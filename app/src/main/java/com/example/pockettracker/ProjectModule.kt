@@ -52,7 +52,7 @@ class ProjectModule : TrackerModule {
         // Column 2: Parameter values (starts at x=140)
         // ===================================
         val nameColumnX = x + 10      // Left side: parameter names
-        val valueColumnX = x + 140    // Right side: parameter values
+        val valueColumnX = x + 160    // Right side: parameter values
 
         // ===================================
         // STEP 3: Draw header "PROJECT"
