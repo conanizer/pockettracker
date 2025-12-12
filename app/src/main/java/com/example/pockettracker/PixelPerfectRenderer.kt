@@ -98,9 +98,6 @@ fun PixelPerfectTracker(
                 // Use layout manager to draw modules
                 val layout = TrackerLayout()
                 with(layout) {
-                    val projectCursorRow = 0
-                    val projectStatusMessage = ""
-                    val projectStatusSuccess = false
                     drawLayout(
                         scale = scale,
                         currentScreen = currentScreen,
@@ -113,7 +110,7 @@ fun PixelPerfectTracker(
                         previousColumn = previousColumn,
                         currentChain = currentChain,
                         projectCursorRow = projectCursorRow,
-                        projectCursorColumn = projectCursorColumn, // ✨ Pass new vars
+                        projectCursorColumn = projectCursorColumn,
                         projectStatusMessage = projectStatusMessage,
                         projectStatusSuccess = projectStatusSuccess
                     )
