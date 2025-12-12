@@ -85,12 +85,15 @@ enum class ButtonAction {
 }
 
 /**
- * InputMapper - Core input translation system
+ * InputMapper - Core input translation system with modifier support
  *
  * This class:
  * 1. Takes raw input from keyboard/gamepad
  * 2. Maps it to VirtualButton events
- * 3. Calls the appropriate ButtonHandlers callback
+ * 3. Tracks modifier states (L/R buttons held)
+ * 4. Detects button combinations (L+A, R+arrows, etc.)
+ * 5. Supports double-tap detection (A,A)
+ * 6. Calls the appropriate ButtonHandlers callback
  *
  * @param buttonHandlers - The ButtonHandlers instance that defines what each button does
  * @param logInput - If true, logs all button presses to Logcat (useful for debugging)
@@ -99,6 +102,20 @@ class InputMapper(
     private val buttonHandlers: ButtonHandlers,
     private val logInput: Boolean = false  // Set to true to see input in Logcat
 ) {
+    // =========================================================================
+    // STATE TRACKING
+    // =========================================================================
+
+    // Track which modifier buttons are currently held down
+    private var isLPressed = false
+    private var isRPressed = false
+
+    // Track which buttons are currently held (for combinations)
+    private val heldButtons = mutableSetOf<VirtualButton>()
+
+    // Double-tap detection
+    private var lastAPress: Long = 0
+    private val doubleTapWindow = 300L  // 300ms window for double-tap
 
     /**
      * Keyboard to VirtualButton mapping
@@ -130,6 +147,13 @@ class InputMapper(
         Key.ShiftLeft to VirtualButton.SELECT,  // Select = mode switching
         Key.Spacebar to VirtualButton.START     // Start = play/pause
     )
+
+    /**
+     * Get current modifier state
+     */
+    fun isLHeld() = isLPressed
+    fun isRHeld() = isRPressed
+    fun isBothLRHeld() = isLPressed && isRPressed
 
     /**
      * Handles a keyboard event from Compose
@@ -172,17 +196,169 @@ class InputMapper(
      * Routes a virtual button action to the appropriate handler
      *
      * This is the bridge between input events and your tracker logic.
-     * Currently only responds to PRESSED events (not RELEASED).
+     * Now supports:
+     * - Modifier tracking (L/R buttons)
+     * - Button combinations (L+A, R+arrows, etc.)
+     * - Double-tap detection (A,A)
      *
      * @param button - Which virtual button was triggered
      * @param action - Was it pressed or released
      */
     private fun handleButtonAction(button: VirtualButton, action: ButtonAction) {
-        // Only respond to button presses for now
-        // Later: We can add hold/release behaviors here
+        // Update button state tracking
         if (action == ButtonAction.PRESSED) {
-            // Call the appropriate handler function
-            // Each when branch calls the corresponding callback from ButtonHandlers
+            heldButtons.add(button)
+
+            // Update modifier states
+            if (button == VirtualButton.L_SHIFT) isLPressed = true
+            if (button == VirtualButton.R_SHIFT) isRPressed = true
+
+        } else if (action == ButtonAction.RELEASED) {
+            heldButtons.remove(button)
+
+            // Update modifier states
+            if (button == VirtualButton.L_SHIFT) isLPressed = false
+            if (button == VirtualButton.R_SHIFT) isRPressed = false
+        }
+
+        // Only handle button presses (not releases) for now
+        if (action != ButtonAction.PRESSED) return
+
+        // =====================================================================
+        // MODIFIER COMBINATION DETECTION
+        // =====================================================================
+
+        // Check for combinations - order matters!
+        // More specific combinations should be checked first
+
+        // L + R + button combinations (most specific)
+        if (isLPressed && isRPressed) {
+            when (button) {
+                VirtualButton.SELECT -> {
+                    if (logInput) Log.d(TAG, "L+R+SELECT (quit to project)")
+                    // TODO: Add handler for L+R+SELECT
+                    return
+                }
+                VirtualButton.A -> {
+                    if (logInput) Log.d(TAG, "L+R+A (save snapshot)")
+                    // TODO: Add handler for L+R+A
+                    return
+                }
+                VirtualButton.B -> {
+                    if (logInput) Log.d(TAG, "L+R+B (load snapshot)")
+                    // TODO: Add handler for L+R+B
+                    return
+                }
+                else -> { }
+            }
+        }
+
+        // L + button combinations
+        if (isLPressed && !isRPressed) {
+            when (button) {
+                VirtualButton.A -> {
+                    if (logInput) Log.d(TAG, "L+A (paste)")
+                    // TODO: Add handler for L+A (paste)
+                    return
+                }
+                VirtualButton.B -> {
+                    if (logInput) Log.d(TAG, "L+B (selection mode)")
+                    // TODO: Add handler for L+B (selection mode)
+                    return
+                }
+                VirtualButton.DPAD_UP -> {
+                    if (logInput) Log.d(TAG, "L+UP (jump to prev populated)")
+                    // TODO: Add handler for L+UP
+                    return
+                }
+                VirtualButton.DPAD_DOWN -> {
+                    if (logInput) Log.d(TAG, "L+DOWN (jump to next populated)")
+                    // TODO: Add handler for L+DOWN
+                    return
+                }
+                VirtualButton.DPAD_LEFT -> {
+                    if (logInput) Log.d(TAG, "L+LEFT (prev chain/phrase)")
+                    // TODO: Add handler for L+LEFT
+                    return
+                }
+                VirtualButton.DPAD_RIGHT -> {
+                    if (logInput) Log.d(TAG, "L+RIGHT (next chain/phrase)")
+                    // TODO: Add handler for L+RIGHT
+                    return
+                }
+                VirtualButton.START -> {
+                    if (logInput) Log.d(TAG, "L+START (play all from beginning)")
+                    // TODO: Add handler for L+START
+                    return
+                }
+                else -> { }
+            }
+        }
+
+        // R + button combinations
+        if (isRPressed && !isLPressed) {
+            when (button) {
+                VirtualButton.DPAD_UP -> {
+                    if (logInput) Log.d(TAG, "R+UP (navigate screen up)")
+                    // TODO: Add handler for R+UP (navigate screens)
+                    return
+                }
+                VirtualButton.DPAD_DOWN -> {
+                    if (logInput) Log.d(TAG, "R+DOWN (navigate screen down)")
+                    // TODO: Add handler for R+DOWN
+                    return
+                }
+                VirtualButton.DPAD_LEFT -> {
+                    if (logInput) Log.d(TAG, "R+LEFT (navigate screen left)")
+                    // TODO: Add handler for R+LEFT
+                    return
+                }
+                VirtualButton.DPAD_RIGHT -> {
+                    if (logInput) Log.d(TAG, "R+RIGHT (navigate screen right)")
+                    // TODO: Add handler for R+RIGHT
+                    return
+                }
+                VirtualButton.A -> {
+                    if (logInput) Log.d(TAG, "R+A (clone)")
+                    // TODO: Add handler for R+A (clone)
+                    return
+                }
+                VirtualButton.B -> {
+                    if (logInput) Log.d(TAG, "R+B (reset to default)")
+                    // TODO: Add handler for R+B
+                    return
+                }
+                VirtualButton.START -> {
+                    if (logInput) Log.d(TAG, "R+START (play from cursor)")
+                    // TODO: Add handler for R+START
+                    return
+                }
+                else -> { }
+            }
+        }
+
+        // =====================================================================
+        // DOUBLE-TAP DETECTION
+        // =====================================================================
+
+        if (button == VirtualButton.A && !isLPressed && !isRPressed) {
+            val now = System.currentTimeMillis()
+            if (now - lastAPress < doubleTapWindow) {
+                // Double-tap detected!
+                if (logInput) Log.d(TAG, "A,A (insert next unused)")
+                lastAPress = 0  // Reset to prevent triple-tap
+                // TODO: Add handler for A,A (insert next unused)
+                return
+            }
+            lastAPress = now
+        }
+
+        // =====================================================================
+        // BASIC BUTTON PRESSES (no modifiers)
+        // =====================================================================
+
+        // Only call basic handlers if no modifiers are pressed
+        if (!isLPressed && !isRPressed) {
             when (button) {
                 VirtualButton.DPAD_UP -> buttonHandlers.onDPadUp()
                 VirtualButton.DPAD_DOWN -> buttonHandlers.onDPadDown()
@@ -196,8 +372,6 @@ class InputMapper(
                 VirtualButton.START -> buttonHandlers.onStart()
             }
         }
-        // If action == RELEASED, we currently do nothing
-        // But the infrastructure is here for future hold/release features
     }
 }
 
