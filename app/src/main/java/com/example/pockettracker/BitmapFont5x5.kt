@@ -83,6 +83,7 @@ private val FONT_5X5 = mapOf(
     'z' to byteArrayOf(0b11111, 0b00010, 0b00100, 0b01000, 0b11111),
 
     // SPECIAL CHARACTERS
+    '_' to byteArrayOf(0b00000, 0b00000, 0b00000, 0b00000, 0b11111),
     '-' to byteArrayOf(0b00000, 0b00000, 0b11111, 0b00000, 0b00000),
     '#' to byteArrayOf(0b01010, 0b11111, 0b01010, 0b11111, 0b01010),
     '.' to byteArrayOf(0b00000, 0b00000, 0b00000, 0b00000, 0b00100),
