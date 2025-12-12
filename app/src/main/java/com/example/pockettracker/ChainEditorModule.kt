@@ -262,6 +262,36 @@ class ChainEditorModule : TrackerModule {
             fontScale = FONT_SCALE
         )
     }
+
+    /**
+     * Get cursor context for current cursor position
+     *
+     * This tells the generic input system what kind of value we're on
+     * and what actions are available.
+     */
+    fun getCursorContext(state: ChainEditorState): CursorContext {
+        return when (state.cursorColumn) {
+            // Column 0: Step number (read-only, but can insert phrase)
+            0 -> CursorContextFactory.readOnly()
+
+            // Column 1: Phrase reference (00-FE, FF = empty)
+            1 -> {
+                val phraseRef = state.chain.phraseRefs[state.cursorRow]
+                CursorContextFactory.phraseRef(phraseRef, canCreate = true)
+            }
+
+            // Column 2: Transpose (00-FF, 80 = no transpose)
+            2 -> {
+                val phraseRef = state.chain.phraseRefs[state.cursorRow]
+                val isEmpty = phraseRef == 0xFF
+                val transposeValue = state.chain.transposeValues[state.cursorRow]
+                CursorContextFactory.transpose(transposeValue, isEmpty)
+            }
+
+            // Invalid column
+            else -> CursorContextFactory.none()
+        }
+    }
 }
 
 /**

@@ -107,6 +107,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
         }
     }
 
+    // GenericInputHandler: Handles button presses based on cursor context
+    val genericInputHandler = remember { GenericInputHandler() }
+
+    // ChainEditorModule: Used to get cursor context for chain editing
+    val chainEditorModule = remember { ChainEditorModule() }
+
     // ═══════════════════════════════════════════════════════════════════════
     // STATE VARIABLES
     // ═══════════════════════════════════════════════════════════════════════
@@ -346,45 +352,44 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         }
                     }
 
-                    // CHAIN SCREEN: Insert or increment phrase reference
+                    // CHAIN SCREEN: Use generic input system
                     ScreenType.CHAIN -> {
-                        when (cursorColumn) {
-                            0 -> {
-                                // STEP column: Insert phrase
+                        // Get cursor context from chain editor
+                        val chainState = ChainEditorState(
+                            project.chains[currentChain],
+                            cursorRow,
+                            cursorColumn
+                        )
+                        val context = chainEditorModule.getCursorContext(chainState)
+
+                        // Handle input generically
+                        val action = genericInputHandler.handleAButton(context)
+
+                        // Apply the action
+                        when (action) {
+                            is InputAction.SET_VALUE -> {
+                                // Update the value at cursor position
+                                when (cursorColumn) {
+                                    1 -> {
+                                        // Phrase reference
+                                        project.chains[currentChain].phraseRefs[cursorRow] = action.value
+                                        lastEditedPhrase = action.value
+                                    }
+                                    2 -> {
+                                        // Transpose value
+                                        project.chains[currentChain].transposeValues[cursorRow] = action.value
+                                    }
+                                }
+                            }
+                            is InputAction.INSERT_DEFAULT -> {
+                                // Insert last edited phrase
                                 insertChainPhrase(
                                     project.chains[currentChain],
                                     cursorRow,
                                     lastEditedPhrase
                                 )
                             }
-                            1 -> {
-                                // PH column: Insert or increment by 1
-                                val wasEmpty = insertChainPhrase(
-                                    project.chains[currentChain],
-                                    cursorRow,
-                                    lastEditedPhrase
-                                )
-                                if (!wasEmpty) {
-                                    // Not empty, so edit instead (increase by 1)
-                                    editChainPhraseValue(
-                                        project.chains[currentChain],
-                                        cursorRow,
-                                        direction = 1,
-                                        large = false
-                                    )
-                                    // Update last edited value
-                                    lastEditedPhrase = project.chains[currentChain].phraseRefs[cursorRow]
-                                }
-                            }
-                            2 -> {
-                                // TSP column: Increase transpose by 1 semitone
-                                editChainTransposeValue(
-                                    project.chains[currentChain],
-                                    cursorRow,
-                                    direction = 1,
-                                    large = false
-                                )
-                            }
+                            else -> { }
                         }
                     }
 
@@ -493,31 +498,34 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         }
                     }
 
-                    // CHAIN SCREEN: Decrement values
+                    // CHAIN SCREEN: Use generic input system
                     ScreenType.CHAIN -> {
-                        when (cursorColumn) {
-                            1 -> {
-                                // PH column: Decrease by 1
-                                editChainPhraseValue(
-                                    project.chains[currentChain],
-                                    cursorRow,
-                                    direction = -1,
-                                    large = false
-                                )
-                                // Update last edited value
-                                val currentRef = project.chains[currentChain].phraseRefs[cursorRow]
-                                if (currentRef != 0xFF) {
-                                    lastEditedPhrase = currentRef
+                        // Get cursor context from chain editor
+                        val chainState = ChainEditorState(
+                            project.chains[currentChain],
+                            cursorRow,
+                            cursorColumn
+                        )
+                        val context = chainEditorModule.getCursorContext(chainState)
+
+                        // Handle input generically
+                        val action = genericInputHandler.handleBButton(context)
+
+                        // Apply the action
+                        when (action) {
+                            is InputAction.SET_VALUE -> {
+                                // Update the value at cursor position
+                                when (cursorColumn) {
+                                    1 -> {
+                                        // Phrase reference
+                                        project.chains[currentChain].phraseRefs[cursorRow] = action.value
+                                        lastEditedPhrase = action.value
+                                    }
+                                    2 -> {
+                                        // Transpose value
+                                        project.chains[currentChain].transposeValues[cursorRow] = action.value
+                                    }
                                 }
-                            }
-                            2 -> {
-                                // TSP column: Decrease by 1 semitone
-                                editChainTransposeValue(
-                                    project.chains[currentChain],
-                                    cursorRow,
-                                    direction = -1,
-                                    large = false
-                                )
                             }
                             else -> { }
                         }
@@ -589,10 +597,28 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         clearSongChainRef(project.tracks[trackIndex], cursorRow)
                     }
 
-                    // CHAIN SCREEN: Clear phrase reference
+                    // CHAIN SCREEN: Use generic input system (DELETE action)
                     ScreenType.CHAIN -> {
-                        if (cursorColumn == 1) {
-                            clearChainSlot(project.chains[currentChain], cursorRow)
+                        // Get cursor context from chain editor
+                        val chainState = ChainEditorState(
+                            project.chains[currentChain],
+                            cursorRow,
+                            cursorColumn
+                        )
+                        val context = chainEditorModule.getCursorContext(chainState)
+
+                        // Handle SELECT as delete
+                        val action = genericInputHandler.handleSelect(context)
+
+                        // Apply the action
+                        when (action) {
+                            is InputAction.DELETE -> {
+                                // Clear the value at cursor position
+                                if (cursorColumn == 1) {
+                                    clearChainSlot(project.chains[currentChain], cursorRow)
+                                }
+                            }
+                            else -> { }
                         }
                     }
 
