@@ -1,0 +1,288 @@
+package com.example.pockettracker
+
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
+
+/**
+ * SONG EDITOR MODULE - FINAL DESIGN
+ *
+ * This is the "top level" view where you arrange chains into tracks
+ *
+ * Layout:
+ * - Step column (00-FF, read-only, no header)
+ * - 8 track columns (chain references, headers: 1-8)
+ * - 16 visible rows (scrollable)
+ * - Same spacing as Chain/Phrase screens
+ *
+ * Example view:
+ * SONG: MYSONG       BPM: 128
+ *     1   2   3   4   5   6   7   8
+ * 00  00  --  --  --  --  --  --  --
+ * 01  01  --  --  --  --  --  --  --
+ * 02  02  --  --  --  --  --  --  --
+ * 03  --  --  --  --  --  --  --  --
+ * ...
+ *
+ * Size: 620×392 pixels (same as phrase/chain)
+ * State type: SongEditorState
+ */
+class SongEditorModule : TrackerModule {
+    // ===================================
+    // MODULE DIMENSIONS
+    // ===================================
+    override val width = 510
+    override val height = 392
+
+    // ===================================
+    // FONT & LAYOUT CONSTANTS
+    // ===================================
+    private val FONT_SCALE = 3      // 5×5 bitmap scaled 3× = 15×15 pixels
+    private val CHAR_SPACING = 2    // 2px between characters
+    private val ROW_HEIGHT = 21     // Each row is 21px tall
+    private val TEXT_PADDING = 3    // 3px padding above text
+
+    // Number of visible rows (16 chains visible at once)
+    private val VISIBLE_ROWS = 16
+
+    /**
+     * Main draw function - renders the song arrangement view
+     *
+     * @param x X position in design pixels
+     * @param y Y position in design pixels
+     * @param scale Screen scale factor
+     * @param state SongEditorState - contains project and cursor info
+     */
+    override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
+        // Cast state or return if wrong type
+        val songState = state as? SongEditorState ?: return
+
+        // ===================================
+        // STEP 1: Draw background
+        // ===================================
+        drawRect(
+            color = Color(0xFF0a0a0a),
+            topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
+            size = Size((width * scale).toFloat(), (height * scale).toFloat())
+        )
+
+        // ===================================
+        // STEP 2: Calculate column positions
+        // Match phrase/chain spacing EXACTLY!
+        // ===================================
+        var colX = x + 10  // 10px left padding (same as phrase/chain)
+
+        // STEP column (00-FF, 2 chars)
+        val stepX = colX
+        colX += 30 + 20  // 30px for 2 chars + 10px gap
+
+        // Track columns (8 tracks, each showing 2-char chain ID)
+        val trackColumns = IntArray(8)
+        for (i in 0..7) {
+            trackColumns[i] = colX
+            colX += 30 + 20  // 30px for 2 chars + 15px gap between tracks
+        }
+
+        // ===================================
+        // STEP 3: Draw header "SONG: NAME  BPM: 128"
+        // ===================================
+        var rowY = y + TEXT_PADDING
+
+        // Song name (left side)
+        val songName = songState.project.name.take(10)  // Max 10 chars
+        drawBitmapText(
+            text = "SONG: $songName",
+            x = x + 10,
+            y = rowY,
+            scale = scale,
+            color = Color.Cyan,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        // BPM (right side of header)
+        val bpmText = "BPM: ${songState.project.tempo}"
+        val bpmWidth = (bpmText.length * (5 * FONT_SCALE)) + ((bpmText.length - 1) * CHAR_SPACING)
+        val bpmX = x + width - bpmWidth - 10
+
+        drawBitmapText(
+            text = bpmText,
+            x = bpmX,
+            y = rowY,
+            scale = scale,
+            color = Color.Cyan,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        // ===================================
+        // STEP 4: Move down with spacer
+        // ===================================
+        rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING
+
+        // ===================================
+        // STEP 5: Draw track headers (1-8, no header for step column)
+        // ===================================
+        for (trackId in 0..7) {
+            drawBitmapText(
+                text = "${trackId + 1}",  // 1-8 (not 0-7)
+                x = trackColumns[trackId],
+                y = rowY,
+                scale = scale,
+                color = Color.Gray,
+                spacing = CHAR_SPACING,
+                fontScale = FONT_SCALE
+            )
+        }
+
+        // ===================================
+        // STEP 6: Draw song grid (16 visible rows × 8 tracks)
+        // ===================================
+        for (rowIndex in 0 until VISIBLE_ROWS) {
+            // Calculate absolute position (accounting for scroll)
+            val absoluteRow = songState.scrollPosition + rowIndex
+
+            drawSongRow(
+                x = x,
+                y = y,
+                scale = scale,
+                rowIndex = rowIndex,        // Visual row (0-15)
+                absoluteRow = absoluteRow,  // Actual position in song
+                state = songState,
+                stepX = stepX,
+                trackColumns = trackColumns
+            )
+        }
+    }
+
+    /**
+     * Draw a single row of the song (shows chains for all 8 tracks)
+     *
+     * @param x Module X position
+     * @param y Module Y position
+     * @param scale Screen scale
+     * @param rowIndex Visual row index (0-15)
+     * @param absoluteRow Actual row in song (accounting for scroll)
+     * @param state Full song state
+     * @param stepX X position for step column
+     * @param trackColumns X positions for each track column (array of 8)
+     */
+    private fun DrawScope.drawSongRow(
+        x: Int,
+        y: Int,
+        scale: Int,
+        rowIndex: Int,
+        absoluteRow: Int,
+        state: SongEditorState,
+        stepX: Int,
+        trackColumns: IntArray
+    ) {
+        // ===================================
+        // STEP 1: Calculate Y position for this row
+        // ===================================
+        // Start after: header (21px) + spacer (14px) + track headers (21px)
+        // Then add rowIndex × 21px
+        val dataRowY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (rowIndex * ROW_HEIGHT)
+
+        // ===================================
+        // STEP 2: Determine background color
+        // ===================================
+        val bgColor = when {
+            // If cursor is on this row -> highlight
+            absoluteRow == state.cursorRow -> Color(0xFF333333)
+
+            // Every 4th row -> slightly lighter
+            absoluteRow % 4 == 0 -> Color(0xFF151515)
+
+            // Default
+            else -> Color(0xFF0a0a0a)
+        }
+
+        // ===================================
+        // STEP 3: Draw row background
+        // ===================================
+        drawRect(
+            color = bgColor,
+            topLeft = Offset((x * scale).toFloat(), (dataRowY * scale).toFloat()),
+            size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
+        )
+
+        val textY = dataRowY + TEXT_PADDING
+
+        // ===================================
+        // STEP 4: Draw STEP column (00-FF, read-only)
+        // ===================================
+        drawBitmapText(
+            text = absoluteRow.toString(16).padStart(2, '0').uppercase(),  // 00-FF
+            x = stepX,
+            y = textY,
+            scale = scale,
+            color = Color(0xFF666666),  // Always gray (read-only, never highlighted)
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        // ===================================
+        // STEP 5: Draw chain reference for each track
+        // ===================================
+        for (trackId in 0..7) {
+            // Get this track's chain sequence
+            val track = state.project.tracks[trackId]
+
+            // Get chain ID at this position (or -1 if beyond end)
+            val chainId = if (absoluteRow < track.chainRefs.size) {
+                track.chainRefs[absoluteRow]
+            } else {
+                -1  // No chain at this position
+            }
+
+            // Format as text
+            val chainText = if (chainId == -1) {
+                "--"  // Empty
+            } else {
+                // Show chain ID in hex (e.g., 0 -> "00", 255 -> "FF")
+                chainId.toString(16).padStart(2, '0').uppercase()
+            }
+
+            // Determine text color
+            val textColor = when {
+                // Cursor is on this cell (track column starts at 1, not 0)
+                absoluteRow == state.cursorRow &&
+                        trackId == (state.cursorTrack - 1) -> Color.Yellow
+
+                // Empty cell
+                chainId == -1 -> Color(0xFF444444)
+
+                // Normal chain reference
+                else -> Color.White
+            }
+
+            // Draw the chain ID
+            drawBitmapText(
+                text = chainText,
+                x = trackColumns[trackId],
+                y = textY,
+                scale = scale,
+                color = textColor,
+                spacing = CHAR_SPACING,
+                fontScale = FONT_SCALE
+            )
+        }
+    }
+}
+
+/**
+ * STATE DATA FOR SONG EDITOR MODULE
+ *
+ * @param project The full project (contains all 8 tracks)
+ * @param cursorRow Which row the cursor is on (absolute position, 0-255)
+ * @param cursorTrack Which track/column the cursor is on (1-8, NOT 0-7!)
+ * @param scrollPosition Vertical scroll offset (for showing more than 16 rows)
+ */
+data class SongEditorState(
+    val project: Project,       // Full project data
+    val cursorRow: Int,         // Cursor row (absolute position 0-255)
+    val cursorTrack: Int,       // Which track (1-8, step column is not selectable)
+    val scrollPosition: Int = 0 // Scroll offset (0 = top of song)
+)
