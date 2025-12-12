@@ -8,11 +8,14 @@
 package com.example.pockettracker
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
@@ -35,12 +38,17 @@ fun FullScreenLayout(
     projectCursorRow: Int,
     projectCursorColumn: Int,
     projectStatusMessage: String,
-    projectStatusSuccess: Boolean
+    projectStatusSuccess: Boolean,
+    inputMapper: InputMapper,
+    focusRequester: FocusRequester
 ) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black),
+            .background(Color.Black)
+            .focusRequester(focusRequester)
+            .inputHandler(inputMapper)
+            .focusable(),
         contentAlignment = Alignment.Center
     ) {
         PixelPerfectTracker(
@@ -79,7 +87,9 @@ fun PortraitLayoutWithVirtualButtons(
     projectCursorColumn: Int,
     projectStatusMessage: String,
     projectStatusSuccess: Boolean,
-    buttonHandlers: ButtonHandlers
+    buttonHandlers: ButtonHandlers,
+    inputMapper: InputMapper,
+    focusRequester: FocusRequester
 ) {
     // FIXED SPACER HEIGHT
     val spacerHeight = 200
@@ -96,7 +106,10 @@ fun PortraitLayoutWithVirtualButtons(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black),
+            .background(Color.Black)
+            .focusRequester(focusRequester)
+            .inputHandler(inputMapper)
+            .focusable(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Top  // ← Add this to align to top!
     ) {
@@ -181,7 +194,9 @@ fun LandscapeLayoutWithVirtualButtons(
     projectCursorColumn: Int,
     projectStatusMessage: String,
     projectStatusSuccess: Boolean,
-    buttonHandlers: ButtonHandlers
+    buttonHandlers: ButtonHandlers,
+    inputMapper: InputMapper,
+    focusRequester: FocusRequester
 ) {
     // Calculate available space for each button panel
     // Formula: (deviceWidth - scaledScreenWidth) / 2
@@ -208,6 +223,9 @@ fun LandscapeLayoutWithVirtualButtons(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .focusRequester(focusRequester)
+            .inputHandler(inputMapper)
+            .focusable()
     ) {
         // Put screen in center FIRST
         Box(

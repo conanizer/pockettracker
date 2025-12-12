@@ -18,6 +18,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.pockettracker.ui.theme.PockettrackerTheme
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN ACTIVITY
@@ -636,6 +639,24 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // KEYBOARD INPUT MAPPING
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Create the input mapper to handle keyboard input
+    // This maps WASD/JK/UI/Shift/Space to game buttons
+    val inputMapper = remember(buttonHandlers) {
+        InputMapper(buttonHandlers, logInput = true)  // Enable logging for debugging
+    }
+
+    // Focus requester to auto-focus the app for keyboard input
+    val focusRequester = remember { FocusRequester() }
+
+    // Auto-focus when app starts so keyboard works immediately
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // CHOOSE LAYOUT BASED ON DEVICE DETECTION
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -661,7 +682,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 projectCursorColumn = projectCursorColumn,
                 projectStatusMessage = projectStatusMessage,
                 projectStatusSuccess = projectStatusSuccess,
-                buttonHandlers = buttonHandlers
+                buttonHandlers = buttonHandlers,
+                inputMapper = inputMapper,
+                focusRequester = focusRequester
             )
         } else {
             // PORTRAIT: Buttons below screen
@@ -679,7 +702,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 projectCursorColumn = projectCursorColumn,
                 projectStatusMessage = projectStatusMessage,
                 projectStatusSuccess = projectStatusSuccess,
-                buttonHandlers = buttonHandlers
+                buttonHandlers = buttonHandlers,
+                inputMapper = inputMapper,
+                focusRequester = focusRequester
             )
         }
     } else {
@@ -698,7 +723,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             projectCursorRow = projectCursorRow,
             projectCursorColumn = projectCursorColumn,
             projectStatusMessage = projectStatusMessage,
-            projectStatusSuccess = projectStatusSuccess
+            projectStatusSuccess = projectStatusSuccess,
+            inputMapper = inputMapper,
+            focusRequester = focusRequester
         )
     }
 }
