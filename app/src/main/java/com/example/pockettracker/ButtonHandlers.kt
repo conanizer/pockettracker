@@ -48,7 +48,13 @@ data class ButtonHandlers(
     val onSelect: () -> Unit,       // Called when SELECT is pressed
     val onStart: () -> Unit,        // Called when START is pressed
     val onL: () -> Unit,            // Called when L shoulder is pressed
-    val onR: () -> Unit             // Called when R shoulder is pressed
+    val onR: () -> Unit,            // Called when R shoulder is pressed
+
+    // A+direction combinations for value editing (M8-style)
+    val onAUp: () -> Unit,          // A+UP: Small increment
+    val onADown: () -> Unit,        // A+DOWN: Small decrement
+    val onALeft: () -> Unit,        // A+LEFT: Large decrement (one octave/0x10)
+    val onARight: () -> Unit        // A+RIGHT: Large increment (one octave/0x10)
 )
 
 /**
@@ -241,22 +247,22 @@ class InputMapper(
             when (button) {
                 VirtualButton.DPAD_UP -> {
                     if (logInput) Log.d(TAG, "A+UP (increment by small step)")
-                    // TODO: Add handler for A+UP (small increment)
+                    buttonHandlers.onAUp()
                     return
                 }
                 VirtualButton.DPAD_DOWN -> {
                     if (logInput) Log.d(TAG, "A+DOWN (decrement by small step)")
-                    // TODO: Add handler for A+DOWN (small decrement)
+                    buttonHandlers.onADown()
                     return
                 }
                 VirtualButton.DPAD_RIGHT -> {
                     if (logInput) Log.d(TAG, "A+RIGHT (increment by large step)")
-                    // TODO: Add handler for A+RIGHT (large increment)
+                    buttonHandlers.onARight()
                     return
                 }
                 VirtualButton.DPAD_LEFT -> {
                     if (logInput) Log.d(TAG, "A+LEFT (decrement by large step)")
-                    // TODO: Add handler for A+LEFT (large decrement)
+                    buttonHandlers.onALeft()
                     return
                 }
                 else -> { }
