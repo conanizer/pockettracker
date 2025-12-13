@@ -109,6 +109,7 @@ class InputMapper(
     // Track which modifier buttons are currently held down
     private var isLPressed = false
     private var isRPressed = false
+    private var isAPressed = false  // Track A button for A+direction combos
 
     // Track which buttons are currently held (for combinations)
     private val heldButtons = mutableSetOf<VirtualButton>()
@@ -153,6 +154,7 @@ class InputMapper(
      */
     fun isLHeld() = isLPressed
     fun isRHeld() = isRPressed
+    fun isAHeld() = isAPressed
     fun isBothLRHeld() = isLPressed && isRPressed
 
     /**
@@ -212,6 +214,7 @@ class InputMapper(
             // Update modifier states
             if (button == VirtualButton.L_SHIFT) isLPressed = true
             if (button == VirtualButton.R_SHIFT) isRPressed = true
+            if (button == VirtualButton.A) isAPressed = true
 
         } else if (action == ButtonAction.RELEASED) {
             heldButtons.remove(button)
@@ -219,6 +222,7 @@ class InputMapper(
             // Update modifier states
             if (button == VirtualButton.L_SHIFT) isLPressed = false
             if (button == VirtualButton.R_SHIFT) isRPressed = false
+            if (button == VirtualButton.A) isAPressed = false
         }
 
         // Only handle button presses (not releases) for now
@@ -230,6 +234,34 @@ class InputMapper(
 
         // Check for combinations - order matters!
         // More specific combinations should be checked first
+
+        // A + direction combinations (M8-style value editing)
+        // When A is held, directions change values instead of moving cursor
+        if (isAPressed && !isLPressed && !isRPressed) {
+            when (button) {
+                VirtualButton.DPAD_UP -> {
+                    if (logInput) Log.d(TAG, "A+UP (increment by small step)")
+                    // TODO: Add handler for A+UP (small increment)
+                    return
+                }
+                VirtualButton.DPAD_DOWN -> {
+                    if (logInput) Log.d(TAG, "A+DOWN (decrement by small step)")
+                    // TODO: Add handler for A+DOWN (small decrement)
+                    return
+                }
+                VirtualButton.DPAD_RIGHT -> {
+                    if (logInput) Log.d(TAG, "A+RIGHT (increment by large step)")
+                    // TODO: Add handler for A+RIGHT (large increment)
+                    return
+                }
+                VirtualButton.DPAD_LEFT -> {
+                    if (logInput) Log.d(TAG, "A+LEFT (decrement by large step)")
+                    // TODO: Add handler for A+LEFT (large decrement)
+                    return
+                }
+                else -> { }
+            }
+        }
 
         // L + R + button combinations (most specific)
         if (isLPressed && isRPressed) {
@@ -358,7 +390,7 @@ class InputMapper(
         // =====================================================================
 
         // Only call basic handlers if no modifiers are pressed
-        if (!isLPressed && !isRPressed) {
+        if (!isLPressed && !isRPressed && !isAPressed) {
             when (button) {
                 VirtualButton.DPAD_UP -> buttonHandlers.onDPadUp()
                 VirtualButton.DPAD_DOWN -> buttonHandlers.onDPadDown()

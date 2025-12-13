@@ -152,7 +152,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 
     // Playback and control state
     var isPlaying by remember { mutableStateOf(false) }
-    var isShiftHeld by remember { mutableStateOf(false) }  // L button = SHIFT
 
     // Which chain/phrase we're editing
     var currentChain by remember { mutableIntStateOf(0) }
@@ -182,7 +181,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // "remember" with dependencies means "recalculate when these values change"
     // This is important so button handlers always use the latest state values
     val buttonHandlers = remember(
-        currentScreen, cursorRow, cursorColumn, isShiftHeld,
+        currentScreen, cursorRow, cursorColumn,
         projectCursorRow, projectCursorColumn, currentChain,
         lastEditedChain, lastEditedPhrase
     ) {
@@ -191,33 +190,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             // D-PAD UP
             // ───────────────────────────────────────────────────────────────
             onDPadUp = {
-                // Log what's happening (shows in Logcat)
-                Log.d("DEBUG", "Current screen: $currentScreen")
-                Log.d("DEBUG", "UP button pressed!")
-
-                if (isShiftHeld) {
-                    // SHIFT+UP: Navigate to screen above in the 5×5 grid
-                    val result = navigateUp(currentScreen, previousColumn)
-                    currentScreen = result.first
-                    previousColumn = result.second
-                } else {
-                    // Normal UP: Move cursor up
-                    when (currentScreen) {
-                        ScreenType.PROJECT -> {
-                            // Project screen has special cursor handling
-                            Log.d("PROJECT", "UP pressed - Current row: $projectCursorRow, column: $projectCursorColumn")
-                            if (projectCursorRow > 0) {
-                                projectCursorRow--
-                                projectCursorColumn = 1  // Reset to first value column
-                                Log.d("PROJECT", "Moved UP - New row: $projectCursorRow, column: $projectCursorColumn")
-                            } else {
-                                Log.d("PROJECT", "Already at top!")
-                            }
+                // Move cursor up (R+UP for screen navigation handled by InputMapper)
+                when (currentScreen) {
+                    ScreenType.PROJECT -> {
+                        // Project screen has special cursor handling
+                        if (projectCursorRow > 0) {
+                            projectCursorRow--
+                            projectCursorColumn = 1  // Reset to first value column
                         }
-                        else -> {
-                            // All other screens: simple cursor movement
-                            if (cursorRow > 0) cursorRow--
-                        }
+                    }
+                    else -> {
+                        // All other screens: simple cursor movement
+                        if (cursorRow > 0) cursorRow--
                     }
                 }
             },
@@ -226,25 +210,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             // D-PAD DOWN
             // ───────────────────────────────────────────────────────────────
             onDPadDown = {
-                if (isShiftHeld) {
-                    // SHIFT+DOWN: Navigate to screen below
-                    val result = navigateDown(currentScreen, previousColumn)
-                    currentScreen = result.first
-                    previousColumn = result.second
-                } else {
-                    // Normal DOWN: Move cursor down
-                    when (currentScreen) {
-                        ScreenType.PROJECT -> {
-                            // Project has 7 rows (0-6)
-                            if (projectCursorRow < 6) {
-                                projectCursorRow++
-                                projectCursorColumn = 1  // Reset column
-                            }
+                // Move cursor down (R+DOWN for screen navigation handled by InputMapper)
+                when (currentScreen) {
+                    ScreenType.PROJECT -> {
+                        // Project has 7 rows (0-6)
+                        if (projectCursorRow < 6) {
+                            projectCursorRow++
+                            projectCursorColumn = 1  // Reset column
                         }
-                        else -> {
-                            // Most screens have 16 rows (0-15)
-                            if (cursorRow < 15) cursorRow++
-                        }
+                    }
+                    else -> {
+                        // Most screens have 16 rows (0-15)
+                        if (cursorRow < 15) cursorRow++
                     }
                 }
             },
@@ -253,32 +230,25 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             // D-PAD LEFT
             // ───────────────────────────────────────────────────────────────
             onDPadLeft = {
-                if (isShiftHeld) {
-                    // SHIFT+LEFT: Navigate to previous main screen (S→C→P→I→T)
-                    val result = navigateLeft(currentScreen, previousColumn)
-                    currentScreen = result.first
-                    previousColumn = result.second
-                } else {
-                    // Normal LEFT: Move cursor left
-                    when (currentScreen) {
-                        ScreenType.PROJECT -> {
-                            // Project has different column limits per row
-                            projectCursorColumn = handleProjectCursorLeft(
-                                projectCursorRow,
-                                projectCursorColumn
-                            )
+                // Move cursor left (R+LEFT for screen navigation handled by InputMapper)
+                when (currentScreen) {
+                    ScreenType.PROJECT -> {
+                        // Project has different column limits per row
+                        projectCursorColumn = handleProjectCursorLeft(
+                            projectCursorRow,
+                            projectCursorColumn
+                        )
+                    }
+                    else -> {
+                        // Get minimum column for this screen
+                        val minColumn = when (currentScreen) {
+                            ScreenType.SONG -> 1    // Column 0 is step number (not editable)
+                            ScreenType.CHAIN -> 1
+                            ScreenType.PHRASE -> 1
+                            else -> 0
                         }
-                        else -> {
-                            // Get minimum column for this screen
-                            val minColumn = when (currentScreen) {
-                                ScreenType.SONG -> 1    // Column 0 is step number (not editable)
-                                ScreenType.CHAIN -> 1
-                                ScreenType.PHRASE -> 1
-                                else -> 0
-                            }
-                            // Move left if not at minimum
-                            if (cursorColumn > minColumn) cursorColumn--
-                        }
+                        // Move left if not at minimum
+                        if (cursorColumn > minColumn) cursorColumn--
                     }
                 }
             },
@@ -287,32 +257,25 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             // D-PAD RIGHT
             // ───────────────────────────────────────────────────────────────
             onDPadRight = {
-                if (isShiftHeld) {
-                    // SHIFT+RIGHT: Navigate to next main screen
-                    val result = navigateRight(currentScreen, previousColumn)
-                    currentScreen = result.first
-                    previousColumn = result.second
-                } else {
-                    // Normal RIGHT: Move cursor right
-                    when (currentScreen) {
-                        ScreenType.PROJECT -> {
-                            // Project has different column limits per row
-                            projectCursorColumn = handleProjectCursorRight(
-                                projectCursorRow,
-                                projectCursorColumn
-                            )
+                // Move cursor right (R+RIGHT for screen navigation handled by InputMapper)
+                when (currentScreen) {
+                    ScreenType.PROJECT -> {
+                        // Project has different column limits per row
+                        projectCursorColumn = handleProjectCursorRight(
+                            projectCursorRow,
+                            projectCursorColumn
+                        )
+                    }
+                    else -> {
+                        // Get maximum column for this screen
+                        val maxColumn = when (currentScreen) {
+                            ScreenType.SONG -> 8     // 8 tracks
+                            ScreenType.CHAIN -> 2    // PH + TSP columns
+                            ScreenType.PHRASE -> 6   // Note + Vol + Inst + FX columns
+                            else -> 0
                         }
-                        else -> {
-                            // Get maximum column for this screen
-                            val maxColumn = when (currentScreen) {
-                                ScreenType.SONG -> 8     // 8 tracks
-                                ScreenType.CHAIN -> 2    // PH + TSP columns
-                                ScreenType.PHRASE -> 6   // Note + Vol + Inst + FX columns
-                                else -> 0
-                            }
-                            // Move right if not at maximum
-                            if (cursorColumn < maxColumn) cursorColumn++
-                        }
+                        // Move right if not at maximum
+                        if (cursorColumn < maxColumn) cursorColumn++
                     }
                 }
             },
@@ -646,20 +609,19 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             },
 
             // ───────────────────────────────────────────────────────────────
-            // L BUTTON - Acts as SHIFT modifier
+            // L BUTTON - Hold modifier (tracked by InputMapper)
             // ───────────────────────────────────────────────────────────────
             onL = {
-                isShiftHeld = !isShiftHeld
+                // L is tracked as a hold modifier by InputMapper
+                // Combinations like L+A, L+direction are handled in InputMapper
             },
 
             // ───────────────────────────────────────────────────────────────
-            // R BUTTON - Quick navigation (cycle through chains)
+            // R BUTTON - Hold modifier (tracked by InputMapper)
             // ───────────────────────────────────────────────────────────────
             onR = {
-                if (currentScreen == ScreenType.CHAIN) {
-                    currentChain = navigateChain(currentChain, 1)
-                    cursorRow = 0  // Reset cursor to top
-                }
+                // R is tracked as a hold modifier by InputMapper
+                // Combinations like R+arrows for screen navigation handled in InputMapper
             }
         )
     }
