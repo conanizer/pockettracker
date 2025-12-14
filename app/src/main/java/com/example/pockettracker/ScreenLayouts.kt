@@ -62,7 +62,6 @@ fun FullScreenLayout(
             previousColumn = previousColumn,
             currentChain = currentChain,
             currentPhrase = currentPhrase,
-            currentPhrase = currentPhrase,
             projectCursorRow = projectCursorRow,
             projectCursorColumn = projectCursorColumn,
             projectStatusMessage = projectStatusMessage,
