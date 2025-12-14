@@ -41,7 +41,8 @@ fun FullScreenLayout(
     projectStatusMessage: String,
     projectStatusSuccess: Boolean,
     inputMapper: InputMapper,
-    focusRequester: FocusRequester
+    focusRequester: FocusRequester,
+    projectVersion: Int  // Version counter to trigger recomposition on nested data changes
 ) {
     Box(
         modifier = Modifier
@@ -92,7 +93,8 @@ fun PortraitLayoutWithVirtualButtons(
     projectStatusSuccess: Boolean,
     buttonHandlers: ButtonHandlers,
     inputMapper: InputMapper,
-    focusRequester: FocusRequester
+    focusRequester: FocusRequester,
+    projectVersion: Int
 ) {
     // FIXED SPACER HEIGHT
     val spacerHeight = 200
@@ -201,7 +203,8 @@ fun LandscapeLayoutWithVirtualButtons(
     projectStatusSuccess: Boolean,
     buttonHandlers: ButtonHandlers,
     inputMapper: InputMapper,
-    focusRequester: FocusRequester
+    focusRequester: FocusRequester,
+    projectVersion: Int
 ) {
     // Calculate available space for each button panel
     // Formula: (deviceWidth - scaledScreenWidth) / 2
