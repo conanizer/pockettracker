@@ -66,7 +66,8 @@ fun FullScreenLayout(
             projectCursorRow = projectCursorRow,
             projectCursorColumn = projectCursorColumn,
             projectStatusMessage = projectStatusMessage,
-            projectStatusSuccess = projectStatusSuccess
+            projectStatusSuccess = projectStatusSuccess,
+            projectVersion = projectVersion
         )
     }
 }
@@ -147,11 +148,12 @@ fun PortraitLayoutWithVirtualButtons(
                     isPlaying = isPlaying,
                     previousColumn = previousColumn,
                     currentChain = currentChain,
-            currentPhrase = currentPhrase,
+                    currentPhrase = currentPhrase,
                     projectCursorRow = projectCursorRow,
                     projectCursorColumn = projectCursorColumn,
                     projectStatusMessage = projectStatusMessage,
-                    projectStatusSuccess = projectStatusSuccess
+                    projectStatusSuccess = projectStatusSuccess,
+                    projectVersion = projectVersion
                 )
             }
         }
@@ -261,11 +263,12 @@ fun LandscapeLayoutWithVirtualButtons(
                     isPlaying = isPlaying,
                     previousColumn = previousColumn,
                     currentChain = currentChain,
-            currentPhrase = currentPhrase,
+                    currentPhrase = currentPhrase,
                     projectCursorRow = projectCursorRow,
                     projectCursorColumn = projectCursorColumn,
                     projectStatusMessage = projectStatusMessage,
-                    projectStatusSuccess = projectStatusSuccess
+                    projectStatusSuccess = projectStatusSuccess,
+                    projectVersion = projectVersion
                 )
             }
         }
