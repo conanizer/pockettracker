@@ -302,7 +302,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
         row: Int
     ) {
         Log.d("SongInputAction", "track=$trackIndex row=$row action=$action")
-        val track = project.song.tracks[trackIndex]
+        val track = project.tracks[trackIndex]
 
         when (action) {
             is InputAction.SET_VALUE -> {
