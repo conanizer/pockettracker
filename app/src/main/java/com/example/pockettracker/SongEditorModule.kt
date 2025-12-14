@@ -270,6 +270,32 @@ class SongEditorModule : TrackerModule {
             )
         }
     }
+
+    /**
+     * Get cursor context for current cursor position
+     *
+     * This tells the generic input system what kind of value we're on
+     * and what actions are available.
+     */
+    fun getCursorContext(state: SongEditorState): CursorContext {
+        // Step column is not selectable, only tracks 1-8
+        if (state.cursorTrack < 1 || state.cursorTrack > 8) {
+            return CursorContextFactory.none()
+        }
+
+        // Get the track (cursorTrack is 1-8, array index is 0-7)
+        val track = state.project.song.tracks[state.cursorTrack - 1]
+
+        // Get chain reference at current row
+        val chainRef = if (state.cursorRow < track.chainRefs.size) {
+            track.chainRefs[state.cursorRow]
+        } else {
+            -1  // Beyond current track length
+        }
+
+        // Return cursor context for chain reference
+        return CursorContextFactory.chainRef(chainRef, canCreate = true)
+    }
 }
 
 /**

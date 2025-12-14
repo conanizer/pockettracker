@@ -116,6 +116,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // PhraseEditorModule: Used to get cursor context for phrase editing
     val phraseEditorModule = remember { PhraseEditorModule() }
 
+    // SongEditorModule: Used to get cursor context for song editing
+    val songEditorModule = remember { SongEditorModule() }
+
     // ═══════════════════════════════════════════════════════════════════════
     // STATE VARIABLES
     // ═══════════════════════════════════════════════════════════════════════
@@ -185,52 +188,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * Apply an InputAction to the project state (currently only for CHAIN screen)
-     * This consolidates the logic that was duplicated in onButtonA, onButtonB, etc.
-     */
-    fun applyInputAction(
-        action: InputAction,
-        chainIndex: Int,
-        row: Int,
-        column: Int
-    ) {
-        when (action) {
-            is InputAction.SET_VALUE -> {
-                // Update the value at cursor position
-                when (column) {
-                    1 -> {
-                        // Phrase reference
-                        project.chains[chainIndex].phraseRefs[row] = action.value
-                        lastEditedPhrase = action.value
-                    }
-                    2 -> {
-                        // Transpose value
-                        project.chains[chainIndex].transposeValues[row] = action.value
-                    }
-                }
-            }
-            is InputAction.INSERT_DEFAULT -> {
-                // Insert last edited phrase
-                insertChainPhrase(
-                    project.chains[chainIndex],
-                    row,
-                    lastEditedPhrase
-                )
-            }
-            is InputAction.DELETE -> {
-                // Clear the value at cursor position
-                if (column == 1) {
-                    clearChainSlot(project.chains[chainIndex], row)
-                }
-            }
-            else -> { /* NONE or unhandled - do nothing */ }
-        }
-
-        // Trigger recomposition by reassigning project to itself
-        project = project
-    }
-
-    /**
      * Apply InputAction to phrase step
      *
      * Handles value changes for phrase editing (notes, volume, instrument)
@@ -281,6 +238,99 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
         // Trigger recomposition by incrementing version counter
         projectVersion++
         Log.d("PhraseInputAction", "projectVersion incremented to $projectVersion")
+    }
+
+    /**
+     * Apply InputAction to chain step
+     *
+     * Handles value changes for chain editing (phrase refs and transpose)
+     */
+    fun applyChainInputAction(
+        action: InputAction,
+        chainIndex: Int,
+        row: Int,
+        column: Int
+    ) {
+        Log.d("ChainInputAction", "chain=$chainIndex row=$row col=$column action=$action")
+        val chain = project.chains[chainIndex]
+
+        when (action) {
+            is InputAction.SET_VALUE -> {
+                when (column) {
+                    1 -> {
+                        // Phrase reference column
+                        chain.phraseRefs[row] = action.value
+                    }
+                    2 -> {
+                        // Transpose column
+                        chain.transposeValues[row] = action.value
+                    }
+                }
+            }
+            is InputAction.DELETE -> {
+                when (column) {
+                    1 -> {
+                        // Clear phrase reference
+                        chain.phraseRefs[row] = 0xFF  // Empty
+                        chain.transposeValues[row] = 0x80  // Reset transpose
+                    }
+                }
+            }
+            is InputAction.INSERT_DEFAULT -> {
+                if (column == 1) {
+                    // Insert phrase 0 by default
+                    chain.phraseRefs[row] = 0
+                    chain.transposeValues[row] = 0x80  // No transpose
+                }
+            }
+            else -> { /* NONE or unhandled - do nothing */ }
+        }
+
+        // Trigger recomposition
+        projectVersion++
+        Log.d("ChainInputAction", "projectVersion incremented to $projectVersion")
+    }
+
+    /**
+     * Apply InputAction to song track
+     *
+     * Handles value changes for song editing (chain references)
+     */
+    fun applySongInputAction(
+        action: InputAction,
+        trackIndex: Int,
+        row: Int
+    ) {
+        Log.d("SongInputAction", "track=$trackIndex row=$row action=$action")
+        val track = project.song.tracks[trackIndex]
+
+        when (action) {
+            is InputAction.SET_VALUE -> {
+                // Ensure track is long enough
+                while (track.chainRefs.size <= row) {
+                    track.chainRefs.add(-1)
+                }
+                track.chainRefs[row] = action.value
+            }
+            is InputAction.DELETE -> {
+                // Clear chain reference
+                if (row < track.chainRefs.size) {
+                    track.chainRefs[row] = -1
+                }
+            }
+            is InputAction.INSERT_DEFAULT -> {
+                // Insert chain 0 by default
+                while (track.chainRefs.size <= row) {
+                    track.chainRefs.add(-1)
+                }
+                track.chainRefs[row] = 0
+            }
+            else -> { /* NONE or unhandled - do nothing */ }
+        }
+
+        // Trigger recomposition
+        projectVersion++
+        Log.d("SongInputAction", "projectVersion incremented to $projectVersion")
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -744,7 +794,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         )
                         val context = chainEditorModule.getCursorContext(chainState)
                         val action = genericInputHandler.handleAButton(context)
-                        applyInputAction(action, currentChain, cursorRow, cursorColumn)
+                        applyChainInputAction(action, currentChain, cursorRow, cursorColumn)
                     }
                     ScreenType.PHRASE -> {
                         val phraseState = PhraseEditorState(
@@ -758,7 +808,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         val action = genericInputHandler.handleAButton(context)
                         applyPhraseInputAction(action, currentPhrase, cursorRow, cursorColumn)
                     }
-                    else -> { /* TODO: Add other screens */ }
+                    ScreenType.SONG -> {
+                        val songState = SongEditorState(
+                            project,
+                            cursorRow,
+                            cursorTrack = cursorColumn
+                        )
+                        val context = songEditorModule.getCursorContext(songState)
+                        val action = genericInputHandler.handleAButton(context)
+                        applySongInputAction(action, cursorColumn - 1, cursorRow)
+                    }
+                    else -> { /* Other screens not yet implemented */ }
                 }
             },
 
@@ -773,7 +833,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         )
                         val context = chainEditorModule.getCursorContext(chainState)
                         val action = genericInputHandler.handleBButton(context)
-                        applyInputAction(action, currentChain, cursorRow, cursorColumn)
+                        applyChainInputAction(action, currentChain, cursorRow, cursorColumn)
                     }
                     ScreenType.PHRASE -> {
                         val phraseState = PhraseEditorState(
@@ -787,7 +847,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         val action = genericInputHandler.handleBButton(context)
                         applyPhraseInputAction(action, currentPhrase, cursorRow, cursorColumn)
                     }
-                    else -> { /* TODO: Add other screens */ }
+                    ScreenType.SONG -> {
+                        val songState = SongEditorState(
+                            project,
+                            cursorRow,
+                            cursorTrack = cursorColumn
+                        )
+                        val context = songEditorModule.getCursorContext(songState)
+                        val action = genericInputHandler.handleBButton(context)
+                        applySongInputAction(action, cursorColumn - 1, cursorRow)
+                    }
+                    else -> { /* Other screens not yet implemented */ }
                 }
             },
 
@@ -802,7 +872,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         )
                         val context = chainEditorModule.getCursorContext(chainState)
                         val action = genericInputHandler.handleALeft(context)
-                        applyInputAction(action, currentChain, cursorRow, cursorColumn)
+                        applyChainInputAction(action, currentChain, cursorRow, cursorColumn)
                     }
                     ScreenType.PHRASE -> {
                         val phraseState = PhraseEditorState(
@@ -816,7 +886,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         val action = genericInputHandler.handleALeft(context)
                         applyPhraseInputAction(action, currentPhrase, cursorRow, cursorColumn)
                     }
-                    else -> { /* TODO: Add other screens */ }
+                    ScreenType.SONG -> {
+                        val songState = SongEditorState(
+                            project,
+                            cursorRow,
+                            cursorTrack = cursorColumn
+                        )
+                        val context = songEditorModule.getCursorContext(songState)
+                        val action = genericInputHandler.handleALeft(context)
+                        applySongInputAction(action, cursorColumn - 1, cursorRow)
+                    }
+                    else -> { /* Other screens not yet implemented */ }
                 }
             },
 
@@ -831,7 +911,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         )
                         val context = chainEditorModule.getCursorContext(chainState)
                         val action = genericInputHandler.handleARight(context)
-                        applyInputAction(action, currentChain, cursorRow, cursorColumn)
+                        applyChainInputAction(action, currentChain, cursorRow, cursorColumn)
                     }
                     ScreenType.PHRASE -> {
                         val phraseState = PhraseEditorState(
@@ -845,7 +925,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         val action = genericInputHandler.handleARight(context)
                         applyPhraseInputAction(action, currentPhrase, cursorRow, cursorColumn)
                     }
-                    else -> { /* TODO: Add other screens */ }
+                    ScreenType.SONG -> {
+                        val songState = SongEditorState(
+                            project,
+                            cursorRow,
+                            cursorTrack = cursorColumn
+                        )
+                        val context = songEditorModule.getCursorContext(songState)
+                        val action = genericInputHandler.handleARight(context)
+                        applySongInputAction(action, cursorColumn - 1, cursorRow)
+                    }
+                    else -> { /* Other screens not yet implemented */ }
                 }
             },
 
