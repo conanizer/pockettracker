@@ -174,6 +174,53 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // INPUT ACTION HELPER
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Apply an InputAction to the project state (currently only for CHAIN screen)
+     * This consolidates the logic that was duplicated in onButtonA, onButtonB, etc.
+     */
+    fun applyInputAction(
+        action: InputAction,
+        chainIndex: Int,
+        row: Int,
+        column: Int
+    ) {
+        when (action) {
+            is InputAction.SET_VALUE -> {
+                // Update the value at cursor position
+                when (column) {
+                    1 -> {
+                        // Phrase reference
+                        project.chains[chainIndex].phraseRefs[row] = action.value
+                        lastEditedPhrase = action.value
+                    }
+                    2 -> {
+                        // Transpose value
+                        project.chains[chainIndex].transposeValues[row] = action.value
+                    }
+                }
+            }
+            is InputAction.INSERT_DEFAULT -> {
+                // Insert last edited phrase
+                insertChainPhrase(
+                    project.chains[chainIndex],
+                    row,
+                    lastEditedPhrase
+                )
+            }
+            is InputAction.DELETE -> {
+                // Clear the value at cursor position
+                if (column == 1) {
+                    clearChainSlot(project.chains[chainIndex], row)
+                }
+            }
+            else -> { /* NONE or unhandled - do nothing */ }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // BUTTON HANDLERS
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -633,13 +680,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     ScreenType.CHAIN -> {
                         val chainState = ChainEditorState(
                             project.chains[currentChain],
-                            currentChain,
                             cursorRow,
                             cursorColumn
                         )
                         val context = chainEditorModule.getCursorContext(chainState)
                         val action = genericInputHandler.handleAButton(context)
-                        applyInputAction(action, project, currentChain, cursorRow, cursorColumn)
+                        applyInputAction(action, currentChain, cursorRow, cursorColumn)
                     }
                     else -> { /* TODO: Add other screens */ }
                 }
@@ -651,13 +697,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     ScreenType.CHAIN -> {
                         val chainState = ChainEditorState(
                             project.chains[currentChain],
-                            currentChain,
                             cursorRow,
                             cursorColumn
                         )
                         val context = chainEditorModule.getCursorContext(chainState)
                         val action = genericInputHandler.handleBButton(context)
-                        applyInputAction(action, project, currentChain, cursorRow, cursorColumn)
+                        applyInputAction(action, currentChain, cursorRow, cursorColumn)
                     }
                     else -> { /* TODO: Add other screens */ }
                 }
@@ -669,13 +714,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     ScreenType.CHAIN -> {
                         val chainState = ChainEditorState(
                             project.chains[currentChain],
-                            currentChain,
                             cursorRow,
                             cursorColumn
                         )
                         val context = chainEditorModule.getCursorContext(chainState)
                         val action = genericInputHandler.handleALeft(context)
-                        applyInputAction(action, project, currentChain, cursorRow, cursorColumn)
+                        applyInputAction(action, currentChain, cursorRow, cursorColumn)
                     }
                     else -> { /* TODO: Add other screens */ }
                 }
@@ -687,66 +731,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     ScreenType.CHAIN -> {
                         val chainState = ChainEditorState(
                             project.chains[currentChain],
-                            currentChain,
                             cursorRow,
                             cursorColumn
                         )
                         val context = chainEditorModule.getCursorContext(chainState)
                         val action = genericInputHandler.handleARight(context)
-                        applyInputAction(action, project, currentChain, cursorRow, cursorColumn)
+                        applyInputAction(action, currentChain, cursorRow, cursorColumn)
                     }
                     else -> { /* TODO: Add other screens */ }
                 }
             }
         )
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // INPUT ACTION HELPER
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /**
-     * Apply an InputAction to the project state (currently only for CHAIN screen)
-     * This consolidates the logic that was duplicated in onButtonA, onButtonB, etc.
-     */
-    fun applyInputAction(
-        action: InputAction,
-        project: Project,
-        chainIndex: Int,
-        row: Int,
-        column: Int
-    ) {
-        when (action) {
-            is InputAction.SET_VALUE -> {
-                // Update the value at cursor position
-                when (column) {
-                    1 -> {
-                        // Phrase reference
-                        project.chains[chainIndex].phraseRefs[row] = action.value
-                        lastEditedPhrase = action.value
-                    }
-                    2 -> {
-                        // Transpose value
-                        project.chains[chainIndex].transposeValues[row] = action.value
-                    }
-                }
-            }
-            is InputAction.INSERT_DEFAULT -> {
-                // Insert last edited phrase
-                insertChainPhrase(
-                    project.chains[chainIndex],
-                    row,
-                    lastEditedPhrase
-                )
-            }
-            is InputAction.DELETE -> {
-                // Clear the value at cursor position
-                if (column == 1) {
-                    clearChainSlot(project.chains[chainIndex], row)
-                }
-            }
-            else -> { /* NONE or unhandled - do nothing */ }
-        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
