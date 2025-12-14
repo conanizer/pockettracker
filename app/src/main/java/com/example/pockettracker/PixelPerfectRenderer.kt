@@ -94,32 +94,35 @@ fun PixelPerfectTracker(
         val offsetX = (screenWidthPx - renderWidth) / 2f
         val offsetY = (screenHeightPx - renderHeight) / 2f
 
-        // Main canvas
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            translate(offsetX, offsetY) {
-                // Use layout manager to draw modules
-                val layout = TrackerLayout()
-                with(layout) {
-                    val projectCursorRow = 0
-                    val projectStatusMessage = ""
-                    val projectStatusSuccess = false
-                    drawLayout(
-                        scale = scale,
-                        currentScreen = currentScreen,
-                        project = project,
-                        cursorRow = cursorRow,
-                        cursorColumn = cursorColumn,
-                        isPlaying = isPlaying,
-                        playbackRow = playbackRow,
-                        audioEngine = audioEngine,
-                        previousColumn = previousColumn,
-                        currentChain = currentChain,
-                        currentPhrase = currentPhrase,
-                        projectCursorRow = projectCursorRow,
-                        projectCursorColumn = projectCursorColumn,
-                        projectStatusMessage = projectStatusMessage,
-                        projectStatusSuccess = projectStatusSuccess
-                    )
+        // Main canvas - use key() to force redraw when projectVersion changes
+        key(projectVersion) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                translate(offsetX, offsetY) {
+                    // Use layout manager to draw modules
+                    val layout = TrackerLayout()
+                    with(layout) {
+                        val projectCursorRow = 0
+                        val projectStatusMessage = ""
+                        val projectStatusSuccess = false
+                        drawLayout(
+                            scale = scale,
+                            currentScreen = currentScreen,
+                            project = project,
+                            cursorRow = cursorRow,
+                            cursorColumn = cursorColumn,
+                            isPlaying = isPlaying,
+                            playbackRow = playbackRow,
+                            audioEngine = audioEngine,
+                            previousColumn = previousColumn,
+                            currentChain = currentChain,
+                            currentPhrase = currentPhrase,
+                            projectCursorRow = projectCursorRow,
+                            projectCursorColumn = projectCursorColumn,
+                            projectStatusMessage = projectStatusMessage,
+                            projectStatusSuccess = projectStatusSuccess,
+                            projectVersion = projectVersion
+                        )
+                    }
                 }
             }
         }
@@ -161,7 +164,8 @@ class TrackerLayout {
         projectCursorRow: Int = 0,
         projectCursorColumn: Int = 1,
         projectStatusMessage: String = "",
-        projectStatusSuccess: Boolean = true
+        projectStatusSuccess: Boolean = true,
+        projectVersion: Int = 0  // Version counter to force redraw on data changes
     ) {
         // ===================================
         // DRAW BACKGROUND
