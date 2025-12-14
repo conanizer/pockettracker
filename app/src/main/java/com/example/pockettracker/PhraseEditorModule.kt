@@ -228,6 +228,51 @@ class PhraseEditorModule : TrackerModule {
             fontScale = FONT_SCALE
         )
     }
+
+    /**
+     * Get cursor context for generic input handling
+     *
+     * Maps cursor position to appropriate CursorContext based on which column
+     * the cursor is in, enabling A+direction value editing.
+     *
+     * Phrase columns:
+     * 0 = Step number (read-only)
+     * 1 = Note (C-0 to B-9, can be empty)
+     * 2 = Volume (00-FF)
+     * 3 = Instrument (0-3 for now)
+     * 4-6 = FX1, FX2, FX3 (read-only for now)
+     */
+    fun getCursorContext(state: PhraseEditorState): CursorContext {
+        val step = state.phrase.steps[state.cursorRow]
+
+        return when (state.cursorColumn) {
+            // Column 0: Step number (read-only)
+            0 -> CursorContextFactory.readOnly()
+
+            // Column 1: Note (C-0 to B-9)
+            1 -> {
+                val isEmpty = step.note == Note.EMPTY
+                val currentValue = if (isEmpty) 0 else step.note.pitch + (step.note.octave * 12)
+                CursorContextFactory.note(currentValue, isEmpty)
+            }
+
+            // Column 2: Volume (00-FF)
+            2 -> {
+                CursorContextFactory.volume(step.volume)
+            }
+
+            // Column 3: Instrument (0-3)
+            3 -> {
+                CursorContextFactory.instrument(step.instrument)
+            }
+
+            // Columns 4-6: FX slots (read-only for now)
+            4, 5, 6 -> CursorContextFactory.readOnly()
+
+            // Invalid column
+            else -> CursorContextFactory.none()
+        }
+    }
 }
 
 /**

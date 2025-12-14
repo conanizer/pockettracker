@@ -113,6 +113,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // ChainEditorModule: Used to get cursor context for chain editing
     val chainEditorModule = remember { ChainEditorModule() }
 
+    // PhraseEditorModule: Used to get cursor context for phrase editing
+    val phraseEditorModule = remember { PhraseEditorModule() }
+
     // ═══════════════════════════════════════════════════════════════════════
     // STATE VARIABLES
     // ═══════════════════════════════════════════════════════════════════════
@@ -214,6 +217,54 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 // Clear the value at cursor position
                 if (column == 1) {
                     clearChainSlot(project.chains[chainIndex], row)
+                }
+            }
+            else -> { /* NONE or unhandled - do nothing */ }
+        }
+    }
+
+    /**
+     * Apply InputAction to phrase step
+     *
+     * Handles value changes for phrase editing (notes, volume, instrument)
+     */
+    fun applyPhraseInputAction(
+        action: InputAction,
+        phraseIndex: Int,
+        row: Int,
+        column: Int
+    ) {
+        val step = project.phrases[phraseIndex].steps[row]
+
+        when (action) {
+            is InputAction.SET_VALUE -> {
+                when (column) {
+                    1 -> {
+                        // Note column: Convert MIDI value back to Note
+                        step.note = Note.fromMidi(action.value)
+                    }
+                    2 -> {
+                        // Volume column
+                        step.volume = action.value
+                    }
+                    3 -> {
+                        // Instrument column
+                        step.instrument = action.value
+                    }
+                }
+            }
+            is InputAction.DELETE -> {
+                when (column) {
+                    1 -> {
+                        // Clear note
+                        step.note = Note.EMPTY
+                    }
+                }
+            }
+            is InputAction.INSERT_DEFAULT -> {
+                // Insert default note (C-4)
+                if (column == 1) {
+                    step.note = Note.fromString("C-4")
                 }
             }
             else -> { /* NONE or unhandled - do nothing */ }
@@ -687,6 +738,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         val action = genericInputHandler.handleAButton(context)
                         applyInputAction(action, currentChain, cursorRow, cursorColumn)
                     }
+                    ScreenType.PHRASE -> {
+                        val phraseState = PhraseEditorState(
+                            project.phrases[currentPhrase],
+                            cursorRow,
+                            cursorColumn,
+                            playbackRow = 0,
+                            isPlaying = false
+                        )
+                        val context = phraseEditorModule.getCursorContext(phraseState)
+                        val action = genericInputHandler.handleAButton(context)
+                        applyPhraseInputAction(action, currentPhrase, cursorRow, cursorColumn)
+                    }
                     else -> { /* TODO: Add other screens */ }
                 }
             },
@@ -703,6 +766,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         val context = chainEditorModule.getCursorContext(chainState)
                         val action = genericInputHandler.handleBButton(context)
                         applyInputAction(action, currentChain, cursorRow, cursorColumn)
+                    }
+                    ScreenType.PHRASE -> {
+                        val phraseState = PhraseEditorState(
+                            project.phrases[currentPhrase],
+                            cursorRow,
+                            cursorColumn,
+                            playbackRow = 0,
+                            isPlaying = false
+                        )
+                        val context = phraseEditorModule.getCursorContext(phraseState)
+                        val action = genericInputHandler.handleBButton(context)
+                        applyPhraseInputAction(action, currentPhrase, cursorRow, cursorColumn)
                     }
                     else -> { /* TODO: Add other screens */ }
                 }
@@ -721,6 +796,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         val action = genericInputHandler.handleALeft(context)
                         applyInputAction(action, currentChain, cursorRow, cursorColumn)
                     }
+                    ScreenType.PHRASE -> {
+                        val phraseState = PhraseEditorState(
+                            project.phrases[currentPhrase],
+                            cursorRow,
+                            cursorColumn,
+                            playbackRow = 0,
+                            isPlaying = false
+                        )
+                        val context = phraseEditorModule.getCursorContext(phraseState)
+                        val action = genericInputHandler.handleALeft(context)
+                        applyPhraseInputAction(action, currentPhrase, cursorRow, cursorColumn)
+                    }
                     else -> { /* TODO: Add other screens */ }
                 }
             },
@@ -737,6 +824,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         val context = chainEditorModule.getCursorContext(chainState)
                         val action = genericInputHandler.handleARight(context)
                         applyInputAction(action, currentChain, cursorRow, cursorColumn)
+                    }
+                    ScreenType.PHRASE -> {
+                        val phraseState = PhraseEditorState(
+                            project.phrases[currentPhrase],
+                            cursorRow,
+                            cursorColumn,
+                            playbackRow = 0,
+                            isPlaying = false
+                        )
+                        val context = phraseEditorModule.getCursorContext(phraseState)
+                        val action = genericInputHandler.handleARight(context)
+                        applyPhraseInputAction(action, currentPhrase, cursorRow, cursorColumn)
                     }
                     else -> { /* TODO: Add other screens */ }
                 }
