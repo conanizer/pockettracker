@@ -237,6 +237,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
         row: Int,
         column: Int
     ) {
+        Log.d("PhraseInputAction", "phrase=$phraseIndex row=$row col=$column action=$action")
         val step = project.phrases[phraseIndex].steps[row]
 
         when (action) {
@@ -879,31 +880,37 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             // ───────────────────────────────────────────────────────────────
             onLLeft = {
                 // L+LEFT: Navigate to previous chain/phrase/instrument
+                Log.d("Navigation", "L+LEFT: currentScreen=$currentScreen, currentChain=$currentChain, currentPhrase=$currentPhrase")
                 when (currentScreen) {
                     ScreenType.CHAIN -> {
                         // Previous chain (wrap around)
                         currentChain = if (currentChain > 0) currentChain - 1 else 255
+                        Log.d("Navigation", "  -> Changed to chain $currentChain")
                     }
                     ScreenType.PHRASE -> {
                         // Previous phrase (wrap around)
                         currentPhrase = if (currentPhrase > 0) currentPhrase - 1 else 255
+                        Log.d("Navigation", "  -> Changed to phrase $currentPhrase")
                     }
-                    else -> { /* Other screens don't have context navigation */ }
+                    else -> { Log.d("Navigation", "  -> No action for screen $currentScreen") }
                 }
             },
 
             onLRight = {
                 // L+RIGHT: Navigate to next chain/phrase/instrument
+                Log.d("Navigation", "L+RIGHT: currentScreen=$currentScreen, currentChain=$currentChain, currentPhrase=$currentPhrase")
                 when (currentScreen) {
                     ScreenType.CHAIN -> {
                         // Next chain (wrap around)
                         currentChain = if (currentChain < 255) currentChain + 1 else 0
+                        Log.d("Navigation", "  -> Changed to chain $currentChain")
                     }
                     ScreenType.PHRASE -> {
                         // Next phrase (wrap around)
                         currentPhrase = if (currentPhrase < 255) currentPhrase + 1 else 0
+                        Log.d("Navigation", "  -> Changed to phrase $currentPhrase")
                     }
-                    else -> { /* Other screens don't have context navigation */ }
+                    else -> { Log.d("Navigation", "  -> No action for screen $currentScreen") }
                 }
             }
         )

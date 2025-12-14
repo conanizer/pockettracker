@@ -134,10 +134,6 @@ class InputMapper(
     // Store native key codes (Int) for proper equality checking
     private val pressedKeys = mutableSetOf<Int>()
 
-    // Track last DOWN timestamp per key (for debouncing spurious UP events)
-    private val lastDownTime = mutableMapOf<Int, Long>()
-    private val debounceMs = 50L  // Ignore UP events within 50ms of DOWN
-
     // Double-tap detection
     private var lastAPress: Long = 0
     private val doubleTapWindow = 300L  // 300ms window for double-tap
@@ -207,9 +203,8 @@ class InputMapper(
                     return true
                 }
 
-                // Mark this key as pressed and record timestamp
+                // Mark this key as pressed
                 pressedKeys.add(nativeKeyCode)
-                lastDownTime[nativeKeyCode] = System.currentTimeMillis()
 
                 // Optional logging for debugging
                 if (logInput) {
@@ -224,22 +219,8 @@ class InputMapper(
             KeyEventType.KeyUp -> {
                 val nativeKeyCode = keyEvent.nativeKeyEvent.keyCode
 
-                // DEBOUNCE: Ignore UP events that happen too quickly after DOWN
-                // This fixes spurious rapid UP/DOWN/UP/DOWN events from buggy keyboard drivers
-                val downTime = lastDownTime[nativeKeyCode] ?: 0L
-                val timeSinceDown = System.currentTimeMillis() - downTime
-
-                if (timeSinceDown < debounceMs) {
-                    // Too soon after DOWN - this is a spurious UP event, ignore it
-                    if (logInput) {
-                        Log.d(TAG, "Key ${keyEvent.key} UP IGNORED (debounce: ${timeSinceDown}ms < ${debounceMs}ms)")
-                    }
-                    return true
-                }
-
                 // Remove key from pressed set
                 pressedKeys.remove(nativeKeyCode)
-                lastDownTime.remove(nativeKeyCode)
 
                 // Optional logging for debugging
                 if (logInput) {
