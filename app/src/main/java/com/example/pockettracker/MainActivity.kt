@@ -164,6 +164,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     var lastEditedPhrase by remember { mutableIntStateOf(0) }
     var lastEditedChain by remember { mutableIntStateOf(0) }
 
+    // Version counter to force recomposition when nested project data changes
+    // Incrementing this tells Compose the project has changed even if the reference is the same
+    var projectVersion by remember { mutableIntStateOf(0) }
+
     // Update lastEditedPhrase when cursor moves in chain screen
     // This runs every time cursorRow or currentChain changes
     lastEditedPhrase = project.chains[currentChain].phraseRefs[cursorRow]
@@ -274,8 +278,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             else -> { /* NONE or unhandled - do nothing */ }
         }
 
-        // Trigger recomposition by reassigning project to itself
-        project = project
+        // Trigger recomposition by incrementing version counter
+        projectVersion++
+        Log.d("PhraseInputAction", "projectVersion incremented to $projectVersion")
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -963,7 +968,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 projectStatusSuccess = projectStatusSuccess,
                 buttonHandlers = buttonHandlers,
                 inputMapper = inputMapper,
-                focusRequester = focusRequester
+                focusRequester = focusRequester,
+                projectVersion = projectVersion
             )
         } else {
             // PORTRAIT: Buttons below screen
@@ -984,7 +990,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 projectStatusSuccess = projectStatusSuccess,
                 buttonHandlers = buttonHandlers,
                 inputMapper = inputMapper,
-                focusRequester = focusRequester
+                focusRequester = focusRequester,
+                projectVersion = projectVersion
             )
         }
     } else {
@@ -1006,7 +1013,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             projectStatusMessage = projectStatusMessage,
             projectStatusSuccess = projectStatusSuccess,
             inputMapper = inputMapper,
-            focusRequester = focusRequester
+            focusRequester = focusRequester,
+            projectVersion = projectVersion
         )
     }
 }
