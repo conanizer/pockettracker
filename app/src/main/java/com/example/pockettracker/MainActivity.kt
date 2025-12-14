@@ -221,6 +221,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             }
             else -> { /* NONE or unhandled - do nothing */ }
         }
+
+        // Trigger recomposition by reassigning project to itself
+        project = project
     }
 
     /**
@@ -269,6 +272,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             }
             else -> { /* NONE or unhandled - do nothing */ }
         }
+
+        // Trigger recomposition by reassigning project to itself
+        project = project
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -276,13 +282,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // ═══════════════════════════════════════════════════════════════════════
 
     // Create a ButtonHandlers object that contains all button press logic
-    // "remember" with dependencies means "recalculate when these values change"
-    // This is important so button handlers always use the latest state values
-    val buttonHandlers = remember(
-        currentScreen, cursorRow, cursorColumn,
-        projectCursorRow, projectCursorColumn, currentChain,
-        lastEditedChain, lastEditedPhrase
-    ) {
+    // Remove dependencies - handlers can access current values directly from scope
+    // This prevents InputMapper from being recreated and losing modifier states
+    val buttonHandlers = remember {
         ButtonHandlers(
             // ───────────────────────────────────────────────────────────────
             // D-PAD UP
