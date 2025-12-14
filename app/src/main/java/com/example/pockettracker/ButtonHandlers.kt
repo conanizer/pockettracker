@@ -121,7 +121,8 @@ class InputMapper(
     private val heldButtons = mutableSetOf<VirtualButton>()
 
     // Track which physical keys are currently pressed (to ignore key repeat)
-    private val pressedKeys = mutableSetOf<androidx.compose.ui.input.key.Key>()
+    // Store key codes (Long) instead of Key objects for proper equality checking
+    private val pressedKeys = mutableSetOf<Long>()
 
     // Double-tap detection
     private var lastAPress: Long = 0
@@ -185,13 +186,14 @@ class InputMapper(
                 // IMPORTANT: Ignore key repeat!
                 // When you hold a key, OS sends repeated KeyDown events
                 // We only want to handle the FIRST press
-                if (pressedKeys.contains(keyEvent.key)) {
+                // Use keyCode (Long) for proper equality checking
+                if (pressedKeys.contains(keyEvent.key.keyCode)) {
                     // This is a key repeat - ignore it
                     return true
                 }
 
-                // Mark this key as pressed
-                pressedKeys.add(keyEvent.key)
+                // Mark this key as pressed (store keyCode, not Key object)
+                pressedKeys.add(keyEvent.key.keyCode)
 
                 // Optional logging for debugging
                 if (logInput) {
@@ -204,8 +206,8 @@ class InputMapper(
             }
 
             KeyEventType.KeyUp -> {
-                // Remove key from pressed set
-                pressedKeys.remove(keyEvent.key)
+                // Remove key from pressed set (using keyCode)
+                pressedKeys.remove(keyEvent.key.keyCode)
 
                 // Optional logging for debugging
                 if (logInput) {
