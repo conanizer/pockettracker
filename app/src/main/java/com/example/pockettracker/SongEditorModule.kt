@@ -284,7 +284,7 @@ class SongEditorModule : TrackerModule {
         }
 
         // Get the track (cursorTrack is 1-8, array index is 0-7)
-        val track = state.project.song.tracks[state.cursorTrack - 1]
+        val track = state.project.tracks[state.cursorTrack - 1]
 
         // Get chain reference at current row
         val chainRef = if (state.cursorRow < track.chainRefs.size) {
