@@ -48,7 +48,8 @@ fun PixelPerfectTracker(
     projectCursorRow: Int,
     projectCursorColumn: Int,
     projectStatusMessage: String,
-    projectStatusSuccess: Boolean
+    projectStatusSuccess: Boolean,
+    projectVersion: Int
 ) {
     // Playback state
     var playbackRow by remember { mutableStateOf(0) }
