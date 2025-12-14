@@ -60,7 +60,11 @@ data class ButtonHandlers(
     val onRUp: () -> Unit,          // R+UP: Navigate screen up
     val onRDown: () -> Unit,        // R+DOWN: Navigate screen down
     val onRLeft: () -> Unit,        // R+LEFT: Navigate screen left
-    val onRRight: () -> Unit        // R+RIGHT: Navigate screen right
+    val onRRight: () -> Unit,       // R+RIGHT: Navigate screen right
+
+    // L+direction combinations for context navigation
+    val onLLeft: () -> Unit,        // L+LEFT: Previous chain/phrase/instrument
+    val onLRight: () -> Unit        // L+RIGHT: Next chain/phrase/instrument
 )
 
 /**
@@ -345,12 +349,12 @@ class InputMapper(
                 }
                 VirtualButton.DPAD_LEFT -> {
                     if (logInput) Log.d(TAG, "L+LEFT (prev chain/phrase)")
-                    // TODO: Add handler for L+LEFT
+                    buttonHandlers.onLLeft()
                     return
                 }
                 VirtualButton.DPAD_RIGHT -> {
                     if (logInput) Log.d(TAG, "L+RIGHT (next chain/phrase)")
-                    // TODO: Add handler for L+RIGHT
+                    buttonHandlers.onLRight()
                     return
                 }
                 VirtualButton.START -> {

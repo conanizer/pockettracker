@@ -870,6 +870,39 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 val (newScreen, newCol) = navigateRight(currentScreen, previousColumn)
                 currentScreen = newScreen
                 previousColumn = newCol
+            },
+
+            // ───────────────────────────────────────────────────────────────
+            // L + DIRECTION COMBINATIONS (Context navigation)
+            // ───────────────────────────────────────────────────────────────
+            onLLeft = {
+                // L+LEFT: Navigate to previous chain/phrase/instrument
+                when (currentScreen) {
+                    ScreenType.CHAIN -> {
+                        // Previous chain (wrap around)
+                        currentChain = if (currentChain > 0) currentChain - 1 else 255
+                    }
+                    ScreenType.PHRASE -> {
+                        // Previous phrase (wrap around)
+                        currentPhrase = if (currentPhrase > 0) currentPhrase - 1 else 255
+                    }
+                    else -> { /* Other screens don't have context navigation */ }
+                }
+            },
+
+            onLRight = {
+                // L+RIGHT: Navigate to next chain/phrase/instrument
+                when (currentScreen) {
+                    ScreenType.CHAIN -> {
+                        // Next chain (wrap around)
+                        currentChain = if (currentChain < 255) currentChain + 1 else 0
+                    }
+                    ScreenType.PHRASE -> {
+                        // Next phrase (wrap around)
+                        currentPhrase = if (currentPhrase < 255) currentPhrase + 1 else 0
+                    }
+                    else -> { /* Other screens don't have context navigation */ }
+                }
             }
         )
     }
