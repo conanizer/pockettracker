@@ -198,6 +198,7 @@ object CursorContextFactory {
             canIncrementFast = !isEmpty,  // +12 = octave up
             canDecrementFast = !isEmpty,  // -12 = octave down
             canDelete = !isEmpty,
+            canInsert = isEmpty,          // A on empty note inserts default (C-4)
             isEmpty = isEmpty
         ),
         currentValue = currentValue,

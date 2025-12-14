@@ -44,6 +44,7 @@ fun PixelPerfectTracker(
     isPlaying: Boolean,
     previousColumn: Int,
     currentChain: Int,
+    currentPhrase: Int,
     projectCursorRow: Int,
     projectCursorColumn: Int,
     projectStatusMessage: String,
@@ -112,8 +113,9 @@ fun PixelPerfectTracker(
                         audioEngine = audioEngine,
                         previousColumn = previousColumn,
                         currentChain = currentChain,
+                        currentPhrase = currentPhrase,
                         projectCursorRow = projectCursorRow,
-                        projectCursorColumn = projectCursorColumn, // ✨ Pass new vars
+                        projectCursorColumn = projectCursorColumn,
                         projectStatusMessage = projectStatusMessage,
                         projectStatusSuccess = projectStatusSuccess
                     )
@@ -154,6 +156,7 @@ class TrackerLayout {
         audioEngine: TrackerAudioEngine,
         previousColumn: Int,
         currentChain: Int,
+        currentPhrase: Int = 0,
         projectCursorRow: Int = 0,
         projectCursorColumn: Int = 1,
         projectStatusMessage: String = "",
@@ -202,7 +205,7 @@ class TrackerLayout {
                 y = currentY,
                 scale = scale,
                 state = PhraseEditorState(
-                    phrase = project.phrases[0],
+                    phrase = project.phrases[currentPhrase],
                     cursorRow = cursorRow,
                     cursorColumn = cursorColumn,
                     playbackRow = playbackRow,
@@ -239,7 +242,7 @@ class TrackerLayout {
                         y = currentY,
                         scale = scale,
                         state = PhraseEditorState(
-                            phrase = project.phrases[0],
+                            phrase = project.phrases[currentPhrase],
                             cursorRow = cursorRow,
                             cursorColumn = cursorColumn,
                             playbackRow = playbackRow,
