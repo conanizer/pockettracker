@@ -131,8 +131,8 @@ class InputMapper(
     private val heldButtons = mutableSetOf<VirtualButton>()
 
     // Track which physical keys are currently pressed (to ignore key repeat)
-    // Store key codes (Long) instead of Key objects for proper equality checking
-    private val pressedKeys = mutableSetOf<Long>()
+    // Store native key codes (Int) for proper equality checking
+    private val pressedKeys = mutableSetOf<Int>()
 
     // Double-tap detection
     private var lastAPress: Long = 0
@@ -196,18 +196,19 @@ class InputMapper(
                 // IMPORTANT: Ignore key repeat!
                 // When you hold a key, OS sends repeated KeyDown events
                 // We only want to handle the FIRST press
-                // Use keyCode (Long) for proper equality checking
-                if (pressedKeys.contains(keyEvent.key.keyCode)) {
+                // Use native keyCode (Int) for proper equality checking
+                val nativeKeyCode = keyEvent.nativeKeyEvent.keyCode
+                if (pressedKeys.contains(nativeKeyCode)) {
                     // This is a key repeat - ignore it
                     return true
                 }
 
-                // Mark this key as pressed (store keyCode, not Key object)
-                pressedKeys.add(keyEvent.key.keyCode)
+                // Mark this key as pressed (store native keyCode)
+                pressedKeys.add(nativeKeyCode)
 
                 // Optional logging for debugging
                 if (logInput) {
-                    Log.d(TAG, "Key ${keyEvent.key} DOWN → Button ${virtualButton.name} PRESSED")
+                    Log.d(TAG, "Key ${keyEvent.key} DOWN (native=$nativeKeyCode) → Button ${virtualButton.name} PRESSED")
                 }
 
                 // Trigger the button action
@@ -216,8 +217,9 @@ class InputMapper(
             }
 
             KeyEventType.KeyUp -> {
-                // Remove key from pressed set (using keyCode)
-                pressedKeys.remove(keyEvent.key.keyCode)
+                // Remove key from pressed set (using native keyCode)
+                val nativeKeyCode = keyEvent.nativeKeyEvent.keyCode
+                pressedKeys.remove(nativeKeyCode)
 
                 // Optional logging for debugging
                 if (logInput) {
