@@ -120,6 +120,9 @@ class InputMapper(
     // Track which buttons are currently held (for combinations)
     private val heldButtons = mutableSetOf<VirtualButton>()
 
+    // Track which physical keys are currently pressed (to ignore key repeat)
+    private val pressedKeys = mutableSetOf<androidx.compose.ui.input.key.Key>()
+
     // Double-tap detection
     private var lastAPress: Long = 0
     private val doubleTapWindow = 300L  // 300ms window for double-tap
@@ -173,30 +176,48 @@ class InputMapper(
      * @return Boolean - true if we handled this key, false if we ignored it
      */
     fun handleKeyEvent(keyEvent: androidx.compose.ui.input.key.KeyEvent): Boolean {
+        // Look up the pressed key in our mapping first
+        val virtualButton = keyboardMapping[keyEvent.key] ?: return false
+
         // Determine if this is a key press or release
-        val action = when (keyEvent.type) {
-            KeyEventType.KeyDown -> ButtonAction.PRESSED
-            KeyEventType.KeyUp -> ButtonAction.RELEASED
-            else -> return false  // Unknown event type, ignore
-        }
+        when (keyEvent.type) {
+            KeyEventType.KeyDown -> {
+                // IMPORTANT: Ignore key repeat!
+                // When you hold a key, OS sends repeated KeyDown events
+                // We only want to handle the FIRST press
+                if (pressedKeys.contains(keyEvent.key)) {
+                    // This is a key repeat - ignore it
+                    return true
+                }
 
-        // Look up the pressed key in our mapping
-        val virtualButton = keyboardMapping[keyEvent.key]
+                // Mark this key as pressed
+                pressedKeys.add(keyEvent.key)
 
-        // If this key is mapped to a button...
-        return if (virtualButton != null) {
-            // Optional logging for debugging
-            if (logInput) {
-                Log.d(TAG, "Key ${keyEvent.key} → Button ${virtualButton.name} ${action.name}")
+                // Optional logging for debugging
+                if (logInput) {
+                    Log.d(TAG, "Key ${keyEvent.key} DOWN → Button ${virtualButton.name} PRESSED")
+                }
+
+                // Trigger the button action
+                handleButtonAction(virtualButton, ButtonAction.PRESSED)
+                return true
             }
 
-            // Trigger the button action
-            handleButtonAction(virtualButton, action)
+            KeyEventType.KeyUp -> {
+                // Remove key from pressed set
+                pressedKeys.remove(keyEvent.key)
 
-            true  // Return true = "we handled this key"
-        } else {
-            // This key isn't mapped, let the system handle it
-            false
+                // Optional logging for debugging
+                if (logInput) {
+                    Log.d(TAG, "Key ${keyEvent.key} UP → Button ${virtualButton.name} RELEASED")
+                }
+
+                // Trigger the button action
+                handleButtonAction(virtualButton, ButtonAction.RELEASED)
+                return true
+            }
+
+            else -> return false  // Unknown event type, ignore
         }
     }
 
