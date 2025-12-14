@@ -54,7 +54,13 @@ data class ButtonHandlers(
     val onAUp: () -> Unit,          // A+UP: Small increment
     val onADown: () -> Unit,        // A+DOWN: Small decrement
     val onALeft: () -> Unit,        // A+LEFT: Large decrement (one octave/0x10)
-    val onARight: () -> Unit        // A+RIGHT: Large increment (one octave/0x10)
+    val onARight: () -> Unit,       // A+RIGHT: Large increment (one octave/0x10)
+
+    // R+direction combinations for screen navigation
+    val onRUp: () -> Unit,          // R+UP: Navigate screen up
+    val onRDown: () -> Unit,        // R+DOWN: Navigate screen down
+    val onRLeft: () -> Unit,        // R+LEFT: Navigate screen left
+    val onRRight: () -> Unit        // R+RIGHT: Navigate screen right
 )
 
 /**
@@ -361,22 +367,22 @@ class InputMapper(
             when (button) {
                 VirtualButton.DPAD_UP -> {
                     if (logInput) Log.d(TAG, "R+UP (navigate screen up)")
-                    // TODO: Add handler for R+UP (navigate screens)
+                    buttonHandlers.onRUp()
                     return
                 }
                 VirtualButton.DPAD_DOWN -> {
                     if (logInput) Log.d(TAG, "R+DOWN (navigate screen down)")
-                    // TODO: Add handler for R+DOWN
+                    buttonHandlers.onRDown()
                     return
                 }
                 VirtualButton.DPAD_LEFT -> {
                     if (logInput) Log.d(TAG, "R+LEFT (navigate screen left)")
-                    // TODO: Add handler for R+LEFT
+                    buttonHandlers.onRLeft()
                     return
                 }
                 VirtualButton.DPAD_RIGHT -> {
                     if (logInput) Log.d(TAG, "R+RIGHT (navigate screen right)")
-                    // TODO: Add handler for R+RIGHT
+                    buttonHandlers.onRRight()
                     return
                 }
                 VirtualButton.A -> {

@@ -740,6 +740,37 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     }
                     else -> { /* TODO: Add other screens */ }
                 }
+            },
+
+            // ───────────────────────────────────────────────────────────────
+            // R + DIRECTION COMBINATIONS (Screen navigation)
+            // ───────────────────────────────────────────────────────────────
+            onRUp = {
+                // R+UP: Navigate to screen above in 5×5 grid
+                val (newScreen, newCol) = navigateUp(currentScreen, previousColumn)
+                currentScreen = newScreen
+                previousColumn = newCol
+            },
+
+            onRDown = {
+                // R+DOWN: Navigate to screen below in 5×5 grid
+                val (newScreen, newCol) = navigateDown(currentScreen, previousColumn)
+                currentScreen = newScreen
+                previousColumn = newCol
+            },
+
+            onRLeft = {
+                // R+LEFT: Navigate to screen on left in main row
+                val (newScreen, newCol) = navigateLeft(currentScreen, previousColumn)
+                currentScreen = newScreen
+                previousColumn = newCol
+            },
+
+            onRRight = {
+                // R+RIGHT: Navigate to screen on right in main row
+                val (newScreen, newCol) = navigateRight(currentScreen, previousColumn)
+                currentScreen = newScreen
+                previousColumn = newCol
             }
         )
     }
