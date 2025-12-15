@@ -308,28 +308,39 @@ class ProjectModule : TrackerModule {
         )
 
         // COLUMN 2: Name characters (12 characters max)
-        // Pad name to 12 characters with underscores
-        val displayName = projectState.project.name
-            .take(12)  // Max 12 chars
-            .padEnd(12, '_')  // Fill with underscores
+        // Show actual name characters, then "-" for empty slots
+        val projectName = projectState.project.name.take(12)
 
         // Draw each character separately
         var charX = valueColumnX
         for (charIndex in 0..11) {
-            val char = displayName[charIndex]
+            // Get character to display:
+            // - If within name length: show actual character
+            // - If beyond name length: show "-" for empty slot
+            val char = if (charIndex < projectName.length) {
+                projectName[charIndex]
+            } else {
+                '-'  // Empty slot indicator
+            }
 
             // Is cursor on THIS specific character?
             // cursorColumn: 0=name label, 1=first char, 2=second char, etc.
             val isCursorOnThisChar = isCursorOnThisRow &&
                     projectState.cursorColumn == charIndex + 1
 
+            // Choose color: yellow for cursor, gray for empty slots, white for content
+            val charColor = when {
+                isCursorOnThisChar -> Color.Yellow
+                charIndex >= projectName.length -> Color.Gray  // Gray for empty slots
+                else -> Color.White  // White for name content
+            }
+
             drawBitmapText(
                 text = char.toString(),
                 x = charX,
                 y = textY,
                 scale = scale,
-                // Yellow if cursor is on this character, white otherwise
-                color = if (isCursorOnThisChar) Color.Yellow else Color.White,
+                color = charColor,
                 spacing = CHAR_SPACING,
                 fontScale = FONT_SCALE
             )
@@ -401,6 +412,93 @@ class ProjectModule : TrackerModule {
             // Move to next option position
             // Leave ~40px between options
             optionX += 80
+        }
+    }
+
+    /**
+     * Get cursor context for current cursor position
+     *
+     * This tells the generic input system what kind of value we're on
+     * and what actions are available.
+     */
+    fun getCursorContext(state: ProjectState): CursorContext {
+        when (state.cursorRow) {
+            0 -> {
+                // TEMPO row
+                if (state.cursorColumn == 0) {
+                    // On "TEMPO" label - read only
+                    return CursorContextFactory.readOnly()
+                }
+                // On tempo value (000-999)
+                return CursorContext(
+                    valueType = CursorValueType.HEX_BYTE,  // Actually decimal, but similar behavior
+                    capabilities = CursorCapabilities(
+                        canIncrement = true,
+                        canDecrement = true,
+                        canIncrementFast = true,
+                        canDecrementFast = true
+                    ),
+                    currentValue = state.project.tempo,
+                    minValue = 20,
+                    maxValue = 999,
+                    smallStep = 1,
+                    largeStep = 10,
+                    emptyValue = -1
+                )
+            }
+            1 -> {
+                // TRANSPOSE row
+                if (state.cursorColumn == 0) {
+                    return CursorContextFactory.readOnly()
+                }
+                // Transpose value (00-FF)
+                return CursorContextFactory.hexByte(
+                    currentValue = state.project.transpose,
+                    min = 0,
+                    max = 255
+                )
+            }
+            2 -> {
+                // NAME row - per-character editing
+                if (state.cursorColumn == 0) {
+                    return CursorContextFactory.readOnly()
+                }
+                // Get the character index (column 1 = char 0, column 2 = char 1, etc.)
+                val charIndex = state.cursorColumn - 1
+                if (charIndex >= 12) {
+                    return CursorContextFactory.none()
+                }
+
+                // Get current character (or space if beyond name length)
+                val currentChar = if (charIndex < state.project.name.length) {
+                    state.project.name[charIndex]
+                } else {
+                    ' '  // Empty slot
+                }
+
+                // Character value (A-Z, 0-9, space, etc.)
+                // For now, treat as simple increment/decrement through allowed characters
+                return CursorContext(
+                    valueType = CursorValueType.HEX_NIBBLE,  // Re-use for character editing
+                    capabilities = CursorCapabilities(
+                        canIncrement = true,
+                        canDecrement = true,
+                        canDelete = currentChar != ' ',  // Can delete non-empty
+                        isEmpty = currentChar == ' '
+                    ),
+                    currentValue = currentChar.code,
+                    minValue = 32,   // Space
+                    maxValue = 90,   // Z
+                    smallStep = 1,
+                    largeStep = 1,
+                    emptyValue = 32  // Space character
+                )
+            }
+            3 -> {
+                // PROJECT row (LOAD/SAVE/NEW) - not value editing, read-only for now
+                return CursorContextFactory.readOnly()
+            }
+            else -> return CursorContextFactory.none()
         }
     }
 }
