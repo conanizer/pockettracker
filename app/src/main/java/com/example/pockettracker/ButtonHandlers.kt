@@ -129,6 +129,7 @@ class InputMapper(
     private var isLPressed = false
     private var isRPressed = false
     private var isAPressed = false  // Track A button for A+direction combos
+    private var isBPressed = false  // Track B button to prevent B+direction old behavior
 
     // Track which buttons are currently held (for combinations)
     private val heldButtons = mutableSetOf<VirtualButton>()
@@ -194,8 +195,8 @@ class InputMapper(
         // Android gamepad face buttons (KEYCODE_BUTTON_*)
         96 to VirtualButton.A,              // KEYCODE_BUTTON_A
         97 to VirtualButton.B,              // KEYCODE_BUTTON_B
-        99 to VirtualButton.X,              // KEYCODE_BUTTON_X (map to A for now)
-        100 to VirtualButton.Y,             // KEYCODE_BUTTON_Y (map to B for now)
+        99 to VirtualButton.A,              // KEYCODE_BUTTON_X (map to A)
+        100 to VirtualButton.B,             // KEYCODE_BUTTON_Y (map to B)
 
         // Android gamepad shoulder buttons
         102 to VirtualButton.L_SHIFT,       // KEYCODE_BUTTON_L1
@@ -302,6 +303,7 @@ class InputMapper(
             if (button == VirtualButton.L_SHIFT) isLPressed = true
             if (button == VirtualButton.R_SHIFT) isRPressed = true
             if (button == VirtualButton.A) isAPressed = true
+            if (button == VirtualButton.B) isBPressed = true
 
         } else if (action == ButtonAction.RELEASED) {
             heldButtons.remove(button)
@@ -310,10 +312,16 @@ class InputMapper(
             if (button == VirtualButton.L_SHIFT) isLPressed = false
             if (button == VirtualButton.R_SHIFT) isRPressed = false
             if (button == VirtualButton.A) isAPressed = false
+            if (button == VirtualButton.B) isBPressed = false
         }
 
         // Only handle button presses (not releases) for now
         if (action != ButtonAction.PRESSED) return
+
+        // Debug: Log modifier states when any button is pressed
+        if (logInput) {
+            Log.d(TAG, "handleButtonAction: button=$button, isA=$isAPressed, isB=$isBPressed, isL=$isLPressed, isR=$isRPressed")
+        }
 
         // =====================================================================
         // MODIFIER COMBINATION DETECTION
@@ -325,6 +333,7 @@ class InputMapper(
         // A + direction combinations (M8-style value editing)
         // When A is held, directions change values instead of moving cursor
         if (isAPressed && !isLPressed && !isRPressed) {
+            if (logInput) Log.d(TAG, "A is held, checking for combos with button=$button")
             when (button) {
                 VirtualButton.B -> {
                     if (logInput) Log.d(TAG, "A+B (delete)")
@@ -482,7 +491,7 @@ class InputMapper(
         // =====================================================================
 
         // Only call basic handlers if no modifiers are pressed
-        if (!isLPressed && !isRPressed && !isAPressed) {
+        if (!isLPressed && !isRPressed && !isAPressed && !isBPressed) {
             when (button) {
                 VirtualButton.DPAD_UP -> buttonHandlers.onDPadUp()
                 VirtualButton.DPAD_DOWN -> buttonHandlers.onDPadDown()
