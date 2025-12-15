@@ -168,18 +168,14 @@ class GenericInputHandler {
      */
     private fun incrementValue(current: Int, step: Int, context: CursorContext): Int {
         return when (context.valueType) {
-            // References wrap around (0-254 for phrases, 0-255 for chains)
-            CursorValueType.PHRASE_REF -> {
+            // References and hex bytes wrap around (00 -> FF -> 00)
+            CursorValueType.PHRASE_REF,
+            CursorValueType.CHAIN_REF,
+            CursorValueType.HEX_BYTE,
+            CursorValueType.SEMITONE_OFFSET -> {
                 var newVal = current + step
                 while (newVal > context.maxValue) {
-                    newVal -= (context.maxValue + 1)
-                }
-                newVal
-            }
-            CursorValueType.CHAIN_REF -> {
-                var newVal = current + step
-                while (newVal > context.maxValue) {
-                    newVal -= (context.maxValue + 1)
+                    newVal -= (context.maxValue - context.minValue + 1)
                 }
                 newVal
             }
@@ -193,18 +189,14 @@ class GenericInputHandler {
      */
     private fun decrementValue(current: Int, step: Int, context: CursorContext): Int {
         return when (context.valueType) {
-            // References wrap around
-            CursorValueType.PHRASE_REF -> {
+            // References and hex bytes wrap around (00 -> FF -> 00)
+            CursorValueType.PHRASE_REF,
+            CursorValueType.CHAIN_REF,
+            CursorValueType.HEX_BYTE,
+            CursorValueType.SEMITONE_OFFSET -> {
                 var newVal = current - step
                 while (newVal < context.minValue) {
-                    newVal += (context.maxValue + 1)
-                }
-                newVal
-            }
-            CursorValueType.CHAIN_REF -> {
-                var newVal = current - step
-                while (newVal < context.minValue) {
-                    newVal += (context.maxValue + 1)
+                    newVal += (context.maxValue - context.minValue + 1)
                 }
                 newVal
             }

@@ -275,7 +275,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     1 -> {
                         // Clear phrase reference
                         chain.phraseRefs[row] = 0xFF  // Empty
-                        chain.transposeValues[row] = 0x80  // Reset transpose
+                        chain.transposeValues[row] = 0x00  // Reset transpose to default
                     }
                 }
             }
@@ -283,7 +283,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 if (column == 1) {
                     // Insert phrase 0 by default
                     chain.phraseRefs[row] = 0
-                    chain.transposeValues[row] = 0x80  // No transpose
+                    chain.transposeValues[row] = 0x00  // Default transpose
                 }
             }
             else -> { /* NONE or unhandled - do nothing */ }
@@ -417,15 +417,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 // Move cursor up (R+UP for screen navigation handled by InputMapper)
                 when (currentScreen) {
                     ScreenType.PROJECT -> {
-                        // Project screen has special cursor handling
-                        if (projectCursorRow > 0) {
-                            projectCursorRow--
-                            projectCursorColumn = 1  // Reset to first value column
+                        // Project screen has special cursor handling (rows 0-6)
+                        projectCursorRow = if (projectCursorRow > 0) {
+                            projectCursorRow - 1
+                        } else {
+                            6  // Wrap to bottom
                         }
+                        projectCursorColumn = 1  // Reset to first value column
                     }
                     else -> {
-                        // All other screens: simple cursor movement
-                        if (cursorRow > 0) cursorRow--
+                        // All other screens: simple cursor movement with wrapping (rows 0-15)
+                        cursorRow = if (cursorRow > 0) cursorRow - 1 else 15
                     }
                 }
             },
@@ -437,15 +439,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 // Move cursor down (R+DOWN for screen navigation handled by InputMapper)
                 when (currentScreen) {
                     ScreenType.PROJECT -> {
-                        // Project has 7 rows (0-6)
-                        if (projectCursorRow < 6) {
-                            projectCursorRow++
-                            projectCursorColumn = 1  // Reset column
+                        // Project has 7 rows (0-6) with wrapping
+                        projectCursorRow = if (projectCursorRow < 6) {
+                            projectCursorRow + 1
+                        } else {
+                            0  // Wrap to top
                         }
+                        projectCursorColumn = 1  // Reset column
                     }
                     else -> {
-                        // Most screens have 16 rows (0-15)
-                        if (cursorRow < 15) cursorRow++
+                        // Most screens have 16 rows (0-15) with wrapping
+                        cursorRow = if (cursorRow < 15) cursorRow + 1 else 0
                     }
                 }
             },
@@ -1546,7 +1550,7 @@ fun cycleInstrument(step: PhraseStep, direction: Int) {
 fun insertChainPhrase(chain: Chain, row: Int, lastPhraseValue: Int = 0): Boolean {
     if (chain.phraseRefs[row] == 0xFF) {
         chain.phraseRefs[row] = lastPhraseValue
-        chain.transposeValues[row] = 0x80  // Default: no transpose
+        chain.transposeValues[row] = 0x00  // Default transpose
         return true  // Successfully inserted
     }
     return false  // Already has a value
@@ -1581,7 +1585,7 @@ fun editChainTransposeValue(chain: Chain, row: Int, direction: Int, large: Boole
  */
 fun clearChainSlot(chain: Chain, row: Int) {
     chain.phraseRefs[row] = 0xFF
-    chain.transposeValues[row] = 0x80  // Reset transpose too
+    chain.transposeValues[row] = 0x00  // Reset transpose to default
 }
 
 /**
