@@ -1056,6 +1056,60 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             },
 
             // ───────────────────────────────────────────────────────────────
+            // A + B COMBINATION (Delete)
+            // ───────────────────────────────────────────────────────────────
+            onAB = {
+                // A+B: Delete/clear value at cursor
+                when (currentScreen) {
+                    ScreenType.CHAIN -> {
+                        val chainState = ChainEditorState(
+                            project.chains[currentChain],
+                            cursorRow,
+                            cursorColumn
+                        )
+                        val context = chainEditorModule.getCursorContext(chainState)
+                        val action = genericInputHandler.handleABCombo(context)
+                        applyChainInputAction(action, currentChain, cursorRow, cursorColumn)
+                    }
+                    ScreenType.PHRASE -> {
+                        val phraseState = PhraseEditorState(
+                            project.phrases[currentPhrase],
+                            cursorRow,
+                            cursorColumn,
+                            playbackRow = 0,
+                            isPlaying = false
+                        )
+                        val context = phraseEditorModule.getCursorContext(phraseState)
+                        val action = genericInputHandler.handleABCombo(context)
+                        applyPhraseInputAction(action, currentPhrase, cursorRow, cursorColumn)
+                    }
+                    ScreenType.SONG -> {
+                        val songState = SongEditorState(
+                            project,
+                            cursorRow,
+                            cursorTrack = cursorColumn
+                        )
+                        val context = songEditorModule.getCursorContext(songState)
+                        val action = genericInputHandler.handleABCombo(context)
+                        applySongInputAction(action, cursorColumn - 1, cursorRow)
+                    }
+                    ScreenType.PROJECT -> {
+                        val projectState = ProjectState(
+                            project,
+                            projectCursorRow,
+                            projectCursorColumn,
+                            projectStatusMessage,
+                            projectStatusSuccess
+                        )
+                        val context = projectModule.getCursorContext(projectState)
+                        val action = genericInputHandler.handleABCombo(context)
+                        applyProjectInputAction(action, projectCursorRow, projectCursorColumn)
+                    }
+                    else -> { /* Other screens not yet implemented */ }
+                }
+            },
+
+            // ───────────────────────────────────────────────────────────────
             // R + DIRECTION COMBINATIONS (Screen navigation)
             // ───────────────────────────────────────────────────────────────
             onRUp = {
