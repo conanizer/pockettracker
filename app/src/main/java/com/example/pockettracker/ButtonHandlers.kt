@@ -56,6 +56,9 @@ data class ButtonHandlers(
     val onALeft: () -> Unit,        // A+LEFT: Large decrement (one octave/0x10)
     val onARight: () -> Unit,       // A+RIGHT: Large increment (one octave/0x10)
 
+    // A+B combination for delete
+    val onAB: () -> Unit,           // A+B: Delete/clear value at cursor
+
     // R+direction combinations for screen navigation
     val onRUp: () -> Unit,          // R+UP: Navigate screen up
     val onRDown: () -> Unit,        // R+DOWN: Navigate screen down
@@ -281,6 +284,11 @@ class InputMapper(
         // When A is held, directions change values instead of moving cursor
         if (isAPressed && !isLPressed && !isRPressed) {
             when (button) {
+                VirtualButton.B -> {
+                    if (logInput) Log.d(TAG, "A+B (delete)")
+                    buttonHandlers.onAB()
+                    return
+                }
                 VirtualButton.DPAD_UP -> {
                     if (logInput) Log.d(TAG, "A+UP (increment by small step)")
                     buttonHandlers.onAUp()
