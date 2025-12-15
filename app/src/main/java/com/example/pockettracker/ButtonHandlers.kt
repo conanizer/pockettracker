@@ -169,7 +169,47 @@ class InputMapper(
 
         // System buttons (easily accessible with left hand)
         Key.ShiftLeft to VirtualButton.SELECT,  // Select = mode switching
-        Key.Spacebar to VirtualButton.START     // Start = play/pause
+        Key.Spacebar to VirtualButton.START,    // Start = play/pause
+
+        // Arrow keys (alternative to WASD)
+        Key.DirectionUp to VirtualButton.DPAD_UP,
+        Key.DirectionLeft to VirtualButton.DPAD_LEFT,
+        Key.DirectionDown to VirtualButton.DPAD_DOWN,
+        Key.DirectionRight to VirtualButton.DPAD_RIGHT,
+
+        // Alternative confirm/cancel keys
+        Key.Enter to VirtualButton.A,
+        Key.Escape to VirtualButton.B
+    )
+
+    // Mapping for native Android key codes (for gamepad support on handhelds)
+    // These are the actual hardware button codes sent by gaming handhelds
+    private val nativeGamepadMapping = mapOf(
+        // Android gamepad D-pad (KEYCODE_DPAD_*)
+        19 to VirtualButton.DPAD_UP,        // KEYCODE_DPAD_UP
+        20 to VirtualButton.DPAD_DOWN,      // KEYCODE_DPAD_DOWN
+        21 to VirtualButton.DPAD_LEFT,      // KEYCODE_DPAD_LEFT
+        22 to VirtualButton.DPAD_RIGHT,     // KEYCODE_DPAD_RIGHT
+
+        // Android gamepad face buttons (KEYCODE_BUTTON_*)
+        96 to VirtualButton.A,              // KEYCODE_BUTTON_A
+        97 to VirtualButton.B,              // KEYCODE_BUTTON_B
+        99 to VirtualButton.X,              // KEYCODE_BUTTON_X (map to A for now)
+        100 to VirtualButton.Y,             // KEYCODE_BUTTON_Y (map to B for now)
+
+        // Android gamepad shoulder buttons
+        102 to VirtualButton.L_SHIFT,       // KEYCODE_BUTTON_L1
+        103 to VirtualButton.R_SHIFT,       // KEYCODE_BUTTON_R1
+        104 to VirtualButton.L_SHIFT,       // KEYCODE_BUTTON_L2 (also L)
+        105 to VirtualButton.R_SHIFT,       // KEYCODE_BUTTON_R2 (also R)
+
+        // Android gamepad system buttons
+        108 to VirtualButton.START,         // KEYCODE_BUTTON_START
+        109 to VirtualButton.SELECT,        // KEYCODE_BUTTON_SELECT
+
+        // Alternative mappings for some handhelds
+        82 to VirtualButton.START,          // KEYCODE_MENU (used as START on some devices)
+        4 to VirtualButton.B                // KEYCODE_BACK (back button as B)
     )
 
     /**
@@ -190,8 +230,10 @@ class InputMapper(
      * @return Boolean - true if we handled this key, false if we ignored it
      */
     fun handleKeyEvent(keyEvent: androidx.compose.ui.input.key.KeyEvent): Boolean {
-        // Look up the pressed key in our mapping first
-        val virtualButton = keyboardMapping[keyEvent.key] ?: return false
+        // Try keyboard mapping first (for PC), then native gamepad codes (for handhelds)
+        val virtualButton = keyboardMapping[keyEvent.key]
+            ?: nativeGamepadMapping[keyEvent.nativeKeyEvent.keyCode]
+            ?: return false  // Unknown key, ignore
 
         // Determine if this is a key press or release
         when (keyEvent.type) {
