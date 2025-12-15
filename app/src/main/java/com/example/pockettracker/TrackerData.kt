@@ -101,7 +101,7 @@ data class Phrase(
 data class Chain(
     val id: Int,  // 00-FF
     val phraseRefs: IntArray = IntArray(16) { 0xFF },  // 0xFF = empty
-    val transposeValues: IntArray = IntArray(16) { 0x80 }  // ✨ NEW! 0x80 = no transpose
+    val transposeValues: IntArray = IntArray(16) { 0x00 }  // Default: 0x00 (can cycle 00-FF)
 ) {
     /**
      * Check if a slot is empty
