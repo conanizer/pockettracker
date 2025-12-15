@@ -168,11 +168,12 @@ class GenericInputHandler {
      */
     private fun incrementValue(current: Int, step: Int, context: CursorContext): Int {
         return when (context.valueType) {
-            // References and hex bytes wrap around (00 -> FF -> 00)
+            // References, hex bytes, and volume wrap around (00 -> max -> 00)
             CursorValueType.PHRASE_REF,
             CursorValueType.CHAIN_REF,
             CursorValueType.HEX_BYTE,
-            CursorValueType.SEMITONE_OFFSET -> {
+            CursorValueType.SEMITONE_OFFSET,
+            CursorValueType.VOLUME -> {
                 var newVal = current + step
                 while (newVal > context.maxValue) {
                     newVal -= (context.maxValue - context.minValue + 1)
@@ -189,11 +190,12 @@ class GenericInputHandler {
      */
     private fun decrementValue(current: Int, step: Int, context: CursorContext): Int {
         return when (context.valueType) {
-            // References and hex bytes wrap around (00 -> FF -> 00)
+            // References, hex bytes, and volume wrap around (00 -> max -> 00)
             CursorValueType.PHRASE_REF,
             CursorValueType.CHAIN_REF,
             CursorValueType.HEX_BYTE,
-            CursorValueType.SEMITONE_OFFSET -> {
+            CursorValueType.SEMITONE_OFFSET,
+            CursorValueType.VOLUME -> {
                 var newVal = current - step
                 while (newVal < context.minValue) {
                     newVal += (context.maxValue - context.minValue + 1)
