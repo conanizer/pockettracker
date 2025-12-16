@@ -172,6 +172,9 @@ class ChainEditorModule : TrackerModule {
         // STEP 2: Row background color
         // ===================================
         val bgColor = when {
+            // Green background when playing this row
+            state.isPlaying && index == state.playbackRow -> Color(0xFF004400)
+
             // Cursor on this row
             index == state.cursorRow -> Color(0xFF333333)
 
@@ -300,9 +303,13 @@ class ChainEditorModule : TrackerModule {
  * @param chain The chain to display
  * @param cursorRow Which row (0-15)
  * @param cursorColumn Which column (0=step, 1=phrase, 2=transpose)
+ * @param playbackRow Which chain row is currently playing (0-15)
+ * @param isPlaying Whether playback is active
  */
 data class ChainEditorState(
     val chain: Chain,
     val cursorRow: Int,
-    val cursorColumn: Int
+    val cursorColumn: Int,
+    val playbackRow: Int = 0,
+    val isPlaying: Boolean = false
 )

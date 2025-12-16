@@ -53,20 +53,75 @@ fun PixelPerfectTracker(
 ) {
     // Playback state
     var playbackRow by remember { mutableStateOf(0) }
+    var playbackChainRow by remember { mutableStateOf(0) }
+    var playbackPhraseStep by remember { mutableStateOf(0) }
 
-    // Playback loop
-    LaunchedEffect(isPlaying) {
+    // Playback loop - handles both Phrase and Chain screens
+    LaunchedEffect(isPlaying, currentScreen) {
         if (isPlaying) {
-            while (isPlaying) {
-                val step = project.phrases[0].steps[playbackRow]
-                if (!step.isEmpty()) {
-                    audioEngine.playNote(step.note, step.instrument, 0, step.volume / 255f)
+            when (currentScreen) {
+                ScreenType.PHRASE -> {
+                    // PHRASE PLAYBACK: Loop through 16 steps of current phrase
+                    while (isPlaying) {
+                        val step = project.phrases[currentPhrase].steps[playbackRow]
+                        if (!step.isEmpty()) {
+                            audioEngine.playNote(step.note, step.instrument, 0, step.volume / 255f)
+                        }
+                        playbackRow = (playbackRow + 1) % 16
+                        delay(60000L / project.tempo / 4)  // Use project tempo, 16th notes
+                    }
                 }
-                playbackRow = (playbackRow + 1) % 16
-                delay(60000L / 128 / 4)  // 128 BPM, 16th notes
+                ScreenType.CHAIN -> {
+                    // CHAIN PLAYBACK: Loop through chain rows, playing phrases with transpose
+                    val chain = project.chains[currentChain]
+
+                    while (isPlaying) {
+                        // Find next non-empty chain row
+                        var attempts = 0
+                        while (chain.isEmpty(playbackChainRow) && attempts < 16) {
+                            playbackChainRow = (playbackChainRow + 1) % 16
+                            attempts++
+                        }
+
+                        // If all rows are empty, stop playback
+                        if (attempts >= 16) {
+                            break
+                        }
+
+                        // Get phrase reference and transpose value
+                        val phraseRef = chain.phraseRefs[playbackChainRow]
+                        val transposeSemitones = chain.getTransposeSemitones(playbackChainRow)
+
+                        // Play this phrase (all 16 steps)
+                        for (stepIndex in 0..15) {
+                            if (!isPlaying) break
+
+                            val step = project.phrases[phraseRef].steps[stepIndex]
+                            if (!step.isEmpty()) {
+                                // Apply transpose to the note
+                                val originalMidi = step.note.toMidi()
+                                if (originalMidi >= 0) {
+                                    val transposedMidi = (originalMidi + transposeSemitones).coerceIn(0, 127)
+                                    val transposedNote = Note.fromMidi(transposedMidi)
+                                    audioEngine.playNote(transposedNote, step.instrument, 0, step.volume / 255f)
+                                }
+                            }
+                            playbackPhraseStep = stepIndex
+                            delay(60000L / project.tempo / 4)  // Use project tempo, 16th notes
+                        }
+
+                        // Move to next chain row
+                        playbackChainRow = (playbackChainRow + 1) % 16
+                    }
+                }
+                else -> {
+                    // Other screens don't support playback yet
+                }
             }
         } else {
             playbackRow = 0
+            playbackChainRow = 0
+            playbackPhraseStep = 0
             audioEngine.stopAll()
         }
     }
@@ -109,6 +164,7 @@ fun PixelPerfectTracker(
                             cursorColumn = cursorColumn,
                             isPlaying = isPlaying,
                             playbackRow = playbackRow,
+                            playbackChainRow = playbackChainRow,
                             audioEngine = audioEngine,
                             previousColumn = previousColumn,
                             currentChain = currentChain,
@@ -154,6 +210,7 @@ class TrackerLayout {
         cursorColumn: Int,
         isPlaying: Boolean,
         playbackRow: Int,
+        playbackChainRow: Int,
         audioEngine: TrackerAudioEngine,
         previousColumn: Int,
         currentChain: Int,
@@ -264,9 +321,11 @@ class TrackerLayout {
                         y = currentY,
                         scale = scale,
                         state = ChainEditorState(
-                            chain = project.chains[currentChain],  // Show first chain for now
+                            chain = project.chains[currentChain],
                             cursorRow = cursorRow,
-                            cursorColumn = cursorColumn
+                            cursorColumn = cursorColumn,
+                            playbackRow = playbackChainRow,
+                            isPlaying = isPlaying
                         )
                     )
                 }

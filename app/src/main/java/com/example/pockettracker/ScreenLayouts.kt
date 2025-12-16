@@ -52,7 +52,8 @@ fun FullScreenLayout(
             .inputHandler(inputMapper)
             .focusable(),
         contentAlignment = Alignment.Center
-    ) {
+    )
+    {
         PixelPerfectTracker(
             currentScreen = currentScreen,
             project = project,

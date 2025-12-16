@@ -109,20 +109,32 @@ data class Chain(
     fun isEmpty(index: Int): Boolean = phraseRefs[index] == 0xFF
 
     /**
-     * Get transpose in semitones (-128 to +127)
-     * 0x00 = -128 semitones
-     * 0x80 = 0 semitones (no change)
-     * 0xFF = +127 semitones
+     * Get transpose in semitones (-127 to +128)
+     * 0x00 = 0 semitones (no change)
+     * 0x01-0x80 = +1 to +128 semitones (up)
+     * 0xFF = -1 semitone
+     * 0xFE = -2 semitones
+     * 0x81 = -127 semitones (down)
      */
     fun getTransposeSemitones(index: Int): Int {
-        return transposeValues[index] - 0x80
+        val value = transposeValues[index]
+        return if (value <= 0x80) {
+            value  // 0x00-0x80 = 0 to +128
+        } else {
+            value - 256  // 0x81-0xFF = -127 to -1
+        }
     }
 
     /**
      * Set transpose from semitones value
+     * Accepts -127 to +128
      */
     fun setTransposeSemitones(index: Int, semitones: Int) {
-        transposeValues[index] = (semitones + 0x80).coerceIn(0, 255)
+        transposeValues[index] = if (semitones >= 0) {
+            semitones.coerceIn(0, 128)  // 0x00-0x80
+        } else {
+            (256 + semitones).coerceIn(129, 255)  // 0x81-0xFF
+        }
     }
 
     override fun equals(other: Any?): Boolean {
