@@ -1119,6 +1119,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             onRUp = {
                 // R+UP: Navigate to screen above in 5×5 grid
                 val (newScreen, newCol) = navigateUp(currentScreen, previousColumn)
+                if (newScreen != currentScreen) {
+                    // Screen changed - reset cursor to default position
+                    val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
+                    cursorRow = defaultRow
+                    cursorColumn = defaultCol
+                }
                 currentScreen = newScreen
                 previousColumn = newCol
             },
@@ -1126,6 +1132,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             onRDown = {
                 // R+DOWN: Navigate to screen below in 5×5 grid
                 val (newScreen, newCol) = navigateDown(currentScreen, previousColumn)
+                if (newScreen != currentScreen) {
+                    // Screen changed - reset cursor to default position
+                    val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
+                    cursorRow = defaultRow
+                    cursorColumn = defaultCol
+                }
                 currentScreen = newScreen
                 previousColumn = newCol
             },
@@ -1133,6 +1145,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             onRLeft = {
                 // R+LEFT: Navigate to screen on left in main row
                 val (newScreen, newCol) = navigateLeft(currentScreen, previousColumn)
+                if (newScreen != currentScreen) {
+                    // Screen changed - reset cursor to default position
+                    val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
+                    cursorRow = defaultRow
+                    cursorColumn = defaultCol
+                }
                 currentScreen = newScreen
                 previousColumn = newCol
             },
@@ -1140,6 +1158,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             onRRight = {
                 // R+RIGHT: Navigate to screen on right in main row
                 val (newScreen, newCol) = navigateRight(currentScreen, previousColumn)
+                if (newScreen != currentScreen) {
+                    // Screen changed - reset cursor to default position
+                    val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
+                    cursorRow = defaultRow
+                    cursorColumn = defaultCol
+                }
                 currentScreen = newScreen
                 previousColumn = newCol
             },
@@ -1453,6 +1477,68 @@ fun navigateRight(currentScreen: ScreenType, previousColumn: Int): Pair<ScreenTy
         ScreenType.TABLE -> Pair(ScreenType.TABLE, 4)  // Already rightmost
         else -> Pair(currentScreen, getScreenColumn(currentScreen))
     }
+}
+
+/**
+ * Get the minimum editable column for a screen type
+ * Column 0 is often read-only (step numbers), so minimum is usually 1
+ */
+fun getMinEditableColumn(screenType: ScreenType): Int {
+    return when (screenType) {
+        // Phrase: Column 0 = step number (read-only), column 1 = NOTE (editable)
+        ScreenType.PHRASE -> 1
+
+        // Chain: Column 0 = step number (read-only), column 1 = PH (editable)
+        ScreenType.CHAIN -> 1
+
+        // Song: Column 0 = step number (read-only), column 1 = Track 1 (editable)
+        // Note: Song uses cursorTrack (1-8), not cursorColumn (0-7)
+        ScreenType.SONG -> 1
+
+        // Project: Column 0 = row labels (read-only), column 1 = values (editable)
+        ScreenType.PROJECT -> 1
+
+        // Instrument: Column 0 might be label, column 1 is first editable
+        ScreenType.INSTRUMENT -> 1
+
+        // Table: Column 0 might be label, column 1 is first editable
+        ScreenType.TABLE -> 1
+
+        // Mixer/Effects: All tracks are editable starting from 0
+        ScreenType.MIXER -> 0
+        ScreenType.EFFECTS -> 0
+
+        // Groove/Scale/Mods/InstPool: Assume column 1 is first editable
+        ScreenType.GROOVE -> 1
+        ScreenType.SCALE -> 1
+        ScreenType.MODS -> 1
+        ScreenType.INST_POOL -> 1
+    }
+}
+
+/**
+ * Get the minimum editable row for a screen type
+ * Most screens start at row 0
+ */
+fun getMinEditableRow(screenType: ScreenType): Int {
+    return when (screenType) {
+        // All current screens start editing from row 0
+        else -> 0
+    }
+}
+
+/**
+ * Get default cursor position for a screen
+ * Returns Pair(row, column) representing the first available/editable cell
+ *
+ * This systematically finds the first editable position by using:
+ * - getMinEditableRow() to skip any read-only header rows
+ * - getMinEditableColumn() to skip any read-only label columns
+ */
+fun getDefaultCursorPosition(screenType: ScreenType): Pair<Int, Int> {
+    val defaultRow = getMinEditableRow(screenType)
+    val defaultColumn = getMinEditableColumn(screenType)
+    return Pair(defaultRow, defaultColumn)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
