@@ -120,7 +120,7 @@ object CursorContextFactory {
     )
 
     /**
-     * Phrase reference (00-FE, FF = empty, with wrapping)
+     * Phrase reference (00-FF with wrapping, use A+B to delete)
      */
     fun phraseRef(currentValue: Int, canCreate: Boolean = true) = CursorContext(
         valueType = CursorValueType.PHRASE_REF,
@@ -136,7 +136,7 @@ object CursorContextFactory {
         ),
         currentValue = currentValue,
         minValue = 0,
-        maxValue = 254,  // 00-FE (FF reserved for empty), wraps around
+        maxValue = 255,  // 00-FF full range with wrapping
         smallStep = 1,
         largeStep = 16,
         emptyValue = 0xFF
