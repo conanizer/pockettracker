@@ -1,166 +1,287 @@
 # PocketTracker Input Combinations Guide
 
-## Keyboard Layout
+**Last Updated:** December 2024
+**Current Implementation Status:** Generic input system working on 4 main screens
 
+---
+
+## Control Layout
+
+### Keyboard Mapping
 ```
-WASD - D-pad navigation
-K    - A button (primary action)
-J    - B button (secondary action)
-U    - L modifier (edit/clipboard)
-I    - R modifier (navigate/create)
-Shift- SELECT button
-Space- START button
+D-PAD:    W (up) / S (down) / A (left) / D (right)
+          Arrow keys also work
+
+A button: K or Enter
+B button: J or Escape
+L button: U (left shoulder/modifier)
+R button: I (right shoulder/modifier)
+SELECT:   Left Shift
+START:    Spacebar
 ```
 
----
+### Physical Gamepad (Android Handhelds)
+```
+D-PAD:    Physical D-pad
+A/B:      A and B face buttons (X/Y also map to A/B)
+L/R:      L1/L2 shoulder buttons (both map to L)
+          R1/R2 shoulder buttons (both map to R)
+SELECT:   SELECT or MENU button
+START:    START button or BACK
+```
 
-## Basic Controls (No Modifiers)
-
-### Navigation
-- **W/S** - Move cursor up/down
-- **A/D** - Move cursor left/right
-
-### Editing
-- **K (A button)** - Insert value / Increment by 1
-- **J (B button)** - Cancel / Decrement by 1
-- **Left Shift (SELECT)** - Delete/clear value
-- **Space (START)** - Play/Stop
-
-### Double-Tap
-- **K, K (A, A)** - Insert next unused chain/phrase/instrument
+✅ **Both keyboard and gamepad work simultaneously!**
 
 ---
 
-## L Modifier (U key) - Edit & Clipboard
+## ✅ Basic Controls (Fully Implemented)
 
-Hold **U** and press:
+### Cursor Navigation
+- **D-PAD** - Move cursor up/down/left/right
+- **UP at row 0** - Wraps to last row (15 or 6 depending on screen)
+- **DOWN at last row** - Wraps to row 0
 
-### Clipboard Operations
-- **U + K (L + A)** - Paste clipboard contents
-- **U + J (L + B)** - Enter selection mode (tap again to cycle: column → row → all)
-- **U + Shift (L + SELECT)** - Copy selection (explicit)
-
-### Navigation
-- **U + W (L + UP)** - Jump to previous populated row
-- **U + S (L + DOWN)** - Jump to next populated row
-- **U + A (L + LEFT)** - Navigate to previous chain/phrase
-- **U + D (L + RIGHT)** - Navigate to next chain/phrase
-
-### Playback
-- **U + Space (L + START)** - Play all tracks from beginning
+### Basic Actions
+- **A button (K)** - Insert value on empty cell
+- **B button (J)** - Cancel / Back to previous screen
+- **SELECT (Shift)** - Quick delete (screen-specific behavior)
+- **START (Space)** - Play/Stop sequencer
 
 ---
 
-## R Modifier (I key) - Navigate & Create
+## ✅ A + Direction Combinations (M8-Style Value Editing)
 
-Hold **I** and press:
+**Hold A (K key) and press directions to edit values:**
 
-### Screen Navigation
-- **I + W (R + UP)** - Navigate to screen above
-- **I + S (R + DOWN)** - Navigate to screen below
-- **I + A (R + LEFT)** - Navigate to screen on left
-- **I + D (R + RIGHT)** - Navigate to screen on right
+### Small Steps
+- **A + UP** - Increment by 1 (00→01, FE→FF, FF→00 with wrapping)
+- **A + DOWN** - Decrement by 1 (01→00, 00→FF with wrapping)
 
-### Item Operations
-- **I + K (R + A)** - Clone current item
-- **I + K, K (R + A, A)** - Deep clone (with all references)
-- **I + J (R + B)** - Reset value to default
+### Large Steps (Octaves/0x10)
+- **A + RIGHT** - Increment by 16 (00→10, F0→00 with wrapping)
+- **A + LEFT** - Decrement by 16 (10→00, 00→F0 with wrapping)
 
-### Playback
-- **I + Space (R + START)** - Play from current cursor position
+**For musical values:**
+- **A + RIGHT** - Increment by 12 semitones (1 octave up)
+- **A + LEFT** - Decrement by 12 semitones (1 octave down)
 
----
-
-## L + R Combinations (U + I together)
-
-Hold **both U and I** and press:
-
-- **U + I + Shift (L + R + SELECT)** - Return to project/file screen
-- **U + I + K (L + R + A)** - Create snapshot (save parameter state)
-- **U + I + J (L + R + B)** - Recall snapshot (load parameter state)
+### Delete Combo
+- **A + B** - Delete/clear value at cursor (sets to empty/default)
 
 ---
 
-## Combination Examples
+## ✅ Value Type Behaviors (Generic Input System)
 
-### Example 1: Clone a chain
-1. Navigate to chain you want to clone
-2. Hold **I** (R button)
-3. Press **K** (A button)
-4. Release **I**
-5. New cloned chain is created
+The tracker automatically adjusts behavior based on what you're editing:
 
-### Example 2: Jump between populated rows
-1. Hold **U** (L button)
-2. Press **W** or **S** (UP/DOWN) to jump between rows with data
-3. Release **U** when you reach desired row
+### HEX_BYTE (00-FF) - Most Parameters
+- **Range:** 00-FF with wrapping
+- **Steps:** 1 (small), 16 (large)
+- **Wrapping:** FF + 1 = 00, 00 - 1 = FF
+- **Examples:** Chain IDs, generic hex values
 
-### Example 3: Navigate screens quickly
-1. Hold **I** (R button)
-2. Use **W/S/A/D** to navigate the screen grid
-3. Release **I** when you reach desired screen
+### PHRASE_REF (00-FF) - Phrase References in Chains
+- **Range:** 00-FF with wrapping
+- **Steps:** 1 (small), 16 (large)
+- **Wrapping:** FE→FF→00 (can access all 256 phrases)
+- **Empty:** Use A+B to delete, can't reach FF by increment
 
-### Example 4: Insert next unused phrase
-1. Position cursor on empty chain slot
-2. Quickly press **K** twice (A, A)
-3. Next unused phrase number is inserted automatically
+### CHAIN_REF (00-FF) - Chain References in Songs
+- **Range:** 00-FF with wrapping
+- **Steps:** 1 (small), 16 (large)
+- **Wrapping:** FF + 1 = 00, 00 - 1 = FF
+- **Empty:** -1 (shown as --)
 
----
+### VOLUME (00-FF) - Volume Parameters
+- **Range:** 00-FF with wrapping
+- **Steps:** 1 (small), 16 (large)
+- **Wrapping:** FF + 1 = 00, 00 - 1 = FF
 
-## Current Implementation Status
+### SEMITONE_OFFSET (00-FF) - Transpose Values
+- **Range:** 00-FF with wrapping
+- **Steps:** 1 semitone (small), 12 semitones/octave (large)
+- **Default:** 00 (no transpose)
+- **Wrapping:** FF + 1 = 00, 00 - 1 = FF
 
-✅ **Implemented:**
-- Modifier state tracking (L/R buttons held)
-- Button combination detection
-- Double-tap detection (300ms window)
-- Logging for all combinations
+### NOTE (C-0 to B-9) - Musical Notes
+- **Range:** C-0 to B-9 (120 notes)
+- **Steps:** 1 semitone (small), 12 semitones/octave (large)
+- **Clamping:** Stops at C-0 and B-9 (no wrapping)
 
-⏳ **TODO (handlers need to be wired up):**
-- L + A for paste
-- L + B for selection mode
-- R + arrows for screen navigation
-- R + A for clone
-- A, A for insert next unused
-- L + R combinations for snapshots
-
-The infrastructure is ready - we just need to connect the handlers to actual actions!
-
----
-
-## Testing Combinations
-
-To test if combinations are detected:
-
-1. Run the app with `logInput = true` in InputMapper
-2. Open Logcat and filter by `PocketInput`
-3. Try holding **U** and pressing **K** - you should see "L+A (paste)" in logs
-4. Try holding **I** and pressing **W** - you should see "R+UP (navigate screen up)"
-5. Try double-tapping **K** quickly - you should see "A,A (insert next unused)"
+### HEX_NIBBLE (0-F) - Single Characters
+- **Range:** 0-F or custom (e.g., letters in project name)
+- **Steps:** 1 per press
+- **Example:** Project name character editing
 
 ---
 
-## Design Philosophy
+## ✅ R + Direction Combinations (Screen Navigation)
 
-This system combines:
-- **LGPT's dual-modifier approach** (L/R buttons for different purposes)
-- **M8's editing precision** (incremental steps, advanced features)
-- **Ergonomic keyboard layout** (U/I are comfortable for left hand)
+**Hold R (I key) and press directions to navigate the 5×5 screen grid:**
 
-**L button** = "Edit things" (clipboard, selection, fine navigation)
-**R button** = "Navigate and create" (screens, clone, playback modes)
+### Grid Navigation
+- **R + UP** - Navigate to screen above
+- **R + DOWN** - Navigate to screen below
+- **R + LEFT** - Navigate to screen on left (main row)
+- **R + RIGHT** - Navigate to screen on right (main row)
 
-This creates a consistent, learnable pattern where modifiers have clear roles.
+### Screen Grid Layout
+```
+Row 0:         -      SCALE   INST_POOL    -
+Row 1:     PROJECT   GROOVE     MODS     PROJECT
+Row 2:      SONG     CHAIN    PHRASE   INSTRUMENT  TABLE
+Row 3:     MIXER     MIXER    MIXER      MIXER     MIXER
+Row 4:    EFFECTS   EFFECTS  EFFECTS    EFFECTS   EFFECTS
+```
+
+**Notes:**
+- Main screens (SONG/CHAIN/PHRASE/INSTRUMENT/TABLE) are always on Row 2
+- Context screens appear above/below based on current column
+- PROJECT, MIXER, EFFECTS span multiple columns
 
 ---
 
-## Next Steps
+## ✅ L + Direction Combinations (Context Navigation)
 
-To wire up the handlers:
+**Hold L (U key) and press directions to navigate within context:**
 
-1. Add handler methods to `ButtonHandlers` data class
-2. Pass these handlers from MainActivity
-3. Call appropriate handlers in InputMapper's TODO sections
-4. Test each combination in Chain Editor
-5. Extend to other screens (Phrase, Song, etc.)
+### Item Navigation
+- **L + LEFT** - Previous chain/phrase/instrument (depending on screen)
+- **L + RIGHT** - Next chain/phrase/instrument (depending on screen)
 
-See `m8_vs_lgpt_comparison.md` for the complete design rationale.
+**Examples:**
+- On CHAIN screen: L+LEFT/RIGHT switches between chains 00-FF
+- On PHRASE screen: L+LEFT/RIGHT switches between phrases 00-FF
+
+---
+
+## 📋 Current Implementation Status
+
+### ✅ Fully Working Screens (with Generic Input)
+- **SONG** - Chain references in 8 tracks (A+direction editing works)
+- **CHAIN** - 16 phrase slots + transpose (A+direction editing works)
+- **PHRASE** - Note/volume/instrument editing (A+direction editing works)
+- **PROJECT** - Tempo/transpose/name editing (A+direction editing works)
+
+### ✅ Working Features
+- A + direction value editing (all value types)
+- A + B delete combo (all screens)
+- R + direction screen navigation (5×5 grid)
+- L + LEFT/RIGHT context navigation (chains/phrases)
+- Cursor wrapping (top ↔ bottom)
+- Value wrapping (hex bytes, refs, volume, transpose)
+- Physical gamepad support (Android handhelds)
+- Dual keyboard/gamepad input
+
+### ⏳ Planned Features (Infrastructure Ready)
+- **L + A** - Paste clipboard contents
+- **L + B** - Enter selection mode (tap again to cycle modes)
+- **L + UP/DOWN** - Jump to next/previous populated row
+- **L + START** - Play all tracks from beginning
+- **R + A** - Clone current item
+- **R + A, A** - Deep clone (with all references)
+- **R + B** - Reset value to default
+- **R + START** - Play from current cursor position
+- **A, A** - Double-tap to insert next unused item
+- **L + R + SELECT** - Return to project screen
+- **L + R + A** - Create parameter snapshot
+- **L + R + B** - Recall parameter snapshot
+
+### ⏳ Screens Not Yet Implemented
+- INSTRUMENT, TABLE, GROOVE, SCALE, MODS, INST_POOL, MIXER, EFFECTS
+
+---
+
+## 🎮 Usage Examples
+
+### Example 1: Edit a volume value in Phrase Editor
+1. Navigate cursor to volume column (column 2)
+2. Hold **A (K key)**
+3. Press **UP** repeatedly to increment by 1 (00→01→02...)
+4. Or press **RIGHT** to jump +16 (00→10→20...)
+5. Press **A + B** to reset to 00
+
+### Example 2: Navigate to Chain Editor from Phrase Editor
+1. Hold **R (I key)**
+2. Press **LEFT** once
+3. Release **R**
+4. You're now on CHAIN screen
+
+### Example 3: Switch to next phrase
+1. From PHRASE screen
+2. Hold **L (U key)**
+3. Press **RIGHT**
+4. Current phrase increments (00→01→02...)
+
+### Example 4: Cycle through chain references with wrapping
+1. On CHAIN screen, cursor on phrase reference showing FF
+2. Hold **A (K key)**
+3. Press **UP** once
+4. Value wraps to 00 (because capabilities prevent increment when empty)
+5. Continue pressing **A + UP** to cycle: 00→01→...→FE→FF→00
+
+### Example 5: Use gamepad on handheld
+1. Connect Android handheld with physical controls
+2. Use D-pad to move cursor
+3. Hold **L1** shoulder button
+4. Press **RIGHT** on D-pad to go to next phrase
+5. All combinations work identically to keyboard!
+
+---
+
+## 🎯 Design Philosophy
+
+**This system combines:**
+- **M8's editing precision** - A + directions for incremental steps
+- **LGPT's dual-modifier approach** - L/R buttons for different purposes
+- **Generic value system** - Same controls work everywhere
+
+**Modifier roles:**
+- **A button** = "Edit this value" (hold for increment/decrement)
+- **L button** = "Edit context" (clipboard, selection, item navigation)
+- **R button** = "Navigate screens" (screen grid, clone, playback modes)
+
+This creates a **consistent, learnable pattern** where:
+- You don't memorize different controls per screen
+- The same value type behaves the same everywhere
+- Modifiers have clear, distinct purposes
+
+---
+
+## 🔍 Testing & Debugging
+
+To verify input is working:
+
+1. Open Android Logcat
+2. Filter by tag: `PocketInput`
+3. Press buttons and check logs show correct detection
+4. Look for: "A+UP (increment by small step)" etc.
+
+**Common issues:**
+- If buttons don't respond: Make sure app has focus
+- If wrapping doesn't work: Check value type in module's `getCursorContext()`
+- If gamepad isn't detected: Check device has physical controls in InputDevice API
+
+---
+
+## 📚 Related Documentation
+
+- **m8_vs_lgpt_comparison.md** - Deep dive into design decisions
+- **CLAUDE.md** - Project architecture and data flow
+- **CursorContext.kt** - Value type definitions (source of truth)
+- **InputHandler.kt** - Generic input logic and wrapping behavior
+- **ButtonHandlers.kt** - Input mapping and combination detection
+
+---
+
+## 🚀 Next Steps for Development
+
+To add generic input to a new screen:
+
+1. Create `getCursorContext(state)` method in your module
+2. Return appropriate `CursorContextFactory` for each cursor position
+3. Wire up `onAUp/Down/Left/Right` handlers in MainActivity
+4. Create `applyInputAction()` function to update your data
+5. All A+direction and A+B combos work automatically!
+
+No need to duplicate input logic - the generic system handles everything.
