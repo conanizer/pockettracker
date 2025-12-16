@@ -126,10 +126,8 @@ class ChainEditorModule : TrackerModule {
             // Get phrase reference at this slot
             val phraseRef = chainState.chain.phraseRefs[index]
 
-            // Get transpose value at this slot (IntArray not in Chain yet!)
-            // For now we'll use 0x80 (no transpose) as default
-            // You'll need to add transposeValues: IntArray to Chain data class
-            val transposeValue = chainState.chain.transposeValues[index]  // TODO: Add to Chain data structure
+            // Get transpose value for this slot (00-FF, default 00)
+            val transposeValue = chainState.chain.transposeValues[index]
 
             drawChainRow(
                 x = x,

@@ -12,18 +12,29 @@ Instead of checking which screen we're on, we check **what type of data the curs
 - CursorContext.kt - Data structures for cursor context
 - InputHandler.kt - Generic input handling logic
 - CursorContextFactory - Helper functions for common contexts
+- Value wrapping for HEX_BYTE, PHRASE_REF, CHAIN_REF, VOLUME, SEMITONE_OFFSET
 
 ✅ **Phase 2 (COMPLETE)**: Chain Editor migration
 - ChainEditorModule.getCursorContext() - Returns context for cursor position
 - MainActivity - Chain screen uses GenericInputHandler
-- A/B/SELECT buttons work generically for Chain screen
+- A+direction buttons work generically for Chain screen
 
-🔄 **Phase 3 (TODO)**: Migrate remaining screens
-- [ ] Phrase Editor
-- [ ] Song Editor
-- [ ] Project Editor
-- [ ] Instrument Editor (future)
-- [ ] Table Editor (future)
+✅ **Phase 3 (COMPLETE)**: Remaining main screens migrated
+- ✅ Phrase Editor - Note/volume/instrument editing with A+direction
+- ✅ Song Editor - Chain references with A+direction and wrapping
+- ✅ Project Editor - Tempo/transpose/name editing with A+direction
+- ⏳ Instrument Editor (future)
+- ⏳ Table Editor (future)
+
+✅ **Phase 4 (COMPLETE)**: Screen navigation system
+- R+direction for 5×5 screen grid navigation
+- L+LEFT/RIGHT for chain/phrase/instrument navigation
+- Cursor wrapping (row 0 ↔ row 15)
+
+✅ **Phase 5 (COMPLETE)**: Hardware support
+- Physical gamepad support for Android handhelds
+- Native KEYCODE mapping (DPAD_*, BUTTON_*)
+- Dual keyboard/gamepad input working simultaneously
 
 ---
 
@@ -99,17 +110,24 @@ when (action) {
 ## Button Mapping
 
 **Current implementation:**
-- A button - Increment / Edit
-- B button - Decrement
-- SELECT - Delete/Clear
-- A+LEFT - Fast decrement (large step)
-- A+RIGHT - Fast increment (large step)
+- **A button** - Insert value on empty cell
+- **A + UP** - Increment by small step (1)
+- **A + DOWN** - Decrement by small step (1)
+- **A + RIGHT** - Increment by large step (16 for hex, 12 for notes)
+- **A + LEFT** - Decrement by large step (16 for hex, 12 for notes)
+- **A + B** - Delete/clear value at cursor
+- **B button** - Cancel / Back
+- **SELECT** - Quick delete (screen-specific)
+- **R + direction** - Navigate 5×5 screen grid
+- **L + LEFT/RIGHT** - Navigate between chains/phrases/instruments
 
-**Future additions:**
-- A+B - Delete (combo)
-- A+A - Create new item (double-tap)
-- B+UP/DOWN - Navigate between chains/phrases
-- Long press behaviors
+**Future additions (infrastructure ready):**
+- A+A - Create new item (double-tap detection exists)
+- L+A - Paste clipboard contents
+- L+B - Selection mode
+- L+UP/DOWN - Jump to populated rows
+- R+A - Clone item
+- L+R combinations - Snapshots
 
 ---
 
@@ -121,15 +139,16 @@ when (action) {
 
 **Column 1 (Phrase Ref):**
 - Empty (0xFF): A inserts default phrase
-- Has value: A increments, B decrements
-- SELECT deletes (sets to 0xFF)
-- Wraps 0-254
+- Has value: A+UP/DOWN increments/decrements by 1
+- A+LEFT/RIGHT: Fast jump by 16
+- A+B deletes (sets to 0xFF)
+- Wraps 00-FF (full 256 phrases)
 
 **Column 2 (Transpose):**
 - Only editable if phrase exists
-- Small step: 1 semitone
-- Large step: 12 semitones (octave)
-- Range: 0x00-0xFF (centered at 0x80)
+- Small step: 1 semitone (A+UP/DOWN)
+- Large step: 12 semitones/octave (A+LEFT/RIGHT)
+- Range: 0x00-0xFF with wrapping (default 00)
 
 ---
 
@@ -160,7 +179,9 @@ To migrate a screen to the generic input system:
 ## Future Enhancements
 
 - **Custom key bindings** - Let users remap keys
-- **Gamepad support** - Handle physical gamepad input
+- ✅ **Gamepad support** - COMPLETE! Physical gamepad working on Android handhelds
 - **Gesture support** - Touch gestures for tablets
 - **Macro system** - Record and replay input sequences
 - **Undo/Redo** - Track input history for undo
+- **Selection mode** - Copy/paste/interpolate (infrastructure exists, not wired)
+- **Clipboard operations** - L+A paste, L+B selection (infrastructure exists, not wired)
