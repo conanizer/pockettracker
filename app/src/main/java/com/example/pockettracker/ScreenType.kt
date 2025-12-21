@@ -16,7 +16,10 @@ enum class ScreenType(val label: String, val shortLabel: String) {
     MODS("MODS", "M"),           // Row 2, Instrument column
     INST_POOL("INST.POOL", "IP"), // Row 1, Instrument column (when on Instrument)
     MIXER("MIXER", "V"),         // Row 4, all columns
-    EFFECTS("EFFECTS", "X")      // Row 5, all columns
+    EFFECTS("EFFECTS", "X"),     // Row 5, all columns
+
+    // Popup screens - replace main view temporarily
+    FILE_BROWSER("FILE BROWSER", "FB")  // File selection popup
 }
 
 // Navigation grid: 5 columns × 5 rows

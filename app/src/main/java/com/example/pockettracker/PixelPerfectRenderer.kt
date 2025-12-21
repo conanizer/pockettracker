@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.platform.LocalDensity
 import kotlin.math.min
 import kotlinx.coroutines.delay
+import android.os.SystemClock
 
 /**
  * PIXEL-PERFECT TRACKER - MODULAR VERSION
@@ -49,12 +50,17 @@ fun PixelPerfectTracker(
     projectCursorColumn: Int,
     projectStatusMessage: String,
     projectStatusSuccess: Boolean,
-    projectVersion: Int
+    projectVersion: Int,
+    fileBrowserState: FileBrowserModule.State? = null
 ) {
+    if (currentScreen == ScreenType.FILE_BROWSER) {
+        android.util.Log.d("PixelPerfectTracker", "FILE_BROWSER screen, fileBrowserState=${if (fileBrowserState != null) "not null (${fileBrowserState.items.size} items)" else "NULL"}")
+    }
     // Playback state
     var playbackRow by remember { mutableStateOf(0) }
     var playbackChainRow by remember { mutableStateOf(0) }
     var playbackPhraseStep by remember { mutableStateOf(0) }
+    var playbackSongRow by remember { mutableStateOf(0) }
 
     // Playback loop - handles both Phrase and Chain screens
     LaunchedEffect(isPlaying, currentScreen) {
@@ -62,18 +68,33 @@ fun PixelPerfectTracker(
             when (currentScreen) {
                 ScreenType.PHRASE -> {
                     // PHRASE PLAYBACK: Loop through 16 steps of current phrase
+                    val stepDurationMs = (60000.0 / project.tempo / 4.0)
+                    var startTime = SystemClock.elapsedRealtime()
+                    var stepCounter = 0L
+
                     while (isPlaying) {
                         val step = project.phrases[currentPhrase].steps[playbackRow]
                         if (!step.isEmpty()) {
                             audioEngine.playNote(step.note, step.instrument, 0, step.volume / 255f)
                         }
                         playbackRow = (playbackRow + 1) % 16
-                        delay(60000L / project.tempo / 4)  // Use project tempo, 16th notes
+                        stepCounter++
+
+                        // Drift compensation
+                        val targetTime = startTime + (stepCounter * stepDurationMs).toLong()
+                        val currentTime = SystemClock.elapsedRealtime()
+                        val waitTime = targetTime - currentTime
+                        if (waitTime > 0) {
+                            delay(waitTime)
+                        }
                     }
                 }
                 ScreenType.CHAIN -> {
                     // CHAIN PLAYBACK: Loop through chain rows, playing phrases with transpose
                     val chain = project.chains[currentChain]
+                    val stepDurationMs = (60000.0 / project.tempo / 4.0)
+                    var startTime = SystemClock.elapsedRealtime()
+                    var stepCounter = 0L
 
                     while (isPlaying) {
                         // Find next non-empty chain row
@@ -107,11 +128,119 @@ fun PixelPerfectTracker(
                                 }
                             }
                             playbackPhraseStep = stepIndex
-                            delay(60000L / project.tempo / 4)  // Use project tempo, 16th notes
+                            stepCounter++
+
+                            // Drift compensation
+                            val targetTime = startTime + (stepCounter * stepDurationMs).toLong()
+                            val currentTime = SystemClock.elapsedRealtime()
+                            val waitTime = targetTime - currentTime
+                            if (waitTime > 0) {
+                                delay(waitTime)
+                            }
                         }
 
                         // Move to next chain row
                         playbackChainRow = (playbackChainRow + 1) % 16
+                    }
+                }
+                ScreenType.SONG -> {
+                    // SONG PLAYBACK: Play all 8 tracks simultaneously (polyphony)
+                    // Each track can have a different chain at the current song row
+
+                    // Calculate step duration in milliseconds (16th note)
+                    val stepDurationMs = (60000.0 / project.tempo / 4.0)
+
+                    // Use absolute timing to prevent drift
+                    var startTime = SystemClock.elapsedRealtime()
+                    var stepCounter = 0L
+
+                    while (isPlaying) {
+                        // Find the longest chain length at current song row
+                        var maxChainLength = 0
+                        for (trackId in 0..7) {
+                            val track = project.tracks[trackId]
+                            if (playbackSongRow < track.chainRefs.size) {
+                                val chainId = track.chainRefs[playbackSongRow]
+                                if (chainId >= 0) {
+                                    val chain = project.chains[chainId]
+                                    // Count non-empty rows in this chain
+                                    var chainLength = 0
+                                    for (i in 0..15) {
+                                        if (!chain.isEmpty(i)) chainLength = i + 1
+                                    }
+                                    if (chainLength > maxChainLength) maxChainLength = chainLength
+                                }
+                            }
+                        }
+
+                        // If no chains at this song row, move to next song row
+                        if (maxChainLength == 0) {
+                            playbackSongRow = (playbackSongRow + 1) % 256
+                            playbackChainRow = 0
+                            continue
+                        }
+
+                        // Play through all chain rows for all active chains
+                        while (playbackChainRow < maxChainLength && isPlaying) {
+                            // Play the phrase at this chain row for all tracks
+                            // All 16 steps are played with all tracks in sync
+                            for (stepIndex in 0..15) {
+                                if (!isPlaying) break
+
+                                // Calculate target time for this step (drift compensation)
+                                val targetTime = startTime + (stepCounter * stepDurationMs).toLong()
+                                val currentTime = SystemClock.elapsedRealtime()
+                                val waitTime = targetTime - currentTime
+
+                                // Play all 8 tracks simultaneously at this step
+                                for (trackId in 0..7) {
+                                    val track = project.tracks[trackId]
+
+                                    // Check if this track has a chain at current song row
+                                    if (playbackSongRow < track.chainRefs.size) {
+                                        val chainId = track.chainRefs[playbackSongRow]
+
+                                        if (chainId >= 0 && chainId < 256) {
+                                            val chain = project.chains[chainId]
+
+                                            // Check if this chain row has a phrase
+                                            if (!chain.isEmpty(playbackChainRow)) {
+                                                val phraseRef = chain.phraseRefs[playbackChainRow]
+                                                val transposeSemitones = chain.getTransposeSemitones(playbackChainRow)
+
+                                                val step = project.phrases[phraseRef].steps[stepIndex]
+                                                if (!step.isEmpty()) {
+                                                    // Apply transpose to the note
+                                                    val originalMidi = step.note.toMidi()
+                                                    if (originalMidi >= 0) {
+                                                        val transposedMidi = (originalMidi + transposeSemitones).coerceIn(0, 127)
+                                                        val transposedNote = Note.fromMidi(transposedMidi)
+                                                        // Use trackId as the track parameter for voice assignment
+                                                        audioEngine.playNote(transposedNote, step.instrument, trackId, step.volume / 255f)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Update playback position
+                                playbackPhraseStep = stepIndex
+                                stepCounter++
+
+                                // Wait until target time (drift compensation)
+                                if (waitTime > 0) {
+                                    delay(waitTime)
+                                }
+                            }
+
+                            // Move to next chain row
+                            playbackChainRow++
+                        }
+
+                        // Finished all chain rows, move to next song row
+                        playbackSongRow = (playbackSongRow + 1) % 256
+                        playbackChainRow = 0
                     }
                 }
                 else -> {
@@ -122,6 +251,7 @@ fun PixelPerfectTracker(
             playbackRow = 0
             playbackChainRow = 0
             playbackPhraseStep = 0
+            playbackSongRow = 0
             audioEngine.stopAll()
         }
     }
@@ -165,6 +295,7 @@ fun PixelPerfectTracker(
                             isPlaying = isPlaying,
                             playbackRow = playbackRow,
                             playbackChainRow = playbackChainRow,
+                            playbackSongRow = playbackSongRow,
                             audioEngine = audioEngine,
                             previousColumn = previousColumn,
                             currentChain = currentChain,
@@ -173,7 +304,8 @@ fun PixelPerfectTracker(
                             projectCursorColumn = projectCursorColumn,
                             projectStatusMessage = projectStatusMessage,
                             projectStatusSuccess = projectStatusSuccess,
-                            projectVersion = projectVersion
+                            projectVersion = projectVersion,
+                            fileBrowserState = fileBrowserState
                         )
                     }
                 }
@@ -198,6 +330,7 @@ class TrackerLayout {
     private val chainEditor = ChainEditorModule()
     private val songEditor = SongEditorModule()
     private val projectModule = ProjectModule()
+    private val fileBrowser = FileBrowserModule()
     /**
      * Main layout drawing function
      * This arranges all modules on the 640×480 screen
@@ -211,6 +344,7 @@ class TrackerLayout {
         isPlaying: Boolean,
         playbackRow: Int,
         playbackChainRow: Int,
+        playbackSongRow: Int,
         audioEngine: TrackerAudioEngine,
         previousColumn: Int,
         currentChain: Int,
@@ -219,7 +353,8 @@ class TrackerLayout {
         projectCursorColumn: Int = 1,
         projectStatusMessage: String = "",
         projectStatusSuccess: Boolean = true,
-        projectVersion: Int = 0  // Version counter to force redraw on data changes
+        projectVersion: Int = 0,  // Version counter to force redraw on data changes
+        fileBrowserState: FileBrowserModule.State? = null  // File browser state
     ) {
         // ===================================
         // DRAW BACKGROUND
@@ -343,9 +478,30 @@ class TrackerLayout {
                         state = SongEditorState(
                             project = project,
                             cursorRow = cursorRow,
-                            cursorTrack = cursorColumn  // Use cursorColumn as track selector
+                            cursorTrack = cursorColumn,  // Use cursorColumn as track selector
+                            isPlaying = isPlaying && currentScreen == ScreenType.SONG,
+                            playbackRow = playbackSongRow
                         )
                     )
+                }
+            }
+
+            // ===================================
+            // FILE BROWSER: Full screen file selection
+            // ===================================
+            ScreenType.FILE_BROWSER -> {
+                android.util.Log.d("FileBrowser", "Rendering FILE_BROWSER, state=${if (fileBrowserState != null) "not null" else "NULL"}")
+                if (fileBrowserState != null) {
+                    with(fileBrowser) {
+                        draw(
+                            x = 0,  // Full screen: start at 0, 0
+                            y = 0,
+                            scale = scale,
+                            state = fileBrowserState
+                        )
+                    }
+                } else {
+                    android.util.Log.e("FileBrowser", "fileBrowserState is NULL - cannot render!")
                 }
             }
 
@@ -367,27 +523,30 @@ class TrackerLayout {
         // ===================================
         // RIGHT SIDE: Navigation map (80px wide)
         // ===================================
+        // Note: Hidden when FILE_BROWSER is active to give full screen space
 
-        // Calculate position for bottom-right corner
-        // X position: 640 (screen width) - 80 (module width) - 10 (right margin) = 550px
-        val navMapX = DESIGN_WIDTH_PX - navigationMap.width - SIDE_SPACER
+        if (currentScreen != ScreenType.FILE_BROWSER) {
+            // Calculate position for bottom-right corner
+            // X position: 640 (screen width) - 80 (module width) - 10 (right margin) = 550px
+            val navMapX = DESIGN_WIDTH_PX - navigationMap.width - SIDE_SPACER
 
-        // Y position: 480 (screen height) - 105 (module height) - 6 (bottom margin) = 369px
-        val navMapY = DESIGN_HEIGHT_PX - navigationMap.height - SCREEN_SPACER
+            // Y position: 480 (screen height) - 105 (module height) - 6 (bottom margin) = 369px
+            val navMapY = DESIGN_HEIGHT_PX - navigationMap.height - SCREEN_SPACER
 
-        // MODULE 3: NAVIGATION MAP (shows current position in screen hierarchy)
-        // Position: Bottom-right corner
-        // Size: 80×105
-        with(navigationMap) {
-            draw(
-                x = navMapX,
-                y = navMapY,
-                scale = scale,
-                state = NavigationMapState(
-                    currentScreen = currentScreen,
-                    sourceColumn = previousColumn  // ✨ Use the passed value
+            // MODULE 3: NAVIGATION MAP (shows current position in screen hierarchy)
+            // Position: Bottom-right corner
+            // Size: 80×105
+            with(navigationMap) {
+                draw(
+                    x = navMapX,
+                    y = navMapY,
+                    scale = scale,
+                    state = NavigationMapState(
+                        currentScreen = currentScreen,
+                        sourceColumn = previousColumn  // ✨ Use the passed value
+                    )
                 )
-            )
+            }
         }
 
         // ===================================

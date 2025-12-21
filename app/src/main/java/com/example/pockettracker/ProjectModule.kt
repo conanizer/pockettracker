@@ -476,23 +476,9 @@ class ProjectModule : TrackerModule {
                     ' '  // Empty slot
                 }
 
-                // Character value (A-Z, 0-9, space, etc.)
-                // For now, treat as simple increment/decrement through allowed characters
-                return CursorContext(
-                    valueType = CursorValueType.HEX_NIBBLE,  // Re-use for character editing
-                    capabilities = CursorCapabilities(
-                        canIncrement = true,
-                        canDecrement = true,
-                        canDelete = currentChar != ' ',  // Can delete non-empty
-                        isEmpty = currentChar == ' '
-                    ),
-                    currentValue = currentChar.code,
-                    minValue = 32,   // Space
-                    maxValue = 90,   // Z
-                    smallStep = 1,
-                    largeStep = 1,
-                    emptyValue = 32  // Space character
-                )
+                // Use CHARACTER type for text editing
+                // Cycles through: A-Z, 0-9, underscore, dash, space
+                return CursorContextFactory.character(currentChar)
             }
             3 -> {
                 // PROJECT row (LOAD/SAVE/NEW) - not value editing, read-only for now

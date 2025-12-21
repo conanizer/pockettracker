@@ -159,6 +159,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     var projectStatusMessage by remember { mutableStateOf("") }
     var projectStatusSuccess by remember { mutableStateOf(true) }
 
+    // Auto-dismiss status messages after 5 seconds
+    LaunchedEffect(projectStatusMessage) {
+        if (projectStatusMessage.isNotEmpty()) {
+            kotlinx.coroutines.delay(5000)  // Wait 5 seconds
+            projectStatusMessage = ""  // Clear message
+        }
+    }
+
     // Playback and control state
     var isPlaying by remember { mutableStateOf(false) }
 
@@ -174,6 +182,30 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // Incrementing this tells Compose the project has changed even if the reference is the same
     var projectVersion by remember { mutableIntStateOf(0) }
 
+    // File browser module and state
+    val fileBrowserModule = remember { FileBrowserModule() }
+    var fileBrowserState by remember {
+        mutableStateOf(
+            FileBrowserModule.State(
+                currentDirectory = fileManager.getProjectsDirectory(),
+                items = emptyList(),
+                fileExtension = "ptp"  // Only show .ptp project files
+            )
+        )
+    }
+    var previousScreen by remember { mutableStateOf(ScreenType.PROJECT) }
+
+    // Initialize file browser item list when directory changes
+    LaunchedEffect(fileBrowserState.currentDirectory, fileBrowserState.sortMode) {
+        val items = fileBrowserModule.buildItemList(
+            fileBrowserState.currentDirectory,
+            fileBrowserState.fileExtension
+        )
+        fileBrowserState = fileBrowserState.copy(
+            items = fileBrowserModule.sortItems(items, fileBrowserState.sortMode)
+        )
+    }
+
     // Update lastEditedPhrase when cursor moves in chain screen
     // This runs every time cursorRow or currentChain changes
     lastEditedPhrase = project.chains[currentChain].phraseRefs[cursorRow]
@@ -187,7 +219,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // INPUT ACTION HELPER
+    // INPUT ACTION HELPERS
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
@@ -401,6 +433,111 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
         Log.d("ProjectInputAction", "projectVersion incremented to $projectVersion")
     }
 
+    /**
+     * Apply input action to file browser (character editing in RENAME/CREATE mode)
+     */
+    fun applyFileBrowserInputAction(action: InputAction) {
+        when (action) {
+            is InputAction.SET_VALUE -> {
+                // Set character at renameCursor position
+                val char = action.value.toChar()
+                val buffer = fileBrowserState.renameBuffer.padEnd(12, ' ')
+                val sb = StringBuilder(buffer)
+                if (fileBrowserState.renameCursor < sb.length) {
+                    sb.setCharAt(fileBrowserState.renameCursor, char)
+                    fileBrowserState = fileBrowserState.copy(
+                        renameBuffer = sb.toString().trimEnd()
+                    )
+                }
+            }
+            is InputAction.DELETE -> {
+                // Delete character at cursor (replace with space, trim end)
+                val buffer = fileBrowserState.renameBuffer.padEnd(12, ' ')
+                val sb = StringBuilder(buffer)
+                if (fileBrowserState.renameCursor < sb.length) {
+                    sb.setCharAt(fileBrowserState.renameCursor, ' ')
+                    fileBrowserState = fileBrowserState.copy(
+                        renameBuffer = sb.toString().trimEnd()
+                    )
+                }
+            }
+            else -> { /* Other actions not applicable */ }
+        }
+    }
+
+    /**
+     * Generic input handler that routes button presses through cursor context
+     *
+     * This helper eliminates code duplication by:
+     * 1. Getting the cursor context for the current screen
+     * 2. Calling the provided handler function (handleAButton, handleBButton, etc.)
+     * 3. Applying the resulting action to the appropriate screen
+     *
+     * Usage example:
+     *   onAUp = { handleGenericInput { ctx -> genericInputHandler.handleAButton(ctx) } }
+     *   onADown = { handleGenericInput { ctx -> genericInputHandler.handleBButton(ctx) } }
+     *
+     * @param handlerFunction Lambda that takes CursorContext and returns InputAction
+     */
+    fun handleGenericInput(handlerFunction: (CursorContext) -> InputAction) {
+        when (currentScreen) {
+            ScreenType.CHAIN -> {
+                val chainState = ChainEditorState(
+                    project.chains[currentChain],
+                    cursorRow,
+                    cursorColumn
+                )
+                val context = chainEditorModule.getCursorContext(chainState)
+                val action = handlerFunction(context)
+                applyChainInputAction(action, currentChain, cursorRow, cursorColumn)
+            }
+            ScreenType.PHRASE -> {
+                val phraseState = PhraseEditorState(
+                    project.phrases[currentPhrase],
+                    cursorRow,
+                    cursorColumn,
+                    playbackRow = 0,
+                    isPlaying = false
+                )
+                val context = phraseEditorModule.getCursorContext(phraseState)
+                val action = handlerFunction(context)
+                applyPhraseInputAction(action, currentPhrase, cursorRow, cursorColumn)
+            }
+            ScreenType.SONG -> {
+                val songState = SongEditorState(
+                    project,
+                    cursorRow,
+                    cursorTrack = cursorColumn
+                )
+                val context = songEditorModule.getCursorContext(songState)
+                val action = handlerFunction(context)
+                applySongInputAction(action, cursorColumn - 1, cursorRow)
+            }
+            ScreenType.PROJECT -> {
+                val projectState = ProjectState(
+                    project,
+                    projectCursorRow,
+                    projectCursorColumn,
+                    projectStatusMessage,
+                    projectStatusSuccess
+                )
+                val context = projectModule.getCursorContext(projectState)
+                val action = handlerFunction(context)
+                applyProjectInputAction(action, projectCursorRow, projectCursorColumn)
+            }
+            ScreenType.FILE_BROWSER -> {
+                // Only handle generic input when in RENAME or CREATE mode (character editing)
+                if (fileBrowserState.mode == FileBrowserModule.BrowserMode.RENAME ||
+                    fileBrowserState.mode == FileBrowserModule.BrowserMode.CREATE) {
+                    val context = fileBrowserModule.getCursorContext(fileBrowserState)
+                    val action = handlerFunction(context)
+                    applyFileBrowserInputAction(action)
+                }
+            }
+            else -> { /* Other screens not yet implemented */ }
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // BUTTON HANDLERS
     // ═══════════════════════════════════════════════════════════════════════
@@ -425,6 +562,29 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         }
                         projectCursorColumn = 1  // Reset to first value column
                     }
+                    ScreenType.FILE_BROWSER -> {
+                        // File browser: move cursor up with wrap-around
+                        if (fileBrowserState.items.isNotEmpty()) {
+                            val newCursor = if (fileBrowserState.cursor > 0) {
+                                fileBrowserState.cursor - 1
+                            } else {
+                                fileBrowserState.items.size - 1  // Wrap to last item
+                            }
+
+                            // Auto-scroll if needed (20 visible rows)
+                            val newScroll = when {
+                                newCursor < fileBrowserState.scroll -> newCursor
+                                newCursor >= fileBrowserState.scroll + FileBrowserModule.VISIBLE_ROWS ->
+                                    (newCursor - FileBrowserModule.VISIBLE_ROWS + 1).coerceAtLeast(0)
+                                else -> fileBrowserState.scroll
+                            }
+
+                            fileBrowserState = fileBrowserState.copy(
+                                cursor = newCursor,
+                                scroll = newScroll
+                            )
+                        }
+                    }
                     else -> {
                         // All other screens: simple cursor movement with wrapping (rows 0-15)
                         cursorRow = if (cursorRow > 0) cursorRow - 1 else 15
@@ -447,6 +607,29 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         }
                         projectCursorColumn = 1  // Reset column
                     }
+                    ScreenType.FILE_BROWSER -> {
+                        // File browser: move cursor down with wrap-around
+                        if (fileBrowserState.items.isNotEmpty()) {
+                            val newCursor = if (fileBrowserState.cursor < fileBrowserState.items.size - 1) {
+                                fileBrowserState.cursor + 1
+                            } else {
+                                0  // Wrap to first item
+                            }
+
+                            // Auto-scroll if needed (20 visible rows)
+                            val newScroll = when {
+                                newCursor >= fileBrowserState.scroll + FileBrowserModule.VISIBLE_ROWS ->
+                                    newCursor - FileBrowserModule.VISIBLE_ROWS + 1
+                                newCursor < fileBrowserState.scroll -> newCursor
+                                else -> fileBrowserState.scroll
+                            }
+
+                            fileBrowserState = fileBrowserState.copy(
+                                cursor = newCursor,
+                                scroll = newScroll
+                            )
+                        }
+                    }
                     else -> {
                         // Most screens have 16 rows (0-15) with wrapping
                         cursorRow = if (cursorRow < 15) cursorRow + 1 else 0
@@ -466,6 +649,37 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                             projectCursorRow,
                             projectCursorColumn
                         )
+                    }
+                    ScreenType.FILE_BROWSER -> {
+                        when (fileBrowserState.mode) {
+                            FileBrowserModule.BrowserMode.RENAME, FileBrowserModule.BrowserMode.CREATE -> {
+                                // In text editing mode: move character cursor left
+                                if (fileBrowserState.renameCursor > 0) {
+                                    fileBrowserState = fileBrowserState.copy(
+                                        renameCursor = fileBrowserState.renameCursor - 1
+                                    )
+                                }
+                            }
+                            else -> {
+                                // Normal/Delete mode: page up (20 items)
+                                if (fileBrowserState.items.isNotEmpty()) {
+                                    val newCursor = (fileBrowserState.cursor - FileBrowserModule.VISIBLE_ROWS).coerceAtLeast(0)
+
+                                    // Auto-scroll to keep cursor visible
+                                    val newScroll = when {
+                                        newCursor < fileBrowserState.scroll -> newCursor
+                                        newCursor >= fileBrowserState.scroll + FileBrowserModule.VISIBLE_ROWS ->
+                                            (newCursor - FileBrowserModule.VISIBLE_ROWS + 1).coerceAtLeast(0)
+                                        else -> fileBrowserState.scroll
+                                    }
+
+                                    fileBrowserState = fileBrowserState.copy(
+                                        cursor = newCursor,
+                                        scroll = newScroll
+                                    )
+                                }
+                            }
+                        }
                     }
                     else -> {
                         // Get minimum column for this screen
@@ -494,6 +708,38 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                             projectCursorColumn
                         )
                     }
+                    ScreenType.FILE_BROWSER -> {
+                        when (fileBrowserState.mode) {
+                            FileBrowserModule.BrowserMode.RENAME, FileBrowserModule.BrowserMode.CREATE -> {
+                                // In text editing mode: move character cursor right (max 11 = 12 chars)
+                                if (fileBrowserState.renameCursor < 11) {
+                                    fileBrowserState = fileBrowserState.copy(
+                                        renameCursor = fileBrowserState.renameCursor + 1
+                                    )
+                                }
+                            }
+                            else -> {
+                                // Normal/Delete mode: page down (20 items)
+                                if (fileBrowserState.items.isNotEmpty()) {
+                                    val newCursor = (fileBrowserState.cursor + FileBrowserModule.VISIBLE_ROWS)
+                                        .coerceAtMost(fileBrowserState.items.size - 1)
+
+                                    // Auto-scroll to keep cursor visible
+                                    val newScroll = when {
+                                        newCursor >= fileBrowserState.scroll + FileBrowserModule.VISIBLE_ROWS ->
+                                            newCursor - FileBrowserModule.VISIBLE_ROWS + 1
+                                        newCursor < fileBrowserState.scroll -> newCursor
+                                        else -> fileBrowserState.scroll
+                                    }
+
+                                    fileBrowserState = fileBrowserState.copy(
+                                        cursor = newCursor,
+                                        scroll = newScroll
+                                    )
+                                }
+                            }
+                        }
+                    }
                     else -> {
                         // Get maximum column for this screen
                         val maxColumn = when (currentScreen) {
@@ -513,137 +759,109 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             // ───────────────────────────────────────────────────────────────
             onButtonA = {
                 when (currentScreen) {
-                    // SONG SCREEN: Insert or increment chain reference
-                    ScreenType.SONG -> {
-                        // Figure out which track (0-7) based on cursor column (1-8)
-                        val trackIndex = getTrackIndex(cursorColumn)
-                        val track = project.tracks[trackIndex]
-
-                        // Check if this cell is empty
-                        val isEmpty = cursorRow >= track.chainRefs.size ||
-                                track.chainRefs[cursorRow] == -1
-
-                        if (isEmpty) {
-                            // Empty: Insert last edited chain (or 0)
-                            insertSongChainRef(track, cursorRow, lastEditedChain)
-                        } else {
-                            // Has value: Increase by 1
-                            editSongChainRef(track, cursorRow, 1)
-                            // Remember this value for next insertion
-                            lastEditedChain = track.chainRefs[cursorRow]
-                        }
-                    }
-
-                    // PHRASE SCREEN: Edit note/volume/instrument
-                    ScreenType.PHRASE -> {
-                        when (cursorColumn) {
-                            1 -> cycleNote(project.phrases[currentPhrase].steps[cursorRow], 1)
-                            2 -> cycleVolume(project.phrases[currentPhrase].steps[cursorRow], 1)
-                            3 -> cycleInstrument(project.phrases[currentPhrase].steps[cursorRow], 1)
-                        }
-                    }
-
-                    // CHAIN SCREEN: Use generic input system
-                    ScreenType.CHAIN -> {
-                        // Get cursor context from chain editor
-                        val chainState = ChainEditorState(
-                            project.chains[currentChain],
-                            cursorRow,
-                            cursorColumn
-                        )
-                        val context = chainEditorModule.getCursorContext(chainState)
-
-                        // Handle input generically
-                        val action = genericInputHandler.handleAButton(context)
-
-                        // Apply the action
-                        when (action) {
-                            is InputAction.SET_VALUE -> {
-                                // Update the value at cursor position
-                                when (cursorColumn) {
-                                    1 -> {
-                                        // Phrase reference
-                                        project.chains[currentChain].phraseRefs[cursorRow] = action.value
-                                        lastEditedPhrase = action.value
+                    // FILE BROWSER: Open folder, load file, or confirm actions
+                    ScreenType.FILE_BROWSER -> {
+                        when (fileBrowserState.mode) {
+                            FileBrowserModule.BrowserMode.NORMAL -> {
+                                // Open folder or load file
+                                val item = fileBrowserState.items.getOrNull(fileBrowserState.cursor)
+                                when (item) {
+                                    is FileBrowserModule.BrowserItem.Parent -> {
+                                        // Navigate to parent folder
+                                        fileBrowserState = fileBrowserModule.navigateToParent(fileBrowserState)
                                     }
-                                    2 -> {
-                                        // Transpose value
-                                        project.chains[currentChain].transposeValues[cursorRow] = action.value
+                                    is FileBrowserModule.BrowserItem.Folder -> {
+                                        // Navigate into folder
+                                        fileBrowserState = fileBrowserModule.navigateToFolder(
+                                            fileBrowserState,
+                                            item.file
+                                        )
                                     }
-                                }
-                            }
-                            is InputAction.INSERT_DEFAULT -> {
-                                // Insert last edited phrase
-                                insertChainPhrase(
-                                    project.chains[currentChain],
-                                    cursorRow,
-                                    lastEditedPhrase
-                                )
-                            }
-                            else -> { }
-                        }
-                    }
-
-                    // PROJECT SCREEN: Edit project parameters
-                    ScreenType.PROJECT -> {
-                        when (projectCursorRow) {
-                            // ROW 0: TEMPO (increase by 1)
-                            0 -> {
-                                if (projectCursorColumn == 1) {
-                                    project.tempo = (project.tempo + 1).coerceIn(1, 999)
-                                }
-                            }
-
-                            // ROW 1: TRANSPOSE (increase by 1)
-                            1 -> {
-                                if (projectCursorColumn == 1) {
-                                    project.transpose = (project.transpose + 1).coerceIn(0, 255)
-                                }
-                            }
-
-                            // ROW 2: NAME (cycle character forward A→B→C...)
-                            2 -> {
-                                if (projectCursorColumn >= 1) {
-                                    // Get which character position (1-12)
-                                    val charIndex = projectCursorColumn - 1
-
-                                    // Allowed characters: A-Z, 0-9, _, -
-                                    val allowedChars = ('A'..'Z') + ('0'..'9') + '_' + '-'
-
-                                    // Get current name, pad to 12 chars with underscores
-                                    val currentName = project.name.padEnd(12, '_')
-                                    val currentChar = currentName.getOrNull(charIndex) ?: '_'
-
-                                    // Find current char in allowed list
-                                    val currentIndex = allowedChars.indexOf(currentChar)
-
-                                    // Get next char (wrap around to 'A' after '-')
-                                    val nextChar = if (currentIndex == -1) {
-                                        'A'  // Default to A if not found
-                                    } else {
-                                        allowedChars[(currentIndex + 1) % allowedChars.size]
-                                    }
-
-                                    // Update name
-                                    val nameChars = currentName.toMutableList()
-                                    nameChars[charIndex] = nextChar
-                                    project.name = nameChars.joinToString("").trimEnd('_')
-                                }
-                            }
-
-                            // ROW 3: PROJECT actions (LOAD/SAVE/NEW)
-                            3 -> {
-                                when (projectCursorColumn) {
-                                    1 -> {  // LOAD
-                                        val loaded = fileManager.loadProject("UNTITLED")
+                                    is FileBrowserModule.BrowserItem.FileItem -> {
+                                        // Load file
+                                        val loaded = fileManager.loadProject(item.file)
                                         if (loaded != null) {
                                             project = loaded
-                                            projectStatusMessage = "LOADED"
+                                            projectStatusMessage = "LOADED: ${item.file.nameWithoutExtension}"
                                             projectStatusSuccess = true
+                                            projectVersion++
+                                            currentScreen = previousScreen
                                         } else {
-                                            projectStatusMessage = "LOAD FAILED"
-                                            projectStatusSuccess = false
+                                            fileBrowserState = fileBrowserState.copy(
+                                                statusMessage = "LOAD FAILED",
+                                                statusSuccess = false
+                                            )
                                         }
+                                    }
+                                    null -> { /* Empty list */ }
+                                }
+                            }
+                            FileBrowserModule.BrowserMode.DELETE -> {
+                                // Confirm delete
+                                val item = fileBrowserState.items.getOrNull(fileBrowserState.cursor)
+                                if (item != null && item !is FileBrowserModule.BrowserItem.Parent) {
+                                    val deleted = fileManager.deleteFileOrFolder(item.file)
+                                    if (deleted) {
+                                        // Refresh list
+                                        val newItems = fileBrowserModule.buildItemList(
+                                            fileBrowserState.currentDirectory,
+                                            fileBrowserState.fileExtension
+                                        )
+                                        val sortedItems = fileBrowserModule.sortItems(newItems, fileBrowserState.sortMode)
+
+                                        // Adjust cursor if needed
+                                        val newCursor = fileBrowserState.cursor.coerceAtMost(
+                                            (newItems.size - 1).coerceAtLeast(0)
+                                        )
+
+                                        fileBrowserState = fileBrowserState.copy(
+                                            items = sortedItems,
+                                            cursor = newCursor,
+                                            mode = FileBrowserModule.BrowserMode.NORMAL,
+                                            statusMessage = "Deleted: ${item.displayName}",
+                                            statusSuccess = true
+                                        )
+                                    } else {
+                                        fileBrowserState = fileBrowserState.copy(
+                                            mode = FileBrowserModule.BrowserMode.NORMAL,
+                                            statusMessage = "Delete failed",
+                                            statusSuccess = false
+                                        )
+                                    }
+                                }
+                            }
+                            FileBrowserModule.BrowserMode.RENAME -> {
+                                // Confirm rename (will implement in Phase 6)
+                                fileBrowserState = fileBrowserState.copy(mode = FileBrowserModule.BrowserMode.NORMAL)
+                            }
+                            FileBrowserModule.BrowserMode.CREATE -> {
+                                // Confirm create folder (will implement in Phase 6)
+                                fileBrowserState = fileBrowserState.copy(mode = FileBrowserModule.BrowserMode.NORMAL)
+                            }
+                        }
+                    }
+
+                    // PROJECT SCREEN: Only handle action buttons (LOAD/SAVE/NEW)
+                    // Value editing (TEMPO/TRANSPOSE/NAME) is handled by A+direction combos
+                    ScreenType.PROJECT -> {
+                        Log.d("ProjectScreen", "A pressed: row=$projectCursorRow, col=$projectCursorColumn")
+                        when (projectCursorRow) {
+                            // ROW 3: PROJECT actions (LOAD/SAVE/NEW)
+                            3 -> {
+                                Log.d("ProjectScreen", "Row 3 action: column=$projectCursorColumn")
+                                when (projectCursorColumn) {
+                                    1 -> {  // LOAD - Show file browser
+                                        Log.d("ProjectScreen", "LOAD button pressed - switching to FILE_BROWSER")
+                                        previousScreen = currentScreen
+                                        currentScreen = ScreenType.FILE_BROWSER
+                                        // Reset file browser state
+                                        fileBrowserState = fileBrowserState.copy(
+                                            cursor = 0,
+                                            scroll = 0,
+                                            mode = FileBrowserModule.BrowserMode.NORMAL,
+                                            statusMessage = ""
+                                        )
+                                        Log.d("ProjectScreen", "File browser opened")
                                     }
                                     2 -> {  // SAVE
                                         val success = fileManager.saveProject(project, project.name)
@@ -675,6 +893,26 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             // ───────────────────────────────────────────────────────────────
             onButtonB = {
                 when (currentScreen) {
+                    // FILE BROWSER: Cancel operation or go back
+                    ScreenType.FILE_BROWSER -> {
+                        when (fileBrowserState.mode) {
+                            FileBrowserModule.BrowserMode.NORMAL -> {
+                                // Go back to previous screen
+                                Log.d("FileBrowser", "Returning to $previousScreen")
+                                currentScreen = previousScreen
+                            }
+                            else -> {
+                                // Cancel current mode (DELETE/RENAME/CREATE)
+                                Log.d("FileBrowser", "Cancelled ${fileBrowserState.mode} mode")
+                                fileBrowserState = fileBrowserState.copy(
+                                    mode = FileBrowserModule.BrowserMode.NORMAL,
+                                    renameBuffer = "",
+                                    renameCursor = 0
+                                )
+                            }
+                        }
+                    }
+
                     // SONG SCREEN: Decrement chain reference
                     ScreenType.SONG -> {
                         val trackIndex = getTrackIndex(cursorColumn)
@@ -813,6 +1051,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         }
                     }
 
+                    // FILE_BROWSER: SELECT button does nothing (combos handled separately)
+                    ScreenType.FILE_BROWSER -> {
+                        // Do nothing - SELECT combos (SELECT+A, SELECT+B, etc.) are handled in InputMapper
+                    }
+
                     // OTHER SCREENS: Quick jump to main screen
                     else -> {
                         if (currentScreen !in MAIN_ROW_SCREENS) {
@@ -840,6 +1083,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             // L BUTTON - Hold modifier (tracked by InputMapper)
             // ───────────────────────────────────────────────────────────────
             onL = {
+                // L button alone
                 // L is tracked as a hold modifier by InputMapper
                 // Combinations like L+A, L+direction are handled in InputMapper
             },
@@ -848,6 +1092,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             // R BUTTON - Hold modifier (tracked by InputMapper)
             // ───────────────────────────────────────────────────────────────
             onR = {
+                // R button alone
                 // R is tracked as a hold modifier by InputMapper
                 // Combinations like R+arrows for screen navigation handled in InputMapper
             },
@@ -857,206 +1102,22 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             // ───────────────────────────────────────────────────────────────
             onAUp = {
                 // A+UP: Small increment (uses GenericInputHandler)
-                when (currentScreen) {
-                    ScreenType.CHAIN -> {
-                        val chainState = ChainEditorState(
-                            project.chains[currentChain],
-                            cursorRow,
-                            cursorColumn
-                        )
-                        val context = chainEditorModule.getCursorContext(chainState)
-                        val action = genericInputHandler.handleAButton(context)
-                        applyChainInputAction(action, currentChain, cursorRow, cursorColumn)
-                    }
-                    ScreenType.PHRASE -> {
-                        val phraseState = PhraseEditorState(
-                            project.phrases[currentPhrase],
-                            cursorRow,
-                            cursorColumn,
-                            playbackRow = 0,
-                            isPlaying = false
-                        )
-                        val context = phraseEditorModule.getCursorContext(phraseState)
-                        val action = genericInputHandler.handleAButton(context)
-                        applyPhraseInputAction(action, currentPhrase, cursorRow, cursorColumn)
-                    }
-                    ScreenType.SONG -> {
-                        val songState = SongEditorState(
-                            project,
-                            cursorRow,
-                            cursorTrack = cursorColumn
-                        )
-                        val context = songEditorModule.getCursorContext(songState)
-                        val action = genericInputHandler.handleAButton(context)
-                        applySongInputAction(action, cursorColumn - 1, cursorRow)
-                    }
-                    ScreenType.PROJECT -> {
-                        val projectState = ProjectState(
-                            project,
-                            projectCursorRow,
-                            projectCursorColumn,
-                            projectStatusMessage,
-                            projectStatusSuccess
-                        )
-                        val context = projectModule.getCursorContext(projectState)
-                        val action = genericInputHandler.handleAButton(context)
-                        applyProjectInputAction(action, projectCursorRow, projectCursorColumn)
-                    }
-                    else -> { /* Other screens not yet implemented */ }
-                }
+                handleGenericInput { context -> genericInputHandler.handleAButton(context) }
             },
 
             onADown = {
                 // A+DOWN: Small decrement (uses GenericInputHandler)
-                when (currentScreen) {
-                    ScreenType.CHAIN -> {
-                        val chainState = ChainEditorState(
-                            project.chains[currentChain],
-                            cursorRow,
-                            cursorColumn
-                        )
-                        val context = chainEditorModule.getCursorContext(chainState)
-                        val action = genericInputHandler.handleBButton(context)
-                        applyChainInputAction(action, currentChain, cursorRow, cursorColumn)
-                    }
-                    ScreenType.PHRASE -> {
-                        val phraseState = PhraseEditorState(
-                            project.phrases[currentPhrase],
-                            cursorRow,
-                            cursorColumn,
-                            playbackRow = 0,
-                            isPlaying = false
-                        )
-                        val context = phraseEditorModule.getCursorContext(phraseState)
-                        val action = genericInputHandler.handleBButton(context)
-                        applyPhraseInputAction(action, currentPhrase, cursorRow, cursorColumn)
-                    }
-                    ScreenType.SONG -> {
-                        val songState = SongEditorState(
-                            project,
-                            cursorRow,
-                            cursorTrack = cursorColumn
-                        )
-                        val context = songEditorModule.getCursorContext(songState)
-                        val action = genericInputHandler.handleBButton(context)
-                        applySongInputAction(action, cursorColumn - 1, cursorRow)
-                    }
-                    ScreenType.PROJECT -> {
-                        val projectState = ProjectState(
-                            project,
-                            projectCursorRow,
-                            projectCursorColumn,
-                            projectStatusMessage,
-                            projectStatusSuccess
-                        )
-                        val context = projectModule.getCursorContext(projectState)
-                        val action = genericInputHandler.handleBButton(context)
-                        applyProjectInputAction(action, projectCursorRow, projectCursorColumn)
-                    }
-                    else -> { /* Other screens not yet implemented */ }
-                }
+                handleGenericInput { context -> genericInputHandler.handleBButton(context) }
             },
 
             onALeft = {
                 // A+LEFT: Large decrement (uses GenericInputHandler)
-                when (currentScreen) {
-                    ScreenType.CHAIN -> {
-                        val chainState = ChainEditorState(
-                            project.chains[currentChain],
-                            cursorRow,
-                            cursorColumn
-                        )
-                        val context = chainEditorModule.getCursorContext(chainState)
-                        val action = genericInputHandler.handleALeft(context)
-                        applyChainInputAction(action, currentChain, cursorRow, cursorColumn)
-                    }
-                    ScreenType.PHRASE -> {
-                        val phraseState = PhraseEditorState(
-                            project.phrases[currentPhrase],
-                            cursorRow,
-                            cursorColumn,
-                            playbackRow = 0,
-                            isPlaying = false
-                        )
-                        val context = phraseEditorModule.getCursorContext(phraseState)
-                        val action = genericInputHandler.handleALeft(context)
-                        applyPhraseInputAction(action, currentPhrase, cursorRow, cursorColumn)
-                    }
-                    ScreenType.SONG -> {
-                        val songState = SongEditorState(
-                            project,
-                            cursorRow,
-                            cursorTrack = cursorColumn
-                        )
-                        val context = songEditorModule.getCursorContext(songState)
-                        val action = genericInputHandler.handleALeft(context)
-                        applySongInputAction(action, cursorColumn - 1, cursorRow)
-                    }
-                    ScreenType.PROJECT -> {
-                        val projectState = ProjectState(
-                            project,
-                            projectCursorRow,
-                            projectCursorColumn,
-                            projectStatusMessage,
-                            projectStatusSuccess
-                        )
-                        val context = projectModule.getCursorContext(projectState)
-                        val action = genericInputHandler.handleALeft(context)
-                        applyProjectInputAction(action, projectCursorRow, projectCursorColumn)
-                    }
-                    else -> { /* Other screens not yet implemented */ }
-                }
+                handleGenericInput { context -> genericInputHandler.handleALeft(context) }
             },
 
             onARight = {
                 // A+RIGHT: Large increment (uses GenericInputHandler)
-                when (currentScreen) {
-                    ScreenType.CHAIN -> {
-                        val chainState = ChainEditorState(
-                            project.chains[currentChain],
-                            cursorRow,
-                            cursorColumn
-                        )
-                        val context = chainEditorModule.getCursorContext(chainState)
-                        val action = genericInputHandler.handleARight(context)
-                        applyChainInputAction(action, currentChain, cursorRow, cursorColumn)
-                    }
-                    ScreenType.PHRASE -> {
-                        val phraseState = PhraseEditorState(
-                            project.phrases[currentPhrase],
-                            cursorRow,
-                            cursorColumn,
-                            playbackRow = 0,
-                            isPlaying = false
-                        )
-                        val context = phraseEditorModule.getCursorContext(phraseState)
-                        val action = genericInputHandler.handleARight(context)
-                        applyPhraseInputAction(action, currentPhrase, cursorRow, cursorColumn)
-                    }
-                    ScreenType.SONG -> {
-                        val songState = SongEditorState(
-                            project,
-                            cursorRow,
-                            cursorTrack = cursorColumn
-                        )
-                        val context = songEditorModule.getCursorContext(songState)
-                        val action = genericInputHandler.handleARight(context)
-                        applySongInputAction(action, cursorColumn - 1, cursorRow)
-                    }
-                    ScreenType.PROJECT -> {
-                        val projectState = ProjectState(
-                            project,
-                            projectCursorRow,
-                            projectCursorColumn,
-                            projectStatusMessage,
-                            projectStatusSuccess
-                        )
-                        val context = projectModule.getCursorContext(projectState)
-                        val action = genericInputHandler.handleARight(context)
-                        applyProjectInputAction(action, projectCursorRow, projectCursorColumn)
-                    }
-                    else -> { /* Other screens not yet implemented */ }
-                }
+                handleGenericInput { context -> genericInputHandler.handleARight(context) }
             },
 
             // ───────────────────────────────────────────────────────────────
@@ -1064,115 +1125,77 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             // ───────────────────────────────────────────────────────────────
             onAB = {
                 // A+B: Delete/clear value at cursor
-                when (currentScreen) {
-                    ScreenType.CHAIN -> {
-                        val chainState = ChainEditorState(
-                            project.chains[currentChain],
-                            cursorRow,
-                            cursorColumn
-                        )
-                        val context = chainEditorModule.getCursorContext(chainState)
-                        val action = genericInputHandler.handleABCombo(context)
-                        applyChainInputAction(action, currentChain, cursorRow, cursorColumn)
-                    }
-                    ScreenType.PHRASE -> {
-                        val phraseState = PhraseEditorState(
-                            project.phrases[currentPhrase],
-                            cursorRow,
-                            cursorColumn,
-                            playbackRow = 0,
-                            isPlaying = false
-                        )
-                        val context = phraseEditorModule.getCursorContext(phraseState)
-                        val action = genericInputHandler.handleABCombo(context)
-                        applyPhraseInputAction(action, currentPhrase, cursorRow, cursorColumn)
-                    }
-                    ScreenType.SONG -> {
-                        val songState = SongEditorState(
-                            project,
-                            cursorRow,
-                            cursorTrack = cursorColumn
-                        )
-                        val context = songEditorModule.getCursorContext(songState)
-                        val action = genericInputHandler.handleABCombo(context)
-                        applySongInputAction(action, cursorColumn - 1, cursorRow)
-                    }
-                    ScreenType.PROJECT -> {
-                        val projectState = ProjectState(
-                            project,
-                            projectCursorRow,
-                            projectCursorColumn,
-                            projectStatusMessage,
-                            projectStatusSuccess
-                        )
-                        val context = projectModule.getCursorContext(projectState)
-                        val action = genericInputHandler.handleABCombo(context)
-                        applyProjectInputAction(action, projectCursorRow, projectCursorColumn)
-                    }
-                    else -> { /* Other screens not yet implemented */ }
-                }
+                handleGenericInput { context -> genericInputHandler.handleABCombo(context) }
             },
 
             // ───────────────────────────────────────────────────────────────
             // R + DIRECTION COMBINATIONS (Screen navigation)
             // ───────────────────────────────────────────────────────────────
             onRUp = {
-                // R+UP: Navigate to screen above in 5×5 grid
-                val (newScreen, newCol) = navigateUp(currentScreen, previousColumn)
-                if (newScreen != currentScreen) {
-                    // Screen changed - reset cursor to default position
-                    val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
-                    cursorRow = defaultRow
-                    cursorColumn = defaultCol
+                // R+UP: Navigate to screen above in 5×5 grid (disabled in FILE_BROWSER)
+                if (currentScreen != ScreenType.FILE_BROWSER) {
+                    val (newScreen, newCol) = navigateUp(currentScreen, previousColumn)
+                    if (newScreen != currentScreen) {
+                        // Screen changed - reset cursor to default position
+                        val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
+                        cursorRow = defaultRow
+                        cursorColumn = defaultCol
+                    }
+                    currentScreen = newScreen
+                    previousColumn = newCol
                 }
-                currentScreen = newScreen
-                previousColumn = newCol
             },
 
             onRDown = {
-                // R+DOWN: Navigate to screen below in 5×5 grid
-                val (newScreen, newCol) = navigateDown(currentScreen, previousColumn)
-                if (newScreen != currentScreen) {
-                    // Screen changed - reset cursor to default position
-                    val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
-                    cursorRow = defaultRow
-                    cursorColumn = defaultCol
+                // R+DOWN: Navigate to screen below in 5×5 grid (disabled in FILE_BROWSER)
+                if (currentScreen != ScreenType.FILE_BROWSER) {
+                    val (newScreen, newCol) = navigateDown(currentScreen, previousColumn)
+                    if (newScreen != currentScreen) {
+                        // Screen changed - reset cursor to default position
+                        val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
+                        cursorRow = defaultRow
+                        cursorColumn = defaultCol
+                    }
+                    currentScreen = newScreen
+                    previousColumn = newCol
                 }
-                currentScreen = newScreen
-                previousColumn = newCol
             },
 
             onRLeft = {
-                // R+LEFT: Navigate to screen on left in main row
-                val (newScreen, newCol) = navigateLeft(currentScreen, previousColumn)
-                if (newScreen != currentScreen) {
-                    // Screen changed - reset cursor to default position
-                    val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
-                    cursorRow = defaultRow
-                    cursorColumn = defaultCol
+                // R+LEFT: Navigate to screen on left in main row (disabled in FILE_BROWSER)
+                if (currentScreen != ScreenType.FILE_BROWSER) {
+                    val (newScreen, newCol) = navigateLeft(currentScreen, previousColumn)
+                    if (newScreen != currentScreen) {
+                        // Screen changed - reset cursor to default position
+                        val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
+                        cursorRow = defaultRow
+                        cursorColumn = defaultCol
+                    }
+                    currentScreen = newScreen
+                    previousColumn = newCol
                 }
-                currentScreen = newScreen
-                previousColumn = newCol
             },
 
             onRRight = {
-                // R+RIGHT: Navigate to screen on right in main row
-                val (newScreen, newCol) = navigateRight(currentScreen, previousColumn)
-                if (newScreen != currentScreen) {
-                    // Screen changed - reset cursor to default position
-                    val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
-                    cursorRow = defaultRow
-                    cursorColumn = defaultCol
+                // R+RIGHT: Navigate to screen on right in main row (disabled in FILE_BROWSER)
+                if (currentScreen != ScreenType.FILE_BROWSER) {
+                    val (newScreen, newCol) = navigateRight(currentScreen, previousColumn)
+                    if (newScreen != currentScreen) {
+                        // Screen changed - reset cursor to default position
+                        val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
+                        cursorRow = defaultRow
+                        cursorColumn = defaultCol
+                    }
+                    currentScreen = newScreen
+                    previousColumn = newCol
                 }
-                currentScreen = newScreen
-                previousColumn = newCol
             },
 
             // ───────────────────────────────────────────────────────────────
             // L + DIRECTION COMBINATIONS (Context navigation)
             // ───────────────────────────────────────────────────────────────
             onLLeft = {
-                // L+LEFT: Navigate to previous chain/phrase/instrument
+                // L+LEFT: Navigate to previous chain/phrase/instrument OR parent folder
                 Log.d("Navigation", "L+LEFT: currentScreen=$currentScreen, currentChain=$currentChain, currentPhrase=$currentPhrase")
                 when (currentScreen) {
                     ScreenType.CHAIN -> {
@@ -1184,6 +1207,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         // Previous phrase (wrap around)
                         currentPhrase = if (currentPhrase > 0) currentPhrase - 1 else 255
                         Log.d("Navigation", "  -> Changed to phrase $currentPhrase")
+                    }
+                    ScreenType.FILE_BROWSER -> {
+                        // Navigate to parent folder
+                        fileBrowserState = fileBrowserModule.navigateToParent(fileBrowserState)
+                        Log.d("Navigation", "  -> Navigated to parent: ${fileBrowserState.currentDirectory.absolutePath}")
                     }
                     else -> { Log.d("Navigation", "  -> No action for screen $currentScreen") }
                 }
@@ -1204,6 +1232,85 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         Log.d("Navigation", "  -> Changed to phrase $currentPhrase")
                     }
                     else -> { Log.d("Navigation", "  -> No action for screen $currentScreen") }
+                }
+            },
+
+            // ─────────────────────────────────────────────────────────────────────
+            // L+UP/DOWN: Sort mode cycling (file browser)
+            // ─────────────────────────────────────────────────────────────────────
+            onLUp = {
+                if (currentScreen == ScreenType.FILE_BROWSER) {
+                    val modes = FileSortMode.values()
+                    val currentIndex = modes.indexOf(fileBrowserState.sortMode)
+                    val nextMode = modes[(currentIndex + 1) % modes.size]
+                    fileBrowserState = fileBrowserState.copy(
+                        sortMode = nextMode
+                    )
+                }
+            },
+
+            onLDown = {
+                if (currentScreen == ScreenType.FILE_BROWSER) {
+                    val modes = FileSortMode.values()
+                    val currentIndex = modes.indexOf(fileBrowserState.sortMode)
+                    val prevMode = modes[(currentIndex - 1 + modes.size) % modes.size]
+                    fileBrowserState = fileBrowserState.copy(
+                        sortMode = prevMode
+                    )
+                }
+            },
+
+            // ─────────────────────────────────────────────────────────────────────
+            // SELECT+A: Rename file/folder
+            // ─────────────────────────────────────────────────────────────────────
+            onSelectA = {
+                if (currentScreen == ScreenType.FILE_BROWSER &&
+                    fileBrowserState.mode == FileBrowserModule.BrowserMode.NORMAL) {
+                    val item = fileBrowserState.items.getOrNull(fileBrowserState.cursor)
+                    // Don't allow renaming parent directory (..)
+                    if (item != null && item !is FileBrowserModule.BrowserItem.Parent) {
+                        fileBrowserState = fileBrowserState.copy(
+                            mode = FileBrowserModule.BrowserMode.RENAME,
+                            renameBuffer = item.file.nameWithoutExtension,
+                            renameCursor = 0,
+                            statusMessage = "",
+                            statusSuccess = true
+                        )
+                    }
+                }
+            },
+
+            // ─────────────────────────────────────────────────────────────────────
+            // SELECT+B: Delete file/folder
+            // ─────────────────────────────────────────────────────────────────────
+            onSelectB = {
+                if (currentScreen == ScreenType.FILE_BROWSER &&
+                    fileBrowserState.mode == FileBrowserModule.BrowserMode.NORMAL) {
+                    val item = fileBrowserState.items.getOrNull(fileBrowserState.cursor)
+                    // Don't allow deleting parent directory (..)
+                    if (item != null && item !is FileBrowserModule.BrowserItem.Parent) {
+                        fileBrowserState = fileBrowserState.copy(
+                            mode = FileBrowserModule.BrowserMode.DELETE,
+                            statusMessage = "",
+                            statusSuccess = true
+                        )
+                    }
+                }
+            },
+
+            // ─────────────────────────────────────────────────────────────────────
+            // SELECT+R: Create new folder
+            // ─────────────────────────────────────────────────────────────────────
+            onSelectR = {
+                if (currentScreen == ScreenType.FILE_BROWSER &&
+                    fileBrowserState.mode == FileBrowserModule.BrowserMode.NORMAL) {
+                    fileBrowserState = fileBrowserState.copy(
+                        mode = FileBrowserModule.BrowserMode.CREATE,
+                        renameBuffer = "NEWFOLDER",
+                        renameCursor = 0,
+                        statusMessage = "",
+                        statusSuccess = true
+                    )
                 }
             }
         )
@@ -1257,7 +1364,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 buttonHandlers = buttonHandlers,
                 inputMapper = inputMapper,
                 focusRequester = focusRequester,
-                projectVersion = projectVersion
+                projectVersion = projectVersion,
+                fileBrowserState = fileBrowserState
             )
         } else {
             // PORTRAIT: Buttons below screen
@@ -1279,7 +1387,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 buttonHandlers = buttonHandlers,
                 inputMapper = inputMapper,
                 focusRequester = focusRequester,
-                projectVersion = projectVersion
+                projectVersion = projectVersion,
+                fileBrowserState = fileBrowserState
             )
         }
     } else {
@@ -1302,7 +1411,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             projectStatusSuccess = projectStatusSuccess,
             inputMapper = inputMapper,
             focusRequester = focusRequester,
-            projectVersion = projectVersion
+            projectVersion = projectVersion,
+            fileBrowserState = fileBrowserState
         )
     }
 }
@@ -1387,6 +1497,9 @@ fun navigateUp(currentScreen: ScreenType, previousColumn: Int): Pair<ScreenType,
         ScreenType.SCALE, ScreenType.INST_POOL -> {
             Pair(currentScreen, currentCol)
         }
+
+        // Popup screens don't participate in navigation
+        ScreenType.FILE_BROWSER -> Pair(currentScreen, currentCol)
     }
 }
 
@@ -1424,6 +1537,9 @@ fun navigateDown(currentScreen: ScreenType, previousColumn: Int): Pair<ScreenTyp
 
         // FROM ROW 4 → Already at bottom!
         ScreenType.EFFECTS -> Pair(ScreenType.EFFECTS, currentCol)
+
+        // Popup screens don't participate in navigation
+        ScreenType.FILE_BROWSER -> Pair(currentScreen, currentCol)
     }
 }
 
@@ -1513,6 +1629,9 @@ fun getMinEditableColumn(screenType: ScreenType): Int {
         ScreenType.SCALE -> 1
         ScreenType.MODS -> 1
         ScreenType.INST_POOL -> 1
+
+        // File browser: No column editing
+        ScreenType.FILE_BROWSER -> 0
     }
 }
 
@@ -1622,7 +1741,7 @@ fun cycleVolume(step: PhraseStep, direction: Int) {
  * Cycle instrument (0-3 for now)
  */
 fun cycleInstrument(step: PhraseStep, direction: Int) {
-    step.instrument = ((step.instrument + direction + 128) % 4).coerceIn(0, 3)
+    step.instrument = ((step.instrument + direction + 128) % 12).coerceIn(0, 12)
 }
 
 // ───────────────────────────────────────────────────────────────────────────

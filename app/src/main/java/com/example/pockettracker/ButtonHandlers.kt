@@ -66,8 +66,15 @@ data class ButtonHandlers(
     val onRRight: () -> Unit,       // R+RIGHT: Navigate screen right
 
     // L+direction combinations for context navigation
-    val onLLeft: () -> Unit,        // L+LEFT: Previous chain/phrase/instrument
-    val onLRight: () -> Unit        // L+RIGHT: Next chain/phrase/instrument
+    val onLLeft: () -> Unit,        // L+LEFT: Previous chain/phrase/instrument OR parent folder
+    val onLRight: () -> Unit,       // L+RIGHT: Next chain/phrase/instrument
+    val onLUp: () -> Unit,          // L+UP: Sort mode up (file browser)
+    val onLDown: () -> Unit,        // L+DOWN: Sort mode down (file browser)
+
+    // SELECT+button combinations for file operations
+    val onSelectA: () -> Unit,      // SELECT+A: Rename file/folder
+    val onSelectB: () -> Unit,      // SELECT+B: Delete file/folder
+    val onSelectR: () -> Unit       // SELECT+R: Create new folder
 )
 
 /**
@@ -130,6 +137,7 @@ class InputMapper(
     private var isRPressed = false
     private var isAPressed = false  // Track A button for A+direction combos
     private var isBPressed = false  // Track B button to prevent B+direction old behavior
+    private var isSelectPressed = false  // Track SELECT button for SELECT+button combos
 
     // Track which buttons are currently held (for combinations)
     private val heldButtons = mutableSetOf<VirtualButton>()
@@ -304,6 +312,7 @@ class InputMapper(
             if (button == VirtualButton.R_SHIFT) isRPressed = true
             if (button == VirtualButton.A) isAPressed = true
             if (button == VirtualButton.B) isBPressed = true
+            if (button == VirtualButton.SELECT) isSelectPressed = true
 
         } else if (action == ButtonAction.RELEASED) {
             heldButtons.remove(button)
@@ -313,6 +322,7 @@ class InputMapper(
             if (button == VirtualButton.R_SHIFT) isRPressed = false
             if (button == VirtualButton.A) isAPressed = false
             if (button == VirtualButton.B) isBPressed = false
+            if (button == VirtualButton.SELECT) isSelectPressed = false
         }
 
         // Only handle button presses (not releases) for now
@@ -320,7 +330,7 @@ class InputMapper(
 
         // Debug: Log modifier states when any button is pressed
         if (logInput) {
-            Log.d(TAG, "handleButtonAction: button=$button, isA=$isAPressed, isB=$isBPressed, isL=$isLPressed, isR=$isRPressed")
+            Log.d(TAG, "handleButtonAction: button=$button, isA=$isAPressed, isB=$isBPressed, isL=$isLPressed, isR=$isRPressed, isSEL=$isSelectPressed")
         }
 
         // =====================================================================
@@ -400,13 +410,13 @@ class InputMapper(
                     return
                 }
                 VirtualButton.DPAD_UP -> {
-                    if (logInput) Log.d(TAG, "L+UP (jump to prev populated)")
-                    // TODO: Add handler for L+UP
+                    if (logInput) Log.d(TAG, "L+UP (sort mode up / jump to prev)")
+                    buttonHandlers.onLUp()
                     return
                 }
                 VirtualButton.DPAD_DOWN -> {
-                    if (logInput) Log.d(TAG, "L+DOWN (jump to next populated)")
-                    // TODO: Add handler for L+DOWN
+                    if (logInput) Log.d(TAG, "L+DOWN (sort mode down / jump to next)")
+                    buttonHandlers.onLDown()
                     return
                 }
                 VirtualButton.DPAD_LEFT -> {
@@ -422,6 +432,28 @@ class InputMapper(
                 VirtualButton.START -> {
                     if (logInput) Log.d(TAG, "L+START (play all from beginning)")
                     // TODO: Add handler for L+START
+                    return
+                }
+                else -> { }
+            }
+        }
+
+        // SELECT + button combinations (file operations)
+        if (isSelectPressed && !isLPressed && !isRPressed) {
+            when (button) {
+                VirtualButton.A -> {
+                    if (logInput) Log.d(TAG, "SELECT+A (rename)")
+                    buttonHandlers.onSelectA()
+                    return
+                }
+                VirtualButton.B -> {
+                    if (logInput) Log.d(TAG, "SELECT+B (delete)")
+                    buttonHandlers.onSelectB()
+                    return
+                }
+                VirtualButton.R_SHIFT -> {
+                    if (logInput) Log.d(TAG, "SELECT+R (create folder)")
+                    buttonHandlers.onSelectR()
                     return
                 }
                 else -> { }
@@ -484,6 +516,31 @@ class InputMapper(
                 return
             }
             lastAPress = now
+            // Single A press - execute action
+            if (logInput) Log.d(TAG, "Single A press")
+            buttonHandlers.onButtonA()
+            return
+        }
+
+        // Handle B button alone (not as modifier)
+        if (button == VirtualButton.B && !isLPressed && !isRPressed && !isAPressed) {
+            if (logInput) Log.d(TAG, "Single B press")
+            buttonHandlers.onButtonB()
+            return
+        }
+
+        // Handle L button alone (not as modifier)
+        if (button == VirtualButton.L_SHIFT && !isRPressed && !isAPressed && !isBPressed) {
+            if (logInput) Log.d(TAG, "Single L press")
+            buttonHandlers.onL()
+            return
+        }
+
+        // Handle R button alone (not as modifier)
+        if (button == VirtualButton.R_SHIFT && !isLPressed && !isAPressed && !isBPressed) {
+            if (logInput) Log.d(TAG, "Single R press")
+            buttonHandlers.onR()
+            return
         }
 
         // =====================================================================
@@ -491,18 +548,15 @@ class InputMapper(
         // =====================================================================
 
         // Only call basic handlers if no modifiers are pressed
-        if (!isLPressed && !isRPressed && !isAPressed && !isBPressed) {
+        if (!isLPressed && !isRPressed && !isAPressed && !isBPressed && !isSelectPressed) {
             when (button) {
                 VirtualButton.DPAD_UP -> buttonHandlers.onDPadUp()
                 VirtualButton.DPAD_DOWN -> buttonHandlers.onDPadDown()
                 VirtualButton.DPAD_LEFT -> buttonHandlers.onDPadLeft()
                 VirtualButton.DPAD_RIGHT -> buttonHandlers.onDPadRight()
-                VirtualButton.A -> buttonHandlers.onButtonA()
-                VirtualButton.B -> buttonHandlers.onButtonB()
-                VirtualButton.L_SHIFT -> buttonHandlers.onL()
-                VirtualButton.R_SHIFT -> buttonHandlers.onR()
                 VirtualButton.SELECT -> buttonHandlers.onSelect()
                 VirtualButton.START -> buttonHandlers.onStart()
+                else -> { } // A, B, L, R, SELECT are handled above
             }
         }
     }
