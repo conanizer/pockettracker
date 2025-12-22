@@ -38,19 +38,45 @@ class TrackerAudioEngine(private val context: Context) {
             val snare = loadWavFile(R.raw.snare)
             val hihat = loadWavFile(R.raw.hihat)
             val bass = loadWavFile(R.raw.bass)
+            val shimmer = loadWavFile(R.raw.shimmer)
+            val tambo = loadWavFile(R.raw.tambo)
+            val lofi = loadWavFile(R.raw.lofi)
+            val choirstring = loadWavFile(R.raw.choirstring)
+            val apache162 = loadWavFile(R.raw.apache162)
+            val copta162 = loadWavFile(R.raw.copta162)
+            val funky162 = loadWavFile(R.raw.funky162)
+            val eightoeight = loadWavFile(R.raw.eightoeight)
 
             native_loadSample(0, kick)
             native_loadSample(1, snare)
             native_loadSample(2, hihat)
             native_loadSample(3, bass)
+            native_loadSample(4, shimmer)
+            native_loadSample(5, tambo)
+            native_loadSample(6, lofi)
+            native_loadSample(7, choirstring)
+            native_loadSample(8, apache162)
+            native_loadSample(9, copta162)
+            native_loadSample(10, funky162)
+            native_loadSample(11, eightoeight)
+
+
 
             // Set base frequencies (assume samples are at C-4 = 261.63 Hz)
             sampleBaseFrequencies[0] = 261.63f
             sampleBaseFrequencies[1] = 261.63f
             sampleBaseFrequencies[2] = 261.63f
             sampleBaseFrequencies[3] = 261.63f
+            sampleBaseFrequencies[4] = 261.63f
+            sampleBaseFrequencies[5] = 261.63f
+            sampleBaseFrequencies[6] = 261.63f
+            sampleBaseFrequencies[7] = 261.63f
+            sampleBaseFrequencies[8] = 261.63f
+            sampleBaseFrequencies[9] = 261.63f
+            sampleBaseFrequencies[10] = 261.63f
+            sampleBaseFrequencies[11] = 261.63f
 
-            Log.d(TAG, "Loaded 4 samples")
+            Log.d(TAG, "Loaded 12 samples")
         } catch (e: Exception) {
             Log.e(TAG, "Error loading samples: ${e.message}")
         }
@@ -84,7 +110,7 @@ class TrackerAudioEngine(private val context: Context) {
         if (note == Note.EMPTY) return
 
         // Get sample for this instrument
-        val sampleId = instrumentId % 4
+        val sampleId = instrumentId % 12
         val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
 
         // Calculate frequency for this note

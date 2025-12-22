@@ -20,6 +20,14 @@ class GenericInputHandler {
 
     private val TAG = "GenericInputHandler"
 
+    companion object {
+        /**
+         * Allowed characters for text editing (project names, etc.)
+         * Order: A-Z, 0-9, underscore, dash, space
+         */
+        private val ALLOWED_CHARS = ('A'..'Z') + ('0'..'9') + '_' + '-' + ' '
+    }
+
     /**
      * Handle A button press (PRIMARY ACTION - Edit/Increase)
      *
@@ -168,6 +176,21 @@ class GenericInputHandler {
      */
     private fun incrementValue(current: Int, step: Int, context: CursorContext): Int {
         return when (context.valueType) {
+            // Character: cycle through allowed character set
+            CursorValueType.CHARACTER -> {
+                val currentChar = current.toChar()
+                val currentIndex = ALLOWED_CHARS.indexOf(currentChar)
+
+                // If character not in allowed set, start at beginning
+                if (currentIndex == -1) {
+                    ALLOWED_CHARS[0].code
+                } else {
+                    // Cycle to next character with wrap-around
+                    val nextIndex = (currentIndex + step) % ALLOWED_CHARS.size
+                    ALLOWED_CHARS[nextIndex].code
+                }
+            }
+
             // References, hex bytes, and volume wrap around (00 -> max -> 00)
             CursorValueType.PHRASE_REF,
             CursorValueType.CHAIN_REF,
@@ -190,6 +213,21 @@ class GenericInputHandler {
      */
     private fun decrementValue(current: Int, step: Int, context: CursorContext): Int {
         return when (context.valueType) {
+            // Character: cycle through allowed character set backward
+            CursorValueType.CHARACTER -> {
+                val currentChar = current.toChar()
+                val currentIndex = ALLOWED_CHARS.indexOf(currentChar)
+
+                // If character not in allowed set, start at end
+                if (currentIndex == -1) {
+                    ALLOWED_CHARS.last().code
+                } else {
+                    // Cycle to previous character with wrap-around
+                    val prevIndex = (currentIndex - step + ALLOWED_CHARS.size) % ALLOWED_CHARS.size
+                    ALLOWED_CHARS[prevIndex].code
+                }
+            }
+
             // References, hex bytes, and volume wrap around (00 -> max -> 00)
             CursorValueType.PHRASE_REF,
             CursorValueType.CHAIN_REF,

@@ -34,6 +34,9 @@ enum class CursorValueType {
     CHAIN_REF,          // Reference to a chain (can be empty --)
     INSTRUMENT_REF,     // Reference to an instrument
 
+    // Text editing
+    CHARACTER,          // Character from allowed set (A-Z, 0-9, _, -)
+
     // Special
     EMPTY,              // Empty cell (can insert)
     READ_ONLY,          // Can't edit (like step numbers)
@@ -119,51 +122,28 @@ object CursorContextFactory {
         capabilities = CursorCapabilities()
     )
 
+    // ============================================================================
+    // HEX BYTE BASED VALUES (00-FF range)
+    // ============================================================================
+    // These all use hexByte() internally with different empty values:
+    // - phraseRef uses 0xFF (255) as empty because Chain stores phrase refs as UByte
+    // - chainRef uses -1 as empty because Song stores chain refs as nullable Int
+    // - volume has no empty value (always valid)
+    // ============================================================================
+
     /**
-     * Phrase reference (00-FF with wrapping, use A+B to delete)
+     * Phrase reference (00-FF, 0xFF = empty)
      */
-    fun phraseRef(currentValue: Int, canCreate: Boolean = true) = CursorContext(
-        valueType = CursorValueType.PHRASE_REF,
-        capabilities = CursorCapabilities(
-            canIncrement = currentValue != 0xFF,
-            canDecrement = currentValue != 0xFF,
-            canIncrementFast = currentValue != 0xFF,
-            canDecrementFast = currentValue != 0xFF,
-            canDelete = currentValue != 0xFF,
-            canInsert = currentValue == 0xFF,
-            canCreate = canCreate,
-            isEmpty = currentValue == 0xFF
-        ),
-        currentValue = currentValue,
-        minValue = 0,
-        maxValue = 255,  // 00-FF full range with wrapping
-        smallStep = 1,
-        largeStep = 16,
-        emptyValue = 0xFF
-    )
+    fun phraseRef(currentValue: Int, canCreate: Boolean = true) =
+        hexByte(currentValue, emptyValue = 0xFF, canDelete = true, canInsert = true, canCreate = canCreate)
+            .copy(valueType = CursorValueType.PHRASE_REF)
 
     /**
      * Chain reference (00-FF, -1 = empty)
      */
-    fun chainRef(currentValue: Int, canCreate: Boolean = true) = CursorContext(
-        valueType = CursorValueType.CHAIN_REF,
-        capabilities = CursorCapabilities(
-            canIncrement = currentValue != -1,
-            canDecrement = currentValue != -1,
-            canIncrementFast = currentValue != -1,
-            canDecrementFast = currentValue != -1,
-            canDelete = currentValue != -1,
-            canInsert = currentValue == -1,
-            canCreate = canCreate,
-            isEmpty = currentValue == -1
-        ),
-        currentValue = if (currentValue == -1) 0 else currentValue,
-        minValue = 0,
-        maxValue = 255,
-        smallStep = 1,
-        largeStep = 16,
-        emptyValue = -1
-    )
+    fun chainRef(currentValue: Int, canCreate: Boolean = true) =
+        hexByte(if (currentValue == -1) 0 else currentValue, emptyValue = -1, canDelete = true, canInsert = true, canCreate = canCreate)
+            .copy(valueType = CursorValueType.CHAIN_REF)
 
     /**
      * Transpose value (00-FF, centered at 0x80)
@@ -212,21 +192,8 @@ object CursorContextFactory {
     /**
      * Volume (00-FF)
      */
-    fun volume(currentValue: Int) = CursorContext(
-        valueType = CursorValueType.VOLUME,
-        capabilities = CursorCapabilities(
-            canIncrement = true,
-            canDecrement = true,
-            canIncrementFast = true,
-            canDecrementFast = true
-        ),
-        currentValue = currentValue,
-        minValue = 0,
-        maxValue = 255,
-        smallStep = 1,      // Jump by 1 (was 16)
-        largeStep = 16,     // Jump by 0x10 (was 64)
-        emptyValue = -1
-    )
+    fun volume(currentValue: Int) =
+        hexByte(currentValue).copy(valueType = CursorValueType.VOLUME)
 
     /**
      * Instrument reference (0-3 for now)
@@ -239,7 +206,7 @@ object CursorContextFactory {
         ),
         currentValue = currentValue,
         minValue = 0,
-        maxValue = 3,       // 4 instruments for now
+        maxValue = 12,       // 4 instruments for now
         smallStep = 1,
         largeStep = 1,      // No fast increment for small range
         emptyValue = -1
@@ -247,20 +214,75 @@ object CursorContextFactory {
 
     /**
      * Generic hex byte (00-FF)
+     * This is the base function that others delegate to
      */
-    fun hexByte(currentValue: Int, min: Int = 0, max: Int = 255) = CursorContext(
-        valueType = CursorValueType.HEX_BYTE,
+    fun hexByte(
+        currentValue: Int,
+        min: Int = 0,
+        max: Int = 255,
+        emptyValue: Int = -1,
+        canDelete: Boolean = false,
+        canInsert: Boolean = false,
+        canCreate: Boolean = false
+    ): CursorContext {
+        val isEmpty = currentValue == emptyValue
+        return CursorContext(
+            valueType = CursorValueType.HEX_BYTE,
+            capabilities = CursorCapabilities(
+                canIncrement = !isEmpty,
+                canDecrement = !isEmpty,
+                canIncrementFast = !isEmpty,
+                canDecrementFast = !isEmpty,
+                canDelete = canDelete && !isEmpty,
+                canInsert = canInsert && isEmpty,
+                canCreate = canCreate,
+                isEmpty = isEmpty
+            ),
+            currentValue = currentValue,
+            minValue = min,
+            maxValue = max,
+            smallStep = 1,
+            largeStep = 16,
+            emptyValue = emptyValue
+        )
+    }
+
+    /**
+     * Character (A-Z, 0-9, _, -)
+     * For project name editing
+     *
+     * Cycles through allowed character set: A→B→C...→Z→0→1...→9→_→-
+     */
+    fun character(currentChar: Char) = CursorContext(
+        valueType = CursorValueType.CHARACTER,  // Special character type
         capabilities = CursorCapabilities(
             canIncrement = true,
             canDecrement = true,
-            canIncrementFast = true,
-            canDecrementFast = true
+            canDelete = true  // Can delete character (replace with space)
         ),
-        currentValue = currentValue,
-        minValue = min,
-        maxValue = max,
+        currentValue = currentChar.code,
+        minValue = 0,       // Not used for CHARACTER type
+        maxValue = 0,       // Not used for CHARACTER type
+        smallStep = 1,      // Move to next character in allowed set
+        largeStep = 1,      // No fast increment for characters
+        emptyValue = '_'.code
+    )
+
+    /**
+     * Browser line (file selection)
+     * For file browser cursor
+     */
+    fun browserLine(currentLine: Int, totalLines: Int) = CursorContext(
+        valueType = CursorValueType.HEX_BYTE,  // Reuse hex byte
+        capabilities = CursorCapabilities(
+            canIncrement = currentLine < totalLines - 1,
+            canDecrement = currentLine > 0
+        ),
+        currentValue = currentLine,
+        minValue = 0,
+        maxValue = totalLines - 1,
         smallStep = 1,
-        largeStep = 16,
+        largeStep = 14,  // Page jump (14 visible rows)
         emptyValue = -1
     )
 }

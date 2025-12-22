@@ -49,6 +49,7 @@ class PhraseEditorModule : TrackerModule {
         var rowY = y + TEXT_PADDING
         drawBitmapText(
             text = "PHRASE ${phraseState.phrase.id.toString(16).padStart(2, '0').uppercase()}",
+
             x = x + 10,
             y = rowY,
             scale = scale,

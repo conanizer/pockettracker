@@ -189,6 +189,9 @@ class SongEditorModule : TrackerModule {
         // STEP 2: Determine background color
         // ===================================
         val bgColor = when {
+            // Playing row -> green highlight
+            state.isPlaying && absoluteRow == state.playbackRow -> Color(0xFF004400)
+
             // If cursor is on this row -> highlight
             absoluteRow == state.cursorRow -> Color(0xFF333333)
 
@@ -305,10 +308,14 @@ class SongEditorModule : TrackerModule {
  * @param cursorRow Which row the cursor is on (absolute position, 0-255)
  * @param cursorTrack Which track/column the cursor is on (1-8, NOT 0-7!)
  * @param scrollPosition Vertical scroll offset (for showing more than 16 rows)
+ * @param isPlaying Whether song playback is active
+ * @param playbackRow Current playback position (0-255, synchronized across all tracks)
  */
 data class SongEditorState(
     val project: Project,       // Full project data
     val cursorRow: Int,         // Cursor row (absolute position 0-255)
     val cursorTrack: Int,       // Which track (1-8, step column is not selectable)
-    val scrollPosition: Int = 0 // Scroll offset (0 = top of song)
+    val scrollPosition: Int = 0, // Scroll offset (0 = top of song)
+    val isPlaying: Boolean = false, // Playback state
+    val playbackRow: Int = 0    // Current playback row (all tracks play in sync)
 )

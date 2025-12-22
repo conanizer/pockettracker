@@ -42,7 +42,8 @@ fun FullScreenLayout(
     projectStatusSuccess: Boolean,
     inputMapper: InputMapper,
     focusRequester: FocusRequester,
-    projectVersion: Int  // Version counter to trigger recomposition on nested data changes
+    projectVersion: Int,  // Version counter to trigger recomposition on nested data changes
+    fileBrowserState: FileBrowserModule.State? = null  // File browser state
 ) {
     Box(
         modifier = Modifier
@@ -68,7 +69,8 @@ fun FullScreenLayout(
             projectCursorColumn = projectCursorColumn,
             projectStatusMessage = projectStatusMessage,
             projectStatusSuccess = projectStatusSuccess,
-            projectVersion = projectVersion
+            projectVersion = projectVersion,
+            fileBrowserState = fileBrowserState
         )
     }
 }
@@ -96,7 +98,8 @@ fun PortraitLayoutWithVirtualButtons(
     buttonHandlers: ButtonHandlers,
     inputMapper: InputMapper,
     focusRequester: FocusRequester,
-    projectVersion: Int
+    projectVersion: Int,
+    fileBrowserState: FileBrowserModule.State? = null
 ) {
     // FIXED SPACER HEIGHT
     val spacerHeight = 200
@@ -154,7 +157,8 @@ fun PortraitLayoutWithVirtualButtons(
                     projectCursorColumn = projectCursorColumn,
                     projectStatusMessage = projectStatusMessage,
                     projectStatusSuccess = projectStatusSuccess,
-                    projectVersion = projectVersion
+                    projectVersion = projectVersion,
+                    fileBrowserState = fileBrowserState
                 )
             }
         }
@@ -207,7 +211,8 @@ fun LandscapeLayoutWithVirtualButtons(
     buttonHandlers: ButtonHandlers,
     inputMapper: InputMapper,
     focusRequester: FocusRequester,
-    projectVersion: Int
+    projectVersion: Int,
+    fileBrowserState: FileBrowserModule.State? = null
 ) {
     // Calculate available space for each button panel
     // Formula: (deviceWidth - scaledScreenWidth) / 2
@@ -269,7 +274,8 @@ fun LandscapeLayoutWithVirtualButtons(
                     projectCursorColumn = projectCursorColumn,
                     projectStatusMessage = projectStatusMessage,
                     projectStatusSuccess = projectStatusSuccess,
-                    projectVersion = projectVersion
+                    projectVersion = projectVersion,
+                    fileBrowserState = fileBrowserState
                 )
             }
         }

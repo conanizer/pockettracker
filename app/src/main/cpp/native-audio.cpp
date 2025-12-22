@@ -39,7 +39,7 @@ struct Voice {
 class AudioEngine : public oboe::AudioStreamDataCallback {
 public:
     AudioEngine() {
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 12; i++) {
             samples[i] = nullptr;
             sampleLengths[i] = 0;
         }
@@ -47,7 +47,7 @@ public:
 
     ~AudioEngine() {
         closeStream();
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 12; i++) {
             if (samples[i]) {
                 delete[] samples[i];
             }
@@ -92,7 +92,7 @@ public:
     }
 
     void loadSample(int id, const float* data, int length) {
-        if (id < 0 || id >= 4) return;
+        if (id < 0 || id >= 12) return;
 
         if (samples[id]) {
             delete[] samples[id];
@@ -108,7 +108,10 @@ public:
     }
 
     void triggerNote(int sampleId, int trackId, float freq, float baseFreq, float vol) {
-        if (sampleId < 0 || sampleId >= 4 || !samples[sampleId]) return;
+        if (sampleId < 0 || sampleId >= 12 || !samples[sampleId]) return;
+
+        // Resume stream if paused (prevents hum when not playing)
+        resumeStream();
 
         // Stop track
         for (int i = 0; i < MAX_VOICES; i++) {
@@ -131,6 +134,19 @@ public:
     void stopAll() {
         for (int i = 0; i < MAX_VOICES; i++) {
             voices[i].stop();
+        }
+        // Pause stream to prevent background noise when idle
+        if (stream && stream->getState() == oboe::StreamState::Started) {
+            stream->pause();
+            LOGD("Stream paused (stopAll)");
+        }
+    }
+
+    void resumeStream() {
+        // Resume stream when playback starts
+        if (stream && stream->getState() == oboe::StreamState::Paused) {
+            stream->start();
+            LOGD("Stream resumed");
         }
     }
 
@@ -176,8 +192,8 @@ public:
 private:
     std::shared_ptr<oboe::AudioStream> stream;
     Voice voices[MAX_VOICES];
-    float* samples[4];
-    int sampleLengths[4];
+    float* samples[12];
+    int sampleLengths[12];
 };
 
 static AudioEngine* engine = nullptr;
