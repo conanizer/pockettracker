@@ -1,0 +1,46 @@
+{
+  "description": "Claude Code settings for PocketTracker Android project",
+
+  "ignorePatterns": [
+    "**/build/**",
+    "**/.gradle/**",
+    "**/.idea/**",
+    "**/.cxx/**",
+    "**/obj/**",
+    "**/.externalNativeBuild/**",
+    "**/cmake-build-*/**",
+    "**/*.apk",
+    "**/*.so",
+    "**/.kotlin/**"
+  ],
+
+  "reminders": {
+    "beforeStarting": [
+      "Read SESSION_HISTORY.md to understand previous work and lessons learned",
+      "Read CLAUDE.md for project architecture overview",
+      "Check git status to see current state",
+      "Don't refactor core state management - current system works fine"
+    ],
+
+    "beforeCommitting": [
+      "Run ./test.sh to verify compilation",
+      "Test basic functionality: launch, cursor movement, A/B buttons, navigation",
+      "Pre-commit hook will verify compilation automatically"
+    ],
+
+    "development": [
+      "Small incremental changes - test after each change",
+      "Use Android Studio Local History as safety net",
+      "CursorContext system works well - don't change it",
+      "When major breakage occurs - rollback first, debug second"
+    ]
+  },
+
+  "quickCommands": {
+    "build": "./build.sh",
+    "test": "./test.sh",
+    "clean": "./clean.sh",
+    "compile": "export JAVA_HOME=\"/c/Program Files/Android/Android Studio/jbr\" && ./gradlew compileDebugKotlin",
+    "fullBuild": "export JAVA_HOME=\"/c/Program Files/Android/Android Studio/jbr\" && ./gradlew assembleDebug"
+  }
+}
