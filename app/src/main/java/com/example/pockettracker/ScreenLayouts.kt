@@ -43,6 +43,11 @@ fun FullScreenLayout(
     inputMapper: InputMapper,
     focusRequester: FocusRequester,
     projectVersion: Int,  // Version counter to trigger recomposition on nested data changes
+    currentInstrument: Int,
+    instrumentCursorRow: Int,
+    instrumentCursorColumn: Int,
+    instrumentStatusMessage: String,
+    instrumentStatusSuccess: Boolean,
     fileBrowserState: FileBrowserModule.State? = null  // File browser state
 ) {
     Box(
@@ -70,6 +75,11 @@ fun FullScreenLayout(
             projectStatusMessage = projectStatusMessage,
             projectStatusSuccess = projectStatusSuccess,
             projectVersion = projectVersion,
+            currentInstrument = currentInstrument,
+            instrumentCursorRow = instrumentCursorRow,
+            instrumentCursorColumn = instrumentCursorColumn,
+            instrumentStatusMessage = instrumentStatusMessage,
+            instrumentStatusSuccess = instrumentStatusSuccess,
             fileBrowserState = fileBrowserState
         )
     }
@@ -99,6 +109,11 @@ fun PortraitLayoutWithVirtualButtons(
     inputMapper: InputMapper,
     focusRequester: FocusRequester,
     projectVersion: Int,
+    currentInstrument: Int,
+    instrumentCursorRow: Int,
+    instrumentCursorColumn: Int,
+    instrumentStatusMessage: String,
+    instrumentStatusSuccess: Boolean,
     fileBrowserState: FileBrowserModule.State? = null
 ) {
     // FIXED SPACER HEIGHT
@@ -158,6 +173,11 @@ fun PortraitLayoutWithVirtualButtons(
                     projectStatusMessage = projectStatusMessage,
                     projectStatusSuccess = projectStatusSuccess,
                     projectVersion = projectVersion,
+                    currentInstrument = currentInstrument,
+                    instrumentCursorRow = instrumentCursorRow,
+                    instrumentCursorColumn = instrumentCursorColumn,
+                    instrumentStatusMessage = instrumentStatusMessage,
+                    instrumentStatusSuccess = instrumentStatusSuccess,
                     fileBrowserState = fileBrowserState
                 )
             }
@@ -212,6 +232,11 @@ fun LandscapeLayoutWithVirtualButtons(
     inputMapper: InputMapper,
     focusRequester: FocusRequester,
     projectVersion: Int,
+    currentInstrument: Int,
+    instrumentCursorRow: Int,
+    instrumentCursorColumn: Int,
+    instrumentStatusMessage: String,
+    instrumentStatusSuccess: Boolean,
     fileBrowserState: FileBrowserModule.State? = null
 ) {
     // Calculate available space for each button panel
@@ -275,6 +300,11 @@ fun LandscapeLayoutWithVirtualButtons(
                     projectStatusMessage = projectStatusMessage,
                     projectStatusSuccess = projectStatusSuccess,
                     projectVersion = projectVersion,
+                    currentInstrument = currentInstrument,
+                    instrumentCursorRow = instrumentCursorRow,
+                    instrumentCursorColumn = instrumentCursorColumn,
+                    instrumentStatusMessage = instrumentStatusMessage,
+                    instrumentStatusSuccess = instrumentStatusSuccess,
                     fileBrowserState = fileBrowserState
                 )
             }

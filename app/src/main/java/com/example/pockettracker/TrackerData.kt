@@ -14,7 +14,7 @@ data class Note(
 
         fun fromMidi(midi: Int): Note {
             if (midi < 0 || midi > 119) return EMPTY
-            val octave = midi / 12
+            val octave = midi / 12 - 1  // MIDI 60 = C-4, so octave = 60/12 - 1 = 4
             val pitch = midi % 12
             return Note(pitch, octave)
         }
@@ -31,7 +31,7 @@ data class Note(
 
     fun toMidi(): Int {
         if (pitch == -1) return -1
-        return octave * 12 + pitch
+        return (octave + 1) * 12 + pitch  // C-4 = (4+1)*12 + 0 = 60 (standard MIDI)
     }
 
     fun toFrequency(): Float {
@@ -169,7 +169,17 @@ data class Instrument(
     var name: String = "INST${id.toString(16).padStart(2,'0').uppercase()}",
     var sampleId: Int = 0,  // Which sample from resources
     var volume: Float = 1.0f,
-    var pan: Float = 0.5f  // 0.0 = left, 0.5 = center, 1.0 = right
+    var pan: Float = 0.5f,  // 0.0 = left, 0.5 = center, 1.0 = right
+
+    // Sample playback parameters
+    var root: Note = Note.fromString("C-4"),  // Root note for sample pitch
+    var detune: Int = 0x80,  // 00-FF: high nibble=semitones, low nibble=1/16ths of semitone
+    var sampleStart: Int = 0x00,  // 00-FF sample start point (00=start, FF=end)
+    var sampleEnd: Int = 0xFF,  // 00-FF sample end point
+    var reverse: Boolean = false,  // Reverse playback
+    var loopMode: String = "off",  // "off", "fwd" (forward), "png" (ping-pong)
+    var loopStart: Int = 0x00,  // 00-FF loop start point
+    var sampleFilePath: String? = null  // Path to loaded WAV file (null = use resource)
 )
 
 // The entire project
@@ -189,8 +199,26 @@ data class Project(
     // 8 tracks
     val tracks: Array<Track> = Array(8) { Track(it) },
 
-    // Instruments (128 slots)
-    val instruments: Array<Instrument> = Array(128) { Instrument(it) }
+    // Instruments (256 slots, but only first 12 initialized with resource samples)
+    val instruments: Array<Instrument> = Array(256) { index ->
+        if (index < 12) {
+            // First 12 instruments (00-0B) map directly to the 12 resource samples
+            // 00=kick, 01=snare, 02=hihat, 03=bass, 04=shimmer, 05=tambo,
+            // 06=lofi, 07=choirstring, 08=apache162, 09=copta162, 0A=funky162, 0B=eightoeight
+            Instrument(
+                id = index,
+                name = "INST${index.toString(16).padStart(2,'0').uppercase()}",
+                sampleId = index  // Direct 1:1 mapping
+            )
+        } else {
+            // Rest are empty instruments with no sample
+            Instrument(
+                id = index,
+                name = "",
+                sampleId = 0  // Default to kick, but name is empty so it's "uninitialized"
+            )
+        }
+    }
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

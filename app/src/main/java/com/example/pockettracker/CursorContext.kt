@@ -37,6 +37,10 @@ enum class CursorValueType {
     // Text editing
     CHARACTER,          // Character from allowed set (A-Z, 0-9, _, -)
 
+    // Toggles
+    TOGGLE_BINARY,      // Binary toggle (off/on)
+    TOGGLE_TERNARY,     // Ternary toggle (3-state: off/fwd/png, etc.)
+
     // Special
     EMPTY,              // Empty cell (can insert)
     READ_ONLY,          // Can't edit (like step numbers)
@@ -196,21 +200,11 @@ object CursorContextFactory {
         hexByte(currentValue).copy(valueType = CursorValueType.VOLUME)
 
     /**
-     * Instrument reference (0-3 for now)
+     * Instrument reference (00-FF hex byte)
+     * Same behavior as volume: A+left/right cycles through full range
      */
-    fun instrument(currentValue: Int) = CursorContext(
-        valueType = CursorValueType.INSTRUMENT_REF,
-        capabilities = CursorCapabilities(
-            canIncrement = true,
-            canDecrement = true
-        ),
-        currentValue = currentValue,
-        minValue = 0,
-        maxValue = 12,       // 4 instruments for now
-        smallStep = 1,
-        largeStep = 1,      // No fast increment for small range
-        emptyValue = -1
-    )
+    fun instrument(currentValue: Int) =
+        hexByte(currentValue).copy(valueType = CursorValueType.INSTRUMENT_REF)
 
     /**
      * Generic hex byte (00-FF)
@@ -283,6 +277,46 @@ object CursorContextFactory {
         maxValue = totalLines - 1,
         smallStep = 1,
         largeStep = 14,  // Page jump (14 visible rows)
+        emptyValue = -1
+    )
+
+    /**
+     * Binary toggle (off/on)
+     * Value: 0 = off, 1 = on
+     * Changed with A+DPAD (cycles between states)
+     */
+    fun toggleBinary(currentValue: Boolean) = CursorContext(
+        valueType = CursorValueType.TOGGLE_BINARY,
+        capabilities = CursorCapabilities(
+            canIncrement = true,
+            canDecrement = true
+        ),
+        currentValue = if (currentValue) 1 else 0,
+        minValue = 0,
+        maxValue = 1,
+        smallStep = 1,
+        largeStep = 1,
+        emptyValue = -1
+    )
+
+    /**
+     * Ternary toggle (3-state toggle like off/fwd/png)
+     * @param currentValue The current value string (e.g., "off", "fwd", "png")
+     * @param options List of valid options in order
+     * Value: 0 = first option, 1 = second, 2 = third
+     * Changed with A+DPAD (cycles through states with wrap)
+     */
+    fun toggleTernary(currentValue: String, options: List<String>) = CursorContext(
+        valueType = CursorValueType.TOGGLE_TERNARY,
+        capabilities = CursorCapabilities(
+            canIncrement = true,
+            canDecrement = true
+        ),
+        currentValue = options.indexOf(currentValue).coerceAtLeast(0),
+        minValue = 0,
+        maxValue = options.size - 1,
+        smallStep = 1,
+        largeStep = 1,
         emptyValue = -1
     )
 }

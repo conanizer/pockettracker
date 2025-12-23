@@ -239,8 +239,8 @@ class PhraseEditorModule : TrackerModule {
      * Phrase columns:
      * 0 = Step number (read-only)
      * 1 = Note (C-0 to B-9, can be empty)
-     * 2 = Volume (00-FF)
-     * 3 = Instrument (0-3 for now)
+     * 2 = Volume (00-FF hex byte, A+left/right cycles)
+     * 3 = Instrument (00-FF hex byte, A+left/right cycles)
      * 4-6 = FX1, FX2, FX3 (read-only for now)
      */
     fun getCursorContext(state: PhraseEditorState): CursorContext {

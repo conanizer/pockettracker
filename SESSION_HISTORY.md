@@ -211,4 +211,199 @@ projectVersion++  // Force recomposition
 
 ---
 
-*Last Updated: 2024-12-22*
+## Session 2025-12-23: Instrument Screen Completion & Critical Bug Fixes
+
+### Context
+- Started with instrument screen implementation (from previous plan)
+- File browser visibility issues resolved from previous session
+- Instrument screen UI mostly complete but had bugs and missing audio functionality
+
+### What Was Implemented
+
+#### 1. Instrument Screen Features
+- **L+LEFT/RIGHT Navigation**: Cycle through instruments 00-FF
+- **Sample Loading**: Load WAV files from file browser into instrument slots
+- **Sample Name Display**: Shows loaded filename (read-only, not character editing)
+- **ROOT Parameter**: Note value that defines sample's base pitch
+- **DETUNE Parameter**: Fine-tuning (±8 semitones with 1/16 precision)
+  - Format: 0x00-0xFF hex, high nibble = semitones, low nibble = sixteenths
+  - Center at 0x80 = no detune
+- **Sample Preview**: START button plays instrument with ROOT+DETUNE applied
+- **Status Messages**: Auto-dismiss after 5 seconds (matches project screen)
+- **12 Hardcoded Samples**: Instruments 00-0B initialized with resource samples
+
+#### 2. File Browser Enhancement
+- **Sample Preview**: START button plays WAV at C-4 reference pitch
+- Helps audition samples before loading
+
+#### 3. Audio Engine Improvements
+- **256 Sample Slots**: Expanded from 12 to 256 (native C++ code)
+- **Stereo/Mono Support**: Auto-detects and mixes stereo → mono during load
+- **Preview Functions**:
+  - `previewSampleFile()` - Preview WAV from file browser
+  - `previewInstrument()` - Preview with ROOT+DETUNE applied
+  - `calculateInstrumentBaseFrequency()` - Combines ROOT+DETUNE
+  - `updateInstrumentBaseFrequency()` - Updates stored base frequency
+
+### Critical Bugs Fixed
+
+#### Bug #1: Stereo/Mono WAV Loading (1 Octave Low)
+**Symptoms**: All stereo samples played 1 octave too low
+**Root Cause**:
+- Stereo WAVs have interleaved L/R samples
+- Code loaded all samples sequentially (doubled sample count)
+- Playing 2x samples at same rate = 2x duration = half speed = 1 octave down
+
+**Fix**:
+- Parse WAV header bytes 22-23 to read channel count
+- If stereo: Mix to mono by averaging L+R channels
+- Result: Correct playback pitch for all samples
+
+**Files**: `TrackerAudioEngine.kt` - `loadWavFile()`, `loadWavFileFromPath()`
+
+#### Bug #2: MIDI Note Conversion (1 Octave Off)
+**Symptoms**: All notes calculated 1 octave too low (C-4 = 130.81 Hz instead of 261.63 Hz)
+**Root Cause**:
+- `toMidi()` formula: `octave * 12 + pitch` (missing +1 offset)
+- `fromMidi()` formula: `octave = midi / 12` (missing -1 offset)
+- Standard MIDI: C-4 = 60, formula should be `(octave + 1) * 12 + pitch`
+
+**Fix**:
+- `toMidi()`: Changed to `(octave + 1) * 12 + pitch`
+- `fromMidi()`: Changed to `octave = midi / 12 - 1`
+- Now C-4 correctly = MIDI 60 = 261.63 Hz
+
+**Files**: `TrackerData.kt` - Note class
+
+#### Bug #3: File Browser Preview Crash (SIGSEGV)
+**Symptoms**: Fatal crash when previewing multiple samples rapidly
+**Root Cause**: Race condition
+- Main thread: Load new sample → delete old slot 255 → allocate new memory
+- Audio thread: Still playing old slot 255 → accesses deleted memory → CRASH
+
+**Fix**: Call `native_stopAll()` before loading preview sample
+**Files**: `TrackerAudioEngine.kt` - `previewSampleFile()`
+
+### Other Fixes & Improvements
+
+#### Instrument Value as Hex Byte
+- Changed from cycling 0-3 to full 00-FF range with A+LEFT/RIGHT
+- Uses same `hexByte()` cursor context as volume
+**Files**: `CursorContext.kt`, `MainActivity.kt`
+
+#### Default Directories
+- Project screen: `/Documents/PocketTracker/Projects/`
+- Instrument screen: `/Documents/PocketTracker/Samples/`
+**Files**: `FileManager.kt`
+
+#### Sample-to-Instrument Mapping
+- Fixed playback to use `instrument.sampleId` instead of wrapping to 0-11
+- Added `project` parameter to `playNote()` for proper instrument lookup
+**Files**: `TrackerAudioEngine.kt`, `PixelPerfectRenderer.kt`
+
+### Lessons Learned
+
+#### ✅ What Worked Well
+
+1. **Debugging Audio Issues Systematically**
+   - Added detailed logging at each step
+   - Traced frequency calculations from Note → MIDI → Frequency
+   - Found exact point where values were wrong
+
+2. **Understanding Native/Kotlin Bridge**
+   - Identified array size limits in C++ (12 vs 256 slots)
+   - Fixed race conditions between threads
+   - Proper synchronization with `native_stopAll()`
+
+3. **WAV File Format Knowledge**
+   - Learned to parse WAV headers properly
+   - Understood stereo interleaving
+   - Implemented proper channel mixing
+
+4. **Incremental Testing**
+   - Fixed one bug at a time
+   - Verified each fix with logs before moving on
+   - User tested each build to confirm
+
+#### 🐛 Bug Patterns to Watch For
+
+1. **Sample Rate Mismatches**: Always check WAV header, don't assume format
+2. **Thread Safety**: Audio runs on separate thread - protect shared data
+3. **Array Bounds**: Keep Kotlin and C++ array sizes synchronized
+4. **MIDI Conventions**: Different standards exist, verify with known values (C-4 = 60)
+
+### Current State (End of Session)
+
+#### ✅ Fully Working
+- Instrument screen with all parameters functional
+- Sample loading and preview (file browser + instrument screen)
+- Stereo/mono WAV support
+- Correct pitch calculation for all notes
+- 256 instrument slots with independent tuning
+- L+LEFT/RIGHT instrument navigation
+- Status message system
+
+#### ⏸️ UI-Only (Audio TODO)
+- Sample start/end points
+- Loop modes (off/fwd/png)
+- Reverse playback
+
+#### 📋 Files Modified
+- `TrackerAudioEngine.kt` - Stereo/mono, preview functions, base frequency management
+- `TrackerData.kt` - MIDI conversion fix, 12-sample initialization
+- `MainActivity.kt` - START button handlers, instrument navigation, auto-dismiss
+- `InstrumentModule.kt` - Sample name display, cursor contexts
+- `native-audio.cpp` - Expanded to 256 slots
+- `CursorContext.kt` - Instrument as hex byte
+- `PixelPerfectRenderer.kt` - Pass project to playNote()
+- `FileManager.kt` - Sample directory helper
+
+#### 🔄 Latest Commit
+Branch: `claude/keyboard-input-layout-01KisvUqQtDHG9cSjHA353c8`
+Ready to commit with message about instrument screen completion and bug fixes
+
+### Next Steps (Priority Order)
+
+1. **Commit Today's Work**
+   - Comprehensive commit message
+   - Push to GitHub
+   - Tag as working state
+
+2. **Effect System** (Next Major Feature)
+   - Define effect types (pitch, volume, filter, etc.)
+   - Implement effect processing in C++ audio callback
+   - Add FX editing UI to phrase screen
+
+3. **Sample Playback Parameters** (Audio Engine)
+   - Implement start/end points in C++
+   - Add loop support (forward, ping-pong)
+   - Add reverse playback
+
+4. **Table Screen**
+   - Arpeggio tables
+   - Volume/pitch envelopes
+   - Reference from phrase FX commands
+
+### Notes for Future Claude Sessions
+
+#### 🎯 Key Technical Details
+- **MIDI Convention**: C-4 = 60 (middle C), formula `(octave+1)*12+pitch`
+- **Detune Format**: High nibble = semitones, low nibble = 1/16 semitone, center = 0x80
+- **Sample Slots**: 00-0B = hardcoded resources, 0C-FF = user samples
+- **Stereo Handling**: All samples mixed to mono during load (line-by-line L+R average)
+- **Thread Safety**: Always `stopAll()` before modifying sample data from main thread
+
+#### ✅ Architecture Patterns That Work
+- Generic input system (CursorContext) - works perfectly, don't change
+- Status message auto-dismiss with LaunchedEffect
+- Sample preview using temporary slot 255
+- Base frequency stored per instrument, not per sample
+
+#### ⚠️ Known Quirks
+- Input event warnings: Harmless, goes away after device restart
+- Focus requester needs small delay on first request
+- Native audio engine runs on separate thread - be careful with sample memory
+
+---
+
+*Last Updated: 2025-12-23*

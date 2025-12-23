@@ -1,9 +1,14 @@
 package com.example.pockettracker
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Button
@@ -16,6 +21,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.example.pockettracker.ui.theme.PockettrackerTheme
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.focusable
@@ -92,6 +98,47 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     val context = LocalContext.current
 
     // ═══════════════════════════════════════════════════════════════════════
+    // STORAGE PERMISSIONS REQUEST
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Request storage permissions for reading WAV files from Documents folder
+    val permissionsToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        // Android 13+ (API 33+): Use granular media permissions
+        arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
+    } else {
+        // Android 12 and below: Use legacy storage permissions
+        arrayOf(
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE
+        )
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val allGranted = permissions.values.all { it }
+        if (allGranted) {
+            Log.d("Permissions", "✅ Storage permissions granted!")
+        } else {
+            Log.w("Permissions", "❌ Storage permissions denied - some features may not work")
+        }
+    }
+
+    // Check and request permissions on first composition
+    LaunchedEffect(Unit) {
+        val hasPermission = permissionsToRequest.all { permission ->
+            ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+        }
+
+        if (!hasPermission) {
+            Log.d("Permissions", "Requesting storage permissions...")
+            permissionLauncher.launch(permissionsToRequest)
+        } else {
+            Log.d("Permissions", "✅ Storage permissions already granted")
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // CREATE MANAGERS
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -121,6 +168,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 
     // ProjectModule: Used to get cursor context for project editing
     val projectModule = remember { ProjectModule() }
+
+    // InstrumentModule: Used for instrument editing screen
+    val instrumentModule = remember { InstrumentModule() }
 
     // ═══════════════════════════════════════════════════════════════════════
     // STATE VARIABLES
@@ -159,11 +209,27 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     var projectStatusMessage by remember { mutableStateOf("") }
     var projectStatusSuccess by remember { mutableStateOf(true) }
 
+    // Instrument screen specific state
+    var currentInstrument by remember { mutableIntStateOf(0) }
+    var instrumentCursorRow by remember { mutableIntStateOf(0) }
+    var instrumentCursorColumn by remember { mutableIntStateOf(1) }
+    var instrumentStatusMessage by remember { mutableStateOf("") }
+    var instrumentStatusSuccess by remember { mutableStateOf(true) }
+
     // Auto-dismiss status messages after 5 seconds
+    // NOTE: All screen status messages use the same 5-second auto-dismiss behavior
+    // to maintain consistency across the app (PROJECT, INSTRUMENT, etc.)
     LaunchedEffect(projectStatusMessage) {
         if (projectStatusMessage.isNotEmpty()) {
             kotlinx.coroutines.delay(5000)  // Wait 5 seconds
             projectStatusMessage = ""  // Clear message
+        }
+    }
+
+    LaunchedEffect(instrumentStatusMessage) {
+        if (instrumentStatusMessage.isNotEmpty()) {
+            kotlinx.coroutines.delay(5000)  // Wait 5 seconds
+            instrumentStatusMessage = ""  // Clear message
         }
     }
 
@@ -466,6 +532,108 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     }
 
     /**
+     * Apply input action to instrument screen
+     * Handles all instrument parameter editing
+     */
+    fun applyInstrumentInputAction(action: InputAction, row: Int, column: Int) {
+        Log.d("InstrumentInputAction", "inst=$currentInstrument row=$row col=$column action=$action")
+        val instrument = project.instruments[currentInstrument]
+
+        when (row) {
+            0 -> {
+                // TYPE row - read-only for now (TODO: A+DPAD to change type)
+            }
+            1 -> {
+                // LOAD row - handled as button action, not value editing
+            }
+            2 -> {
+                // NAME row - read-only (shows loaded sample filename)
+            }
+            3 -> {
+                // ROOT note
+                when (action) {
+                    is InputAction.SET_VALUE -> {
+                        instrument.root = Note.fromMidi(action.value)
+                        // Update base frequency in audio engine (combines ROOT + DETUNE)
+                        audioEngine.updateInstrumentBaseFrequency(instrument)
+                    }
+                    is InputAction.DELETE -> {
+                        instrument.root = Note.fromString("C-4")
+                        // Update base frequency in audio engine (combines ROOT + DETUNE)
+                        audioEngine.updateInstrumentBaseFrequency(instrument)
+                    }
+                    else -> {}
+                }
+            }
+            4 -> {
+                // DETUNE (00-FF hex)
+                when (action) {
+                    is InputAction.SET_VALUE -> {
+                        instrument.detune = action.value.coerceIn(0, 255)
+                        // Update base frequency in audio engine (combines ROOT + DETUNE)
+                        audioEngine.updateInstrumentBaseFrequency(instrument)
+                    }
+                    else -> {}
+                }
+            }
+            5 -> {
+                // SPACER row - no editing
+            }
+            6 -> {
+                // START (sample start point)
+                when (action) {
+                    is InputAction.SET_VALUE -> {
+                        instrument.sampleStart = action.value.coerceIn(0, 255)
+                    }
+                    else -> {}
+                }
+            }
+            7 -> {
+                // END (sample end point)
+                when (action) {
+                    is InputAction.SET_VALUE -> {
+                        instrument.sampleEnd = action.value.coerceIn(0, 255)
+                    }
+                    else -> {}
+                }
+            }
+            8 -> {
+                // REV (reverse: off/on)
+                when (action) {
+                    is InputAction.SET_VALUE -> {
+                        instrument.reverse = action.value == 1
+                    }
+                    else -> {}
+                }
+            }
+            9 -> {
+                // LOOP mode (off/fwd/png)
+                when (action) {
+                    is InputAction.SET_VALUE -> {
+                        val loopModes = listOf("off", "fwd", "png")
+                        if (action.value in 0..2) {
+                            instrument.loopMode = loopModes[action.value]
+                        }
+                    }
+                    else -> {}
+                }
+            }
+            10 -> {
+                // LOOP ST (loop start point)
+                when (action) {
+                    is InputAction.SET_VALUE -> {
+                        instrument.loopStart = action.value.coerceIn(0, 255)
+                    }
+                    else -> {}
+                }
+            }
+        }
+
+        // Trigger recomposition
+        projectVersion++
+    }
+
+    /**
      * Generic input handler that routes button presses through cursor context
      *
      * This helper eliminates code duplication by:
@@ -534,6 +702,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     applyFileBrowserInputAction(action)
                 }
             }
+            ScreenType.INSTRUMENT -> {
+                val instrumentState = InstrumentState(
+                    project.instruments[currentInstrument],
+                    instrumentCursorRow,
+                    instrumentCursorColumn,
+                    instrumentStatusMessage,
+                    instrumentStatusSuccess
+                )
+                val context = instrumentModule.getCursorContext(instrumentState)
+                val action = handlerFunction(context)
+                applyInstrumentInputAction(action, instrumentCursorRow, instrumentCursorColumn)
+            }
             else -> { /* Other screens not yet implemented */ }
         }
     }
@@ -561,6 +741,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                             6  // Wrap to bottom
                         }
                         projectCursorColumn = 1  // Reset to first value column
+                    }
+                    ScreenType.INSTRUMENT -> {
+                        // Instrument screen has rows 0-10 (row 5 is spacer, skip it)
+                        val oldRow = instrumentCursorRow
+                        instrumentCursorRow = when {
+                            instrumentCursorRow > 0 && instrumentCursorRow != 6 -> instrumentCursorRow - 1
+                            instrumentCursorRow == 6 -> 4  // Skip spacer (row 5)
+                            else -> 10  // Wrap to bottom
+                        }
+                        android.util.Log.d("InstrumentCursor", "UP: $oldRow → $instrumentCursorRow")
+                        instrumentCursorColumn = 1  // Reset to first value column
                     }
                     ScreenType.FILE_BROWSER -> {
                         // File browser: move cursor up with wrap-around
@@ -607,6 +798,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         }
                         projectCursorColumn = 1  // Reset column
                     }
+                    ScreenType.INSTRUMENT -> {
+                        // Instrument screen has rows 0-10 (row 5 is spacer, skip it)
+                        val oldRow = instrumentCursorRow
+                        instrumentCursorRow = when {
+                            instrumentCursorRow < 10 && instrumentCursorRow != 4 -> instrumentCursorRow + 1
+                            instrumentCursorRow == 4 -> 6  // Skip spacer (row 5)
+                            else -> 0  // Wrap to top
+                        }
+                        android.util.Log.d("InstrumentCursor", "DOWN: $oldRow → $instrumentCursorRow")
+                        instrumentCursorColumn = 1  // Reset column
+                    }
                     ScreenType.FILE_BROWSER -> {
                         // File browser: move cursor down with wrap-around
                         if (fileBrowserState.items.isNotEmpty()) {
@@ -649,6 +851,20 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                             projectCursorRow,
                             projectCursorColumn
                         )
+                    }
+                    ScreenType.INSTRUMENT -> {
+                        // Instrument: Row 2 (NAME) has columns 1-12, others have only column 1
+                        if (instrumentCursorRow == 2) {
+                            // NAME row: move between character positions (1-12)
+                            if (instrumentCursorColumn > 1) {
+                                instrumentCursorColumn--
+                            }
+                        } else {
+                            // Other rows: only columns 0 and 1
+                            if (instrumentCursorColumn > 0) {
+                                instrumentCursorColumn--
+                            }
+                        }
                     }
                     ScreenType.FILE_BROWSER -> {
                         when (fileBrowserState.mode) {
@@ -707,6 +923,20 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                             projectCursorRow,
                             projectCursorColumn
                         )
+                    }
+                    ScreenType.INSTRUMENT -> {
+                        // Instrument: Row 2 (NAME) has columns 1-12, others have only column 1
+                        if (instrumentCursorRow == 2) {
+                            // NAME row: move between character positions (max 12)
+                            if (instrumentCursorColumn < 12) {
+                                instrumentCursorColumn++
+                            }
+                        } else {
+                            // Other rows: only columns 0 and 1
+                            if (instrumentCursorColumn < 1) {
+                                instrumentCursorColumn++
+                            }
+                        }
                     }
                     ScreenType.FILE_BROWSER -> {
                         when (fileBrowserState.mode) {
@@ -778,19 +1008,63 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                         )
                                     }
                                     is FileBrowserModule.BrowserItem.FileItem -> {
-                                        // Load file
-                                        val loaded = fileManager.loadProject(item.file)
-                                        if (loaded != null) {
-                                            project = loaded
-                                            projectStatusMessage = "LOADED: ${item.file.nameWithoutExtension}"
-                                            projectStatusSuccess = true
-                                            projectVersion++
-                                            currentScreen = previousScreen
-                                        } else {
-                                            fileBrowserState = fileBrowserState.copy(
-                                                statusMessage = "LOAD FAILED",
-                                                statusSuccess = false
-                                            )
+                                        // Check which screen opened the file browser
+                                        when (previousScreen) {
+                                            ScreenType.PROJECT -> {
+                                                // Load project file
+                                                val loaded = fileManager.loadProject(item.file)
+                                                if (loaded != null) {
+                                                    project = loaded
+                                                    projectStatusMessage = "LOADED: ${item.file.nameWithoutExtension}"
+                                                    projectStatusSuccess = true
+                                                    projectVersion++
+                                                    currentScreen = previousScreen
+                                                } else {
+                                                    fileBrowserState = fileBrowserState.copy(
+                                                        statusMessage = "LOAD FAILED",
+                                                        statusSuccess = false
+                                                    )
+                                                }
+                                            }
+                                            ScreenType.INSTRUMENT -> {
+                                                // Load WAV sample file
+                                                val success = audioEngine.loadSampleFromFile(
+                                                    currentInstrument,
+                                                    item.file.absolutePath
+                                                )
+                                                if (success) {
+                                                    // Store file path in instrument and update sample ID
+                                                    project.instruments[currentInstrument].sampleFilePath = item.file.absolutePath
+                                                    project.instruments[currentInstrument].sampleId = currentInstrument
+
+                                                    // Update base frequency based on ROOT + DETUNE
+                                                    audioEngine.updateInstrumentBaseFrequency(project.instruments[currentInstrument])
+
+                                                    instrumentStatusMessage = "LOADED ${item.file.nameWithoutExtension}"
+                                                    instrumentStatusSuccess = true
+                                                    projectVersion++
+                                                    currentScreen = previousScreen
+                                                } else {
+                                                    fileBrowserState = fileBrowserState.copy(
+                                                        statusMessage = "LOAD FAILED",
+                                                        statusSuccess = false
+                                                    )
+                                                }
+                                            }
+                                            else -> {
+                                                // Unknown previous screen - try loading as project
+                                                val loaded = fileManager.loadProject(item.file)
+                                                if (loaded != null) {
+                                                    project = loaded
+                                                    projectVersion++
+                                                    currentScreen = previousScreen
+                                                } else {
+                                                    fileBrowserState = fileBrowserState.copy(
+                                                        statusMessage = "LOAD FAILED",
+                                                        statusSuccess = false
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                     null -> { /* Empty list */ }
@@ -854,14 +1128,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                         Log.d("ProjectScreen", "LOAD button pressed - switching to FILE_BROWSER")
                                         previousScreen = currentScreen
                                         currentScreen = ScreenType.FILE_BROWSER
-                                        // Reset file browser state
+                                        // Reset file browser state with correct directory and extension
                                         fileBrowserState = fileBrowserState.copy(
+                                            currentDirectory = fileManager.getProjectsDirectory(),
                                             cursor = 0,
                                             scroll = 0,
                                             mode = FileBrowserModule.BrowserMode.NORMAL,
+                                            fileExtension = "ptp",  // Filter for project files
                                             statusMessage = ""
                                         )
-                                        Log.d("ProjectScreen", "File browser opened")
+                                        Log.d("ProjectScreen", "File browser opened for .ptp files")
                                     }
                                     2 -> {  // SAVE
                                         val success = fileManager.saveProject(project, project.name)
@@ -881,6 +1157,41 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                 }
                             }
                             // Rows 4-6 (EXPORT, CLEAN, SYSTEM) - placeholder for now
+                        }
+                    }
+
+                    // INSTRUMENT: Handle LOAD button
+                    ScreenType.INSTRUMENT -> {
+                        when (instrumentCursorRow) {
+                            1 -> {  // ROW 1: LOAD button
+                                if (instrumentCursorColumn == 1) {
+                                    val samplesDir = fileManager.getSamplesDirectory()
+                                    Log.d("InstrumentScreen", "LOAD button pressed - opening file browser for WAV files")
+                                    Log.d("InstrumentScreen", "Samples directory: ${samplesDir.absolutePath}")
+                                    Log.d("InstrumentScreen", "Directory exists: ${samplesDir.exists()}")
+                                    Log.d("InstrumentScreen", "Directory can read: ${samplesDir.canRead()}")
+                                    if (samplesDir.exists()) {
+                                        val files = samplesDir.listFiles()
+                                        Log.d("InstrumentScreen", "Files in directory: ${files?.size ?: 0}")
+                                        files?.forEach { Log.d("InstrumentScreen", "  - ${it.name}") }
+                                    }
+
+                                    previousScreen = currentScreen
+                                    currentScreen = ScreenType.FILE_BROWSER
+                                    // Reset file browser state with correct directory and extension for WAV files
+                                    fileBrowserState = FileBrowserModule.State(
+                                        currentDirectory = samplesDir,
+                                        items = fileBrowserModule.buildItemList(samplesDir, fileExtension = "wav"),
+                                        cursor = 0,
+                                        scroll = 0,
+                                        mode = FileBrowserModule.BrowserMode.NORMAL,
+                                        fileExtension = "wav",  // Only show WAV files
+                                        statusMessage = ""
+                                    )
+                                    Log.d("InstrumentScreen", "File browser opened for .wav files, items: ${fileBrowserState.items.size}")
+                                }
+                            }
+                            // Other rows use A+direction combos for value editing
                         }
                     }
 
@@ -960,13 +1271,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         }
                     }
 
-                    // PHRASE SCREEN: Decrement values
+                    // PHRASE SCREEN: Now handled by generic input (A+direction combos)
                     ScreenType.PHRASE -> {
-                        when (cursorColumn) {
-                            1 -> cycleNote(project.phrases[currentPhrase].steps[cursorRow], -1)
-                            2 -> cycleVolume(project.phrases[currentPhrase].steps[cursorRow], -1)
-                            3 -> cycleInstrument(project.phrases[currentPhrase].steps[cursorRow], -1)
-                        }
+                        // All phrase value editing is now handled via generic input handler
+                        // No need for manual cycling here
                     }
 
                     // PROJECT SCREEN: Decrement values
@@ -1073,10 +1381,31 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             },
 
             // ───────────────────────────────────────────────────────────────
-            // START BUTTON - Toggle playback
+            // START BUTTON - Preview sample or toggle playback
             // ───────────────────────────────────────────────────────────────
             onStart = {
-                isPlaying = !isPlaying
+                when (currentScreen) {
+                    // File browser: Preview selected WAV file
+                    ScreenType.FILE_BROWSER -> {
+                        if (previousScreen == ScreenType.INSTRUMENT && fileBrowserState.items.isNotEmpty()) {
+                            val selectedItem = fileBrowserState.items[fileBrowserState.cursor]
+                            val selectedFile = selectedItem.file
+                            if (selectedFile.isFile && selectedFile.extension.lowercase() == "wav") {
+                                audioEngine.previewSampleFile(selectedFile.absolutePath)
+                            }
+                        }
+                    }
+
+                    // Instrument screen: Preview instrument with all parameters
+                    ScreenType.INSTRUMENT -> {
+                        audioEngine.previewInstrument(project.instruments[currentInstrument])
+                    }
+
+                    // Other screens: Toggle playback
+                    else -> {
+                        isPlaying = !isPlaying
+                    }
+                }
             },
 
             // ───────────────────────────────────────────────────────────────
@@ -1208,6 +1537,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         currentPhrase = if (currentPhrase > 0) currentPhrase - 1 else 255
                         Log.d("Navigation", "  -> Changed to phrase $currentPhrase")
                     }
+                    ScreenType.INSTRUMENT -> {
+                        // Previous instrument (wrap around)
+                        currentInstrument = if (currentInstrument > 0) currentInstrument - 1 else 255
+                        Log.d("Navigation", "  -> Changed to instrument $currentInstrument")
+                    }
                     ScreenType.FILE_BROWSER -> {
                         // Navigate to parent folder
                         fileBrowserState = fileBrowserModule.navigateToParent(fileBrowserState)
@@ -1230,6 +1564,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         // Next phrase (wrap around)
                         currentPhrase = if (currentPhrase < 255) currentPhrase + 1 else 0
                         Log.d("Navigation", "  -> Changed to phrase $currentPhrase")
+                    }
+                    ScreenType.INSTRUMENT -> {
+                        // Next instrument (wrap around)
+                        currentInstrument = if (currentInstrument < 255) currentInstrument + 1 else 0
+                        Log.d("Navigation", "  -> Changed to instrument $currentInstrument")
                     }
                     else -> { Log.d("Navigation", "  -> No action for screen $currentScreen") }
                 }
@@ -1331,7 +1670,13 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 
     // Auto-focus when app starts so keyboard works immediately
     LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
+        // Small delay to ensure view is ready before requesting focus
+        kotlinx.coroutines.delay(100)
+        try {
+            focusRequester.requestFocus()
+        } catch (e: Exception) {
+            // Ignore focus request errors
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1365,6 +1710,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 inputMapper = inputMapper,
                 focusRequester = focusRequester,
                 projectVersion = projectVersion,
+                currentInstrument = currentInstrument,
+                instrumentCursorRow = instrumentCursorRow,
+                instrumentCursorColumn = instrumentCursorColumn,
+                instrumentStatusMessage = instrumentStatusMessage,
+                instrumentStatusSuccess = instrumentStatusSuccess,
                 fileBrowserState = fileBrowserState
             )
         } else {
@@ -1388,6 +1738,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 inputMapper = inputMapper,
                 focusRequester = focusRequester,
                 projectVersion = projectVersion,
+                currentInstrument = currentInstrument,
+                instrumentCursorRow = instrumentCursorRow,
+                instrumentCursorColumn = instrumentCursorColumn,
+                instrumentStatusMessage = instrumentStatusMessage,
+                instrumentStatusSuccess = instrumentStatusSuccess,
                 fileBrowserState = fileBrowserState
             )
         }
@@ -1412,6 +1767,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             inputMapper = inputMapper,
             focusRequester = focusRequester,
             projectVersion = projectVersion,
+            currentInstrument = currentInstrument,
+            instrumentCursorRow = instrumentCursorRow,
+            instrumentCursorColumn = instrumentCursorColumn,
+            instrumentStatusMessage = instrumentStatusMessage,
+            instrumentStatusSuccess = instrumentStatusSuccess,
             fileBrowserState = fileBrowserState
         )
     }

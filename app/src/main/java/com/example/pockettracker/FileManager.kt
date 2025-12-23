@@ -29,12 +29,12 @@ class FileManager(private val context: Context) {
      * Get the PocketTracker projects directory
      * Creates it if it doesn't exist
      *
-     * Location: Documents/PocketTracker/
+     * Location: Documents/PocketTracker/Projects/
      */
     fun getProjectsDirectory(): File {
         // Use Documents folder (shared storage, survives uninstall)
         val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        val projectsDir = File(documentsDir, "PocketTracker")
+        val projectsDir = File(documentsDir, "PocketTracker/Projects")
 
         // Create directory if it doesn't exist
         if (!projectsDir.exists()) {
@@ -49,6 +49,29 @@ class FileManager(private val context: Context) {
         }
 
         return projectsDir
+    }
+
+    /**
+     * Get the samples directory
+     * Creates it if it doesn't exist
+     * Returns: Documents/PocketTracker/Samples
+     */
+    fun getSamplesDirectory(): File {
+        val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+        val samplesDir = File(documentsDir, "PocketTracker/Samples")
+
+        if (!samplesDir.exists()) {
+            val created = samplesDir.mkdirs()
+            if (created) {
+                Log.d(TAG, "✅ Created samples directory: ${samplesDir.absolutePath}")
+            } else {
+                Log.e(TAG, "❌ Failed to create samples directory")
+                // Fallback to internal storage if external fails
+                return File(context.filesDir, "Samples").apply { mkdirs() }
+            }
+        }
+
+        return samplesDir
     }
 
     /**

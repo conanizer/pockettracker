@@ -39,7 +39,7 @@ struct Voice {
 class AudioEngine : public oboe::AudioStreamDataCallback {
 public:
     AudioEngine() {
-        for (int i = 0; i < 12; i++) {
+        for (int i = 0; i < 256; i++) {
             samples[i] = nullptr;
             sampleLengths[i] = 0;
         }
@@ -47,7 +47,7 @@ public:
 
     ~AudioEngine() {
         closeStream();
-        for (int i = 0; i < 12; i++) {
+        for (int i = 0; i < 256; i++) {
             if (samples[i]) {
                 delete[] samples[i];
             }
@@ -92,7 +92,7 @@ public:
     }
 
     void loadSample(int id, const float* data, int length) {
-        if (id < 0 || id >= 12) return;
+        if (id < 0 || id >= 256) return;
 
         if (samples[id]) {
             delete[] samples[id];
@@ -108,7 +108,7 @@ public:
     }
 
     void triggerNote(int sampleId, int trackId, float freq, float baseFreq, float vol) {
-        if (sampleId < 0 || sampleId >= 12 || !samples[sampleId]) return;
+        if (sampleId < 0 || sampleId >= 256 || !samples[sampleId]) return;
 
         // Resume stream if paused (prevents hum when not playing)
         resumeStream();
@@ -125,7 +125,7 @@ public:
             if (!voices[i].isActive) {
                 float rate = freq / baseFreq;
                 voices[i].trigger(samples[sampleId], sampleLengths[sampleId], trackId, rate, vol);
-                LOGD("Note: track=%d", trackId);
+                LOGD("Note: track=%d, sampleId=%d", trackId, sampleId);
                 return;
             }
         }
@@ -192,8 +192,8 @@ public:
 private:
     std::shared_ptr<oboe::AudioStream> stream;
     Voice voices[MAX_VOICES];
-    float* samples[12];
-    int sampleLengths[12];
+    float* samples[256];
+    int sampleLengths[256];
 };
 
 static AudioEngine* engine = nullptr;

@@ -51,8 +51,17 @@ fun PixelPerfectTracker(
     projectStatusMessage: String,
     projectStatusSuccess: Boolean,
     projectVersion: Int,
+    currentInstrument: Int,
+    instrumentCursorRow: Int,
+    instrumentCursorColumn: Int,
+    instrumentStatusMessage: String,
+    instrumentStatusSuccess: Boolean,
     fileBrowserState: FileBrowserModule.State? = null
 ) {
+    android.util.Log.d("PixelPerfectTracker", "==== PixelPerfectTracker called ====")
+    android.util.Log.d("PixelPerfectTracker", "Screen: $currentScreen")
+    android.util.Log.d("PixelPerfectTracker", "Instrument cursor: row=$instrumentCursorRow, col=$instrumentCursorColumn")
+
     if (currentScreen == ScreenType.FILE_BROWSER) {
         android.util.Log.d("PixelPerfectTracker", "FILE_BROWSER screen, fileBrowserState=${if (fileBrowserState != null) "not null (${fileBrowserState.items.size} items)" else "NULL"}")
     }
@@ -75,7 +84,7 @@ fun PixelPerfectTracker(
                     while (isPlaying) {
                         val step = project.phrases[currentPhrase].steps[playbackRow]
                         if (!step.isEmpty()) {
-                            audioEngine.playNote(step.note, step.instrument, 0, step.volume / 255f)
+                            audioEngine.playNote(step.note, step.instrument, 0, step.volume / 255f, project)
                         }
                         playbackRow = (playbackRow + 1) % 16
                         stepCounter++
@@ -124,7 +133,7 @@ fun PixelPerfectTracker(
                                 if (originalMidi >= 0) {
                                     val transposedMidi = (originalMidi + transposeSemitones).coerceIn(0, 127)
                                     val transposedNote = Note.fromMidi(transposedMidi)
-                                    audioEngine.playNote(transposedNote, step.instrument, 0, step.volume / 255f)
+                                    audioEngine.playNote(transposedNote, step.instrument, 0, step.volume / 255f, project)
                                 }
                             }
                             playbackPhraseStep = stepIndex
@@ -216,7 +225,7 @@ fun PixelPerfectTracker(
                                                         val transposedMidi = (originalMidi + transposeSemitones).coerceIn(0, 127)
                                                         val transposedNote = Note.fromMidi(transposedMidi)
                                                         // Use trackId as the track parameter for voice assignment
-                                                        audioEngine.playNote(transposedNote, step.instrument, trackId, step.volume / 255f)
+                                                        audioEngine.playNote(transposedNote, step.instrument, trackId, step.volume / 255f, project)
                                                     }
                                                 }
                                             }
@@ -279,8 +288,9 @@ fun PixelPerfectTracker(
         val offsetX = (screenWidthPx - renderWidth) / 2f
         val offsetY = (screenHeightPx - renderHeight) / 2f
 
-        // Main canvas - use key() to force redraw when projectVersion changes
-        key(projectVersion) {
+        // Main canvas - use key() to force redraw when state changes
+        // Key on: projectVersion, screen type, and all cursor positions
+        key(projectVersion, currentScreen, cursorRow, cursorColumn, projectCursorRow, projectCursorColumn, instrumentCursorRow, instrumentCursorColumn) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 translate(offsetX, offsetY) {
                     // Use layout manager to draw modules
@@ -305,6 +315,11 @@ fun PixelPerfectTracker(
                             projectStatusMessage = projectStatusMessage,
                             projectStatusSuccess = projectStatusSuccess,
                             projectVersion = projectVersion,
+                            currentInstrument = currentInstrument,
+                            instrumentCursorRow = instrumentCursorRow,
+                            instrumentCursorColumn = instrumentCursorColumn,
+                            instrumentStatusMessage = instrumentStatusMessage,
+                            instrumentStatusSuccess = instrumentStatusSuccess,
                             fileBrowserState = fileBrowserState
                         )
                     }
@@ -327,6 +342,7 @@ class TrackerLayout {
     private val oscilloscope = OscilloscopeModule(width = 620, height = 70)
     private val phraseEditor = PhraseEditorModule()
     private val navigationMap = NavigationMapModule()
+    private val instrumentModule = InstrumentModule()
     private val chainEditor = ChainEditorModule()
     private val songEditor = SongEditorModule()
     private val projectModule = ProjectModule()
@@ -354,6 +370,11 @@ class TrackerLayout {
         projectStatusMessage: String = "",
         projectStatusSuccess: Boolean = true,
         projectVersion: Int = 0,  // Version counter to force redraw on data changes
+        currentInstrument: Int = 0,
+        instrumentCursorRow: Int = 0,
+        instrumentCursorColumn: Int = 1,
+        instrumentStatusMessage: String = "",
+        instrumentStatusSuccess: Boolean = true,
         fileBrowserState: FileBrowserModule.State? = null  // File browser state
     ) {
         // ===================================
@@ -481,6 +502,26 @@ class TrackerLayout {
                             cursorTrack = cursorColumn,  // Use cursorColumn as track selector
                             isPlaying = isPlaying && currentScreen == ScreenType.SONG,
                             playbackRow = playbackSongRow
+                        )
+                    )
+                }
+            }
+
+            // ===================================
+            // INSTRUMENT SCREEN: Show instrument editor
+            // ===================================
+            ScreenType.INSTRUMENT -> {
+                with(instrumentModule) {
+                    draw(
+                        x = moduleX,
+                        y = currentY,
+                        scale = scale,
+                        state = InstrumentState(
+                            instrument = project.instruments[currentInstrument],
+                            cursorRow = instrumentCursorRow,
+                            cursorColumn = instrumentCursorColumn,
+                            statusMessage = instrumentStatusMessage,
+                            isSuccess = instrumentStatusSuccess
                         )
                     )
                 }
