@@ -78,32 +78,36 @@ fun PixelPerfectTracker(
                 ScreenType.PHRASE -> {
                     // PHRASE PLAYBACK: Loop through 16 steps of current phrase
                     val stepDurationMs = (60000.0 / project.tempo / 4.0)
-                    var startTime = SystemClock.elapsedRealtime()
-                    var stepCounter = 0L
+                    val startTime = SystemClock.elapsedRealtime().toDouble()
+                    var stepCounter = 0
 
                     while (isPlaying) {
+                        // Calculate target time for THIS step (not next step)
+                        val targetTime = startTime + (stepCounter * stepDurationMs)
+                        val currentTime = SystemClock.elapsedRealtime().toDouble()
+                        val waitTime = (targetTime - currentTime).toLong()
+
+                        // Wait until target time, then play note at precise moment
+                        if (waitTime > 0) {
+                            delay(waitTime)
+                        }
+
+                        // Now play the note at the precise target time
                         val step = project.phrases[currentPhrase].steps[playbackRow]
                         if (!step.isEmpty()) {
                             audioEngine.playNote(step.note, step.instrument, 0, step.volume / 255f, project)
                         }
+
                         playbackRow = (playbackRow + 1) % 16
                         stepCounter++
-
-                        // Drift compensation
-                        val targetTime = startTime + (stepCounter * stepDurationMs).toLong()
-                        val currentTime = SystemClock.elapsedRealtime()
-                        val waitTime = targetTime - currentTime
-                        if (waitTime > 0) {
-                            delay(waitTime)
-                        }
                     }
                 }
                 ScreenType.CHAIN -> {
                     // CHAIN PLAYBACK: Loop through chain rows, playing phrases with transpose
                     val chain = project.chains[currentChain]
                     val stepDurationMs = (60000.0 / project.tempo / 4.0)
-                    var startTime = SystemClock.elapsedRealtime()
-                    var stepCounter = 0L
+                    val startTime = SystemClock.elapsedRealtime().toDouble()
+                    var stepCounter = 0
 
                     while (isPlaying) {
                         // Find next non-empty chain row
@@ -126,6 +130,15 @@ fun PixelPerfectTracker(
                         for (stepIndex in 0..15) {
                             if (!isPlaying) break
 
+                            // Calculate target time and wait first
+                            val targetTime = startTime + (stepCounter * stepDurationMs)
+                            val currentTime = SystemClock.elapsedRealtime().toDouble()
+                            val waitTime = (targetTime - currentTime).toLong()
+                            if (waitTime > 0) {
+                                delay(waitTime)
+                            }
+
+                            // Now play note at precise time
                             val step = project.phrases[phraseRef].steps[stepIndex]
                             if (!step.isEmpty()) {
                                 // Apply transpose to the note
@@ -136,16 +149,9 @@ fun PixelPerfectTracker(
                                     audioEngine.playNote(transposedNote, step.instrument, 0, step.volume / 255f, project)
                                 }
                             }
+
                             playbackPhraseStep = stepIndex
                             stepCounter++
-
-                            // Drift compensation
-                            val targetTime = startTime + (stepCounter * stepDurationMs).toLong()
-                            val currentTime = SystemClock.elapsedRealtime()
-                            val waitTime = targetTime - currentTime
-                            if (waitTime > 0) {
-                                delay(waitTime)
-                            }
                         }
 
                         // Move to next chain row
@@ -159,9 +165,9 @@ fun PixelPerfectTracker(
                     // Calculate step duration in milliseconds (16th note)
                     val stepDurationMs = (60000.0 / project.tempo / 4.0)
 
-                    // Use absolute timing to prevent drift
-                    var startTime = SystemClock.elapsedRealtime()
-                    var stepCounter = 0L
+                    // Use absolute timing with double precision to prevent drift
+                    val startTime = SystemClock.elapsedRealtime().toDouble()
+                    var stepCounter = 0
 
                     while (isPlaying) {
                         // Find the longest chain length at current song row
@@ -196,12 +202,15 @@ fun PixelPerfectTracker(
                             for (stepIndex in 0..15) {
                                 if (!isPlaying) break
 
-                                // Calculate target time for this step (drift compensation)
-                                val targetTime = startTime + (stepCounter * stepDurationMs).toLong()
-                                val currentTime = SystemClock.elapsedRealtime()
-                                val waitTime = targetTime - currentTime
+                                // Calculate target time and wait first
+                                val targetTime = startTime + (stepCounter * stepDurationMs)
+                                val currentTime = SystemClock.elapsedRealtime().toDouble()
+                                val waitTime = (targetTime - currentTime).toLong()
+                                if (waitTime > 0) {
+                                    delay(waitTime)
+                                }
 
-                                // Play all 8 tracks simultaneously at this step
+                                // Now play all 8 tracks simultaneously at precise time
                                 for (trackId in 0..7) {
                                     val track = project.tracks[trackId]
 
@@ -236,11 +245,6 @@ fun PixelPerfectTracker(
                                 // Update playback position
                                 playbackPhraseStep = stepIndex
                                 stepCounter++
-
-                                // Wait until target time (drift compensation)
-                                if (waitTime > 0) {
-                                    delay(waitTime)
-                                }
                             }
 
                             // Move to next chain row

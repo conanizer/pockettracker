@@ -9,6 +9,18 @@
 
 const int MAX_VOICES = 8;  // Reduced for testing
 
+// Instrument playback parameters
+struct InstrumentParams {
+    int startPoint;     // 0-255 (normalized position)
+    int endPoint;       // 0-255 (normalized position)
+    bool reverse;       // Play backwards
+    int loopMode;       // 0=off, 1=forward, 2=ping-pong
+    int loopStart;      // 0-255 (normalized position)
+
+    InstrumentParams() : startPoint(0), endPoint(255), reverse(false),
+                         loopMode(0), loopStart(0) {}
+};
+
 struct Voice {
     bool isActive;
     float* sampleData;
@@ -18,16 +30,55 @@ struct Voice {
     float playbackRate;
     float volume;
 
-    Voice() : isActive(false), sampleData(nullptr), sampleLength(0),
-              position(0), trackId(-1), playbackRate(1.0f), volume(1.0f) {}
+    // Playback parameters (calculated from instrument params)
+    int actualStart;     // Actual sample index to start from
+    int actualEnd;       // Actual sample index to end at
+    int actualLoopStart; // Actual sample index to loop from
+    bool reverse;        // Play backwards
+    int loopMode;        // 0=off, 1=forward, 2=ping-pong
+    bool loopingBack;    // For ping-pong mode direction
 
-    void trigger(float* sample, int length, int track, float rate, float vol) {
+    Voice() : isActive(false), sampleData(nullptr), sampleLength(0),
+              position(0), trackId(-1), playbackRate(1.0f), volume(1.0f),
+              actualStart(0), actualEnd(0), actualLoopStart(0),
+              reverse(false), loopMode(0), loopingBack(false) {}
+
+    void trigger(float* sample, int length, int track, float rate, float vol,
+                 const InstrumentParams& params) {
         sampleData = sample;
         sampleLength = length;
-        position = 0.0f;
         trackId = track;
         playbackRate = rate;
         volume = vol;
+
+        // Convert normalized 0-255 values to actual sample positions
+        actualStart = (params.startPoint * length) / 255;
+        actualEnd = (params.endPoint * length) / 255;
+        actualLoopStart = (params.loopStart * length) / 255;
+
+        // Clamp to valid range
+        actualStart = std::max(0, std::min(actualStart, length - 1));
+        actualEnd = std::max(0, std::min(actualEnd, length - 1));
+        actualLoopStart = std::max(actualStart, std::min(actualLoopStart, actualEnd));
+
+        // Ensure start < end
+        if (actualStart >= actualEnd) {
+            actualStart = 0;
+            actualEnd = length - 1;
+        }
+
+        // Set playback parameters
+        reverse = params.reverse;
+        loopMode = params.loopMode;
+        loopingBack = false;
+
+        // Set initial position based on direction
+        if (reverse) {
+            position = (float)actualEnd;
+        } else {
+            position = (float)actualStart;
+        }
+
         isActive = true;
     }
 
@@ -42,6 +93,8 @@ public:
         for (int i = 0; i < 256; i++) {
             samples[i] = nullptr;
             sampleLengths[i] = 0;
+            // Initialize with default parameters
+            instrumentParams[i] = InstrumentParams();
         }
     }
 
@@ -107,6 +160,19 @@ public:
         LOGD("Sample %d: %d frames", id, length);
     }
 
+    void setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt) {
+        if (instrumentId < 0 || instrumentId >= 256) return;
+
+        instrumentParams[instrumentId].startPoint = start;
+        instrumentParams[instrumentId].endPoint = end;
+        instrumentParams[instrumentId].reverse = rev;
+        instrumentParams[instrumentId].loopMode = loop;
+        instrumentParams[instrumentId].loopStart = loopSt;
+
+        LOGD("Instrument %d params: start=%d, end=%d, rev=%d, loop=%d, loopStart=%d",
+             instrumentId, start, end, rev, loop, loopSt);
+    }
+
     void triggerNote(int sampleId, int trackId, float freq, float baseFreq, float vol) {
         if (sampleId < 0 || sampleId >= 256 || !samples[sampleId]) return;
 
@@ -124,8 +190,10 @@ public:
         for (int i = 0; i < MAX_VOICES; i++) {
             if (!voices[i].isActive) {
                 float rate = freq / baseFreq;
-                voices[i].trigger(samples[sampleId], sampleLengths[sampleId], trackId, rate, vol);
-                LOGD("Note: track=%d, sampleId=%d", trackId, sampleId);
+                // Use stored instrument parameters
+                voices[i].trigger(samples[sampleId], sampleLengths[sampleId], trackId, rate, vol,
+                                  instrumentParams[sampleId]);
+                LOGD("Note: track=%d, sampleId=%d, rate=%.3f", trackId, sampleId, rate);
                 return;
             }
         }
@@ -140,6 +208,13 @@ public:
             stream->pause();
             LOGD("Stream paused (stopAll)");
         }
+    }
+
+    int getSampleRate() {
+        if (stream) {
+            return stream->getSampleRate();
+        }
+        return 48000; // Default fallback
     }
 
     void resumeStream() {
@@ -171,7 +246,8 @@ public:
             for (int i = 0; i < numFrames; i++) {
                 int idx = (int)voice.position;
 
-                if (idx >= voice.sampleLength - 1) {
+                // Bounds check
+                if (idx < 0 || idx >= voice.sampleLength) {
                     voice.isActive = false;
                     break;
                 }
@@ -182,7 +258,49 @@ public:
                 output[i * channelCount] += sample;      // Left
                 output[i * channelCount + 1] += sample;  // Right
 
-                voice.position += voice.playbackRate;
+                // Update position based on playback mode
+                if (voice.loopMode == 2) {
+                    // Ping-pong loop
+                    if (voice.loopingBack) {
+                        voice.position -= voice.playbackRate;
+                        if (voice.position <= voice.actualLoopStart) {
+                            voice.loopingBack = false;
+                            voice.position = (float)voice.actualLoopStart;
+                        }
+                    } else {
+                        voice.position += voice.playbackRate;
+                        if (voice.position >= voice.actualEnd) {
+                            voice.loopingBack = true;
+                            voice.position = (float)voice.actualEnd;
+                        }
+                    }
+                } else if (voice.reverse) {
+                    // Reverse playback
+                    voice.position -= voice.playbackRate;
+                    if (voice.position <= voice.actualStart) {
+                        if (voice.loopMode == 1) {
+                            // Forward loop (restart from loop point)
+                            voice.position = (float)voice.actualLoopStart;
+                        } else {
+                            // No loop, stop
+                            voice.isActive = false;
+                            break;
+                        }
+                    }
+                } else {
+                    // Forward playback
+                    voice.position += voice.playbackRate;
+                    if (voice.position >= voice.actualEnd) {
+                        if (voice.loopMode == 1) {
+                            // Forward loop (restart from loop point)
+                            voice.position = (float)voice.actualLoopStart;
+                        } else {
+                            // No loop, stop
+                            voice.isActive = false;
+                            break;
+                        }
+                    }
+                }
             }
         }
 
@@ -194,6 +312,7 @@ private:
     Voice voices[MAX_VOICES];
     float* samples[256];
     int sampleLengths[256];
+    InstrumentParams instrumentParams[256];
 };
 
 static AudioEngine* engine = nullptr;
@@ -251,6 +370,23 @@ Java_com_example_pockettracker_TrackerAudioEngine_native_1stopAll(JNIEnv *env, j
 JNIEXPORT jint JNICALL
 Java_com_example_pockettracker_TrackerAudioEngine_native_1getActiveVoiceCount(JNIEnv *env, jobject thiz) {
     return 0;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_example_pockettracker_TrackerAudioEngine_native_1getSampleRate(JNIEnv *env, jobject thiz) {
+    if (engine) {
+        return engine->getSampleRate();
+    }
+    return 48000; // Default fallback
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_TrackerAudioEngine_native_1setInstrumentParams(
+        JNIEnv *env, jobject thiz, jint instrumentId, jint start, jint end,
+        jboolean reverse, jint loopMode, jint loopStart) {
+    if (engine) {
+        engine->setInstrumentParams(instrumentId, start, end, reverse, loopMode, loopStart);
+    }
 }
 
 }

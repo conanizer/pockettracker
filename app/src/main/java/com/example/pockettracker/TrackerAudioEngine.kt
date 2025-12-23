@@ -16,6 +16,7 @@ class TrackerAudioEngine(private val context: Context) {
 
     // Loaded samples metadata
     private val sampleBaseFrequencies = mutableMapOf<Int, Float>()
+    private val sampleRateRatios = mutableMapOf<Int, Float>()  // deviceRate / sampleRate per sample
 
     init {
         System.loadLibrary("pockettracker")
@@ -34,56 +35,74 @@ class TrackerAudioEngine(private val context: Context) {
 
     private fun loadAllSamples() {
         try {
-            // Load the 4 samples
-            val kick = loadWavFile(R.raw.kick)
-            val snare = loadWavFile(R.raw.snare)
-            val hihat = loadWavFile(R.raw.hihat)
-            val bass = loadWavFile(R.raw.bass)
-            val shimmer = loadWavFile(R.raw.shimmer)
-            val tambo = loadWavFile(R.raw.tambo)
-            val lofi = loadWavFile(R.raw.lofi)
-            val choirstring = loadWavFile(R.raw.choirstring)
-            val apache162 = loadWavFile(R.raw.apache162)
-            val copta162 = loadWavFile(R.raw.copta162)
-            val funky162 = loadWavFile(R.raw.funky162)
-            val eightoeight = loadWavFile(R.raw.eightoeight)
+            // Load the 12 samples (returns Pair of samples + adjusted base frequency)
+            val (kickSamples, kickFreq) = loadWavFile(R.raw.kick)
+            val (snareSamples, snareFreq) = loadWavFile(R.raw.snare)
+            val (hihatSamples, hihatFreq) = loadWavFile(R.raw.hihat)
+            val (bassSamples, bassFreq) = loadWavFile(R.raw.bass)
+            val (shimmerSamples, shimmerFreq) = loadWavFile(R.raw.shimmer)
+            val (tamboSamples, tamboFreq) = loadWavFile(R.raw.tambo)
+            val (lofiSamples, lofiFreq) = loadWavFile(R.raw.lofi)
+            val (choirstringSamples, choirstringFreq) = loadWavFile(R.raw.choirstring)
+            val (apache162Samples, apache162Freq) = loadWavFile(R.raw.apache162)
+            val (copta162Samples, copta162Freq) = loadWavFile(R.raw.copta162)
+            val (funky162Samples, funky162Freq) = loadWavFile(R.raw.funky162)
+            val (eightoeightSamples, eightoeightFreq) = loadWavFile(R.raw.eightoeight)
 
-            native_loadSample(0, kick)
-            native_loadSample(1, snare)
-            native_loadSample(2, hihat)
-            native_loadSample(3, bass)
-            native_loadSample(4, shimmer)
-            native_loadSample(5, tambo)
-            native_loadSample(6, lofi)
-            native_loadSample(7, choirstring)
-            native_loadSample(8, apache162)
-            native_loadSample(9, copta162)
-            native_loadSample(10, funky162)
-            native_loadSample(11, eightoeight)
+            native_loadSample(0, kickSamples)
+            native_loadSample(1, snareSamples)
+            native_loadSample(2, hihatSamples)
+            native_loadSample(3, bassSamples)
+            native_loadSample(4, shimmerSamples)
+            native_loadSample(5, tamboSamples)
+            native_loadSample(6, lofiSamples)
+            native_loadSample(7, choirstringSamples)
+            native_loadSample(8, apache162Samples)
+            native_loadSample(9, copta162Samples)
+            native_loadSample(10, funky162Samples)
+            native_loadSample(11, eightoeightSamples)
 
+            // Set base frequencies and store ratios (adjusted for sample rate)
+            // The ratio is already baked into the frequency, but we also store it separately
+            // so it can be reapplied when ROOT/DETUNE changes
+            val deviceRate = getDeviceSampleRate().toFloat()
+            sampleBaseFrequencies[0] = kickFreq
+            sampleBaseFrequencies[1] = snareFreq
+            sampleBaseFrequencies[2] = hihatFreq
+            sampleBaseFrequencies[3] = bassFreq
+            sampleBaseFrequencies[4] = shimmerFreq
+            sampleBaseFrequencies[5] = tamboFreq
+            sampleBaseFrequencies[6] = lofiFreq
+            sampleBaseFrequencies[7] = choirstringFreq
+            sampleBaseFrequencies[8] = apache162Freq
+            sampleBaseFrequencies[9] = copta162Freq
+            sampleBaseFrequencies[10] = funky162Freq
+            sampleBaseFrequencies[11] = eightoeightFreq
 
+            // Store ratios for each (kickFreq / 261.63 gives us the ratio)
+            for (i in 0..11) {
+                sampleRateRatios[i] = sampleBaseFrequencies[i]!! / 261.63f
+            }
 
-            // Set base frequencies (assume samples are at C-4 = 261.63 Hz)
-            sampleBaseFrequencies[0] = 261.63f
-            sampleBaseFrequencies[1] = 261.63f
-            sampleBaseFrequencies[2] = 261.63f
-            sampleBaseFrequencies[3] = 261.63f
-            sampleBaseFrequencies[4] = 261.63f
-            sampleBaseFrequencies[5] = 261.63f
-            sampleBaseFrequencies[6] = 261.63f
-            sampleBaseFrequencies[7] = 261.63f
-            sampleBaseFrequencies[8] = 261.63f
-            sampleBaseFrequencies[9] = 261.63f
-            sampleBaseFrequencies[10] = 261.63f
-            sampleBaseFrequencies[11] = 261.63f
-
-            Log.d(TAG, "Loaded 12 samples")
+            Log.d(TAG, "Loaded 12 samples with sample rate compensation")
         } catch (e: Exception) {
             Log.e(TAG, "Error loading samples: ${e.message}")
         }
     }
 
-    private fun loadWavFile(resourceId: Int): FloatArray {
+    /**
+     * Get actual device sample rate from audio engine
+     * Queries the Oboe audio stream for the real sample rate
+     */
+    private fun getDeviceSampleRate(): Int {
+        return native_getSampleRate()
+    }
+
+    /**
+     * Load WAV file from resources with sample rate detection
+     * Returns Pair of (samples, adjustedBaseFrequency)
+     */
+    private fun loadWavFile(resourceId: Int): Pair<FloatArray, Float> {
         context.resources.openRawResource(resourceId).use { inputStream ->
             val fileSize = inputStream.available()
             val buffer = ByteArray(fileSize)
@@ -94,6 +113,11 @@ class TrackerAudioEngine(private val context: Context) {
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .short
                 .toInt()
+
+            // Read sample rate from WAV header (bytes 24-27)
+            val sampleRate = ByteBuffer.wrap(buffer, 24, 4)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .int
 
             // Skip WAV header (44 bytes)
             val dataStart = 44
@@ -117,8 +141,15 @@ class TrackerAudioEngine(private val context: Context) {
                 rawSamples
             }
 
-            Log.d(TAG, "Loaded resource sample: ${rawSamples.size} samples ($channels ch) -> ${samples.size} mono")
-            return samples
+            // Calculate adjusted base frequency for sample rate compensation
+            // If sample is 44100Hz and device is 48000Hz, samples plays faster (higher pitch)
+            // Adjust base frequency: baseFreq * (deviceRate / sampleRate) to compensate
+            val deviceSampleRate = getDeviceSampleRate()
+            val sampleRateRatio = deviceSampleRate.toFloat() / sampleRate.toFloat()
+            val adjustedBaseFreq = 261.63f * sampleRateRatio
+
+            Log.d(TAG, "Loaded resource sample: ${rawSamples.size} samples ($channels ch, ${sampleRate}Hz) -> ${samples.size} mono, baseFreq=$adjustedBaseFreq (ratio=$sampleRateRatio)")
+            return Pair(samples, adjustedBaseFreq)
         }
     }
 
@@ -136,14 +167,14 @@ class TrackerAudioEngine(private val context: Context) {
                 return false
             }
 
-            val samples = loadWavFileFromPath(filePath)
+            val (samples, adjustedBaseFreq) = loadWavFileFromPath(filePath)
             native_loadSample(instrumentId, samples)
 
-            // Set default base frequency for this sample (assume C-4 = 261.63 Hz)
-            // This will be updated if the user changes the ROOT parameter
-            sampleBaseFrequencies[instrumentId] = 261.63f
+            // Set adjusted base frequency and store ratio (compensates for sample rate)
+            sampleBaseFrequencies[instrumentId] = adjustedBaseFreq
+            sampleRateRatios[instrumentId] = adjustedBaseFreq / 261.63f
 
-            Log.d(TAG, "✅ Loaded sample: instrumentId=$instrumentId, sampleLength=${samples.size}, baseFreq=261.63, path=$filePath")
+            Log.d(TAG, "✅ Loaded sample: instrumentId=$instrumentId, sampleLength=${samples.size}, baseFreq=$adjustedBaseFreq, ratio=${sampleRateRatios[instrumentId]}, path=$filePath")
             return true
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error loading sample from file: ${e.message}")
@@ -155,8 +186,9 @@ class TrackerAudioEngine(private val context: Context) {
      * Load WAV file from external path
      * Private helper function
      * Handles both mono and stereo files (stereo is mixed down to mono)
+     * Returns Pair of (samples, adjustedBaseFrequency)
      */
-    private fun loadWavFileFromPath(filePath: String): FloatArray {
+    private fun loadWavFileFromPath(filePath: String): Pair<FloatArray, Float> {
         File(filePath).inputStream().use { inputStream ->
             val fileSize = inputStream.available()
             val buffer = ByteArray(fileSize)
@@ -167,6 +199,11 @@ class TrackerAudioEngine(private val context: Context) {
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .short
                 .toInt()
+
+            // Read sample rate from WAV header (bytes 24-27)
+            val sampleRate = ByteBuffer.wrap(buffer, 24, 4)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .int
 
             // Skip WAV header (44 bytes)
             val dataStart = 44
@@ -190,8 +227,13 @@ class TrackerAudioEngine(private val context: Context) {
                 rawSamples
             }
 
-            Log.d(TAG, "Loaded WAV: ${rawSamples.size} samples ($channels ch) -> ${samples.size} mono")
-            return samples
+            // Calculate adjusted base frequency for sample rate compensation
+            val deviceSampleRate = getDeviceSampleRate()
+            val sampleRateRatio = deviceSampleRate.toFloat() / sampleRate.toFloat()
+            val adjustedBaseFreq = 261.63f * sampleRateRatio
+
+            Log.d(TAG, "Loaded WAV: ${rawSamples.size} samples ($channels ch, ${sampleRate}Hz) -> ${samples.size} mono, baseFreq=$adjustedBaseFreq (ratio=$sampleRateRatio)")
+            return Pair(samples, adjustedBaseFreq)
         }
     }
 
@@ -223,16 +265,16 @@ class TrackerAudioEngine(private val context: Context) {
             // (audio thread might be playing old sample 255 while we delete/reallocate it)
             native_stopAll()
 
-            val samples = loadWavFileFromPath(filePath)
+            val (samples, adjustedBaseFreq) = loadWavFileFromPath(filePath)
             // Load to temporary preview slot (255)
             native_loadSample(255, samples)
 
             // Play at C-4 as reference pitch
-            // Assume sample was recorded at C-4, so rate = C-4/C-4 = 1.0
+            // Use adjusted base frequency to compensate for sample rate
             val c4Freq = 261.63f
-            native_triggerNote(255, 0, c4Freq, c4Freq, 1.0f)
+            native_triggerNote(255, 0, c4Freq, adjustedBaseFreq, 1.0f)
 
-            Log.d(TAG, "🔊 Preview sample at C-4: $filePath")
+            Log.d(TAG, "🔊 Preview sample at C-4: $filePath (baseFreq=$adjustedBaseFreq)")
             return true
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error previewing sample: ${e.message}")
@@ -269,7 +311,7 @@ class TrackerAudioEngine(private val context: Context) {
 
     /**
      * Calculate the effective base frequency for an instrument
-     * Combines ROOT note and DETUNE parameters
+     * Combines ROOT note, DETUNE parameters, and sample rate compensation
      * @param instrument The instrument
      * @return Calculated base frequency in Hz
      */
@@ -287,9 +329,12 @@ class TrackerAudioEngine(private val context: Context) {
         // Convert semitone shift to frequency multiplier: 2^(semitones/12)
         val detuneMultiplier = Math.pow(2.0, (totalDetuneSemitones / 12.0).toDouble()).toFloat()
 
-        val result = rootFreq * detuneMultiplier
+        // Apply sample rate compensation ratio
+        val sampleRateRatio = sampleRateRatios[instrument.sampleId] ?: 1.0f
 
-        Log.d(TAG, "📐 calculateBaseFreq: root=${instrument.root}, rootFreq=$rootFreq Hz, detune=0x${instrument.detune.toString(16)}, detuneMulti=$detuneMultiplier, result=$result Hz")
+        val result = rootFreq * detuneMultiplier * sampleRateRatio
+
+        Log.d(TAG, "📐 calculateBaseFreq: root=${instrument.root}, rootFreq=$rootFreq Hz, detune=0x${instrument.detune.toString(16)}, detuneMulti=$detuneMultiplier, sampleRateRatio=$sampleRateRatio, result=$result Hz")
 
         return result
     }
@@ -359,6 +404,43 @@ class TrackerAudioEngine(private val context: Context) {
 
     fun getActiveVoiceCount(): Int = native_getActiveVoiceCount()
 
+    /**
+     * Set playback parameters for an instrument
+     * @param instrumentId Instrument slot (0-255)
+     * @param startPoint Sample start position (0-255)
+     * @param endPoint Sample end position (0-255)
+     * @param reverse Play backwards
+     * @param loopMode 0=off, 1=forward loop, 2=ping-pong loop
+     * @param loopStart Loop restart position (0-255)
+     */
+    fun setInstrumentParams(instrumentId: Int, startPoint: Int, endPoint: Int,
+                           reverse: Boolean, loopMode: Int, loopStart: Int) {
+        native_setInstrumentParams(instrumentId, startPoint, endPoint, reverse, loopMode, loopStart)
+        Log.d(TAG, "🎛️ Set params for instrument $instrumentId: start=$startPoint, end=$endPoint, rev=$reverse, loop=$loopMode, loopSt=$loopStart")
+    }
+
+    /**
+     * Update instrument parameters from Instrument data class
+     * Convenience wrapper that extracts all playback parameters
+     */
+    fun updateInstrumentPlaybackParams(instrument: Instrument) {
+        // Convert loop mode string to int
+        val loopModeInt = when (instrument.loopMode) {
+            "fwd" -> 1
+            "png" -> 2
+            else -> 0  // "off"
+        }
+
+        setInstrumentParams(
+            instrumentId = instrument.sampleId,
+            startPoint = instrument.sampleStart,
+            endPoint = instrument.sampleEnd,
+            reverse = instrument.reverse,
+            loopMode = loopModeInt,
+            loopStart = instrument.loopStart
+        )
+    }
+
     // Native methods
     private external fun native_create(): Boolean
     private external fun native_delete()
@@ -367,4 +449,7 @@ class TrackerAudioEngine(private val context: Context) {
     private external fun native_stopTrack(trackId: Int)
     private external fun native_stopAll()
     private external fun native_getActiveVoiceCount(): Int
+    private external fun native_getSampleRate(): Int
+    private external fun native_setInstrumentParams(instrumentId: Int, startPoint: Int, endPoint: Int,
+                                                    reverse: Boolean, loopMode: Int, loopStart: Int)
 }

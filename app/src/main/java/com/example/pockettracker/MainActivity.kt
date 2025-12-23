@@ -584,6 +584,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 when (action) {
                     is InputAction.SET_VALUE -> {
                         instrument.sampleStart = action.value.coerceIn(0, 255)
+                        // Update playback parameters in audio engine
+                        audioEngine.updateInstrumentPlaybackParams(instrument)
                     }
                     else -> {}
                 }
@@ -593,6 +595,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 when (action) {
                     is InputAction.SET_VALUE -> {
                         instrument.sampleEnd = action.value.coerceIn(0, 255)
+                        // Update playback parameters in audio engine
+                        audioEngine.updateInstrumentPlaybackParams(instrument)
                     }
                     else -> {}
                 }
@@ -602,6 +606,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 when (action) {
                     is InputAction.SET_VALUE -> {
                         instrument.reverse = action.value == 1
+                        // Update playback parameters in audio engine
+                        audioEngine.updateInstrumentPlaybackParams(instrument)
                     }
                     else -> {}
                 }
@@ -614,6 +620,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         if (action.value in 0..2) {
                             instrument.loopMode = loopModes[action.value]
                         }
+                        // Update playback parameters in audio engine
+                        audioEngine.updateInstrumentPlaybackParams(instrument)
                     }
                     else -> {}
                 }
@@ -623,6 +631,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 when (action) {
                     is InputAction.SET_VALUE -> {
                         instrument.loopStart = action.value.coerceIn(0, 255)
+                        // Update playback parameters in audio engine
+                        audioEngine.updateInstrumentPlaybackParams(instrument)
                     }
                     else -> {}
                 }
@@ -1039,6 +1049,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 
                                                     // Update base frequency based on ROOT + DETUNE
                                                     audioEngine.updateInstrumentBaseFrequency(project.instruments[currentInstrument])
+
+                                                    // Update playback parameters (start/end/loop/reverse)
+                                                    audioEngine.updateInstrumentPlaybackParams(project.instruments[currentInstrument])
 
                                                     instrumentStatusMessage = "LOADED ${item.file.nameWithoutExtension}"
                                                     instrumentStatusSuccess = true

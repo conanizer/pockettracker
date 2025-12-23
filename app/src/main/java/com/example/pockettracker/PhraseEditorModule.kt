@@ -253,7 +253,7 @@ class PhraseEditorModule : TrackerModule {
             // Column 1: Note (C-0 to B-9)
             1 -> {
                 val isEmpty = step.note == Note.EMPTY
-                val currentValue = if (isEmpty) 0 else step.note.pitch + (step.note.octave * 12)
+                val currentValue = if (isEmpty) 0 else step.note.toMidi()
                 CursorContextFactory.note(currentValue, isEmpty)
             }
 
