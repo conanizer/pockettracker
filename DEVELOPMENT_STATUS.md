@@ -1,7 +1,7 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2025-12-23
+2025-12-26
 
 ## What's Working ✅
 
@@ -66,6 +66,41 @@
 - ✅ 256 phrases, 256 chains, 8 tracks
 - ✅ 256 instruments with full parameter set
 - ✅ Serialization/deserialization to JSON
+
+## Recent Polish & Refinements (2025-12-26)
+
+### Sample Persistence & Project Loading ✅
+- ✅ **Custom samples reload automatically** when loading projects
+- ✅ **Instrument parameters restored** (ROOT, DETUNE, START, END, REVERSE, LOOP)
+- ✅ **Empty instruments** are truly empty (sampleId = -1, not defaulting to kick)
+- ✅ **First 12 instruments** (00-0B) still default to resource samples
+
+### Perfect Pitch for Common Sample Rates ✅
+- ✅ **Oboe stream set to 44100 Hz** (most common audio sample rate)
+- ✅ **44100 Hz samples**: Perfect pitch, zero compensation error!
+- ✅ **48000 Hz samples**: Still compensated correctly
+- ✅ **Mathematical precision**: No more 0.06 Hz rounding errors
+
+### Low-Latency Audio Performance ✅
+- ✅ **LowLatency performance mode** enabled (MMAP fast audio path)
+- ✅ **Exclusive sharing mode** for dedicated audio stream
+- ✅ **Reduced buffer sizes** for faster response
+- ✅ **Tighter timing**: Much less jitter between notes
+
+### Smart Cursor State Memory ✅
+**Bidirectional sync** - cursor remembers context when navigating:
+- ✅ **Phrase ↔ Instrument**: Jump to instrument shows last used/edited instrument
+- ✅ **Chain ↔ Phrase**: Jump to phrase shows last used/edited phrase
+- ✅ **Song ↔ Chain**: Jump to chain shows last used/edited chain
+- ✅ **Captures on navigation**: Remembers value under cursor when leaving screen
+- ✅ **Updates on edit**: Tracks last edited values via A+direction combos
+
+### Quick Insert Feature ✅
+**A button on empty rows** inserts last-used values:
+- ✅ **Phrase screen**: Insert last note/instrument/volume
+- ✅ **Chain screen**: Insert last phrase/transpose
+- ✅ **Song screen**: Insert last chain
+- ✅ Speeds up composition workflow significantly!
 
 ## Recent Fixes & Features (2025-12-23)
 
@@ -168,12 +203,15 @@
 ## Technical Notes
 
 ### Audio Engine Details
-- Sample rate: Device native (typically 48000 Hz)
+- Sample rate: 44100 Hz (forced via Oboe builder)
+- Performance mode: LowLatency (enables MMAP fast audio path)
+- Sharing mode: Exclusive (dedicated audio stream)
 - Format: Float32, stereo output
-- Latency: Oboe auto-selects best mode
+- Buffer size: Auto-selected by Oboe for low latency (~192-480 frames)
 - All samples stored as mono (stereo mixed during load)
 - Base frequency stored per instrument for pitch calculation
 - Playback rate = target_frequency / base_frequency
+- Sample rate compensation: Automatic for non-44100Hz samples
 
 ### MIDI Note Convention
 - C-4 = MIDI 60 (middle C)

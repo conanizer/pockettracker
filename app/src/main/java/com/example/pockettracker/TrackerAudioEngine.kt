@@ -269,12 +269,15 @@ class TrackerAudioEngine(private val context: Context) {
             // Load to temporary preview slot (255)
             native_loadSample(255, samples)
 
-            // Play at C-4 as reference pitch
-            // Use adjusted base frequency to compensate for sample rate
+            // Play at C-4 as reference pitch with sample rate compensation
+            // targetFreq = what we want to hear (C-4 = 261.63 Hz)
+            // baseFreq = adjustedBaseFreq (compensated for device sample rate)
+            // rate = targetFreq / baseFreq = 261.63 / 284.76 = 0.919 (plays slower to compensate)
             val c4Freq = 261.63f
             native_triggerNote(255, 0, c4Freq, adjustedBaseFreq, 1.0f)
 
-            Log.d(TAG, "🔊 Preview sample at C-4: $filePath (baseFreq=$adjustedBaseFreq)")
+            val rate = c4Freq / adjustedBaseFreq
+            Log.d(TAG, "🔊 Preview sample at C-4: $filePath (baseFreq=$adjustedBaseFreq, rate=$rate)")
             return true
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error previewing sample: ${e.message}")
@@ -291,22 +294,28 @@ class TrackerAudioEngine(private val context: Context) {
     fun previewInstrument(instrument: Instrument) {
         val sampleId = instrument.sampleId
 
-        // Calculate target frequency from ROOT + DETUNE
-        val targetFreq = calculateInstrumentBaseFrequency(instrument)
+        // Calculate target frequency from ROOT + DETUNE (WITHOUT sample rate compensation)
+        val rootFreq = instrument.root.toFrequency()
 
-        // Use C-4 as standard reference pitch for all samples
-        // Sample plays at natural speed when ROOT=C-4, faster/slower when ROOT is higher/lower
-        val sampleReferencePitch = 261.63f // C-4
+        // Apply detune
+        val detuneSemitones = (instrument.detune shr 4).toFloat()
+        val detuneFraction = (instrument.detune and 0x0F) / 16.0f
+        val totalDetuneSemitones = detuneSemitones + detuneFraction - 8.0f
+        val detuneMultiplier = Math.pow(2.0, (totalDetuneSemitones / 12.0).toDouble()).toFloat()
 
-        // Transpose from reference pitch to target pitch
-        // Rate = target/reference
-        // If ROOT=C-4: rate = C-4/C-4 = 1.0 (natural speed)
-        // If ROOT=C-5: rate = C-5/C-4 = 2.0 (one octave up)
-        // If ROOT=C-3: rate = C-3/C-4 = 0.5 (one octave down)
-        native_triggerNote(sampleId, 0, targetFreq, sampleReferencePitch, 1.0f)
+        val targetFreq = rootFreq * detuneMultiplier
 
-        val rate = targetFreq / sampleReferencePitch
-        Log.d(TAG, "🔊 Preview instrument ${instrument.id.toString(16).padStart(2,'0').uppercase()}: root=${instrument.root}, detune=0x${instrument.detune.toString(16).padStart(2,'0').uppercase()}, targetFreq=$targetFreq Hz, rate=$rate")
+        // Get the compensated base frequency for this sample
+        val sampleRateRatio = sampleRateRatios[sampleId] ?: 1.0f
+        val compensatedBaseFreq = 261.63f * sampleRateRatio // C-4 compensated for sample rate
+
+        // Calculate playback rate
+        // If sample is 44100Hz on 48000Hz device: compensatedBaseFreq = 284.76
+        // To play at C-4: rate = 261.63 / 284.76 = 0.919 (slower to compensate)
+        native_triggerNote(sampleId, 0, targetFreq, compensatedBaseFreq, 1.0f)
+
+        val rate = targetFreq / compensatedBaseFreq
+        Log.d(TAG, "🔊 Preview instrument ${instrument.id.toString(16).padStart(2,'0').uppercase()}: root=${instrument.root}, detune=0x${instrument.detune.toString(16).padStart(2,'0').uppercase()}, targetFreq=$targetFreq Hz, baseFreq=$compensatedBaseFreq Hz, rate=$rate")
     }
 
     /**

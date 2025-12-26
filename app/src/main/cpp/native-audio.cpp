@@ -110,11 +110,21 @@ public:
     bool openStream() {
         oboe::AudioStreamBuilder builder;
         builder.setDataCallback(this);
-        builder.setPerformanceMode(oboe::PerformanceMode::None);
-        builder.setSharingMode(oboe::SharingMode::Shared);
+
+        // Enable low-latency mode for precise timing
+        // This enables MMAP (fast audio path) and reduces buffer size
+        builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
+
+        // Try exclusive mode first for lowest latency, fallback to shared if not available
+        builder.setSharingMode(oboe::SharingMode::Exclusive);
+
         builder.setFormat(oboe::AudioFormat::Float);
         builder.setChannelCount(oboe::ChannelCount::Stereo);
 
+        // Set sample rate to 44100 Hz (most common for audio samples)
+        // This eliminates compensation for 44100 Hz samples (perfect pitch!)
+        // Samples at other rates (48000 Hz) will still be compensated
+        builder.setSampleRate(44100);
 
         oboe::Result result = builder.openStream(stream);
         if (result != oboe::Result::OK) {
@@ -122,7 +132,7 @@ public:
             return false;
         }
 
-        LOGD("Stream: %d Hz, buffer: %d",
+        LOGD("Stream: %d Hz (requested 44100), buffer: %d",
              stream->getSampleRate(),
              stream->getBufferSizeInFrames());
 

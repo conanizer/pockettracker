@@ -167,7 +167,7 @@ data class Track(
 data class Instrument(
     val id: Int,  // 00-7F
     var name: String = "INST${id.toString(16).padStart(2,'0').uppercase()}",
-    var sampleId: Int = 0,  // Which sample from resources
+    var sampleId: Int = -1,  // Which sample from resources (-1 = empty/no sample)
     var volume: Float = 1.0f,
     var pan: Float = 0.5f,  // 0.0 = left, 0.5 = center, 1.0 = right
 

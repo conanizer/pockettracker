@@ -85,11 +85,17 @@ fun PixelPerfectTracker(
                         // Calculate target time for THIS step (not next step)
                         val targetTime = startTime + (stepCounter * stepDurationMs)
                         val currentTime = SystemClock.elapsedRealtime().toDouble()
-                        val waitTime = (targetTime - currentTime).toLong()
+                        val waitTime = targetTime - currentTime
 
-                        // Wait until target time, then play note at precise moment
-                        if (waitTime > 0) {
-                            delay(waitTime)
+                        // Hybrid timing: delay() for bulk, spin-wait for precision
+                        if (waitTime > 2.0) {
+                            // Use delay() for most of the wait (efficient, lets other threads run)
+                            delay((waitTime - 1.5).toLong())
+                        }
+
+                        // Spin-wait for the last ~1.5ms for precise timing
+                        while (SystemClock.elapsedRealtime().toDouble() < targetTime && isPlaying) {
+                            // Busy-wait (precise but uses CPU)
                         }
 
                         // Now play the note at the precise target time
@@ -130,12 +136,17 @@ fun PixelPerfectTracker(
                         for (stepIndex in 0..15) {
                             if (!isPlaying) break
 
-                            // Calculate target time and wait first
+                            // Calculate target time and wait with hybrid timing
                             val targetTime = startTime + (stepCounter * stepDurationMs)
                             val currentTime = SystemClock.elapsedRealtime().toDouble()
-                            val waitTime = (targetTime - currentTime).toLong()
-                            if (waitTime > 0) {
-                                delay(waitTime)
+                            val waitTime = targetTime - currentTime
+
+                            // Hybrid timing: delay() for bulk, spin-wait for precision
+                            if (waitTime > 2.0) {
+                                delay((waitTime - 1.5).toLong())
+                            }
+                            while (SystemClock.elapsedRealtime().toDouble() < targetTime && isPlaying) {
+                                // Spin-wait for precision
                             }
 
                             // Now play note at precise time
@@ -202,12 +213,17 @@ fun PixelPerfectTracker(
                             for (stepIndex in 0..15) {
                                 if (!isPlaying) break
 
-                                // Calculate target time and wait first
+                                // Calculate target time and wait with hybrid timing
                                 val targetTime = startTime + (stepCounter * stepDurationMs)
                                 val currentTime = SystemClock.elapsedRealtime().toDouble()
-                                val waitTime = (targetTime - currentTime).toLong()
-                                if (waitTime > 0) {
-                                    delay(waitTime)
+                                val waitTime = targetTime - currentTime
+
+                                // Hybrid timing: delay() for bulk, spin-wait for precision
+                                if (waitTime > 2.0) {
+                                    delay((waitTime - 1.5).toLong())
+                                }
+                                while (SystemClock.elapsedRealtime().toDouble() < targetTime && isPlaying) {
+                                    // Spin-wait for precision
                                 }
 
                                 // Now play all 8 tracks simultaneously at precise time

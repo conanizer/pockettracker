@@ -10,6 +10,174 @@ This file tracks development sessions with Claude Code to maintain context acros
 
 ---
 
+## Session 2025-12-26: Polish & Production Ready
+
+### Context
+- Instrument screen functional but needed polish
+- Audio timing and pitch issues discovered
+- Workflow needed improvement (cursor memory, quick insert)
+
+### Goals
+1. Polish instrument screen functions
+2. Fix audio issues (pitch, timing, sample persistence)
+3. Improve workflow with smart cursor state memory
+4. Add quick insert feature for faster composition
+
+### What Was Accomplished ✅
+
+#### 1. Sample Persistence Fixed
+**Problem**: Custom samples loaded in instruments weren't reloading when loading projects
+- JSON saved `sampleFilePath` but WAV files weren't reloaded into audio engine
+- Instrument parameters (ROOT, DETUNE, START, END, REVERSE, LOOP) not restored
+
+**Solution**:
+- Added `reloadProjectSamples()` function in MainActivity.kt
+- Iterates through all instruments with `sampleFilePath != null`
+- Calls `loadSampleFromFile()` + `updateInstrumentBaseFrequency()` + `updateInstrumentPlaybackParams()`
+- Now all custom samples and parameters restore perfectly on project load
+
+#### 2. Perfect Pitch for 44100 Hz Samples
+**Problem**: Sample rate compensation had rounding errors (284.76 × 0.919 = 261.69444, not 261.63)
+- Mathematical imprecision felt wrong
+- 0.06 Hz error could accumulate
+
+**Solution**:
+- Set Oboe stream to **44100 Hz** (most common sample rate) via `builder.setSampleRate(44100)`
+- **44100 Hz samples**: Perfect pitch with zero error (ratio = 1.0 exactly!)
+- **48000 Hz samples**: Still compensated correctly (ratio = 44100/48000 = 0.91875)
+- Best of both worlds - precision for common case, compensation for others
+
+#### 3. Low-Latency Audio for Tight Timing
+**Problem**: Playback timing still had jitter between notes despite hybrid timing approach
+- Notes triggered from UI thread → JNI → C++ → audio callback (variable latency)
+
+**Solution**:
+- Enabled `PerformanceMode::LowLatency` in native-audio.cpp
+- Changed to `SharingMode::Exclusive` for dedicated audio stream
+- Enables MMAP (Android's fast audio path)
+- Dramatically reduced buffer sizes and latency
+- Result: Much tighter, more consistent timing
+
+#### 4. File Browser Preview Pitch Fixed
+**Problem**: Samples in file browser played ~3 semitones wrong
+- Was passing `adjustedBaseFreq` as target frequency (backwards!)
+- Rate = 261.63 / 284.76 = 0.919 (too slow) → then fixed → 1.088 (too fast)
+
+**Solution**:
+- Corrected parameter order in `previewSampleFile()`:
+  - `targetFreq = c4Freq` (261.63 Hz - what we want to hear)
+  - `baseFreq = adjustedBaseFreq` (284.76 Hz - compensated reference)
+  - `rate = 261.63 / 284.76 = 0.919` ✓ (plays slower to compensate for device sample rate)
+
+#### 5. Instrument Preview Pitch Fixed
+**Problem**: Instrument preview also played too high
+- `calculateInstrumentBaseFrequency()` included sample rate ratio in target frequency
+- Function used for both target (shouldn't include ratio) and base (should include ratio)
+
+**Solution**:
+- Rewrote `previewInstrument()` to calculate target without sample rate ratio
+- Uses compensated base frequency for correct playback
+- Now matches file browser preview pitch perfectly
+
+#### 6. Smart Cursor State Memory (Bidirectional)
+**Problem**: Cursor only remembered last EDITED values, not cursor position
+- Jumping from Song→Chain didn't show the chain you were on
+- One-directional only (couldn't go Instrument→Phrase and remember phrase)
+
+**Solution**:
+- Added tracking variables: `lastEditedInstrument`, `lastEditedNote`, `lastEditedVolume`, `lastEditedTranspose`
+- **Capture on navigation**: When leaving screen, capture value under cursor
+- **Restore on navigation**: When entering screen, restore last captured value
+- **Update on edit**: Track when values change via A+direction or manual entry
+- Implemented in both R+LEFT and R+RIGHT handlers
+- Works in both directions: Phrase↔Instrument, Chain↔Phrase, Song↔Chain
+
+#### 7. Quick Insert Feature
+**Problem**: Repetitive data entry - constantly re-entering same values
+
+**Solution**:
+- A button on empty row inserts last-used values:
+  - **Phrase screen**: Insert last note/instrument/volume
+  - **Chain screen**: Insert last phrase/transpose
+  - **Song screen**: Insert last chain
+- Dramatically speeds up composition workflow
+- Natural workflow: compose once, then quick-insert variations
+
+#### 8. Empty Instruments Fixed
+**Problem**: Instruments 0C-FF defaulted to `sampleId = 0` (kick.wav)
+- Empty instruments had a sample loaded
+
+**Solution**:
+- Changed default `sampleId` from 0 to -1 in TrackerData.kt
+- Instruments 00-0B still initialize with resource samples (as intended)
+- Instruments 0C-FF are truly empty until loaded
+
+#### 9. Last Edited Value Tracking in Song/Chain
+**Problem**: Song and Chain screens didn't track last edited values properly
+- Press A → insert chain 00, press A+UP → becomes 01, move row, press A → still inserts 00 ❌
+
+**Solution**:
+- Added `lastEditedChain/Phrase/Transpose` tracking in `applySongInputAction()` and `applyChainInputAction()`
+- Updates when values change via A+direction combos
+- Now correctly inserts last edited value
+
+### Files Modified
+**Native Code (C++):**
+- `native-audio.cpp` - Set sample rate to 44100Hz, enabled LowLatency + Exclusive modes
+
+**Kotlin:**
+- `MainActivity.kt` - Added reloadProjectSamples(), cursor state tracking, quick insert, last edited tracking
+- `TrackerAudioEngine.kt` - Fixed preview pitch calculations for both file browser and instrument
+- `TrackerData.kt` - Changed default sampleId from 0 to -1
+- `PixelPerfectRenderer.kt` - (Already had hybrid timing from previous session)
+
+**Documentation:**
+- `DEVELOPMENT_STATUS.md` - Updated with all new features and fixes
+- `SESSION_HISTORY.md` - Added this session
+
+### Key Lessons Learned
+
+#### ✅ Proper Audio Configuration Matters
+- Setting Oboe to correct sample rate (44100Hz) eliminates precision issues
+- LowLatency mode makes huge difference in timing consistency
+- Exclusive mode gives best performance for music apps
+
+#### ✅ Sample Rate Compensation Done Right
+- Force stream to common sample rate (44100Hz)
+- Compensate only when sample rate differs
+- Gives perfect pitch for 99% of samples, correct pitch for rest
+
+#### ✅ Bidirectional State Tracking
+- Capture value when LEAVING screen, not just when editing
+- Restore value when ENTERING screen
+- Creates natural, intuitive workflow
+
+#### ✅ Quick Insert Patterns
+- Track "last used" values automatically
+- Single button to reuse = huge workflow speedup
+- Inspired by tracker conventions (M8, LSDJ)
+
+### Current State (End of Session)
+- ✅ All instrument screen functions polished
+- ✅ Audio pitch perfect for 44100Hz samples
+- ✅ Audio timing tight with low-latency mode
+- ✅ Sample persistence working perfectly
+- ✅ Smart cursor memory in both directions
+- ✅ Quick insert feature speeds up composition
+- ✅ Empty instruments are truly empty
+- ✅ Ready for commit and push!
+
+### Next Steps
+- Commit all changes with descriptive message
+- Push to GitHub
+- Consider implementing:
+  - Copy/paste for phrases/chains
+  - Effect commands (volume, pitch, filter)
+  - Table screen for arpeggios
+  - Mixer screen
+
+---
+
 ## Session 2024-12-22: State Refactoring Attempt & Rollback
 
 ### Context

@@ -240,9 +240,13 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     var currentChain by remember { mutableIntStateOf(0) }
     var currentPhrase by remember { mutableIntStateOf(0) }
 
-    // Remember last edited values (for quick insertion)
+    // Remember last edited values (for quick insertion and cursor sync)
     var lastEditedPhrase by remember { mutableIntStateOf(0) }
     var lastEditedChain by remember { mutableIntStateOf(0) }
+    var lastEditedInstrument by remember { mutableIntStateOf(0) }
+    var lastEditedNote by remember { mutableStateOf(Note.fromString("C-4")) }
+    var lastEditedVolume by remember { mutableIntStateOf(0xFF) }
+    var lastEditedTranspose by remember { mutableIntStateOf(0) }
 
     // Version counter to force recomposition when nested project data changes
     // Incrementing this tells Compose the project has changed even if the reference is the same
@@ -271,10 +275,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             items = fileBrowserModule.sortItems(items, fileBrowserState.sortMode)
         )
     }
-
-    // Update lastEditedPhrase when cursor moves in chain screen
-    // This runs every time cursorRow or currentChain changes
-    lastEditedPhrase = project.chains[currentChain].phraseRefs[cursorRow]
 
     // Clean up audio engine when app closes
     // "DisposableEffect" runs code when the composable is removed from screen
@@ -308,14 +308,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     1 -> {
                         // Note column: Convert MIDI value back to Note
                         step.note = Note.fromMidi(action.value)
+                        lastEditedNote = step.note
                     }
                     2 -> {
                         // Volume column
                         step.volume = action.value
+                        lastEditedVolume = action.value
                     }
                     3 -> {
                         // Instrument column
                         step.instrument = action.value
+                        lastEditedInstrument = action.value
                     }
                 }
             }
@@ -331,6 +334,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 // Insert default note (C-4)
                 if (column == 1) {
                     step.note = Note.fromString("C-4")
+                    lastEditedNote = step.note
                 }
             }
             else -> { /* NONE or unhandled - do nothing */ }
@@ -361,10 +365,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     1 -> {
                         // Phrase reference column
                         chain.phraseRefs[row] = action.value
+                        lastEditedPhrase = action.value
                     }
                     2 -> {
                         // Transpose column
                         chain.transposeValues[row] = action.value
+                        lastEditedTranspose = action.value
                     }
                 }
             }
@@ -382,6 +388,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     // Insert phrase 0 by default
                     chain.phraseRefs[row] = 0
                     chain.transposeValues[row] = 0x00  // Default transpose
+                    lastEditedPhrase = 0
+                    lastEditedTranspose = 0
                 }
             }
             else -> { /* NONE or unhandled - do nothing */ }
@@ -412,6 +420,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     track.chainRefs.add(-1)
                 }
                 track.chainRefs[row] = action.value
+                lastEditedChain = action.value
             }
             is InputAction.DELETE -> {
                 // Clear chain reference
@@ -425,6 +434,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     track.chainRefs.add(-1)
                 }
                 track.chainRefs[row] = 0
+                lastEditedChain = 0
             }
             else -> { /* NONE or unhandled - do nothing */ }
         }
@@ -641,6 +651,45 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 
         // Trigger recomposition
         projectVersion++
+    }
+
+    /**
+     * Reload all custom samples from a loaded project
+     *
+     * When a project is loaded from JSON, the sampleFilePath is preserved but the actual
+     * WAV files aren't in memory. This function iterates through all instruments and
+     * reloads any custom samples (instruments with non-null sampleFilePath).
+     *
+     * Also restores all instrument parameters (ROOT, DETUNE, START, END, REVERSE, LOOP).
+     *
+     * Should be called immediately after loading a project.
+     */
+    fun reloadProjectSamples() {
+        var loadedCount = 0
+        var failedCount = 0
+
+        project.instruments.forEach { instrument ->
+            if (instrument.sampleFilePath != null) {
+                val filePath = instrument.sampleFilePath!!
+                val success = audioEngine.loadSampleFromFile(instrument.id, filePath)
+
+                if (success) {
+                    // Restore instrument parameters after loading sample
+                    audioEngine.updateInstrumentBaseFrequency(instrument)
+                    audioEngine.updateInstrumentPlaybackParams(instrument)
+
+                    loadedCount++
+                    Log.d("ProjectLoad", "✅ Reloaded sample for instrument ${instrument.id.toString(16).padStart(2, '0')}: $filePath")
+                } else {
+                    failedCount++
+                    Log.e("ProjectLoad", "❌ Failed to reload sample for instrument ${instrument.id.toString(16).padStart(2, '0')}: $filePath")
+                }
+            }
+        }
+
+        if (loadedCount > 0 || failedCount > 0) {
+            Log.d("ProjectLoad", "Sample reload complete: $loadedCount loaded, $failedCount failed")
+        }
     }
 
     /**
@@ -1025,6 +1074,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                                 val loaded = fileManager.loadProject(item.file)
                                                 if (loaded != null) {
                                                     project = loaded
+                                                    // Reload all custom samples from the loaded project
+                                                    reloadProjectSamples()
                                                     projectStatusMessage = "LOADED: ${item.file.nameWithoutExtension}"
                                                     projectStatusSuccess = true
                                                     projectVersion++
@@ -1069,6 +1120,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                                 val loaded = fileManager.loadProject(item.file)
                                                 if (loaded != null) {
                                                     project = loaded
+                                                    // Reload all custom samples from the loaded project
+                                                    reloadProjectSamples()
                                                     projectVersion++
                                                     currentScreen = previousScreen
                                                 } else {
@@ -1205,6 +1258,46 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                 }
                             }
                             // Other rows use A+direction combos for value editing
+                        }
+                    }
+
+                    // PHRASE: Quick insert last-used values on empty row
+                    ScreenType.PHRASE -> {
+                        val step = project.phrases[currentPhrase].steps[cursorRow]
+                        if (step.isEmpty()) {
+                            // Insert last-used values
+                            step.note = lastEditedNote
+                            step.instrument = lastEditedInstrument
+                            step.volume = lastEditedVolume
+                            projectVersion++
+                            Log.d("QuickInsert", "Inserted phrase step: note=$lastEditedNote, inst=$lastEditedInstrument, vol=$lastEditedVolume")
+                        }
+                    }
+
+                    // CHAIN: Quick insert last-used phrase + transpose on empty row
+                    ScreenType.CHAIN -> {
+                        val chain = project.chains[currentChain]
+                        if (chain.isEmpty(cursorRow)) {
+                            // Insert last-used phrase and transpose
+                            chain.phraseRefs[cursorRow] = lastEditedPhrase
+                            chain.transposeValues[cursorRow] = lastEditedTranspose
+                            projectVersion++
+                            Log.d("QuickInsert", "Inserted chain row: phrase=$lastEditedPhrase, transpose=$lastEditedTranspose")
+                        }
+                    }
+
+                    // SONG: Quick insert last-used chain on empty row
+                    ScreenType.SONG -> {
+                        val track = project.tracks[cursorColumn - 1]
+                        // Ensure track has enough rows
+                        while (track.chainRefs.size <= cursorRow) {
+                            track.chainRefs.add(-1)
+                        }
+                        if (track.chainRefs[cursorRow] == -1) {
+                            // Insert last-used chain
+                            track.chainRefs[cursorRow] = lastEditedChain
+                            projectVersion++
+                            Log.d("QuickInsert", "Inserted song chain: chain=$lastEditedChain at track=${cursorColumn-1}, row=$cursorRow")
                         }
                     }
 
@@ -1508,6 +1601,49 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 if (currentScreen != ScreenType.FILE_BROWSER) {
                     val (newScreen, newCol) = navigateLeft(currentScreen, previousColumn)
                     if (newScreen != currentScreen) {
+                        // Capture cursor value from current screen before leaving
+                        when (currentScreen) {
+                            ScreenType.PHRASE -> {
+                                // Leaving PHRASE: remember instrument under cursor
+                                val step = project.phrases[currentPhrase].steps[cursorRow]
+                                if (!step.isEmpty()) {
+                                    lastEditedInstrument = step.instrument
+                                }
+                            }
+                            ScreenType.CHAIN -> {
+                                // Leaving CHAIN: remember phrase under cursor
+                                val phraseRef = project.chains[currentChain].phraseRefs[cursorRow]
+                                if (phraseRef >= 0) {
+                                    lastEditedPhrase = phraseRef
+                                }
+                            }
+                            ScreenType.SONG -> {
+                                // Leaving SONG: remember chain under cursor
+                                val track = project.tracks[cursorColumn - 1]
+                                if (cursorRow < track.chainRefs.size && track.chainRefs[cursorRow] >= 0) {
+                                    lastEditedChain = track.chainRefs[cursorRow]
+                                }
+                            }
+                            else -> {}
+                        }
+
+                        // Sync cursor state based on which screen we're entering
+                        when (newScreen) {
+                            ScreenType.PHRASE -> {
+                                // Entering PHRASE from CHAIN/INSTRUMENT: sync to last phrase
+                                currentPhrase = lastEditedPhrase
+                            }
+                            ScreenType.CHAIN -> {
+                                // Entering CHAIN from PHRASE/SONG: sync to last chain
+                                currentChain = lastEditedChain
+                            }
+                            ScreenType.INSTRUMENT -> {
+                                // Entering INSTRUMENT from PHRASE: sync to last instrument
+                                currentInstrument = lastEditedInstrument
+                            }
+                            else -> {}
+                        }
+
                         // Screen changed - reset cursor to default position
                         val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
                         cursorRow = defaultRow
@@ -1523,6 +1659,49 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 if (currentScreen != ScreenType.FILE_BROWSER) {
                     val (newScreen, newCol) = navigateRight(currentScreen, previousColumn)
                     if (newScreen != currentScreen) {
+                        // Capture cursor value from current screen before leaving
+                        when (currentScreen) {
+                            ScreenType.PHRASE -> {
+                                // Leaving PHRASE: remember instrument under cursor
+                                val step = project.phrases[currentPhrase].steps[cursorRow]
+                                if (!step.isEmpty()) {
+                                    lastEditedInstrument = step.instrument
+                                }
+                            }
+                            ScreenType.CHAIN -> {
+                                // Leaving CHAIN: remember phrase under cursor
+                                val phraseRef = project.chains[currentChain].phraseRefs[cursorRow]
+                                if (phraseRef >= 0) {
+                                    lastEditedPhrase = phraseRef
+                                }
+                            }
+                            ScreenType.SONG -> {
+                                // Leaving SONG: remember chain under cursor
+                                val track = project.tracks[cursorColumn - 1]
+                                if (cursorRow < track.chainRefs.size && track.chainRefs[cursorRow] >= 0) {
+                                    lastEditedChain = track.chainRefs[cursorRow]
+                                }
+                            }
+                            else -> {}
+                        }
+
+                        // Sync cursor state based on which screen we're entering
+                        when (newScreen) {
+                            ScreenType.INSTRUMENT -> {
+                                // Entering INSTRUMENT from PHRASE: sync to last instrument
+                                currentInstrument = lastEditedInstrument
+                            }
+                            ScreenType.PHRASE -> {
+                                // Entering PHRASE from CHAIN: sync to last phrase
+                                currentPhrase = lastEditedPhrase
+                            }
+                            ScreenType.CHAIN -> {
+                                // Entering CHAIN from SONG: sync to last chain
+                                currentChain = lastEditedChain
+                            }
+                            else -> {}
+                        }
+
                         // Screen changed - reset cursor to default position
                         val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
                         cursorRow = defaultRow
@@ -1543,16 +1722,19 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     ScreenType.CHAIN -> {
                         // Previous chain (wrap around)
                         currentChain = if (currentChain > 0) currentChain - 1 else 255
+                        lastEditedChain = currentChain
                         Log.d("Navigation", "  -> Changed to chain $currentChain")
                     }
                     ScreenType.PHRASE -> {
                         // Previous phrase (wrap around)
                         currentPhrase = if (currentPhrase > 0) currentPhrase - 1 else 255
+                        lastEditedPhrase = currentPhrase
                         Log.d("Navigation", "  -> Changed to phrase $currentPhrase")
                     }
                     ScreenType.INSTRUMENT -> {
                         // Previous instrument (wrap around)
                         currentInstrument = if (currentInstrument > 0) currentInstrument - 1 else 255
+                        lastEditedInstrument = currentInstrument
                         Log.d("Navigation", "  -> Changed to instrument $currentInstrument")
                     }
                     ScreenType.FILE_BROWSER -> {
@@ -1571,16 +1753,19 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     ScreenType.CHAIN -> {
                         // Next chain (wrap around)
                         currentChain = if (currentChain < 255) currentChain + 1 else 0
+                        lastEditedChain = currentChain
                         Log.d("Navigation", "  -> Changed to chain $currentChain")
                     }
                     ScreenType.PHRASE -> {
                         // Next phrase (wrap around)
                         currentPhrase = if (currentPhrase < 255) currentPhrase + 1 else 0
+                        lastEditedPhrase = currentPhrase
                         Log.d("Navigation", "  -> Changed to phrase $currentPhrase")
                     }
                     ScreenType.INSTRUMENT -> {
                         // Next instrument (wrap around)
                         currentInstrument = if (currentInstrument < 255) currentInstrument + 1 else 0
+                        lastEditedInstrument = currentInstrument
                         Log.d("Navigation", "  -> Changed to instrument $currentInstrument")
                     }
                     else -> { Log.d("Navigation", "  -> No action for screen $currentScreen") }
