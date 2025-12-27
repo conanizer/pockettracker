@@ -354,15 +354,167 @@ fun PixelPerfectTracker(
                     }
                 }
                 ScreenType.SONG -> {
-                    // SONG PLAYBACK: Play all 8 tracks simultaneously (polyphony)
-                    // Each track can have a different chain at the current song row
+                    if (USE_NOTE_QUEUE) {
+                        try {
+                            // CRITICAL: Clear any leftover notes from previous playback
+                            audioEngine.clearScheduledNotes()
 
-                    // Calculate step duration in milliseconds (16th note)
-                    val stepDurationMs = (60000.0 / project.tempo / 4.0)
+                            // PHASE 3: Queue-based song playback (8-track polyphonic with sample-accurate timing)
+                            val sampleRate = audioEngine.getDeviceSampleRate()
+                            val msPerStep = (60000.0 / project.tempo / 4.0)
+                            val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+                            val framesPerPhrase = 16 * framesPerStep
 
-                    // Use absolute timing with double precision to prevent drift
-                    val startTime = SystemClock.elapsedRealtime().toDouble()
-                    var stepCounter = 0
+                            // Maintain a continuous buffer
+                            val lookaheadMs = 50L
+                            val lookaheadFrames = (lookaheadMs * sampleRate / 1000.0).toLong()
+                            val bufferPhrases = 2  // Keep 2 phrases queued ahead
+
+                            // Start scheduling from current frame + lookahead
+                            val playbackStartFrame = audioEngine.getCurrentFrame() + lookaheadFrames
+                            var nextPhraseStartFrame = playbackStartFrame
+
+                            // Track current position in song
+                            var currentSongRow = playbackSongRow
+                            var currentChainRow = playbackChainRow
+
+                            // Data class to track each track's chain state
+                            data class TrackState(
+                                var chainId: Int,
+                                var chainRow: Int,
+                                var maxChainLength: Int
+                            )
+
+                            // Helper function to get active tracks at a song row
+                            fun getActiveTracksAtSongRow(songRow: Int): List<TrackState> {
+                                val activeTracks = mutableListOf<TrackState>()
+                                for (trackId in 0..7) {
+                                    val track = project.tracks[trackId]
+                                    if (songRow < track.chainRefs.size) {
+                                        val chainId = track.chainRefs[songRow]
+                                        if (chainId >= 0 && chainId < 256) {
+                                            val chain = project.chains[chainId]
+                                            // Count non-empty rows in this chain
+                                            var maxLength = 0
+                                            for (i in 0..15) {
+                                                if (!chain.isEmpty(i)) maxLength = i + 1
+                                            }
+                                            if (maxLength > 0) {
+                                                activeTracks.add(TrackState(chainId, 0, maxLength))
+                                            }
+                                        }
+                                    }
+                                }
+                                return activeTracks
+                            }
+
+                            // Helper function to schedule one phrase for all tracks
+                            fun scheduleAllTracksAtPosition(startFrame: Long, songRow: Int, chainRow: Int) {
+                                for (trackId in 0..7) {
+                                    val track = project.tracks[trackId]
+                                    if (songRow < track.chainRefs.size) {
+                                        val chainId = track.chainRefs[songRow]
+                                        if (chainId >= 0 && chainId < 256) {
+                                            val chain = project.chains[chainId]
+                                            if (!chain.isEmpty(chainRow)) {
+                                                val phraseRef = chain.phraseRefs[chainRow]
+                                                val transposeSemitones = chain.getTransposeSemitones(chainRow)
+
+                                                // Schedule all 16 steps for this track
+                                                for (step in 0..15) {
+                                                    val targetFrame = startFrame + (step * framesPerStep)
+                                                    val phraseStep = project.phrases[phraseRef].steps[step]
+
+                                                    if (!phraseStep.isEmpty()) {
+                                                        // Apply transpose to the note
+                                                        val originalMidi = phraseStep.note.toMidi()
+                                                        if (originalMidi >= 0) {
+                                                            val transposedMidi = (originalMidi + transposeSemitones).coerceIn(0, 127)
+                                                            val transposedNote = Note.fromMidi(transposedMidi)
+
+                                                            audioEngine.scheduleNote(
+                                                                targetFrame = targetFrame,
+                                                                note = transposedNote,
+                                                                instrumentId = phraseStep.instrument,
+                                                                trackId = trackId,  // Use actual trackId for voice assignment
+                                                                volume = phraseStep.volume / 255f,
+                                                                project = project
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Get initial tracks
+                            var activeTracks = getActiveTracksAtSongRow(currentSongRow)
+                            if (activeTracks.isEmpty()) {
+                                // No active tracks, stop playback
+                            } else {
+                                // Find max chain length among active tracks
+                                var maxChainLength = activeTracks.maxOf { it.maxChainLength }
+
+                                // Initial fill: schedule first phrase for all tracks
+                                scheduleAllTracksAtPosition(nextPhraseStartFrame, currentSongRow, currentChainRow)
+                                nextPhraseStartFrame += framesPerPhrase
+                                currentChainRow++
+
+                                // Continuous scheduling loop
+                                while (isPlaying) {
+                                    val currentFrame = audioEngine.getCurrentFrame()
+
+                                    // Maintain 2-phrase buffer
+                                    val bufferRemaining = nextPhraseStartFrame - currentFrame
+                                    if (bufferRemaining < (bufferPhrases * framesPerPhrase)) {
+                                        // Check if we need to advance to next song row
+                                        if (currentChainRow >= maxChainLength) {
+                                            // Move to next song row
+                                            currentSongRow = (currentSongRow + 1) % 256
+                                            currentChainRow = 0
+                                            activeTracks = getActiveTracksAtSongRow(currentSongRow)
+                                            maxChainLength = activeTracks.maxOfOrNull { it.maxChainLength } ?: 0
+
+                                            if (maxChainLength == 0) {
+                                                // No more active tracks, could loop song or stop
+                                                currentSongRow = 0
+                                                activeTracks = getActiveTracksAtSongRow(currentSongRow)
+                                                maxChainLength = activeTracks.maxOfOrNull { it.maxChainLength } ?: 0
+                                            }
+                                        }
+
+                                        // Schedule next phrase for all tracks
+                                        if (currentChainRow < maxChainLength) {
+                                            scheduleAllTracksAtPosition(nextPhraseStartFrame, currentSongRow, currentChainRow)
+                                            nextPhraseStartFrame += framesPerPhrase
+                                            currentChainRow++
+                                        }
+                                    }
+
+                                    // Update playback cursor
+                                    val framesIntoPlayback = maxOf(0L, currentFrame - playbackStartFrame)
+                                    val framesIntoPhrase = framesIntoPlayback % framesPerPhrase
+                                    playbackPhraseStep = (framesIntoPhrase / framesPerStep).toInt().coerceIn(0, 15)
+                                    playbackSongRow = currentSongRow
+                                    playbackChainRow = currentChainRow
+
+                                    delay(msPerStep.toLong())
+                                }
+                            }
+                        } finally {
+                            // CRITICAL: Clean up scheduled notes when playback stops
+                            audioEngine.clearScheduledNotes()
+                        }
+                    } else {
+                        // OLD: Kotlin timing for song playback
+                        // Calculate step duration in milliseconds (16th note)
+                        val stepDurationMs = (60000.0 / project.tempo / 4.0)
+
+                        // Use absolute timing with double precision to prevent drift
+                        val startTime = SystemClock.elapsedRealtime().toDouble()
+                        var stepCounter = 0
 
                     while (isPlaying) {
                         // Find the longest chain length at current song row
@@ -454,6 +606,7 @@ fun PixelPerfectTracker(
                         // Finished all chain rows, move to next song row
                         playbackSongRow = (playbackSongRow + 1) % 256
                         playbackChainRow = 0
+                    }
                     }
                 }
                 else -> {
