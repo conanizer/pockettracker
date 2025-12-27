@@ -35,6 +35,11 @@ const val DESIGN_HEIGHT_PX = 480
 const val SCREEN_SPACER = 6      // Space between modules
 const val SIDE_SPACER = 10       // Space on sides
 
+// PHASE 2: Feature flag for queue-based playback
+// Set to true to use sample-accurate C++ note queue
+// Set to false to use old Kotlin timing (for comparison)
+const val USE_NOTE_QUEUE = true
+
 @Composable
 fun PixelPerfectTracker(
     currentScreen: ScreenType,
@@ -76,36 +81,77 @@ fun PixelPerfectTracker(
         if (isPlaying) {
             when (currentScreen) {
                 ScreenType.PHRASE -> {
-                    // PHRASE PLAYBACK: Loop through 16 steps of current phrase
-                    val stepDurationMs = (60000.0 / project.tempo / 4.0)
-                    val startTime = SystemClock.elapsedRealtime().toDouble()
-                    var stepCounter = 0
+                    if (USE_NOTE_QUEUE) {
+                        // PHASE 2: Queue-based playback (sample-accurate timing)
+                        val sampleRate = audioEngine.getDeviceSampleRate()
+                        val msPerStep = (60000.0 / project.tempo / 4.0)
+                        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
 
-                    while (isPlaying) {
-                        // Calculate target time for THIS step (not next step)
-                        val targetTime = startTime + (stepCounter * stepDurationMs)
-                        val currentTime = SystemClock.elapsedRealtime().toDouble()
-                        val waitTime = targetTime - currentTime
+                        while (isPlaying) {
+                            // Get current audio frame
+                            val startFrame = audioEngine.getCurrentFrame()
 
-                        // Hybrid timing: delay() for bulk, spin-wait for precision
-                        if (waitTime > 2.0) {
-                            // Use delay() for most of the wait (efficient, lets other threads run)
-                            delay((waitTime - 1.5).toLong())
+                            // Schedule all 16 steps ahead of time
+                            for (step in 0..15) {
+                                val targetFrame = startFrame + (step * framesPerStep)
+                                val phraseStep = project.phrases[currentPhrase].steps[step]
+
+                                if (!phraseStep.isEmpty()) {
+                                    audioEngine.scheduleNote(
+                                        targetFrame = targetFrame,
+                                        note = phraseStep.note,
+                                        instrumentId = phraseStep.instrument,
+                                        trackId = 0,
+                                        volume = phraseStep.volume / 255f,
+                                        project = project
+                                    )
+                                }
+                            }
+
+                            // Update playback cursor in sync with audio
+                            val phraseDurationMs = (msPerStep * 16).toLong()
+                            val updateIntervalMs = msPerStep.toLong()
+
+                            for (step in 0..15) {
+                                if (!isPlaying) break
+                                playbackRow = step
+                                delay(updateIntervalMs)
+                            }
+
+                            // Loop: phrase complete, schedule next iteration
                         }
+                    } else {
+                        // OLD: Kotlin timing (for comparison)
+                        val stepDurationMs = (60000.0 / project.tempo / 4.0)
+                        val startTime = SystemClock.elapsedRealtime().toDouble()
+                        var stepCounter = 0
 
-                        // Spin-wait for the last ~1.5ms for precise timing
-                        while (SystemClock.elapsedRealtime().toDouble() < targetTime && isPlaying) {
-                            // Busy-wait (precise but uses CPU)
+                        while (isPlaying) {
+                            // Calculate target time for THIS step (not next step)
+                            val targetTime = startTime + (stepCounter * stepDurationMs)
+                            val currentTime = SystemClock.elapsedRealtime().toDouble()
+                            val waitTime = targetTime - currentTime
+
+                            // Hybrid timing: delay() for bulk, spin-wait for precision
+                            if (waitTime > 2.0) {
+                                // Use delay() for most of the wait (efficient, lets other threads run)
+                                delay((waitTime - 1.5).toLong())
+                            }
+
+                            // Spin-wait for the last ~1.5ms for precise timing
+                            while (SystemClock.elapsedRealtime().toDouble() < targetTime && isPlaying) {
+                                // Busy-wait (precise but uses CPU)
+                            }
+
+                            // Now play the note at the precise target time
+                            val step = project.phrases[currentPhrase].steps[playbackRow]
+                            if (!step.isEmpty()) {
+                                audioEngine.playNote(step.note, step.instrument, 0, step.volume / 255f, project)
+                            }
+
+                            playbackRow = (playbackRow + 1) % 16
+                            stepCounter++
                         }
-
-                        // Now play the note at the precise target time
-                        val step = project.phrases[currentPhrase].steps[playbackRow]
-                        if (!step.isEmpty()) {
-                            audioEngine.playNote(step.note, step.instrument, 0, step.volume / 255f, project)
-                        }
-
-                        playbackRow = (playbackRow + 1) % 16
-                        stepCounter++
                     }
                 }
                 ScreenType.CHAIN -> {
