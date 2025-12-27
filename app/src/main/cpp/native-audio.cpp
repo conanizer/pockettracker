@@ -2,12 +2,83 @@
 #include <oboe/Oboe.h>
 #include <android/log.h>
 #include <vector>
+#include <queue>
+#include <mutex>
 
 #define LOG_TAG "NativeAudio"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 const int MAX_VOICES = 8;  // Reduced for testing
+
+// ===================================
+// PHASE 1: NOTE QUEUE INFRASTRUCTURE
+// ===================================
+// Sample-accurate note scheduling system
+// Notes are scheduled with exact target frame numbers
+// Audio callback triggers notes at precise moments
+
+struct ScheduledNote {
+    int64_t targetFrame;     // Exact audio frame to trigger this note
+    int sampleId;            // Which sample to play (0-255)
+    int trackId;             // Which track/voice (0-7)
+    float frequency;         // Target playback frequency
+    float baseFrequency;     // Sample's base frequency
+    float volume;            // Playback volume (0.0-1.0)
+
+    // For priority queue sorting (earliest frame first)
+    bool operator>(const ScheduledNote& other) const {
+        return targetFrame > other.targetFrame;
+    }
+};
+
+// Thread-safe note queue
+// Audio callback pops notes, Kotlin thread pushes notes
+class NoteQueue {
+private:
+    // Min-heap: earliest targetFrame is always on top
+    std::priority_queue<ScheduledNote, std::vector<ScheduledNote>, std::greater<ScheduledNote>> queue;
+    std::mutex mutex;
+
+public:
+    // Schedule a note to be played at exact frame
+    void schedule(const ScheduledNote& note) {
+        std::lock_guard<std::mutex> lock(mutex);
+        queue.push(note);
+        LOGD("📅 Scheduled note: frame=%lld, sample=%d, track=%d, freq=%.2f",
+             (long long)note.targetFrame, note.sampleId, note.trackId, note.frequency);
+    }
+
+    // Check if any note should trigger at or before this frame
+    bool hasNoteAt(int64_t currentFrame) {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (queue.empty()) return false;
+        return queue.top().targetFrame <= currentFrame;
+    }
+
+    // Pop the next note (call only if hasNoteAt returns true)
+    ScheduledNote pop() {
+        std::lock_guard<std::mutex> lock(mutex);
+        ScheduledNote note = queue.top();
+        queue.pop();
+        return note;
+    }
+
+    // Clear all scheduled notes (for stop/reset)
+    void clear() {
+        std::lock_guard<std::mutex> lock(mutex);
+        while (!queue.empty()) {
+            queue.pop();
+        }
+        LOGD("🗑️ Note queue cleared");
+    }
+
+    // Get queue size (for debugging)
+    size_t size() {
+        std::lock_guard<std::mutex> lock(mutex);
+        return queue.size();
+    }
+};
 
 // Instrument playback parameters
 struct InstrumentParams {
@@ -96,6 +167,7 @@ public:
             // Initialize with default parameters
             instrumentParams[i] = InstrumentParams();
         }
+        globalFrameCounter = 0;
     }
 
     ~AudioEngine() {
@@ -248,6 +320,46 @@ public:
             output[i] = 0.0f;
         }
 
+        // PHASE 1: Process note queue at sample-accurate timing
+        // Check each frame for scheduled notes
+        for (int32_t frame = 0; frame < numFrames; frame++) {
+            int64_t currentFrame = globalFrameCounter + frame;
+
+            // Trigger all notes scheduled for this exact frame
+            while (noteQueue.hasNoteAt(currentFrame)) {
+                ScheduledNote note = noteQueue.pop();
+
+                // Find free voice (same logic as triggerNote)
+                bool voiceFound = false;
+
+                // First, stop any voice on this track (voice stealing)
+                for (int v = 0; v < MAX_VOICES; v++) {
+                    if (voices[v].trackId == note.trackId) {
+                        voices[v].stop();
+                    }
+                }
+
+                // Find free voice slot
+                for (int v = 0; v < MAX_VOICES; v++) {
+                    if (!voices[v].isActive) {
+                        if (note.sampleId >= 0 && note.sampleId < 256 && samples[note.sampleId]) {
+                            float rate = note.frequency / note.baseFrequency;
+                            voices[v].trigger(samples[note.sampleId], sampleLengths[note.sampleId],
+                                            note.trackId, rate, note.volume, instrumentParams[note.sampleId]);
+                            voiceFound = true;
+                            LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f",
+                                 (long long)currentFrame, note.sampleId, note.trackId, rate);
+                        }
+                        break;
+                    }
+                }
+
+                if (!voiceFound) {
+                    LOGD("⚠️ No free voice for scheduled note at frame %lld", (long long)currentFrame);
+                }
+            }
+        }
+
         // Mix voices
         for (int v = 0; v < MAX_VOICES; v++) {
             Voice& voice = voices[v];
@@ -326,7 +438,34 @@ public:
             }
         }
 
+        // Update global frame counter for next callback
+        globalFrameCounter += numFrames;
+
         return oboe::DataCallbackResult::Continue;
+    }
+
+    // Get current global frame counter (for scheduling notes from Kotlin)
+    int64_t getCurrentFrame() {
+        return globalFrameCounter;
+    }
+
+    // Schedule a note to be played at exact frame
+    void scheduleNote(int64_t targetFrame, int sampleId, int trackId,
+                     float frequency, float baseFrequency, float volume) {
+        ScheduledNote note = {
+            .targetFrame = targetFrame,
+            .sampleId = sampleId,
+            .trackId = trackId,
+            .frequency = frequency,
+            .baseFrequency = baseFrequency,
+            .volume = volume
+        };
+        noteQueue.schedule(note);
+    }
+
+    // Clear all scheduled notes
+    void clearScheduledNotes() {
+        noteQueue.clear();
     }
 
 private:
@@ -335,6 +474,10 @@ private:
     float* samples[256];
     int sampleLengths[256];
     InstrumentParams instrumentParams[256];
+
+    // PHASE 1: Sample-accurate timing infrastructure
+    NoteQueue noteQueue;           // Thread-safe queue of scheduled notes
+    int64_t globalFrameCounter;    // Total frames processed since start
 };
 
 static AudioEngine* engine = nullptr;
@@ -408,6 +551,34 @@ Java_com_example_pockettracker_TrackerAudioEngine_native_1setInstrumentParams(
         jboolean reverse, jint loopMode, jint loopStart) {
     if (engine) {
         engine->setInstrumentParams(instrumentId, start, end, reverse, loopMode, loopStart);
+    }
+}
+
+// ===================================
+// PHASE 1: NOTE QUEUE JNI METHODS
+// ===================================
+
+JNIEXPORT jlong JNICALL
+Java_com_example_pockettracker_TrackerAudioEngine_native_1getCurrentFrame(JNIEnv *env, jobject thiz) {
+    if (engine) {
+        return (jlong)engine->getCurrentFrame();
+    }
+    return 0;
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_TrackerAudioEngine_native_1scheduleNote(
+        JNIEnv *env, jobject thiz, jlong targetFrame, jint sampleId, jint trackId,
+        jfloat frequency, jfloat baseFrequency, jfloat volume) {
+    if (engine) {
+        engine->scheduleNote(targetFrame, sampleId, trackId, frequency, baseFrequency, volume);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_TrackerAudioEngine_native_1clearScheduledNotes(JNIEnv *env, jobject thiz) {
+    if (engine) {
+        engine->clearScheduledNotes();
     }
 }
 

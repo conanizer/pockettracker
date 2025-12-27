@@ -413,6 +413,68 @@ class TrackerAudioEngine(private val context: Context) {
 
     fun getActiveVoiceCount(): Int = native_getActiveVoiceCount()
 
+    // ===================================
+    // PHASE 1: NOTE QUEUE INTERFACE
+    // ===================================
+
+    /**
+     * Get current audio frame number (for sample-accurate scheduling)
+     * @return Global frame counter from audio engine
+     */
+    fun getCurrentFrame(): Long = native_getCurrentFrame()
+
+    /**
+     * Schedule a note to be played at exact audio frame
+     * @param targetFrame Exact frame number to trigger note
+     * @param note Note to play
+     * @param instrumentId Instrument slot (0-255)
+     * @param trackId Track/voice assignment (0-7)
+     * @param volume Playback volume (0.0-1.0)
+     * @param project Project containing instrument data
+     */
+    fun scheduleNote(targetFrame: Long, note: Note, instrumentId: Int, trackId: Int,
+                    volume: Float = 1.0f, project: Project) {
+        if (note == Note.EMPTY) return
+
+        // Get sample for this instrument
+        val sampleId = if (instrumentId in 0..255) {
+            project.instruments[instrumentId].sampleId
+        } else {
+            return  // Invalid instrument
+        }
+
+        val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
+        val frequency = note.toFrequency()
+
+        native_scheduleNote(targetFrame, sampleId, trackId, frequency, baseFreq, volume)
+
+        Log.d(TAG, "📅 Scheduled: frame=$targetFrame, note=$note, inst=$instrumentId, track=$trackId")
+    }
+
+    /**
+     * Clear all scheduled notes (call on stop/reset)
+     */
+    fun clearScheduledNotes() {
+        native_clearScheduledNotes()
+        Log.d(TAG, "🗑️ Cleared all scheduled notes")
+    }
+
+    /**
+     * Calculate target frame for a note based on tempo and step number
+     * @param startFrame Frame number when playback started
+     * @param stepNumber Which step (0, 1, 2, ...)
+     * @param tempo BPM
+     * @return Target frame number for this step
+     */
+    fun calculateTargetFrame(startFrame: Long, stepNumber: Int, tempo: Int): Long {
+        val sampleRate = getDeviceSampleRate()
+        // 60000ms per minute ÷ BPM ÷ 4 (16th notes) = ms per step
+        val msPerStep = (60000.0 / tempo / 4.0)
+        // Convert to frames: ms * sampleRate / 1000
+        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+        return startFrame + (stepNumber * framesPerStep)
+    }
+
     /**
      * Set playback parameters for an instrument
      * @param instrumentId Instrument slot (0-255)
@@ -461,4 +523,10 @@ class TrackerAudioEngine(private val context: Context) {
     private external fun native_getSampleRate(): Int
     private external fun native_setInstrumentParams(instrumentId: Int, startPoint: Int, endPoint: Int,
                                                     reverse: Boolean, loopMode: Int, loopStart: Int)
+
+    // PHASE 1: Note queue native methods
+    private external fun native_getCurrentFrame(): Long
+    private external fun native_scheduleNote(targetFrame: Long, sampleId: Int, trackId: Int,
+                                           frequency: Float, baseFrequency: Float, volume: Float)
+    private external fun native_clearScheduledNotes()
 }
