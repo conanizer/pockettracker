@@ -82,63 +82,71 @@ fun PixelPerfectTracker(
             when (currentScreen) {
                 ScreenType.PHRASE -> {
                     if (USE_NOTE_QUEUE) {
-                        // PHASE 2: Queue-based playback (sample-accurate timing)
-                        val sampleRate = audioEngine.getDeviceSampleRate()
-                        val msPerStep = (60000.0 / project.tempo / 4.0)
-                        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
-                        val framesPerPhrase = 16 * framesPerStep
+                        try {
+                            // CRITICAL: Clear any leftover notes from previous playback
+                            audioEngine.clearScheduledNotes()
 
-                        // Maintain a continuous buffer of scheduled phrases
-                        val lookaheadMs = 250L  // Increased from 100ms for more stable startup
-                        val lookaheadFrames = (lookaheadMs * sampleRate / 1000.0).toLong()
-                        val bufferPhrases = 2  // Keep 2 phrases queued ahead (reduced from 3)
+                            // PHASE 2: Queue-based playback (sample-accurate timing)
+                            val sampleRate = audioEngine.getDeviceSampleRate()
+                            val msPerStep = (60000.0 / project.tempo / 4.0)
+                            val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+                            val framesPerPhrase = 16 * framesPerStep
 
-                        // Start scheduling from current frame + lookahead
-                        val playbackStartFrame = audioEngine.getCurrentFrame() + lookaheadFrames
-                        var nextPhraseStartFrame = playbackStartFrame
+                            // Maintain a continuous buffer of scheduled phrases
+                            val lookaheadMs = 250L  // Increased from 100ms for more stable startup
+                            val lookaheadFrames = (lookaheadMs * sampleRate / 1000.0).toLong()
+                            val bufferPhrases = 2  // Keep 2 phrases queued ahead (reduced from 3)
 
-                        // Helper function to schedule a single phrase
-                        fun schedulePhrase(startFrame: Long) {
-                            for (step in 0..15) {
-                                val targetFrame = startFrame + (step * framesPerStep)
-                                val phraseStep = project.phrases[currentPhrase].steps[step]
+                            // Start scheduling from current frame + lookahead
+                            val playbackStartFrame = audioEngine.getCurrentFrame() + lookaheadFrames
+                            var nextPhraseStartFrame = playbackStartFrame
 
-                                if (!phraseStep.isEmpty()) {
-                                    audioEngine.scheduleNote(
-                                        targetFrame = targetFrame,
-                                        note = phraseStep.note,
-                                        instrumentId = phraseStep.instrument,
-                                        trackId = 0,
-                                        volume = phraseStep.volume / 255f,
-                                        project = project
-                                    )
+                            // Helper function to schedule a single phrase
+                            fun schedulePhrase(startFrame: Long) {
+                                for (step in 0..15) {
+                                    val targetFrame = startFrame + (step * framesPerStep)
+                                    val phraseStep = project.phrases[currentPhrase].steps[step]
+
+                                    if (!phraseStep.isEmpty()) {
+                                        audioEngine.scheduleNote(
+                                            targetFrame = targetFrame,
+                                            note = phraseStep.note,
+                                            instrumentId = phraseStep.instrument,
+                                            trackId = 0,
+                                            volume = phraseStep.volume / 255f,
+                                            project = project
+                                        )
+                                    }
                                 }
                             }
-                        }
 
-                        // Initial fill: schedule first phrase, then add to buffer gradually
-                        schedulePhrase(nextPhraseStartFrame)
-                        nextPhraseStartFrame += framesPerPhrase
+                            // Initial fill: schedule first phrase, then add to buffer gradually
+                            schedulePhrase(nextPhraseStartFrame)
+                            nextPhraseStartFrame += framesPerPhrase
 
-                        // Continuous scheduling loop
-                        while (isPlaying) {
-                            val currentFrame = audioEngine.getCurrentFrame()
+                            // Continuous scheduling loop
+                            while (isPlaying) {
+                                val currentFrame = audioEngine.getCurrentFrame()
 
-                            // Maintain 2-phrase buffer: schedule more when buffer gets low
-                            val bufferRemaining = nextPhraseStartFrame - currentFrame
-                            if (bufferRemaining < (bufferPhrases * framesPerPhrase)) {
-                                schedulePhrase(nextPhraseStartFrame)
-                                nextPhraseStartFrame += framesPerPhrase
+                                // Maintain 2-phrase buffer: schedule more when buffer gets low
+                                val bufferRemaining = nextPhraseStartFrame - currentFrame
+                                if (bufferRemaining < (bufferPhrases * framesPerPhrase)) {
+                                    schedulePhrase(nextPhraseStartFrame)
+                                    nextPhraseStartFrame += framesPerPhrase
+                                }
+
+                                // Update playback cursor based on current audio position
+                                // Guard against negative values during startup
+                                val framesIntoPlayback = maxOf(0L, currentFrame - playbackStartFrame)
+                                val framesIntoPhrase = framesIntoPlayback % framesPerPhrase
+                                playbackRow = (framesIntoPhrase / framesPerStep).toInt().coerceIn(0, 15)
+
+                                // Update UI at display refresh rate (not audio rate)
+                                delay(msPerStep.toLong())
                             }
-
-                            // Update playback cursor based on current audio position
-                            // Guard against negative values during startup
-                            val framesIntoPlayback = maxOf(0L, currentFrame - playbackStartFrame)
-                            val framesIntoPhrase = framesIntoPlayback % framesPerPhrase
-                            playbackRow = (framesIntoPhrase / framesPerStep).toInt().coerceIn(0, 15)
-
-                            // Update UI at display refresh rate (not audio rate)
-                            delay(msPerStep.toLong())
+                        } finally {
+                            // CRITICAL: Clean up scheduled notes when playback stops
+                            audioEngine.clearScheduledNotes()
                         }
                     } else {
                         // OLD: Kotlin timing (for comparison)
