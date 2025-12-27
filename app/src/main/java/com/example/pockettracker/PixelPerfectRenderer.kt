@@ -86,18 +86,21 @@ fun PixelPerfectTracker(
                         val sampleRate = audioEngine.getDeviceSampleRate()
                         val msPerStep = (60000.0 / project.tempo / 4.0)
                         val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+                        val framesPerPhrase = 16 * framesPerStep
 
-                        // Lookahead: schedule notes this far in the future (prevents rushing)
-                        val lookaheadMs = 100L  // 100ms buffer
+                        // Maintain a continuous buffer of scheduled phrases
+                        val lookaheadMs = 100L
                         val lookaheadFrames = (lookaheadMs * sampleRate / 1000.0).toLong()
+                        val bufferPhrases = 3  // Keep 3 phrases queued ahead
 
-                        // Track where next phrase should start (prevents tempo jumps)
-                        var nextPhraseStartFrame = audioEngine.getCurrentFrame() + lookaheadFrames
+                        // Start scheduling from current frame + lookahead
+                        val playbackStartFrame = audioEngine.getCurrentFrame() + lookaheadFrames
+                        var nextPhraseStartFrame = playbackStartFrame
 
-                        while (isPlaying) {
-                            // Schedule all 16 steps from nextPhraseStartFrame
+                        // Helper function to schedule a single phrase
+                        fun schedulePhrase(startFrame: Long) {
                             for (step in 0..15) {
-                                val targetFrame = nextPhraseStartFrame + (step * framesPerStep)
+                                val targetFrame = startFrame + (step * framesPerStep)
                                 val phraseStep = project.phrases[currentPhrase].steps[step]
 
                                 if (!phraseStep.isEmpty()) {
@@ -111,21 +114,33 @@ fun PixelPerfectTracker(
                                     )
                                 }
                             }
+                        }
 
-                            // Calculate when this phrase ends (for next loop)
-                            val phraseEndFrame = nextPhraseStartFrame + (16 * framesPerStep)
+                        // Initial fill: schedule first 3 phrases to build buffer
+                        for (i in 0 until bufferPhrases) {
+                            schedulePhrase(nextPhraseStartFrame)
+                            nextPhraseStartFrame += framesPerPhrase
+                        }
 
-                            // Update playback cursor in sync with audio
-                            val updateIntervalMs = msPerStep.toLong()
+                        // Continuous scheduling loop
+                        while (isPlaying) {
+                            val currentFrame = audioEngine.getCurrentFrame()
 
-                            for (step in 0..15) {
-                                if (!isPlaying) break
-                                playbackRow = step
-                                delay(updateIntervalMs)
+                            // If we're within 1 phrase duration of our buffer end, schedule another
+                            val bufferRemaining = nextPhraseStartFrame - currentFrame
+                            if (bufferRemaining < framesPerPhrase + lookaheadFrames) {
+                                schedulePhrase(nextPhraseStartFrame)
+                                nextPhraseStartFrame += framesPerPhrase
                             }
 
-                            // Next phrase starts where this one ended (perfect continuity)
-                            nextPhraseStartFrame = phraseEndFrame
+                            // Update playback cursor based on current audio position
+                            val framesIntoPlayback = currentFrame - playbackStartFrame
+                            val currentPhraseIndex = (framesIntoPlayback / framesPerPhrase).toInt()
+                            val framesIntoPhrase = framesIntoPlayback % framesPerPhrase
+                            playbackRow = (framesIntoPhrase / framesPerStep).toInt().coerceIn(0, 15)
+
+                            // Update UI at display refresh rate (not audio rate)
+                            delay(msPerStep.toLong())
                         }
                     } else {
                         // OLD: Kotlin timing (for comparison)
