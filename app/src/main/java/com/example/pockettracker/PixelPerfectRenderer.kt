@@ -93,9 +93,9 @@ fun PixelPerfectTracker(
                             val framesPerPhrase = 16 * framesPerStep
 
                             // Maintain a continuous buffer of scheduled phrases
-                            val lookaheadMs = 250L  // Increased from 100ms for more stable startup
+                            val lookaheadMs = 50L  // Minimal delay for responsive start
                             val lookaheadFrames = (lookaheadMs * sampleRate / 1000.0).toLong()
-                            val bufferPhrases = 2  // Keep 2 phrases queued ahead (reduced from 3)
+                            val bufferPhrases = 2  // Keep 2 phrases queued ahead for stability
 
                             // Start scheduling from current frame + lookahead
                             val playbackStartFrame = audioEngine.getCurrentFrame() + lookaheadFrames
