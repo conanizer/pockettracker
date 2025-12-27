@@ -89,9 +89,9 @@ fun PixelPerfectTracker(
                         val framesPerPhrase = 16 * framesPerStep
 
                         // Maintain a continuous buffer of scheduled phrases
-                        val lookaheadMs = 100L
+                        val lookaheadMs = 250L  // Increased from 100ms for more stable startup
                         val lookaheadFrames = (lookaheadMs * sampleRate / 1000.0).toLong()
-                        val bufferPhrases = 3  // Keep 3 phrases queued ahead
+                        val bufferPhrases = 2  // Keep 2 phrases queued ahead (reduced from 3)
 
                         // Start scheduling from current frame + lookahead
                         val playbackStartFrame = audioEngine.getCurrentFrame() + lookaheadFrames
@@ -116,26 +116,24 @@ fun PixelPerfectTracker(
                             }
                         }
 
-                        // Initial fill: schedule first 3 phrases to build buffer
-                        for (i in 0 until bufferPhrases) {
-                            schedulePhrase(nextPhraseStartFrame)
-                            nextPhraseStartFrame += framesPerPhrase
-                        }
+                        // Initial fill: schedule first phrase, then add to buffer gradually
+                        schedulePhrase(nextPhraseStartFrame)
+                        nextPhraseStartFrame += framesPerPhrase
 
                         // Continuous scheduling loop
                         while (isPlaying) {
                             val currentFrame = audioEngine.getCurrentFrame()
 
-                            // If we're within 1 phrase duration of our buffer end, schedule another
+                            // Maintain 2-phrase buffer: schedule more when buffer gets low
                             val bufferRemaining = nextPhraseStartFrame - currentFrame
-                            if (bufferRemaining < framesPerPhrase + lookaheadFrames) {
+                            if (bufferRemaining < (bufferPhrases * framesPerPhrase)) {
                                 schedulePhrase(nextPhraseStartFrame)
                                 nextPhraseStartFrame += framesPerPhrase
                             }
 
                             // Update playback cursor based on current audio position
-                            val framesIntoPlayback = currentFrame - playbackStartFrame
-                            val currentPhraseIndex = (framesIntoPlayback / framesPerPhrase).toInt()
+                            // Guard against negative values during startup
+                            val framesIntoPlayback = maxOf(0L, currentFrame - playbackStartFrame)
                             val framesIntoPhrase = framesIntoPlayback % framesPerPhrase
                             playbackRow = (framesIntoPhrase / framesPerStep).toInt().coerceIn(0, 15)
 
