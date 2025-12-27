@@ -183,11 +183,120 @@ fun PixelPerfectTracker(
                     }
                 }
                 ScreenType.CHAIN -> {
-                    // CHAIN PLAYBACK: Loop through chain rows, playing phrases with transpose
-                    val chain = project.chains[currentChain]
-                    val stepDurationMs = (60000.0 / project.tempo / 4.0)
-                    val startTime = SystemClock.elapsedRealtime().toDouble()
-                    var stepCounter = 0
+                    if (USE_NOTE_QUEUE) {
+                        try {
+                            // CRITICAL: Clear any leftover notes from previous playback
+                            audioEngine.clearScheduledNotes()
+
+                            // PHASE 3: Queue-based chain playback (sample-accurate timing with transpose)
+                            val chain = project.chains[currentChain]
+                            val sampleRate = audioEngine.getDeviceSampleRate()
+                            val msPerStep = (60000.0 / project.tempo / 4.0)
+                            val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+                            val framesPerPhrase = 16 * framesPerStep
+
+                            // Maintain a continuous buffer
+                            val lookaheadMs = 50L
+                            val lookaheadFrames = (lookaheadMs * sampleRate / 1000.0).toLong()
+                            val bufferPhrases = 2  // Keep 2 phrases queued ahead
+
+                            // Start scheduling from current frame + lookahead
+                            val playbackStartFrame = audioEngine.getCurrentFrame() + lookaheadFrames
+                            var nextPhraseStartFrame = playbackStartFrame
+
+                            // Track current position in chain
+                            var currentChainRow = playbackChainRow
+
+                            // Helper function to find next non-empty chain row
+                            fun findNextNonEmptyRow(startRow: Int): Int? {
+                                var row = startRow
+                                var attempts = 0
+                                while (chain.isEmpty(row) && attempts < 16) {
+                                    row = (row + 1) % 16
+                                    attempts++
+                                }
+                                return if (attempts >= 16) null else row
+                            }
+
+                            // Helper function to schedule a single phrase from chain
+                            fun scheduleChainPhrase(startFrame: Long, chainRow: Int) {
+                                val phraseRef = chain.phraseRefs[chainRow]
+                                val transposeSemitones = chain.getTransposeSemitones(chainRow)
+
+                                for (step in 0..15) {
+                                    val targetFrame = startFrame + (step * framesPerStep)
+                                    val phraseStep = project.phrases[phraseRef].steps[step]
+
+                                    if (!phraseStep.isEmpty()) {
+                                        // Apply transpose to the note
+                                        val originalMidi = phraseStep.note.toMidi()
+                                        if (originalMidi >= 0) {
+                                            val transposedMidi = (originalMidi + transposeSemitones).coerceIn(0, 127)
+                                            val transposedNote = Note.fromMidi(transposedMidi)
+
+                                            audioEngine.scheduleNote(
+                                                targetFrame = targetFrame,
+                                                note = transposedNote,
+                                                instrumentId = phraseStep.instrument,
+                                                trackId = 0,
+                                                volume = phraseStep.volume / 255f,
+                                                project = project
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Find first non-empty row
+                            val firstRow = findNextNonEmptyRow(currentChainRow)
+                            if (firstRow == null) {
+                                // Chain is completely empty, stop playback
+                                // (isPlaying will be set to false externally)
+                            } else {
+                                currentChainRow = firstRow
+
+                                // Initial fill: schedule first phrase
+                                scheduleChainPhrase(nextPhraseStartFrame, currentChainRow)
+                                nextPhraseStartFrame += framesPerPhrase
+                                currentChainRow = (currentChainRow + 1) % 16
+
+                                // Continuous scheduling loop
+                                while (isPlaying) {
+                                    val currentFrame = audioEngine.getCurrentFrame()
+
+                                    // Maintain 2-phrase buffer
+                                    val bufferRemaining = nextPhraseStartFrame - currentFrame
+                                    if (bufferRemaining < (bufferPhrases * framesPerPhrase)) {
+                                        // Find next non-empty row
+                                        val nextRow = findNextNonEmptyRow(currentChainRow)
+                                        if (nextRow != null) {
+                                            scheduleChainPhrase(nextPhraseStartFrame, nextRow)
+                                            nextPhraseStartFrame += framesPerPhrase
+                                            currentChainRow = (nextRow + 1) % 16
+                                        }
+                                    }
+
+                                    // Update playback cursor based on current audio position
+                                    val framesIntoPlayback = maxOf(0L, currentFrame - playbackStartFrame)
+                                    val currentPhraseIndex = (framesIntoPlayback / framesPerPhrase).toInt()
+                                    val framesIntoPhrase = framesIntoPlayback % framesPerPhrase
+                                    playbackRow = (framesIntoPhrase / framesPerStep).toInt().coerceIn(0, 15)
+                                    playbackChainRow = currentChainRow
+                                    playbackPhraseStep = playbackRow
+
+                                    delay(msPerStep.toLong())
+                                }
+                            }
+                        } finally {
+                            // CRITICAL: Clean up scheduled notes when playback stops
+                            audioEngine.clearScheduledNotes()
+                        }
+                    } else {
+                        // OLD: Kotlin timing for chain playback
+                        val chain = project.chains[currentChain]
+                        val stepDurationMs = (60000.0 / project.tempo / 4.0)
+                        val startTime = SystemClock.elapsedRealtime().toDouble()
+                        var stepCounter = 0
 
                     while (isPlaying) {
                         // Find next non-empty chain row
@@ -241,6 +350,7 @@ fun PixelPerfectTracker(
 
                         // Move to next chain row
                         playbackChainRow = (playbackChainRow + 1) % 16
+                    }
                     }
                 }
                 ScreenType.SONG -> {
