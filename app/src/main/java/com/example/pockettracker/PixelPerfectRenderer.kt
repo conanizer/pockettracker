@@ -204,8 +204,9 @@ fun PixelPerfectTracker(
                             val playbackStartFrame = audioEngine.getCurrentFrame() + lookaheadFrames
                             var nextPhraseStartFrame = playbackStartFrame
 
-                            // Track current position in chain
-                            var currentChainRow = playbackChainRow
+                            // Track scheduled chain rows to map audio position to chain row
+                            val scheduledRows = mutableListOf<Int>()
+                            var nextRowToSchedule = playbackChainRow
 
                             // Helper function to find next non-empty chain row
                             fun findNextNonEmptyRow(startRow: Int): Int? {
@@ -248,17 +249,16 @@ fun PixelPerfectTracker(
                             }
 
                             // Find first non-empty row
-                            val firstRow = findNextNonEmptyRow(currentChainRow)
+                            val firstRow = findNextNonEmptyRow(nextRowToSchedule)
                             if (firstRow == null) {
                                 // Chain is completely empty, stop playback
                                 // (isPlaying will be set to false externally)
                             } else {
-                                currentChainRow = firstRow
-
                                 // Initial fill: schedule first phrase
-                                scheduleChainPhrase(nextPhraseStartFrame, currentChainRow)
+                                scheduleChainPhrase(nextPhraseStartFrame, firstRow)
+                                scheduledRows.add(firstRow)
                                 nextPhraseStartFrame += framesPerPhrase
-                                currentChainRow = (currentChainRow + 1) % 16
+                                nextRowToSchedule = (firstRow + 1) % 16
 
                                 // Continuous scheduling loop
                                 while (isPlaying) {
@@ -268,20 +268,26 @@ fun PixelPerfectTracker(
                                     val bufferRemaining = nextPhraseStartFrame - currentFrame
                                     if (bufferRemaining < (bufferPhrases * framesPerPhrase)) {
                                         // Find next non-empty row
-                                        val nextRow = findNextNonEmptyRow(currentChainRow)
+                                        val nextRow = findNextNonEmptyRow(nextRowToSchedule)
                                         if (nextRow != null) {
                                             scheduleChainPhrase(nextPhraseStartFrame, nextRow)
+                                            scheduledRows.add(nextRow)
                                             nextPhraseStartFrame += framesPerPhrase
-                                            currentChainRow = (nextRow + 1) % 16
+                                            nextRowToSchedule = (nextRow + 1) % 16
                                         }
                                     }
 
-                                    // Update playback cursor based on current audio position
+                                    // Calculate which phrase is currently playing based on audio position
                                     val framesIntoPlayback = maxOf(0L, currentFrame - playbackStartFrame)
                                     val currentPhraseIndex = (framesIntoPlayback / framesPerPhrase).toInt()
                                     val framesIntoPhrase = framesIntoPlayback % framesPerPhrase
+
+                                    // Map phrase index to actual chain row
+                                    if (currentPhraseIndex < scheduledRows.size) {
+                                        playbackChainRow = scheduledRows[currentPhraseIndex]
+                                    }
+
                                     playbackRow = (framesIntoPhrase / framesPerStep).toInt().coerceIn(0, 15)
-                                    playbackChainRow = currentChainRow
                                     playbackPhraseStep = playbackRow
 
                                     delay(msPerStep.toLong())
