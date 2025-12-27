@@ -94,7 +94,7 @@ class TrackerAudioEngine(private val context: Context) {
      * Get actual device sample rate from audio engine
      * Queries the Oboe audio stream for the real sample rate
      */
-    private fun getDeviceSampleRate(): Int {
+    fun getDeviceSampleRate(): Int {
         return native_getSampleRate()
     }
 

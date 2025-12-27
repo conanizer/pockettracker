@@ -265,6 +265,64 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     }
     var previousScreen by remember { mutableStateOf(ScreenType.PROJECT) }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // PHASE 1 TEST: NOTE QUEUE VERIFICATION
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Test the note queue infrastructure by scheduling 8 metronome clicks
+     * Each click is exactly 1 beat apart at current project tempo
+     * Verifies sample-accurate timing by logging schedule vs trigger times
+     *
+     * Trigger: Press START on PROJECT screen
+     */
+    val testNoteQueue = {
+        Log.d("NoteQueueTest", "═══════════════════════════════════════════")
+        Log.d("NoteQueueTest", "🧪 PHASE 1 TEST: Sample-Accurate Note Queue")
+        Log.d("NoteQueueTest", "═══════════════════════════════════════════")
+
+        val currentFrame = audioEngine.getCurrentFrame()
+        val tempo = project.tempo
+        val sampleRate = audioEngine.getDeviceSampleRate()
+
+        // Calculate frames per beat (quarter note) at current tempo
+        // 60000ms per minute ÷ BPM = ms per beat
+        // ms per beat × sampleRate / 1000 = frames per beat
+        val msPerBeat = (60000.0 / tempo)
+        val framesPerBeat = (msPerBeat * sampleRate / 1000.0).toLong()
+
+        Log.d("NoteQueueTest", "Tempo: $tempo BPM")
+        Log.d("NoteQueueTest", "Sample Rate: $sampleRate Hz")
+        Log.d("NoteQueueTest", "Frames per beat: $framesPerBeat")
+        Log.d("NoteQueueTest", "Current frame: $currentFrame")
+        Log.d("NoteQueueTest", "-------------------------------------------")
+
+        // Schedule 8 metronome clicks (C-4 note, kick drum, 1 beat apart)
+        val metronomNote = Note.fromString("C-4")
+        val kickInstrument = 0  // Instrument 00 = kick drum
+
+        for (beat in 0..7) {
+            val targetFrame = currentFrame + (beat * framesPerBeat)
+            audioEngine.scheduleNote(
+                targetFrame = targetFrame,
+                note = metronomNote,
+                instrumentId = kickInstrument,
+                trackId = 0,
+                volume = 0.8f,
+                project = project
+            )
+
+            val targetTimeMs = (beat * msPerBeat).toLong()
+            Log.d("NoteQueueTest", "📅 Beat $beat scheduled: frame=$targetFrame (${targetTimeMs}ms from now)")
+        }
+
+        Log.d("NoteQueueTest", "-------------------------------------------")
+        Log.d("NoteQueueTest", "✅ Scheduled 8 beats. Watch for 🎵 trigger logs!")
+        Log.d("NoteQueueTest", "Expected: Notes trigger at exact scheduled frames")
+        Log.d("NoteQueueTest", "Precision: <0.02ms jitter (sample-accurate)")
+        Log.d("NoteQueueTest", "═══════════════════════════════════════════")
+    }
+
     // Initialize file browser item list when directory changes
     LaunchedEffect(fileBrowserState.currentDirectory, fileBrowserState.sortMode) {
         val items = fileBrowserModule.buildItemList(
@@ -1491,6 +1549,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             // ───────────────────────────────────────────────────────────────
             onStart = {
                 when (currentScreen) {
+                    // PHASE 1 TEST: START on PROJECT screen triggers note queue test
+                    ScreenType.PROJECT -> {
+                        Log.d("NoteQueueTest", "🧪 START on PROJECT - Running note queue test...")
+                        testNoteQueue()
+                    }
+
                     // File browser: Preview selected WAV file
                     ScreenType.FILE_BROWSER -> {
                         if (previousScreen == ScreenType.INSTRUMENT && fileBrowserState.items.isNotEmpty()) {
