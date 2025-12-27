@@ -582,4 +582,11 @@ Java_com_example_pockettracker_TrackerAudioEngine_native_1clearScheduledNotes(JN
     }
 }
 
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_TrackerAudioEngine_native_1resumeStream(JNIEnv *env, jobject thiz) {
+    if (engine) {
+        engine->resumeStream();
+    }
+}
+
 }

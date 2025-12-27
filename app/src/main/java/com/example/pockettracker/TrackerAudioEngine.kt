@@ -425,6 +425,7 @@ class TrackerAudioEngine(private val context: Context) {
 
     /**
      * Schedule a note to be played at exact audio frame
+     * IMPORTANT: This resumes the audio stream if paused
      * @param targetFrame Exact frame number to trigger note
      * @param note Note to play
      * @param instrumentId Instrument slot (0-255)
@@ -445,6 +446,9 @@ class TrackerAudioEngine(private val context: Context) {
 
         val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
         val frequency = note.toFrequency()
+
+        // CRITICAL: Resume stream so audio callback can process the queue
+        native_resumeStream()
 
         native_scheduleNote(targetFrame, sampleId, trackId, frequency, baseFreq, volume)
 
@@ -529,4 +533,5 @@ class TrackerAudioEngine(private val context: Context) {
     private external fun native_scheduleNote(targetFrame: Long, sampleId: Int, trackId: Int,
                                            frequency: Float, baseFrequency: Float, volume: Float)
     private external fun native_clearScheduledNotes()
+    private external fun native_resumeStream()
 }
