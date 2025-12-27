@@ -255,14 +255,26 @@ public:
 
             for (int i = 0; i < numFrames; i++) {
                 int idx = (int)voice.position;
+                float frac = voice.position - (float)idx;  // Fractional part for interpolation
 
-                // Bounds check
-                if (idx < 0 || idx >= voice.sampleLength) {
+                // Bounds check - need idx+1 for interpolation
+                if (idx < 0 || idx >= voice.sampleLength - 1) {
+                    // Handle edge case: exactly at last sample
+                    if (idx == voice.sampleLength - 1 && frac == 0.0f) {
+                        float sample = voice.sampleData[idx] * voice.volume * 0.25f;
+                        output[i * channelCount] += sample;      // Left
+                        output[i * channelCount + 1] += sample;  // Right
+                    }
                     voice.isActive = false;
                     break;
                 }
 
-                float sample = voice.sampleData[idx] * voice.volume * 0.25f;
+                // Linear interpolation: blend between two adjacent samples
+                // This eliminates aliasing artifacts when pitch-shifting
+                float sample1 = voice.sampleData[idx];
+                float sample2 = voice.sampleData[idx + 1];
+                float interpolatedSample = sample1 + (sample2 - sample1) * frac;
+                float sample = interpolatedSample * voice.volume * 0.25f;
 
                 // Write to both channels (stereo)
                 output[i * channelCount] += sample;      // Left
