@@ -380,9 +380,13 @@ fun PixelPerfectTracker(
                             val playbackStartFrame = audioEngine.getCurrentFrame() + lookaheadFrames
                             var nextPhraseStartFrame = playbackStartFrame
 
-                            // Track current position in song
-                            var currentSongRow = playbackSongRow
-                            var currentChainRow = playbackChainRow
+                            // Track scheduled positions to map audio position to display position
+                            data class ScheduledPosition(val songRow: Int, val chainRow: Int)
+                            val scheduledPositions = mutableListOf<ScheduledPosition>()
+
+                            // Track next position to schedule
+                            var nextSongRowToSchedule = playbackSongRow
+                            var nextChainRowToSchedule = playbackChainRow
 
                             // Data class to track each track's chain state
                             data class TrackState(
@@ -456,7 +460,7 @@ fun PixelPerfectTracker(
                             }
 
                             // Get initial tracks
-                            var activeTracks = getActiveTracksAtSongRow(currentSongRow)
+                            var activeTracks = getActiveTracksAtSongRow(nextSongRowToSchedule)
                             if (activeTracks.isEmpty()) {
                                 // No active tracks, stop playback
                             } else {
@@ -464,9 +468,10 @@ fun PixelPerfectTracker(
                                 var maxChainLength = activeTracks.maxOf { it.maxChainLength }
 
                                 // Initial fill: schedule first phrase for all tracks
-                                scheduleAllTracksAtPosition(nextPhraseStartFrame, currentSongRow, currentChainRow)
+                                scheduleAllTracksAtPosition(nextPhraseStartFrame, nextSongRowToSchedule, nextChainRowToSchedule)
+                                scheduledPositions.add(ScheduledPosition(nextSongRowToSchedule, nextChainRowToSchedule))
                                 nextPhraseStartFrame += framesPerPhrase
-                                currentChainRow++
+                                nextChainRowToSchedule++
 
                                 // Continuous scheduling loop
                                 while (isPlaying) {
@@ -476,35 +481,43 @@ fun PixelPerfectTracker(
                                     val bufferRemaining = nextPhraseStartFrame - currentFrame
                                     if (bufferRemaining < (bufferPhrases * framesPerPhrase)) {
                                         // Check if we need to advance to next song row
-                                        if (currentChainRow >= maxChainLength) {
+                                        if (nextChainRowToSchedule >= maxChainLength) {
                                             // Move to next song row
-                                            currentSongRow = (currentSongRow + 1) % 256
-                                            currentChainRow = 0
-                                            activeTracks = getActiveTracksAtSongRow(currentSongRow)
+                                            nextSongRowToSchedule = (nextSongRowToSchedule + 1) % 256
+                                            nextChainRowToSchedule = 0
+                                            activeTracks = getActiveTracksAtSongRow(nextSongRowToSchedule)
                                             maxChainLength = activeTracks.maxOfOrNull { it.maxChainLength } ?: 0
 
                                             if (maxChainLength == 0) {
                                                 // No more active tracks, could loop song or stop
-                                                currentSongRow = 0
-                                                activeTracks = getActiveTracksAtSongRow(currentSongRow)
+                                                nextSongRowToSchedule = 0
+                                                activeTracks = getActiveTracksAtSongRow(nextSongRowToSchedule)
                                                 maxChainLength = activeTracks.maxOfOrNull { it.maxChainLength } ?: 0
                                             }
                                         }
 
                                         // Schedule next phrase for all tracks
-                                        if (currentChainRow < maxChainLength) {
-                                            scheduleAllTracksAtPosition(nextPhraseStartFrame, currentSongRow, currentChainRow)
+                                        if (nextChainRowToSchedule < maxChainLength) {
+                                            scheduleAllTracksAtPosition(nextPhraseStartFrame, nextSongRowToSchedule, nextChainRowToSchedule)
+                                            scheduledPositions.add(ScheduledPosition(nextSongRowToSchedule, nextChainRowToSchedule))
                                             nextPhraseStartFrame += framesPerPhrase
-                                            currentChainRow++
+                                            nextChainRowToSchedule++
                                         }
                                     }
 
-                                    // Update playback cursor
+                                    // Calculate which phrase is currently playing based on audio position
                                     val framesIntoPlayback = maxOf(0L, currentFrame - playbackStartFrame)
+                                    val currentPhraseIndex = (framesIntoPlayback / framesPerPhrase).toInt()
                                     val framesIntoPhrase = framesIntoPlayback % framesPerPhrase
+
+                                    // Map phrase index to actual song/chain position
+                                    if (currentPhraseIndex < scheduledPositions.size) {
+                                        val pos = scheduledPositions[currentPhraseIndex]
+                                        playbackSongRow = pos.songRow
+                                        playbackChainRow = pos.chainRow
+                                    }
+
                                     playbackPhraseStep = (framesIntoPhrase / framesPerStep).toInt().coerceIn(0, 15)
-                                    playbackSongRow = currentSongRow
-                                    playbackChainRow = currentChainRow
 
                                     delay(msPerStep.toLong())
                                 }
