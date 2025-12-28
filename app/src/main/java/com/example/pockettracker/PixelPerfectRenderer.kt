@@ -35,11 +35,6 @@ const val DESIGN_HEIGHT_PX = 480
 const val SCREEN_SPACER = 6      // Space between modules
 const val SIDE_SPACER = 10       // Space on sides
 
-// PHASE 2: Feature flag for queue-based playback
-// Set to true to use sample-accurate C++ note queue
-// Set to false to use old Kotlin timing (for comparison)
-const val USE_NOTE_QUEUE = true
-
 @Composable
 fun PixelPerfectTracker(
     currentScreen: ScreenType,
@@ -81,12 +76,11 @@ fun PixelPerfectTracker(
         if (isPlaying) {
             when (currentScreen) {
                 ScreenType.PHRASE -> {
-                    if (USE_NOTE_QUEUE) {
-                        try {
-                            // CRITICAL: Clear any leftover notes from previous playback
-                            audioEngine.clearScheduledNotes()
+                    try {
+                        // CRITICAL: Clear any leftover notes from previous playback
+                        audioEngine.clearScheduledNotes()
 
-                            // PHASE 2: Queue-based playback (sample-accurate timing)
+                        // Queue-based playback (sample-accurate timing)
                             val sampleRate = audioEngine.getDeviceSampleRate()
                             val msPerStep = (60000.0 / project.tempo / 4.0)
                             val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
@@ -148,47 +142,13 @@ fun PixelPerfectTracker(
                             // CRITICAL: Clean up scheduled notes when playback stops
                             audioEngine.clearScheduledNotes()
                         }
-                    } else {
-                        // OLD: Kotlin timing (for comparison)
-                        val stepDurationMs = (60000.0 / project.tempo / 4.0)
-                        val startTime = SystemClock.elapsedRealtime().toDouble()
-                        var stepCounter = 0
-
-                        while (isPlaying) {
-                            // Calculate target time for THIS step (not next step)
-                            val targetTime = startTime + (stepCounter * stepDurationMs)
-                            val currentTime = SystemClock.elapsedRealtime().toDouble()
-                            val waitTime = targetTime - currentTime
-
-                            // Hybrid timing: delay() for bulk, spin-wait for precision
-                            if (waitTime > 2.0) {
-                                // Use delay() for most of the wait (efficient, lets other threads run)
-                                delay((waitTime - 1.5).toLong())
-                            }
-
-                            // Spin-wait for the last ~1.5ms for precise timing
-                            while (SystemClock.elapsedRealtime().toDouble() < targetTime && isPlaying) {
-                                // Busy-wait (precise but uses CPU)
-                            }
-
-                            // Now play the note at the precise target time
-                            val step = project.phrases[currentPhrase].steps[playbackRow]
-                            if (!step.isEmpty()) {
-                                audioEngine.playNote(step.note, step.instrument, 0, step.volume / 255f, project)
-                            }
-
-                            playbackRow = (playbackRow + 1) % 16
-                            stepCounter++
-                        }
-                    }
                 }
                 ScreenType.CHAIN -> {
-                    if (USE_NOTE_QUEUE) {
-                        try {
-                            // CRITICAL: Clear any leftover notes from previous playback
-                            audioEngine.clearScheduledNotes()
+                    try {
+                        // CRITICAL: Clear any leftover notes from previous playback
+                        audioEngine.clearScheduledNotes()
 
-                            // PHASE 3: Queue-based chain playback (sample-accurate timing with transpose)
+                        // Queue-based chain playback (sample-accurate timing with transpose)
                             val chain = project.chains[currentChain]
                             val sampleRate = audioEngine.getDeviceSampleRate()
                             val msPerStep = (60000.0 / project.tempo / 4.0)
@@ -297,75 +257,13 @@ fun PixelPerfectTracker(
                             // CRITICAL: Clean up scheduled notes when playback stops
                             audioEngine.clearScheduledNotes()
                         }
-                    } else {
-                        // OLD: Kotlin timing for chain playback
-                        val chain = project.chains[currentChain]
-                        val stepDurationMs = (60000.0 / project.tempo / 4.0)
-                        val startTime = SystemClock.elapsedRealtime().toDouble()
-                        var stepCounter = 0
-
-                    while (isPlaying) {
-                        // Find next non-empty chain row
-                        var attempts = 0
-                        while (chain.isEmpty(playbackChainRow) && attempts < 16) {
-                            playbackChainRow = (playbackChainRow + 1) % 16
-                            attempts++
-                        }
-
-                        // If all rows are empty, stop playback
-                        if (attempts >= 16) {
-                            break
-                        }
-
-                        // Get phrase reference and transpose value
-                        val phraseRef = chain.phraseRefs[playbackChainRow]
-                        val transposeSemitones = chain.getTransposeSemitones(playbackChainRow)
-
-                        // Play this phrase (all 16 steps)
-                        for (stepIndex in 0..15) {
-                            if (!isPlaying) break
-
-                            // Calculate target time and wait with hybrid timing
-                            val targetTime = startTime + (stepCounter * stepDurationMs)
-                            val currentTime = SystemClock.elapsedRealtime().toDouble()
-                            val waitTime = targetTime - currentTime
-
-                            // Hybrid timing: delay() for bulk, spin-wait for precision
-                            if (waitTime > 2.0) {
-                                delay((waitTime - 1.5).toLong())
-                            }
-                            while (SystemClock.elapsedRealtime().toDouble() < targetTime && isPlaying) {
-                                // Spin-wait for precision
-                            }
-
-                            // Now play note at precise time
-                            val step = project.phrases[phraseRef].steps[stepIndex]
-                            if (!step.isEmpty()) {
-                                // Apply transpose to the note
-                                val originalMidi = step.note.toMidi()
-                                if (originalMidi >= 0) {
-                                    val transposedMidi = (originalMidi + transposeSemitones).coerceIn(0, 127)
-                                    val transposedNote = Note.fromMidi(transposedMidi)
-                                    audioEngine.playNote(transposedNote, step.instrument, 0, step.volume / 255f, project)
-                                }
-                            }
-
-                            playbackPhraseStep = stepIndex
-                            stepCounter++
-                        }
-
-                        // Move to next chain row
-                        playbackChainRow = (playbackChainRow + 1) % 16
-                    }
-                    }
                 }
                 ScreenType.SONG -> {
-                    if (USE_NOTE_QUEUE) {
-                        try {
-                            // CRITICAL: Clear any leftover notes from previous playback
-                            audioEngine.clearScheduledNotes()
+                    try {
+                        // CRITICAL: Clear any leftover notes from previous playback
+                        audioEngine.clearScheduledNotes()
 
-                            // PHASE 3: Queue-based song playback (8-track polyphonic with sample-accurate timing)
+                        // Queue-based song playback (8-track polyphonic with sample-accurate timing)
                             val sampleRate = audioEngine.getDeviceSampleRate()
                             val msPerStep = (60000.0 / project.tempo / 4.0)
                             val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
@@ -526,107 +424,6 @@ fun PixelPerfectTracker(
                             // CRITICAL: Clean up scheduled notes when playback stops
                             audioEngine.clearScheduledNotes()
                         }
-                    } else {
-                        // OLD: Kotlin timing for song playback
-                        // Calculate step duration in milliseconds (16th note)
-                        val stepDurationMs = (60000.0 / project.tempo / 4.0)
-
-                        // Use absolute timing with double precision to prevent drift
-                        val startTime = SystemClock.elapsedRealtime().toDouble()
-                        var stepCounter = 0
-
-                    while (isPlaying) {
-                        // Find the longest chain length at current song row
-                        var maxChainLength = 0
-                        for (trackId in 0..7) {
-                            val track = project.tracks[trackId]
-                            if (playbackSongRow < track.chainRefs.size) {
-                                val chainId = track.chainRefs[playbackSongRow]
-                                if (chainId >= 0) {
-                                    val chain = project.chains[chainId]
-                                    // Count non-empty rows in this chain
-                                    var chainLength = 0
-                                    for (i in 0..15) {
-                                        if (!chain.isEmpty(i)) chainLength = i + 1
-                                    }
-                                    if (chainLength > maxChainLength) maxChainLength = chainLength
-                                }
-                            }
-                        }
-
-                        // If no chains at this song row, move to next song row
-                        if (maxChainLength == 0) {
-                            playbackSongRow = (playbackSongRow + 1) % 256
-                            playbackChainRow = 0
-                            continue
-                        }
-
-                        // Play through all chain rows for all active chains
-                        while (playbackChainRow < maxChainLength && isPlaying) {
-                            // Play the phrase at this chain row for all tracks
-                            // All 16 steps are played with all tracks in sync
-                            for (stepIndex in 0..15) {
-                                if (!isPlaying) break
-
-                                // Calculate target time and wait with hybrid timing
-                                val targetTime = startTime + (stepCounter * stepDurationMs)
-                                val currentTime = SystemClock.elapsedRealtime().toDouble()
-                                val waitTime = targetTime - currentTime
-
-                                // Hybrid timing: delay() for bulk, spin-wait for precision
-                                if (waitTime > 2.0) {
-                                    delay((waitTime - 1.5).toLong())
-                                }
-                                while (SystemClock.elapsedRealtime().toDouble() < targetTime && isPlaying) {
-                                    // Spin-wait for precision
-                                }
-
-                                // Now play all 8 tracks simultaneously at precise time
-                                for (trackId in 0..7) {
-                                    val track = project.tracks[trackId]
-
-                                    // Check if this track has a chain at current song row
-                                    if (playbackSongRow < track.chainRefs.size) {
-                                        val chainId = track.chainRefs[playbackSongRow]
-
-                                        if (chainId >= 0 && chainId < 256) {
-                                            val chain = project.chains[chainId]
-
-                                            // Check if this chain row has a phrase
-                                            if (!chain.isEmpty(playbackChainRow)) {
-                                                val phraseRef = chain.phraseRefs[playbackChainRow]
-                                                val transposeSemitones = chain.getTransposeSemitones(playbackChainRow)
-
-                                                val step = project.phrases[phraseRef].steps[stepIndex]
-                                                if (!step.isEmpty()) {
-                                                    // Apply transpose to the note
-                                                    val originalMidi = step.note.toMidi()
-                                                    if (originalMidi >= 0) {
-                                                        val transposedMidi = (originalMidi + transposeSemitones).coerceIn(0, 127)
-                                                        val transposedNote = Note.fromMidi(transposedMidi)
-                                                        // Use trackId as the track parameter for voice assignment
-                                                        audioEngine.playNote(transposedNote, step.instrument, trackId, step.volume / 255f, project)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Update playback position
-                                playbackPhraseStep = stepIndex
-                                stepCounter++
-                            }
-
-                            // Move to next chain row
-                            playbackChainRow++
-                        }
-
-                        // Finished all chain rows, move to next song row
-                        playbackSongRow = (playbackSongRow + 1) % 256
-                        playbackChainRow = 0
-                    }
-                    }
                 }
                 else -> {
                     // Other screens don't support playback yet
