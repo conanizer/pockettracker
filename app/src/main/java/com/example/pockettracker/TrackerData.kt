@@ -174,6 +174,17 @@ data class Instrument(
     // Sample playback parameters
     var root: Note = Note.fromString("C-4"),  // Root note for sample pitch
     var detune: Int = 0x80,  // 00-FF: high nibble=semitones, low nibble=1/16ths of semitone
+
+    // Distortion/bitcrusher parameters
+    var drive: Int = 0x00,  // 00-FF: pre-gain boost (00=1.0x, 80=1.0x, FF=2.0x)
+    var crush: Int = 0x0,  // 0-F: bit depth reduction (0=16-bit/off, F=1-bit)
+    var downsample: Int = 0x0,  // 0-F: sample rate reduction (0=off, 1=÷2, 2=÷4, etc.)
+
+    // Filter parameters
+    var filterType: String = "off",  // "off", "lp" (low-pass), "hp" (high-pass), "bp" (band-pass)
+    var filterCut: Int = 0x00,  // 00-FF: cutoff frequency
+    var filterRes: Int = 0x00,  // 00-FF: resonance
+
     var sampleStart: Int = 0x00,  // 00-FF sample start point (00=start, FF=end)
     var sampleEnd: Int = 0xFF,  // 00-FF sample end point
     var reverse: Boolean = false,  // Reverse playback

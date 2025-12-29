@@ -489,9 +489,12 @@ class TrackerAudioEngine(private val context: Context) {
      * @param loopStart Loop restart position (0-255)
      */
     fun setInstrumentParams(instrumentId: Int, startPoint: Int, endPoint: Int,
-                           reverse: Boolean, loopMode: Int, loopStart: Int) {
-        native_setInstrumentParams(instrumentId, startPoint, endPoint, reverse, loopMode, loopStart)
-        Log.d(TAG, "🎛️ Set params for instrument $instrumentId: start=$startPoint, end=$endPoint, rev=$reverse, loop=$loopMode, loopSt=$loopStart")
+                           reverse: Boolean, loopMode: Int, loopStart: Int,
+                           drive: Int, crush: Int, downsample: Int,
+                           filterType: Int, filterCut: Int, filterRes: Int) {
+        native_setInstrumentParams(instrumentId, startPoint, endPoint, reverse, loopMode, loopStart,
+                                  drive, crush, downsample, filterType, filterCut, filterRes)
+        Log.d(TAG, "🎛️ Set params for instrument $instrumentId: start=$startPoint, end=$endPoint, rev=$reverse, loop=$loopMode, loopSt=$loopStart, drive=$drive, crush=$crush, downsample=$downsample, filter=$filterType, cut=$filterCut, res=$filterRes")
     }
 
     /**
@@ -506,13 +509,27 @@ class TrackerAudioEngine(private val context: Context) {
             else -> 0  // "off"
         }
 
+        // Convert filter type string to int
+        val filterTypeInt = when (instrument.filterType) {
+            "lp" -> 1
+            "hp" -> 2
+            "bp" -> 3
+            else -> 0  // "off"
+        }
+
         setInstrumentParams(
             instrumentId = instrument.sampleId,
             startPoint = instrument.sampleStart,
             endPoint = instrument.sampleEnd,
             reverse = instrument.reverse,
             loopMode = loopModeInt,
-            loopStart = instrument.loopStart
+            loopStart = instrument.loopStart,
+            drive = instrument.drive,
+            crush = instrument.crush,
+            downsample = instrument.downsample,
+            filterType = filterTypeInt,
+            filterCut = instrument.filterCut,
+            filterRes = instrument.filterRes
         )
     }
 
@@ -526,7 +543,9 @@ class TrackerAudioEngine(private val context: Context) {
     private external fun native_getActiveVoiceCount(): Int
     private external fun native_getSampleRate(): Int
     private external fun native_setInstrumentParams(instrumentId: Int, startPoint: Int, endPoint: Int,
-                                                    reverse: Boolean, loopMode: Int, loopStart: Int)
+                                                    reverse: Boolean, loopMode: Int, loopStart: Int,
+                                                    drive: Int, crush: Int, downsample: Int,
+                                                    filterType: Int, filterCut: Int, filterRes: Int)
 
     // PHASE 1: Note queue native methods
     private external fun native_getCurrentFrame(): Long

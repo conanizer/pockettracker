@@ -84,6 +84,10 @@ The UI uses a custom pixel-perfect rendering system built on Jetpack Compose Can
 - `PhraseEditorModule`: 620×392px phrase editing interface
 - `ChainEditorModule`: Chain editing screen
 - `SongEditorModule`: Song arrangement screen
+- `InstrumentModule`: Instrument editing with dual-column layout for parameters
+  - Left column: Sample, volume, pan, loop, drive, crush, downsample
+  - Right column: Filter type, cutoff, resonance
+  - Cursor navigation between columns with horizontal D-pad
 - `ProjectModule`: Project settings (tempo, name, save/load)
 - `NavigationMapModule`: 80×105px navigation grid display
 
@@ -106,6 +110,8 @@ Each module receives state objects and renders itself independently.
 - **Linear interpolation**: Eliminates aliasing artifacts during pitch-shifting
 - **8-voice polyphony**: Per-track voice stealing (trackId 0-7)
 - **Global frame counter**: Tracks total frames processed for accurate scheduling
+- **Resonant biquad filters**: Low-pass, high-pass, and band-pass filters using Audio EQ Cookbook formulas
+- **Signal chain**: Downsample → Crush → Interpolate → Drive → Filter → Volume
 - Stereo mixing in audio callback
 
 **Queue-Based Playback System:**

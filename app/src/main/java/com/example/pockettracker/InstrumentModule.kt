@@ -55,7 +55,7 @@ class InstrumentModule : TrackerModule {
         // STEP 2: Calculate column positions
         // ===================================
         val nameColumnX = x + 10      // Left side: parameter names
-        val valueColumnX = x + 170    // Right side: parameter values
+        val valueColumnX = x + 150    // Right side: parameter values
 
         // ===================================
         // STEP 3: Draw header "INSTRUMENT XX"
@@ -171,7 +171,78 @@ class InstrumentModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 6: START (sample start point)
+        // ROW 6: DRIVE + FILTER (dual parameter row)
+        // ─────────────────────────────────────
+        val driveHex = instrument.drive.toString(16).padStart(2, '0').uppercase()
+        drawDualParameterRow(
+            x = x,
+            y = rowY,
+            scale = scale,
+            nameColumnX = nameColumnX,
+            valueColumnX = valueColumnX,
+            param1Name = "DRIVE",
+            param1Value = driveHex,
+            param2Name = "FILTER",
+            param2Value = instrument.filterType,
+            cursorRow = instrumentState.cursorRow,
+            cursorColumn = instrumentState.cursorColumn,
+            currentRow = currentRow
+        )
+        rowY += ROW_HEIGHT
+        currentRow++
+
+        // ─────────────────────────────────────
+        // ROW 7: CRUSH + CUT (dual parameter row)
+        // ─────────────────────────────────────
+        val crushHex = instrument.crush.toString(16).uppercase()
+        val cutHex = instrument.filterCut.toString(16).padStart(2, '0').uppercase()
+        drawDualParameterRow(
+            x = x,
+            y = rowY,
+            scale = scale,
+            nameColumnX = nameColumnX,
+            valueColumnX = valueColumnX,
+            param1Name = "CRUSH",
+            param1Value = crushHex,
+            param2Name = "CUT",
+            param2Value = cutHex,
+            cursorRow = instrumentState.cursorRow,
+            cursorColumn = instrumentState.cursorColumn,
+            currentRow = currentRow
+        )
+        rowY += ROW_HEIGHT
+        currentRow++
+
+        // ─────────────────────────────────────
+        // ROW 8: DWNSMPL + RES (dual parameter row)
+        // ─────────────────────────────────────
+        val downsampleHex = instrument.downsample.toString(16).uppercase()
+        val resHex = instrument.filterRes.toString(16).padStart(2, '0').uppercase()
+        drawDualParameterRow(
+            x = x,
+            y = rowY,
+            scale = scale,
+            nameColumnX = nameColumnX,
+            valueColumnX = valueColumnX,
+            param1Name = "DWNSMPL",
+            param1Value = downsampleHex,
+            param2Name = "RES",
+            param2Value = resHex,
+            cursorRow = instrumentState.cursorRow,
+            cursorColumn = instrumentState.cursorColumn,
+            currentRow = currentRow
+        )
+        rowY += ROW_HEIGHT
+        currentRow++
+
+        // ─────────────────────────────────────
+        // ROW 9: SPACER (empty row)
+        // ─────────────────────────────────────
+        rowY += ROW_HEIGHT
+        currentRow++
+
+        // ─────────────────────────────────────
+        // ROW 10: START (sample start point)
         // ─────────────────────────────────────
         val startHex = instrument.sampleStart.toString(16).padStart(2, '0').uppercase()
         drawParameterRow(
@@ -189,7 +260,7 @@ class InstrumentModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 7: END (sample end point)
+        // ROW 11: END (sample end point)
         // ─────────────────────────────────────
         val endHex = instrument.sampleEnd.toString(16).padStart(2, '0').uppercase()
         drawParameterRow(
@@ -207,7 +278,7 @@ class InstrumentModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 8: REV (reverse: off/on)
+        // ROW 12: REV (reverse: off/on)
         // ─────────────────────────────────────
         drawParameterRow(
             x = x,
@@ -224,7 +295,7 @@ class InstrumentModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 9: LOOP (loop mode: off/fwd/png)
+        // ROW 13: LOOP (loop mode: off/fwd/png)
         // ─────────────────────────────────────
         drawParameterRow(
             x = x,
@@ -241,7 +312,7 @@ class InstrumentModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 10: LOOP ST (loop start point)
+        // ROW 14: LOOP ST (loop start point)
         // ─────────────────────────────────────
         val loopStartHex = instrument.loopStart.toString(16).padStart(2, '0').uppercase()
         drawParameterRow(
@@ -322,6 +393,90 @@ class InstrumentModule : TrackerModule {
             y = textY,
             scale = scale,
             color = if (isCursorOnValue)
+                Color.Yellow else Color.White,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+    }
+
+    /**
+     * Draw a dual-parameter row (two parameters side-by-side)
+     * Example: DRIVE    80    FILTER   lp
+     * Columns: 0=name1, 1=value1, 2=name2, 3=value2
+     */
+    private fun DrawScope.drawDualParameterRow(
+        x: Int,
+        y: Int,
+        scale: Int,
+        nameColumnX: Int,
+        valueColumnX: Int,
+        param1Name: String,
+        param1Value: String,
+        param2Name: String,
+        param2Value: String,
+        cursorRow: Int,
+        cursorColumn: Int,
+        currentRow: Int
+    ) {
+        val textY = y + TEXT_PADDING
+        val isCursorOnThisRow = cursorRow == currentRow
+
+        // Draw row background if cursor is on this row
+        if (isCursorOnThisRow) {
+            drawRect(
+                color = Color(0xFF333333),  // Dark gray background
+                topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
+                size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
+            )
+        }
+
+        // COLUMN 0: First parameter name (left side)
+        // Yellow only if cursor is on its value (column 1)
+        drawBitmapText(
+            text = param1Name,
+            x = nameColumnX,
+            y = textY,
+            scale = scale,
+            color = if (cursorRow == currentRow && cursorColumn == 1)
+                Color.Yellow else Color.Gray,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        // COLUMN 1: First parameter value
+        drawBitmapText(
+            text = param1Value,
+            x = valueColumnX,
+            y = textY,
+            scale = scale,
+            color = if (cursorRow == currentRow && cursorColumn == 1)
+                Color.Yellow else Color.White,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        // COLUMN 2: Second parameter name (right side, offset by 230px)
+        // Yellow only if cursor is on its value (column 3)
+        val name2ColumnX = nameColumnX + 230
+        drawBitmapText(
+            text = param2Name,
+            x = name2ColumnX,
+            y = textY,
+            scale = scale,
+            color = if (cursorRow == currentRow && cursorColumn == 3)
+                Color.Yellow else Color.Gray,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        // COLUMN 3: Second parameter value (offset by 220px from first value)
+        val value2ColumnX = valueColumnX + 220
+        drawBitmapText(
+            text = param2Value,
+            x = value2ColumnX,
+            y = textY,
+            scale = scale,
+            color = if (cursorRow == currentRow && cursorColumn == 3)
                 Color.Yellow else Color.White,
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
@@ -447,6 +602,60 @@ class InstrumentModule : TrackerModule {
                 return CursorContextFactory.none()
             }
             6 -> {
+                // DRIVE + FILTER row (columns: 0=name, 1=drive, 2=name, 3=filter)
+                when (state.cursorColumn) {
+                    0, 2 -> return CursorContextFactory.readOnly()  // Parameter names
+                    1 -> return CursorContextFactory.hexByte(  // DRIVE value
+                        currentValue = state.instrument.drive,
+                        min = 0,
+                        max = 255
+                    )
+                    3 -> {  // FILTER type
+                        val filterTypes = listOf("off", "lp", "hp", "bp")
+                        return CursorContextFactory.toggleTernary(state.instrument.filterType, filterTypes)
+                    }
+                    else -> return CursorContextFactory.none()
+                }
+            }
+            7 -> {
+                // CRUSH + CUT row (columns: 0=name, 1=crush, 2=name, 3=cut)
+                when (state.cursorColumn) {
+                    0, 2 -> return CursorContextFactory.readOnly()  // Parameter names
+                    1 -> return CursorContextFactory.hexByte(  // CRUSH value
+                        currentValue = state.instrument.crush,
+                        min = 0,
+                        max = 15
+                    )
+                    3 -> return CursorContextFactory.hexByte(  // CUT value
+                        currentValue = state.instrument.filterCut,
+                        min = 0,
+                        max = 255
+                    )
+                    else -> return CursorContextFactory.none()
+                }
+            }
+            8 -> {
+                // DWNSMPL + RES row (columns: 0=name, 1=downsample, 2=name, 3=res)
+                when (state.cursorColumn) {
+                    0, 2 -> return CursorContextFactory.readOnly()  // Parameter names
+                    1 -> return CursorContextFactory.hexByte(  // DWNSMPL value
+                        currentValue = state.instrument.downsample,
+                        min = 0,
+                        max = 15
+                    )
+                    3 -> return CursorContextFactory.hexByte(  // RES value
+                        currentValue = state.instrument.filterRes,
+                        min = 0,
+                        max = 255
+                    )
+                    else -> return CursorContextFactory.none()
+                }
+            }
+            9 -> {
+                // SPACER row - no editing
+                return CursorContextFactory.none()
+            }
+            10 -> {
                 // START row - hex byte (00-FF)
                 if (state.cursorColumn == 0) {
                     return CursorContextFactory.readOnly()
@@ -457,7 +666,7 @@ class InstrumentModule : TrackerModule {
                     max = 255
                 )
             }
-            7 -> {
+            11 -> {
                 // END row - hex byte (00-FF)
                 if (state.cursorColumn == 0) {
                     return CursorContextFactory.readOnly()
@@ -468,14 +677,14 @@ class InstrumentModule : TrackerModule {
                     max = 255
                 )
             }
-            8 -> {
+            12 -> {
                 // REV row - binary toggle (off/on)
                 if (state.cursorColumn == 0) {
                     return CursorContextFactory.readOnly()
                 }
                 return CursorContextFactory.toggleBinary(state.instrument.reverse)
             }
-            9 -> {
+            13 -> {
                 // LOOP row - ternary toggle (off/fwd/png)
                 if (state.cursorColumn == 0) {
                     return CursorContextFactory.readOnly()
@@ -483,7 +692,7 @@ class InstrumentModule : TrackerModule {
                 val loopModes = listOf("off", "fwd", "png")
                 return CursorContextFactory.toggleTernary(state.instrument.loopMode, loopModes)
             }
-            10 -> {
+            14 -> {
                 // LOOP ST row - hex byte (00-FF)
                 if (state.cursorColumn == 0) {
                     return CursorContextFactory.readOnly()
@@ -503,7 +712,10 @@ class InstrumentModule : TrackerModule {
  * STATE DATA FOR INSTRUMENT SCREEN
  *
  * @param instrument The instrument being edited
- * @param cursorRow Which row (0=TYPE, 1=LOAD, 2=NAME, 3=ROOT, etc.)
+ * @param cursorRow Which row:
+ *   - 0=TYPE, 1=LOAD, 2=NAME, 3=ROOT, 4=DETUNE, 5=SPACER
+ *   - 6=DRIVE, 7=CRUSH, 8=DWNSMPL, 9=SPACER
+ *   - 10=START, 11=END, 12=REV, 13=LOOP, 14=LOOP ST
  * @param cursorColumn Which column:
  *   - 0 = Parameter name (left column)
  *   - 1+ = Value columns (specific to each row)

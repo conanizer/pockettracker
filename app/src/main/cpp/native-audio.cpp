@@ -4,12 +4,91 @@
 #include <vector>
 #include <queue>
 #include <mutex>
+#include <cmath>
 
 #define LOG_TAG "NativeAudio"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 const int MAX_VOICES = 8;  // Reduced for testing
+
+// ===================================
+// BIQUAD FILTER COEFFICIENT CALCULATION
+// ===================================
+// Calculates resonant low-pass, high-pass, and band-pass filter coefficients
+// Using Robert Bristow-Johnson's Audio EQ Cookbook formulas
+
+inline void calculateBiquadCoeffs(
+    int filterType,     // 0=off, 1=lp, 2=hp, 3=bp
+    int cutParam,       // 0-255 (cutoff frequency parameter)
+    int resParam,       // 0-255 (resonance parameter)
+    float sampleRate,   // Audio sample rate (e.g., 44100 Hz)
+    float& b0, float& b1, float& b2,  // Output: feedforward coefficients
+    float& a1, float& a2              // Output: feedback coefficients
+) {
+    if (filterType == 0) {
+        // Filter off: pass-through (unity gain)
+        b0 = 1.0f; b1 = 0.0f; b2 = 0.0f;
+        a1 = 0.0f; a2 = 0.0f;
+        return;
+    }
+
+    // Map cutoff parameter (0-255) to frequency (20 Hz - 20 kHz)
+    // Use exponential curve for musical feel
+    float cutoff = 20.0f * powf(1000.0f, cutParam / 255.0f);  // 20 Hz to 20 kHz
+    cutoff = fminf(cutoff, sampleRate * 0.45f);  // Limit to below Nyquist
+
+    // Map resonance parameter (0-255) to Q factor (0.5 - 20.0)
+    // Higher Q = sharper resonance peak
+    float Q = 0.5f + (resParam / 255.0f) * 19.5f;  // 0.5 to 20.0
+
+    // Calculate intermediate values
+    float w0 = 2.0f * M_PI * cutoff / sampleRate;  // Angular frequency
+    float cosw0 = cosf(w0);
+    float sinw0 = sinf(w0);
+    float alpha = sinw0 / (2.0f * Q);  // Bandwidth parameter
+
+    // Calculate coefficients based on filter type
+    float a0;  // Normalization coefficient
+
+    if (filterType == 1) {
+        // LOW-PASS filter
+        b0 = (1.0f - cosw0) / 2.0f;
+        b1 = 1.0f - cosw0;
+        b2 = (1.0f - cosw0) / 2.0f;
+        a0 = 1.0f + alpha;
+        a1 = -2.0f * cosw0;
+        a2 = 1.0f - alpha;
+    } else if (filterType == 2) {
+        // HIGH-PASS filter
+        b0 = (1.0f + cosw0) / 2.0f;
+        b1 = -(1.0f + cosw0);
+        b2 = (1.0f + cosw0) / 2.0f;
+        a0 = 1.0f + alpha;
+        a1 = -2.0f * cosw0;
+        a2 = 1.0f - alpha;
+    } else if (filterType == 3) {
+        // BAND-PASS filter (constant skirt gain)
+        b0 = alpha;
+        b1 = 0.0f;
+        b2 = -alpha;
+        a0 = 1.0f + alpha;
+        a1 = -2.0f * cosw0;
+        a2 = 1.0f - alpha;
+    } else {
+        // Unknown type, pass-through
+        b0 = 1.0f; b1 = 0.0f; b2 = 0.0f;
+        a1 = 0.0f; a2 = 0.0f;
+        return;
+    }
+
+    // Normalize coefficients by a0
+    b0 /= a0;
+    b1 /= a0;
+    b2 /= a0;
+    a1 /= a0;
+    a2 /= a0;
+}
 
 // ===================================
 // PHASE 1: NOTE QUEUE INFRASTRUCTURE
@@ -88,8 +167,19 @@ struct InstrumentParams {
     int loopMode;       // 0=off, 1=forward, 2=ping-pong
     int loopStart;      // 0-255 (normalized position)
 
+    // Distortion/bitcrusher parameters
+    int drive;          // 0-255 (pre-gain boost)
+    int crush;          // 0-15 (bit depth reduction, 0=off/16-bit, 15=1-bit)
+    int downsample;     // 0-15 (sample rate reduction, 0=off, 1=÷2, 2=÷4, etc.)
+
+    // Filter parameters
+    int filterType;     // 0=off, 1=lp, 2=hp, 3=bp
+    int filterCut;      // 0-255 (cutoff frequency)
+    int filterRes;      // 0-255 (resonance)
+
     InstrumentParams() : startPoint(0), endPoint(255), reverse(false),
-                         loopMode(0), loopStart(0) {}
+                         loopMode(0), loopStart(0), drive(0), crush(0), downsample(0),
+                         filterType(0), filterCut(128), filterRes(0) {}
 };
 
 struct Voice {
@@ -109,13 +199,33 @@ struct Voice {
     int loopMode;        // 0=off, 1=forward, 2=ping-pong
     bool loopingBack;    // For ping-pong mode direction
 
+    // Distortion/bitcrusher parameters
+    int drive;           // 0-255 (pre-gain boost)
+    int crush;           // 0-15 (bit depth reduction, 0=off, 15=1-bit)
+    int downsample;      // 0-15 (sample rate reduction factor)
+
+    // Filter parameters
+    int filterType;      // 0=off, 1=lp, 2=hp, 3=bp
+    int filterCut;       // 0-255 (cutoff frequency)
+    int filterRes;       // 0-255 (resonance)
+
+    // Biquad filter state (for resonant filters)
+    float b0, b1, b2;    // Feedforward coefficients
+    float a1, a2;        // Feedback coefficients (a0 is normalized to 1)
+    float x1, x2;        // Input history
+    float y1, y2;        // Output history
+
     Voice() : isActive(false), sampleData(nullptr), sampleLength(0),
               position(0), trackId(-1), playbackRate(1.0f), volume(1.0f),
               actualStart(0), actualEnd(0), actualLoopStart(0),
-              reverse(false), loopMode(0), loopingBack(false) {}
+              reverse(false), loopMode(0), loopingBack(false),
+              drive(0), crush(0), downsample(0),
+              filterType(0), filterCut(128), filterRes(0),
+              b0(1.0f), b1(0.0f), b2(0.0f), a1(0.0f), a2(0.0f),
+              x1(0.0f), x2(0.0f), y1(0.0f), y2(0.0f) {}
 
     void trigger(float* sample, int length, int track, float rate, float vol,
-                 const InstrumentParams& params) {
+                 const InstrumentParams& params, float sampleRate) {
         sampleData = sample;
         sampleLength = length;
         trackId = track;
@@ -142,6 +252,22 @@ struct Voice {
         reverse = params.reverse;
         loopMode = params.loopMode;
         loopingBack = false;
+
+        // Set distortion/bitcrusher parameters
+        drive = params.drive;
+        crush = params.crush;
+        downsample = params.downsample;
+
+        // Set filter parameters and calculate coefficients
+        filterType = params.filterType;
+        filterCut = params.filterCut;
+        filterRes = params.filterRes;
+        calculateBiquadCoeffs(filterType, filterCut, filterRes, sampleRate,
+                             b0, b1, b2, a1, a2);
+
+        // Reset filter history (important to avoid clicks)
+        x1 = 0.0f; x2 = 0.0f;
+        y1 = 0.0f; y2 = 0.0f;
 
         // Set initial position based on direction
         if (reverse) {
@@ -242,7 +368,8 @@ public:
         LOGD("Sample %d: %d frames", id, length);
     }
 
-    void setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt) {
+    void setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt,
+                            int drv, int crsh, int dwn, int fType, int fCut, int fRes) {
         if (instrumentId < 0 || instrumentId >= 256) return;
 
         instrumentParams[instrumentId].startPoint = start;
@@ -250,9 +377,15 @@ public:
         instrumentParams[instrumentId].reverse = rev;
         instrumentParams[instrumentId].loopMode = loop;
         instrumentParams[instrumentId].loopStart = loopSt;
+        instrumentParams[instrumentId].drive = drv;
+        instrumentParams[instrumentId].crush = crsh;
+        instrumentParams[instrumentId].downsample = dwn;
+        instrumentParams[instrumentId].filterType = fType;
+        instrumentParams[instrumentId].filterCut = fCut;
+        instrumentParams[instrumentId].filterRes = fRes;
 
-        LOGD("Instrument %d params: start=%d, end=%d, rev=%d, loop=%d, loopStart=%d",
-             instrumentId, start, end, rev, loop, loopSt);
+        LOGD("Instrument %d params: start=%d, end=%d, rev=%d, loop=%d, loopStart=%d, drive=%d, crush=%d, downsample=%d, filter=%d, cut=%d, res=%d",
+             instrumentId, start, end, rev, loop, loopSt, drv, crsh, dwn, fType, fCut, fRes);
     }
 
     void triggerNote(int sampleId, int trackId, float freq, float baseFreq, float vol) {
@@ -272,11 +405,21 @@ public:
         for (int i = 0; i < MAX_VOICES; i++) {
             if (!voices[i].isActive) {
                 float rate = freq / baseFreq;
+                float sampleRate = stream ? (float)stream->getSampleRate() : 44100.0f;
                 // Use stored instrument parameters
                 voices[i].trigger(samples[sampleId], sampleLengths[sampleId], trackId, rate, vol,
-                                  instrumentParams[sampleId]);
+                                  instrumentParams[sampleId], sampleRate);
                 LOGD("Note: track=%d, sampleId=%d, rate=%.3f", trackId, sampleId, rate);
                 return;
+            }
+        }
+    }
+
+    void stopTrack(int trackId) {
+        // Stop all voices on this track
+        for (int i = 0; i < MAX_VOICES; i++) {
+            if (voices[i].trackId == trackId && voices[i].isActive) {
+                voices[i].stop();
             }
         }
     }
@@ -290,6 +433,16 @@ public:
             stream->pause();
             LOGD("Stream paused (stopAll)");
         }
+    }
+
+    int getActiveVoiceCount() {
+        int count = 0;
+        for (int i = 0; i < MAX_VOICES; i++) {
+            if (voices[i].isActive) {
+                count++;
+            }
+        }
+        return count;
     }
 
     int getSampleRate() {
@@ -344,8 +497,10 @@ public:
                     if (!voices[v].isActive) {
                         if (note.sampleId >= 0 && note.sampleId < 256 && samples[note.sampleId]) {
                             float rate = note.frequency / note.baseFrequency;
+                            float sampleRate = (float)audioStream->getSampleRate();
                             voices[v].trigger(samples[note.sampleId], sampleLengths[note.sampleId],
-                                            note.trackId, rate, note.volume, instrumentParams[note.sampleId]);
+                                            note.trackId, rate, note.volume, instrumentParams[note.sampleId],
+                                            sampleRate);
                             voiceFound = true;
                             LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f",
                                  (long long)currentFrame, note.sampleId, note.trackId, rate);
@@ -381,12 +536,69 @@ public:
                     break;
                 }
 
-                // Linear interpolation: blend between two adjacent samples
-                // This eliminates aliasing artifacts when pitch-shifting
+                // ===================================
+                // SIGNAL CHAIN: Downsample → Crush → Interpolate → Drive → Volume
+                // Applying downsample/crush BEFORE interpolation creates artifacts
+                // that interact with pitch-shifting for authentic lo-fi texture
+                // ===================================
+
+                // Read two adjacent samples for interpolation
                 float sample1 = voice.sampleData[idx];
                 float sample2 = voice.sampleData[idx + 1];
+
+                // STEP 1: DOWNSAMPLE (sample rate reduction via sample-and-hold)
+                // Apply to raw samples BEFORE interpolation to create aliasing
+                if (voice.downsample > 0) {
+                    int downsampleFactor = 1 << voice.downsample;  // 2^downsample
+                    // Quantize position to downsample grid (creates sample-and-hold effect)
+                    int quantizedIdx = (idx / downsampleFactor) * downsampleFactor;
+                    sample1 = voice.sampleData[quantizedIdx];
+                    sample2 = voice.sampleData[quantizedIdx];  // No interpolation between samples
+                }
+
+                // STEP 2: CRUSH (bit depth reduction)
+                // Apply to raw samples BEFORE interpolation
+                if (voice.crush > 0) {
+                    int bits = 16 - voice.crush;  // 0=16-bit (off), 1=15-bit, ..., 15=1-bit
+                    if (bits < 1) bits = 1;  // Minimum 1 bit
+                    int levels = 1 << bits;  // 2^bits quantization levels
+                    sample1 = floorf(sample1 * levels) / levels;
+                    sample2 = floorf(sample2 * levels) / levels;
+                }
+
+                // STEP 3: LINEAR INTERPOLATION (pitch shifting)
+                // Now interpolate the crushed/downsampled samples
                 float interpolatedSample = sample1 + (sample2 - sample1) * frac;
-                float sample = interpolatedSample * voice.volume * 0.25f;
+
+                // STEP 4: DRIVE (pre-gain boost with soft clipping for overdrive character)
+                float processedSample = interpolatedSample;
+                if (voice.drive > 0) {
+                    float driveGain = voice.drive / 128.0f;  // 00=0x, 80=1.0x, FF=2.0x
+                    processedSample *= driveGain;
+                    // Soft clip using tanh for smooth overdrive/distortion character
+                    processedSample = tanhf(processedSample);
+                }
+
+                // STEP 5: FILTER (resonant biquad filter)
+                // Apply only if filter is enabled (filterType != 0)
+                if (voice.filterType != 0) {
+                    // Biquad filter equation (Direct Form I):
+                    // y[n] = b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2]
+                    float x0 = processedSample;
+                    float y0 = voice.b0 * x0 + voice.b1 * voice.x1 + voice.b2 * voice.x2
+                             - voice.a1 * voice.y1 - voice.a2 * voice.y2;
+
+                    // Update history buffers
+                    voice.x2 = voice.x1;
+                    voice.x1 = x0;
+                    voice.y2 = voice.y1;
+                    voice.y1 = y0;
+
+                    processedSample = y0;
+                }
+
+                // STEP 6: Apply volume after effects
+                float sample = processedSample * voice.volume * 0.25f;
 
                 // Write to both channels (stereo)
                 output[i * channelCount] += sample;      // Left
@@ -522,7 +734,9 @@ Java_com_example_pockettracker_TrackerAudioEngine_native_1triggerNote(
 
 JNIEXPORT void JNICALL
 Java_com_example_pockettracker_TrackerAudioEngine_native_1stopTrack(JNIEnv *env, jobject thiz, jint tid) {
-    // Not implemented
+    if (engine) {
+        engine->stopTrack(tid);
+    }
 }
 
 JNIEXPORT void JNICALL
@@ -534,6 +748,9 @@ Java_com_example_pockettracker_TrackerAudioEngine_native_1stopAll(JNIEnv *env, j
 
 JNIEXPORT jint JNICALL
 Java_com_example_pockettracker_TrackerAudioEngine_native_1getActiveVoiceCount(JNIEnv *env, jobject thiz) {
+    if (engine) {
+        return engine->getActiveVoiceCount();
+    }
     return 0;
 }
 
@@ -548,9 +765,12 @@ Java_com_example_pockettracker_TrackerAudioEngine_native_1getSampleRate(JNIEnv *
 JNIEXPORT void JNICALL
 Java_com_example_pockettracker_TrackerAudioEngine_native_1setInstrumentParams(
         JNIEnv *env, jobject thiz, jint instrumentId, jint start, jint end,
-        jboolean reverse, jint loopMode, jint loopStart) {
+        jboolean reverse, jint loopMode, jint loopStart,
+        jint drive, jint crush, jint downsample,
+        jint filterType, jint filterCut, jint filterRes) {
     if (engine) {
-        engine->setInstrumentParams(instrumentId, start, end, reverse, loopMode, loopStart);
+        engine->setInstrumentParams(instrumentId, start, end, reverse, loopMode, loopStart,
+                                   drive, crush, downsample, filterType, filterCut, filterRes);
     }
 }
 

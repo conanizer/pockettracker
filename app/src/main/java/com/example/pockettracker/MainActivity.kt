@@ -648,6 +648,81 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 // SPACER row - no editing
             }
             6 -> {
+                // DRIVE + FILTER row (columns: 0=name, 1=drive, 2=name, 3=filter)
+                when (column) {
+                    1 -> {  // DRIVE value
+                        when (action) {
+                            is InputAction.SET_VALUE -> {
+                                instrument.drive = action.value.coerceIn(0, 255)
+                                audioEngine.updateInstrumentPlaybackParams(instrument)
+                            }
+                            else -> {}
+                        }
+                    }
+                    3 -> {  // FILTER type
+                        when (action) {
+                            is InputAction.SET_VALUE -> {
+                                val filterTypes = listOf("off", "lp", "hp", "bp")
+                                if (action.value in 0..3) {
+                                    instrument.filterType = filterTypes[action.value]
+                                    audioEngine.updateInstrumentPlaybackParams(instrument)
+                                }
+                            }
+                            else -> {}
+                        }
+                    }
+                }
+            }
+            7 -> {
+                // CRUSH + CUT row (columns: 0=name, 1=crush, 2=name, 3=cut)
+                when (column) {
+                    1 -> {  // CRUSH value
+                        when (action) {
+                            is InputAction.SET_VALUE -> {
+                                instrument.crush = action.value.coerceIn(0, 15)
+                                audioEngine.updateInstrumentPlaybackParams(instrument)
+                            }
+                            else -> {}
+                        }
+                    }
+                    3 -> {  // CUT value
+                        when (action) {
+                            is InputAction.SET_VALUE -> {
+                                instrument.filterCut = action.value.coerceIn(0, 255)
+                                audioEngine.updateInstrumentPlaybackParams(instrument)
+                            }
+                            else -> {}
+                        }
+                    }
+                }
+            }
+            8 -> {
+                // DWNSMPL + RES row (columns: 0=name, 1=downsample, 2=name, 3=res)
+                when (column) {
+                    1 -> {  // DWNSMPL value
+                        when (action) {
+                            is InputAction.SET_VALUE -> {
+                                instrument.downsample = action.value.coerceIn(0, 15)
+                                audioEngine.updateInstrumentPlaybackParams(instrument)
+                            }
+                            else -> {}
+                        }
+                    }
+                    3 -> {  // RES value
+                        when (action) {
+                            is InputAction.SET_VALUE -> {
+                                instrument.filterRes = action.value.coerceIn(0, 255)
+                                audioEngine.updateInstrumentPlaybackParams(instrument)
+                            }
+                            else -> {}
+                        }
+                    }
+                }
+            }
+            9 -> {
+                // SPACER row - no editing
+            }
+            10 -> {
                 // START (sample start point)
                 when (action) {
                     is InputAction.SET_VALUE -> {
@@ -658,7 +733,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     else -> {}
                 }
             }
-            7 -> {
+            11 -> {
                 // END (sample end point)
                 when (action) {
                     is InputAction.SET_VALUE -> {
@@ -669,7 +744,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     else -> {}
                 }
             }
-            8 -> {
+            12 -> {
                 // REV (reverse: off/on)
                 when (action) {
                     is InputAction.SET_VALUE -> {
@@ -680,7 +755,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     else -> {}
                 }
             }
-            9 -> {
+            13 -> {
                 // LOOP mode (off/fwd/png)
                 when (action) {
                     is InputAction.SET_VALUE -> {
@@ -694,7 +769,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     else -> {}
                 }
             }
-            10 -> {
+            14 -> {
                 // LOOP ST (loop start point)
                 when (action) {
                     is InputAction.SET_VALUE -> {
@@ -860,15 +935,23 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         projectCursorColumn = 1  // Reset to first value column
                     }
                     ScreenType.INSTRUMENT -> {
-                        // Instrument screen has rows 0-10 (row 5 is spacer, skip it)
+                        // Instrument screen has rows 0-14 (rows 5 and 9 are spacers, skip them)
                         val oldRow = instrumentCursorRow
+                        val oldColumn = instrumentCursorColumn
                         instrumentCursorRow = when {
-                            instrumentCursorRow > 0 && instrumentCursorRow != 6 -> instrumentCursorRow - 1
+                            instrumentCursorRow > 0 && instrumentCursorRow != 6 && instrumentCursorRow != 10 -> instrumentCursorRow - 1
                             instrumentCursorRow == 6 -> 4  // Skip spacer (row 5)
-                            else -> 10  // Wrap to bottom
+                            instrumentCursorRow == 10 -> 8  // Skip spacer (row 9)
+                            else -> 14  // Wrap to bottom
                         }
                         android.util.Log.d("InstrumentCursor", "UP: $oldRow → $instrumentCursorRow")
-                        instrumentCursorColumn = 1  // Reset to first value column
+
+                        // Preserve column 3 when navigating within rows 6-8, otherwise reset to column 1
+                        instrumentCursorColumn = if (oldRow in 6..8 && instrumentCursorRow in 6..8 && oldColumn == 3) {
+                            3  // Stay in column 3 when moving within dual-parameter rows
+                        } else {
+                            1  // Reset to column 1 for all other cases
+                        }
                     }
                     ScreenType.FILE_BROWSER -> {
                         // File browser: move cursor up with wrap-around
@@ -916,15 +999,23 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         projectCursorColumn = 1  // Reset column
                     }
                     ScreenType.INSTRUMENT -> {
-                        // Instrument screen has rows 0-10 (row 5 is spacer, skip it)
+                        // Instrument screen has rows 0-14 (rows 5 and 9 are spacers, skip them)
                         val oldRow = instrumentCursorRow
+                        val oldColumn = instrumentCursorColumn
                         instrumentCursorRow = when {
-                            instrumentCursorRow < 10 && instrumentCursorRow != 4 -> instrumentCursorRow + 1
+                            instrumentCursorRow < 14 && instrumentCursorRow != 4 && instrumentCursorRow != 8 -> instrumentCursorRow + 1
                             instrumentCursorRow == 4 -> 6  // Skip spacer (row 5)
+                            instrumentCursorRow == 8 -> 10  // Skip spacer (row 9)
                             else -> 0  // Wrap to top
                         }
                         android.util.Log.d("InstrumentCursor", "DOWN: $oldRow → $instrumentCursorRow")
-                        instrumentCursorColumn = 1  // Reset column
+
+                        // Preserve column 3 when navigating within rows 6-8, otherwise reset to column 1
+                        instrumentCursorColumn = if (oldRow in 6..8 && instrumentCursorRow in 6..8 && oldColumn == 3) {
+                            3  // Stay in column 3 when moving within dual-parameter rows
+                        } else {
+                            1  // Reset to column 1 for all other cases
+                        }
                     }
                     ScreenType.FILE_BROWSER -> {
                         // File browser: move cursor down with wrap-around
@@ -970,18 +1061,20 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         )
                     }
                     ScreenType.INSTRUMENT -> {
-                        // Instrument: Row 2 (NAME) has columns 1-12, others have only column 1
+                        // Instrument: Row 2 (NAME) has columns 1-12, others stay at column 1
                         if (instrumentCursorRow == 2) {
                             // NAME row: move between character positions (1-12)
                             if (instrumentCursorColumn > 1) {
                                 instrumentCursorColumn--
                             }
-                        } else {
-                            // Other rows: only columns 0 and 1
-                            if (instrumentCursorColumn > 0) {
-                                instrumentCursorColumn--
+                        } else if (instrumentCursorRow in 6..8) {
+                            // Rows 6-8 (DRIVE/CRUSH/DWNSMPL + filter params): 4 columns (0, 1, 2, 3)
+                            // Columns 0 and 2 are read-only names, only 1 and 3 are editable
+                            if (instrumentCursorColumn == 3) {
+                                instrumentCursorColumn = 1  // Jump from column 3 to column 1 (skip 2)
                             }
                         }
+                        // Other rows: cursor stays locked at column 1
                     }
                     ScreenType.FILE_BROWSER -> {
                         when (fileBrowserState.mode) {
@@ -1048,12 +1141,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                             if (instrumentCursorColumn < 12) {
                                 instrumentCursorColumn++
                             }
-                        } else {
-                            // Other rows: only columns 0 and 1
-                            if (instrumentCursorColumn < 1) {
-                                instrumentCursorColumn++
+                        } else if (instrumentCursorRow in 6..8) {
+                            // Rows 6-8 (DRIVE/CRUSH/DWNSMPL + filter params): 4 columns (0, 1, 2, 3)
+                            // Columns 0 and 2 are read-only names, only 1 and 3 are editable
+                            if (instrumentCursorColumn == 1) {
+                                instrumentCursorColumn = 3  // Jump from column 1 to column 3 (skip 2)
                             }
                         }
+                        // Other rows: cursor stays locked at column 1
                     }
                     ScreenType.FILE_BROWSER -> {
                         when (fileBrowserState.mode) {
