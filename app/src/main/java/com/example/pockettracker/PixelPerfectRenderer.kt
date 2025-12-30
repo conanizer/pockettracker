@@ -851,7 +851,8 @@ fun DrawScope.drawBitmapChar(
     color: Color,
     fontScale: Int = 1
 ) {
-    val charData = FONT_5X5[char.uppercaseChar()]
+    // Try the character as-is first, then fall back to uppercase for letters
+    val charData = FONT_5X5[char] ?: FONT_5X5[char.uppercaseChar()]
 
     if (charData == null) {
         // Missing character - draw outline square
@@ -889,48 +890,4 @@ fun DrawScope.drawBitmapChar(
     }
 }
 
-// Font data
-private val FONT_5X5 = mapOf(
-    '0' to byteArrayOf(0b01110, 0b10001, 0b10001, 0b10001, 0b01110),
-    '1' to byteArrayOf(0b00100, 0b01100, 0b00100, 0b00100, 0b01110),
-    '2' to byteArrayOf(0b01110, 0b10001, 0b00010, 0b00100, 0b11111),
-    '3' to byteArrayOf(0b11111, 0b00010, 0b00110, 0b00001, 0b11110),
-    '4' to byteArrayOf(0b10001, 0b10001, 0b11111, 0b00001, 0b00001),
-    '5' to byteArrayOf(0b11111, 0b10000, 0b11110, 0b00001, 0b11110),
-    '6' to byteArrayOf(0b01110, 0b10000, 0b11110, 0b10001, 0b01110),
-    '7' to byteArrayOf(0b11111, 0b00001, 0b00010, 0b00100, 0b01000),
-    '8' to byteArrayOf(0b01110, 0b10001, 0b01110, 0b10001, 0b01110),
-    '9' to byteArrayOf(0b01110, 0b10001, 0b01111, 0b00001, 0b01110),
-    'A' to byteArrayOf(0b01110, 0b10001, 0b11111, 0b10001, 0b10001),
-    'B' to byteArrayOf(0b11110, 0b10001, 0b11110, 0b10001, 0b11110),
-    'C' to byteArrayOf(0b01110, 0b10001, 0b10000, 0b10001, 0b01110),
-    'D' to byteArrayOf(0b11110, 0b10001, 0b10001, 0b10001, 0b11110),
-    'E' to byteArrayOf(0b11111, 0b10000, 0b11110, 0b10000, 0b11111),
-    'F' to byteArrayOf(0b11111, 0b10000, 0b11110, 0b10000, 0b10000),
-    'G' to byteArrayOf(0b01110, 0b10000, 0b10011, 0b10001, 0b01110),
-    'H' to byteArrayOf(0b10001, 0b10001, 0b11111, 0b10001, 0b10001),
-    'I' to byteArrayOf(0b01110, 0b00100, 0b00100, 0b00100, 0b01110),
-    'J' to byteArrayOf(0b00111, 0b00001, 0b00001, 0b10001, 0b01110),
-    'K' to byteArrayOf(0b10001, 0b10010, 0b11100, 0b10010, 0b10001),
-    'L' to byteArrayOf(0b10000, 0b10000, 0b10000, 0b10000, 0b11111),
-    'M' to byteArrayOf(0b10001, 0b11011, 0b10101, 0b10001, 0b10001),
-    'N' to byteArrayOf(0b10001, 0b11001, 0b10101, 0b10011, 0b10001),
-    'O' to byteArrayOf(0b01110, 0b10001, 0b10001, 0b10001, 0b01110),
-    'P' to byteArrayOf(0b11110, 0b10001, 0b11110, 0b10000, 0b10000),
-    'Q' to byteArrayOf(0b01110, 0b10001, 0b10001, 0b10010, 0b01101),
-    'R' to byteArrayOf(0b11110, 0b10001, 0b11110, 0b10010, 0b10001),
-    'S' to byteArrayOf(0b01111, 0b10000, 0b01110, 0b00001, 0b11110),
-    'T' to byteArrayOf(0b11111, 0b00100, 0b00100, 0b00100, 0b00100),
-    'U' to byteArrayOf(0b10001, 0b10001, 0b10001, 0b10001, 0b01110),
-    'V' to byteArrayOf(0b10001, 0b10001, 0b10001, 0b01010, 0b00100),
-    'W' to byteArrayOf(0b10001, 0b10001, 0b10101, 0b11011, 0b10001),
-    'X' to byteArrayOf(0b10001, 0b01010, 0b00100, 0b01010, 0b10001),
-    'Y' to byteArrayOf(0b10001, 0b01010, 0b00100, 0b00100, 0b00100),
-    'Z' to byteArrayOf(0b11111, 0b00010, 0b00100, 0b01000, 0b11111),
-    '-' to byteArrayOf(0b00000, 0b00000, 0b11111, 0b00000, 0b00000),
-    '#' to byteArrayOf(0b01010, 0b11111, 0b01010, 0b11111, 0b01010),
-    '.' to byteArrayOf(0b00000, 0b00000, 0b00000, 0b00000, 0b00100),
-    ':' to byteArrayOf(0b00000, 0b00100, 0b00000, 0b00100, 0b00000),
-    '/' to byteArrayOf(0b00001, 0b00010, 0b00100, 0b01000, 0b10000),
-    ' ' to byteArrayOf(0b00000, 0b00000, 0b00000, 0b00000, 0b00000),
-)
+// Font data is now imported from BitmapFont5x5.kt (internal val FONT_5X5)
