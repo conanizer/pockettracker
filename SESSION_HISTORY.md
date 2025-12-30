@@ -10,6 +10,226 @@ This file tracks development sessions with Claude Code to maintain context acros
 
 ---
 
+## Session 2025-12-30: Oscilloscope Overhaul & Future Features Planning
+
+### Context
+- Oscilloscope was a placeholder showing note trigger events (not real waveform)
+- Font system had duplicate data causing maintenance issues
+- User wanted scrolling waveform visualization and future visualizer modules
+
+### Goals
+1. Fix font duplication issue (BitmapFont5x5 vs PixelPerfectRenderer)
+2. Implement real-time scrolling oscilloscope with actual audio output
+3. Fix oscilloscope speed issues on different screens
+4. Add adjustable gain for waveform visibility
+5. Plan future system settings and alternative visualizer modules
+
+### What Was Accomplished ✅
+
+#### Font System Consolidation (~1 hour)
+
+**Problem**: Duplicate `FONT_5X5` maps in two files
+- `BitmapFont5x5.kt` - User's edited version with special characters
+- `PixelPerfectRenderer.kt` - Duplicate lacking special characters
+- Special characters (arrows, brackets) showing as empty squares
+
+**Investigation**:
+- User added `+`, `↑`, `↓`, `←`, `→`, `<`, `>`, `=`, `[`, `]` to BitmapFont5x5.kt
+- But modules were using duplicate from PixelPerfectRenderer.kt
+- `uppercaseChar()` being called on all characters (broke special chars)
+
+**Solution**:
+1. Made `BitmapFont5x5.kt` the single source of truth
+   - Changed `FONT_5X5` from `private` to `internal`
+   - Removed 54 lines of duplicate font data from PixelPerfectRenderer.kt
+2. Fixed character lookup to preserve special characters
+   - Changed: `FONT_5X5[char.uppercaseChar()]`
+   - To: `FONT_5X5[char] ?: FONT_5X5[char.uppercaseChar()]`
+   - Now tries exact match first, then falls back to uppercase
+
+**Result**:
+- ✅ All special characters display correctly (brackets in "[LOAD]", etc.)
+- ✅ Single source of truth for font data
+- ✅ -49 lines of code (cleaner, more maintainable)
+
+#### Real-Time Oscilloscope Implementation (~3 hours)
+
+**Problem**: Oscilloscope was fake
+- Only updated when notes triggered
+- Showed volume level as single pixel dot, not waveform
+- `updateWaveform(volume * 0.5f)` - just a placeholder
+
+**Solution - Native Side (C++)**:
+1. Added waveform circular buffer (620 samples)
+   ```cpp
+   float waveformBuffer[WAVEFORM_SIZE];
+   int waveformIndex = 0;
+   std::mutex waveformMutex;  // Thread-safe access
+   ```
+
+2. Capture audio output in `onAudioReady()` callback
+   - After mixing, copy left channel samples to buffer
+   - Circular buffer with wraparound indexing
+   - Thread-safe with mutex lock
+
+3. Added `getWaveform()` method and JNI function
+   - Reads buffer in correct order (scrolling effect)
+   - Copies to Java array for display
+
+**Solution - Kotlin Side**:
+1. Added `native_getWaveform(FloatArray)` JNI method
+2. Added `updateWaveform()` method in TrackerAudioEngine
+3. Call `audioEngine.updateWaveform()` before drawing oscilloscope
+
+**Initial Result**:
+- ✅ Real waveform display working!
+- ❌ But super slow - "one frame per phrase"
+
+#### Speed Issues & Fixes (~2 hours)
+
+**Problem #1: Oscilloscope too slow**
+- Capturing all 44,100 samples/second
+- 620-pixel buffer filled in only 14ms
+- Way too fast to see anything useful
+
+**Solution**: Added downsampling
+```cpp
+static const int WAVEFORM_DOWNSAMPLE = 1;  // Adjustable
+```
+- Captures every Nth sample
+- User adjustable: 1=14ms visible, 10=140ms, 50=700ms
+- Set to 1 initially per user preference
+
+**Problem #2: Song screen still super slow**
+- Works great in phrase/chain screens
+- "One frame refresh in one bar" in song screen
+- Different update rate between screens?
+
+**Root Cause**: Canvas recomposition
+- Canvas only redraws when `key()` values change
+- Phrase/chain: `playbackRow` updates every step (~60-125ms)
+- Song: `playbackSongRow` only updates once per step (~100-125ms)
+- Oscilloscope stuck at ~8-9 FPS instead of 60 FPS!
+
+**Solution**: Added continuous refresh ticker
+```kotlin
+var oscilloscopeTicker by remember { mutableStateOf(0L) }
+
+LaunchedEffect(Unit) {
+    while (true) {
+        oscilloscopeTicker++
+        delay(16L)  // ~60 FPS
+    }
+}
+```
+- Added `oscilloscopeTicker` to Canvas `key()`
+- Forces 60 FPS refresh on all screens
+- User-adjustable: 16ms=60fps, 33ms=30fps, 50ms=20fps
+
+**Result**:
+- ✅ Smooth scrolling at 60 FPS on all screens!
+- ✅ Consistent behavior in phrase/chain/song modes
+
+#### Waveform Gain Adjustment (~30 min)
+
+**Problem**: Waveform peaks too small
+- Even with all 8 tracks playing, barely visible
+- Audio normalized to -1.0 to 1.0, but rarely reaches max
+- Oscilloscope area not fully utilized
+
+**Solution**: Added adjustable gain
+```kotlin
+companion object {
+    const val WAVEFORM_GAIN = 3.0f  // Adjustable
+}
+
+val sample = (waveformData[i] * WAVEFORM_GAIN).coerceIn(-1f, 1f)
+```
+- Multiplies samples before clamping
+- User adjustable: 1.0=normal, 3.0=triple, 6.0=huge
+- Higher gain = more visible quiet audio, may clip loud audio
+
+**Result**:
+- ✅ Waveform now uses full oscilloscope area
+- ✅ Much more visible and satisfying
+- ✅ Adjustable for different use cases
+
+#### Future Features Planning (~30 min)
+
+**User's Vision**: Modular visualizer system
+- Oscilloscope area (620×70) becomes swappable module
+- System settings accessible from Project screen
+- Settings apply globally (not per-project)
+
+**Planned Global Settings**:
+- Visualizer module selection
+- Theme/color scheme
+- Font selection
+- Song template (default project structure)
+- Default tempo
+- Auto-save settings
+
+**Planned Visualizer Modules**:
+1. ✅ Oscilloscope - Waveform (current, working)
+2. [ ] EQ Spectrum - Wave style (FFT, smooth)
+3. [ ] EQ Spectrum - Pixel bars (retro sound system, 16 bars)
+4. [ ] Oscilloscope - Bar mode (waveform as vertical bars)
+5. [ ] DB Meter - Multi-track (8 tracks + stereo master)
+6. [ ] Spectrogram (frequency vs time, color intensity)
+
+**Technical Notes**:
+- All implement `TrackerModule` interface
+- All use 620×70 dimensions
+- All receive real-time audio from native engine
+- FFT modules need additional DSP in C++
+- Settings stored in app preferences (not project file)
+
+**Documentation**: Added detailed section to DEVELOPMENT_STATUS.md
+
+### Files Modified
+- `BitmapFont5x5.kt` - Made FONT_5X5 internal, fixed uppercaseChar
+- `PixelPerfectRenderer.kt` - Removed duplicate font, added oscilloscope ticker
+- `native-audio.cpp` - Waveform capture, downsampling, getWaveform()
+- `TrackerAudioEngine.kt` - Added updateWaveform() and native JNI
+- `OscilloscopeModule.kt` - Added WAVEFORM_GAIN constant
+- `DEVELOPMENT_STATUS.md` - Updated status, added future features section
+- `SESSION_HISTORY.md` - This entry
+
+### Lessons Learned
+
+1. **Duplicate Data is Evil**: Font duplication caused unnecessary debugging
+   - Single source of truth is always better
+   - Use `internal` for package-wide access
+
+2. **Compose Recomposition Gotchas**: Canvas doesn't redraw automatically
+   - Need to change values in `key()` to force redraws
+   - For continuous animation, need a ticker that updates constantly
+   - `LaunchedEffect(Unit)` for infinite loops
+
+3. **Native Audio Timing**: Audio callback rate vs visual refresh rate
+   - Audio: 44.1kHz (22,676 samples per 512-frame callback)
+   - Visual: 60 Hz (16.67ms per frame)
+   - Need buffering and downsampling to bridge the gap
+
+4. **Oscilloscope Design**: Real-time waveform display requires:
+   - Circular buffer for continuous capture
+   - Thread-safe access (mutex for audio thread vs UI thread)
+   - Downsampling to show useful time window
+   - Gain adjustment for visibility
+   - High refresh rate for smooth scrolling
+
+5. **User-Facing Tunables**: Make constants easy to find and adjust
+   - Clear comments explaining what values do
+   - Examples of different settings
+   - Located near top of file or in companion object
+
+### Next Steps
+- Continue with MVP features (effects, tables, mixer)
+- System settings and visualizer modules are post-MVP
+- User will test oscilloscope and provide feedback on gain/speed values
+
+---
+
 ## Session 2025-12-28: Professional Audio Engine Overhaul
 
 ### Context

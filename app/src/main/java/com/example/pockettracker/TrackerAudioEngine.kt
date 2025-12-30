@@ -11,8 +11,8 @@ class TrackerAudioEngine(private val context: Context) {
     private val TAG = "TrackerAudioEngine"
 
     // Waveform buffer for visualization (620 samples for 620px width)
+    // Updated from native engine via updateWaveform()
     val waveformBuffer = FloatArray(620) { 0f }
-    private var waveformIndex = 0
 
     // Loaded samples metadata
     private val sampleBaseFrequencies = mutableMapOf<Int, Float>()
@@ -383,15 +383,12 @@ class TrackerAudioEngine(private val context: Context) {
 
         // Trigger the note in C++
         native_triggerNote(sampleId, trackId, frequency, baseFreq, volume)
-
-        // Update waveform buffer (simple visualization - just mark activity)
-        updateWaveform(volume * 0.5f)
     }
 
-    // Update waveform buffer for visualization
-    private fun updateWaveform(sample: Float) {
-        waveformBuffer[waveformIndex] = sample
-        waveformIndex = (waveformIndex + 1) % waveformBuffer.size
+    // Update waveform buffer from native audio engine
+    // Call this periodically (e.g., every frame) to get latest waveform data
+    fun updateWaveform() {
+        native_getWaveform(waveformBuffer)
     }
 
     // Stop all notes on a track
@@ -553,4 +550,5 @@ class TrackerAudioEngine(private val context: Context) {
                                            frequency: Float, baseFrequency: Float, volume: Float)
     private external fun native_clearScheduledNotes()
     private external fun native_resumeStream()
+    private external fun native_getWaveform(outArray: FloatArray)
 }

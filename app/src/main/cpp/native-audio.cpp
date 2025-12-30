@@ -294,6 +294,13 @@ public:
             instrumentParams[i] = InstrumentParams();
         }
         globalFrameCounter = 0;
+
+        // Initialize waveform buffer
+        for (int i = 0; i < WAVEFORM_SIZE; i++) {
+            waveformBuffer[i] = 0.0f;
+        }
+        waveformIndex = 0;
+        waveformDownsampleCounter = 0;
     }
 
     ~AudioEngine() {
@@ -650,6 +657,20 @@ public:
             }
         }
 
+        // Capture waveform for oscilloscope (left channel only, with downsampling)
+        {
+            std::lock_guard<std::mutex> lock(waveformMutex);
+            for (int i = 0; i < numFrames; i++) {
+                // Downsample: only capture every Nth sample
+                waveformDownsampleCounter++;
+                if (waveformDownsampleCounter >= WAVEFORM_DOWNSAMPLE) {
+                    waveformBuffer[waveformIndex] = output[i * channelCount];  // Left channel
+                    waveformIndex = (waveformIndex + 1) % WAVEFORM_SIZE;
+                    waveformDownsampleCounter = 0;
+                }
+            }
+        }
+
         // Update global frame counter for next callback
         globalFrameCounter += numFrames;
 
@@ -680,6 +701,18 @@ public:
         noteQueue.clear();
     }
 
+    // Get waveform data for oscilloscope display
+    void getWaveform(float* outBuffer, int bufferSize) {
+        std::lock_guard<std::mutex> lock(waveformMutex);
+
+        // Copy from circular buffer in the correct order
+        // Start from current index and wrap around for scrolling effect
+        for (int i = 0; i < bufferSize && i < WAVEFORM_SIZE; i++) {
+            int readIndex = (waveformIndex + i) % WAVEFORM_SIZE;
+            outBuffer[i] = waveformBuffer[readIndex];
+        }
+    }
+
 private:
     std::shared_ptr<oboe::AudioStream> stream;
     Voice voices[MAX_VOICES];
@@ -690,6 +723,19 @@ private:
     // PHASE 1: Sample-accurate timing infrastructure
     NoteQueue noteQueue;           // Thread-safe queue of scheduled notes
     int64_t globalFrameCounter;    // Total frames processed since start
+
+    // Oscilloscope waveform buffer (circular buffer for recent output)
+    static const int WAVEFORM_SIZE = 620;
+    float waveformBuffer[WAVEFORM_SIZE];
+    int waveformIndex = 0;
+    std::mutex waveformMutex;
+
+    // Downsampling for oscilloscope (capture every Nth sample)
+    // Lower = faster scrolling (more zoomed in), Higher = slower scrolling (more time visible)
+    // Adjust this value to control oscilloscope speed:
+    //   1 = 14ms visible (super fast), 10 = 140ms, 20 = 280ms, 50 = 700ms, etc.
+    static const int WAVEFORM_DOWNSAMPLE = 1;  // Capture every 10th sample
+    int waveformDownsampleCounter = 0;
 };
 
 static AudioEngine* engine = nullptr;
@@ -806,6 +852,22 @@ JNIEXPORT void JNICALL
 Java_com_example_pockettracker_TrackerAudioEngine_native_1resumeStream(JNIEnv *env, jobject thiz) {
     if (engine) {
         engine->resumeStream();
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_TrackerAudioEngine_native_1getWaveform(JNIEnv *env, jobject thiz, jfloatArray outArray) {
+    if (engine && outArray != nullptr) {
+        jsize length = env->GetArrayLength(outArray);
+        float* buffer = new float[length];
+
+        // Get waveform from engine
+        engine->getWaveform(buffer, length);
+
+        // Copy to Java array
+        env->SetFloatArrayRegion(outArray, 0, length, buffer);
+
+        delete[] buffer;
     }
 }
 

@@ -71,6 +71,17 @@ fun PixelPerfectTracker(
     var playbackPhraseStep by remember { mutableStateOf(0) }
     var playbackSongRow by remember { mutableStateOf(0) }
 
+    // Oscilloscope refresh ticker (force continuous Canvas redraws for smooth waveform)
+    var oscilloscopeTicker by remember { mutableStateOf(0L) }
+
+    // Oscilloscope refresh loop (independent of playback position)
+    LaunchedEffect(Unit) {
+        while (true) {
+            oscilloscopeTicker++
+            delay(16L)  // ~60 FPS refresh rate
+        }
+    }
+
     // Playback loop - handles both Phrase and Chain screens
     LaunchedEffect(isPlaying, currentScreen) {
         if (isPlaying) {
@@ -462,8 +473,8 @@ fun PixelPerfectTracker(
         val offsetY = (screenHeightPx - renderHeight) / 2f
 
         // Main canvas - use key() to force redraw when state changes
-        // Key on: projectVersion, screen type, and all cursor positions
-        key(projectVersion, currentScreen, cursorRow, cursorColumn, projectCursorRow, projectCursorColumn, instrumentCursorRow, instrumentCursorColumn) {
+        // Key on: projectVersion, screen type, cursor positions, and oscilloscope ticker (for smooth waveform)
+        key(projectVersion, currentScreen, cursorRow, cursorColumn, projectCursorRow, projectCursorColumn, instrumentCursorRow, instrumentCursorColumn, oscilloscopeTicker) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 translate(offsetX, offsetY) {
                     // Use layout manager to draw modules
@@ -569,6 +580,10 @@ class TrackerLayout {
         // Start position: 10px from left edge (centers 620px in 640px)
         val moduleX = SIDE_SPACER
         var currentY = SCREEN_SPACER  // Start 6px from top
+
+        // Update waveform data from native audio engine (every frame)
+        // NOTE: Adjust update rate here if needed (e.g., skip frames for slower update)
+        audioEngine.updateWaveform()
 
         // MODULE 1: OSCILLOSCOPE (waveform display)
         // Position: Top of screen

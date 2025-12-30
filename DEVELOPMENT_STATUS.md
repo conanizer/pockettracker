@@ -1,7 +1,7 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2025-12-28
+2025-12-30
 
 ## What's Working ✅
 
@@ -28,8 +28,16 @@
 - ✅ **Continuous buffering**: 2-phrase lookahead for smooth playback
 - ✅ **50ms startup latency**: Instant playback feel
 - ✅ **Accurate playback cursors**: Frame-based position tracking
+- ✅ **Real-time waveform capture**: Oscilloscope displays actual mixed audio output
 
 ### Screens & Modules
+- ✅ **Oscilloscope** - Real-time audio waveform visualization
+  - Captures actual mixed audio output from native engine
+  - Scrolling waveform display (right-to-left)
+  - Adjustable downsampling rate (time window: 14ms-700ms)
+  - Adjustable gain (amplitude scaling)
+  - 60 FPS refresh rate on all screens
+
 - ✅ **Phrase Editor** - 16-step note editing with N/V/I/FX columns
   - Cursor navigation (up/down/left/right)
   - Volume, instrument, FX value editing
@@ -202,6 +210,7 @@
 ### Audio Features
 - [ ] Effect commands (FX1, FX2, FX3)
 - [ ] Real-time effect processing
+- [ ] Audio effects: drive, crush, downsample, filters (LP/HP/BP)
 
 ### UI Screens
 - [ ] Mixer screen
@@ -216,6 +225,64 @@
 - [ ] Clone instrument
 - [ ] Undo/redo
 - [ ] Pattern selection/editing
+
+## Post-MVP Features (Future Ideas)
+
+### System Settings (Global, Not Per-Project)
+**Location:** Accessible from Project screen
+
+Planned global settings:
+- [ ] **Visualizer Module Selection** - Choose which visualizer displays in the oscilloscope area
+- [ ] **Theme/Color Scheme** - UI color customization
+- [ ] **Font Selection** - Alternative bitmap fonts
+- [ ] **Song Template** - Default project structure when creating new projects
+- [ ] **Default Tempo** - Starting tempo for new projects
+- [ ] **Auto-save Settings** - Frequency and behavior
+
+### Alternative Visualizer Modules (620×70 pixel area)
+
+All visualizers will show real-time audio analysis with adjustable parameters.
+
+**1. Oscilloscope - Waveform** ✅ **(Current)**
+- Scrolling waveform display
+- Adjustable gain and time window
+- 60 FPS smooth scrolling
+
+**2. EQ Spectrum - Wave Style**
+- [ ] Real-time FFT frequency analysis
+- [ ] Smooth wave-like frequency visualization
+- [ ] 16-32 frequency bands
+- [ ] Configurable color gradient
+
+**3. EQ Spectrum - Pixel Bars** (Retro Style)
+- [ ] Classic sound system display aesthetic
+- [ ] 16 vertical pixel bars
+- [ ] Old-school LED meter look
+- [ ] Peak hold indicators
+
+**4. Oscilloscope - Bar Mode**
+- [ ] Waveform displayed as vertical bars instead of line
+- [ ] Retro pixel aesthetic
+- [ ] Amplitude represented by bar height
+
+**5. DB Meter - Multi-Track**
+- [ ] 8 vertical meters for individual tracks
+- [ ] Stereo master L/R meters
+- [ ] Peak hold markers
+- [ ] Color-coded levels (green/yellow/red)
+- [ ] Real-time RMS and peak measurements
+
+**6. Spectrogram** (Advanced)
+- [ ] Scrolling frequency vs time visualization
+- [ ] Color intensity = amplitude
+- [ ] Shows harmonic content over time
+
+**Technical Requirements:**
+- All modules implement `TrackerModule` interface
+- All use same 620×70 pixel dimensions
+- All receive real-time audio data from native engine
+- FFT-based modules may require additional DSP in C++
+- Settings stored in app preferences (not project file)
 
 ## Next Steps (Priority Order)
 
