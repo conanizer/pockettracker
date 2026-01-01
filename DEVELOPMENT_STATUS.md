@@ -1,7 +1,10 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2025-12-30
+2025-01-02
+
+## Current Phase
+**Phase A Complete** → **Architecture Refactoring (Phase 4)** → Effects System → Copy/Paste → MVP Release
 
 ## What's Working ✅
 
@@ -80,6 +83,7 @@
 - ✅ 256 phrases, 256 chains, 8 tracks
 - ✅ 256 instruments with full parameter set
 - ✅ Serialization/deserialization to JSON
+- ✅ **Platform-agnostic** - No Android dependencies in data classes!
 
 ## Professional Audio Engine Overhaul (2025-12-28) ✅
 
@@ -148,162 +152,191 @@
 - ✅ **Song screen**: Insert last chain
 - ✅ Speeds up composition workflow significantly!
 
-## Recent Fixes & Features (2025-12-23)
+## Testing Devices
 
-### Advanced Sample Playback Parameters ✅
-**FULLY IMPLEMENTED** - Start/end points, reverse, and looping now work in audio engine!
-- ✅ **Sample start/end points** - Playback constrained to 0-255 range (UI + audio)
-- ✅ **Reverse playback** - Samples play backwards when enabled
-- ✅ **Forward loop** - Loops between loopStart and end points
-- ✅ **Ping-pong loop** - Bounces back and forth between points
-- Implementation: C++ audio callback handles all modes with precise sample-accurate timing
+### Primary Device ✅
+**Miyoo Flip**
+- RAM: 1GB
+- OS: Android 13 (GammaCoreOS)
+- Resolution: 640×480
+- Status: All features working smoothly!
 
-### Sample Rate Compensation ✅
-**AUTOMATIC PITCH CORRECTION** - All samples play at correct pitch regardless of sample rate!
-- ✅ Reads sample rate from WAV header (44100Hz, 48000Hz, etc.)
-- ✅ Queries actual device sample rate from Oboe (not hardcoded!)
-- ✅ Calculates compensation ratio: `baseFreq = 261.63 × (deviceRate / sampleRate)`
-- ✅ Ratio persists when ROOT/DETUNE parameters change
-- Result: 44100Hz samples on 48000Hz device now play at correct pitch
+### Secondary Device (Arriving Soon)
+**Ayaneo Pocket Air Mini**
+- RAM: 3GB
+- OS: Android 11
+- Resolution: TBD
+- Purpose: Performance comparison, verify 60fps possible
 
-### Playback Timing Precision Fixes ✅
-**ROCK-SOLID TEMPO** - Fixed timing jitter and uneven note spacing!
-
-1. **Phrase Note Increment Bug** - A+UP/DOWN was offsetting by -1 octave
-   - Root cause: `PhraseEditorModule.kt` used old MIDI formula `octave*12+pitch`
-   - Fix: Changed to use `note.toMidi()` with correct formula `(octave+1)*12+pitch`
-
-2. **Precision Loss in Timing** - Phrase loops had inconsistent retrigger timing
-   - Root cause: `(stepCounter * stepDurationMs).toLong()` truncated fractional ms
-   - At 162 BPM: Lost 0.59ms per step = 9.48ms error per 16-step phrase!
-   - Fix: Keep calculations in Double precision until final delay
-
-3. **Uneven Note Timing Within Phrase** - "Floating tempo" inside bars
-   - Root cause: Notes played immediately, then delay compensated for drift
-   - This made some notes play too soon, others too late
-   - Fix: Calculate target time FIRST, wait until precise moment, THEN play note
-   - Result: Every note triggers at exact calculated time
-
-### Critical Bug Fixes (Earlier Session)
-1. **Stereo/Mono WAV Loading** - Samples were playing 1 octave too low
-   - Root cause: Stereo files loaded as sequential mono (doubled sample count)
-   - Fix: Parse WAV header for channel count, mix stereo → mono
-
-2. **MIDI Note Conversion** - All notes off by 1 octave
-   - Root cause: `toMidi()` and `fromMidi()` missing octave offset
-   - Fix: C-4 now correctly = MIDI 60 (was 48)
-
-3. **File Browser Crash** - SIGSEGV when previewing samples
-   - Root cause: Race condition (audio thread playing deleted sample)
-   - Fix: Call `native_stopAll()` before loading preview sample
-
-### New Features (Earlier Session)
-- Sample preview in file browser (C-4 reference pitch)
-- Instrument preview with ROOT+DETUNE applied
-- Proper detune calculation (high nibble = semitones, low nibble = 1/16)
+### Minimum Requirements (Verified)
+- Android 8.0+ (API 26)
+- 64-bit processor
+- **~512MB total RAM** (works on 1GB Miyoo Flip!)
+- ~50MB storage
+- 640×480 minimum resolution
 
 ## Known Issues
 - ⚠️ Generic input warning spam after device restart (harmless, goes away after reboot)
 
-## What's NOT Implemented Yet
+## What's NOT Implemented Yet (MVP Remaining Work)
 
-### Audio Features
-- [ ] Effect commands (FX1, FX2, FX3)
-- [ ] Real-time effect processing
-- [ ] Audio effects: drive, crush, downsample, filters (LP/HP/BP)
+### 1. Architecture Refactoring (1-2 weeks) ⚠️
+**Status:** Starting next!
 
-### UI Screens
-- [ ] Mixer screen
-- [ ] Effects screen
-- [ ] Table screen (arpeggio/pitch/volume tables)
-- [ ] Groove screen
-- [ ] Scale screen
-- [ ] Mods screen
+**Why refactoring before features?**
+- Prepares for Linux port (mentor joining post-MVP)
+- Separates Android-specific code from business logic
+- Makes effects and copy/paste easier to implement
+- Clean architecture = easier debugging
 
-### Workflow Features
-- [ ] Copy/paste for phrases/chains
-- [ ] Clone instrument
-- [ ] Undo/redo
-- [ ] Pattern selection/editing
+**What needs refactoring:**
+- [ ] Phase 1: Audio backend abstraction (2-3 days)
+  - Create `IAudioBackend` interface
+  - Wrap Oboe in `OboeAudioBackend`
+  - Audio engine uses interface instead of JNI directly
+  
+- [ ] Phase 2: Resource loading abstraction (1 day)
+  - Create `IResourceLoader` interface
+  - Implement `AndroidResourceLoader`
+  - Sample loading uses interface
+  
+- [ ] Phase 3: File I/O abstraction (1-2 days)
+  - Create `IFileSystem` interface
+  - Implement `AndroidFileSystem`
+  - FileManager uses interface
+  
+- [ ] Phase 4: Business logic extraction (5-7 days)
+  - Create 6 separate controllers:
+    - `TrackerController` (main coordinator)
+    - `InputController` (button handling)
+    - `PlaybackController` (playback scheduling)
+    - `EffectProcessor` (effect calculations)
+    - `InstrumentController` (sample management)
+    - `FileController` (save/load)
+  - Create `ClipboardManager` (copy/paste operations)
+  - MainActivity becomes THIN (just creates backends + UI)
+
+**See:** `REFACTORING_ROADMAP.md` for detailed step-by-step guide
+
+### 2. Effects System (1-2 weeks) ⚠️
+**TOP-5 Effects in PHRASE screen only:**
+- [ ] Arpeggio (Axx) - Note pattern automation
+- [ ] Offset (Oxx) - Sample start point
+- [ ] Volume (Vxx) - Volume automation
+- [ ] Kill (K00) - Stop sample immediately
+- [ ] Repeat (Rxx) - Retrigger within step
+
+**Table screen effects:** Early Post-MVP
+
+**See:** `MVP_ROADMAP.md` Milestone 2 for implementation details
+
+### 3. Copy/Paste System (4-5 days) ⚠️
+**M8-style workflow:**
+- [ ] Selection mode (SELECT+B to enter)
+- [ ] Copy selection (B in selection mode)
+- [ ] Paste (SELECT+A) ✅
+- [ ] Cut (A+B)
+- [ ] Copy/paste phrase steps
+- [ ] Copy/paste between different phrases
+- [ ] Clipboard indicator in header row
+
+**Advanced features:** Early Post-MVP (instrument settings copy, etc.)
+
+**See:** `MVP_ROADMAP.md` Milestone 2.5 for implementation details
+
+### 4. Testing & Polish (1 week)
+- [ ] "Hello world" song usability test (<5 min)
+- [ ] Bug hunting on both devices
+- [ ] Performance verification (stable 30-60fps)
+- [ ] Example project creation
+
+### 5. Documentation (3-5 days)
+- [ ] README finalization
+- [ ] Controls guide (including copy/paste)
+- [ ] Short demo video
+- [ ] Known issues list
 
 ## Post-MVP Features (Future Ideas)
+
+### Early Post-MVP (With Mentor)
+1. **Table Screen** - Effects for instruments
+2. **Advanced Copy/Paste** - Instrument settings
+3. **Linux Port** - GTK/Qt UI with same controllers
+4. **Braids Synthesizers** - Mutable Instruments integration
+5. **Remaining Effects** - Pitch, pan, filter, etc.
+
+### Later Features
+- Undo/redo
+- WAV export
+- Advanced filters
+- Mixer screen
+- Themes/polish
 
 ### System Settings (Global, Not Per-Project)
 **Location:** Accessible from Project screen
 
 Planned global settings:
-- [ ] **Visualizer Module Selection** - Choose which visualizer displays in the oscilloscope area
-- [ ] **Theme/Color Scheme** - UI color customization
+- [ ] **Visualizer Module Selection** - Choose which visualizer displays
+- [ ] **Theme/Color Scheme** - UI customization
 - [ ] **Font Selection** - Alternative bitmap fonts
-- [ ] **Song Template** - Default project structure when creating new projects
-- [ ] **Default Tempo** - Starting tempo for new projects
+- [ ] **Song Template** - Default project structure
 - [ ] **Auto-save Settings** - Frequency and behavior
 
 ### Alternative Visualizer Modules (620×70 pixel area)
 
-All visualizers will show real-time audio analysis with adjustable parameters.
-
 **1. Oscilloscope - Waveform** ✅ **(Current)**
 - Scrolling waveform display
 - Adjustable gain and time window
-- 60 FPS smooth scrolling
 
 **2. EQ Spectrum - Wave Style**
 - [ ] Real-time FFT frequency analysis
-- [ ] Smooth wave-like frequency visualization
-- [ ] 16-32 frequency bands
-- [ ] Configurable color gradient
+- [ ] Smooth wave-like visualization
 
 **3. EQ Spectrum - Pixel Bars** (Retro Style)
-- [ ] Classic sound system display aesthetic
+- [ ] Classic LED meter look
 - [ ] 16 vertical pixel bars
-- [ ] Old-school LED meter look
-- [ ] Peak hold indicators
 
-**4. Oscilloscope - Bar Mode**
-- [ ] Waveform displayed as vertical bars instead of line
-- [ ] Retro pixel aesthetic
-- [ ] Amplitude represented by bar height
-
-**5. DB Meter - Multi-Track**
-- [ ] 8 vertical meters for individual tracks
+**4. DB Meter - Multi-Track**
+- [ ] 8 vertical meters for tracks
 - [ ] Stereo master L/R meters
-- [ ] Peak hold markers
-- [ ] Color-coded levels (green/yellow/red)
-- [ ] Real-time RMS and peak measurements
 
-**6. Spectrogram** (Advanced)
-- [ ] Scrolling frequency vs time visualization
-- [ ] Color intensity = amplitude
-- [ ] Shows harmonic content over time
-
-**Technical Requirements:**
-- All modules implement `TrackerModule` interface
-- All use same 620×70 pixel dimensions
-- All receive real-time audio data from native engine
-- FFT-based modules may require additional DSP in C++
-- Settings stored in app preferences (not project file)
+**5. Spectrogram** (Advanced)
+- [ ] Frequency vs time visualization
 
 ## Next Steps (Priority Order)
 
-1. **Effect System Implementation**
-   - Define effect types (pitch, volume, filter, etc.)
-   - Implement in audio engine
-   - Add effect editing UI
+### This Week:
+1. **Start Refactoring Phase 1** (Audio abstraction)
+   - Read `REFACTORING_ROADMAP.md` Phase 1
+   - Follow step-by-step guide
+   - Test after each step
 
-2. **Sample Playback Parameters**
-   - Implement start/end/loop in C++ audio engine
-   - Add reverse playback support
+### Next 2 Weeks:
+2. **Complete Refactoring Phases 2-4**
+   - Resources abstraction
+   - File I/O abstraction
+   - Controller extraction
 
-3. **Table Screen**
-   - Arpeggio tables for melodic sequences
-   - Volume envelopes
-   - Pitch modulation
+### Following Weeks:
+3. **Effects System** (Milestone 2)
+4. **Copy/Paste System** (Milestone 2.5)
+5. **Testing & Polish** (Milestone 3-4)
 
-4. **Mixer Screen**
-   - Per-track volume/pan
-   - Master volume
-   - Visualization
+## Timeline to MVP
+
+**Realistic Timeline:** Late February 2025 (8-10 weeks from now)
+
+```
+Weeks 1-2:   Refactoring (clean architecture)
+Weeks 3-4:   Effects system (TOP-5 in phrase)
+Week 5:      Copy/paste system (M8-style)
+Week 6:      Integration & testing
+Weeks 7-8:   Bug fixes & performance
+Week 9:      Documentation
+Week 10:     Video & buffer for launch
+```
+
+**See:** `MVP_ROADMAP.md` for complete vertical slice breakdown
 
 ## Technical Notes
 
@@ -336,5 +369,13 @@ All visualizers will show real-time audio analysis with adjustable parameters.
 - 0C-FF: User-loadable samples
 - Each instrument has independent ROOT+DETUNE tuning
 
-## Questions for Claude
-- None at this time - all major systems working!
+## Questions for Claude Code
+
+When starting work:
+1. Read `DEVELOPMENT_STATUS.md` (this file) - know current progress
+2. Read `REFACTORING_ROADMAP.md` - understand current phase
+3. Read `MVP_ROADMAP.md` - see complete path to MVP
+4. Start with current task (currently: Refactoring Phase 1)
+
+**Current task:** Phase 1 - Audio Backend Abstraction
+**See:** `REFACTORING_ROADMAP.md` for step-by-step instructions
