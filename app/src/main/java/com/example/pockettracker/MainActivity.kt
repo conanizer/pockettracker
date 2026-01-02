@@ -28,6 +28,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import com.example.pockettracker.core.logic.InstrumentController
+import com.example.pockettracker.core.logic.PlaybackController
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN ACTIVITY
@@ -161,6 +162,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
         InstrumentController(audioEngine)
     }
 
+    // PlaybackController: Manages all playback operations
+    // PHASE 4: Extracted from MainActivity to separate business logic
+    val playbackController = remember {
+        PlaybackController(audioEngine)
+    }
+
     // GenericInputHandler: Handles button presses based on cursor context
     val genericInputHandler = remember { GenericInputHandler() }
 
@@ -240,7 +247,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     }
 
     // Playback and control state
-    var isPlaying by remember { mutableStateOf(false) }
+    // REMOVED: isPlaying - now in playbackController.isPlaying
 
     // Which chain/phrase we're editing
     var currentChain by remember { mutableIntStateOf(0) }
@@ -249,7 +256,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // Remember last edited values (for quick insertion and cursor sync)
     var lastEditedPhrase by remember { mutableIntStateOf(0) }
     var lastEditedChain by remember { mutableIntStateOf(0) }
-    // REMOVED: instrumentController.lastEditedInstrument - now in instrumentController.instrumentController.lastEditedInstrument
+    // REMOVED: lastEditedInstrument - now in instrumentController.lastEditedInstrument
     var lastEditedNote by remember { mutableStateOf(Note.fromString("C-4")) }
     var lastEditedVolume by remember { mutableIntStateOf(0xFF) }
     var lastEditedTranspose by remember { mutableIntStateOf(0) }
@@ -271,63 +278,66 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     }
     var previousScreen by remember { mutableStateOf(ScreenType.PROJECT) }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // PHASE 1 TEST: NOTE QUEUE VERIFICATION
-    // ═══════════════════════════════════════════════════════════════════════
-
-    /**
-     * Test the note queue infrastructure by scheduling 8 metronome clicks
-     * Each click is exactly 1 beat apart at current project tempo
-     * Verifies sample-accurate timing by logging schedule vs trigger times
-     *
-     * Trigger: Press START on PROJECT screen
-     */
-    val testNoteQueue = {
-        Log.d("NoteQueueTest", "═══════════════════════════════════════════")
-        Log.d("NoteQueueTest", "🧪 PHASE 1 TEST: Sample-Accurate Note Queue")
-        Log.d("NoteQueueTest", "═══════════════════════════════════════════")
-
-        val currentFrame = audioEngine.getCurrentFrame()
-        val tempo = project.tempo
-        val sampleRate = audioEngine.getDeviceSampleRate()
-
-        // Calculate frames per beat (quarter note) at current tempo
-        // 60000ms per minute ÷ BPM = ms per beat
-        // ms per beat × sampleRate / 1000 = frames per beat
-        val msPerBeat = (60000.0 / tempo)
-        val framesPerBeat = (msPerBeat * sampleRate / 1000.0).toLong()
-
-        Log.d("NoteQueueTest", "Tempo: $tempo BPM")
-        Log.d("NoteQueueTest", "Sample Rate: $sampleRate Hz")
-        Log.d("NoteQueueTest", "Frames per beat: $framesPerBeat")
-        Log.d("NoteQueueTest", "Current frame: $currentFrame")
-        Log.d("NoteQueueTest", "-------------------------------------------")
-
-        // Schedule 8 metronome clicks (C-4 note, kick drum, 1 beat apart)
-        val metronomNote = Note.fromString("C-4")
-        val kickInstrument = 0  // Instrument 00 = kick drum
-
-        for (beat in 0..7) {
-            val targetFrame = currentFrame + (beat * framesPerBeat)
-            audioEngine.scheduleNote(
-                targetFrame = targetFrame,
-                note = metronomNote,
-                instrumentId = kickInstrument,
-                trackId = 0,
-                volume = 0.8f,
-                project = project
-            )
-
-            val targetTimeMs = (beat * msPerBeat).toLong()
-            Log.d("NoteQueueTest", "📅 Beat $beat scheduled: frame=$targetFrame (${targetTimeMs}ms from now)")
-        }
-
-        Log.d("NoteQueueTest", "-------------------------------------------")
-        Log.d("NoteQueueTest", "✅ Scheduled 8 beats. Watch for 🎵 trigger logs!")
-        Log.d("NoteQueueTest", "Expected: Notes trigger at exact scheduled frames")
-        Log.d("NoteQueueTest", "Precision: <0.02ms jitter (sample-accurate)")
-        Log.d("NoteQueueTest", "═══════════════════════════════════════════")
-    }
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DEPRECATED - testNoteQueue moved to PlaybackController
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DEPRECATED:     // ═══════════════════════════════════════════════════════════════════════
+    // DEPRECATED:     // PHASE 1 TEST: NOTE QUEUE VERIFICATION
+    // DEPRECATED:     // ═══════════════════════════════════════════════════════════════════════
+    // DEPRECATED: 
+    // DEPRECATED:     /**
+    // DEPRECATED:      * Test the note queue infrastructure by scheduling 8 metronome clicks
+    // DEPRECATED:      * Each click is exactly 1 beat apart at current project tempo
+    // DEPRECATED:      * Verifies sample-accurate timing by logging schedule vs trigger times
+    // DEPRECATED:      *
+    // DEPRECATED:      * Trigger: Press START on PROJECT screen
+    // DEPRECATED:      */
+    // DEPRECATED:     val testNoteQueue = {
+    // DEPRECATED:         Log.d("NoteQueueTest", "═══════════════════════════════════════════")
+    // DEPRECATED:         Log.d("NoteQueueTest", "🧪 PHASE 1 TEST: Sample-Accurate Note Queue")
+    // DEPRECATED:         Log.d("NoteQueueTest", "═══════════════════════════════════════════")
+    // DEPRECATED: 
+    // DEPRECATED:         val currentFrame = audioEngine.getCurrentFrame()
+    // DEPRECATED:         val tempo = project.tempo
+    // DEPRECATED:         val sampleRate = audioEngine.getDeviceSampleRate()
+    // DEPRECATED: 
+    // DEPRECATED:         // Calculate frames per beat (quarter note) at current tempo
+    // DEPRECATED:         // 60000ms per minute ÷ BPM = ms per beat
+    // DEPRECATED:         // ms per beat × sampleRate / 1000 = frames per beat
+    // DEPRECATED:         val msPerBeat = (60000.0 / tempo)
+    // DEPRECATED:         val framesPerBeat = (msPerBeat * sampleRate / 1000.0).toLong()
+    // DEPRECATED: 
+    // DEPRECATED:         Log.d("NoteQueueTest", "Tempo: $tempo BPM")
+    // DEPRECATED:         Log.d("NoteQueueTest", "Sample Rate: $sampleRate Hz")
+    // DEPRECATED:         Log.d("NoteQueueTest", "Frames per beat: $framesPerBeat")
+    // DEPRECATED:         Log.d("NoteQueueTest", "Current frame: $currentFrame")
+    // DEPRECATED:         Log.d("NoteQueueTest", "-------------------------------------------")
+    // DEPRECATED: 
+    // DEPRECATED:         // Schedule 8 metronome clicks (C-4 note, kick drum, 1 beat apart)
+    // DEPRECATED:         val metronomNote = Note.fromString("C-4")
+    // DEPRECATED:         val kickInstrument = 0  // Instrument 00 = kick drum
+    // DEPRECATED: 
+    // DEPRECATED:         for (beat in 0..7) {
+    // DEPRECATED:             val targetFrame = currentFrame + (beat * framesPerBeat)
+    // DEPRECATED:             audioEngine.scheduleNote(
+    // DEPRECATED:                 targetFrame = targetFrame,
+    // DEPRECATED:                 note = metronomNote,
+    // DEPRECATED:                 instrumentId = kickInstrument,
+    // DEPRECATED:                 trackId = 0,
+    // DEPRECATED:                 volume = 0.8f,
+    // DEPRECATED:                 project = project
+    // DEPRECATED:             )
+    // DEPRECATED: 
+    // DEPRECATED:             val targetTimeMs = (beat * msPerBeat).toLong()
+    // DEPRECATED:             Log.d("NoteQueueTest", "📅 Beat $beat scheduled: frame=$targetFrame (${targetTimeMs}ms from now)")
+    // DEPRECATED:         }
+    // DEPRECATED: 
+    // DEPRECATED:         Log.d("NoteQueueTest", "-------------------------------------------")
+    // DEPRECATED:         Log.d("NoteQueueTest", "✅ Scheduled 8 beats. Watch for 🎵 trigger logs!")
+    // DEPRECATED:         Log.d("NoteQueueTest", "Expected: Notes trigger at exact scheduled frames")
+    // DEPRECATED:         Log.d("NoteQueueTest", "Precision: <0.02ms jitter (sample-accurate)")
+    // DEPRECATED:         Log.d("NoteQueueTest", "═══════════════════════════════════════════")
+    // DEPRECATED:     }
 
     // Initialize file browser item list when directory changes
     LaunchedEffect(fileBrowserState.currentDirectory, fileBrowserState.sortMode) {
@@ -863,7 +873,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     cursorRow,
                     cursorColumn,
                     playbackRow = 0,
-                    isPlaying = false
+                    isPlaying = playbackController.isPlaying
                 )
                 val context = phraseEditorModule.getCursorContext(phraseState)
                 val action = handlerFunction(context)
@@ -1641,7 +1651,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     // PHASE 1 TEST: START on PROJECT screen triggers note queue test
                     ScreenType.PROJECT -> {
                         Log.d("NoteQueueTest", "🧪 START on PROJECT - Running note queue test...")
-                        testNoteQueue()
+                        playbackController.testNoteQueue(project)
                     }
 
                     // File browser: Preview selected WAV file
@@ -1662,7 +1672,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 
                     // Other screens: Toggle playback
                     else -> {
-                        isPlaying = !isPlaying
+                        playbackController.togglePlayback()
                     }
                 }
             },
@@ -2047,7 +2057,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 audioEngine = audioEngine,
                 cursorRow = cursorRow,
                 cursorColumn = cursorColumn,
-                isPlaying = isPlaying,
+                isPlaying = playbackController.isPlaying,
                 previousColumn = previousColumn,
                 currentChain = currentChain,
                 currentPhrase = currentPhrase,
@@ -2075,7 +2085,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 audioEngine = audioEngine,
                 cursorRow = cursorRow,
                 cursorColumn = cursorColumn,
-                isPlaying = isPlaying,
+                isPlaying = playbackController.isPlaying,
                 previousColumn = previousColumn,
                 currentChain = currentChain,
                 currentPhrase = currentPhrase,
@@ -2105,7 +2115,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             audioEngine = audioEngine,
             cursorRow = cursorRow,
             cursorColumn = cursorColumn,
-            isPlaying = isPlaying,
+            isPlaying = playbackController.isPlaying,
             previousColumn = previousColumn,
             currentChain = currentChain,
             currentPhrase = currentPhrase,
