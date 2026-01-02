@@ -32,6 +32,26 @@ import com.example.pockettracker.core.logic.PlaybackController
 import com.example.pockettracker.core.audio.AudioEngine
 import com.example.pockettracker.platform.android.OboeAudioBackend
 import com.example.pockettracker.platform.android.AndroidResourceLoader
+import com.example.pockettracker.platform.android.AndroidFileSystem
+import com.example.pockettracker.core.storage.FileInfo
+import java.io.File
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPER FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Convert java.io.File to platform-agnostic FileInfo.
+ * Temporary helper during refactoring - FileBrowserModule will eventually use FileInfo directly.
+ */
+fun File.toFileInfo(): FileInfo = FileInfo(
+    path = absolutePath,
+    name = name,
+    extension = extension,
+    isDirectory = isDirectory,
+    size = if (isFile) length() else 0L,
+    lastModified = lastModified()
+)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN ACTIVITY
@@ -144,12 +164,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // CREATE MANAGERS
+    // FILE SYSTEM SETUP (REFACTORED ARCHITECTURE - Phase 2 COMPLETE!)
     // ═══════════════════════════════════════════════════════════════════════
 
-    // FileManager: Handles saving/loading projects
-    // "remember" means "keep this object alive across recompositions"
-    val fileManager = remember { FileManager(context) }
+    // Step 1: Create platform-specific file system backend
+    val fileSystem = remember { AndroidFileSystem(context) }
+
+    // Step 2: Create platform-agnostic FileManager
+    // ✅ No more Context dependency - fully portable!
+    val fileManager = remember { FileManager(fileSystem) }
 
     // ═══════════════════════════════════════════════════════════════════════
     // AUDIO ENGINE SETUP (REFACTORED ARCHITECTURE - Phase 1 COMPLETE!)
@@ -288,7 +311,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     var fileBrowserState by remember {
         mutableStateOf(
             FileBrowserModule.State(
-                currentDirectory = fileManager.getProjectsDirectory(),
+                currentDirectory = File(fileManager.getProjectsDirectory()),
                 items = emptyList(),
                 fileExtension = "ptp"  // Only show .ptp project files
             )
@@ -1252,7 +1275,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                         when (previousScreen) {
                                             ScreenType.PROJECT -> {
                                                 // Load project file
-                                                val loaded = fileManager.loadProject(item.file)
+                                                val loaded = fileManager.loadProject(item.file.toFileInfo())
                                                 if (loaded != null) {
                                                     project = loaded
                                                     // Reload all custom samples from the loaded project
@@ -1286,7 +1309,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                             }
                                             else -> {
                                                 // Unknown previous screen - try loading as project
-                                                val loaded = fileManager.loadProject(item.file)
+                                                val loaded = fileManager.loadProject(item.file.toFileInfo())
                                                 if (loaded != null) {
                                                     project = loaded
                                                     // Reload all custom samples from the loaded project
@@ -1309,7 +1332,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                 // Confirm delete
                                 val item = fileBrowserState.items.getOrNull(fileBrowserState.cursor)
                                 if (item != null && item !is FileBrowserModule.BrowserItem.Parent) {
-                                    val deleted = fileManager.deleteFileOrFolder(item.file)
+                                    val deleted = fileManager.deleteFileOrFolder(item.file.absolutePath)
                                     if (deleted) {
                                         // Refresh list
                                         val newItems = fileBrowserModule.buildItemList(
@@ -1365,7 +1388,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                         currentScreen = ScreenType.FILE_BROWSER
                                         // Reset file browser state with correct directory and extension
                                         fileBrowserState = fileBrowserState.copy(
-                                            currentDirectory = fileManager.getProjectsDirectory(),
+                                            currentDirectory = File(fileManager.getProjectsDirectory()),
                                             cursor = 0,
                                             scroll = 0,
                                             mode = FileBrowserModule.BrowserMode.NORMAL,
@@ -1400,7 +1423,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         when (instrumentController.cursorRow) {
                             1 -> {  // ROW 1: LOAD button
                                 if (instrumentController.cursorColumn == 1) {
-                                    val samplesDir = fileManager.getSamplesDirectory()
+                                    val samplesDir = File(fileManager.getSamplesDirectory())
                                     Log.d("InstrumentScreen", "LOAD button pressed - opening file browser for WAV files")
                                     Log.d("InstrumentScreen", "Samples directory: ${samplesDir.absolutePath}")
                                     Log.d("InstrumentScreen", "Directory exists: ${samplesDir.exists()}")
