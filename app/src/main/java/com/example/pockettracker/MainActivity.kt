@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import com.example.pockettracker.core.logic.InstrumentController
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN ACTIVITY
@@ -154,6 +155,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
         }
     }
 
+    // InstrumentController: Manages all instrument operations
+    // PHASE 4: Extracted from MainActivity to separate business logic
+    val instrumentController = remember {
+        InstrumentController(audioEngine)
+    }
+
     // GenericInputHandler: Handles button presses based on cursor context
     val genericInputHandler = remember { GenericInputHandler() }
 
@@ -209,12 +216,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     var projectStatusMessage by remember { mutableStateOf("") }
     var projectStatusSuccess by remember { mutableStateOf(true) }
 
-    // Instrument screen specific state
-    var currentInstrument by remember { mutableIntStateOf(0) }
-    var instrumentCursorRow by remember { mutableIntStateOf(0) }
-    var instrumentCursorColumn by remember { mutableIntStateOf(1) }
-    var instrumentStatusMessage by remember { mutableStateOf("") }
-    var instrumentStatusSuccess by remember { mutableStateOf(true) }
+    // Instrument screen specific state - NOW MANAGED BY InstrumentController
+    // REMOVED: instrumentController.currentInstrument, instrumentController.cursorRow, instrumentController.cursorColumn,
+    //          instrumentController.statusMessage, instrumentController.statusSuccess
+    // ACCESS VIA: instrumentController.instrumentController.currentInstrument, instrumentController.cursorRow, etc.
 
     // Auto-dismiss status messages after 5 seconds
     // NOTE: All screen status messages use the same 5-second auto-dismiss behavior
@@ -226,10 +231,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
         }
     }
 
-    LaunchedEffect(instrumentStatusMessage) {
-        if (instrumentStatusMessage.isNotEmpty()) {
+    // Auto-dismiss instrument status (now from controller)
+    LaunchedEffect(instrumentController.statusMessage) {
+        if (instrumentController.statusMessage.isNotEmpty()) {
             kotlinx.coroutines.delay(5000)  // Wait 5 seconds
-            instrumentStatusMessage = ""  // Clear message
+            instrumentController.clearStatus()
         }
     }
 
@@ -243,7 +249,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // Remember last edited values (for quick insertion and cursor sync)
     var lastEditedPhrase by remember { mutableIntStateOf(0) }
     var lastEditedChain by remember { mutableIntStateOf(0) }
-    var lastEditedInstrument by remember { mutableIntStateOf(0) }
+    // REMOVED: instrumentController.lastEditedInstrument - now in instrumentController.instrumentController.lastEditedInstrument
     var lastEditedNote by remember { mutableStateOf(Note.fromString("C-4")) }
     var lastEditedVolume by remember { mutableIntStateOf(0xFF) }
     var lastEditedTranspose by remember { mutableIntStateOf(0) }
@@ -376,7 +382,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     3 -> {
                         // Instrument column
                         step.instrument = action.value
-                        lastEditedInstrument = action.value
+                        instrumentController.lastEditedInstrument = action.value
                     }
                 }
             }
@@ -604,8 +610,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
      * Handles all instrument parameter editing
      */
     fun applyInstrumentInputAction(action: InputAction, row: Int, column: Int) {
-        Log.d("InstrumentInputAction", "inst=$currentInstrument row=$row col=$column action=$action")
-        val instrument = project.instruments[currentInstrument]
+        Log.d("InstrumentInputAction", "inst=$instrumentController.currentInstrument row=$row col=$column action=$action")
+        val instrument = project.instruments[instrumentController.currentInstrument]
 
         when (row) {
             0 -> {
@@ -896,15 +902,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             }
             ScreenType.INSTRUMENT -> {
                 val instrumentState = InstrumentState(
-                    project.instruments[currentInstrument],
-                    instrumentCursorRow,
-                    instrumentCursorColumn,
-                    instrumentStatusMessage,
-                    instrumentStatusSuccess
+                    project.instruments[instrumentController.currentInstrument],
+                    instrumentController.cursorRow,
+                    instrumentController.cursorColumn,
+                    instrumentController.statusMessage,
+                    instrumentController.statusSuccess
                 )
                 val context = instrumentModule.getCursorContext(instrumentState)
                 val action = handlerFunction(context)
-                applyInstrumentInputAction(action, instrumentCursorRow, instrumentCursorColumn)
+                applyInstrumentInputAction(action, instrumentController.cursorRow, instrumentController.cursorColumn)
             }
             else -> { /* Other screens not yet implemented */ }
         }
@@ -936,18 +942,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     }
                     ScreenType.INSTRUMENT -> {
                         // Instrument screen has rows 0-14 (rows 5 and 9 are spacers, skip them)
-                        val oldRow = instrumentCursorRow
-                        val oldColumn = instrumentCursorColumn
-                        instrumentCursorRow = when {
-                            instrumentCursorRow > 0 && instrumentCursorRow != 6 && instrumentCursorRow != 10 -> instrumentCursorRow - 1
-                            instrumentCursorRow == 6 -> 4  // Skip spacer (row 5)
-                            instrumentCursorRow == 10 -> 8  // Skip spacer (row 9)
+                        val oldRow = instrumentController.cursorRow
+                        val oldColumn = instrumentController.cursorColumn
+                        instrumentController.cursorRow = when {
+                            instrumentController.cursorRow > 0 && instrumentController.cursorRow != 6 && instrumentController.cursorRow != 10 -> instrumentController.cursorRow - 1
+                            instrumentController.cursorRow == 6 -> 4  // Skip spacer (row 5)
+                            instrumentController.cursorRow == 10 -> 8  // Skip spacer (row 9)
                             else -> 14  // Wrap to bottom
                         }
-                        android.util.Log.d("InstrumentCursor", "UP: $oldRow → $instrumentCursorRow")
+                        android.util.Log.d("InstrumentCursor", "UP: $oldRow → $instrumentController.cursorRow")
 
                         // Preserve column 3 when navigating within rows 6-8, otherwise reset to column 1
-                        instrumentCursorColumn = if (oldRow in 6..8 && instrumentCursorRow in 6..8 && oldColumn == 3) {
+                        instrumentController.cursorColumn = if (oldRow in 6..8 && instrumentController.cursorRow in 6..8 && oldColumn == 3) {
                             3  // Stay in column 3 when moving within dual-parameter rows
                         } else {
                             1  // Reset to column 1 for all other cases
@@ -1000,18 +1006,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     }
                     ScreenType.INSTRUMENT -> {
                         // Instrument screen has rows 0-14 (rows 5 and 9 are spacers, skip them)
-                        val oldRow = instrumentCursorRow
-                        val oldColumn = instrumentCursorColumn
-                        instrumentCursorRow = when {
-                            instrumentCursorRow < 14 && instrumentCursorRow != 4 && instrumentCursorRow != 8 -> instrumentCursorRow + 1
-                            instrumentCursorRow == 4 -> 6  // Skip spacer (row 5)
-                            instrumentCursorRow == 8 -> 10  // Skip spacer (row 9)
+                        val oldRow = instrumentController.cursorRow
+                        val oldColumn = instrumentController.cursorColumn
+                        instrumentController.cursorRow = when {
+                            instrumentController.cursorRow < 14 && instrumentController.cursorRow != 4 && instrumentController.cursorRow != 8 -> instrumentController.cursorRow + 1
+                            instrumentController.cursorRow == 4 -> 6  // Skip spacer (row 5)
+                            instrumentController.cursorRow == 8 -> 10  // Skip spacer (row 9)
                             else -> 0  // Wrap to top
                         }
-                        android.util.Log.d("InstrumentCursor", "DOWN: $oldRow → $instrumentCursorRow")
+                        android.util.Log.d("InstrumentCursor", "DOWN: $oldRow → $instrumentController.cursorRow")
 
                         // Preserve column 3 when navigating within rows 6-8, otherwise reset to column 1
-                        instrumentCursorColumn = if (oldRow in 6..8 && instrumentCursorRow in 6..8 && oldColumn == 3) {
+                        instrumentController.cursorColumn = if (oldRow in 6..8 && instrumentController.cursorRow in 6..8 && oldColumn == 3) {
                             3  // Stay in column 3 when moving within dual-parameter rows
                         } else {
                             1  // Reset to column 1 for all other cases
@@ -1062,16 +1068,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     }
                     ScreenType.INSTRUMENT -> {
                         // Instrument: Row 2 (NAME) has columns 1-12, others stay at column 1
-                        if (instrumentCursorRow == 2) {
+                        if (instrumentController.cursorRow == 2) {
                             // NAME row: move between character positions (1-12)
-                            if (instrumentCursorColumn > 1) {
-                                instrumentCursorColumn--
+                            if (instrumentController.cursorColumn > 1) {
+                                instrumentController.cursorColumn--
                             }
-                        } else if (instrumentCursorRow in 6..8) {
+                        } else if (instrumentController.cursorRow in 6..8) {
                             // Rows 6-8 (DRIVE/CRUSH/DWNSMPL + filter params): 4 columns (0, 1, 2, 3)
                             // Columns 0 and 2 are read-only names, only 1 and 3 are editable
-                            if (instrumentCursorColumn == 3) {
-                                instrumentCursorColumn = 1  // Jump from column 3 to column 1 (skip 2)
+                            if (instrumentController.cursorColumn == 3) {
+                                instrumentController.cursorColumn = 1  // Jump from column 3 to column 1 (skip 2)
                             }
                         }
                         // Other rows: cursor stays locked at column 1
@@ -1136,16 +1142,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     }
                     ScreenType.INSTRUMENT -> {
                         // Instrument: Row 2 (NAME) has columns 1-12, others have only column 1
-                        if (instrumentCursorRow == 2) {
+                        if (instrumentController.cursorRow == 2) {
                             // NAME row: move between character positions (max 12)
-                            if (instrumentCursorColumn < 12) {
-                                instrumentCursorColumn++
+                            if (instrumentController.cursorColumn < 12) {
+                                instrumentController.cursorColumn++
                             }
-                        } else if (instrumentCursorRow in 6..8) {
+                        } else if (instrumentController.cursorRow in 6..8) {
                             // Rows 6-8 (DRIVE/CRUSH/DWNSMPL + filter params): 4 columns (0, 1, 2, 3)
                             // Columns 0 and 2 are read-only names, only 1 and 3 are editable
-                            if (instrumentCursorColumn == 1) {
-                                instrumentCursorColumn = 3  // Jump from column 1 to column 3 (skip 2)
+                            if (instrumentController.cursorColumn == 1) {
+                                instrumentController.cursorColumn = 3  // Jump from column 1 to column 3 (skip 2)
                             }
                         }
                         // Other rows: cursor stays locked at column 1
@@ -1241,24 +1247,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                                 }
                                             }
                                             ScreenType.INSTRUMENT -> {
-                                                // Load WAV sample file
-                                                val success = audioEngine.loadSampleFromFile(
-                                                    currentInstrument,
+                                                // Load WAV sample file using InstrumentController
+                                                val result = instrumentController.loadSampleFromFile(
+                                                    project,
                                                     item.file.absolutePath
                                                 )
-                                                if (success) {
-                                                    // Store file path in instrument and update sample ID
-                                                    project.instruments[currentInstrument].sampleFilePath = item.file.absolutePath
-                                                    project.instruments[currentInstrument].sampleId = currentInstrument
-
-                                                    // Update base frequency based on ROOT + DETUNE
-                                                    audioEngine.updateInstrumentBaseFrequency(project.instruments[currentInstrument])
-
-                                                    // Update playback parameters (start/end/loop/reverse)
-                                                    audioEngine.updateInstrumentPlaybackParams(project.instruments[currentInstrument])
-
-                                                    instrumentStatusMessage = "LOADED ${item.file.nameWithoutExtension}"
-                                                    instrumentStatusSuccess = true
+                                                if (result is com.example.pockettracker.core.logic.LoadResult.Success) {
                                                     projectVersion++
                                                     currentScreen = previousScreen
                                                 } else {
@@ -1381,9 +1375,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 
                     // INSTRUMENT: Handle LOAD button
                     ScreenType.INSTRUMENT -> {
-                        when (instrumentCursorRow) {
+                        when (instrumentController.cursorRow) {
                             1 -> {  // ROW 1: LOAD button
-                                if (instrumentCursorColumn == 1) {
+                                if (instrumentController.cursorColumn == 1) {
                                     val samplesDir = fileManager.getSamplesDirectory()
                                     Log.d("InstrumentScreen", "LOAD button pressed - opening file browser for WAV files")
                                     Log.d("InstrumentScreen", "Samples directory: ${samplesDir.absolutePath}")
@@ -1420,10 +1414,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         if (step.isEmpty()) {
                             // Insert last-used values
                             step.note = lastEditedNote
-                            step.instrument = lastEditedInstrument
+                            step.instrument = instrumentController.lastEditedInstrument
                             step.volume = lastEditedVolume
                             projectVersion++
-                            Log.d("QuickInsert", "Inserted phrase step: note=$lastEditedNote, inst=$lastEditedInstrument, vol=$lastEditedVolume")
+                            Log.d("QuickInsert", "Inserted phrase step: note=$lastEditedNote, inst=$instrumentController.lastEditedInstrument, vol=$lastEditedVolume")
                         }
                     }
 
@@ -1656,14 +1650,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                             val selectedItem = fileBrowserState.items[fileBrowserState.cursor]
                             val selectedFile = selectedItem.file
                             if (selectedFile.isFile && selectedFile.extension.lowercase() == "wav") {
-                                audioEngine.previewSampleFile(selectedFile.absolutePath)
+                                instrumentController.previewSampleFile(selectedFile.absolutePath)
                             }
                         }
                     }
 
                     // Instrument screen: Preview instrument with all parameters
                     ScreenType.INSTRUMENT -> {
-                        audioEngine.previewInstrument(project.instruments[currentInstrument])
+                        instrumentController.previewInstrument(project)
                     }
 
                     // Other screens: Toggle playback
@@ -1766,7 +1760,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                 // Leaving PHRASE: remember instrument under cursor
                                 val step = project.phrases[currentPhrase].steps[cursorRow]
                                 if (!step.isEmpty()) {
-                                    lastEditedInstrument = step.instrument
+                                    instrumentController.lastEditedInstrument = step.instrument
                                 }
                             }
                             ScreenType.CHAIN -> {
@@ -1798,7 +1792,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                             }
                             ScreenType.INSTRUMENT -> {
                                 // Entering INSTRUMENT from PHRASE: sync to last instrument
-                                currentInstrument = lastEditedInstrument
+                                instrumentController.currentInstrument = instrumentController.lastEditedInstrument
                             }
                             else -> {}
                         }
@@ -1824,7 +1818,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                 // Leaving PHRASE: remember instrument under cursor
                                 val step = project.phrases[currentPhrase].steps[cursorRow]
                                 if (!step.isEmpty()) {
-                                    lastEditedInstrument = step.instrument
+                                    instrumentController.lastEditedInstrument = step.instrument
                                 }
                             }
                             ScreenType.CHAIN -> {
@@ -1848,7 +1842,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         when (newScreen) {
                             ScreenType.INSTRUMENT -> {
                                 // Entering INSTRUMENT from PHRASE: sync to last instrument
-                                currentInstrument = lastEditedInstrument
+                                instrumentController.currentInstrument = instrumentController.lastEditedInstrument
                             }
                             ScreenType.PHRASE -> {
                                 // Entering PHRASE from CHAIN: sync to last phrase
@@ -1891,10 +1885,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         Log.d("Navigation", "  -> Changed to phrase $currentPhrase")
                     }
                     ScreenType.INSTRUMENT -> {
-                        // Previous instrument (wrap around)
-                        currentInstrument = if (currentInstrument > 0) currentInstrument - 1 else 255
-                        lastEditedInstrument = currentInstrument
-                        Log.d("Navigation", "  -> Changed to instrument $currentInstrument")
+                        // Previous instrument (wrap around) - use controller method
+                        instrumentController.navigatePrevious()
+                        Log.d("Navigation", "  -> Changed to instrument ${instrumentController.currentInstrument}")
                     }
                     ScreenType.FILE_BROWSER -> {
                         // Navigate to parent folder
@@ -1922,10 +1915,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         Log.d("Navigation", "  -> Changed to phrase $currentPhrase")
                     }
                     ScreenType.INSTRUMENT -> {
-                        // Next instrument (wrap around)
-                        currentInstrument = if (currentInstrument < 255) currentInstrument + 1 else 0
-                        lastEditedInstrument = currentInstrument
-                        Log.d("Navigation", "  -> Changed to instrument $currentInstrument")
+                        // Next instrument (wrap around) - use controller method
+                        instrumentController.navigateNext()
+                        Log.d("Navigation", "  -> Changed to instrument ${instrumentController.currentInstrument}")
                     }
                     else -> { Log.d("Navigation", "  -> No action for screen $currentScreen") }
                 }
@@ -2067,11 +2059,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 inputMapper = inputMapper,
                 focusRequester = focusRequester,
                 projectVersion = projectVersion,
-                currentInstrument = currentInstrument,
-                instrumentCursorRow = instrumentCursorRow,
-                instrumentCursorColumn = instrumentCursorColumn,
-                instrumentStatusMessage = instrumentStatusMessage,
-                instrumentStatusSuccess = instrumentStatusSuccess,
+                currentInstrument = instrumentController.currentInstrument,
+                instrumentCursorRow = instrumentController.cursorRow,
+                instrumentCursorColumn = instrumentController.cursorColumn,
+                instrumentStatusMessage = instrumentController.statusMessage,
+                instrumentStatusSuccess = instrumentController.statusSuccess,
                 fileBrowserState = fileBrowserState
             )
         } else {
@@ -2095,11 +2087,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 inputMapper = inputMapper,
                 focusRequester = focusRequester,
                 projectVersion = projectVersion,
-                currentInstrument = currentInstrument,
-                instrumentCursorRow = instrumentCursorRow,
-                instrumentCursorColumn = instrumentCursorColumn,
-                instrumentStatusMessage = instrumentStatusMessage,
-                instrumentStatusSuccess = instrumentStatusSuccess,
+                currentInstrument = instrumentController.currentInstrument,
+                instrumentCursorRow = instrumentController.cursorRow,
+                instrumentCursorColumn = instrumentController.cursorColumn,
+                instrumentStatusMessage = instrumentController.statusMessage,
+                instrumentStatusSuccess = instrumentController.statusSuccess,
                 fileBrowserState = fileBrowserState
             )
         }
@@ -2124,11 +2116,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             inputMapper = inputMapper,
             focusRequester = focusRequester,
             projectVersion = projectVersion,
-            currentInstrument = currentInstrument,
-            instrumentCursorRow = instrumentCursorRow,
-            instrumentCursorColumn = instrumentCursorColumn,
-            instrumentStatusMessage = instrumentStatusMessage,
-            instrumentStatusSuccess = instrumentStatusSuccess,
+            currentInstrument = instrumentController.currentInstrument,
+            instrumentCursorRow = instrumentController.cursorRow,
+            instrumentCursorColumn = instrumentController.cursorColumn,
+            instrumentStatusMessage = instrumentController.statusMessage,
+            instrumentStatusSuccess = instrumentController.statusSuccess,
             fileBrowserState = fileBrowserState
         )
     }
