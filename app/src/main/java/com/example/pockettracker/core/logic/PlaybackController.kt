@@ -3,7 +3,7 @@ package com.example.pockettracker.core.logic
 import androidx.compose.runtime.*
 import com.example.pockettracker.Note
 import com.example.pockettracker.Project
-import com.example.pockettracker.TrackerAudioEngine
+import com.example.pockettracker.core.audio.AudioEngine
 import android.util.Log
 
 /**
@@ -15,15 +15,14 @@ import android.util.Log
  * - Sample-accurate note queue management
  * - Playback cursors and position tracking
  *
- * GOAL: Platform-agnostic playback logic
- * CURRENT: Temporarily depends on TrackerAudioEngine (Android)
- * FUTURE: Will use IAudioBackend interface after Phase 1-3 refactoring
+ * Platform-agnostic playback logic using AudioEngine interface.
+ * Updated in Phase 1 refactoring to use the new AudioEngine architecture.
  *
  * This controller is being created during Phase 4 (Business Logic Extraction)
  * to separate playback logic from MainActivity.
  */
 class PlaybackController(
-    private val audioEngine: TrackerAudioEngine  // TODO: Replace with IAudioBackend in Phase 1
+    private val audioEngine: AudioEngine
 ) {
     private val TAG = "PlaybackController"
 

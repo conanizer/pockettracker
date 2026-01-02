@@ -29,6 +29,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import com.example.pockettracker.core.logic.InstrumentController
 import com.example.pockettracker.core.logic.PlaybackController
+import com.example.pockettracker.core.audio.AudioEngine
+import com.example.pockettracker.platform.android.OboeAudioBackend
+import com.example.pockettracker.platform.android.AndroidResourceLoader
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN ACTIVITY
@@ -148,11 +151,26 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // "remember" means "keep this object alive across recompositions"
     val fileManager = remember { FileManager(context) }
 
-    // TrackerAudioEngine: Handles all audio playback
-    // "apply { create() }" means "after creating, call the create() method"
+    // ═══════════════════════════════════════════════════════════════════════
+    // AUDIO ENGINE SETUP (REFACTORED ARCHITECTURE - Phase 1 COMPLETE!)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Step 1: Create platform-specific backends
+    val audioBackend = remember { OboeAudioBackend() }
+    val resourceLoader = remember { AndroidResourceLoader(context) }
+
+    // Step 2: Create platform-agnostic AudioEngine
+    // ✅ No more Context dependency - fully portable!
     val audioEngine = remember {
-        TrackerAudioEngine(context).apply {
+        AudioEngine(audioBackend, resourceLoader).apply {
             create()
+        }
+    }
+
+    // Step 3: Cleanup when app closes (important to prevent memory leaks)
+    DisposableEffect(Unit) {
+        onDispose {
+            audioEngine.close()
         }
     }
 
@@ -350,13 +368,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
         )
     }
 
-    // Clean up audio engine when app closes
-    // "DisposableEffect" runs code when the composable is removed from screen
-    DisposableEffect(Unit) {
-        onDispose {
-            audioEngine.destroy()
-        }
-    }
+    // (Audio engine cleanup moved to line 168-172 with new architecture)
 
     // ═══════════════════════════════════════════════════════════════════════
     // INPUT ACTION HELPERS

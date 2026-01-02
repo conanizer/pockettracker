@@ -1,10 +1,10 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2025-01-02
+2026-01-03
 
 ## Current Phase
-**Phase A Complete** → **Architecture Refactoring (Phase 4)** → Effects System → Copy/Paste → MVP Release
+**Phase A Complete** → **Architecture Refactoring (Phase 4 - Phase 1 Complete ✅)** → Effects System → Copy/Paste → MVP Release
 
 ## What's Working ✅
 
@@ -16,6 +16,7 @@
 - ✅ Navigation system (5×5 screen grid with SHIFT+DPAD)
 
 ### Audio Engine
+- ✅ **Platform-agnostic architecture** (IAudioBackend + IResourceLoader interfaces) 🆕
 - ✅ **Sample-accurate note queue system** (C++ priority queue, <0.02ms jitter)
 - ✅ **Linear interpolation** (eliminates aliasing artifacts during pitch-shifting)
 - ✅ **Frame-precise scheduling** (matches M8/LGPT/Picotracker timing precision)
@@ -190,31 +191,31 @@
 - Clean architecture = easier debugging
 
 **What needs refactoring:**
-- [ ] Phase 1: Audio backend abstraction (2-3 days)
-  - Create `IAudioBackend` interface
-  - Wrap Oboe in `OboeAudioBackend`
-  - Audio engine uses interface instead of JNI directly
-  
-- [ ] Phase 2: Resource loading abstraction (1 day)
-  - Create `IResourceLoader` interface
-  - Implement `AndroidResourceLoader`
-  - Sample loading uses interface
-  
-- [ ] Phase 3: File I/O abstraction (1-2 days)
+- ✅ **Phase 1: Audio backend abstraction** (COMPLETE - 2026-01-03)
+  - ✅ Created `IAudioBackend` interface (core/audio/)
+  - ✅ Created `OboeAudioBackend` implementation (platform/android/)
+  - ✅ Created `AudioEngine` wrapper (core/audio/, platform-agnostic)
+  - ✅ Created `IResourceLoader` interface (core/resources/)
+  - ✅ Created `AndroidResourceLoader` implementation (platform/android/)
+  - ✅ Updated MainActivity + controllers to use new architecture
+  - ✅ Removed legacy TrackerAudioEngine.kt
+  - ✅ Audio engine now 100% portable (zero Android dependencies)
+  - **Result:** Ready for Linux port! 🎉
+
+- [ ] Phase 2: File I/O abstraction (1-2 days) ← **NEXT**
   - Create `IFileSystem` interface
   - Implement `AndroidFileSystem`
   - FileManager uses interface
-  
-- [ ] Phase 4: Business logic extraction (5-7 days)
+
+- [ ] Phase 3: Business logic extraction (5-7 days)
   - Create 6 separate controllers:
     - `TrackerController` (main coordinator)
     - `InputController` (button handling)
-    - `PlaybackController` (playback scheduling)
     - `EffectProcessor` (effect calculations)
-    - `InstrumentController` (sample management)
     - `FileController` (save/load)
   - Create `ClipboardManager` (copy/paste operations)
   - MainActivity becomes THIN (just creates backends + UI)
+  - **Note:** PlaybackController and InstrumentController already extracted!
 
 **See:** `REFACTORING_ROADMAP.md` for detailed step-by-step guide
 
@@ -306,16 +307,17 @@ Planned global settings:
 ## Next Steps (Priority Order)
 
 ### This Week:
-1. **Start Refactoring Phase 1** (Audio abstraction)
-   - Read `REFACTORING_ROADMAP.md` Phase 1
-   - Follow step-by-step guide
-   - Test after each step
+1. **Start Refactoring Phase 2** (File I/O abstraction) ← **YOU ARE HERE**
+   - Read `REFACTORING_ROADMAP.md` Phase 2
+   - Create `IFileSystem` interface
+   - Implement `AndroidFileSystem`
+   - Update FileManager to use interface
 
 ### Next 2 Weeks:
-2. **Complete Refactoring Phases 2-4**
-   - Resources abstraction
-   - File I/O abstraction
-   - Controller extraction
+2. **Complete Refactoring Phase 3**
+   - Extract remaining controllers
+   - Create ClipboardManager
+   - Make MainActivity thin
 
 ### Following Weeks:
 3. **Effects System** (Milestone 2)
@@ -375,7 +377,7 @@ When starting work:
 1. Read `DEVELOPMENT_STATUS.md` (this file) - know current progress
 2. Read `REFACTORING_ROADMAP.md` - understand current phase
 3. Read `MVP_ROADMAP.md` - see complete path to MVP
-4. Start with current task (currently: Refactoring Phase 1)
+4. Start with current task (currently: Refactoring Phase 2)
 
-**Current task:** Phase 1 - Audio Backend Abstraction
+**Current task:** Phase 2 - File I/O Abstraction
 **See:** `REFACTORING_ROADMAP.md` for step-by-step instructions

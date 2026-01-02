@@ -871,4 +871,115 @@ Java_com_example_pockettracker_TrackerAudioEngine_native_1getWaveform(JNIEnv *en
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// JNI METHODS FOR OboeAudioBackend (Refactoring Phase 1)
+// ═══════════════════════════════════════════════════════════════════════════
+// These are the new platform-agnostic JNI methods that match the OboeAudioBackend class
+// in platform/android/OboeAudioBackend.kt
+
+JNIEXPORT jboolean JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1create(JNIEnv *env, jobject thiz) {
+    if (!engine) {
+        engine = new AudioEngine();
+        return engine->openStream() ? JNI_TRUE : JNI_FALSE;
+    }
+    return JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1delete(JNIEnv *env, jobject thiz) {
+    if (engine) {
+        delete engine;
+        engine = nullptr;
+        LOGD("✅ Audio engine deleted");
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1loadSample(
+        JNIEnv *env, jobject thiz, jint id, jfloatArray data) {
+    if (!engine) return;
+
+    jsize len = env->GetArrayLength(data);
+    jfloat* arr = env->GetFloatArrayElements(data, nullptr);
+
+    engine->loadSample(id, arr, len);
+
+    env->ReleaseFloatArrayElements(data, arr, JNI_ABORT);
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1scheduleNote(
+        JNIEnv *env, jobject thiz, jlong targetFrame, jint sampleId, jint trackId,
+        jfloat frequency, jfloat baseFrequency, jfloat volume) {
+    if (engine) {
+        engine->scheduleNote(targetFrame, sampleId, trackId, frequency, baseFrequency, volume);
+    }
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getCurrentFrame(JNIEnv *env, jobject thiz) {
+    if (engine) {
+        return (jlong)engine->getCurrentFrame();
+    }
+    return 0;
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1clearScheduledNotes(JNIEnv *env, jobject thiz) {
+    if (engine) {
+        engine->clearScheduledNotes();
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1resumeStream(JNIEnv *env, jobject thiz) {
+    if (engine) {
+        engine->resumeStream();
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1stopAll(JNIEnv *env, jobject thiz) {
+    if (engine) {
+        engine->stopAll();
+    }
+}
+
+JNIEXPORT jint JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getSampleRate(JNIEnv *env, jobject thiz) {
+    if (engine) {
+        return engine->getSampleRate();
+    }
+    return 44100; // Default fallback
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getWaveform(JNIEnv *env, jobject thiz, jfloatArray outArray) {
+    if (engine && outArray != nullptr) {
+        jsize length = env->GetArrayLength(outArray);
+        float* buffer = new float[length];
+
+        // Get waveform from engine
+        engine->getWaveform(buffer, length);
+
+        // Copy to Java array
+        env->SetFloatArrayRegion(outArray, 0, length, buffer);
+
+        delete[] buffer;
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setInstrumentParams(
+        JNIEnv *env, jobject thiz, jint instrumentId, jint start, jint end,
+        jboolean reverse, jint loopMode, jint loopStart,
+        jint drive, jint crush, jint downsample,
+        jint filterType, jint filterCut, jint filterRes) {
+    if (engine) {
+        engine->setInstrumentParams(instrumentId, start, end, reverse, loopMode, loopStart,
+                                   drive, crush, downsample, filterType, filterCut, filterRes);
+    }
+}
+
 }

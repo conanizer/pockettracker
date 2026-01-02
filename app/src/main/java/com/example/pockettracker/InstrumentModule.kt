@@ -38,9 +38,8 @@ class InstrumentModule : TrackerModule {
         val instrumentState = state as? InstrumentState ?: return
         val instrument = instrumentState.instrument
 
-        android.util.Log.d("InstrumentModule", "Drawing INSTRUMENT screen")
-        android.util.Log.d("InstrumentModule", "  Cursor: row=${instrumentState.cursorRow}, col=${instrumentState.cursorColumn}")
-        android.util.Log.d("InstrumentModule", "  Instrument: id=${instrument.id}, name=${instrument.name}")
+        // Debug logs removed - they were spamming logcat on every frame (60+ fps)
+        // Use breakpoints or event-specific logging instead
 
         // ===================================
         // STEP 1: Draw background
@@ -485,7 +484,7 @@ class InstrumentModule : TrackerModule {
 
     /**
      * Draw NAME row showing loaded sample filename (read-only)
-     * Example: NAME     kick.wav
+     * Example: NAME
      */
     private fun DrawScope.drawNameRow(
         x: Int,
@@ -530,18 +529,6 @@ class InstrumentModule : TrackerModule {
         } else {
             // Show default sample name based on sampleId (12 hardcoded samples)
             when (instrumentState.instrument.sampleId) {
-                0 -> "kick.wav"
-                1 -> "snare.wav"
-                2 -> "hihat.wav"
-                3 -> "bass.wav"
-                4 -> "shimmer.wav"
-                5 -> "tambo.wav"
-                6 -> "lofi.wav"
-                7 -> "choirstring.wav"
-                8 -> "apache162.wav"
-                9 -> "copta162.wav"
-                10 -> "funky162.wav"
-                11 -> "eightoeight.wav"
                 else -> "[no sample]"
             }
         }

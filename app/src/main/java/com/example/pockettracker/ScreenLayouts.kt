@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.pockettracker.core.audio.AudioEngine
 
 // ============================================================================
 // FULL SCREEN LAYOUT
@@ -29,7 +30,7 @@ fun FullScreenLayout(
     layoutConfig: DeviceAdapter.LayoutConfig,
     currentScreen: ScreenType,
     project: Project,
-    audioEngine: TrackerAudioEngine,
+    audioEngine: AudioEngine,
     cursorRow: Int,
     cursorColumn: Int,
     isPlaying: Boolean,
@@ -94,7 +95,7 @@ fun PortraitLayoutWithVirtualButtons(
     layoutConfig: DeviceAdapter.LayoutConfig,
     currentScreen: ScreenType,
     project: Project,
-    audioEngine: TrackerAudioEngine,
+    audioEngine: AudioEngine,
     cursorRow: Int,
     cursorColumn: Int,
     isPlaying: Boolean,
@@ -217,7 +218,7 @@ fun LandscapeLayoutWithVirtualButtons(
     layoutConfig: DeviceAdapter.LayoutConfig,
     currentScreen: ScreenType,
     project: Project,
-    audioEngine: TrackerAudioEngine,
+    audioEngine: AudioEngine,
     cursorRow: Int,
     cursorColumn: Int,
     isPlaying: Boolean,

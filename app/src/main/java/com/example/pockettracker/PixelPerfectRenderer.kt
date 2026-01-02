@@ -14,6 +14,7 @@ import androidx.compose.ui.platform.LocalDensity
 import kotlin.math.min
 import kotlinx.coroutines.delay
 import android.os.SystemClock
+import com.example.pockettracker.core.audio.AudioEngine
 
 /**
  * PIXEL-PERFECT TRACKER - MODULAR VERSION
@@ -39,7 +40,7 @@ const val SIDE_SPACER = 10       // Space on sides
 fun PixelPerfectTracker(
     currentScreen: ScreenType,
     project: Project,
-    audioEngine: TrackerAudioEngine,
+    audioEngine: AudioEngine,
     cursorRow: Int,
     cursorColumn: Int,
     isPlaying: Boolean,
@@ -545,7 +546,7 @@ class TrackerLayout {
         playbackRow: Int,
         playbackChainRow: Int,
         playbackSongRow: Int,
-        audioEngine: TrackerAudioEngine,
+        audioEngine: AudioEngine,
         previousColumn: Int,
         currentChain: Int,
         currentPhrase: Int = 0,
@@ -719,7 +720,7 @@ class TrackerLayout {
             // FILE BROWSER: Full screen file selection
             // ===================================
             ScreenType.FILE_BROWSER -> {
-                android.util.Log.d("FileBrowser", "Rendering FILE_BROWSER, state=${if (fileBrowserState != null) "not null" else "NULL"}")
+                // Debug log removed - was spamming logcat on every frame (60+ fps)
                 if (fileBrowserState != null) {
                     with(fileBrowser) {
                         draw(
