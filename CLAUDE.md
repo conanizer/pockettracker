@@ -499,12 +499,34 @@ std::lock_guard<std::mutex> lock(queueMutex);
 
 ## 🧪 Testing Strategy
 
+### ⚠️ CRITICAL RULE: NEVER COMMIT WITHOUT TESTING
+
+**Before ANY git commit:**
+1. ✅ Code must compile without errors
+2. ✅ App must run on real device or emulator
+3. ✅ Changed features must be tested and verified working
+4. ✅ Check logcat for errors or warnings
+
+**Why this matters:**
+- Compilation success ≠ working code
+- Runtime errors only appear on device
+- Bad commits waste time and break history
+- Real testing catches issues immediately
+
+**If you can't test right now:**
+- DON'T commit yet
+- Ask user to test first
+- Wait for confirmation before committing
+
+---
+
 ### After Each Code Change:
 
 **Minimal Test:**
 1. App compiles without errors
-2. App runs without crashing
+2. App runs on device/emulator without crashing
 3. Changed feature still works
+4. Check logcat for errors
 
 **Full Functionality Test (After Phase/Milestone):**
 1. Create new project
