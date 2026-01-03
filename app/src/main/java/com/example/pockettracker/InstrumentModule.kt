@@ -693,6 +693,190 @@ class InstrumentModule : TrackerModule {
             else -> return CursorContextFactory.none()
         }
     }
+
+    /**
+     * Handle input action for instrument screen.
+     */
+    fun handleInput(
+        state: InstrumentState,
+        action: com.example.pockettracker.core.logic.InputAction,
+        audioEngine: com.example.pockettracker.core.audio.AudioEngine
+    ): InputResult {
+        when (state.cursorRow) {
+            0 -> {
+                // TYPE row - read-only for now (TODO: A+DPAD to change type)
+            }
+            1 -> {
+                // LOAD row - handled as button action, not value editing
+            }
+            2 -> {
+                // NAME row - read-only (shows loaded sample filename)
+            }
+            3 -> {
+                // ROOT note
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        state.instrument.root = Note.fromMidi(action.value)
+                        audioEngine.updateInstrumentBaseFrequency(state.instrument)
+                    }
+                    is com.example.pockettracker.core.logic.InputAction.DELETE -> {
+                        state.instrument.root = Note.fromString("C-4")
+                        audioEngine.updateInstrumentBaseFrequency(state.instrument)
+                    }
+                    else -> {}
+                }
+            }
+            4 -> {
+                // DETUNE (00-FF hex)
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        state.instrument.detune = action.value.coerceIn(0, 255)
+                        audioEngine.updateInstrumentBaseFrequency(state.instrument)
+                    }
+                    else -> {}
+                }
+            }
+            5 -> {
+                // SPACER row - no editing
+            }
+            6 -> {
+                // DRIVE + FILTER row (columns: 0=name, 1=drive, 2=name, 3=filter)
+                when (state.cursorColumn) {
+                    1 -> {  // DRIVE value
+                        when (action) {
+                            is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                                state.instrument.drive = action.value.coerceIn(0, 255)
+                                audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                            }
+                            else -> {}
+                        }
+                    }
+                    3 -> {  // FILTER type
+                        when (action) {
+                            is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                                val filterTypes = listOf("off", "lp", "hp", "bp")
+                                if (action.value in 0..3) {
+                                    state.instrument.filterType = filterTypes[action.value]
+                                    audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                                }
+                            }
+                            else -> {}
+                        }
+                    }
+                }
+            }
+            7 -> {
+                // CRUSH + CUT row (columns: 0=name, 1=crush, 2=name, 3=cut)
+                when (state.cursorColumn) {
+                    1 -> {  // CRUSH value
+                        when (action) {
+                            is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                                state.instrument.crush = action.value.coerceIn(0, 15)
+                                audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                            }
+                            else -> {}
+                        }
+                    }
+                    3 -> {  // CUT value
+                        when (action) {
+                            is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                                state.instrument.filterCut = action.value.coerceIn(0, 255)
+                                audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                            }
+                            else -> {}
+                        }
+                    }
+                }
+            }
+            8 -> {
+                // DWNSMPL + RES row (columns: 0=name, 1=downsample, 2=name, 3=res)
+                when (state.cursorColumn) {
+                    1 -> {  // DWNSMPL value
+                        when (action) {
+                            is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                                state.instrument.downsample = action.value.coerceIn(0, 15)
+                                audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                            }
+                            else -> {}
+                        }
+                    }
+                    3 -> {  // RES value
+                        when (action) {
+                            is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                                state.instrument.filterRes = action.value.coerceIn(0, 255)
+                                audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                            }
+                            else -> {}
+                        }
+                    }
+                }
+            }
+            9 -> {
+                // SPACER row - no editing
+            }
+            10 -> {
+                // START (sample start point)
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        state.instrument.sampleStart = action.value.coerceIn(0, 255)
+                        audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                    }
+                    else -> {}
+                }
+            }
+            11 -> {
+                // END (sample end point)
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        state.instrument.sampleEnd = action.value.coerceIn(0, 255)
+                        audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                    }
+                    else -> {}
+                }
+            }
+            12 -> {
+                // REV (reverse: off/on)
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        state.instrument.reverse = action.value == 1
+                        audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                    }
+                    else -> {}
+                }
+            }
+            13 -> {
+                // LOOP mode (off/fwd/png)
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        val loopModes = listOf("off", "fwd", "png")
+                        if (action.value in 0..2) {
+                            state.instrument.loopMode = loopModes[action.value]
+                        }
+                        audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                    }
+                    else -> {}
+                }
+            }
+            14 -> {
+                // LOOP ST (loop start point)
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        state.instrument.loopStart = action.value.coerceIn(0, 255)
+                        audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                    }
+                    else -> {}
+                }
+            }
+        }
+
+        return InputResult(
+            modified = action !is com.example.pockettracker.core.logic.InputAction.NONE
+        )
+    }
+
+    data class InputResult(
+        val modified: Boolean
+    )
 }
 
 /**

@@ -455,222 +455,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
      *
      * Handles value changes for phrase editing (notes, volume, instrument)
      */
-    fun applyPhraseInputAction(
-        action: InputAction,
-        phraseIndex: Int,
-        row: Int,
-        column: Int
-    ) {
-        Log.d("PhraseInputAction", "phrase=$phraseIndex row=$row col=$column action=$action")
-        val step = project.phrases[phraseIndex].steps[row]
-
-        when (action) {
-            is InputAction.SET_VALUE -> {
-                when (column) {
-                    1 -> {
-                        // Note column: Convert MIDI value back to Note
-                        step.note = Note.fromMidi(action.value)
-                        lastEditedNote = step.note
-                    }
-                    2 -> {
-                        // Volume column
-                        step.volume = action.value
-                        lastEditedVolume = action.value
-                    }
-                    3 -> {
-                        // Instrument column
-                        step.instrument = action.value
-                        instrumentController.lastEditedInstrument = action.value
-                    }
-                }
-            }
-            is InputAction.DELETE -> {
-                when (column) {
-                    1 -> {
-                        // Clear note
-                        step.note = Note.EMPTY
-                    }
-                }
-            }
-            is InputAction.INSERT_DEFAULT -> {
-                // Insert default note (C-4)
-                if (column == 1) {
-                    step.note = Note.fromString("C-4")
-                    lastEditedNote = step.note
-                }
-            }
-            else -> { /* NONE or unhandled - do nothing */ }
-        }
-
-        // Trigger recomposition by incrementing version counter
-        projectVersion++
-        Log.d("PhraseInputAction", "projectVersion incremented to $projectVersion")
-    }
-
-    /**
-     * Apply InputAction to chain step
-     *
-     * Handles value changes for chain editing (phrase refs and transpose)
-     */
-    fun applyChainInputAction(
-        action: InputAction,
-        chainIndex: Int,
-        row: Int,
-        column: Int
-    ) {
-        Log.d("ChainInputAction", "chain=$chainIndex row=$row col=$column action=$action")
-        val chain = project.chains[chainIndex]
-
-        when (action) {
-            is InputAction.SET_VALUE -> {
-                when (column) {
-                    1 -> {
-                        // Phrase reference column
-                        chain.phraseRefs[row] = action.value
-                        lastEditedPhrase = action.value
-                    }
-                    2 -> {
-                        // Transpose column
-                        chain.transposeValues[row] = action.value
-                        lastEditedTranspose = action.value
-                    }
-                }
-            }
-            is InputAction.DELETE -> {
-                when (column) {
-                    1 -> {
-                        // Clear phrase reference
-                        chain.phraseRefs[row] = 0xFF  // Empty
-                        chain.transposeValues[row] = 0x00  // Reset transpose to default
-                    }
-                }
-            }
-            is InputAction.INSERT_DEFAULT -> {
-                if (column == 1) {
-                    // Insert phrase 0 by default
-                    chain.phraseRefs[row] = 0
-                    chain.transposeValues[row] = 0x00  // Default transpose
-                    lastEditedPhrase = 0
-                    lastEditedTranspose = 0
-                }
-            }
-            else -> { /* NONE or unhandled - do nothing */ }
-        }
-
-        // Trigger recomposition
-        projectVersion++
-        Log.d("ChainInputAction", "projectVersion incremented to $projectVersion")
-    }
-
-    /**
-     * Apply InputAction to song track
-     *
-     * Handles value changes for song editing (chain references)
-     */
-    fun applySongInputAction(
-        action: InputAction,
-        trackIndex: Int,
-        row: Int
-    ) {
-        Log.d("SongInputAction", "track=$trackIndex row=$row action=$action")
-        val track = project.tracks[trackIndex]
-
-        when (action) {
-            is InputAction.SET_VALUE -> {
-                // Ensure track is long enough
-                while (track.chainRefs.size <= row) {
-                    track.chainRefs.add(-1)
-                }
-                track.chainRefs[row] = action.value
-                lastEditedChain = action.value
-            }
-            is InputAction.DELETE -> {
-                // Clear chain reference
-                if (row < track.chainRefs.size) {
-                    track.chainRefs[row] = -1
-                }
-            }
-            is InputAction.INSERT_DEFAULT -> {
-                // Insert chain 0 by default
-                while (track.chainRefs.size <= row) {
-                    track.chainRefs.add(-1)
-                }
-                track.chainRefs[row] = 0
-                lastEditedChain = 0
-            }
-            else -> { /* NONE or unhandled - do nothing */ }
-        }
-
-        // Trigger recomposition
-        projectVersion++
-        Log.d("SongInputAction", "projectVersion incremented to $projectVersion")
-    }
-
-    /**
-     * Apply InputAction to project settings
-     *
-     * Handles value changes for project screen (tempo, transpose, name)
-     */
-    fun applyProjectInputAction(
-        action: InputAction,
-        row: Int,
-        column: Int
-    ) {
-        Log.d("ProjectInputAction", "row=$row col=$column action=$action")
-
-        when (row) {
-            0 -> {
-                // TEMPO row
-                when (action) {
-                    is InputAction.SET_VALUE -> {
-                        project.tempo = action.value.coerceIn(20, 999)
-                    }
-                    else -> { /* Other actions not applicable */ }
-                }
-            }
-            1 -> {
-                // TRANSPOSE row
-                when (action) {
-                    is InputAction.SET_VALUE -> {
-                        project.transpose = action.value.coerceIn(0, 255)
-                    }
-                    else -> { /* Other actions not applicable */ }
-                }
-            }
-            2 -> {
-                // NAME row - per-character editing
-                val charIndex = column - 1
-                if (charIndex < 0 || charIndex >= 12) return
-
-                when (action) {
-                    is InputAction.SET_VALUE -> {
-                        // Set character at position
-                        val char = action.value.toChar()
-                        val sb = StringBuilder(project.name.padEnd(12, ' '))
-                        sb.setCharAt(charIndex, char)
-                        project.name = sb.toString().trimEnd()  // Remove trailing spaces
-                    }
-                    is InputAction.DELETE -> {
-                        // Delete character (replace with space)
-                        if (charIndex < project.name.length) {
-                            val sb = StringBuilder(project.name.padEnd(12, ' '))
-                            sb.setCharAt(charIndex, ' ')
-                            project.name = sb.toString().trimEnd()
-                        }
-                    }
-                    else -> { /* Other actions not applicable */ }
-                }
-            }
-            3 -> {
-                // PROJECT row (LOAD/SAVE/NEW) - handled elsewhere
-            }
-        }
-
-        // Trigger recomposition
-        projectVersion++
-        Log.d("ProjectInputAction", "projectVersion incremented to $projectVersion")
-    }
-
     /**
      * Apply input action to file browser (character editing in RENAME/CREATE mode)
      */
@@ -701,193 +485,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             }
             else -> { /* Other actions not applicable */ }
         }
-    }
-
-    /**
-     * Apply input action to instrument screen
-     * Handles all instrument parameter editing
-     */
-    fun applyInstrumentInputAction(action: InputAction, row: Int, column: Int) {
-        Log.d("InstrumentInputAction", "inst=$instrumentController.currentInstrument row=$row col=$column action=$action")
-        val instrument = project.instruments[instrumentController.currentInstrument]
-
-        when (row) {
-            0 -> {
-                // TYPE row - read-only for now (TODO: A+DPAD to change type)
-            }
-            1 -> {
-                // LOAD row - handled as button action, not value editing
-            }
-            2 -> {
-                // NAME row - read-only (shows loaded sample filename)
-            }
-            3 -> {
-                // ROOT note
-                when (action) {
-                    is InputAction.SET_VALUE -> {
-                        instrument.root = Note.fromMidi(action.value)
-                        // Update base frequency in audio engine (combines ROOT + DETUNE)
-                        audioEngine.updateInstrumentBaseFrequency(instrument)
-                    }
-                    is InputAction.DELETE -> {
-                        instrument.root = Note.fromString("C-4")
-                        // Update base frequency in audio engine (combines ROOT + DETUNE)
-                        audioEngine.updateInstrumentBaseFrequency(instrument)
-                    }
-                    else -> {}
-                }
-            }
-            4 -> {
-                // DETUNE (00-FF hex)
-                when (action) {
-                    is InputAction.SET_VALUE -> {
-                        instrument.detune = action.value.coerceIn(0, 255)
-                        // Update base frequency in audio engine (combines ROOT + DETUNE)
-                        audioEngine.updateInstrumentBaseFrequency(instrument)
-                    }
-                    else -> {}
-                }
-            }
-            5 -> {
-                // SPACER row - no editing
-            }
-            6 -> {
-                // DRIVE + FILTER row (columns: 0=name, 1=drive, 2=name, 3=filter)
-                when (column) {
-                    1 -> {  // DRIVE value
-                        when (action) {
-                            is InputAction.SET_VALUE -> {
-                                instrument.drive = action.value.coerceIn(0, 255)
-                                audioEngine.updateInstrumentPlaybackParams(instrument)
-                            }
-                            else -> {}
-                        }
-                    }
-                    3 -> {  // FILTER type
-                        when (action) {
-                            is InputAction.SET_VALUE -> {
-                                val filterTypes = listOf("off", "lp", "hp", "bp")
-                                if (action.value in 0..3) {
-                                    instrument.filterType = filterTypes[action.value]
-                                    audioEngine.updateInstrumentPlaybackParams(instrument)
-                                }
-                            }
-                            else -> {}
-                        }
-                    }
-                }
-            }
-            7 -> {
-                // CRUSH + CUT row (columns: 0=name, 1=crush, 2=name, 3=cut)
-                when (column) {
-                    1 -> {  // CRUSH value
-                        when (action) {
-                            is InputAction.SET_VALUE -> {
-                                instrument.crush = action.value.coerceIn(0, 15)
-                                audioEngine.updateInstrumentPlaybackParams(instrument)
-                            }
-                            else -> {}
-                        }
-                    }
-                    3 -> {  // CUT value
-                        when (action) {
-                            is InputAction.SET_VALUE -> {
-                                instrument.filterCut = action.value.coerceIn(0, 255)
-                                audioEngine.updateInstrumentPlaybackParams(instrument)
-                            }
-                            else -> {}
-                        }
-                    }
-                }
-            }
-            8 -> {
-                // DWNSMPL + RES row (columns: 0=name, 1=downsample, 2=name, 3=res)
-                when (column) {
-                    1 -> {  // DWNSMPL value
-                        when (action) {
-                            is InputAction.SET_VALUE -> {
-                                instrument.downsample = action.value.coerceIn(0, 15)
-                                audioEngine.updateInstrumentPlaybackParams(instrument)
-                            }
-                            else -> {}
-                        }
-                    }
-                    3 -> {  // RES value
-                        when (action) {
-                            is InputAction.SET_VALUE -> {
-                                instrument.filterRes = action.value.coerceIn(0, 255)
-                                audioEngine.updateInstrumentPlaybackParams(instrument)
-                            }
-                            else -> {}
-                        }
-                    }
-                }
-            }
-            9 -> {
-                // SPACER row - no editing
-            }
-            10 -> {
-                // START (sample start point)
-                when (action) {
-                    is InputAction.SET_VALUE -> {
-                        instrument.sampleStart = action.value.coerceIn(0, 255)
-                        // Update playback parameters in audio engine
-                        audioEngine.updateInstrumentPlaybackParams(instrument)
-                    }
-                    else -> {}
-                }
-            }
-            11 -> {
-                // END (sample end point)
-                when (action) {
-                    is InputAction.SET_VALUE -> {
-                        instrument.sampleEnd = action.value.coerceIn(0, 255)
-                        // Update playback parameters in audio engine
-                        audioEngine.updateInstrumentPlaybackParams(instrument)
-                    }
-                    else -> {}
-                }
-            }
-            12 -> {
-                // REV (reverse: off/on)
-                when (action) {
-                    is InputAction.SET_VALUE -> {
-                        instrument.reverse = action.value == 1
-                        // Update playback parameters in audio engine
-                        audioEngine.updateInstrumentPlaybackParams(instrument)
-                    }
-                    else -> {}
-                }
-            }
-            13 -> {
-                // LOOP mode (off/fwd/png)
-                when (action) {
-                    is InputAction.SET_VALUE -> {
-                        val loopModes = listOf("off", "fwd", "png")
-                        if (action.value in 0..2) {
-                            instrument.loopMode = loopModes[action.value]
-                        }
-                        // Update playback parameters in audio engine
-                        audioEngine.updateInstrumentPlaybackParams(instrument)
-                    }
-                    else -> {}
-                }
-            }
-            14 -> {
-                // LOOP ST (loop start point)
-                when (action) {
-                    is InputAction.SET_VALUE -> {
-                        instrument.loopStart = action.value.coerceIn(0, 255)
-                        // Update playback parameters in audio engine
-                        audioEngine.updateInstrumentPlaybackParams(instrument)
-                    }
-                    else -> {}
-                }
-            }
-        }
-
-        // Trigger recomposition
-        projectVersion++
     }
 
     /**
@@ -953,7 +550,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 )
                 val context = chainEditorModule.getCursorContext(chainState)
                 val action = handlerFunction(context)
-                applyChainInputAction(action, currentChain, cursorRow, cursorColumn)
+                val result = chainEditorModule.handleInput(chainState, action)
+                if (result.modified) {
+                    result.lastEditedPhrase?.let { lastEditedPhrase = it }
+                    result.lastEditedTranspose?.let { lastEditedTranspose = it }
+                    projectVersion++
+                }
             }
             ScreenType.PHRASE -> {
                 val phraseState = PhraseEditorState(
@@ -965,7 +567,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 )
                 val context = phraseEditorModule.getCursorContext(phraseState)
                 val action = handlerFunction(context)
-                applyPhraseInputAction(action, currentPhrase, cursorRow, cursorColumn)
+                val result = phraseEditorModule.handleInput(phraseState, action, instrumentController)
+                if (result.modified) {
+                    result.lastEditedNote?.let { lastEditedNote = it }
+                    result.lastEditedVolume?.let { lastEditedVolume = it }
+                    projectVersion++
+                }
             }
             ScreenType.SONG -> {
                 val songState = SongEditorState(
@@ -975,7 +582,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 )
                 val context = songEditorModule.getCursorContext(songState)
                 val action = handlerFunction(context)
-                applySongInputAction(action, cursorColumn - 1, cursorRow)
+                val result = songEditorModule.handleInput(songState, action)
+                if (result.modified) {
+                    result.lastEditedChain?.let { lastEditedChain = it }
+                    projectVersion++
+                }
             }
             ScreenType.PROJECT -> {
                 val projectState = ProjectState(
@@ -987,7 +598,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 )
                 val context = projectModule.getCursorContext(projectState)
                 val action = handlerFunction(context)
-                applyProjectInputAction(action, projectCursorRow, projectCursorColumn)
+                val result = projectModule.handleInput(projectState, action)
+                if (result.modified) {
+                    projectVersion++
+                }
             }
             ScreenType.FILE_BROWSER -> {
                 // Only handle generic input when in RENAME or CREATE mode (character editing)
@@ -1008,7 +622,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 )
                 val context = instrumentModule.getCursorContext(instrumentState)
                 val action = handlerFunction(context)
-                applyInstrumentInputAction(action, instrumentController.cursorRow, instrumentController.cursorColumn)
+                val result = instrumentModule.handleInput(instrumentState, action, audioEngine)
+                if (result.modified) {
+                    projectVersion++
+                }
             }
             else -> { /* Other screens not yet implemented */ }
         }

@@ -293,6 +293,66 @@ class ChainEditorModule : TrackerModule {
             else -> CursorContextFactory.none()
         }
     }
+
+    /**
+     * Handle input action for chain editor.
+     */
+    fun handleInput(
+        state: ChainEditorState,
+        action: com.example.pockettracker.core.logic.InputAction
+    ): InputResult {
+        val chain = state.chain
+        var lastEditedPhrase: Int? = null
+        var lastEditedTranspose: Int? = null
+
+        when (action) {
+            is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                when (state.cursorColumn) {
+                    1 -> {
+                        // Phrase reference column
+                        chain.phraseRefs[state.cursorRow] = action.value
+                        lastEditedPhrase = action.value
+                    }
+                    2 -> {
+                        // Transpose column
+                        chain.transposeValues[state.cursorRow] = action.value
+                        lastEditedTranspose = action.value
+                    }
+                }
+            }
+            is com.example.pockettracker.core.logic.InputAction.DELETE -> {
+                when (state.cursorColumn) {
+                    1 -> {
+                        // Clear phrase reference
+                        chain.phraseRefs[state.cursorRow] = 0xFF  // Empty
+                        chain.transposeValues[state.cursorRow] = 0x00  // Reset transpose to default
+                    }
+                }
+            }
+            is com.example.pockettracker.core.logic.InputAction.INSERT_DEFAULT -> {
+                if (state.cursorColumn == 1) {
+                    // Insert phrase 0 by default
+                    chain.phraseRefs[state.cursorRow] = 0
+                    chain.transposeValues[state.cursorRow] = 0x00  // Default transpose
+                    lastEditedPhrase = 0
+                    lastEditedTranspose = 0
+                }
+            }
+            else -> { /* NONE or unhandled - do nothing */ }
+        }
+
+        return InputResult(
+            modified = action !is com.example.pockettracker.core.logic.InputAction.NONE,
+            lastEditedPhrase = lastEditedPhrase,
+            lastEditedTranspose = lastEditedTranspose
+        )
+    }
+
+    data class InputResult(
+        val modified: Boolean,
+        val lastEditedPhrase: Int? = null,
+        val lastEditedTranspose: Int? = null
+    )
 }
 
 /**

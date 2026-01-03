@@ -487,6 +487,70 @@ class ProjectModule : TrackerModule {
             else -> return CursorContextFactory.none()
         }
     }
+
+    /**
+     * Handle input action for project screen.
+     */
+    fun handleInput(
+        state: ProjectState,
+        action: com.example.pockettracker.core.logic.InputAction
+    ): InputResult {
+        when (state.cursorRow) {
+            0 -> {
+                // TEMPO row
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        state.project.tempo = action.value.coerceIn(20, 999)
+                    }
+                    else -> { /* Other actions not applicable */ }
+                }
+            }
+            1 -> {
+                // TRANSPOSE row
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        state.project.transpose = action.value.coerceIn(0, 255)
+                    }
+                    else -> { /* Other actions not applicable */ }
+                }
+            }
+            2 -> {
+                // NAME row - per-character editing
+                val charIndex = state.cursorColumn - 1
+                if (charIndex < 0 || charIndex >= 12) return InputResult(modified = false)
+
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        // Set character at position
+                        val char = action.value.toChar()
+                        val sb = StringBuilder(state.project.name.padEnd(12, ' '))
+                        sb.setCharAt(charIndex, char)
+                        state.project.name = sb.toString().trimEnd()  // Remove trailing spaces
+                    }
+                    is com.example.pockettracker.core.logic.InputAction.DELETE -> {
+                        // Delete character (replace with space)
+                        if (charIndex < state.project.name.length) {
+                            val sb = StringBuilder(state.project.name.padEnd(12, ' '))
+                            sb.setCharAt(charIndex, ' ')
+                            state.project.name = sb.toString().trimEnd()
+                        }
+                    }
+                    else -> { /* Other actions not applicable */ }
+                }
+            }
+            3 -> {
+                // PROJECT row (LOAD/SAVE/NEW) - handled elsewhere
+            }
+        }
+
+        return InputResult(
+            modified = action !is com.example.pockettracker.core.logic.InputAction.NONE
+        )
+    }
+
+    data class InputResult(
+        val modified: Boolean
+    )
 }
 
 /**

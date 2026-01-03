@@ -274,6 +274,78 @@ class PhraseEditorModule : TrackerModule {
             else -> CursorContextFactory.none()
         }
     }
+
+    /**
+     * Handle input action for phrase editor.
+     * Applies the action to the phrase and returns information about what changed.
+     *
+     * @param state Current phrase editor state
+     * @param action Input action to apply
+     * @param instrumentController Reference to instrument controller for tracking last edited instrument
+     * @return Result containing what was modified
+     */
+    fun handleInput(
+        state: PhraseEditorState,
+        action: com.example.pockettracker.core.logic.InputAction,
+        instrumentController: com.example.pockettracker.core.logic.InstrumentController
+    ): InputResult {
+        val step = state.phrase.steps[state.cursorRow]
+        var lastEditedNote: Note? = null
+        var lastEditedVolume: Int? = null
+
+        when (action) {
+            is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                when (state.cursorColumn) {
+                    1 -> {
+                        // Note column: Convert MIDI value back to Note
+                        step.note = Note.fromMidi(action.value)
+                        lastEditedNote = step.note
+                    }
+                    2 -> {
+                        // Volume column
+                        step.volume = action.value
+                        lastEditedVolume = action.value
+                    }
+                    3 -> {
+                        // Instrument column
+                        step.instrument = action.value
+                        instrumentController.lastEditedInstrument = action.value
+                    }
+                }
+            }
+            is com.example.pockettracker.core.logic.InputAction.DELETE -> {
+                when (state.cursorColumn) {
+                    1 -> {
+                        // Clear note
+                        step.note = Note.EMPTY
+                    }
+                }
+            }
+            is com.example.pockettracker.core.logic.InputAction.INSERT_DEFAULT -> {
+                // Insert default note (C-4)
+                if (state.cursorColumn == 1) {
+                    step.note = Note.fromString("C-4")
+                    lastEditedNote = step.note
+                }
+            }
+            else -> { /* NONE or unhandled - do nothing */ }
+        }
+
+        return InputResult(
+            modified = action !is com.example.pockettracker.core.logic.InputAction.NONE,
+            lastEditedNote = lastEditedNote,
+            lastEditedVolume = lastEditedVolume
+        )
+    }
+
+    /**
+     * Result of input handling
+     */
+    data class InputResult(
+        val modified: Boolean,
+        val lastEditedNote: Note? = null,
+        val lastEditedVolume: Int? = null
+    )
 }
 
 /**

@@ -299,6 +299,59 @@ class SongEditorModule : TrackerModule {
         // Return cursor context for chain reference
         return CursorContextFactory.chainRef(chainRef, canCreate = true)
     }
+
+    /**
+     * Handle input action for song editor.
+     */
+    fun handleInput(
+        state: SongEditorState,
+        action: com.example.pockettracker.core.logic.InputAction
+    ): InputResult {
+        // Get track index (cursorTrack is 1-8, array index is 0-7)
+        val trackIndex = state.cursorTrack - 1
+        if (trackIndex < 0 || trackIndex >= state.project.tracks.size) {
+            return InputResult(modified = false)
+        }
+
+        val track = state.project.tracks[trackIndex]
+        var lastEditedChain: Int? = null
+
+        when (action) {
+            is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                // Ensure track is long enough
+                while (track.chainRefs.size <= state.cursorRow) {
+                    track.chainRefs.add(-1)
+                }
+                track.chainRefs[state.cursorRow] = action.value
+                lastEditedChain = action.value
+            }
+            is com.example.pockettracker.core.logic.InputAction.DELETE -> {
+                // Clear chain reference
+                if (state.cursorRow < track.chainRefs.size) {
+                    track.chainRefs[state.cursorRow] = -1
+                }
+            }
+            is com.example.pockettracker.core.logic.InputAction.INSERT_DEFAULT -> {
+                // Insert chain 0 by default
+                while (track.chainRefs.size <= state.cursorRow) {
+                    track.chainRefs.add(-1)
+                }
+                track.chainRefs[state.cursorRow] = 0
+                lastEditedChain = 0
+            }
+            else -> { /* NONE or unhandled - do nothing */ }
+        }
+
+        return InputResult(
+            modified = action !is com.example.pockettracker.core.logic.InputAction.NONE,
+            lastEditedChain = lastEditedChain
+        )
+    }
+
+    data class InputResult(
+        val modified: Boolean,
+        val lastEditedChain: Int? = null
+    )
 }
 
 /**
