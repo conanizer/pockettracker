@@ -1,6 +1,5 @@
 package com.example.pockettracker.core.logic
 
-import androidx.compose.runtime.*
 import com.example.pockettracker.Project
 import com.example.pockettracker.ScreenType
 import com.example.pockettracker.core.storage.FileInfo
@@ -11,7 +10,7 @@ import com.example.pockettracker.core.storage.FileInfo
  * Main coordinator for all tracker logic.
  * Owns global state and delegates operations to specialist controllers.
  *
- * ✅ PLATFORM-AGNOSTIC - No Android dependencies
+ * ✅ PLATFORM-AGNOSTIC - No Android dependencies!
  *
  * Architecture:
  * - TrackerController (this) - Owns state, coordinates operations
@@ -20,7 +19,10 @@ import com.example.pockettracker.core.storage.FileInfo
  * - InstrumentController - Sample management
  * - EffectProcessor - Effect calculations (stubs)
  * - ClipboardManager - Copy/paste (stubs)
- * - InputController - Button handling (stub)
+ * - InputController - Button handling
+ *
+ * Updated in Phase 5 to remove Compose state dependencies.
+ * State changes are communicated to UI layer via callbacks or version counter.
  */
 class TrackerController(
     val fileController: FileController,
@@ -28,7 +30,8 @@ class TrackerController(
     val instrumentController: InstrumentController,
     val effectProcessor: EffectProcessor,
     val clipboardManager: ClipboardManager,
-    val inputController: InputController
+    val inputController: InputController,
+    private val stateObserver: StateObserver
 ) {
 
     // ========================================
@@ -38,27 +41,48 @@ class TrackerController(
     /**
      * Current project (all tracker data).
      */
-    var project by mutableStateOf(Project())
+    var project = Project()
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     /**
      * Current screen being displayed.
      */
-    var currentScreen by mutableStateOf(ScreenType.PHRASE)
+    var currentScreen = ScreenType.PHRASE
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     /**
-     * Project version counter (for forcing Compose recomposition).
+     * Project version counter (for forcing UI recomposition).
+     * Increment this whenever project data changes.
      */
-    var projectVersion by mutableIntStateOf(0)
+    var projectVersion = 0
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     /**
      * Status message for user feedback.
      */
-    var statusMessage by mutableStateOf("")
+    var statusMessage = ""
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     /**
      * Whether last operation succeeded.
      */
-    var statusSuccess by mutableStateOf(true)
+    var statusSuccess = true
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     // ========================================
     // FILE OPERATIONS (delegate to FileController)

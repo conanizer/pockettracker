@@ -1,9 +1,8 @@
 package com.example.pockettracker.core.logic
 
-import android.util.Log
-import androidx.compose.runtime.*
 import com.example.pockettracker.CursorContext
 import com.example.pockettracker.CursorValueType
+import com.example.pockettracker.core.logging.ILogger
 
 /**
  * INPUT CONTROLLER
@@ -11,7 +10,7 @@ import com.example.pockettracker.CursorValueType
  * Handles all user input based on cursor context.
  * Uses a unified input system that works the same way across all screens.
  *
- * ✅ PLATFORM-AGNOSTIC - No Android dependencies (except Log which will be abstracted later)
+ * ✅ PLATFORM-AGNOSTIC - No Android dependencies!
  *
  * Philosophy:
  * - A button = increase/edit value
@@ -25,7 +24,10 @@ import com.example.pockettracker.CursorValueType
  *
  * Migrated from GenericInputHandler during Phase 4 refactoring.
  */
-class InputController {
+class InputController(
+    private val logger: ILogger,
+    private val stateObserver: StateObserver
+) {
     private val TAG = "InputController"
 
     companion object {
@@ -43,19 +45,28 @@ class InputController {
     /**
      * Whether selection mode is active (SELECT+B to enter).
      */
-    var selectionMode by mutableStateOf(false)
-        private set
+    var selectionMode = false
+        private set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     /**
      * Selection start/end positions.
      */
     data class CursorPosition(val row: Int, val column: Int)
 
-    var selectionStart: CursorPosition? by mutableStateOf(null)
-        private set
+    var selectionStart: CursorPosition? = null
+        private set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
-    var selectionEnd: CursorPosition? by mutableStateOf(null)
-        private set
+    var selectionEnd: CursorPosition? = null
+        private set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     // ========================================
     // BUTTON HANDLERS (based on CursorContext)
@@ -70,20 +81,20 @@ class InputController {
     fun handleAButton(context: CursorContext): InputAction {
         // Read-only or invalid position - do nothing
         if (!context.isEditable()) {
-            Log.d(TAG, "A button pressed on non-editable position")
+            logger.d(TAG, "A button pressed on non-editable position")
             return InputAction.NONE
         }
 
         // A on empty - Insert default value
         if (context.capabilities.isEmpty && context.capabilities.canInsert) {
-            Log.d(TAG, "A button on empty - inserting default value")
+            logger.d(TAG, "A button on empty - inserting default value")
             return InputAction.INSERT_DEFAULT
         }
 
         // A on value - Increment by small step
         if (context.capabilities.canIncrement) {
             val newValue = incrementValue(context.currentValue, context.smallStep, context)
-            Log.d(TAG, "A button - increment: ${context.currentValue} → $newValue")
+            logger.d(TAG, "A button - increment: ${context.currentValue} → $newValue")
             return InputAction.SET_VALUE(newValue)
         }
 
@@ -110,7 +121,7 @@ class InputController {
         // B on value - Decrement by small step
         if (context.capabilities.canDecrement) {
             val newValue = decrementValue(context.currentValue, context.smallStep, context)
-            Log.d(TAG, "B button - decrement: ${context.currentValue} → $newValue")
+            logger.d(TAG, "B button - decrement: ${context.currentValue} → $newValue")
             return InputAction.SET_VALUE(newValue)
         }
 
@@ -130,7 +141,7 @@ class InputController {
 
         if (context.capabilities.canIncrementFast) {
             val newValue = incrementValue(context.currentValue, context.largeStep, context)
-            Log.d(TAG, "A+RIGHT - fast increment: ${context.currentValue} → $newValue (step=${context.largeStep})")
+            logger.d(TAG, "A+RIGHT - fast increment: ${context.currentValue} → $newValue (step=${context.largeStep})")
             return InputAction.SET_VALUE(newValue)
         }
 
@@ -150,7 +161,7 @@ class InputController {
 
         if (context.capabilities.canDecrementFast) {
             val newValue = decrementValue(context.currentValue, context.largeStep, context)
-            Log.d(TAG, "A+LEFT - fast decrement: ${context.currentValue} → $newValue (step=${context.largeStep})")
+            logger.d(TAG, "A+LEFT - fast decrement: ${context.currentValue} → $newValue (step=${context.largeStep})")
             return InputAction.SET_VALUE(newValue)
         }
 
@@ -165,7 +176,7 @@ class InputController {
      */
     fun handleABCombo(context: CursorContext): InputAction {
         if (context.capabilities.canDelete) {
-            Log.d(TAG, "A+B - deleting value at cursor")
+            logger.d(TAG, "A+B - deleting value at cursor")
             return InputAction.DELETE
         }
         return InputAction.NONE
@@ -179,7 +190,7 @@ class InputController {
      */
     fun handleAACombo(context: CursorContext): InputAction {
         if (context.capabilities.canCreate) {
-            Log.d(TAG, "A+A - creating new item")
+            logger.d(TAG, "A+A - creating new item")
             return InputAction.CREATE_NEW
         }
         return InputAction.NONE
@@ -194,7 +205,7 @@ class InputController {
     fun handleSelect(context: CursorContext): InputAction {
         // For now, SELECT acts as delete on non-empty values
         if (!context.capabilities.isEmpty && context.capabilities.canDelete) {
-            Log.d(TAG, "SELECT - deleting value")
+            logger.d(TAG, "SELECT - deleting value")
             return InputAction.DELETE
         }
         return InputAction.NONE
@@ -225,7 +236,7 @@ class InputController {
      * TODO: Full implementation in Milestone 2.5
      */
     fun handleSelectA(): InputAction {
-        Log.d(TAG, "⏳ SELECT+A - paste (stub, implementation in Milestone 2.5)")
+        logger.d(TAG, "⏳ SELECT+A - paste (stub, implementation in Milestone 2.5)")
         return InputAction.NONE
     }
 
@@ -234,7 +245,7 @@ class InputController {
      */
     private fun enterSelectionMode() {
         selectionMode = true
-        Log.d(TAG, "📋 Entered selection mode")
+        logger.d(TAG, "📋 Entered selection mode")
     }
 
     /**
@@ -244,7 +255,7 @@ class InputController {
         selectionMode = false
         selectionStart = null
         selectionEnd = null
-        Log.d(TAG, "📋 Exited selection mode")
+        logger.d(TAG, "📋 Exited selection mode")
     }
 
     /**

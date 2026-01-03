@@ -1,10 +1,9 @@
 package com.example.pockettracker.core.logic
 
-import androidx.compose.runtime.*
 import com.example.pockettracker.Note
 import com.example.pockettracker.Project
 import com.example.pockettracker.core.audio.AudioEngine
-import android.util.Log
+import com.example.pockettracker.core.logging.ILogger
 
 /**
  * PlaybackController
@@ -15,14 +14,15 @@ import android.util.Log
  * - Sample-accurate note queue management
  * - Playback cursors and position tracking
  *
- * Platform-agnostic playback logic using AudioEngine interface.
- * Updated in Phase 1 refactoring to use the new AudioEngine architecture.
+ * ✅ PLATFORM-AGNOSTIC - No Android dependencies!
  *
- * This controller is being created during Phase 4 (Business Logic Extraction)
- * to separate playback logic from MainActivity.
+ * Updated in Phase 1 refactoring to use the new AudioEngine architecture.
+ * Updated in Phase 5 to remove Compose state dependencies.
  */
 class PlaybackController(
-    private val audioEngine: AudioEngine
+    private val audioEngine: AudioEngine,
+    private val logger: ILogger,
+    private val stateObserver: StateObserver
 ) {
     private val TAG = "PlaybackController"
 
@@ -31,15 +31,25 @@ class PlaybackController(
     // ═══════════════════════════════════════════════════════════════════════════
 
     /** Is playback currently active */
-    var isPlaying by mutableStateOf(false)
+    var isPlaying = false
+        private set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     /** Current playback mode */
-    var playbackMode by mutableStateOf(PlaybackMode.STOPPED)
-        private set
+    var playbackMode = PlaybackMode.STOPPED
+        private set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     /** Playback cursor position (for visual feedback) */
-    var playbackCursor by mutableIntStateOf(0)
-        private set
+    var playbackCursor = 0
+        private set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // PLAYBACK CONTROL
@@ -54,7 +64,7 @@ class PlaybackController(
         if (!isPlaying) {
             stop()
         }
-        Log.d(TAG, if (isPlaying) "▶️ Playback started" else "⏸️ Playback stopped")
+        logger.d(TAG, if (isPlaying) "▶️ Playback started" else "⏸️ Playback stopped")
     }
 
     /**
@@ -62,7 +72,7 @@ class PlaybackController(
      */
     fun play() {
         isPlaying = true
-        Log.d(TAG, "▶️ Playback started")
+        logger.d(TAG, "▶️ Playback started")
     }
 
     /**
@@ -74,7 +84,7 @@ class PlaybackController(
         playbackCursor = 0
         audioEngine.clearScheduledNotes()
         audioEngine.stopAll()
-        Log.d(TAG, "⏹️ Playback stopped")
+        logger.d(TAG, "⏹️ Playback stopped")
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -96,7 +106,7 @@ class PlaybackController(
      * @param loop Whether to loop playback
      */
     fun playPhrase(project: Project, phraseId: Int, loop: Boolean = true) {
-        Log.w(TAG, "⚠️ playPhrase() not yet implemented - stub only")
+        logger.w(TAG, "⚠️ playPhrase() not yet implemented - stub only")
         playbackMode = PlaybackMode.PHRASE
 
         // TODO: Implement phrase playback logic
@@ -121,7 +131,7 @@ class PlaybackController(
      * @param loop Whether to loop playback
      */
     fun playChain(project: Project, chainId: Int, loop: Boolean = true) {
-        Log.w(TAG, "⚠️ playChain() not yet implemented - stub only")
+        logger.w(TAG, "⚠️ playChain() not yet implemented - stub only")
         playbackMode = PlaybackMode.CHAIN
 
         // TODO: Implement chain playback logic
@@ -141,7 +151,7 @@ class PlaybackController(
      * @param loop Whether to loop playback
      */
     fun playSong(project: Project, startRow: Int = 0, loop: Boolean = true) {
-        Log.w(TAG, "⚠️ playSong() not yet implemented - stub only")
+        logger.w(TAG, "⚠️ playSong() not yet implemented - stub only")
         playbackMode = PlaybackMode.SONG
 
         // TODO: Implement song playback logic
@@ -162,9 +172,9 @@ class PlaybackController(
      * @param project Project (for tempo and instrument access)
      */
     fun testNoteQueue(project: Project) {
-        Log.d(TAG, "═══════════════════════════════════════════")
-        Log.d(TAG, "🧪 PHASE 1 TEST: Sample-Accurate Note Queue")
-        Log.d(TAG, "═══════════════════════════════════════════")
+        logger.d(TAG, "═══════════════════════════════════════════")
+        logger.d(TAG, "🧪 PHASE 1 TEST: Sample-Accurate Note Queue")
+        logger.d(TAG, "═══════════════════════════════════════════")
 
         val currentFrame = audioEngine.getCurrentFrame()
         val tempo = project.tempo
@@ -176,11 +186,11 @@ class PlaybackController(
         val msPerBeat = (60000.0 / tempo)
         val framesPerBeat = (msPerBeat * sampleRate / 1000.0).toLong()
 
-        Log.d(TAG, "Tempo: $tempo BPM")
-        Log.d(TAG, "Sample Rate: $sampleRate Hz")
-        Log.d(TAG, "Frames per beat: $framesPerBeat")
-        Log.d(TAG, "Current frame: $currentFrame")
-        Log.d(TAG, "-------------------------------------------")
+        logger.d(TAG, "Tempo: $tempo BPM")
+        logger.d(TAG, "Sample Rate: $sampleRate Hz")
+        logger.d(TAG, "Frames per beat: $framesPerBeat")
+        logger.d(TAG, "Current frame: $currentFrame")
+        logger.d(TAG, "-------------------------------------------")
 
         // Schedule 8 metronome clicks (C-4 note, kick drum, 1 beat apart)
         val metronomeNote = Note.fromString("C-4")
@@ -198,14 +208,14 @@ class PlaybackController(
             )
 
             val targetTimeMs = (beat * msPerBeat).toLong()
-            Log.d(TAG, "📅 Beat $beat scheduled: frame=$targetFrame (${targetTimeMs}ms from now)")
+            logger.d(TAG, "📅 Beat $beat scheduled: frame=$targetFrame (${targetTimeMs}ms from now)")
         }
 
-        Log.d(TAG, "-------------------------------------------")
-        Log.d(TAG, "✅ Scheduled 8 beats. Watch for 🎵 trigger logs!")
-        Log.d(TAG, "Expected: Notes trigger at exact scheduled frames")
-        Log.d(TAG, "Precision: <0.02ms jitter (sample-accurate)")
-        Log.d(TAG, "═══════════════════════════════════════════")
+        logger.d(TAG, "-------------------------------------------")
+        logger.d(TAG, "✅ Scheduled 8 beats. Watch for 🎵 trigger logs!")
+        logger.d(TAG, "Expected: Notes trigger at exact scheduled frames")
+        logger.d(TAG, "Precision: <0.02ms jitter (sample-accurate)")
+        logger.d(TAG, "═══════════════════════════════════════════")
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

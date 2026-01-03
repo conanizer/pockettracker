@@ -1,9 +1,9 @@
 package com.example.pockettracker.core.audio
 
-import android.util.Log
 import com.example.pockettracker.Instrument
 import com.example.pockettracker.Note
 import com.example.pockettracker.Project
+import com.example.pockettracker.core.logging.ILogger
 import com.example.pockettracker.core.resources.IResourceLoader
 import java.io.File
 import java.nio.ByteBuffer
@@ -15,17 +15,19 @@ import java.nio.ByteOrder
  * This wraps the IAudioBackend interface to provide high-level audio functionality
  * without depending on Android-specific code.
  *
- * ✅ FULLY PLATFORM-AGNOSTIC (Phase 1 complete!)
- * - No Android imports (except Log which will be abstracted later)
- * - No Context dependency
+ * ✅ FULLY PLATFORM-AGNOSTIC - No Android dependencies!
  * - Uses interfaces for all platform-specific operations
+ * - No Context dependency
+ * - Pure Kotlin business logic
  *
  * @param backend Platform-specific audio backend (e.g., OboeAudioBackend on Android)
  * @param resourceLoader Platform-specific resource loader (e.g., AndroidResourceLoader on Android)
+ * @param logger Platform-specific logger (e.g., AndroidLogger on Android)
  */
 class AudioEngine(
     private val backend: IAudioBackend,
-    private val resourceLoader: IResourceLoader
+    private val resourceLoader: IResourceLoader,
+    private val logger: ILogger
 ) {
     private val TAG = "AudioEngine"
 
@@ -43,10 +45,10 @@ class AudioEngine(
     fun create(): Boolean {
         val success = backend.create()
         if (success) {
-            Log.d(TAG, "✅ Audio engine created successfully")
+            logger.d(TAG, "✅ Audio engine created successfully")
             loadAllSamples()
         } else {
-            Log.e(TAG, "❌ Failed to create audio engine")
+            logger.e(TAG, "❌ Failed to create audio engine")
         }
         return success
     }
@@ -62,7 +64,7 @@ class AudioEngine(
      */
     private fun loadAllSamples() {
         // No default samples loaded - users load their own via file browser
-        Log.d(TAG, "✅ Audio engine initialized (no default samples)")
+        logger.d(TAG, "✅ Audio engine initialized (no default samples)")
     }
 
     /**
@@ -80,7 +82,7 @@ class AudioEngine(
         try {
             val file = File(filePath)
             if (!file.exists() || !file.canRead()) {
-                Log.e(TAG, "Cannot read file: $filePath")
+                logger.e(TAG, "Cannot read file: $filePath")
                 return false
             }
 
@@ -90,10 +92,10 @@ class AudioEngine(
             sampleBaseFrequencies[instrumentId] = adjustedBaseFreq
             sampleRateRatios[instrumentId] = adjustedBaseFreq / 261.63f
 
-            Log.d(TAG, "✅ Loaded sample: instrumentId=$instrumentId, length=${samples.size}, baseFreq=$adjustedBaseFreq, path=$filePath")
+            logger.d(TAG, "✅ Loaded sample: instrumentId=$instrumentId, length=${samples.size}, baseFreq=$adjustedBaseFreq, path=$filePath")
             return true
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Error loading sample from file: ${e.message}")
+            logger.e(TAG, "❌ Error loading sample from file: ${e.message}")
             return false
         }
     }
@@ -164,7 +166,7 @@ class AudioEngine(
         try {
             val file = File(filePath)
             if (!file.exists() || !file.canRead()) {
-                Log.e(TAG, "Cannot read file: $filePath")
+                logger.e(TAG, "Cannot read file: $filePath")
                 return false
             }
 
@@ -190,10 +192,10 @@ class AudioEngine(
                 vol = 1.0f
             )
 
-            Log.d(TAG, "🔊 Preview sample at C-4: $filePath (baseFreq=$adjustedBaseFreq)")
+            logger.d(TAG, "🔊 Preview sample at C-4: $filePath (baseFreq=$adjustedBaseFreq)")
             return true
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Error previewing sample: ${e.message}")
+            logger.e(TAG, "❌ Error previewing sample: ${e.message}")
             return false
         }
     }
@@ -233,7 +235,7 @@ class AudioEngine(
             vol = 1.0f
         )
 
-        Log.d(TAG, "🔊 Preview instrument ${instrument.id.toString(16).padStart(2,'0').uppercase()}: freq=$targetFreq Hz")
+        logger.d(TAG, "🔊 Preview instrument ${instrument.id.toString(16).padStart(2,'0').uppercase()}: freq=$targetFreq Hz")
     }
 
     /**
@@ -260,7 +262,7 @@ class AudioEngine(
     fun updateInstrumentBaseFrequency(instrument: Instrument) {
         val baseFreq = calculateInstrumentBaseFrequency(instrument)
         sampleBaseFrequencies[instrument.sampleId] = baseFreq
-        Log.d(TAG, "📝 Updated base frequency for instrument ${instrument.id}: $baseFreq Hz")
+        logger.d(TAG, "📝 Updated base frequency for instrument ${instrument.id}: $baseFreq Hz")
     }
 
     /**

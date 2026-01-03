@@ -1,6 +1,6 @@
 package com.example.pockettracker.core.logic
 
-import android.util.Log
+import com.example.pockettracker.core.logging.ILogger
 import com.example.pockettracker.Project
 import com.example.pockettracker.PhraseStep
 
@@ -20,7 +20,9 @@ import com.example.pockettracker.PhraseStep
  * - SELECT + A: Paste
  * - A + B: Cut (copy + delete)
  */
-class ClipboardManager {
+class ClipboardManager(
+    private val logger: ILogger
+) {
     private val TAG = "ClipboardManager"
 
     // ========================================
@@ -73,7 +75,7 @@ class ClipboardManager {
      */
     fun copy(type: ClipboardType, data: Any, width: Int, height: Int) {
         clipboard = ClipboardData(type, data, width, height)
-        Log.d(TAG, "📋 Copied: type=$type, ${width}x${height}")
+        logger.d(TAG, "📋 Copied: type=$type, ${width}x${height}")
     }
 
     /**
@@ -87,7 +89,7 @@ class ClipboardManager {
     fun cut(type: ClipboardType, data: Any, width: Int, height: Int): CutResult {
         // Stub - full implementation in Milestone 2.5
         copy(type, data, width, height)
-        Log.d(TAG, "⏳ Cut stub: type=$type (delete not implemented yet)")
+        logger.d(TAG, "⏳ Cut stub: type=$type (delete not implemented yet)")
         return CutResult.Success(width * height)
     }
 
@@ -114,8 +116,8 @@ class ClipboardManager {
         val clip = clipboard ?: return PasteResult.NoClipboard
 
         // Stub - full implementation in Milestone 2.5
-        Log.d(TAG, "⏳ Paste stub: type=${clip.type}, target=$targetScreen, pos=($cursorRow,$cursorColumn)")
-        Log.d(TAG, "   Clipboard size: ${clip.width}x${clip.height}")
+        logger.d(TAG, "⏳ Paste stub: type=${clip.type}, target=$targetScreen, pos=($cursorRow,$cursorColumn)")
+        logger.d(TAG, "   Clipboard size: ${clip.width}x${clip.height}")
 
         return PasteResult.Success(itemsPasted = clip.width * clip.height)
     }
@@ -125,7 +127,7 @@ class ClipboardManager {
      */
     fun clear() {
         clipboard = null
-        Log.d(TAG, "🗑️ Clipboard cleared")
+        logger.d(TAG, "🗑️ Clipboard cleared")
     }
 
     /**

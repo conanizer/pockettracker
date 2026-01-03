@@ -1,6 +1,6 @@
 package com.example.pockettracker.core.logic
 
-import android.util.Log
+import com.example.pockettracker.core.logging.ILogger
 import com.example.pockettracker.FileManager
 import com.example.pockettracker.Project
 import com.example.pockettracker.core.storage.FileInfo
@@ -18,7 +18,8 @@ import com.example.pockettracker.core.storage.FileInfo
  * - IFileSystem - Platform abstraction
  */
 class FileController(
-    private val fileManager: FileManager
+    private val fileManager: FileManager,
+    private val logger: ILogger
 ) {
     private val TAG = "FileController"
 
@@ -34,14 +35,14 @@ class FileController(
             val success = fileManager.saveProject(project, filename)
 
             if (success) {
-                Log.d(TAG, "✅ Project saved: $filename")
+                logger.d(TAG, "✅ Project saved: $filename")
                 SaveResult.Success(filename)
             } else {
-                Log.e(TAG, "❌ Save failed: $filename")
+                logger.e(TAG, "❌ Save failed: $filename")
                 SaveResult.Error("Failed to save project")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Save error: ${e.message}")
+            logger.e(TAG, "❌ Save error: ${e.message}")
             SaveResult.Error(e.message ?: "Unknown error")
         }
     }
@@ -57,14 +58,14 @@ class FileController(
             val project = fileManager.loadProject(filename)
 
             if (project != null) {
-                Log.d(TAG, "✅ Project loaded: $filename")
+                logger.d(TAG, "✅ Project loaded: $filename")
                 LoadResult.Success(project)
             } else {
-                Log.e(TAG, "❌ Load failed: $filename")
+                logger.e(TAG, "❌ Load failed: $filename")
                 LoadResult.Error("Failed to load project")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Load error: ${e.message}")
+            logger.e(TAG, "❌ Load error: ${e.message}")
             LoadResult.Error(e.message ?: "Unknown error")
         }
     }
@@ -80,14 +81,14 @@ class FileController(
             val project = fileManager.loadProject(fileInfo)
 
             if (project != null) {
-                Log.d(TAG, "✅ Project loaded: ${fileInfo.name}")
+                logger.d(TAG, "✅ Project loaded: ${fileInfo.name}")
                 LoadResult.Success(project)
             } else {
-                Log.e(TAG, "❌ Load failed: ${fileInfo.name}")
+                logger.e(TAG, "❌ Load failed: ${fileInfo.name}")
                 LoadResult.Error("Failed to load project")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Load error: ${e.message}")
+            logger.e(TAG, "❌ Load error: ${e.message}")
             LoadResult.Error(e.message ?: "Unknown error")
         }
     }

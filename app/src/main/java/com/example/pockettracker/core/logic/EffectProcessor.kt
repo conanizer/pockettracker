@@ -1,6 +1,6 @@
 package com.example.pockettracker.core.logic
 
-import android.util.Log
+import com.example.pockettracker.core.logging.ILogger
 import com.example.pockettracker.PhraseStep
 import com.example.pockettracker.core.audio.IAudioBackend
 
@@ -22,7 +22,8 @@ import com.example.pockettracker.core.audio.IAudioBackend
  * - Repeat (Rxx) - Retrigger sample N times per step
  */
 class EffectProcessor(
-    private val audioBackend: IAudioBackend
+    private val audioBackend: IAudioBackend,
+    private val logger: ILogger
 ) {
     private val TAG = "EffectProcessor"
 
@@ -130,7 +131,7 @@ class EffectProcessor(
             FX_KILL -> applyKill(frame, trackId)
             FX_REPEAT -> applyRepeat(value, frame, duration, trackId, frequency, volume, sampleId)
             else -> {
-                Log.w(TAG, "Unknown effect type: 0x${type.toString(16).uppercase()}")
+                logger.w(TAG, "Unknown effect type: 0x${type.toString(16).uppercase()}")
             }
         }
     }
@@ -161,7 +162,7 @@ class EffectProcessor(
         sampleId: Int
     ) {
         // Stub - full implementation in Milestone 2
-        Log.d(TAG, "⏳ Arpeggio effect stub: value=0x${value.toString(16).uppercase()} (implementation pending)")
+        logger.d(TAG, "⏳ Arpeggio effect stub: value=0x${value.toString(16).uppercase()} (implementation pending)")
     }
 
     /**
@@ -183,7 +184,7 @@ class EffectProcessor(
         sampleId: Int
     ) {
         // Stub - full implementation in Milestone 2
-        Log.d(TAG, "⏳ Offset effect stub: value=0x${value.toString(16).uppercase()} (implementation pending)")
+        logger.d(TAG, "⏳ Offset effect stub: value=0x${value.toString(16).uppercase()} (implementation pending)")
     }
 
     /**
@@ -205,7 +206,7 @@ class EffectProcessor(
         sampleId: Int
     ) {
         // Stub - full implementation in Milestone 2
-        Log.d(TAG, "⏳ Volume effect stub: value=0x${value.toString(16).uppercase()} (implementation pending)")
+        logger.d(TAG, "⏳ Volume effect stub: value=0x${value.toString(16).uppercase()} (implementation pending)")
     }
 
     /**
@@ -223,7 +224,7 @@ class EffectProcessor(
         trackId: Int
     ) {
         // Stub - full implementation in Milestone 2
-        Log.d(TAG, "⏳ Kill effect stub (implementation pending)")
+        logger.d(TAG, "⏳ Kill effect stub (implementation pending)")
     }
 
     /**
@@ -246,6 +247,6 @@ class EffectProcessor(
         sampleId: Int
     ) {
         // Stub - full implementation in Milestone 2
-        Log.d(TAG, "⏳ Repeat effect stub: value=0x${value.toString(16).uppercase()} (implementation pending)")
+        logger.d(TAG, "⏳ Repeat effect stub: value=0x${value.toString(16).uppercase()} (implementation pending)")
     }
 }

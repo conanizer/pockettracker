@@ -1,11 +1,10 @@
 package com.example.pockettracker.core.logic
 
-import androidx.compose.runtime.*
 import com.example.pockettracker.Instrument
 import com.example.pockettracker.Note
 import com.example.pockettracker.Project
 import com.example.pockettracker.core.audio.AudioEngine
-import android.util.Log
+import com.example.pockettracker.core.logging.ILogger
 
 /**
  * InstrumentController
@@ -16,14 +15,15 @@ import android.util.Log
  * - Sample/instrument preview
  * - Instrument parameter updates
  *
- * Platform-agnostic instrument management using AudioEngine interface.
- * Updated in Phase 1 refactoring to use the new AudioEngine architecture.
+ * ✅ PLATFORM-AGNOSTIC - No Android dependencies!
  *
- * This controller is being created during Phase 4 (Business Logic Extraction)
- * to separate instrument logic from MainActivity.
+ * Updated in Phase 1 refactoring to use the new AudioEngine architecture.
+ * Updated in Phase 5 to remove Compose state dependencies.
  */
 class InstrumentController(
-    private val audioEngine: AudioEngine
+    private val audioEngine: AudioEngine,
+    private val logger: ILogger,
+    private val stateObserver: StateObserver
 ) {
     private val TAG = "InstrumentController"
 
@@ -32,20 +32,40 @@ class InstrumentController(
     // ═══════════════════════════════════════════════════════════════════════════
 
     /** Currently selected instrument (0-255) */
-    var currentInstrument by mutableIntStateOf(0)
+    var currentInstrument = 0
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     /** Last edited instrument ID (for cursor sync between screens) */
-    var lastEditedInstrument by mutableIntStateOf(0)
+    var lastEditedInstrument = 0
 
     /** Cursor position on instrument screen */
-    var cursorRow by mutableIntStateOf(0)
-    var cursorColumn by mutableIntStateOf(1)
+    var cursorRow = 0
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
+    var cursorColumn = 1
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     /** Status message for instrument screen */
-    var statusMessage by mutableStateOf("")
+    var statusMessage = ""
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     /** Status success flag (true = success/green, false = error/red) */
-    var statusSuccess by mutableStateOf(true)
+    var statusSuccess = true
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // NAVIGATION
@@ -58,7 +78,7 @@ class InstrumentController(
     fun navigatePrevious() {
         currentInstrument = if (currentInstrument > 0) currentInstrument - 1 else 255
         lastEditedInstrument = currentInstrument
-        Log.d(TAG, "⬅️ Navigate to instrument ${formatHex(currentInstrument)}")
+        logger.d(TAG, "⬅️ Navigate to instrument ${formatHex(currentInstrument)}")
     }
 
     /**
@@ -68,7 +88,7 @@ class InstrumentController(
     fun navigateNext() {
         currentInstrument = if (currentInstrument < 255) currentInstrument + 1 else 0
         lastEditedInstrument = currentInstrument
-        Log.d(TAG, "➡️ Navigate to instrument ${formatHex(currentInstrument)}")
+        logger.d(TAG, "➡️ Navigate to instrument ${formatHex(currentInstrument)}")
     }
 
     /**
@@ -78,7 +98,7 @@ class InstrumentController(
     fun jumpToInstrument(instrumentId: Int) {
         currentInstrument = instrumentId.coerceIn(0, 255)
         lastEditedInstrument = currentInstrument
-        Log.d(TAG, "🎯 Jump to instrument ${formatHex(currentInstrument)}")
+        logger.d(TAG, "🎯 Jump to instrument ${formatHex(currentInstrument)}")
     }
 
     /**
@@ -86,7 +106,7 @@ class InstrumentController(
      */
     fun syncToLastEdited() {
         currentInstrument = lastEditedInstrument
-        Log.d(TAG, "🔄 Sync to last edited instrument ${formatHex(currentInstrument)}")
+        logger.d(TAG, "🔄 Sync to last edited instrument ${formatHex(currentInstrument)}")
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -103,7 +123,7 @@ class InstrumentController(
     fun loadSampleFromFile(project: Project, filePath: String): LoadResult {
         val instrument = project.instruments[currentInstrument]
 
-        Log.d(TAG, "📂 Loading sample: inst=${formatHex(currentInstrument)}, path=$filePath")
+        logger.d(TAG, "📂 Loading sample: inst=${formatHex(currentInstrument)}, path=$filePath")
 
         val success = audioEngine.loadSampleFromFile(instrument.id, filePath)
 
@@ -118,11 +138,11 @@ class InstrumentController(
             // Update status
             setStatus("Loaded: $filename", success = true)
 
-            Log.d(TAG, "✅ Sample loaded successfully")
+            logger.d(TAG, "✅ Sample loaded successfully")
             LoadResult.Success
         } else {
             setStatus("Failed to load sample", success = false)
-            Log.e(TAG, "❌ Sample loading failed")
+            logger.e(TAG, "❌ Sample loading failed")
             LoadResult.Error("Failed to load WAV file")
         }
     }
@@ -139,12 +159,12 @@ class InstrumentController(
      * @return True if successful
      */
     fun previewSampleFile(filePath: String): Boolean {
-        Log.d(TAG, "🔊 Previewing sample file: $filePath")
+        logger.d(TAG, "🔊 Previewing sample file: $filePath")
         val success = audioEngine.previewSampleFile(filePath)
 
         if (!success) {
             setStatus("Cannot preview sample", success = false)
-            Log.e(TAG, "❌ Preview failed")
+            logger.e(TAG, "❌ Preview failed")
         }
 
         return success
@@ -159,7 +179,7 @@ class InstrumentController(
     fun previewInstrument(project: Project) {
         val instrument = project.instruments[currentInstrument]
 
-        Log.d(TAG, "🎵 Previewing instrument ${formatHex(currentInstrument)}: root=${instrument.root}, detune=0x${formatHex(instrument.detune)}")
+        logger.d(TAG, "🎵 Previewing instrument ${formatHex(currentInstrument)}: root=${instrument.root}, detune=0x${formatHex(instrument.detune)}")
 
         audioEngine.previewInstrument(instrument)
     }
@@ -175,7 +195,7 @@ class InstrumentController(
     fun updateRoot(instrument: Instrument, note: Note) {
         instrument.root = note
         audioEngine.updateInstrumentBaseFrequency(instrument)
-        Log.d(TAG, "🎹 Updated ROOT: ${instrument.root}")
+        logger.d(TAG, "🎹 Updated ROOT: ${instrument.root}")
     }
 
     /**
@@ -185,7 +205,7 @@ class InstrumentController(
     fun updateDetune(instrument: Instrument, detune: Int) {
         instrument.detune = detune.coerceIn(0, 255)
         audioEngine.updateInstrumentBaseFrequency(instrument)
-        Log.d(TAG, "🎚️ Updated DETUNE: 0x${formatHex(instrument.detune)}")
+        logger.d(TAG, "🎚️ Updated DETUNE: 0x${formatHex(instrument.detune)}")
     }
 
     /**
@@ -194,7 +214,7 @@ class InstrumentController(
      */
     fun updatePlaybackParams(instrument: Instrument) {
         audioEngine.updateInstrumentPlaybackParams(instrument)
-        Log.d(TAG, "🎛️ Updated playback params for instrument ${formatHex(instrument.id)}")
+        logger.d(TAG, "🎛️ Updated playback params for instrument ${formatHex(instrument.id)}")
     }
 
     /**
@@ -229,7 +249,7 @@ class InstrumentController(
     fun setStatus(message: String, success: Boolean = true) {
         statusMessage = message
         statusSuccess = success
-        Log.d(TAG, if (success) "✅ $message" else "❌ $message")
+        logger.d(TAG, if (success) "✅ $message" else "❌ $message")
     }
 
     /**

@@ -176,8 +176,26 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // ✅ No more Context dependency - fully portable!
     val fileManager = remember { FileManager(fileSystem) }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // PLATFORM BACKENDS (Phase 5: Complete Portability)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Create logger (used by all controllers)
+    val logger = remember { com.example.pockettracker.platform.android.AndroidLogger() }
+
+    // Create state observer (triggers UI recomposition when controller state changes)
+    // This is the bridge between platform-agnostic controllers and Compose's reactive UI
+    var stateVersion by remember { mutableIntStateOf(0) }
+    val stateObserver = remember {
+        object : com.example.pockettracker.core.logic.StateObserver {
+            override fun onStateChanged() {
+                stateVersion++  // Trigger Compose recomposition
+            }
+        }
+    }
+
     // Step 3: Create FileController (coordinates save/load operations)
-    val fileController = remember { FileController(fileManager) }
+    val fileController = remember { FileController(fileManager, logger) }
 
     // ═══════════════════════════════════════════════════════════════════════
     // AUDIO ENGINE SETUP (REFACTORED ARCHITECTURE - Phase 1 COMPLETE!)
@@ -190,7 +208,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // Step 2: Create platform-agnostic AudioEngine
     // ✅ No more Context dependency - fully portable!
     val audioEngine = remember {
-        AudioEngine(audioBackend, resourceLoader).apply {
+        AudioEngine(audioBackend, resourceLoader, logger).apply {
             create()
         }
     }
@@ -204,36 +222,40 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 
     // InstrumentController: Manages all instrument operations
     // PHASE 4: Extracted from MainActivity to separate business logic
+    // PHASE 5: Uses StateObserver for UI reactivity
     val instrumentController = remember {
-        InstrumentController(audioEngine)
+        InstrumentController(audioEngine, logger, stateObserver)
     }
 
     // PlaybackController: Manages all playback operations
     // PHASE 4: Extracted from MainActivity to separate business logic
+    // PHASE 5: Uses StateObserver for UI reactivity
     val playbackController = remember {
-        PlaybackController(audioEngine)
+        PlaybackController(audioEngine, logger, stateObserver)
     }
 
     // EffectProcessor: Processes effects (stub for now, implementation in Milestone 2)
     // PHASE 4: Extracted from MainActivity to separate business logic
     val effectProcessor = remember {
-        com.example.pockettracker.core.logic.EffectProcessor(audioBackend)
+        com.example.pockettracker.core.logic.EffectProcessor(audioBackend, logger)
     }
 
     // ClipboardManager: Handles copy/paste (stub for now, implementation in Milestone 2.5)
     // PHASE 4: Extracted from MainActivity to separate business logic
     val clipboardManager = remember {
-        com.example.pockettracker.core.logic.ClipboardManager()
+        com.example.pockettracker.core.logic.ClipboardManager(logger)
     }
 
-    // InputController: Handles button input (stub for now, implementation in Milestone 2.5)
+    // InputController: Handles button input
     // PHASE 4: Extracted from MainActivity to separate business logic
+    // PHASE 5: Uses StateObserver for UI reactivity
     val inputController = remember {
-        com.example.pockettracker.core.logic.InputController()
+        com.example.pockettracker.core.logic.InputController(logger, stateObserver)
     }
 
     // TrackerController: Main coordinator that owns state and delegates to controllers
     // PHASE 4: This is the MAIN COORDINATOR for all tracker logic
+    // PHASE 5: Uses StateObserver for UI reactivity
     val trackerController = remember {
         com.example.pockettracker.core.logic.TrackerController(
             fileController = fileController,
@@ -241,7 +263,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             instrumentController = instrumentController,
             effectProcessor = effectProcessor,
             clipboardManager = clipboardManager,
-            inputController = inputController
+            inputController = inputController,
+            stateObserver = stateObserver
         ).apply {
             // Initialize with test project data
             project = Project().apply {
@@ -1759,6 +1782,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // This is where the magic happens!
     // Based on what DeviceAdapter detected, we show different layouts:
 
+    // Re-read controller properties when stateVersion changes
+    // This ensures layout functions recompose when controller state changes
+    val isPlaying = stateVersion.let { playbackController.isPlaying }
+    val currentInstrument = stateVersion.let { instrumentController.currentInstrument }
+    val instrumentCursorRow = stateVersion.let { instrumentController.cursorRow }
+    val instrumentCursorColumn = stateVersion.let { instrumentController.cursorColumn }
+    val instrumentStatusMessage = stateVersion.let { instrumentController.statusMessage }
+    val instrumentStatusSuccess = stateVersion.let { instrumentController.statusSuccess }
+
     if (layoutConfig.needsVirtualButtons) {
         // SCENARIOS 2/3: Touchscreen devices need virtual buttons
 
@@ -1771,7 +1803,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 audioEngine = audioEngine,
                 cursorRow = cursorRow,
                 cursorColumn = cursorColumn,
-                isPlaying = playbackController.isPlaying,
+                isPlaying = isPlaying,
                 previousColumn = previousColumn,
                 currentChain = currentChain,
                 currentPhrase = currentPhrase,
@@ -1783,11 +1815,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 inputMapper = inputMapper,
                 focusRequester = focusRequester,
                 projectVersion = projectVersion,
-                currentInstrument = instrumentController.currentInstrument,
-                instrumentCursorRow = instrumentController.cursorRow,
-                instrumentCursorColumn = instrumentController.cursorColumn,
-                instrumentStatusMessage = instrumentController.statusMessage,
-                instrumentStatusSuccess = instrumentController.statusSuccess,
+                currentInstrument = currentInstrument,
+                instrumentCursorRow = instrumentCursorRow,
+                instrumentCursorColumn = instrumentCursorColumn,
+                instrumentStatusMessage = instrumentStatusMessage,
+                instrumentStatusSuccess = instrumentStatusSuccess,
                 fileBrowserState = fileBrowserState
             )
         } else {
@@ -1799,7 +1831,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 audioEngine = audioEngine,
                 cursorRow = cursorRow,
                 cursorColumn = cursorColumn,
-                isPlaying = playbackController.isPlaying,
+                isPlaying = isPlaying,
                 previousColumn = previousColumn,
                 currentChain = currentChain,
                 currentPhrase = currentPhrase,
@@ -1811,11 +1843,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 inputMapper = inputMapper,
                 focusRequester = focusRequester,
                 projectVersion = projectVersion,
-                currentInstrument = instrumentController.currentInstrument,
-                instrumentCursorRow = instrumentController.cursorRow,
-                instrumentCursorColumn = instrumentController.cursorColumn,
-                instrumentStatusMessage = instrumentController.statusMessage,
-                instrumentStatusSuccess = instrumentController.statusSuccess,
+                currentInstrument = currentInstrument,
+                instrumentCursorRow = instrumentCursorRow,
+                instrumentCursorColumn = instrumentCursorColumn,
+                instrumentStatusMessage = instrumentStatusMessage,
+                instrumentStatusSuccess = instrumentStatusSuccess,
                 fileBrowserState = fileBrowserState
             )
         }
@@ -1829,7 +1861,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             audioEngine = audioEngine,
             cursorRow = cursorRow,
             cursorColumn = cursorColumn,
-            isPlaying = playbackController.isPlaying,
+            isPlaying = isPlaying,
             previousColumn = previousColumn,
             currentChain = currentChain,
             currentPhrase = currentPhrase,
@@ -1840,11 +1872,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             inputMapper = inputMapper,
             focusRequester = focusRequester,
             projectVersion = projectVersion,
-            currentInstrument = instrumentController.currentInstrument,
-            instrumentCursorRow = instrumentController.cursorRow,
-            instrumentCursorColumn = instrumentController.cursorColumn,
-            instrumentStatusMessage = instrumentController.statusMessage,
-            instrumentStatusSuccess = instrumentController.statusSuccess,
+            currentInstrument = currentInstrument,
+            instrumentCursorRow = instrumentCursorRow,
+            instrumentCursorColumn = instrumentCursorColumn,
+            instrumentStatusMessage = instrumentStatusMessage,
+            instrumentStatusSuccess = instrumentStatusSuccess,
             fileBrowserState = fileBrowserState
         )
     }
