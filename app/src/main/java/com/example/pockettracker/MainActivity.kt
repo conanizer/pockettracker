@@ -29,6 +29,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import com.example.pockettracker.core.logic.InstrumentController
 import com.example.pockettracker.core.logic.PlaybackController
+import com.example.pockettracker.core.logic.FileController
 import com.example.pockettracker.core.audio.AudioEngine
 import com.example.pockettracker.platform.android.OboeAudioBackend
 import com.example.pockettracker.platform.android.AndroidResourceLoader
@@ -173,6 +174,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // Step 2: Create platform-agnostic FileManager
     // ✅ No more Context dependency - fully portable!
     val fileManager = remember { FileManager(fileSystem) }
+
+    // Step 3: Create FileController (coordinates save/load operations)
+    val fileController = remember { FileController(fileManager) }
 
     // ═══════════════════════════════════════════════════════════════════════
     // AUDIO ENGINE SETUP (REFACTORED ARCHITECTURE - Phase 1 COMPLETE!)
@@ -1275,20 +1279,23 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                         when (previousScreen) {
                                             ScreenType.PROJECT -> {
                                                 // Load project file
-                                                val loaded = fileManager.loadProject(item.file.toFileInfo())
-                                                if (loaded != null) {
-                                                    project = loaded
-                                                    // Reload all custom samples from the loaded project
-                                                    reloadProjectSamples()
-                                                    projectStatusMessage = "LOADED: ${item.file.nameWithoutExtension}"
-                                                    projectStatusSuccess = true
-                                                    projectVersion++
-                                                    currentScreen = previousScreen
-                                                } else {
-                                                    fileBrowserState = fileBrowserState.copy(
-                                                        statusMessage = "LOAD FAILED",
-                                                        statusSuccess = false
-                                                    )
+                                                val result = fileController.loadProject(item.file.toFileInfo())
+                                                when (result) {
+                                                    is FileController.LoadResult.Success -> {
+                                                        project = result.project
+                                                        // Reload all custom samples from the loaded project
+                                                        reloadProjectSamples()
+                                                        projectStatusMessage = "LOADED: ${item.file.nameWithoutExtension}"
+                                                        projectStatusSuccess = true
+                                                        projectVersion++
+                                                        currentScreen = previousScreen
+                                                    }
+                                                    is FileController.LoadResult.Error -> {
+                                                        fileBrowserState = fileBrowserState.copy(
+                                                            statusMessage = "LOAD FAILED",
+                                                            statusSuccess = false
+                                                        )
+                                                    }
                                                 }
                                             }
                                             ScreenType.INSTRUMENT -> {
@@ -1309,18 +1316,21 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                             }
                                             else -> {
                                                 // Unknown previous screen - try loading as project
-                                                val loaded = fileManager.loadProject(item.file.toFileInfo())
-                                                if (loaded != null) {
-                                                    project = loaded
-                                                    // Reload all custom samples from the loaded project
-                                                    reloadProjectSamples()
-                                                    projectVersion++
-                                                    currentScreen = previousScreen
-                                                } else {
-                                                    fileBrowserState = fileBrowserState.copy(
-                                                        statusMessage = "LOAD FAILED",
-                                                        statusSuccess = false
-                                                    )
+                                                val result = fileController.loadProject(item.file.toFileInfo())
+                                                when (result) {
+                                                    is FileController.LoadResult.Success -> {
+                                                        project = result.project
+                                                        // Reload all custom samples from the loaded project
+                                                        reloadProjectSamples()
+                                                        projectVersion++
+                                                        currentScreen = previousScreen
+                                                    }
+                                                    is FileController.LoadResult.Error -> {
+                                                        fileBrowserState = fileBrowserState.copy(
+                                                            statusMessage = "LOAD FAILED",
+                                                            statusSuccess = false
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -1398,13 +1408,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                         Log.d("ProjectScreen", "File browser opened for .ptp files")
                                     }
                                     2 -> {  // SAVE
-                                        val success = fileManager.saveProject(project, project.name)
-                                        if (success) {
-                                            projectStatusMessage = "SAVED"
-                                            projectStatusSuccess = true
-                                        } else {
-                                            projectStatusMessage = "SAVE FAILED"
-                                            projectStatusSuccess = false
+                                        val result = fileController.saveProject(project, project.name)
+                                        when (result) {
+                                            is FileController.SaveResult.Success -> {
+                                                projectStatusMessage = "SAVED"
+                                                projectStatusSuccess = true
+                                            }
+                                            is FileController.SaveResult.Error -> {
+                                                projectStatusMessage = "SAVE FAILED"
+                                                projectStatusSuccess = false
+                                            }
                                         }
                                     }
                                     3 -> {  // NEW
