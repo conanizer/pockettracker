@@ -4,7 +4,7 @@
 2026-01-03
 
 ## Current Phase
-**Phase A Complete** → **Architecture Refactoring (Phase 4 - Phase 1 Complete ✅)** → Effects System → Copy/Paste → MVP Release
+**Phase A Complete** → **Architecture Refactoring (Phases 1-3 Complete ✅)** → Phase 4 → Effects System → Copy/Paste → MVP Release
 
 ## What's Working ✅
 
@@ -191,30 +191,36 @@
 - Clean architecture = easier debugging
 
 **What needs refactoring:**
-- ✅ **Phase 1: Audio backend abstraction** (COMPLETE - 2026-01-03)
+- ✅ **Phase 1: Audio Backend Abstraction** (COMPLETE - 2026-01-03)
   - ✅ Created `IAudioBackend` interface (core/audio/)
   - ✅ Created `OboeAudioBackend` implementation (platform/android/)
   - ✅ Created `AudioEngine` wrapper (core/audio/, platform-agnostic)
-  - ✅ Created `IResourceLoader` interface (core/resources/)
-  - ✅ Created `AndroidResourceLoader` implementation (platform/android/)
   - ✅ Updated MainActivity + controllers to use new architecture
   - ✅ Removed legacy TrackerAudioEngine.kt
   - ✅ Audio engine now 100% portable (zero Android dependencies)
+
+- ✅ **Phase 2: Resource Loading Abstraction** (COMPLETE - 2026-01-03)
+  - ✅ Created `IResourceLoader` interface (core/resources/)
+  - ✅ Created `AndroidResourceLoader` implementation (platform/android/)
+  - ✅ Integrated with AudioEngine
+  - **Note:** Completed as part of Phase 1 (steps 1.7-1.9)
+
+- ✅ **Phase 3: File I/O Abstraction** (COMPLETE - 2026-01-03)
+  - ✅ Created `IFileSystem` interface (core/storage/)
+  - ✅ Created `FileInfo` data class (platform-agnostic file metadata)
+  - ✅ Created `AndroidFileSystem` implementation (platform/android/)
+  - ✅ Updated FileManager to use IFileSystem (zero Context dependencies)
+  - ✅ FileManager now 100% portable
   - **Result:** Ready for Linux port! 🎉
 
-- [ ] Phase 2: File I/O abstraction (1-2 days) ← **NEXT**
-  - Create `IFileSystem` interface
-  - Implement `AndroidFileSystem`
-  - FileManager uses interface
-
-- [ ] Phase 3: Business logic extraction (5-7 days)
-  - Create 6 separate controllers:
-    - `TrackerController` (main coordinator)
+- [ ] **Phase 4: Business Logic Extraction** (5-7 days) ← **NEXT**
+  - Create 5 separate controllers:
     - `InputController` (button handling)
-    - `EffectProcessor` (effect calculations)
-    - `FileController` (save/load)
-  - Create `ClipboardManager` (copy/paste operations)
-  - MainActivity becomes THIN (just creates backends + UI)
+    - `EffectProcessor` (effect calculations - stubs for now)
+    - `FileController` (save/load coordination)
+    - `ClipboardManager` (copy/paste operations - stubs for now)
+    - `TrackerController` (main coordinator)
+  - MainActivity becomes THIN (~300 lines vs current 2606)
   - **Note:** PlaybackController and InstrumentController already extracted!
 
 **See:** `REFACTORING_ROADMAP.md` for detailed step-by-step guide
@@ -307,17 +313,17 @@ Planned global settings:
 ## Next Steps (Priority Order)
 
 ### This Week:
-1. **Start Refactoring Phase 2** (File I/O abstraction) ← **YOU ARE HERE**
-   - Read `REFACTORING_ROADMAP.md` Phase 2
-   - Create `IFileSystem` interface
-   - Implement `AndroidFileSystem`
-   - Update FileManager to use interface
+1. **Start Refactoring Phase 4** (Business Logic Extraction) ← **YOU ARE HERE**
+   - Read `REFACTORING_ROADMAP.md` Phase 4
+   - Create InputController (button handling)
+   - Create EffectProcessor (stubs)
+   - Create FileController (save/load)
 
 ### Next 2 Weeks:
-2. **Complete Refactoring Phase 3**
-   - Extract remaining controllers
-   - Create ClipboardManager
-   - Make MainActivity thin
+2. **Complete Refactoring Phase 4**
+   - Create ClipboardManager (stubs)
+   - Create TrackerController (coordinator)
+   - Make MainActivity thin (~300 lines)
 
 ### Following Weeks:
 3. **Effects System** (Milestone 2)
@@ -377,7 +383,7 @@ When starting work:
 1. Read `DEVELOPMENT_STATUS.md` (this file) - know current progress
 2. Read `REFACTORING_ROADMAP.md` - understand current phase
 3. Read `MVP_ROADMAP.md` - see complete path to MVP
-4. Start with current task (currently: Refactoring Phase 2)
+4. Start with current task (currently: Refactoring Phase 4)
 
-**Current task:** Phase 2 - File I/O Abstraction
-**See:** `REFACTORING_ROADMAP.md` for step-by-step instructions
+**Current task:** Phase 4 - Business Logic Extraction
+**See:** `REFACTORING_ROADMAP.md` Phase 4 for step-by-step instructions
