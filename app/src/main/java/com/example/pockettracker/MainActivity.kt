@@ -30,6 +30,7 @@ import androidx.compose.ui.focus.focusRequester
 import com.example.pockettracker.core.logic.InstrumentController
 import com.example.pockettracker.core.logic.PlaybackController
 import com.example.pockettracker.core.logic.FileController
+import com.example.pockettracker.core.logic.InputAction
 import com.example.pockettracker.core.audio.AudioEngine
 import com.example.pockettracker.platform.android.OboeAudioBackend
 import com.example.pockettracker.platform.android.AndroidResourceLoader
@@ -225,6 +226,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
         com.example.pockettracker.core.logic.ClipboardManager()
     }
 
+    // InputController: Handles button input (stub for now, implementation in Milestone 2.5)
+    // PHASE 4: Extracted from MainActivity to separate business logic
+    val inputController = remember {
+        com.example.pockettracker.core.logic.InputController()
+    }
+
     // TrackerController: Main coordinator that owns state and delegates to controllers
     // PHASE 4: This is the MAIN COORDINATOR for all tracker logic
     val trackerController = remember {
@@ -233,8 +240,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             playbackController = playbackController,
             instrumentController = instrumentController,
             effectProcessor = effectProcessor,
-            clipboardManager = clipboardManager
-            // NOTE: InputController will be added tomorrow when we create it
+            clipboardManager = clipboardManager,
+            inputController = inputController
         ).apply {
             // Initialize with test project data
             project = Project().apply {
@@ -252,11 +259,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     }
 
     // NOTE: For now, we maintain both TrackerController.project and MainActivity's project
-    // Tomorrow when we add InputController, we'll migrate fully to TrackerController
+    // Full migration to TrackerController will happen when we implement copy/paste (Milestone 2.5)
     // and remove MainActivity's project state entirely.
 
-    // GenericInputHandler: Handles button presses based on cursor context
-    val genericInputHandler = remember { GenericInputHandler() }
+    // NOTE: GenericInputHandler has been migrated to InputController (Phase 4)
+    // All input handling now goes through trackerController.inputController
 
     // ChainEditorModule: Used to get cursor context for chain editing
     val chainEditorModule = remember { ChainEditorModule() }
@@ -931,8 +938,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
      * 3. Applying the resulting action to the appropriate screen
      *
      * Usage example:
-     *   onAUp = { handleGenericInput { ctx -> genericInputHandler.handleAButton(ctx) } }
-     *   onADown = { handleGenericInput { ctx -> genericInputHandler.handleBButton(ctx) } }
+     *   onAUp = { handleGenericInput { ctx -> trackerController.inputController.handleAButton(ctx) } }
+     *   onADown = { handleGenericInput { ctx -> trackerController.inputController.handleBButton(ctx) } }
      *
      * @param handlerFunction Lambda that takes CursorContext and returns InputAction
      */
@@ -1602,7 +1609,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         val context = chainEditorModule.getCursorContext(chainState)
 
                         // Handle input generically
-                        val action = genericInputHandler.handleBButton(context)
+                        val action = trackerController.inputController.handleBButton(context)
 
                         // Apply the action
                         when (action) {
@@ -1698,7 +1705,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         val context = chainEditorModule.getCursorContext(chainState)
 
                         // Handle SELECT as delete
-                        val action = genericInputHandler.handleSelect(context)
+                        val action = trackerController.inputController.handleSelect(context)
 
                         // Apply the action
                         when (action) {
@@ -1789,23 +1796,23 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             // A + DIRECTION COMBINATIONS (M8-style value editing)
             // ───────────────────────────────────────────────────────────────
             onAUp = {
-                // A+UP: Small increment (uses GenericInputHandler)
-                handleGenericInput { context -> genericInputHandler.handleAButton(context) }
+                // A+UP: Small increment (uses InputController)
+                handleGenericInput { context -> trackerController.inputController.handleAButton(context) }
             },
 
             onADown = {
-                // A+DOWN: Small decrement (uses GenericInputHandler)
-                handleGenericInput { context -> genericInputHandler.handleBButton(context) }
+                // A+DOWN: Small decrement (uses InputController)
+                handleGenericInput { context -> trackerController.inputController.handleBButton(context) }
             },
 
             onALeft = {
-                // A+LEFT: Large decrement (uses GenericInputHandler)
-                handleGenericInput { context -> genericInputHandler.handleALeft(context) }
+                // A+LEFT: Large decrement (uses InputController)
+                handleGenericInput { context -> trackerController.inputController.handleALeft(context) }
             },
 
             onARight = {
-                // A+RIGHT: Large increment (uses GenericInputHandler)
-                handleGenericInput { context -> genericInputHandler.handleARight(context) }
+                // A+RIGHT: Large increment (uses InputController)
+                handleGenericInput { context -> trackerController.inputController.handleARight(context) }
             },
 
             // ───────────────────────────────────────────────────────────────
@@ -1813,7 +1820,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             // ───────────────────────────────────────────────────────────────
             onAB = {
                 // A+B: Delete/clear value at cursor
-                handleGenericInput { context -> genericInputHandler.handleABCombo(context) }
+                handleGenericInput { context -> trackerController.inputController.handleABCombo(context) }
             },
 
             // ───────────────────────────────────────────────────────────────

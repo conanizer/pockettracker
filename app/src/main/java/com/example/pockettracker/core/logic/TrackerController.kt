@@ -20,15 +20,15 @@ import com.example.pockettracker.core.storage.FileInfo
  * - InstrumentController - Sample management
  * - EffectProcessor - Effect calculations (stubs)
  * - ClipboardManager - Copy/paste (stubs)
- * - InputController - Button handling (TODO: add tomorrow)
+ * - InputController - Button handling (stub)
  */
 class TrackerController(
     val fileController: FileController,
     val playbackController: PlaybackController,
     val instrumentController: InstrumentController,
     val effectProcessor: EffectProcessor,
-    val clipboardManager: ClipboardManager
-    // TODO: Add inputController tomorrow when we create it
+    val clipboardManager: ClipboardManager,
+    val inputController: InputController
 ) {
 
     // ========================================
