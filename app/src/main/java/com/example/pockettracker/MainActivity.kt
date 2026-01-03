@@ -305,7 +305,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 
     // Navigation state - where we are in the app
     var currentScreen by remember { mutableStateOf(ScreenType.PHRASE) }
-    var previousColumn by remember { mutableIntStateOf(getScreenColumn(ScreenType.PHRASE)) }
+    var previousColumn by remember { mutableIntStateOf(trackerController.getScreenColumn(ScreenType.PHRASE)) }
 
     // Cursor position - where the cursor is on screen
     var cursorRow by remember { mutableIntStateOf(0) }
@@ -1829,10 +1829,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             onRUp = {
                 // R+UP: Navigate to screen above in 5×5 grid (disabled in FILE_BROWSER)
                 if (currentScreen != ScreenType.FILE_BROWSER) {
-                    val (newScreen, newCol) = navigateUp(currentScreen, previousColumn)
+                    val (newScreen, newCol) = trackerController.navigateUp(currentScreen, previousColumn)
                     if (newScreen != currentScreen) {
                         // Screen changed - reset cursor to default position
-                        val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
+                        val (defaultRow, defaultCol) = trackerController.getDefaultCursorPosition(newScreen)
                         cursorRow = defaultRow
                         cursorColumn = defaultCol
                     }
@@ -1844,10 +1844,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             onRDown = {
                 // R+DOWN: Navigate to screen below in 5×5 grid (disabled in FILE_BROWSER)
                 if (currentScreen != ScreenType.FILE_BROWSER) {
-                    val (newScreen, newCol) = navigateDown(currentScreen, previousColumn)
+                    val (newScreen, newCol) = trackerController.navigateDown(currentScreen, previousColumn)
                     if (newScreen != currentScreen) {
                         // Screen changed - reset cursor to default position
-                        val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
+                        val (defaultRow, defaultCol) = trackerController.getDefaultCursorPosition(newScreen)
                         cursorRow = defaultRow
                         cursorColumn = defaultCol
                     }
@@ -1859,7 +1859,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             onRLeft = {
                 // R+LEFT: Navigate to screen on left in main row (disabled in FILE_BROWSER)
                 if (currentScreen != ScreenType.FILE_BROWSER) {
-                    val (newScreen, newCol) = navigateLeft(currentScreen, previousColumn)
+                    val (newScreen, newCol) = trackerController.navigateLeft(currentScreen, previousColumn)
                     if (newScreen != currentScreen) {
                         // Capture cursor value from current screen before leaving
                         when (currentScreen) {
@@ -1905,7 +1905,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         }
 
                         // Screen changed - reset cursor to default position
-                        val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
+                        val (defaultRow, defaultCol) = trackerController.getDefaultCursorPosition(newScreen)
                         cursorRow = defaultRow
                         cursorColumn = defaultCol
                     }
@@ -1917,7 +1917,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             onRRight = {
                 // R+RIGHT: Navigate to screen on right in main row (disabled in FILE_BROWSER)
                 if (currentScreen != ScreenType.FILE_BROWSER) {
-                    val (newScreen, newCol) = navigateRight(currentScreen, previousColumn)
+                    val (newScreen, newCol) = trackerController.navigateRight(currentScreen, previousColumn)
                     if (newScreen != currentScreen) {
                         // Capture cursor value from current screen before leaving
                         when (currentScreen) {
@@ -1963,7 +1963,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         }
 
                         // Screen changed - reset cursor to default position
-                        val (defaultRow, defaultCol) = getDefaultCursorPosition(newScreen)
+                        val (defaultRow, defaultCol) = trackerController.getDefaultCursorPosition(newScreen)
                         cursorRow = defaultRow
                         cursorColumn = defaultCol
                     }
@@ -2236,245 +2236,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 // ═══════════════════════════════════════════════════════════════════════════
 // NAVIGATION HELPER FUNCTIONS
 // ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Get which column (0-4) a screen belongs to in the 5×5 grid
- *
- * The grid looks like this:
- *        Col 0   Col 1   Col 2   Col 3      Col 4
- * Row 0:         (none)  SCALE   INST_POOL  (none)
- * Row 1: PROJECT PROJECT GROOVE  MODS       PROJECT
- * Row 2: SONG    CHAIN   PHRASE  INSTRUMENT TABLE
- * Row 3: MIXER   MIXER   MIXER   MIXER      MIXER
- * Row 4: EFFECTS EFFECTS EFFECTS EFFECTS    EFFECTS
- */
-fun getScreenColumn(screen: ScreenType): Int {
-    return when (screen) {
-        ScreenType.SONG -> 0
-        ScreenType.CHAIN -> 1
-        ScreenType.PHRASE, ScreenType.GROOVE, ScreenType.SCALE -> 2
-        ScreenType.INSTRUMENT, ScreenType.MODS, ScreenType.INST_POOL -> 3
-        ScreenType.TABLE -> 4
-        // Shared screens (Project, Mixer, Effects) don't have fixed columns
-        else -> -1  // Will use previousColumn
-    }
-}
-
-/**
- * Get the main screen (row 2) for a given column
- */
-fun getMainScreenForColumn(column: Int): ScreenType {
-    return when (column) {
-        0 -> ScreenType.SONG
-        1 -> ScreenType.CHAIN
-        2 -> ScreenType.PHRASE
-        3 -> ScreenType.INSTRUMENT
-        4 -> ScreenType.TABLE
-        else -> ScreenType.PHRASE
-    }
-}
-
-/**
- * Navigate UP in the 5×5 grid
- * Returns: Pair(newScreen, newColumn)
- */
-fun navigateUp(currentScreen: ScreenType, previousColumn: Int): Pair<ScreenType, Int> {
-    // Figure out which column we're in
-    val currentCol = if (getScreenColumn(currentScreen) == -1) {
-        previousColumn  // We're in a shared room, use remembered column
-    } else {
-        getScreenColumn(currentScreen)
-    }
-
-    // Navigate up within this column
-    return when (currentScreen) {
-        // FROM ROW 4 (Effects) → UP TO ROW 3 (Mixer)
-        ScreenType.EFFECTS -> Pair(ScreenType.MIXER, currentCol)
-
-        // FROM ROW 3 (Mixer) → UP TO ROW 2 (Main)
-        ScreenType.MIXER -> {
-            val mainScreen = getMainScreenForColumn(currentCol)
-            Pair(mainScreen, currentCol)
-        }
-
-        // FROM ROW 2 (Main) → UP TO ROW 1
-        ScreenType.SONG, ScreenType.CHAIN, ScreenType.TABLE -> {
-            Pair(ScreenType.PROJECT, currentCol)
-        }
-        ScreenType.PHRASE -> Pair(ScreenType.GROOVE, 2)
-        ScreenType.INSTRUMENT -> Pair(ScreenType.MODS, 3)
-
-        // FROM ROW 1 → UP TO ROW 0 (where it exists)
-        ScreenType.GROOVE -> Pair(ScreenType.SCALE, 2)
-        ScreenType.MODS -> Pair(ScreenType.INST_POOL, 3)
-        ScreenType.PROJECT -> Pair(ScreenType.PROJECT, currentCol)
-
-        // FROM ROW 0 → Already at top!
-        ScreenType.SCALE, ScreenType.INST_POOL -> {
-            Pair(currentScreen, currentCol)
-        }
-
-        // Popup screens don't participate in navigation
-        ScreenType.FILE_BROWSER -> Pair(currentScreen, currentCol)
-    }
-}
-
-/**
- * Navigate DOWN in the 5×5 grid
- */
-fun navigateDown(currentScreen: ScreenType, previousColumn: Int): Pair<ScreenType, Int> {
-    val currentCol = if (getScreenColumn(currentScreen) == -1) {
-        previousColumn
-    } else {
-        getScreenColumn(currentScreen)
-    }
-
-    return when (currentScreen) {
-        // FROM ROW 0 → DOWN TO ROW 1
-        ScreenType.SCALE -> Pair(ScreenType.GROOVE, 2)
-        ScreenType.INST_POOL -> Pair(ScreenType.MODS, 3)
-
-        // FROM ROW 1 → DOWN TO ROW 2 (Main)
-        ScreenType.GROOVE -> Pair(ScreenType.PHRASE, 2)
-        ScreenType.MODS -> Pair(ScreenType.INSTRUMENT, 3)
-        ScreenType.PROJECT -> {
-            val mainScreen = getMainScreenForColumn(currentCol)
-            Pair(mainScreen, currentCol)
-        }
-
-        // FROM ROW 2 (Main) → DOWN TO ROW 3 (Mixer)
-        ScreenType.SONG, ScreenType.CHAIN, ScreenType.PHRASE,
-        ScreenType.INSTRUMENT, ScreenType.TABLE -> {
-            Pair(ScreenType.MIXER, currentCol)
-        }
-
-        // FROM ROW 3 (Mixer) → DOWN TO ROW 4 (Effects)
-        ScreenType.MIXER -> Pair(ScreenType.EFFECTS, currentCol)
-
-        // FROM ROW 4 → Already at bottom!
-        ScreenType.EFFECTS -> Pair(ScreenType.EFFECTS, currentCol)
-
-        // Popup screens don't participate in navigation
-        ScreenType.FILE_BROWSER -> Pair(currentScreen, currentCol)
-    }
-}
-
-/**
- * Navigate LEFT - Only works on main row (S C P I T)
- */
-fun navigateLeft(currentScreen: ScreenType, previousColumn: Int): Pair<ScreenType, Int> {
-    // Shared rooms have no side doors!
-    if (currentScreen in listOf(ScreenType.PROJECT, ScreenType.MIXER, ScreenType.EFFECTS)) {
-        return Pair(currentScreen, previousColumn)
-    }
-
-    // If in a context screen, go to main row first
-    if (currentScreen !in MAIN_ROW_SCREENS) {
-        val mainScreen = getMainScreenForColumn(getScreenColumn(currentScreen))
-        return Pair(mainScreen, getScreenColumn(currentScreen))
-    }
-
-    // Move left through S C P I T
-    return when (currentScreen) {
-        ScreenType.TABLE -> Pair(ScreenType.INSTRUMENT, 3)
-        ScreenType.INSTRUMENT -> Pair(ScreenType.PHRASE, 2)
-        ScreenType.PHRASE -> Pair(ScreenType.CHAIN, 1)
-        ScreenType.CHAIN -> Pair(ScreenType.SONG, 0)
-        ScreenType.SONG -> Pair(ScreenType.SONG, 0)  // Already leftmost
-        else -> Pair(currentScreen, getScreenColumn(currentScreen))
-    }
-}
-
-/**
- * Navigate RIGHT - Only works on main row (S C P I T)
- */
-fun navigateRight(currentScreen: ScreenType, previousColumn: Int): Pair<ScreenType, Int> {
-    // Shared rooms have no side doors!
-    if (currentScreen in listOf(ScreenType.PROJECT, ScreenType.MIXER, ScreenType.EFFECTS)) {
-        return Pair(currentScreen, previousColumn)
-    }
-
-    // If in a context screen, go to main row first
-    if (currentScreen !in MAIN_ROW_SCREENS) {
-        val mainScreen = getMainScreenForColumn(getScreenColumn(currentScreen))
-        return Pair(mainScreen, getScreenColumn(currentScreen))
-    }
-
-    // Move right through S C P I T
-    return when (currentScreen) {
-        ScreenType.SONG -> Pair(ScreenType.CHAIN, 1)
-        ScreenType.CHAIN -> Pair(ScreenType.PHRASE, 2)
-        ScreenType.PHRASE -> Pair(ScreenType.INSTRUMENT, 3)
-        ScreenType.INSTRUMENT -> Pair(ScreenType.TABLE, 4)
-        ScreenType.TABLE -> Pair(ScreenType.TABLE, 4)  // Already rightmost
-        else -> Pair(currentScreen, getScreenColumn(currentScreen))
-    }
-}
-
-/**
- * Get the minimum editable column for a screen type
- * Column 0 is often read-only (step numbers), so minimum is usually 1
- */
-fun getMinEditableColumn(screenType: ScreenType): Int {
-    return when (screenType) {
-        // Phrase: Column 0 = step number (read-only), column 1 = NOTE (editable)
-        ScreenType.PHRASE -> 1
-
-        // Chain: Column 0 = step number (read-only), column 1 = PH (editable)
-        ScreenType.CHAIN -> 1
-
-        // Song: Column 0 = step number (read-only), column 1 = Track 1 (editable)
-        // Note: Song uses cursorTrack (1-8), not cursorColumn (0-7)
-        ScreenType.SONG -> 1
-
-        // Project: Column 0 = row labels (read-only), column 1 = values (editable)
-        ScreenType.PROJECT -> 1
-
-        // Instrument: Column 0 might be label, column 1 is first editable
-        ScreenType.INSTRUMENT -> 1
-
-        // Table: Column 0 might be label, column 1 is first editable
-        ScreenType.TABLE -> 1
-
-        // Mixer/Effects: All tracks are editable starting from 0
-        ScreenType.MIXER -> 0
-        ScreenType.EFFECTS -> 0
-
-        // Groove/Scale/Mods/InstPool: Assume column 1 is first editable
-        ScreenType.GROOVE -> 1
-        ScreenType.SCALE -> 1
-        ScreenType.MODS -> 1
-        ScreenType.INST_POOL -> 1
-
-        // File browser: No column editing
-        ScreenType.FILE_BROWSER -> 0
-    }
-}
-
-/**
- * Get the minimum editable row for a screen type
- * Most screens start at row 0
- */
-fun getMinEditableRow(screenType: ScreenType): Int {
-    return when (screenType) {
-        // All current screens start editing from row 0
-        else -> 0
-    }
-}
-
-/**
- * Get default cursor position for a screen
- * Returns Pair(row, column) representing the first available/editable cell
- *
- * This systematically finds the first editable position by using:
- * - getMinEditableRow() to skip any read-only header rows
- * - getMinEditableColumn() to skip any read-only label columns
- */
-fun getDefaultCursorPosition(screenType: ScreenType): Pair<Int, Int> {
-    val defaultRow = getMinEditableRow(screenType)
-    val defaultColumn = getMinEditableColumn(screenType)
-    return Pair(defaultRow, defaultColumn)
-}
+// NOTE: Navigation functions migrated to TrackerController (Phase 4 cleanup - January 2025)
+// All navigation logic now in core/logic/TrackerController.kt
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PROJECT SCREEN CURSOR HELPERS

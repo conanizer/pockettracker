@@ -284,4 +284,200 @@ class TrackerController(
     fun clearStatus() {
         statusMessage = ""
     }
+
+    // ========================================
+    // SCREEN NAVIGATION
+    // ========================================
+    // Migrated from MainActivity during cleanup (January 2025)
+
+    /**
+     * Get the column (0-4) for a given screen in the 5×5 navigation grid.
+     */
+    fun getScreenColumn(screen: ScreenType): Int {
+        return when (screen) {
+            ScreenType.SONG -> 0
+            ScreenType.CHAIN -> 1
+            ScreenType.PHRASE, ScreenType.GROOVE, ScreenType.SCALE -> 2
+            ScreenType.INSTRUMENT, ScreenType.MODS, ScreenType.INST_POOL -> 3
+            ScreenType.TABLE -> 4
+            // Shared screens (Project, Mixer, Effects) don't have fixed columns
+            else -> -1  // Will use previousColumn
+        }
+    }
+
+    /**
+     * Get the main screen (row 2) for a given column.
+     */
+    fun getMainScreenForColumn(column: Int): ScreenType {
+        return when (column) {
+            0 -> ScreenType.SONG
+            1 -> ScreenType.CHAIN
+            2 -> ScreenType.PHRASE
+            3 -> ScreenType.INSTRUMENT
+            4 -> ScreenType.TABLE
+            else -> ScreenType.PHRASE
+        }
+    }
+
+    /**
+     * Navigate UP in the 5×5 grid.
+     * Returns: Pair(newScreen, newColumn)
+     */
+    fun navigateUp(currentScreen: ScreenType, previousColumn: Int): Pair<ScreenType, Int> {
+        val currentCol = if (getScreenColumn(currentScreen) == -1) {
+            previousColumn
+        } else {
+            getScreenColumn(currentScreen)
+        }
+
+        return when (currentScreen) {
+            // FROM ROW 4 (Effects) → UP TO ROW 3 (Mixer)
+            ScreenType.EFFECTS -> Pair(ScreenType.MIXER, currentCol)
+
+            // FROM ROW 3 (Mixer) → UP TO ROW 2 (Main)
+            ScreenType.MIXER -> {
+                val mainScreen = getMainScreenForColumn(currentCol)
+                Pair(mainScreen, currentCol)
+            }
+
+            // FROM ROW 2 (Main) → UP TO ROW 1
+            ScreenType.SONG, ScreenType.CHAIN -> Pair(ScreenType.PROJECT, currentCol)
+            ScreenType.PHRASE -> Pair(ScreenType.GROOVE, 2)
+            ScreenType.INSTRUMENT -> Pair(ScreenType.MODS, 3)
+            ScreenType.TABLE -> Pair(ScreenType.PROJECT, currentCol)
+
+            // FROM ROW 1 → UP TO ROW 0
+            ScreenType.PROJECT -> Pair(ScreenType.PROJECT, currentCol)  // Stay on PROJECT
+            ScreenType.GROOVE -> Pair(ScreenType.SCALE, 2)
+            ScreenType.MODS -> Pair(ScreenType.INST_POOL, 3)
+
+            // FROM ROW 0 → Stay at top
+            ScreenType.SCALE, ScreenType.INST_POOL -> Pair(currentScreen, currentCol)
+
+            // Unhandled screens
+            else -> Pair(currentScreen, currentCol)
+        }
+    }
+
+    /**
+     * Navigate DOWN in the 5×5 grid.
+     */
+    fun navigateDown(currentScreen: ScreenType, previousColumn: Int): Pair<ScreenType, Int> {
+        val currentCol = if (getScreenColumn(currentScreen) == -1) {
+            previousColumn
+        } else {
+            getScreenColumn(currentScreen)
+        }
+
+        return when (currentScreen) {
+            // FROM ROW 0 → DOWN TO ROW 1
+            ScreenType.SCALE -> Pair(ScreenType.GROOVE, 2)
+            ScreenType.INST_POOL -> Pair(ScreenType.MODS, 3)
+
+            // FROM ROW 1 → DOWN TO ROW 2 (Main)
+            ScreenType.GROOVE -> Pair(ScreenType.PHRASE, 2)
+            ScreenType.MODS -> Pair(ScreenType.INSTRUMENT, 3)
+            ScreenType.PROJECT -> {
+                val mainScreen = getMainScreenForColumn(currentCol)
+                Pair(mainScreen, currentCol)
+            }
+
+            // FROM ROW 2 (Main) → DOWN TO ROW 3 (Mixer)
+            ScreenType.SONG, ScreenType.CHAIN, ScreenType.PHRASE,
+            ScreenType.INSTRUMENT, ScreenType.TABLE -> Pair(ScreenType.MIXER, currentCol)
+
+            // FROM ROW 3 (Mixer) → DOWN TO ROW 4 (Effects)
+            ScreenType.MIXER -> Pair(ScreenType.EFFECTS, currentCol)
+
+            // FROM ROW 4 (Effects) → Stay at bottom
+            ScreenType.EFFECTS -> Pair(ScreenType.EFFECTS, currentCol)
+
+            // Unhandled screens
+            else -> Pair(currentScreen, currentCol)
+        }
+    }
+
+    /**
+     * Navigate LEFT through main row screens (S C P I T).
+     */
+    fun navigateLeft(currentScreen: ScreenType, previousColumn: Int): Pair<ScreenType, Int> {
+        // Shared rooms have no side doors!
+        if (currentScreen in listOf(ScreenType.PROJECT, ScreenType.MIXER, ScreenType.EFFECTS)) {
+            return Pair(currentScreen, previousColumn)
+        }
+
+        // If in a context screen, go to main row first
+        if (currentScreen !in com.example.pockettracker.MAIN_ROW_SCREENS) {
+            val mainScreen = getMainScreenForColumn(getScreenColumn(currentScreen))
+            return Pair(mainScreen, getScreenColumn(currentScreen))
+        }
+
+        // Move left through S C P I T
+        return when (currentScreen) {
+            ScreenType.TABLE -> Pair(ScreenType.INSTRUMENT, 3)
+            ScreenType.INSTRUMENT -> Pair(ScreenType.PHRASE, 2)
+            ScreenType.PHRASE -> Pair(ScreenType.CHAIN, 1)
+            ScreenType.CHAIN -> Pair(ScreenType.SONG, 0)
+            ScreenType.SONG -> Pair(ScreenType.SONG, 0)  // Stay at leftmost
+            else -> Pair(currentScreen, previousColumn)
+        }
+    }
+
+    /**
+     * Navigate RIGHT through main row screens (S C P I T).
+     */
+    fun navigateRight(currentScreen: ScreenType, previousColumn: Int): Pair<ScreenType, Int> {
+        // Shared rooms have no side doors!
+        if (currentScreen in listOf(ScreenType.PROJECT, ScreenType.MIXER, ScreenType.EFFECTS)) {
+            return Pair(currentScreen, previousColumn)
+        }
+
+        // If in a context screen, go to main row first
+        if (currentScreen !in com.example.pockettracker.MAIN_ROW_SCREENS) {
+            val mainScreen = getMainScreenForColumn(getScreenColumn(currentScreen))
+            return Pair(mainScreen, getScreenColumn(currentScreen))
+        }
+
+        // Move right through S C P I T
+        return when (currentScreen) {
+            ScreenType.SONG -> Pair(ScreenType.CHAIN, 1)
+            ScreenType.CHAIN -> Pair(ScreenType.PHRASE, 2)
+            ScreenType.PHRASE -> Pair(ScreenType.INSTRUMENT, 3)
+            ScreenType.INSTRUMENT -> Pair(ScreenType.TABLE, 4)
+            ScreenType.TABLE -> Pair(ScreenType.TABLE, 4)  // Stay at rightmost
+            else -> Pair(currentScreen, previousColumn)
+        }
+    }
+
+    /**
+     * Get minimum editable column for a screen type.
+     */
+    fun getMinEditableColumn(screenType: ScreenType): Int {
+        return when (screenType) {
+            ScreenType.PHRASE -> 1
+            ScreenType.CHAIN -> 1
+            ScreenType.SONG -> 1
+            ScreenType.PROJECT -> 1
+            ScreenType.INSTRUMENT -> 1
+            ScreenType.FILE_BROWSER -> 0
+            else -> 0
+        }
+    }
+
+    /**
+     * Get minimum editable row for a screen type.
+     */
+    fun getMinEditableRow(screenType: ScreenType): Int {
+        return 0  // All current screens start editing from row 0
+    }
+
+    /**
+     * Get default cursor position for a screen.
+     * Returns Pair(row, column) representing the first available/editable cell.
+     */
+    fun getDefaultCursorPosition(screenType: ScreenType): Pair<Int, Int> {
+        val defaultRow = getMinEditableRow(screenType)
+        val defaultColumn = getMinEditableColumn(screenType)
+        return Pair(defaultRow, defaultColumn)
+    }
 }
