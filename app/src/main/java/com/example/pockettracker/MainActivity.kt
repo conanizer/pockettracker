@@ -213,6 +213,48 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
         PlaybackController(audioEngine)
     }
 
+    // EffectProcessor: Processes effects (stub for now, implementation in Milestone 2)
+    // PHASE 4: Extracted from MainActivity to separate business logic
+    val effectProcessor = remember {
+        com.example.pockettracker.core.logic.EffectProcessor(audioBackend)
+    }
+
+    // ClipboardManager: Handles copy/paste (stub for now, implementation in Milestone 2.5)
+    // PHASE 4: Extracted from MainActivity to separate business logic
+    val clipboardManager = remember {
+        com.example.pockettracker.core.logic.ClipboardManager()
+    }
+
+    // TrackerController: Main coordinator that owns state and delegates to controllers
+    // PHASE 4: This is the MAIN COORDINATOR for all tracker logic
+    val trackerController = remember {
+        com.example.pockettracker.core.logic.TrackerController(
+            fileController = fileController,
+            playbackController = playbackController,
+            instrumentController = instrumentController,
+            effectProcessor = effectProcessor,
+            clipboardManager = clipboardManager
+            // NOTE: InputController will be added tomorrow when we create it
+        ).apply {
+            // Initialize with test project data
+            project = Project().apply {
+                // Add some test notes to phrase 0
+                phrases[0].steps[0].note = Note.fromString("C-4")
+                phrases[0].steps[0].instrument = 3
+                phrases[0].steps[4].note = Note.fromString("E-4")
+                phrases[0].steps[4].instrument = 3
+                phrases[0].steps[8].note = Note.fromString("G-4")
+                phrases[0].steps[8].instrument = 3
+                phrases[0].steps[12].note = Note.fromString("C-5")
+                phrases[0].steps[12].instrument = 3
+            }
+        }
+    }
+
+    // NOTE: For now, we maintain both TrackerController.project and MainActivity's project
+    // Tomorrow when we add InputController, we'll migrate fully to TrackerController
+    // and remove MainActivity's project state entirely.
+
     // GenericInputHandler: Handles button presses based on cursor context
     val genericInputHandler = remember { GenericInputHandler() }
 
