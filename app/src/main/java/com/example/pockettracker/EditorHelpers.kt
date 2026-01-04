@@ -43,6 +43,92 @@ fun cycleInstrument(step: PhraseStep, direction: Int) {
     step.instrument = ((step.instrument + direction + 128) % 12).coerceIn(0, 12)
 }
 
+/**
+ * Cycle effect type for FX columns (A+UP/DOWN on effect name column)
+ * Effect names: ---, ARP, KIL, OFF, RPT, VOL
+ * @param fxSlot Which FX slot (1, 2, or 3)
+ * @param direction +1 to go to next effect, -1 to go to previous
+ */
+fun cycleEffectType(step: PhraseStep, fxSlot: Int, direction: Int) {
+    // Effect types: NONE(0x00), Arpeggio(0x0A), Kill(0x0B), Offset(0x0F), Repeat(0x12), Volume(0x16)
+    val effectTypes = listOf(0x00, 0x0A, 0x0B, 0x0F, 0x12, 0x16)
+
+    val currentType = when (fxSlot) {
+        1 -> step.fx1Type
+        2 -> step.fx2Type
+        3 -> step.fx3Type
+        else -> return
+    }
+
+    val currentIndex = effectTypes.indexOf(currentType).takeIf { it >= 0 } ?: 0
+    val newIndex = (currentIndex + direction + effectTypes.size) % effectTypes.size
+    val newType = effectTypes[newIndex]
+
+    when (fxSlot) {
+        1 -> step.fx1Type = newType
+        2 -> step.fx2Type = newType
+        3 -> step.fx3Type = newType
+    }
+}
+
+/**
+ * Cycle effect value for FX columns (A+LEFT/RIGHT on effect value column)
+ * @param fxSlot Which FX slot (1, 2, or 3)
+ * @param direction +1 to increment, -1 to decrement
+ */
+fun cycleEffectValue(step: PhraseStep, fxSlot: Int, direction: Int) {
+    val currentValue = when (fxSlot) {
+        1 -> step.fx1Value
+        2 -> step.fx2Value
+        3 -> step.fx3Value
+        else -> return
+    }
+
+    val newValue = (currentValue + direction).coerceIn(0, 255)
+
+    when (fxSlot) {
+        1 -> step.fx1Value = newValue
+        2 -> step.fx2Value = newValue
+        3 -> step.fx3Value = newValue
+    }
+}
+
+/**
+ * Clear effect (set to NONE) - A+B shortcut
+ * @param fxSlot Which FX slot (1, 2, or 3)
+ */
+fun clearEffect(step: PhraseStep, fxSlot: Int) {
+    when (fxSlot) {
+        1 -> {
+            step.fx1Type = 0x00
+            step.fx1Value = 0x00
+        }
+        2 -> {
+            step.fx2Type = 0x00
+            step.fx2Value = 0x00
+        }
+        3 -> {
+            step.fx3Type = 0x00
+            step.fx3Value = 0x00
+        }
+    }
+}
+
+/**
+ * Get effect type 3-letter name for display
+ * Returns: ---, ARP, KIL, OFF, RPT, VOL
+ */
+fun getEffectTypeName(effectType: Int): String {
+    return when (effectType) {
+        0x0A -> "ARP"  // Arpeggio
+        0x0B -> "KIL"  // Kill
+        0x0F -> "OFF"  // Offset
+        0x12 -> "RPT"  // Repeat
+        0x16 -> "VOL"  // Volume
+        else -> "---"   // NONE
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // CHAIN EDITOR HELPERS
 // ═══════════════════════════════════════════════════════════════════════════

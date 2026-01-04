@@ -302,12 +302,15 @@ class InputController(
                 }
             }
 
-            // References, hex bytes, volume, and toggles wrap around (00 -> max -> 00)
+            // References, hex bytes, volume, effects, and toggles wrap around (00 -> max -> 00)
             CursorValueType.PHRASE_REF,
             CursorValueType.CHAIN_REF,
             CursorValueType.HEX_BYTE,
             CursorValueType.SEMITONE_OFFSET,
             CursorValueType.VOLUME,
+            CursorValueType.EFFECT_TYPE,
+            CursorValueType.EFFECT_VALUE,
+            CursorValueType.INSTRUMENT_REF,
             CursorValueType.TOGGLE_BINARY,
             CursorValueType.TOGGLE_TERNARY -> {
                 var newVal = current + step
@@ -341,12 +344,15 @@ class InputController(
                 }
             }
 
-            // References, hex bytes, volume, and toggles wrap around (00 -> max -> 00)
+            // References, hex bytes, volume, effects, and toggles wrap around (00 -> max -> 00)
             CursorValueType.PHRASE_REF,
             CursorValueType.CHAIN_REF,
             CursorValueType.HEX_BYTE,
             CursorValueType.SEMITONE_OFFSET,
             CursorValueType.VOLUME,
+            CursorValueType.EFFECT_TYPE,
+            CursorValueType.EFFECT_VALUE,
+            CursorValueType.INSTRUMENT_REF,
             CursorValueType.TOGGLE_BINARY,
             CursorValueType.TOGGLE_TERNARY -> {
                 var newVal = current - step

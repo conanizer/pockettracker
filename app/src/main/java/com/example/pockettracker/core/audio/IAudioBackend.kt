@@ -96,6 +96,26 @@ interface IAudioBackend {
     fun stopAll()
 
     /**
+     * Stop a specific track's voice immediately.
+     *
+     * Used for Kill effect (K00) - stops the voice on the specified track.
+     *
+     * @param trackId Which track to kill (0-7)
+     */
+    fun killTrack(trackId: Int)
+
+    /**
+     * Schedule a kill event at a specific audio frame.
+     *
+     * This schedules a track kill to happen at a specific frame time,
+     * allowing sample-accurate kill effects.
+     *
+     * @param frame Absolute audio frame number when to kill
+     * @param trackId Which track to kill (0-7)
+     */
+    fun scheduleKill(frame: Long, trackId: Int)
+
+    /**
      * Get the actual sample rate of the audio stream.
      *
      * This may differ from the requested rate (e.g., requested 44100Hz but got 48000Hz).

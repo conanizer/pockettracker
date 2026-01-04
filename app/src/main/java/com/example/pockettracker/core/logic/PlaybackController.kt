@@ -21,6 +21,7 @@ import com.example.pockettracker.core.logging.ILogger
  */
 class PlaybackController(
     private val audioEngine: AudioEngine,
+    private val effectProcessor: EffectProcessor,
     private val logger: ILogger,
     private val stateObserver: StateObserver
 ) {
@@ -94,27 +95,90 @@ class PlaybackController(
     /**
      * Play a phrase (16 steps)
      *
-     * TODO: Implement phrase playback
-     * - Schedule all 16 steps with sample-accurate timing
-     * - Apply instrument parameters
-     * - Apply effects (after EffectProcessor is implemented)
-     * - Loop if requested
-     * - Update playback cursor in real-time
+     * Schedules all 16 steps with sample-accurate timing.
+     * Effects are applied through EffectProcessor if available.
      *
      * @param project Project containing phrase data
      * @param phraseId Which phrase to play (0-255)
-     * @param loop Whether to loop playback
+     * @param loop Whether to loop playback (not implemented yet)
      */
     fun playPhrase(project: Project, phraseId: Int, loop: Boolean = true) {
-        logger.w(TAG, "⚠️ playPhrase() not yet implemented - stub only")
-        playbackMode = PlaybackMode.PHRASE
+        logger.d(TAG, "▶️ Playing phrase $phraseId (tempo: ${project.tempo} BPM)")
 
-        // TODO: Implement phrase playback logic
-        // 1. Get phrase from project
-        // 2. Calculate frame timing based on tempo
-        // 3. Schedule all non-empty steps
-        // 4. Set up loop if requested
-        // 5. Start playback cursor updates
+        // Stop any current playback
+        stop()
+
+        // Get phrase
+        if (phraseId !in 0..255) {
+            logger.e(TAG, "Invalid phraseId: $phraseId")
+            return
+        }
+
+        val phrase = project.phrases[phraseId]
+        playbackMode = PlaybackMode.PHRASE
+        isPlaying = true
+
+        // Get timing information
+        val startFrame = audioEngine.getCurrentFrame()
+        val tempo = project.tempo
+
+        logger.d(TAG, "Start frame: $startFrame, Tempo: $tempo BPM")
+
+        // Calculate step duration for effects
+        val sampleRate = audioEngine.getDeviceSampleRate()
+        val msPerStep = (60000.0 / tempo / 4.0)  // 4 steps per beat
+        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+
+        // Schedule all 16 steps
+        var scheduledNotes = 0
+        phrase.steps.forEachIndexed { stepIndex, step ->
+            // Calculate when this step should trigger (always, even if empty)
+            val targetFrame = audioEngine.calculateTargetFrame(startFrame, stepIndex, tempo)
+
+            // Schedule note if step has one
+            if (!step.isEmpty()) {
+                // Get instrument and sample info
+                val instrument = project.instruments[step.instrument]
+                val sampleId = instrument.sampleId
+
+                // Schedule the note
+                audioEngine.scheduleNote(
+                    targetFrame = targetFrame,
+                    note = step.note,
+                    instrumentId = step.instrument,
+                    trackId = 0,  // Single track for phrase playback
+                    volume = step.volume / 255.0f,
+                    project = project
+                )
+
+                scheduledNotes++
+                logger.d(TAG, "  Step $stepIndex: ${step.note} I:${step.instrument.toString(16).uppercase()} V:${step.volume.toString(16).uppercase()} @ frame $targetFrame")
+            }
+
+            // Apply effects (ALWAYS - effects affect STEPS not NOTES!)
+            // This allows effects like Kill to work even on empty steps
+            if (step.fx1Type != 0x00 || step.fx2Type != 0x00 || step.fx3Type != 0x00) {
+                val instrument = project.instruments[step.instrument]
+                val sampleId = instrument.sampleId
+
+                logger.d(TAG, "  Step $stepIndex EFFECTS: FX1=0x${step.fx1Type.toString(16).uppercase()} FX2=0x${step.fx2Type.toString(16).uppercase()} FX3=0x${step.fx3Type.toString(16).uppercase()}")
+
+                effectProcessor.applyEffects(
+                    step = step,
+                    baseFrame = targetFrame,
+                    stepDuration = framesPerStep,
+                    trackId = 0,
+                    baseFrequency = step.note.toFrequency(),
+                    baseVolume = step.volume / 255.0f,
+                    sampleId = sampleId
+                )
+            }
+        }
+
+        logger.d(TAG, "✅ Scheduled $scheduledNotes notes from phrase $phraseId")
+
+        // TODO: Implement looping (reschedule after 16 steps complete)
+        // TODO: Update playback cursor in real-time for visual feedback
     }
 
     /**

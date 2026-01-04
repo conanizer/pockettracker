@@ -41,6 +41,10 @@ enum class CursorValueType {
     TOGGLE_BINARY,      // Binary toggle (off/on)
     TOGGLE_TERNARY,     // Ternary toggle (3-state: off/fwd/png, etc.)
 
+    // Effects (Milestone 2)
+    EFFECT_TYPE,        // Effect type (---, ARP, KIL, OFF, RPT, VOL)
+    EFFECT_VALUE,       // Effect value (00-FF)
+
     // Special
     EMPTY,              // Empty cell (can insert)
     READ_ONLY,          // Can't edit (like step numbers)
@@ -91,7 +95,8 @@ data class CursorContext(
     val maxValue: Int = 255,                // Maximum allowed value
     val smallStep: Int = 1,                 // Step for normal A/B
     val largeStep: Int = 16,                // Step for A+LEFT/RIGHT
-    val emptyValue: Int = 0xFF              // Value that means "empty"
+    val emptyValue: Int = 0xFF,             // Value that means "empty"
+    val fxSlot: Int = 0                     // For effects: which FX slot (1, 2, or 3)
 ) {
     /**
      * Helper: Is the current value empty?
@@ -205,6 +210,57 @@ object CursorContextFactory {
      */
     fun instrument(currentValue: Int) =
         hexByte(currentValue).copy(valueType = CursorValueType.INSTRUMENT_REF)
+
+    /**
+     * Effect type (cycles through: ---, ARP, KIL, OFF, RPT, VOL)
+     * A+UP/DOWN cycles through effect types
+     * A+B clears effect (sets to NONE/---)
+     * @param currentType Effect type code (0x00=NONE, 0x0A=ARP, etc.)
+     * @param fxSlot Which FX slot (1, 2, or 3) - used to identify which effect to modify
+     */
+    fun effectType(currentType: Int, fxSlot: Int): CursorContext {
+        // Effect types list: NONE(0x00), Arpeggio(0x0A), Kill(0x0B), Offset(0x0F), Repeat(0x12), Volume(0x16)
+        val effectTypes = listOf(0x00, 0x0A, 0x0B, 0x0F, 0x12, 0x16)
+        val currentIndex = effectTypes.indexOf(currentType).takeIf { it >= 0 } ?: 0
+
+        return CursorContext(
+            valueType = CursorValueType.EFFECT_TYPE,
+            capabilities = CursorCapabilities(
+                canIncrement = true,     // Cycle to next effect type
+                canDecrement = true,     // Cycle to previous effect type
+                canDelete = currentType != 0x00,  // A+B clears effect (but only if not already NONE)
+                isEmpty = currentType == 0x00
+            ),
+            currentValue = currentIndex,  // Store as index (0-5), not effect code
+            minValue = 0,
+            maxValue = 5,  // 6 effect types total (including NONE)
+            smallStep = 1,
+            fxSlot = fxSlot  // Store which FX slot this is for
+        )
+    }
+
+    /**
+     * Effect value (00-FF hex byte)
+     * A+LEFT/RIGHT changes value
+     * @param currentValue Effect value (0-255)
+     * @param fxSlot Which FX slot (1, 2, or 3)
+     */
+    fun effectValue(currentValue: Int, fxSlot: Int) = CursorContext(
+        valueType = CursorValueType.EFFECT_VALUE,
+        capabilities = CursorCapabilities(
+            canIncrement = true,
+            canDecrement = true,
+            canIncrementFast = true,  // +16
+            canDecrementFast = true,  // -16
+            isEmpty = false
+        ),
+        currentValue = currentValue,
+        minValue = 0,
+        maxValue = 255,
+        smallStep = 1,
+        largeStep = 16,
+        fxSlot = fxSlot
+    )
 
     /**
      * Generic hex byte (00-FF)

@@ -58,12 +58,12 @@ data class PhraseStep(
     var note: Note = Note.EMPTY,
     var instrument: Int = 0x00,  // 00-7F
     var volume: Int = 0xFF,      // 00-FF (FF = max)
-    val fx1Type: Int = 0x00,     // Effect type
-    val fx1Value: Int = 0x00,    // Effect value
-    val fx2Type: Int = 0x00,
-    val fx2Value: Int = 0x00,
-    val fx3Type: Int = 0x00,
-    val fx3Value: Int = 0x00
+    var fx1Type: Int = 0x00,     // Effect type (Milestone 2: NOW EDITABLE!)
+    var fx1Value: Int = 0x00,    // Effect value
+    var fx2Type: Int = 0x00,
+    var fx2Value: Int = 0x00,
+    var fx3Type: Int = 0x00,
+    var fx3Value: Int = 0x00
 ) {
     fun isEmpty(): Boolean = note == Note.EMPTY
 

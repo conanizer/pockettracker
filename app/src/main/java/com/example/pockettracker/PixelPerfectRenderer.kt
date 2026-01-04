@@ -57,7 +57,8 @@ fun PixelPerfectTracker(
     instrumentCursorColumn: Int,
     instrumentStatusMessage: String,
     instrumentStatusSuccess: Boolean,
-    fileBrowserState: FileBrowserModule.State? = null
+    fileBrowserState: FileBrowserModule.State? = null,
+    effectProcessor: com.example.pockettracker.core.logic.EffectProcessor? = null
 ) {
     android.util.Log.d("PixelPerfectTracker", "==== PixelPerfectTracker called ====")
     android.util.Log.d("PixelPerfectTracker", "Screen: $currentScreen")
@@ -113,6 +114,7 @@ fun PixelPerfectTracker(
                                     val targetFrame = startFrame + (step * framesPerStep)
                                     val phraseStep = project.phrases[currentPhrase].steps[step]
 
+                                    // Schedule note if step has one
                                     if (!phraseStep.isEmpty()) {
                                         audioEngine.scheduleNote(
                                             targetFrame = targetFrame,
@@ -121,6 +123,22 @@ fun PixelPerfectTracker(
                                             trackId = 0,
                                             volume = phraseStep.volume / 255f,
                                             project = project
+                                        )
+                                    }
+
+                                    // Process effects (ALWAYS - effects affect STEPS not NOTES!)
+                                    if (phraseStep.fx1Type != 0x00 || phraseStep.fx2Type != 0x00 || phraseStep.fx3Type != 0x00) {
+                                        val instrument = project.instruments[phraseStep.instrument]
+                                        val sampleId = instrument.sampleId
+
+                                        effectProcessor?.applyEffects(
+                                            step = phraseStep,
+                                            baseFrame = targetFrame,
+                                            stepDuration = framesPerStep,
+                                            trackId = 0,
+                                            baseFrequency = phraseStep.note.toFrequency(),
+                                            baseVolume = phraseStep.volume / 255.0f,
+                                            sampleId = sampleId
                                         )
                                     }
                                 }

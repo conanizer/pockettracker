@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.pockettracker.core.audio.AudioEngine
+import com.example.pockettracker.core.logic.EffectProcessor
 
 // ============================================================================
 // FULL SCREEN LAYOUT
@@ -49,7 +50,8 @@ fun FullScreenLayout(
     instrumentCursorColumn: Int,
     instrumentStatusMessage: String,
     instrumentStatusSuccess: Boolean,
-    fileBrowserState: FileBrowserModule.State? = null  // File browser state
+    fileBrowserState: FileBrowserModule.State? = null,  // File browser state
+    effectProcessor: EffectProcessor? = null  // Effect processor for applying effects
 ) {
     Box(
         modifier = Modifier
@@ -81,7 +83,8 @@ fun FullScreenLayout(
             instrumentCursorColumn = instrumentCursorColumn,
             instrumentStatusMessage = instrumentStatusMessage,
             instrumentStatusSuccess = instrumentStatusSuccess,
-            fileBrowserState = fileBrowserState
+            fileBrowserState = fileBrowserState,
+            effectProcessor = effectProcessor
         )
     }
 }
@@ -115,7 +118,8 @@ fun PortraitLayoutWithVirtualButtons(
     instrumentCursorColumn: Int,
     instrumentStatusMessage: String,
     instrumentStatusSuccess: Boolean,
-    fileBrowserState: FileBrowserModule.State? = null
+    fileBrowserState: FileBrowserModule.State? = null,
+    effectProcessor: EffectProcessor? = null
 ) {
     // FIXED SPACER HEIGHT
     val spacerHeight = 200
@@ -179,7 +183,8 @@ fun PortraitLayoutWithVirtualButtons(
                     instrumentCursorColumn = instrumentCursorColumn,
                     instrumentStatusMessage = instrumentStatusMessage,
                     instrumentStatusSuccess = instrumentStatusSuccess,
-                    fileBrowserState = fileBrowserState
+                    fileBrowserState = fileBrowserState,
+                    effectProcessor = effectProcessor
                 )
             }
         }
@@ -238,7 +243,8 @@ fun LandscapeLayoutWithVirtualButtons(
     instrumentCursorColumn: Int,
     instrumentStatusMessage: String,
     instrumentStatusSuccess: Boolean,
-    fileBrowserState: FileBrowserModule.State? = null
+    fileBrowserState: FileBrowserModule.State? = null,
+    effectProcessor: EffectProcessor? = null
 ) {
     // Calculate available space for each button panel
     // Formula: (deviceWidth - scaledScreenWidth) / 2
@@ -306,7 +312,8 @@ fun LandscapeLayoutWithVirtualButtons(
                     instrumentCursorColumn = instrumentCursorColumn,
                     instrumentStatusMessage = instrumentStatusMessage,
                     instrumentStatusSuccess = instrumentStatusSuccess,
-                    fileBrowserState = fileBrowserState
+                    fileBrowserState = fileBrowserState,
+                    effectProcessor = effectProcessor
                 )
             }
         }

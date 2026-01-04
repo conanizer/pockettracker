@@ -37,13 +37,16 @@ class PhraseEditorModule : TrackerModule {
 
         // Calculate column X positions (tight spacing, equal gaps)
         var colX = x + 10  // Start with 10px left padding
-        val stepX = colX; colX += 30 + 10      // Step (2 chars)
-        val noteX = colX; colX += 45 + 20      // Note (3 chars)
-        val volX = colX; colX += 30 + 15       // Volume (2 chars)
-        val instX = colX; colX += 45 + 15      // Instrument (2 chars)
-        val fx1X = colX; colX += 75 + 20       // FX1 (5 chars)
-        val fx2X = colX; colX += 75 + 20       // FX2 (5 chars)
-        val fx3X = colX;
+        val stepX = colX; colX += 30 + 10          // Step (2 chars)
+        val noteX = colX; colX += 45 + 20          // Note (3 chars)
+        val volX = colX; colX += 30 + 15           // Volume (2 chars)
+        val instX = colX; colX += 30 + 15          // Instrument (2 chars)
+        val fx1NameX = colX; colX += 45 + 10       // FX1 Name (3 chars: ARP, KIL, ---)
+        val fx1ValueX = colX; colX += 30 + 15      // FX1 Value (2 chars: 00-FF)
+        val fx2NameX = colX; colX += 45 + 10       // FX2 Name (3 chars)
+        val fx2ValueX = colX; colX += 30 + 15      // FX2 Value (2 chars)
+        val fx3NameX = colX; colX += 45 + 10       // FX3 Name (3 chars)
+        val fx3ValueX = colX;                      // FX3 Value (2 chars)
 
         // ROW 0: HEADER "PHRASE 00"
         var rowY = y + TEXT_PADDING
@@ -65,9 +68,9 @@ class PhraseEditorModule : TrackerModule {
         drawBitmapText("N", noteX, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
         drawBitmapText("V", volX, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
         drawBitmapText("I", instX, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("FX1", fx1X, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("FX2", fx2X, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("FX3", fx3X, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("FX1", fx1NameX, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("FX2", fx2NameX, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("FX3", fx3NameX, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
 
         // ROWS 2-17: 16 DATA ROWS
         phraseState.phrase.steps.forEachIndexed { index, step ->
@@ -82,9 +85,12 @@ class PhraseEditorModule : TrackerModule {
                 noteX = noteX,
                 volX = volX,
                 instX = instX,
-                fx1X = fx1X,
-                fx2X = fx2X,
-                fx3X = fx3X
+                fx1NameX = fx1NameX,
+                fx1ValueX = fx1ValueX,
+                fx2NameX = fx2NameX,
+                fx2ValueX = fx2ValueX,
+                fx3NameX = fx3NameX,
+                fx3ValueX = fx3ValueX
             )
         }
     }
@@ -103,9 +109,12 @@ class PhraseEditorModule : TrackerModule {
         noteX: Int,
         volX: Int,
         instX: Int,
-        fx1X: Int,
-        fx2X: Int,
-        fx3X: Int
+        fx1NameX: Int,
+        fx1ValueX: Int,
+        fx2NameX: Int,
+        fx2ValueX: Int,
+        fx3NameX: Int,
+        fx3ValueX: Int
     ) {
         // Calculate row Y position
         val dataRowY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (index * ROW_HEIGHT)
@@ -184,45 +193,90 @@ class PhraseEditorModule : TrackerModule {
             fontScale = FONT_SCALE
         )
 
-        // COLUMN 4: FX1 (mockup: ---00)
+        // COLUMN 4: FX1 NAME (ARP, KIL, OFF, RPT, VOL, ---)
         drawBitmapText(
-            text = "---${step.fx1Value.toString(16).padStart(2, '0').uppercase()}",
-            x = fx1X,
+            text = getEffectTypeName(step.fx1Type),
+            x = fx1NameX,
             y = textY,
             scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 4 -> Color.Yellow
-                step.note == Note.EMPTY -> Color(0xFF444444)
-                else -> Color(0xFFaaaaaa)
+                step.fx1Type == 0x00 -> Color(0xFF444444)  // Dim if no effect
+                else -> Color.Cyan  // Cyan for effect names
             },
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
 
-        // COLUMN 5: FX2 (mockup: ---00)
+        // COLUMN 5: FX1 VALUE (00-FF)
         drawBitmapText(
-            text = "---${step.fx2Value.toString(16).padStart(2, '0').uppercase()}",
-            x = fx2X,
+            text = step.fx1Value.toString(16).padStart(2, '0').uppercase(),
+            x = fx1ValueX,
             y = textY,
             scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 5 -> Color.Yellow
-                step.note == Note.EMPTY -> Color(0xFF444444)
+                step.fx1Type == 0x00 -> Color(0xFF444444)  // Dim if no effect
                 else -> Color(0xFFaaaaaa)
             },
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
 
-        // COLUMN 5: FX3 (mockup: ---00)
+        // COLUMN 6: FX2 NAME
         drawBitmapText(
-            text = "---${step.fx3Value.toString(16).padStart(2, '0').uppercase()}",
-            x = fx3X,
+            text = getEffectTypeName(step.fx2Type),
+            x = fx2NameX,
             y = textY,
             scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 6 -> Color.Yellow
-                step.note == Note.EMPTY -> Color(0xFF444444)
+                step.fx2Type == 0x00 -> Color(0xFF444444)
+                else -> Color.Cyan
+            },
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        // COLUMN 7: FX2 VALUE
+        drawBitmapText(
+            text = step.fx2Value.toString(16).padStart(2, '0').uppercase(),
+            x = fx2ValueX,
+            y = textY,
+            scale = scale,
+            color = when {
+                index == state.cursorRow && state.cursorColumn == 7 -> Color.Yellow
+                step.fx2Type == 0x00 -> Color(0xFF444444)
+                else -> Color(0xFFaaaaaa)
+            },
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        // COLUMN 8: FX3 NAME
+        drawBitmapText(
+            text = getEffectTypeName(step.fx3Type),
+            x = fx3NameX,
+            y = textY,
+            scale = scale,
+            color = when {
+                index == state.cursorRow && state.cursorColumn == 8 -> Color.Yellow
+                step.fx3Type == 0x00 -> Color(0xFF444444)
+                else -> Color.Cyan
+            },
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        // COLUMN 9: FX3 VALUE
+        drawBitmapText(
+            text = step.fx3Value.toString(16).padStart(2, '0').uppercase(),
+            x = fx3ValueX,
+            y = textY,
+            scale = scale,
+            color = when {
+                index == state.cursorRow && state.cursorColumn == 9 -> Color.Yellow
+                step.fx3Type == 0x00 -> Color(0xFF444444)
                 else -> Color(0xFFaaaaaa)
             },
             spacing = CHAR_SPACING,
@@ -239,9 +293,14 @@ class PhraseEditorModule : TrackerModule {
      * Phrase columns:
      * 0 = Step number (read-only)
      * 1 = Note (C-0 to B-9, can be empty)
-     * 2 = Volume (00-FF hex byte, A+left/right cycles)
-     * 3 = Instrument (00-FF hex byte, A+left/right cycles)
-     * 4-6 = FX1, FX2, FX3 (read-only for now)
+     * 2 = Volume (00-FF hex byte)
+     * 3 = Instrument (00-FF hex byte)
+     * 4 = FX1 Name (ARP, KIL, OFF, RPT, VOL, ---)
+     * 5 = FX1 Value (00-FF hex byte)
+     * 6 = FX2 Name
+     * 7 = FX2 Value
+     * 8 = FX3 Name
+     * 9 = FX3 Value
      */
     fun getCursorContext(state: PhraseEditorState): CursorContext {
         val step = state.phrase.steps[state.cursorRow]
@@ -262,13 +321,28 @@ class PhraseEditorModule : TrackerModule {
                 CursorContextFactory.volume(step.volume)
             }
 
-            // Column 3: Instrument (0-3)
+            // Column 3: Instrument (0-11)
             3 -> {
                 CursorContextFactory.instrument(step.instrument)
             }
 
-            // Columns 4-6: FX slots (read-only for now)
-            4, 5, 6 -> CursorContextFactory.readOnly()
+            // Column 4: FX1 Name (effect type)
+            4 -> CursorContextFactory.effectType(step.fx1Type, 1)
+
+            // Column 5: FX1 Value (00-FF)
+            5 -> CursorContextFactory.effectValue(step.fx1Value, 1)
+
+            // Column 6: FX2 Name
+            6 -> CursorContextFactory.effectType(step.fx2Type, 2)
+
+            // Column 7: FX2 Value
+            7 -> CursorContextFactory.effectValue(step.fx2Value, 2)
+
+            // Column 8: FX3 Name
+            8 -> CursorContextFactory.effectType(step.fx3Type, 3)
+
+            // Column 9: FX3 Value
+            9 -> CursorContextFactory.effectValue(step.fx3Value, 3)
 
             // Invalid column
             else -> CursorContextFactory.none()
@@ -311,6 +385,33 @@ class PhraseEditorModule : TrackerModule {
                         step.instrument = action.value
                         instrumentController.lastEditedInstrument = action.value
                     }
+                    4 -> {
+                        // FX1 Type: Convert index (0-5) to effect code
+                        val effectTypes = listOf(0x00, 0x0A, 0x0B, 0x0F, 0x12, 0x16)
+                        step.fx1Type = effectTypes.getOrElse(action.value) { 0x00 }
+                    }
+                    5 -> {
+                        // FX1 Value
+                        step.fx1Value = action.value
+                    }
+                    6 -> {
+                        // FX2 Type: Convert index (0-5) to effect code
+                        val effectTypes = listOf(0x00, 0x0A, 0x0B, 0x0F, 0x12, 0x16)
+                        step.fx2Type = effectTypes.getOrElse(action.value) { 0x00 }
+                    }
+                    7 -> {
+                        // FX2 Value
+                        step.fx2Value = action.value
+                    }
+                    8 -> {
+                        // FX3 Type: Convert index (0-5) to effect code
+                        val effectTypes = listOf(0x00, 0x0A, 0x0B, 0x0F, 0x12, 0x16)
+                        step.fx3Type = effectTypes.getOrElse(action.value) { 0x00 }
+                    }
+                    9 -> {
+                        // FX3 Value
+                        step.fx3Value = action.value
+                    }
                 }
             }
             is com.example.pockettracker.core.logic.InputAction.DELETE -> {
@@ -318,6 +419,16 @@ class PhraseEditorModule : TrackerModule {
                     1 -> {
                         // Clear note
                         step.note = Note.EMPTY
+                    }
+                    4, 6, 8 -> {
+                        // Clear effect (A+B on effect type column)
+                        val fxSlot = when (state.cursorColumn) {
+                            4 -> 1  // FX1
+                            6 -> 2  // FX2
+                            8 -> 3  // FX3
+                            else -> 0
+                        }
+                        clearEffect(step, fxSlot)
                     }
                 }
             }

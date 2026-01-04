@@ -227,17 +227,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
         InstrumentController(audioEngine, logger, stateObserver)
     }
 
-    // PlaybackController: Manages all playback operations
-    // PHASE 4: Extracted from MainActivity to separate business logic
-    // PHASE 5: Uses StateObserver for UI reactivity
-    val playbackController = remember {
-        PlaybackController(audioEngine, logger, stateObserver)
-    }
-
-    // EffectProcessor: Processes effects (stub for now, implementation in Milestone 2)
+    // EffectProcessor: Processes effects (Milestone 2 - Kill effect implemented!)
     // PHASE 4: Extracted from MainActivity to separate business logic
     val effectProcessor = remember {
         com.example.pockettracker.core.logic.EffectProcessor(audioBackend, logger)
+    }
+
+    // PlaybackController: Manages all playback operations
+    // PHASE 4: Extracted from MainActivity to separate business logic
+    // PHASE 5: Uses StateObserver for UI reactivity
+    // MILESTONE 2: Now includes EffectProcessor for effects support
+    val playbackController = remember {
+        PlaybackController(audioEngine, effectProcessor, logger, stateObserver)
     }
 
     // ClipboardManager: Handles copy/paste (stub for now, implementation in Milestone 2.5)
@@ -931,7 +932,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         val maxColumn = when (currentScreen) {
                             ScreenType.SONG -> 8     // 8 tracks
                             ScreenType.CHAIN -> 2    // PH + TSP columns
-                            ScreenType.PHRASE -> 6   // Note + Vol + Inst + FX columns
+                            ScreenType.PHRASE -> 9   // Note + Vol + Inst + FX1(name+val) + FX2(name+val) + FX3(name+val) = 10 columns (0-9)
                             else -> 0
                         }
                         // Move right if not at maximum
@@ -1157,15 +1158,20 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 
                     // PHRASE: Quick insert last-used values on empty row
                     ScreenType.PHRASE -> {
-                        val step = project.phrases[currentPhrase].steps[cursorRow]
-                        if (step.isEmpty()) {
-                            // Insert last-used values
-                            step.note = lastEditedNote
-                            step.instrument = instrumentController.lastEditedInstrument
-                            step.volume = lastEditedVolume
-                            projectVersion++
-                            Log.d("QuickInsert", "Inserted phrase step: note=$lastEditedNote, inst=$instrumentController.lastEditedInstrument, vol=$lastEditedVolume")
+                        // Quick-insert only works on Note column (column 1)
+                        // FX columns (4-9) should not trigger note insertion
+                        if (cursorColumn == 1) {
+                            val step = project.phrases[currentPhrase].steps[cursorRow]
+                            if (step.isEmpty()) {
+                                // Insert last-used values
+                                step.note = lastEditedNote
+                                step.instrument = instrumentController.lastEditedInstrument
+                                step.volume = lastEditedVolume
+                                projectVersion++
+                                Log.d("QuickInsert", "Inserted phrase step: note=$lastEditedNote, inst=$instrumentController.lastEditedInstrument, vol=$lastEditedVolume")
+                            }
                         }
+                        // For FX columns, A button behavior is handled by A+direction combos via handleGenericInput
                     }
 
                     // CHAIN: Quick insert last-used phrase + transpose on empty row
@@ -1820,7 +1826,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 instrumentCursorColumn = instrumentCursorColumn,
                 instrumentStatusMessage = instrumentStatusMessage,
                 instrumentStatusSuccess = instrumentStatusSuccess,
-                fileBrowserState = fileBrowserState
+                fileBrowserState = fileBrowserState,
+                effectProcessor = effectProcessor
             )
         } else {
             // PORTRAIT: Buttons below screen
@@ -1848,7 +1855,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 instrumentCursorColumn = instrumentCursorColumn,
                 instrumentStatusMessage = instrumentStatusMessage,
                 instrumentStatusSuccess = instrumentStatusSuccess,
-                fileBrowserState = fileBrowserState
+                fileBrowserState = fileBrowserState,
+                effectProcessor = effectProcessor
             )
         }
     } else {
@@ -1877,7 +1885,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             instrumentCursorColumn = instrumentCursorColumn,
             instrumentStatusMessage = instrumentStatusMessage,
             instrumentStatusSuccess = instrumentStatusSuccess,
-            fileBrowserState = fileBrowserState
+            fileBrowserState = fileBrowserState,
+            effectProcessor = effectProcessor
         )
     }
 }

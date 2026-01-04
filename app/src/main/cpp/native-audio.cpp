@@ -111,6 +111,17 @@ struct ScheduledNote {
     }
 };
 
+// Scheduled kill event (for Kill effect K00)
+struct ScheduledKill {
+    int64_t targetFrame;     // Exact audio frame to trigger kill
+    int trackId;             // Which track to kill (0-7)
+
+    // For priority queue sorting (earliest frame first)
+    bool operator>(const ScheduledKill& other) const {
+        return targetFrame > other.targetFrame;
+    }
+};
+
 // Thread-safe note queue
 // Audio callback pops notes, Kotlin thread pushes notes
 class NoteQueue {
@@ -150,6 +161,51 @@ public:
             queue.pop();
         }
         LOGD("🗑️ Note queue cleared");
+    }
+
+    // Get queue size (for debugging)
+    size_t size() {
+        std::lock_guard<std::mutex> lock(mutex);
+        return queue.size();
+    }
+};
+
+// Thread-safe kill queue (for Kill effect K00)
+class KillQueue {
+private:
+    std::priority_queue<ScheduledKill, std::vector<ScheduledKill>, std::greater<ScheduledKill>> queue;
+    std::mutex mutex;
+
+public:
+    // Schedule a kill event at exact frame
+    void schedule(const ScheduledKill& kill) {
+        std::lock_guard<std::mutex> lock(mutex);
+        queue.push(kill);
+        LOGD("🔪 Scheduled kill: frame=%lld, track=%d", (long long)kill.targetFrame, kill.trackId);
+    }
+
+    // Check if any kill should trigger at or before this frame
+    bool hasKillAt(int64_t currentFrame) {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (queue.empty()) return false;
+        return queue.top().targetFrame <= currentFrame;
+    }
+
+    // Pop the next kill (call only if hasKillAt returns true)
+    ScheduledKill pop() {
+        std::lock_guard<std::mutex> lock(mutex);
+        ScheduledKill kill = queue.top();
+        queue.pop();
+        return kill;
+    }
+
+    // Clear all scheduled kills
+    void clear() {
+        std::lock_guard<std::mutex> lock(mutex);
+        while (!queue.empty()) {
+            queue.pop();
+        }
+        LOGD("🗑️ Kill queue cleared");
     }
 
     // Get queue size (for debugging)
@@ -485,6 +541,18 @@ public:
         for (int32_t frame = 0; frame < numFrames; frame++) {
             int64_t currentFrame = globalFrameCounter + frame;
 
+            // Process all scheduled kill events for this exact frame (BEFORE notes)
+            while (killQueue.hasKillAt(currentFrame)) {
+                ScheduledKill kill = killQueue.pop();
+                // Stop all voices on this track
+                for (int v = 0; v < MAX_VOICES; v++) {
+                    if (voices[v].trackId == kill.trackId && voices[v].isActive) {
+                        voices[v].stop();
+                        LOGD("🔪 Killed track %d at frame %lld", kill.trackId, (long long)currentFrame);
+                    }
+                }
+            }
+
             // Trigger all notes scheduled for this exact frame
             while (noteQueue.hasNoteAt(currentFrame)) {
                 ScheduledNote note = noteQueue.pop();
@@ -696,9 +764,19 @@ public:
         noteQueue.schedule(note);
     }
 
+    // Schedule a kill event (for Kill effect K00)
+    void scheduleKill(int64_t targetFrame, int trackId) {
+        ScheduledKill kill = {
+            .targetFrame = targetFrame,
+            .trackId = trackId
+        };
+        killQueue.schedule(kill);
+    }
+
     // Clear all scheduled notes
     void clearScheduledNotes() {
         noteQueue.clear();
+        killQueue.clear();  // Also clear kill events
     }
 
     // Get waveform data for oscilloscope display
@@ -722,6 +800,7 @@ private:
 
     // PHASE 1: Sample-accurate timing infrastructure
     NoteQueue noteQueue;           // Thread-safe queue of scheduled notes
+    KillQueue killQueue;           // Thread-safe queue of scheduled kill events
     int64_t globalFrameCounter;    // Total frames processed since start
 
     // Oscilloscope waveform buffer (circular buffer for recent output)
@@ -943,6 +1022,20 @@ JNIEXPORT void JNICALL
 Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1stopAll(JNIEnv *env, jobject thiz) {
     if (engine) {
         engine->stopAll();
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1killTrack(JNIEnv *env, jobject thiz, jint trackId) {
+    if (engine) {
+        engine->stopTrack(trackId);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1scheduleKill(JNIEnv *env, jobject thiz, jlong targetFrame, jint trackId) {
+    if (engine) {
+        engine->scheduleKill(targetFrame, trackId);
     }
 }
 

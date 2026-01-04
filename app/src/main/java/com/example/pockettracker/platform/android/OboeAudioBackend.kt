@@ -86,6 +86,16 @@ class OboeAudioBackend : IAudioBackend {
         Log.d(TAG, "⏹️ Stopped all voices")
     }
 
+    override fun killTrack(trackId: Int) {
+        native_killTrack(trackId)
+        Log.d(TAG, "🔪 Killed track $trackId")
+    }
+
+    override fun scheduleKill(frame: Long, trackId: Int) {
+        native_scheduleKill(frame, trackId)
+        Log.d(TAG, "⏱️ Scheduled kill: track $trackId at frame $frame")
+    }
+
     override fun getSampleRate(): Int {
         return native_getSampleRate()
     }
@@ -149,6 +159,8 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_clearScheduledNotes()
     private external fun native_resumeStream()
     private external fun native_stopAll()
+    private external fun native_killTrack(trackId: Int)
+    private external fun native_scheduleKill(frame: Long, trackId: Int)
     private external fun native_getSampleRate(): Int
     private external fun native_getWaveform(outArray: FloatArray)
     private external fun native_setInstrumentParams(

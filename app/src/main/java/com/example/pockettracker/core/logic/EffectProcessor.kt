@@ -124,6 +124,7 @@ class EffectProcessor(
         volume: Float,
         sampleId: Int
     ) {
+        logger.d(TAG, "⚡ applyEffect: type=0x${type.toString(16).uppercase()}, value=0x${value.toString(16).uppercase()}, frame=$frame")
         when (type) {
             FX_ARPEGGIO -> applyArpeggio(value, frame, duration, trackId, frequency, volume, sampleId)
             FX_OFFSET -> applyOffset(value, frame, trackId, frequency, volume, sampleId)
@@ -210,21 +211,19 @@ class EffectProcessor(
     }
 
     /**
-     * Kill: Stop sample immediately.
+     * Kill: Stop sample at exact frame time.
      *
      * Value: Always 00
      * Example: K00 = stop playback on this track
      *
-     * TODO: Implement in Milestone 2
-     * - Add killNote() method to IAudioBackend
-     * - Stop voice on specified track
+     * ✅ IMPLEMENTED - Schedules kill to happen at exact frame time
      */
     private fun applyKill(
         frame: Long,
         trackId: Int
     ) {
-        // Stub - full implementation in Milestone 2
-        logger.d(TAG, "⏳ Kill effect stub (implementation pending)")
+        audioBackend.scheduleKill(frame, trackId)
+        logger.d(TAG, "🔪 Kill effect: Track $trackId scheduled to stop at frame $frame")
     }
 
     /**

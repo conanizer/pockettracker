@@ -306,6 +306,13 @@ class AudioEngine(
     }
 
     /**
+     * Kill a specific track's voice (for K00 Kill effect).
+     */
+    fun killTrack(trackId: Int) {
+        backend.killTrack(trackId)
+    }
+
+    /**
      * Get current audio frame counter (for sample-accurate scheduling).
      */
     fun getCurrentFrame(): Long = backend.getCurrentFrame()
