@@ -10,6 +10,129 @@ This file tracks development sessions with Claude Code to maintain context acros
 
 ---
 
+## Session 2026-01-10: Effect Architecture Cleanup & Code Audit
+
+### Context
+- OFFSET, VOLUME, KILL effects were implemented but code was scattered
+- PixelPerfectRenderer had duplicate playback code (~150 lines)
+- `effectTypes` list was duplicated in 5 places
+- EffectProcessor had old `applyEffects()` system no longer used
+- MainActivity has duplicate state variables that should be in TrackerController
+
+### What Was Accomplished ✅
+
+#### 1. Centralized Effect Resolution
+- Created `ResolvedStepParams` data class in EffectProcessor
+- Created `resolveStepParams()` function - SINGLE SOURCE OF TRUTH for effect resolution
+- Added `EFFECT_TYPES` constant list to EffectProcessor companion object
+- Replaced all 5 hardcoded `effectTypes` lists across codebase
+
+#### 2. Unified Step Scheduling
+- Created `scheduleStepWithEffects()` in PlaybackController
+- Handles note scheduling + all effect resolution in one place
+- Added `scheduleKill()` to AudioEngine and IAudioBackend
+
+#### 3. Wired PixelPerfectRenderer to PlaybackController
+- Replaced Phrase scheduling (~50 lines) with playbackController call
+- Replaced Chain scheduling (~50 lines) with playbackController call
+- Replaced Song scheduling (~70 lines) with playbackController call
+- Removed ~150 lines of duplicate effect handling code
+
+#### 4. Updated Parameter Flow
+- ScreenLayouts.kt: Changed from `effectProcessor` param to `playbackController`
+- MainActivity.kt: Updated all layout calls to pass `playbackController`
+
+### Commit
+`91550d3` - [Milestone 2] Centralize effect architecture - OFFSET, VOLUME, KILL working
+
+### Code Audit Started (NOT COMPLETE)
+
+#### Dead Code Identified in EffectProcessor.kt (~100 lines to delete)
+```kotlin
+// ALL OF THESE ARE DEAD - never called after refactoring:
+fun applyEffects()           // lines 176-226
+private fun applyEffect()    // lines 231-252
+private fun applyArpeggio()  // lines 270-281
+private fun applyOffset()    // lines 293-303
+private fun applyVolume()    // lines 315-325
+private fun applyKill()      // lines 335-341
+private fun applyRepeat()    // lines 353-364
+```
+
+#### Duplicate State in MainActivity.kt
+These `by remember` variables duplicate TrackerController state:
+- `cursorRow`, `cursorColumn`
+- `currentScreen`
+- `currentChain`, `currentPhrase`
+- `lastEditedPhrase`, `lastEditedChain`, `lastEditedNote`, `lastEditedVolume`, `lastEditedTranspose`
+- `projectCursorRow`, `projectCursorColumn`
+
+**Pattern exists** at lines 1791-1798 for instrument properties:
+```kotlin
+val isPlaying = stateVersion.let { playbackController.isPlaying }
+```
+This pattern should be used for ALL state owned by controllers.
+
+### Files Modified This Session
+- `EffectProcessor.kt` - Added ResolvedStepParams, EFFECT_TYPES, resolveStepParams()
+- `PlaybackController.kt` - Updated scheduleStepWithEffects()
+- `AudioEngine.kt` - Added scheduleKill()
+- `IAudioBackend.kt` - Added scheduleKill()
+- `OboeAudioBackend.kt` - Added scheduleKill()
+- `CursorContext.kt` - Use EffectProcessor.EFFECT_TYPES
+- `EditorHelpers.kt` - Use EffectProcessor.EFFECT_TYPES
+- `PhraseEditorModule.kt` - Use EffectProcessor.EFFECT_TYPES (3 places)
+- `PixelPerfectRenderer.kt` - Use playbackController for all playback
+- `ScreenLayouts.kt` - playbackController param instead of effectProcessor
+- `MainActivity.kt` - Pass playbackController to layouts
+
+### NEXT SESSION TODO (Code Cleanup)
+
+#### Task 1: Delete Dead Code from EffectProcessor.kt
+Delete these functions (lines 176-364, ~100 lines):
+- `applyEffects()`
+- `applyEffect()`
+- `applyArpeggio()`
+- `applyOffset()`
+- `applyVolume()`
+- `applyKill()`
+- `applyRepeat()`
+
+#### Task 2: Consolidate MainActivity State to Controllers
+Replace `by remember { mutableStateOf }` with `stateVersion.let { controller.property }`:
+
+1. `cursorRow`, `cursorColumn` → `trackerController.cursorRow/cursorColumn`
+2. `currentScreen` → `trackerController.currentScreen`
+3. `currentChain`, `currentPhrase` → `trackerController.currentChain/currentPhrase`
+4. `lastEditedPhrase`, etc. → `trackerController.lastEditedPhrase`, etc.
+5. `projectCursorRow`, `projectCursorColumn` → `trackerController.projectCursorRow/projectCursorColumn`
+
+Pattern to follow (already used for instrument):
+```kotlin
+val cursorRow = stateVersion.let { trackerController.cursorRow }
+```
+
+This requires:
+- Removing duplicate `by remember` declarations
+- Updating all reads to use controller properties
+- Updating all writes to call controller setters (e.g., `trackerController.setCursor(row, col)`)
+
+#### Task 3: Check Other Core Files for Unused Code
+Files to audit:
+- `InputController.kt` - Check for unused functions
+- `ClipboardManager.kt` - May be all stubs
+- `FileController.kt` - Check what's actually used
+- `TrackerController.kt` - Check for unused delegation functions
+
+### Lessons Learned
+
+1. **Single Source of Truth** - `resolveStepParams()` is now the one place for effect resolution
+2. **Delegate to Controllers** - PixelPerfectRenderer shouldn't have playback logic
+3. **State Duplication is Tech Debt** - MainActivity has ~20 variables that duplicate controller state
+4. **Pattern Established** - `stateVersion.let { controller.prop }` triggers Compose recomposition
+
+---
+
 ## Session 2026-01-03: Phase 1 Refactoring - Platform-Agnostic Architecture
 
 ### Context

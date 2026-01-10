@@ -1,7 +1,7 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-01-03
+2026-01-10
 
 ## Current Phase
 **Phase A Complete** → **Architecture Refactoring (Phases 1-3 Complete ✅)** → Phase 4 → Effects System → Copy/Paste → MVP Release
@@ -231,13 +231,15 @@
 
 **See:** `REFACTORING_ROADMAP.md` for detailed step-by-step guide
 
-### 2. Effects System (1-2 weeks) ⚠️
+### 2. Effects System (1-2 weeks) 🚧
 **TOP-5 Effects in PHRASE screen only:**
-- [ ] Arpeggio (Axx) - Note pattern automation
-- [ ] Offset (Oxx) - Sample start point
-- [ ] Volume (Vxx) - Volume automation
-- [ ] Kill (K00) - Stop sample immediately
-- [ ] Repeat (Rxx) - Retrigger within step
+- [ ] Arpeggio (Axx) - Note pattern automation (stub ready)
+- [x] Offset (Oxx) - Sample start point ✅ WORKING
+- [x] Volume (Vxx) - Volume automation ✅ WORKING
+- [x] Kill (K00) - Stop sample immediately ✅ WORKING
+- [ ] Repeat (Rxx) - Retrigger within step (stub ready)
+
+**Architecture:** Centralized in EffectProcessor.resolveStepParams() (2026-01-10)
 
 **Table screen effects:** Early Post-MVP
 
@@ -329,10 +331,15 @@ Planned global settings:
 **Result:** Codebase is now portable and ready for Linux port! 🎉
 
 ### This Week:
-1. **Start Effects System** (Milestone 2) ← **YOU ARE HERE**
-   - Read `MVP_ROADMAP.md` Milestone 2
-   - Implement TOP-5 effects in phrase screen
-   - Arpeggio (Axx), Offset (Oxx), Volume (Vxx), Kill (K00), Repeat (Rxx)
+1. **Code Cleanup** ← **YOU ARE HERE**
+   - Delete dead code from EffectProcessor (~100 lines of unused applyEffects system)
+   - Consolidate MainActivity state to TrackerController (remove duplicates)
+   - See SESSION_HISTORY.md "Session 2026-01-10" for detailed task list
+
+2. **Finish Effects System** (Milestone 2)
+   - Implement ARPEGGIO (Axx) - stubs ready in EffectProcessor
+   - Implement REPEAT (Rxx) - stubs ready in EffectProcessor
+   - OFFSET, VOLUME, KILL already working ✅
 
 ### Next 2 Weeks:
 2. **Copy/Paste System** (Milestone 2.5)
@@ -397,9 +404,25 @@ Week 9:         Documentation & video
 
 When starting work:
 1. Read `DEVELOPMENT_STATUS.md` (this file) - know current progress
-2. Read `REFACTORING_ROADMAP.md` - understand current phase
+2. Read `SESSION_HISTORY.md` - see recent session details and pending tasks
 3. Read `MVP_ROADMAP.md` - see complete path to MVP
-4. Start with current task (currently: Refactoring Phase 4)
 
-**Current task:** Phase 4 - Business Logic Extraction
-**See:** `REFACTORING_ROADMAP.md` Phase 4 for step-by-step instructions
+**Current task:** Code Cleanup (dead code removal + state consolidation)
+**See:** `SESSION_HISTORY.md` "Session 2026-01-10" for detailed TODO list
+
+### Next Session Quick Start
+
+1. **Delete dead code from EffectProcessor.kt** (lines 176-364):
+   - `applyEffects()`, `applyEffect()`, `applyArpeggio()`, `applyOffset()`,
+   - `applyVolume()`, `applyKill()`, `applyRepeat()`
+
+2. **Consolidate MainActivity state** - replace `by remember` with controller reads:
+   ```kotlin
+   // BEFORE (duplicate state):
+   var cursorRow by remember { mutableIntStateOf(0) }
+
+   // AFTER (read from controller):
+   val cursorRow = stateVersion.let { trackerController.cursorRow }
+   ```
+
+3. **Then implement remaining effects**: ARPEGGIO (Axx), REPEAT (Rxx)
