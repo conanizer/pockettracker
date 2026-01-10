@@ -1,5 +1,7 @@
 package com.example.pockettracker
 
+import com.example.pockettracker.core.logic.EffectProcessor
+
 /**
  * EDITOR HELPERS
  *
@@ -50,8 +52,8 @@ fun cycleInstrument(step: PhraseStep, direction: Int) {
  * @param direction +1 to go to next effect, -1 to go to previous
  */
 fun cycleEffectType(step: PhraseStep, fxSlot: Int, direction: Int) {
-    // Effect types: NONE(0x00), Arpeggio(0x0A), Kill(0x0B), Offset(0x0F), Repeat(0x12), Volume(0x16)
-    val effectTypes = listOf(0x00, 0x0A, 0x0B, 0x0F, 0x12, 0x16)
+    // Use centralized effect types list from EffectProcessor
+    val effectTypes = EffectProcessor.EFFECT_TYPES
 
     val currentType = when (fxSlot) {
         1 -> step.fx1Type

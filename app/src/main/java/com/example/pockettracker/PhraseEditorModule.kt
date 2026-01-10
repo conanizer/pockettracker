@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.example.pockettracker.core.logic.EffectProcessor
 
 
 /**
@@ -386,27 +387,24 @@ class PhraseEditorModule : TrackerModule {
                         instrumentController.lastEditedInstrument = action.value
                     }
                     4 -> {
-                        // FX1 Type: Convert index (0-5) to effect code
-                        val effectTypes = listOf(0x00, 0x0A, 0x0B, 0x0F, 0x12, 0x16)
-                        step.fx1Type = effectTypes.getOrElse(action.value) { 0x00 }
+                        // FX1 Type: Convert index to effect code
+                        step.fx1Type = EffectProcessor.EFFECT_TYPES.getOrElse(action.value) { EffectProcessor.FX_NONE }
                     }
                     5 -> {
                         // FX1 Value
                         step.fx1Value = action.value
                     }
                     6 -> {
-                        // FX2 Type: Convert index (0-5) to effect code
-                        val effectTypes = listOf(0x00, 0x0A, 0x0B, 0x0F, 0x12, 0x16)
-                        step.fx2Type = effectTypes.getOrElse(action.value) { 0x00 }
+                        // FX2 Type: Convert index to effect code
+                        step.fx2Type = EffectProcessor.EFFECT_TYPES.getOrElse(action.value) { EffectProcessor.FX_NONE }
                     }
                     7 -> {
                         // FX2 Value
                         step.fx2Value = action.value
                     }
                     8 -> {
-                        // FX3 Type: Convert index (0-5) to effect code
-                        val effectTypes = listOf(0x00, 0x0A, 0x0B, 0x0F, 0x12, 0x16)
-                        step.fx3Type = effectTypes.getOrElse(action.value) { 0x00 }
+                        // FX3 Type: Convert index to effect code
+                        step.fx3Type = EffectProcessor.EFFECT_TYPES.getOrElse(action.value) { EffectProcessor.FX_NONE }
                     }
                     9 -> {
                         // FX3 Value

@@ -1,5 +1,7 @@
 package com.example.pockettracker
 
+import com.example.pockettracker.core.logic.EffectProcessor
+
 /**
  * CURSOR CONTEXT SYSTEM
  *
@@ -219,8 +221,8 @@ object CursorContextFactory {
      * @param fxSlot Which FX slot (1, 2, or 3) - used to identify which effect to modify
      */
     fun effectType(currentType: Int, fxSlot: Int): CursorContext {
-        // Effect types list: NONE(0x00), Arpeggio(0x0A), Kill(0x0B), Offset(0x0F), Repeat(0x12), Volume(0x16)
-        val effectTypes = listOf(0x00, 0x0A, 0x0B, 0x0F, 0x12, 0x16)
+        // Use centralized effect types list from EffectProcessor
+        val effectTypes = EffectProcessor.EFFECT_TYPES
         val currentIndex = effectTypes.indexOf(currentType).takeIf { it >= 0 } ?: 0
 
         return CursorContext(
@@ -228,12 +230,12 @@ object CursorContextFactory {
             capabilities = CursorCapabilities(
                 canIncrement = true,     // Cycle to next effect type
                 canDecrement = true,     // Cycle to previous effect type
-                canDelete = currentType != 0x00,  // A+B clears effect (but only if not already NONE)
-                isEmpty = currentType == 0x00
+                canDelete = currentType != EffectProcessor.FX_NONE,  // A+B clears effect (but only if not already NONE)
+                isEmpty = currentType == EffectProcessor.FX_NONE
             ),
             currentValue = currentIndex,  // Store as index (0-5), not effect code
             minValue = 0,
-            maxValue = 5,  // 6 effect types total (including NONE)
+            maxValue = effectTypes.size - 1,  // Dynamic based on list size
             smallStep = 1,
             fxSlot = fxSlot  // Store which FX slot this is for
         )

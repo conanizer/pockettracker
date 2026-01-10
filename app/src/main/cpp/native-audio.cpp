@@ -104,6 +104,7 @@ struct ScheduledNote {
     float frequency;         // Target playback frequency
     float baseFrequency;     // Sample's base frequency
     float volume;            // Playback volume (0.0-1.0)
+    int startPointOverride;  // Optional start point override (-1 = use instrument default)
 
     // For priority queue sorting (earliest frame first)
     bool operator>(const ScheduledNote& other) const {
@@ -281,7 +282,7 @@ struct Voice {
               x1(0.0f), x2(0.0f), y1(0.0f), y2(0.0f) {}
 
     void trigger(float* sample, int length, int track, float rate, float vol,
-                 const InstrumentParams& params, float sampleRate) {
+                 const InstrumentParams& params, float sampleRate, int startPointOverride = -1) {
         sampleData = sample;
         sampleLength = length;
         trackId = track;
@@ -289,7 +290,9 @@ struct Voice {
         volume = vol;
 
         // Convert normalized 0-255 values to actual sample positions
-        actualStart = (params.startPoint * length) / 255;
+        // Use startPointOverride if provided (Offset effect), otherwise use instrument default
+        int effectiveStartPoint = (startPointOverride >= 0) ? startPointOverride : params.startPoint;
+        actualStart = (effectiveStartPoint * length) / 255;
         actualEnd = (params.endPoint * length) / 255;
         actualLoopStart = (params.loopStart * length) / 255;
 
@@ -575,10 +578,10 @@ public:
                             float sampleRate = (float)audioStream->getSampleRate();
                             voices[v].trigger(samples[note.sampleId], sampleLengths[note.sampleId],
                                             note.trackId, rate, note.volume, instrumentParams[note.sampleId],
-                                            sampleRate);
+                                            sampleRate, note.startPointOverride);
                             voiceFound = true;
-                            LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f",
-                                 (long long)currentFrame, note.sampleId, note.trackId, rate);
+                            LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, startOverride=%d",
+                                 (long long)currentFrame, note.sampleId, note.trackId, rate, note.startPointOverride);
                         }
                         break;
                     }
@@ -752,14 +755,15 @@ public:
 
     // Schedule a note to be played at exact frame
     void scheduleNote(int64_t targetFrame, int sampleId, int trackId,
-                     float frequency, float baseFrequency, float volume) {
+                     float frequency, float baseFrequency, float volume, int startPointOverride = -1) {
         ScheduledNote note = {
             .targetFrame = targetFrame,
             .sampleId = sampleId,
             .trackId = trackId,
             .frequency = frequency,
             .baseFrequency = baseFrequency,
-            .volume = volume
+            .volume = volume,
+            .startPointOverride = startPointOverride
         };
         noteQueue.schedule(note);
     }
@@ -990,9 +994,9 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1loadSam
 JNIEXPORT void JNICALL
 Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1scheduleNote(
         JNIEnv *env, jobject thiz, jlong targetFrame, jint sampleId, jint trackId,
-        jfloat frequency, jfloat baseFrequency, jfloat volume) {
+        jfloat frequency, jfloat baseFrequency, jfloat volume, jint startPointOverride) {
     if (engine) {
-        engine->scheduleNote(targetFrame, sampleId, trackId, frequency, baseFrequency, volume);
+        engine->scheduleNote(targetFrame, sampleId, trackId, frequency, baseFrequency, volume, startPointOverride);
     }
 }
 

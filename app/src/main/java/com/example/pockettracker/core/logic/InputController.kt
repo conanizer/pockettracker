@@ -13,8 +13,7 @@ import com.example.pockettracker.core.logging.ILogger
  * ✅ PLATFORM-AGNOSTIC - No Android dependencies!
  *
  * Philosophy:
- * - A button = increase/edit value
- * - B button = decrease value
+ * - A button = increase/decrease/edit value
  * - A+B = delete/clear
  * - A+A = create new item
  * - SELECT+B = enter/exit selection mode (for copy/paste)

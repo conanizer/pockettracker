@@ -1,5 +1,6 @@
 package com.example.pockettracker.core.logic
 
+import com.example.pockettracker.Note
 import com.example.pockettracker.Project
 import com.example.pockettracker.ScreenType
 import com.example.pockettracker.core.storage.FileInfo
@@ -83,6 +84,62 @@ class TrackerController(
             field = value
             stateObserver.onStateChanged()
         }
+
+    // === NEW STATE (moved from MainActivity) ===
+    // Navigation
+    var previousColumn = 2
+        private set
+
+    // Cursor positions
+    var cursorRow = 0
+        private set
+
+    var cursorColumn = 1
+        private set
+
+    // Project screen cursor
+    var projectCursorRow = 0
+        private set
+
+    var projectCursorColumn = 1
+        private set
+
+    // Instrument screen cursor
+    var instrumentCursorRow = 0
+        private set
+
+    var instrumentCursorColumn = 1
+        private set
+
+    // Current editing context
+    var currentChain = 0
+        private set
+
+    var currentPhrase = 0
+        private set
+
+    // Last edited values (for quick insert)
+    var lastEditedPhrase = 0
+        private set
+
+    var lastEditedChain = 0
+        private set
+
+    var lastEditedNote = Note.fromString("C-4")
+        private set
+
+    var lastEditedVolume = 0xFF
+        private set
+
+    var lastEditedTranspose = 0
+        private set
+
+    // Instrument references
+    var currentInstrument = 0
+        private set
+
+    var lastEditedInstrument = 0
+        private set
 
     // ========================================
     // FILE OPERATIONS (delegate to FileController)
@@ -307,6 +364,7 @@ class TrackerController(
      */
     fun clearStatus() {
         statusMessage = ""
+        statusSuccess = true
     }
 
     // ========================================
@@ -503,5 +561,61 @@ class TrackerController(
         val defaultRow = getMinEditableRow(screenType)
         val defaultColumn = getMinEditableColumn(screenType)
         return Pair(defaultRow, defaultColumn)
+    }
+
+    // === SIMPLE SETTER METHODS ===
+    fun setCursor(row: Int, column: Int) {
+        cursorRow = row
+        cursorColumn = column
+        notifyStateChanged()
+    }
+
+    fun setProjectCursor(row: Int, column: Int) {
+        projectCursorRow = row
+        projectCursorColumn = column
+        notifyStateChanged()
+    }
+
+    fun setInstrumentCursor(row: Int, column: Int) {
+        instrumentCursorRow = row
+        instrumentCursorColumn = column
+        notifyStateChanged()
+    }
+
+    fun setCurrentChain(chain: Int) {
+        currentChain = chain
+        lastEditedChain = chain
+        notifyStateChanged()
+    }
+
+    fun setCurrentPhrase(phrase: Int) {
+        currentPhrase = phrase
+        lastEditedPhrase = phrase
+        notifyStateChanged()
+    }
+
+    fun setCurrentInstrument(instrument: Int) {
+        currentInstrument = instrument
+        lastEditedInstrument = instrument
+        notifyStateChanged()
+    }
+
+    fun updateLastEditedNote(note: Note) {
+        lastEditedNote = note
+    }
+
+    fun updateLastEditedVolume(volume: Int) {
+        lastEditedVolume = volume
+    }
+
+    fun updateLastEditedTranspose(transpose: Int) {
+        lastEditedTranspose = transpose
+    }
+
+
+    // === PRIVATE HELPER ===
+    private fun notifyStateChanged() {
+        projectVersion++
+        stateObserver.onStateChanged()
     }
 }

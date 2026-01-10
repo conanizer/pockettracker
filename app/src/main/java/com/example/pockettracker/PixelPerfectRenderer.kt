@@ -41,6 +41,7 @@ fun PixelPerfectTracker(
     currentScreen: ScreenType,
     project: Project,
     audioEngine: AudioEngine,
+    playbackController: com.example.pockettracker.core.logic.PlaybackController,
     cursorRow: Int,
     cursorColumn: Int,
     isPlaying: Boolean,
@@ -57,8 +58,7 @@ fun PixelPerfectTracker(
     instrumentCursorColumn: Int,
     instrumentStatusMessage: String,
     instrumentStatusSuccess: Boolean,
-    fileBrowserState: FileBrowserModule.State? = null,
-    effectProcessor: com.example.pockettracker.core.logic.EffectProcessor? = null
+    fileBrowserState: FileBrowserModule.State? = null
 ) {
     android.util.Log.d("PixelPerfectTracker", "==== PixelPerfectTracker called ====")
     android.util.Log.d("PixelPerfectTracker", "Screen: $currentScreen")
@@ -109,38 +109,21 @@ fun PixelPerfectTracker(
                             var nextPhraseStartFrame = playbackStartFrame
 
                             // Helper function to schedule a single phrase
+                            // Uses PlaybackController for proper effect resolution
                             fun schedulePhrase(startFrame: Long) {
                                 for (step in 0..15) {
                                     val targetFrame = startFrame + (step * framesPerStep)
                                     val phraseStep = project.phrases[currentPhrase].steps[step]
 
-                                    // Schedule note if step has one
-                                    if (!phraseStep.isEmpty()) {
-                                        audioEngine.scheduleNote(
-                                            targetFrame = targetFrame,
-                                            note = phraseStep.note,
-                                            instrumentId = phraseStep.instrument,
-                                            trackId = 0,
-                                            volume = phraseStep.volume / 255f,
-                                            project = project
-                                        )
-                                    }
-
-                                    // Process effects (ALWAYS - effects affect STEPS not NOTES!)
-                                    if (phraseStep.fx1Type != 0x00 || phraseStep.fx2Type != 0x00 || phraseStep.fx3Type != 0x00) {
-                                        val instrument = project.instruments[phraseStep.instrument]
-                                        val sampleId = instrument.sampleId
-
-                                        effectProcessor?.applyEffects(
-                                            step = phraseStep,
-                                            baseFrame = targetFrame,
-                                            stepDuration = framesPerStep,
-                                            trackId = 0,
-                                            baseFrequency = phraseStep.note.toFrequency(),
-                                            baseVolume = phraseStep.volume / 255.0f,
-                                            sampleId = sampleId
-                                        )
-                                    }
+                                    // Use PlaybackController for scheduling with effect resolution
+                                    playbackController.scheduleStepWithEffects(
+                                        step = phraseStep,
+                                        targetFrame = targetFrame,
+                                        stepDuration = framesPerStep,
+                                        trackId = 0,
+                                        transposeSemitones = 0,
+                                        project = project
+                                    )
                                 }
                             }
 
@@ -210,6 +193,7 @@ fun PixelPerfectTracker(
                             }
 
                             // Helper function to schedule a single phrase from chain
+                            // Uses PlaybackController for proper effect resolution
                             fun scheduleChainPhrase(startFrame: Long, chainRow: Int) {
                                 val phraseRef = chain.phraseRefs[chainRow]
                                 val transposeSemitones = chain.getTransposeSemitones(chainRow)
@@ -218,23 +202,15 @@ fun PixelPerfectTracker(
                                     val targetFrame = startFrame + (step * framesPerStep)
                                     val phraseStep = project.phrases[phraseRef].steps[step]
 
-                                    if (!phraseStep.isEmpty()) {
-                                        // Apply transpose to the note
-                                        val originalMidi = phraseStep.note.toMidi()
-                                        if (originalMidi >= 0) {
-                                            val transposedMidi = (originalMidi + transposeSemitones).coerceIn(0, 127)
-                                            val transposedNote = Note.fromMidi(transposedMidi)
-
-                                            audioEngine.scheduleNote(
-                                                targetFrame = targetFrame,
-                                                note = transposedNote,
-                                                instrumentId = phraseStep.instrument,
-                                                trackId = 0,
-                                                volume = phraseStep.volume / 255f,
-                                                project = project
-                                            )
-                                        }
-                                    }
+                                    // Use PlaybackController for scheduling with effect resolution
+                                    playbackController.scheduleStepWithEffects(
+                                        step = phraseStep,
+                                        targetFrame = targetFrame,
+                                        stepDuration = framesPerStep,
+                                        trackId = 0,
+                                        transposeSemitones = transposeSemitones,
+                                        project = project
+                                    )
                                 }
                             }
 
@@ -347,6 +323,7 @@ fun PixelPerfectTracker(
                             }
 
                             // Helper function to schedule one phrase for all tracks
+                            // Uses PlaybackController for proper effect resolution
                             fun scheduleAllTracksAtPosition(startFrame: Long, songRow: Int, chainRow: Int) {
                                 for (trackId in 0..7) {
                                     val track = project.tracks[trackId]
@@ -358,28 +335,20 @@ fun PixelPerfectTracker(
                                                 val phraseRef = chain.phraseRefs[chainRow]
                                                 val transposeSemitones = chain.getTransposeSemitones(chainRow)
 
-                                                // Schedule all 16 steps for this track
+                                                // Schedule all 16 steps for this track using PlaybackController
                                                 for (step in 0..15) {
                                                     val targetFrame = startFrame + (step * framesPerStep)
                                                     val phraseStep = project.phrases[phraseRef].steps[step]
 
-                                                    if (!phraseStep.isEmpty()) {
-                                                        // Apply transpose to the note
-                                                        val originalMidi = phraseStep.note.toMidi()
-                                                        if (originalMidi >= 0) {
-                                                            val transposedMidi = (originalMidi + transposeSemitones).coerceIn(0, 127)
-                                                            val transposedNote = Note.fromMidi(transposedMidi)
-
-                                                            audioEngine.scheduleNote(
-                                                                targetFrame = targetFrame,
-                                                                note = transposedNote,
-                                                                instrumentId = phraseStep.instrument,
-                                                                trackId = trackId,  // Use actual trackId for voice assignment
-                                                                volume = phraseStep.volume / 255f,
-                                                                project = project
-                                                            )
-                                                        }
-                                                    }
+                                                    // Use PlaybackController for scheduling with effect resolution
+                                                    playbackController.scheduleStepWithEffects(
+                                                        step = phraseStep,
+                                                        targetFrame = targetFrame,
+                                                        stepDuration = framesPerStep,
+                                                        trackId = trackId,
+                                                        transposeSemitones = transposeSemitones,
+                                                        project = project
+                                                    )
                                                 }
                                             }
                                         }

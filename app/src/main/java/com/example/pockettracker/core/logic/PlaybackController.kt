@@ -1,6 +1,7 @@
 package com.example.pockettracker.core.logic
 
 import com.example.pockettracker.Note
+import com.example.pockettracker.PhraseStep
 import com.example.pockettracker.Project
 import com.example.pockettracker.core.audio.AudioEngine
 import com.example.pockettracker.core.logging.ILogger
@@ -129,49 +130,24 @@ class PlaybackController(
         val msPerStep = (60000.0 / tempo / 4.0)  // 4 steps per beat
         val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
 
-        // Schedule all 16 steps
+        // Schedule all 16 steps using the unified helper
         var scheduledNotes = 0
         phrase.steps.forEachIndexed { stepIndex, step ->
-            // Calculate when this step should trigger (always, even if empty)
             val targetFrame = audioEngine.calculateTargetFrame(startFrame, stepIndex, tempo)
 
-            // Schedule note if step has one
-            if (!step.isEmpty()) {
-                // Get instrument and sample info
-                val instrument = project.instruments[step.instrument]
-                val sampleId = instrument.sampleId
+            // Use unified helper for scheduling + effects
+            val noteScheduled = scheduleStepWithEffects(
+                step = step,
+                targetFrame = targetFrame,
+                stepDuration = framesPerStep,
+                trackId = 0,  // Single track for phrase playback
+                transposeSemitones = 0,  // No transpose for phrase playback
+                project = project
+            )
 
-                // Schedule the note
-                audioEngine.scheduleNote(
-                    targetFrame = targetFrame,
-                    note = step.note,
-                    instrumentId = step.instrument,
-                    trackId = 0,  // Single track for phrase playback
-                    volume = step.volume / 255.0f,
-                    project = project
-                )
-
+            if (noteScheduled) {
                 scheduledNotes++
                 logger.d(TAG, "  Step $stepIndex: ${step.note} I:${step.instrument.toString(16).uppercase()} V:${step.volume.toString(16).uppercase()} @ frame $targetFrame")
-            }
-
-            // Apply effects (ALWAYS - effects affect STEPS not NOTES!)
-            // This allows effects like Kill to work even on empty steps
-            if (step.fx1Type != 0x00 || step.fx2Type != 0x00 || step.fx3Type != 0x00) {
-                val instrument = project.instruments[step.instrument]
-                val sampleId = instrument.sampleId
-
-                logger.d(TAG, "  Step $stepIndex EFFECTS: FX1=0x${step.fx1Type.toString(16).uppercase()} FX2=0x${step.fx2Type.toString(16).uppercase()} FX3=0x${step.fx3Type.toString(16).uppercase()}")
-
-                effectProcessor.applyEffects(
-                    step = step,
-                    baseFrame = targetFrame,
-                    stepDuration = framesPerStep,
-                    trackId = 0,
-                    baseFrequency = step.note.toFrequency(),
-                    baseVolume = step.volume / 255.0f,
-                    sampleId = sampleId
-                )
             }
         }
 
@@ -182,43 +158,170 @@ class PlaybackController(
     }
 
     /**
-     * Play a chain (16 phrases with transpose)
+     * Play a chain (16 phrase slots with transpose)
      *
-     * TODO: Implement chain playback
-     * - Schedule phrase sequences with transpose values
-     * - Handle phrase transitions smoothly
-     * - Apply per-phrase transpose
-     * - 2-phrase lookahead buffering
+     * Schedules all non-empty phrase slots in the chain sequentially.
+     * Each phrase is 16 steps, and transpose is applied per-slot.
      *
      * @param project Project containing chain data
      * @param chainId Which chain to play (0-255)
-     * @param loop Whether to loop playback
+     * @param loop Whether to loop playback (not implemented yet)
      */
     fun playChain(project: Project, chainId: Int, loop: Boolean = true) {
-        logger.w(TAG, "⚠️ playChain() not yet implemented - stub only")
-        playbackMode = PlaybackMode.CHAIN
+        logger.d(TAG, "▶️ Playing chain $chainId (tempo: ${project.tempo} BPM)")
 
-        // TODO: Implement chain playback logic
+        // Stop any current playback
+        stop()
+
+        // Validate chain ID
+        if (chainId !in 0..255) {
+            logger.e(TAG, "Invalid chainId: $chainId")
+            return
+        }
+
+        val chain = project.chains[chainId]
+        playbackMode = PlaybackMode.CHAIN
+        isPlaying = true
+
+        // Get timing information
+        val startFrame = audioEngine.getCurrentFrame()
+        val tempo = project.tempo
+        val sampleRate = audioEngine.getDeviceSampleRate()
+        val msPerStep = (60000.0 / tempo / 4.0)  // 4 steps per beat
+        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+        val framesPerPhrase = framesPerStep * 16  // 16 steps per phrase
+
+        logger.d(TAG, "Start frame: $startFrame, Tempo: $tempo BPM, Frames per phrase: $framesPerPhrase")
+
+        // Schedule all non-empty chain rows
+        var scheduledNotes = 0
+        var phraseOffset = 0L  // Cumulative frame offset for each phrase
+
+        for (chainRow in 0..15) {
+            if (chain.isEmpty(chainRow)) continue
+
+            val phraseId = chain.phraseRefs[chainRow]
+            val transposeSemitones = chain.getTransposeSemitones(chainRow)
+            val phrase = project.phrases[phraseId]
+
+            logger.d(TAG, "  Chain row $chainRow: Phrase $phraseId, transpose=$transposeSemitones")
+
+            // Schedule all 16 steps of this phrase
+            for (stepIndex in 0..15) {
+                val step = phrase.steps[stepIndex]
+                val targetFrame = startFrame + phraseOffset + (stepIndex * framesPerStep)
+
+                val noteScheduled = scheduleStepWithEffects(
+                    step = step,
+                    targetFrame = targetFrame,
+                    stepDuration = framesPerStep,
+                    trackId = 0,  // Single track for chain playback
+                    transposeSemitones = transposeSemitones,
+                    project = project
+                )
+
+                if (noteScheduled) scheduledNotes++
+            }
+
+            phraseOffset += framesPerPhrase
+        }
+
+        logger.d(TAG, "✅ Scheduled $scheduledNotes notes from chain $chainId")
+
+        // TODO: Implement looping
     }
 
     /**
      * Play song (8 tracks polyphonic)
      *
-     * TODO: Implement song playback
-     * - Schedule all 8 tracks simultaneously
-     * - Per-track voice allocation
-     * - Handle chain sequences per track
-     * - Continuous buffering with lookahead
+     * Schedules all 8 tracks simultaneously. Each track plays its chain sequence,
+     * with proper voice allocation (trackId 0-7).
      *
      * @param project Project containing song data
-     * @param startRow Which row to start from
-     * @param loop Whether to loop playback
+     * @param startRow Which song row to start from (index into each track's chainRefs)
+     * @param loop Whether to loop playback (not implemented yet)
      */
     fun playSong(project: Project, startRow: Int = 0, loop: Boolean = true) {
-        logger.w(TAG, "⚠️ playSong() not yet implemented - stub only")
-        playbackMode = PlaybackMode.SONG
+        logger.d(TAG, "▶️ Playing song from row $startRow (tempo: ${project.tempo} BPM)")
 
-        // TODO: Implement song playback logic
+        // Stop any current playback
+        stop()
+
+        playbackMode = PlaybackMode.SONG
+        isPlaying = true
+
+        // Get timing information
+        val startFrame = audioEngine.getCurrentFrame()
+        val tempo = project.tempo
+        val sampleRate = audioEngine.getDeviceSampleRate()
+        val msPerStep = (60000.0 / tempo / 4.0)  // 4 steps per beat
+        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+        val framesPerPhrase = framesPerStep * 16  // 16 steps per phrase
+
+        logger.d(TAG, "Start frame: $startFrame, Tempo: $tempo BPM")
+
+        var totalScheduledNotes = 0
+
+        // Schedule all 8 tracks
+        for (trackId in 0..7) {
+            val track = project.tracks[trackId]
+            if (track.chainRefs.isEmpty()) continue
+
+            var trackScheduledNotes = 0
+            var songRowOffset = 0L  // Frame offset for song rows (each row = full chain playback)
+
+            // Iterate through song rows (chain references in this track)
+            for (songRowIndex in startRow until track.chainRefs.size) {
+                val chainId = track.chainRefs[songRowIndex]
+                if (chainId < 0 || chainId > 255) continue
+
+                val chain = project.chains[chainId]
+                var chainOffset = 0L  // Frame offset within the chain
+
+                // Schedule all phrases in this chain
+                for (chainRow in 0..15) {
+                    if (chain.isEmpty(chainRow)) continue
+
+                    val phraseId = chain.phraseRefs[chainRow]
+                    val transposeSemitones = chain.getTransposeSemitones(chainRow)
+                    val phrase = project.phrases[phraseId]
+
+                    // Schedule all 16 steps of this phrase
+                    for (stepIndex in 0..15) {
+                        val step = phrase.steps[stepIndex]
+                        val targetFrame = startFrame + songRowOffset + chainOffset + (stepIndex * framesPerStep)
+
+                        val noteScheduled = scheduleStepWithEffects(
+                            step = step,
+                            targetFrame = targetFrame,
+                            stepDuration = framesPerStep,
+                            trackId = trackId,  // Each track gets its own trackId
+                            transposeSemitones = transposeSemitones,
+                            project = project
+                        )
+
+                        if (noteScheduled) trackScheduledNotes++
+                    }
+
+                    chainOffset += framesPerPhrase
+                }
+
+                // Move to next song row position
+                // Each song row represents the longest chain in that row
+                // For simplicity, we assume all chains have same length (count non-empty rows)
+                val chainLength = (0..15).count { !chain.isEmpty(it) }
+                songRowOffset += chainLength * framesPerPhrase
+            }
+
+            if (trackScheduledNotes > 0) {
+                logger.d(TAG, "  Track $trackId: $trackScheduledNotes notes")
+            }
+            totalScheduledNotes += trackScheduledNotes
+        }
+
+        logger.d(TAG, "✅ Scheduled $totalScheduledNotes notes across all tracks")
+
+        // TODO: Implement looping
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -280,6 +383,83 @@ class PlaybackController(
         logger.d(TAG, "Expected: Notes trigger at exact scheduled frames")
         logger.d(TAG, "Precision: <0.02ms jitter (sample-accurate)")
         logger.d(TAG, "═══════════════════════════════════════════")
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // STEP SCHEDULING HELPER
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Schedule a single phrase step with all effects applied.
+     *
+     * This is the unified helper for scheduling notes across all playback modes
+     * (Phrase, Chain, Song). It handles:
+     * - Note scheduling with optional transposition
+     * - OFFSET effect (Oxx) - modifies sample start point
+     * - VOLUME effect (Vxx) - overrides step volume
+     * - Other effects via EffectProcessor (KILL, ARPEGGIO, REPEAT)
+     *
+     * @param step The phrase step to schedule
+     * @param targetFrame When this step should trigger (audio frame)
+     * @param stepDuration Duration of step in frames (for time-based effects)
+     * @param trackId Which track (0-7)
+     * @param transposeSemitones Semitones to transpose (0 for Phrase, varies for Chain/Song)
+     * @param project Project containing instrument data
+     * @return true if a note was scheduled, false if step was empty
+     */
+    fun scheduleStepWithEffects(
+        step: PhraseStep,
+        targetFrame: Long,
+        stepDuration: Long,
+        trackId: Int,
+        transposeSemitones: Int,
+        project: Project
+    ): Boolean {
+        // Resolve all effect parameters via EffectProcessor (single source of truth)
+        val defaultVolume = step.volume / 255.0f
+        val params = effectProcessor.resolveStepParams(step, targetFrame, defaultVolume)
+
+        // Schedule note if step has one
+        var noteScheduled = false
+        if (!step.isEmpty()) {
+            // Apply transposition if needed
+            val note = if (transposeSemitones != 0) {
+                val originalMidi = step.note.toMidi()
+                if (originalMidi >= 0) {
+                    val transposedMidi = (originalMidi + transposeSemitones).coerceIn(0, 127)
+                    Note.fromMidi(transposedMidi)
+                } else {
+                    step.note
+                }
+            } else {
+                step.note
+            }
+
+            // Schedule the note with resolved effect parameters
+            audioEngine.scheduleNote(
+                targetFrame = targetFrame,
+                note = note,
+                instrumentId = step.instrument,
+                trackId = trackId,
+                volume = params.volume,
+                project = project,
+                startPointOverride = params.startPoint
+            )
+            noteScheduled = true
+        }
+
+        // Handle KILL effect - schedule kill at the specified frame
+        if (params.killAtFrame != null) {
+            audioEngine.scheduleKill(params.killAtFrame, trackId)
+        }
+
+        // TODO: Handle ARPEGGIO effect (schedule 3 notes)
+        // if (params.arpeggioValue != null) { ... }
+
+        // TODO: Handle REPEAT effect (schedule N retriggers)
+        // if (params.repeatCount != null) { ... }
+
+        return noteScheduled
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

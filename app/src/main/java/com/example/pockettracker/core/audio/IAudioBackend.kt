@@ -51,6 +51,7 @@ interface IAudioBackend {
      * @param freq Target playback frequency in Hz
      * @param baseFreq Base frequency of the sample (for pitch calculation)
      * @param vol Volume (0.0 to 1.0)
+     * @param startPointOverride Optional start point override (0-65535, overrides instrument start point, -1 = use default)
      */
     fun scheduleNote(
         frame: Long,
@@ -58,7 +59,8 @@ interface IAudioBackend {
         trackId: Int,
         freq: Float,
         baseFreq: Float,
-        vol: Float
+        vol: Float,
+        startPointOverride: Int = -1
     )
 
     /**

@@ -47,7 +47,7 @@ class InstrumentController(
             field = value
             stateObserver.onStateChanged()
         }
-    var cursorColumn = 1
+    var cursorColumn = 0
         set(value) {
             field = value
             stateObserver.onStateChanged()

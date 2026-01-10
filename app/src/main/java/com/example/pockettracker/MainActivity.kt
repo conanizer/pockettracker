@@ -402,7 +402,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // DEPRECATED:     // ═══════════════════════════════════════════════════════════════════════
     // DEPRECATED:     // PHASE 1 TEST: NOTE QUEUE VERIFICATION
     // DEPRECATED:     // ═══════════════════════════════════════════════════════════════════════
-    // DEPRECATED: 
+    // DEPRECATED:
     // DEPRECATED:     /**
     // DEPRECATED:      * Test the note queue infrastructure by scheduling 8 metronome clicks
     // DEPRECATED:      * Each click is exactly 1 beat apart at current project tempo
@@ -414,27 +414,27 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // DEPRECATED:         Log.d("NoteQueueTest", "═══════════════════════════════════════════")
     // DEPRECATED:         Log.d("NoteQueueTest", "🧪 PHASE 1 TEST: Sample-Accurate Note Queue")
     // DEPRECATED:         Log.d("NoteQueueTest", "═══════════════════════════════════════════")
-    // DEPRECATED: 
+    // DEPRECATED:
     // DEPRECATED:         val currentFrame = audioEngine.getCurrentFrame()
     // DEPRECATED:         val tempo = project.tempo
     // DEPRECATED:         val sampleRate = audioEngine.getDeviceSampleRate()
-    // DEPRECATED: 
+    // DEPRECATED:
     // DEPRECATED:         // Calculate frames per beat (quarter note) at current tempo
     // DEPRECATED:         // 60000ms per minute ÷ BPM = ms per beat
     // DEPRECATED:         // ms per beat × sampleRate / 1000 = frames per beat
     // DEPRECATED:         val msPerBeat = (60000.0 / tempo)
     // DEPRECATED:         val framesPerBeat = (msPerBeat * sampleRate / 1000.0).toLong()
-    // DEPRECATED: 
+    // DEPRECATED:
     // DEPRECATED:         Log.d("NoteQueueTest", "Tempo: $tempo BPM")
     // DEPRECATED:         Log.d("NoteQueueTest", "Sample Rate: $sampleRate Hz")
     // DEPRECATED:         Log.d("NoteQueueTest", "Frames per beat: $framesPerBeat")
     // DEPRECATED:         Log.d("NoteQueueTest", "Current frame: $currentFrame")
     // DEPRECATED:         Log.d("NoteQueueTest", "-------------------------------------------")
-    // DEPRECATED: 
+    // DEPRECATED:
     // DEPRECATED:         // Schedule 8 metronome clicks (C-4 note, kick drum, 1 beat apart)
     // DEPRECATED:         val metronomNote = Note.fromString("C-4")
     // DEPRECATED:         val kickInstrument = 0  // Instrument 00 = kick drum
-    // DEPRECATED: 
+    // DEPRECATED:
     // DEPRECATED:         for (beat in 0..7) {
     // DEPRECATED:             val targetFrame = currentFrame + (beat * framesPerBeat)
     // DEPRECATED:             audioEngine.scheduleNote(
@@ -445,11 +445,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // DEPRECATED:                 volume = 0.8f,
     // DEPRECATED:                 project = project
     // DEPRECATED:             )
-    // DEPRECATED: 
+    // DEPRECATED:
     // DEPRECATED:             val targetTimeMs = (beat * msPerBeat).toLong()
     // DEPRECATED:             Log.d("NoteQueueTest", "📅 Beat $beat scheduled: frame=$targetFrame (${targetTimeMs}ms from now)")
     // DEPRECATED:         }
-    // DEPRECATED: 
+    // DEPRECATED:
     // DEPRECATED:         Log.d("NoteQueueTest", "-------------------------------------------")
     // DEPRECATED:         Log.d("NoteQueueTest", "✅ Scheduled 8 beats. Watch for 🎵 trigger logs!")
     // DEPRECATED:         Log.d("NoteQueueTest", "Expected: Notes trigger at exact scheduled frames")
@@ -1827,7 +1827,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 instrumentStatusMessage = instrumentStatusMessage,
                 instrumentStatusSuccess = instrumentStatusSuccess,
                 fileBrowserState = fileBrowserState,
-                effectProcessor = effectProcessor
+                playbackController = playbackController
             )
         } else {
             // PORTRAIT: Buttons below screen
@@ -1856,7 +1856,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 instrumentStatusMessage = instrumentStatusMessage,
                 instrumentStatusSuccess = instrumentStatusSuccess,
                 fileBrowserState = fileBrowserState,
-                effectProcessor = effectProcessor
+                playbackController = playbackController
             )
         }
     } else {
@@ -1886,7 +1886,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             instrumentStatusMessage = instrumentStatusMessage,
             instrumentStatusSuccess = instrumentStatusSuccess,
             fileBrowserState = fileBrowserState,
-            effectProcessor = effectProcessor
+            playbackController = playbackController
         )
     }
 }

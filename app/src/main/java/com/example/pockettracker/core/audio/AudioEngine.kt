@@ -306,10 +306,17 @@ class AudioEngine(
     }
 
     /**
-     * Kill a specific track's voice (for K00 Kill effect).
+     * Kill a specific track's voice immediately (for K00 Kill effect).
      */
     fun killTrack(trackId: Int) {
         backend.killTrack(trackId)
+    }
+
+    /**
+     * Schedule a kill event at a specific frame (for sample-accurate Kill effect).
+     */
+    fun scheduleKill(frame: Long, trackId: Int) {
+        backend.scheduleKill(frame, trackId)
     }
 
     /**
@@ -326,7 +333,8 @@ class AudioEngine(
         instrumentId: Int,
         trackId: Int,
         volume: Float = 1.0f,
-        project: Project
+        project: Project,
+        startPointOverride: Int = -1  // -1 = use instrument default, 0-255 = Offset effect override
     ) {
         if (note == Note.EMPTY) return
 
@@ -342,7 +350,7 @@ class AudioEngine(
         // Resume stream so audio callback can process the queue
         backend.resumeStream()
 
-        backend.scheduleNote(targetFrame, sampleId, trackId, frequency, baseFreq, volume)
+        backend.scheduleNote(targetFrame, sampleId, trackId, frequency, baseFreq, volume, startPointOverride)
     }
 
     /**
