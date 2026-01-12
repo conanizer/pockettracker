@@ -74,21 +74,31 @@ class InstrumentController(
     /**
      * Navigate to previous instrument (L+LEFT on instrument screen)
      * Wraps around: 0 → 255
+     *
+     * @param onInstrumentChanged Optional callback to sync TrackerController.currentInstrument
+     * @return New instrument ID
      */
-    fun navigatePrevious() {
+    fun navigatePrevious(onInstrumentChanged: ((Int) -> Unit)? = null): Int {
         currentInstrument = if (currentInstrument > 0) currentInstrument - 1 else 255
         lastEditedInstrument = currentInstrument
+        onInstrumentChanged?.invoke(currentInstrument)
         logger.d(TAG, "⬅️ Navigate to instrument ${formatHex(currentInstrument)}")
+        return currentInstrument
     }
 
     /**
      * Navigate to next instrument (L+RIGHT on instrument screen)
      * Wraps around: 255 → 0
+     *
+     * @param onInstrumentChanged Optional callback to sync TrackerController.currentInstrument
+     * @return New instrument ID
      */
-    fun navigateNext() {
+    fun navigateNext(onInstrumentChanged: ((Int) -> Unit)? = null): Int {
         currentInstrument = if (currentInstrument < 255) currentInstrument + 1 else 0
         lastEditedInstrument = currentInstrument
+        onInstrumentChanged?.invoke(currentInstrument)
         logger.d(TAG, "➡️ Navigate to instrument ${formatHex(currentInstrument)}")
+        return currentInstrument
     }
 
     /**
@@ -103,10 +113,16 @@ class InstrumentController(
 
     /**
      * Sync to last edited instrument (used when entering instrument screen)
+     * Also prepares audio engine for the synced instrument.
      */
-    fun syncToLastEdited() {
+    fun syncToLastEdited(project: Project? = null) {
         currentInstrument = lastEditedInstrument
         logger.d(TAG, "🔄 Sync to last edited instrument ${formatHex(currentInstrument)}")
+        if (project != null) {
+            val instrument = project.instruments[currentInstrument]
+            audioEngine.updateInstrumentBaseFrequency(instrument)
+            audioEngine.updateInstrumentPlaybackParams(instrument)
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -173,6 +189,9 @@ class InstrumentController(
     /**
      * Preview current instrument with all parameters
      * Plays at ROOT+DETUNE pitch
+     *
+     * NOTE: Caller should ensure currentInstrument is set to the desired instrument
+     * before calling this (typically via syncToLastEdited or explicit assignment).
      *
      * @param project Project containing instrument data
      */
@@ -296,7 +315,6 @@ enum class InstrumentParameter {
     FILTER_RES,
     SAMPLE_START,
     SAMPLE_END,
-    REVERSE,
     LOOP_MODE,
     LOOP_START
 }

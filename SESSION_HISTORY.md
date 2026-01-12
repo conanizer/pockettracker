@@ -10,6 +10,90 @@ This file tracks development sessions with Claude Code to maintain context acros
 
 ---
 
+## Session 2026-01-13: Cursor Navigation Fix & EditorHelpers.kt Cleanup
+
+### Context
+- D-pad LEFT wasn't working on PROJECT and INSTRUMENT screens while RIGHT worked fine
+- TrackerController had navigation helpers that weren't being used
+- EditorHelpers.kt had accumulated unused functions from old code
+- Goal: Fix navigation and clean up orphaned code
+
+### What Was Accomplished ✅
+
+#### 1. Fixed PROJECT Screen Cursor Navigation
+- **Issue**: Cursor couldn't move LEFT (RIGHT worked)
+- **Root Cause**: MainActivity wasn't implementing left/right navigation for PROJECT screen
+- **Solution**: Added proper `onDPadLeft` and `onDPadRight` handlers with correct column bounds
+- **Result**: PROJECT screen cursor now moves bidirectionally smoothly
+
+**Project Screen Bounds:**
+- Column 0: Always unreachable (contains labels)
+- Row 0 (TEMPO): Max column 1
+- Row 1 (TRANSPOSE): Max column 1
+- Row 2 (NAME): Max column 12 (editable characters)
+- Row 3 (PROJECT buttons): Max column 3 (LOAD/SAVE/NEW)
+- Row 4-6: Max column 1
+
+#### 2. Fixed INSTRUMENT Screen Cursor Navigation
+- **Issue**: Cursor movement inconsistent on INSTRUMENT screen with multi-column layout
+- **Root Cause**: Didn't account for unreachable columns and row-specific bounds
+- **Solution**: Implemented column-skipping logic for dual-parameter rows
+- **Result**: INSTRUMENT screen fully navigable
+
+**Instrument Screen Bounds:**
+- Columns 0 and 2: Always unreachable (column 0 = labels, column 2 = headers on rows 5-8)
+- Rows 0-4, 9-14: Max column 1 (single parameter)
+- Rows 5-8: Max column 3 (dual parameters: START/END, REVERSE/LOOP with shared column 2 toggle)
+- Proper column skipping on left/right movement prevents cursor getting stuck
+
+#### 3. Updated MainActivity Navigation Handlers
+- Enhanced `onDPadLeft()` (lines 635-682): Routes to proper handler per screen with bounds checking
+- Enhanced `onDPadRight()` (lines 684-730): Routes to proper handler per screen with bounds checking + max column enforcement
+- Proper null-safety and state updates via `trackerController.setCursor()`
+
+#### 4. Cleaned Up EditorHelpers.kt
+- **Removed 15 unused functions** (from 23 to 8 functions):
+  - ❌ `cycleNote`, `cycleVolume`, `cycleInstrument` (old input system)
+  - ❌ `cycleEffectType`, `cycleEffectValue` (old input system)
+  - ❌ `insertChainPhrase`, `editChainPhraseValue`, `editChainTransposeValue` (unused)
+  - ❌ `insertSongChainRef`, `editSongChainRef` (unused)
+  - ❌ `navigateChain` (unused)
+  - ❌ `handleProjectCursorLeft/Right`, `getProjectMinColumn/MaxColumn` (replaced by MainActivity logic)
+
+- **Kept 8 essential functions:**
+  - ✅ `getTrackIndex()` - used in MainActivity SONG handling
+  - ✅ `clearChainSlot()` - used in MainActivity CHAIN deletion
+  - ✅ `clearSongChainRef()` - used in deletion logic
+  - ✅ `getEffectTypeName()` - used in PhraseEditorModule (3 places)
+  - ✅ `clearEffect()` - used in PhraseEditorModule
+
+- **File reduced**: 292 lines → 61 lines (78% reduction)
+- **Result**: Cleaner codebase, easier to maintain, no compilation errors
+
+### Files Modified
+- `TrackerController.kt` - Navigation helper methods with proper bounds
+- `MainActivity.kt` - Enhanced onDPadLeft/Right handlers with screen-specific logic
+- `EditorHelpers.kt` - Removed 15 unused functions, kept only essential helpers
+
+### Testing
+- ✅ All compilation errors resolved
+- ✅ PROJECT screen: LEFT/RIGHT navigation works bidirectionally
+- ✅ INSTRUMENT screen: LEFT/RIGHT navigation works with proper column skipping
+- ✅ No broken references after EditorHelpers.kt cleanup
+- ✅ App compiles cleanly and runs without errors
+
+### Lessons Learned
+
+1. **Column Bounds Vary by Row** - Different rows have different maximum columns; must account for this
+2. **Unreachable Columns Need Skipping** - Can't just clamp; must skip over unreachable positions
+3. **Bidirectional Parity** - LEFT and RIGHT need identical bounds logic for symmetry
+4. **Cleanup Verification** - Must grep entire codebase to confirm function unused before deletion
+
+### Session Summary
+Fixed critical cursor navigation bug that prevented moving LEFT on 2 major screens. Also cleaned up 15+ lines of dead code from EditorHelpers.kt. User confirmed: "works now!"
+
+---
+
 ## Session 2026-01-10: Effect Architecture Cleanup & Code Audit
 
 ### Context

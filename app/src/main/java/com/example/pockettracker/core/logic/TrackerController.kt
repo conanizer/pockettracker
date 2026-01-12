@@ -55,6 +55,9 @@ class TrackerController(
         set(value) {
             field = value
             stateObserver.onStateChanged()
+            if (value == ScreenType.INSTRUMENT) {
+                instrumentController.syncToLastEdited(project)
+            }
         }
 
     /**
@@ -88,58 +91,85 @@ class TrackerController(
     // === NEW STATE (moved from MainActivity) ===
     // Navigation
     var previousColumn = 2
-        private set
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     // Cursor positions
     var cursorRow = 0
-        private set
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     var cursorColumn = 1
-        private set
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     // Project screen cursor
     var projectCursorRow = 0
-        private set
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     var projectCursorColumn = 1
-        private set
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     // Instrument screen cursor
     var instrumentCursorRow = 0
-        private set
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     var instrumentCursorColumn = 1
-        private set
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
 
     // Current editing context
     var currentChain = 0
-        private set
+        set(value) {
+            field = value
+            lastEditedChain = value
+            stateObserver.onStateChanged()
+        }
 
     var currentPhrase = 0
-        private set
+        set(value) {
+            field = value
+            lastEditedPhrase = value
+            stateObserver.onStateChanged()
+        }
 
     // Last edited values (for quick insert)
     var lastEditedPhrase = 0
-        private set
 
     var lastEditedChain = 0
-        private set
 
     var lastEditedNote = Note.fromString("C-4")
-        private set
 
     var lastEditedVolume = 0xFF
-        private set
 
     var lastEditedTranspose = 0
-        private set
 
     // Instrument references
     var currentInstrument = 0
-        private set
+        set(value) {
+            field = value
+            lastEditedInstrument = value
+            stateObserver.onStateChanged()
+        }
 
     var lastEditedInstrument = 0
-        private set
 
     // ========================================
     // FILE OPERATIONS (delegate to FileController)
@@ -239,6 +269,7 @@ class TrackerController(
      */
     fun playPhrase(phraseId: Int, loop: Boolean = true) {
         playbackController.playPhrase(project, phraseId, loop)
+        currentPhrase = phraseId
     }
 
     /**
@@ -246,6 +277,7 @@ class TrackerController(
      */
     fun playChain(chainId: Int, loop: Boolean = true) {
         playbackController.playChain(project, chainId, loop)
+        currentChain = chainId
     }
 
     /**
@@ -269,6 +301,20 @@ class TrackerController(
         return playbackController.isPlaying
     }
 
+    fun togglePlayback() {
+        if (isPlaying()) {
+            stopPlayback()
+        } else {
+            // Start playback based on current screen
+            when (currentScreen) {
+                ScreenType.PHRASE -> playPhrase(currentPhrase)
+                ScreenType.CHAIN -> playChain(currentChain)
+                ScreenType.SONG -> playSong()
+                else -> playPhrase(currentPhrase) // default
+            }
+        }
+    }
+
     // ========================================
     // INSTRUMENT OPERATIONS (delegate to InstrumentController)
     // ========================================
@@ -280,13 +326,13 @@ class TrackerController(
         val result = instrumentController.loadSampleFromFile(project, filePath)
 
         when (result) {
-            is com.example.pockettracker.core.logic.LoadResult.Success -> {
+            is LoadResult.Success -> {
                 // Project is modified in-place by InstrumentController
                 projectVersion++
                 statusMessage = "SAMPLE LOADED"
                 statusSuccess = true
             }
-            is com.example.pockettracker.core.logic.LoadResult.Error -> {
+            is LoadResult.Error -> {
                 statusMessage = result.message
                 statusSuccess = false
             }
@@ -297,6 +343,8 @@ class TrackerController(
      * Preview instrument with current parameters.
      */
     fun previewInstrument() {
+        // Sync InstrumentController to TrackerController's currentInstrument before previewing
+        instrumentController.currentInstrument = currentInstrument
         instrumentController.previewInstrument(project)
     }
 
@@ -563,59 +611,218 @@ class TrackerController(
         return Pair(defaultRow, defaultColumn)
     }
 
-    // === SIMPLE SETTER METHODS ===
-    fun setCursor(row: Int, column: Int) {
-        cursorRow = row
-        cursorColumn = column
-        notifyStateChanged()
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CURSOR NAVIGATION (extracted from MainActivity)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Move cursor up on current screen with appropriate wrapping and bounds checking
+     */
+    fun moveCursorUp() {
+        when (currentScreen) {
+            ScreenType.PROJECT -> {
+                projectCursorRow = if (projectCursorRow > 0) {
+                    projectCursorRow - 1
+                } else {
+                    6  // Wrap to bottom
+                }
+                projectCursorColumn = 1  // Reset to first value column
+            }
+            ScreenType.INSTRUMENT -> {
+                val oldRow = instrumentCursorRow
+                val oldColumn = instrumentCursorColumn
+                instrumentCursorRow = when {
+                    instrumentCursorRow > 0 && instrumentCursorRow != 6 && instrumentCursorRow != 10 -> instrumentCursorRow - 1
+                    instrumentCursorRow == 6 -> 4  // Skip spacer (row 5)
+                    instrumentCursorRow == 10 -> 8  // Skip spacer (row 9)
+                    else -> 14  // Wrap to bottom
+                }
+
+                // Preserve column 3 when navigating within rows 6-8, otherwise reset to column 1
+                instrumentCursorColumn = if (oldRow in 6..8 && instrumentCursorRow in 6..8 && oldColumn == 3) {
+                    3  // Stay in column 3 when moving within dual-parameter rows
+                } else {
+                    1  // Reset to column 1 for all other cases
+                }
+            }
+            else -> {
+                // All other screens: simple cursor movement with wrapping (rows 0-15)
+                cursorRow = if (cursorRow > 0) cursorRow - 1 else 15
+            }
+        }
     }
 
-    fun setProjectCursor(row: Int, column: Int) {
-        projectCursorRow = row
-        projectCursorColumn = column
-        notifyStateChanged()
+    /**
+     * Move cursor down on current screen with appropriate wrapping and bounds checking
+     */
+    fun moveCursorDown() {
+        when (currentScreen) {
+            ScreenType.PROJECT -> {
+                // Project has 7 rows (0-6) with wrapping
+                projectCursorRow = if (projectCursorRow < 6) {
+                    projectCursorRow + 1
+                } else {
+                    0  // Wrap to top
+                }
+                projectCursorColumn = 1  // Reset column
+            }
+            ScreenType.INSTRUMENT -> {
+                val oldRow = instrumentCursorRow
+                val oldColumn = instrumentCursorColumn
+                instrumentCursorRow = when {
+                    instrumentCursorRow < 14 && instrumentCursorRow != 4 && instrumentCursorRow != 8 -> instrumentCursorRow + 1
+                    instrumentCursorRow == 4 -> 6  // Skip spacer (row 5)
+                    instrumentCursorRow == 8 -> 10  // Skip spacer (row 9)
+                    else -> 0  // Wrap to top
+                }
+
+                // Preserve column 3 when navigating within rows 6-8, otherwise reset to column 1
+                instrumentCursorColumn = if (oldRow in 6..8 && instrumentCursorRow in 6..8 && oldColumn == 3) {
+                    3  // Stay in column 3 when moving within dual-parameter rows
+                } else {
+                    1  // Reset to column 1 for all other cases
+                }
+            }
+            else -> {
+                // Most screens have 16 rows (0-15) with wrapping
+                cursorRow = if (cursorRow < 15) cursorRow + 1 else 0
+            }
+        }
     }
 
-    fun setInstrumentCursor(row: Int, column: Int) {
-        instrumentCursorRow = row
-        instrumentCursorColumn = column
-        notifyStateChanged()
+    /**
+     * Move cursor left on current screen with appropriate bounds checking
+     */
+    fun moveCursorLeft() {
+        when (currentScreen) {
+            ScreenType.PROJECT -> {
+                projectCursorColumn = getProjectCursorLeftColumn(projectCursorRow, projectCursorColumn)
+            }
+            ScreenType.INSTRUMENT -> {
+                // Instrument screen: handle left movement for screens with additional columns
+                // Most rows: column 1 only (locked)
+                // Rows with filter settings: toggle between value columns
+                val minColumn = getInstrumentCursorLeftColumn(instrumentCursorRow, instrumentCursorColumn)
+                if (instrumentCursorColumn > minColumn) {
+                    instrumentCursorColumn = minColumn
+                }
+            }
+            else -> {
+                // Get minimum column for this screen
+                val minColumn = when (currentScreen) {
+                    ScreenType.SONG -> 1    // Column 0 is step number (not editable)
+                    ScreenType.CHAIN -> 1
+                    ScreenType.PHRASE -> 1
+                    else -> 0
+                }
+                // Move left if not at minimum
+                if (cursorColumn > minColumn) cursorColumn--
+            }
+        }
     }
 
-    fun setCurrentChain(chain: Int) {
-        currentChain = chain
-        lastEditedChain = chain
-        notifyStateChanged()
+    /**
+     * Move cursor right on current screen with appropriate bounds checking
+     */
+    fun moveCursorRight() {
+        when (currentScreen) {
+            ScreenType.PROJECT -> {
+                projectCursorColumn = getProjectCursorRightColumn(projectCursorRow, projectCursorColumn)
+            }
+            ScreenType.INSTRUMENT -> {
+                // Instrument screen: handle right movement for screens with additional columns
+                // Most rows: column 1 only (locked)
+                // Rows with filter settings: toggle between value columns
+                val maxColumn = getInstrumentCursorRightColumn(instrumentCursorRow, instrumentCursorColumn)
+                if (instrumentCursorColumn < maxColumn) {
+                    instrumentCursorColumn = maxColumn
+                }
+            }
+            else -> {
+                // Get maximum column for this screen
+                val maxColumn = when (currentScreen) {
+                    ScreenType.SONG -> 8     // 8 tracks
+                    ScreenType.CHAIN -> 2    // PH + TSP columns
+                    ScreenType.PHRASE -> 9   // Note + Vol + Inst + FX1(name+val) + FX2(name+val) + FX3(name+val) = 10 columns (0-9)
+                    else -> 0
+                }
+                // Move right if not at maximum
+                if (cursorColumn < maxColumn) cursorColumn++
+            }
+        }
     }
 
-    fun setCurrentPhrase(phrase: Int) {
-        currentPhrase = phrase
-        lastEditedPhrase = phrase
-        notifyStateChanged()
+    /**
+     * Helper to get next column left for PROJECT screen
+     * Column 0 is always unreachable (label column)
+     */
+    private fun getProjectCursorLeftColumn(row: Int, currentColumn: Int): Int {
+        // PROJECT screen column layout per row:
+        // All rows: min column is 1 (column 0 is unreachable label)
+        // Row 0-2: TEMPO/TRANSPOSE/NAME - columns 1-3 (value and up to 2 name letters)
+        // Row 3: LOAD/SAVE/NEW buttons - columns 1-3 (LOAD, SAVE, NEW)
+        // Row 4-6: no extra columns - column 1 only
+        
+        val minColumn = 1  // All rows start at column 1
+        
+        return (currentColumn - 1).coerceAtLeast(minColumn)
     }
 
-    fun setCurrentInstrument(instrument: Int) {
-        currentInstrument = instrument
-        lastEditedInstrument = instrument
-        notifyStateChanged()
+    /**
+     * Helper to get next column right for PROJECT screen
+     * Column 0 is always unreachable (label column)
+     */
+    private fun getProjectCursorRightColumn(row: Int, currentColumn: Int): Int {
+        // PROJECT screen column layout per row:
+        // All rows: min column is 1 (column 0 is unreachable label)
+        // Row 0-2: TEMPO/TRANSPOSE/NAME - columns 1-3 (value and up to 2 name letters)
+        // Row 3: LOAD/SAVE/NEW buttons - columns 1-3 (LOAD, SAVE, NEW)
+        // Row 4-6: no extra columns - column 1 only
+        
+        val maxColumn = when (row) {
+            2 -> 12  // TEMPO/TRANSPOSE/NAME: up to column 3 (includes name letters)
+            3 -> 3        // LOAD/SAVE/NEW buttons: up to column 3
+            else -> 1     // Other rows: column 1 only
+        }
+        return (currentColumn + 1).coerceAtMost(maxColumn)
     }
 
-    fun updateLastEditedNote(note: Note) {
-        lastEditedNote = note
+    /**
+     * Helper to get next column left for INSTRUMENT screen
+     * Columns 0 and 2 are always unreachable (headers/labels)
+     */
+    private fun getInstrumentCursorLeftColumn(row: Int, currentColumn: Int): Int {
+        // INSTRUMENT screen column layout per row:
+        // All rows: min column is 1 (column 0 is unreachable header)
+        // Rows 0-4, 9-14: column 1 only (single value)
+        // Rows 5-8: columns 1 and 3 (dual values: skip col 2)
+        
+        return if (row in 5..8) {
+            // Rows 5-8: columns 1 and 3 (skip 2)
+            if (currentColumn > 1) 1 else 1
+        } else {
+            // All other rows: column 1 only
+            1
+        }
     }
 
-    fun updateLastEditedVolume(volume: Int) {
-        lastEditedVolume = volume
+    /**
+     * Helper to get next column right for INSTRUMENT screen
+     * Columns 0 and 2 are always unreachable (headers/labels)
+     */
+    private fun getInstrumentCursorRightColumn(row: Int, currentColumn: Int): Int {
+        // INSTRUMENT screen column layout per row:
+        // All rows: min column is 1 (column 0 is unreachable header)
+        // Rows 0-4, 9-14: column 1 only (single value - max is col 1)
+        // Rows 5-8: columns 1 and 3 (dual values: skip col 2)
+        
+        return if (row in 5..8) {
+            // Rows 5-8: columns 1 and 3 (skip 2)
+            if (currentColumn < 3) 3 else 3
+        } else {
+            // All other rows: column 1 only
+            1
+        }
     }
 
-    fun updateLastEditedTranspose(transpose: Int) {
-        lastEditedTranspose = transpose
-    }
-
-
-    // === PRIVATE HELPER ===
-    private fun notifyStateChanged() {
-        projectVersion++
-        stateObserver.onStateChanged()
-    }
 }

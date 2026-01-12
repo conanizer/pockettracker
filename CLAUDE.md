@@ -9,10 +9,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **ALWAYS read these files first:**
 
 1. **DEVELOPMENT_STATUS.md** - What's done, what's remaining
-2. **REFACTORING_ROADMAP.md** - Current refactoring phase (if Phase 4 in progress)
-3. **MVP_ROADMAP.md** - Overall path to MVP
+2. **MVP_ROADMAP.md** - Overall path to MVP
 
-**Current Phase:** Architecture Refactoring (Phase 4)
+**Current Phase:** Architecture Refactoring (Finalizing)
 
 **Current Task:** Extract controllers from MainActivity
 
@@ -45,7 +44,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Why:**
 - Linux port planned post-MVP
-- Mentor joining for Braids integration
 - Clean architecture from start = easier maintenance
 - Write effects code once (portable immediately)
 
@@ -62,8 +60,6 @@ core/logic/
 ```
 
 **See:** `TECHNICAL_ARCHITECTURE.md` for complete architecture
-
-**See:** `REFACTORING_SIMPLE_EXPLANATION.md` for simple explanation
 
 ---
 
@@ -213,75 +209,15 @@ Each module receives state objects and renders itself independently.
 
 ---
 
-## 🔄 Current Refactoring (Phase 4)
-
-**CRITICAL:** We are currently in the middle of architecture refactoring!
-
-### Why Refactoring?
-
-**Goal:** Prepare codebase for Linux port by separating:
-- Platform-specific code (Android JNI, file system, resources)
-- Platform-agnostic business logic (controllers, effects, playback)
-
-**Benefit:** Write effects and copy/paste code ONCE, works on both Android and Linux.
-
-### Refactoring Phases
-
-**Phase 1: Audio Backend Abstraction** ✅ or 🚧 (check REFACTORING_ROADMAP.md)
-- Create `IAudioBackend` interface
-- Wrap Oboe in `OboeAudioBackend`
-- AudioEngine uses interface instead of JNI directly
-
-**Phase 2: Resource Loading Abstraction** ✅ or 🚧
-- Create `IResourceLoader` interface
-- `AndroidResourceLoader` loads from R.raw.*
-- Sample loading uses interface
-
-**Phase 3: File I/O Abstraction** ✅ or 🚧
-- Create `IFileSystem` interface
-- `AndroidFileSystem` wraps Android scoped storage
-- FileManager uses interface
-
-**Phase 4: Business Logic Extraction** ✅ or 🚧 **← Currently here!**
-- Extract 6 controllers from MainActivity:
-  - `TrackerController` (coordinator)
-  - `InputController` (button handling)
-  - `PlaybackController` (playback logic)
-  - `EffectProcessor` (effect calculations)
-  - `InstrumentController` (sample management)
-  - `FileController` (save/load)
-- Create `ClipboardManager` (copy/paste operations)
-- MainActivity becomes THIN (just creates backends + UI)
-
-**See:** `REFACTORING_ROADMAP.md` for step-by-step instructions
-
-### Working on Refactoring
-
-**If you're asked to work on refactoring:**
-
-1. Read `REFACTORING_ROADMAP.md` first
-2. Find current phase/step
-3. Follow instructions EXACTLY
-4. Test after each step
-5. Don't skip ahead
-
-**If you're asked to add features (effects, copy/paste):**
-
-1. Check if refactoring is complete
-2. If Phase 4 done: Add feature to appropriate controller
-3. If Phase 4 not done: Wait or help finish refactoring first
-
----
-
 ## 🎵 MVP Remaining Work
 
 ### 1. Effects System (1-2 weeks)
 
 **TOP-5 Effects in PHRASE screen only:**
 - Arpeggio (Axx) - Note pattern automation
-- Offset (Oxx) - Sample start point automation
-- Volume (Vxx) - Volume automation within step
-- Kill (K00) - Stop sample immediately
+- Offset (Oxx) - Sample start point automation(DONE)
+- Volume (Vxx) - Volume automation within step(DONE)
+- Kill (K00) - Stop sample immediately(DONE)
 - Repeat (Rxx) - Retrigger sample N times per step
 
 **Implementation:**
@@ -539,28 +475,6 @@ std::lock_guard<std::mutex> lock(queueMutex);
 8. Load project
 9. Verify all data identical
 
-### Manual Testing Checklist
-
-**Audio:**
-- [ ] Phrase playback works
-- [ ] Chain playback works (with transpose)
-- [ ] Song playback works (8 tracks)
-- [ ] No audio glitches or dropouts
-
-**UI:**
-- [ ] All screens navigate correctly
-- [ ] Cursor moves in all directions
-- [ ] Value editing (A+direction) works
-- [ ] Virtual controls work (on touchscreen device)
-
-**Files:**
-- [ ] Save project works
-- [ ] Load project works
-- [ ] Custom samples load
-- [ ] Instrument parameters persist
-
----
-
 ## 📝 Git Workflow
 
 **Branch Strategy:**
@@ -612,7 +526,6 @@ Categories:
 Read in this order:
 1. DEVELOPMENT_STATUS.md - What's done
 2. Current task document:
-   - If refactoring: REFACTORING_ROADMAP.md
    - If effects: MVP_ROADMAP.md Milestone 2
    - If copy/paste: MVP_ROADMAP.md Milestone 2.5
 3. TECHNICAL_ARCHITECTURE.md - How it should work
@@ -734,7 +647,6 @@ project.phrases[0] = project.phrases[0].copy(
 - [ ] All refactoring phases complete (portable architecture)
 - [ ] TOP-5 effects working in phrase screen
 - [ ] Copy/paste working (M8-style)
-- [ ] "Hello world" song completable in <5 min
 - [ ] Tested on Miyoo Flip and Ayaneo
 - [ ] README complete with installation guide
 - [ ] Demo video recorded

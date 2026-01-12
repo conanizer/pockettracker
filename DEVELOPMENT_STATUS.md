@@ -1,10 +1,10 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-01-10
+2026-01-13
 
 ## Current Phase
-**Phase A Complete** → **Architecture Refactoring (Phases 1-3 Complete ✅)** → Phase 4 → Effects System → Copy/Paste → MVP Release
+**Phase A Complete** → **Architecture Refactoring (Phases 1-4 Complete ✅)** → Effects System (TOP-5 In Progress) → Copy/Paste → MVP Release
 
 ## What's Working ✅
 
@@ -321,20 +321,34 @@ Planned global settings:
 ## Next Steps (Priority Order)
 
 ### ✅ ARCHITECTURE REFACTORING COMPLETE!
+### ✅ CODE CLEANUP COMPLETE! (2026-01-13)
 
-**All 4 phases finished:**
-- ✅ Phase 1: Audio Backend Abstraction
-- ✅ Phase 2: Resource Loading Abstraction
-- ✅ Phase 3: File I/O Abstraction
-- ✅ Phase 4: Business Logic Extraction
+**Completed this session:**
+- ✅ Fixed PROJECT screen cursor LEFT/RIGHT navigation
+- ✅ Fixed INSTRUMENT screen cursor LEFT/RIGHT navigation with column skipping
+- ✅ Cleaned up EditorHelpers.kt: removed 15 unused functions (292→61 lines)
+- ✅ All orphaned code removed, verified no broken references
 
-**Result:** Codebase is now portable and ready for Linux port! 🎉
+**Result:** Navigation fully bidirectional, codebase cleaner! 🎉
+
+### Next Priority: Effects System (TOP-5 in PHRASE)
+
+**Currently Working:**
+- ✅ OFFSET (Oxx) - Sample start point offset
+- ✅ VOLUME (Vxx) - Volume automation
+- ✅ KILL (K00) - Stop sample immediately
+
+**Still Need:**
+- [ ] ARPEGGIO (Axx) - Note pattern automation
+- [ ] REPEAT (Rxx) - Retrigger within step
+
+**See:** `MVP_ROADMAP.md` Milestone 2 for full effects implementation
 
 ### This Week:
-1. **Code Cleanup** ← **YOU ARE HERE**
-   - Delete dead code from EffectProcessor (~100 lines of unused applyEffects system)
-   - Consolidate MainActivity state to TrackerController (remove duplicates)
-   - See SESSION_HISTORY.md "Session 2026-01-10" for detailed task list
+1. ✅ **Code Cleanup** - COMPLETE!
+   - ✅ Delete dead code from EditorHelpers.kt
+   - ✅ Verify no broken references
+   - ✅ All compilation errors resolved
 
 2. **Finish Effects System** (Milestone 2)
    - Implement ARPEGGIO (Axx) - stubs ready in EffectProcessor

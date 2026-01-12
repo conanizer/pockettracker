@@ -84,356 +84,24 @@ fun PixelPerfectTracker(
         }
     }
 
-    // Playback loop - handles both Phrase and Chain screens
+    // Playback position update loop
+    // This is SIMPLIFIED: all scheduling logic moved to PlaybackController.updatePlaybackBuffer()
     LaunchedEffect(isPlaying, currentScreen) {
         if (isPlaying) {
-            when (currentScreen) {
-                ScreenType.PHRASE -> {
-                    try {
-                        // CRITICAL: Clear any leftover notes from previous playback
-                        audioEngine.clearScheduledNotes()
+            while (isPlaying) {
+                // Update lookahead buffer - PlaybackController handles all scheduling
+                playbackController.updatePlaybackBuffer()
 
-                        // Queue-based playback (sample-accurate timing)
-                            val sampleRate = audioEngine.getDeviceSampleRate()
-                            val msPerStep = (60000.0 / project.tempo / 4.0)
-                            val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
-                            val framesPerPhrase = 16 * framesPerStep
+                // Get current playback position for UI updates
+                val position = playbackController.getPlaybackPosition()
+                playbackRow = position.row
+                playbackChainRow = position.chainRow
+                playbackPhraseStep = position.phraseStep
+                playbackSongRow = position.songRow
 
-                            // Maintain a continuous buffer of scheduled phrases
-                            val lookaheadMs = 50L  // Minimal delay for responsive start
-                            val lookaheadFrames = (lookaheadMs * sampleRate / 1000.0).toLong()
-                            val bufferPhrases = 2  // Keep 2 phrases queued ahead for stability
-
-                            // Start scheduling from current frame + lookahead
-                            val playbackStartFrame = audioEngine.getCurrentFrame() + lookaheadFrames
-                            var nextPhraseStartFrame = playbackStartFrame
-
-                            // Helper function to schedule a single phrase
-                            // Uses PlaybackController for proper effect resolution
-                            fun schedulePhrase(startFrame: Long) {
-                                for (step in 0..15) {
-                                    val targetFrame = startFrame + (step * framesPerStep)
-                                    val phraseStep = project.phrases[currentPhrase].steps[step]
-
-                                    // Use PlaybackController for scheduling with effect resolution
-                                    playbackController.scheduleStepWithEffects(
-                                        step = phraseStep,
-                                        targetFrame = targetFrame,
-                                        stepDuration = framesPerStep,
-                                        trackId = 0,
-                                        transposeSemitones = 0,
-                                        project = project
-                                    )
-                                }
-                            }
-
-                            // Initial fill: schedule first phrase, then add to buffer gradually
-                            schedulePhrase(nextPhraseStartFrame)
-                            nextPhraseStartFrame += framesPerPhrase
-
-                            // Continuous scheduling loop
-                            while (isPlaying) {
-                                val currentFrame = audioEngine.getCurrentFrame()
-
-                                // Maintain 2-phrase buffer: schedule more when buffer gets low
-                                val bufferRemaining = nextPhraseStartFrame - currentFrame
-                                if (bufferRemaining < (bufferPhrases * framesPerPhrase)) {
-                                    schedulePhrase(nextPhraseStartFrame)
-                                    nextPhraseStartFrame += framesPerPhrase
-                                }
-
-                                // Update playback cursor based on current audio position
-                                // Guard against negative values during startup
-                                val framesIntoPlayback = maxOf(0L, currentFrame - playbackStartFrame)
-                                val framesIntoPhrase = framesIntoPlayback % framesPerPhrase
-                                playbackRow = (framesIntoPhrase / framesPerStep).toInt().coerceIn(0, 15)
-
-                                // Update UI at display refresh rate (not audio rate)
-                                delay(msPerStep.toLong())
-                            }
-                        } finally {
-                            // CRITICAL: Clean up scheduled notes when playback stops
-                            audioEngine.clearScheduledNotes()
-                        }
-                }
-                ScreenType.CHAIN -> {
-                    try {
-                        // CRITICAL: Clear any leftover notes from previous playback
-                        audioEngine.clearScheduledNotes()
-
-                        // Queue-based chain playback (sample-accurate timing with transpose)
-                            val chain = project.chains[currentChain]
-                            val sampleRate = audioEngine.getDeviceSampleRate()
-                            val msPerStep = (60000.0 / project.tempo / 4.0)
-                            val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
-                            val framesPerPhrase = 16 * framesPerStep
-
-                            // Maintain a continuous buffer
-                            val lookaheadMs = 50L
-                            val lookaheadFrames = (lookaheadMs * sampleRate / 1000.0).toLong()
-                            val bufferPhrases = 2  // Keep 2 phrases queued ahead
-
-                            // Start scheduling from current frame + lookahead
-                            val playbackStartFrame = audioEngine.getCurrentFrame() + lookaheadFrames
-                            var nextPhraseStartFrame = playbackStartFrame
-
-                            // Track scheduled chain rows to map audio position to chain row
-                            val scheduledRows = mutableListOf<Int>()
-                            var nextRowToSchedule = playbackChainRow
-
-                            // Helper function to find next non-empty chain row
-                            fun findNextNonEmptyRow(startRow: Int): Int? {
-                                var row = startRow
-                                var attempts = 0
-                                while (chain.isEmpty(row) && attempts < 16) {
-                                    row = (row + 1) % 16
-                                    attempts++
-                                }
-                                return if (attempts >= 16) null else row
-                            }
-
-                            // Helper function to schedule a single phrase from chain
-                            // Uses PlaybackController for proper effect resolution
-                            fun scheduleChainPhrase(startFrame: Long, chainRow: Int) {
-                                val phraseRef = chain.phraseRefs[chainRow]
-                                val transposeSemitones = chain.getTransposeSemitones(chainRow)
-
-                                for (step in 0..15) {
-                                    val targetFrame = startFrame + (step * framesPerStep)
-                                    val phraseStep = project.phrases[phraseRef].steps[step]
-
-                                    // Use PlaybackController for scheduling with effect resolution
-                                    playbackController.scheduleStepWithEffects(
-                                        step = phraseStep,
-                                        targetFrame = targetFrame,
-                                        stepDuration = framesPerStep,
-                                        trackId = 0,
-                                        transposeSemitones = transposeSemitones,
-                                        project = project
-                                    )
-                                }
-                            }
-
-                            // Find first non-empty row
-                            val firstRow = findNextNonEmptyRow(nextRowToSchedule)
-                            if (firstRow == null) {
-                                // Chain is completely empty, stop playback
-                                // (isPlaying will be set to false externally)
-                            } else {
-                                // Initial fill: schedule first phrase
-                                scheduleChainPhrase(nextPhraseStartFrame, firstRow)
-                                scheduledRows.add(firstRow)
-                                nextPhraseStartFrame += framesPerPhrase
-                                nextRowToSchedule = (firstRow + 1) % 16
-
-                                // Continuous scheduling loop
-                                while (isPlaying) {
-                                    val currentFrame = audioEngine.getCurrentFrame()
-
-                                    // Maintain 2-phrase buffer
-                                    val bufferRemaining = nextPhraseStartFrame - currentFrame
-                                    if (bufferRemaining < (bufferPhrases * framesPerPhrase)) {
-                                        // Find next non-empty row
-                                        val nextRow = findNextNonEmptyRow(nextRowToSchedule)
-                                        if (nextRow != null) {
-                                            scheduleChainPhrase(nextPhraseStartFrame, nextRow)
-                                            scheduledRows.add(nextRow)
-                                            nextPhraseStartFrame += framesPerPhrase
-                                            nextRowToSchedule = (nextRow + 1) % 16
-                                        }
-                                    }
-
-                                    // Calculate which phrase is currently playing based on audio position
-                                    val framesIntoPlayback = maxOf(0L, currentFrame - playbackStartFrame)
-                                    val currentPhraseIndex = (framesIntoPlayback / framesPerPhrase).toInt()
-                                    val framesIntoPhrase = framesIntoPlayback % framesPerPhrase
-
-                                    // Map phrase index to actual chain row
-                                    if (currentPhraseIndex < scheduledRows.size) {
-                                        playbackChainRow = scheduledRows[currentPhraseIndex]
-                                    }
-
-                                    playbackRow = (framesIntoPhrase / framesPerStep).toInt().coerceIn(0, 15)
-                                    playbackPhraseStep = playbackRow
-
-                                    delay(msPerStep.toLong())
-                                }
-                            }
-                        } finally {
-                            // CRITICAL: Clean up scheduled notes when playback stops
-                            audioEngine.clearScheduledNotes()
-                        }
-                }
-                ScreenType.SONG -> {
-                    try {
-                        // CRITICAL: Clear any leftover notes from previous playback
-                        audioEngine.clearScheduledNotes()
-
-                        // Queue-based song playback (8-track polyphonic with sample-accurate timing)
-                            val sampleRate = audioEngine.getDeviceSampleRate()
-                            val msPerStep = (60000.0 / project.tempo / 4.0)
-                            val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
-                            val framesPerPhrase = 16 * framesPerStep
-
-                            // Maintain a continuous buffer
-                            val lookaheadMs = 50L
-                            val lookaheadFrames = (lookaheadMs * sampleRate / 1000.0).toLong()
-                            val bufferPhrases = 2  // Keep 2 phrases queued ahead
-
-                            // Start scheduling from current frame + lookahead
-                            val playbackStartFrame = audioEngine.getCurrentFrame() + lookaheadFrames
-                            var nextPhraseStartFrame = playbackStartFrame
-
-                            // Track scheduled positions to map audio position to display position
-                            data class ScheduledPosition(val songRow: Int, val chainRow: Int)
-                            val scheduledPositions = mutableListOf<ScheduledPosition>()
-
-                            // Track next position to schedule
-                            var nextSongRowToSchedule = playbackSongRow
-                            var nextChainRowToSchedule = playbackChainRow
-
-                            // Data class to track each track's chain state
-                            data class TrackState(
-                                var chainId: Int,
-                                var chainRow: Int,
-                                var maxChainLength: Int
-                            )
-
-                            // Helper function to get active tracks at a song row
-                            fun getActiveTracksAtSongRow(songRow: Int): List<TrackState> {
-                                val activeTracks = mutableListOf<TrackState>()
-                                for (trackId in 0..7) {
-                                    val track = project.tracks[trackId]
-                                    if (songRow < track.chainRefs.size) {
-                                        val chainId = track.chainRefs[songRow]
-                                        if (chainId >= 0 && chainId < 256) {
-                                            val chain = project.chains[chainId]
-                                            // Count non-empty rows in this chain
-                                            var maxLength = 0
-                                            for (i in 0..15) {
-                                                if (!chain.isEmpty(i)) maxLength = i + 1
-                                            }
-                                            if (maxLength > 0) {
-                                                activeTracks.add(TrackState(chainId, 0, maxLength))
-                                            }
-                                        }
-                                    }
-                                }
-                                return activeTracks
-                            }
-
-                            // Helper function to schedule one phrase for all tracks
-                            // Uses PlaybackController for proper effect resolution
-                            fun scheduleAllTracksAtPosition(startFrame: Long, songRow: Int, chainRow: Int) {
-                                for (trackId in 0..7) {
-                                    val track = project.tracks[trackId]
-                                    if (songRow < track.chainRefs.size) {
-                                        val chainId = track.chainRefs[songRow]
-                                        if (chainId >= 0 && chainId < 256) {
-                                            val chain = project.chains[chainId]
-                                            if (!chain.isEmpty(chainRow)) {
-                                                val phraseRef = chain.phraseRefs[chainRow]
-                                                val transposeSemitones = chain.getTransposeSemitones(chainRow)
-
-                                                // Schedule all 16 steps for this track using PlaybackController
-                                                for (step in 0..15) {
-                                                    val targetFrame = startFrame + (step * framesPerStep)
-                                                    val phraseStep = project.phrases[phraseRef].steps[step]
-
-                                                    // Use PlaybackController for scheduling with effect resolution
-                                                    playbackController.scheduleStepWithEffects(
-                                                        step = phraseStep,
-                                                        targetFrame = targetFrame,
-                                                        stepDuration = framesPerStep,
-                                                        trackId = trackId,
-                                                        transposeSemitones = transposeSemitones,
-                                                        project = project
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Get initial tracks
-                            var activeTracks = getActiveTracksAtSongRow(nextSongRowToSchedule)
-                            if (activeTracks.isEmpty()) {
-                                // No active tracks, stop playback
-                            } else {
-                                // Find max chain length among active tracks
-                                var maxChainLength = activeTracks.maxOf { it.maxChainLength }
-
-                                // Initial fill: schedule first phrase for all tracks
-                                scheduleAllTracksAtPosition(nextPhraseStartFrame, nextSongRowToSchedule, nextChainRowToSchedule)
-                                scheduledPositions.add(ScheduledPosition(nextSongRowToSchedule, nextChainRowToSchedule))
-                                nextPhraseStartFrame += framesPerPhrase
-                                nextChainRowToSchedule++
-
-                                // Continuous scheduling loop
-                                while (isPlaying) {
-                                    val currentFrame = audioEngine.getCurrentFrame()
-
-                                    // Maintain 2-phrase buffer
-                                    val bufferRemaining = nextPhraseStartFrame - currentFrame
-                                    if (bufferRemaining < (bufferPhrases * framesPerPhrase)) {
-                                        // Check if we need to advance to next song row
-                                        if (nextChainRowToSchedule >= maxChainLength) {
-                                            // Move to next song row
-                                            nextSongRowToSchedule = (nextSongRowToSchedule + 1) % 256
-                                            nextChainRowToSchedule = 0
-                                            activeTracks = getActiveTracksAtSongRow(nextSongRowToSchedule)
-                                            maxChainLength = activeTracks.maxOfOrNull { it.maxChainLength } ?: 0
-
-                                            if (maxChainLength == 0) {
-                                                // No more active tracks, could loop song or stop
-                                                nextSongRowToSchedule = 0
-                                                activeTracks = getActiveTracksAtSongRow(nextSongRowToSchedule)
-                                                maxChainLength = activeTracks.maxOfOrNull { it.maxChainLength } ?: 0
-                                            }
-                                        }
-
-                                        // Schedule next phrase for all tracks
-                                        if (nextChainRowToSchedule < maxChainLength) {
-                                            scheduleAllTracksAtPosition(nextPhraseStartFrame, nextSongRowToSchedule, nextChainRowToSchedule)
-                                            scheduledPositions.add(ScheduledPosition(nextSongRowToSchedule, nextChainRowToSchedule))
-                                            nextPhraseStartFrame += framesPerPhrase
-                                            nextChainRowToSchedule++
-                                        }
-                                    }
-
-                                    // Calculate which phrase is currently playing based on audio position
-                                    val framesIntoPlayback = maxOf(0L, currentFrame - playbackStartFrame)
-                                    val currentPhraseIndex = (framesIntoPlayback / framesPerPhrase).toInt()
-                                    val framesIntoPhrase = framesIntoPlayback % framesPerPhrase
-
-                                    // Map phrase index to actual song/chain position
-                                    if (currentPhraseIndex < scheduledPositions.size) {
-                                        val pos = scheduledPositions[currentPhraseIndex]
-                                        playbackSongRow = pos.songRow
-                                        playbackChainRow = pos.chainRow
-                                    }
-
-                                    playbackPhraseStep = (framesIntoPhrase / framesPerStep).toInt().coerceIn(0, 15)
-
-                                    delay(msPerStep.toLong())
-                                }
-                            }
-                        } finally {
-                            // CRITICAL: Clean up scheduled notes when playback stops
-                            audioEngine.clearScheduledNotes()
-                        }
-                }
-                else -> {
-                    // Other screens don't support playback yet
-                }
+                // Update UI at 60 Hz
+                delay(16L)
             }
-        } else {
-            playbackRow = 0
-            playbackChainRow = 0
-            playbackPhraseStep = 0
-            playbackSongRow = 0
-            audioEngine.stopAll()
         }
     }
 
@@ -862,7 +530,7 @@ fun DrawScope.drawBitmapChar(
         drawRect(
             color = color,
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
-            size = androidx.compose.ui.geometry.Size(
+            size = Size(
                 (5 * fontScale * scale).toFloat(),
                 (5 * fontScale * scale).toFloat()
             ),
@@ -883,7 +551,7 @@ fun DrawScope.drawBitmapChar(
                         ((x + col * fontScale) * scale).toFloat(),
                         ((y + row * fontScale) * scale).toFloat()
                     ),
-                    size = androidx.compose.ui.geometry.Size(
+                    size = Size(
                         (scale * fontScale).toFloat(),
                         (scale * fontScale).toFloat()
                     )

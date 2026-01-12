@@ -398,6 +398,7 @@ class InputMapper(
 
         // L + button combinations
         if (isLPressed && !isRPressed) {
+            if (logInput) Log.d(TAG, "L is held, checking L+button combo for button=$button")
             when (button) {
                 VirtualButton.A -> {
                     if (logInput) Log.d(TAG, "L+A (paste)")
@@ -410,22 +411,22 @@ class InputMapper(
                     return
                 }
                 VirtualButton.DPAD_UP -> {
-                    if (logInput) Log.d(TAG, "L+UP (sort mode up / jump to prev)")
+                    if (logInput) Log.d(TAG, "L+UP (sort mode up / jump to prev) → calling onLUp()")
                     buttonHandlers.onLUp()
                     return
                 }
                 VirtualButton.DPAD_DOWN -> {
-                    if (logInput) Log.d(TAG, "L+DOWN (sort mode down / jump to next)")
+                    if (logInput) Log.d(TAG, "L+DOWN (sort mode down / jump to next) → calling onLDown()")
                     buttonHandlers.onLDown()
                     return
                 }
                 VirtualButton.DPAD_LEFT -> {
-                    if (logInput) Log.d(TAG, "L+LEFT (prev chain/phrase)")
+                    if (logInput) Log.d(TAG, "L+LEFT (prev chain/phrase) → calling onLLeft()")
                     buttonHandlers.onLLeft()
                     return
                 }
                 VirtualButton.DPAD_RIGHT -> {
-                    if (logInput) Log.d(TAG, "L+RIGHT (next chain/phrase)")
+                    if (logInput) Log.d(TAG, "L+RIGHT (next chain/phrase) → calling onLRight()")
                     buttonHandlers.onLRight()
                     return
                 }
@@ -434,7 +435,9 @@ class InputMapper(
                     // TODO: Add handler for L+START
                     return
                 }
-                else -> { }
+                else -> {
+                    if (logInput) Log.d(TAG, "L held but button=$button not a combo target")
+                }
             }
         }
 
@@ -547,6 +550,22 @@ class InputMapper(
         // BASIC BUTTON PRESSES (no modifiers)
         // =====================================================================
 
+        // Handle SELECT button alone (before basic buttons check since isSelectPressed is already true)
+        // This fixes the bug where SELECT handler was never called because isSelectPressed=true
+        // skipped the basic buttons block
+        if (button == VirtualButton.SELECT && !isLPressed && !isRPressed && !isAPressed && !isBPressed) {
+            if (logInput) Log.d(TAG, "Single SELECT press")
+            buttonHandlers.onSelect()
+            return
+        }
+
+        // Handle START button (check explicitly to ensure it's called)
+        if (button == VirtualButton.START && !isLPressed && !isRPressed && !isAPressed && !isBPressed && !isSelectPressed) {
+            if (logInput) Log.d(TAG, "Single START press → calling onStart()")
+            buttonHandlers.onStart()
+            return
+        }
+
         // Only call basic handlers if no modifiers are pressed
         if (!isLPressed && !isRPressed && !isAPressed && !isBPressed && !isSelectPressed) {
             when (button) {
@@ -554,9 +573,8 @@ class InputMapper(
                 VirtualButton.DPAD_DOWN -> buttonHandlers.onDPadDown()
                 VirtualButton.DPAD_LEFT -> buttonHandlers.onDPadLeft()
                 VirtualButton.DPAD_RIGHT -> buttonHandlers.onDPadRight()
-                VirtualButton.SELECT -> buttonHandlers.onSelect()
-                VirtualButton.START -> buttonHandlers.onStart()
-                else -> { } // A, B, L, R, SELECT are handled above
+                // SELECT and START now handled above with explicit logging
+                else -> { } // A, B, L, R are handled above
             }
         }
     }

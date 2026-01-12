@@ -19,12 +19,12 @@ const int MAX_VOICES = 8;  // Reduced for testing
 // Using Robert Bristow-Johnson's Audio EQ Cookbook formulas
 
 inline void calculateBiquadCoeffs(
-    int filterType,     // 0=off, 1=lp, 2=hp, 3=bp
-    int cutParam,       // 0-255 (cutoff frequency parameter)
-    int resParam,       // 0-255 (resonance parameter)
-    float sampleRate,   // Audio sample rate (e.g., 44100 Hz)
-    float& b0, float& b1, float& b2,  // Output: feedforward coefficients
-    float& a1, float& a2              // Output: feedback coefficients
+        int filterType,     // 0=off, 1=lp, 2=hp, 3=bp
+        int cutParam,       // 0-255 (cutoff frequency parameter)
+        int resParam,       // 0-255 (resonance parameter)
+        float sampleRate,   // Audio sample rate (e.g., 44100 Hz)
+        float& b0, float& b1, float& b2,  // Output: feedforward coefficients
+        float& a1, float& a2              // Output: feedback coefficients
 ) {
     if (filterType == 0) {
         // Filter off: pass-through (unity gain)
@@ -322,15 +322,16 @@ struct Voice {
         filterCut = params.filterCut;
         filterRes = params.filterRes;
         calculateBiquadCoeffs(filterType, filterCut, filterRes, sampleRate,
-                             b0, b1, b2, a1, a2);
+                              b0, b1, b2, a1, a2);
 
         // Reset filter history (important to avoid clicks)
         x1 = 0.0f; x2 = 0.0f;
         y1 = 0.0f; y2 = 0.0f;
 
         // Set initial position based on direction
+        // For reverse: start at actualEnd - 1 (not actualEnd) because we need to read idx+1 for interpolation
         if (reverse) {
-            position = (float)actualEnd;
+            position = (float)(actualEnd > actualStart ? actualEnd - 1 : actualStart);
         } else {
             position = (float)actualStart;
         }
@@ -435,7 +436,7 @@ public:
     }
 
     void setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt,
-                            int drv, int crsh, int dwn, int fType, int fCut, int fRes) {
+                             int drv, int crsh, int dwn, int fType, int fCut, int fRes) {
         if (instrumentId < 0 || instrumentId >= 256) return;
 
         instrumentParams[instrumentId].startPoint = start;
@@ -571,24 +572,36 @@ public:
                 }
 
                 // Find free voice slot
+                bool foundInactiveVoice = false;
                 for (int v = 0; v < MAX_VOICES; v++) {
                     if (!voices[v].isActive) {
+                        foundInactiveVoice = true;
                         if (note.sampleId >= 0 && note.sampleId < 256 && samples[note.sampleId]) {
                             float rate = note.frequency / note.baseFrequency;
                             float sampleRate = (float)audioStream->getSampleRate();
                             voices[v].trigger(samples[note.sampleId], sampleLengths[note.sampleId],
-                                            note.trackId, rate, note.volume, instrumentParams[note.sampleId],
-                                            sampleRate, note.startPointOverride);
+                                              note.trackId, rate, note.volume, instrumentParams[note.sampleId],
+                                              sampleRate, note.startPointOverride);
                             voiceFound = true;
                             LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, startOverride=%d",
                                  (long long)currentFrame, note.sampleId, note.trackId, rate, note.startPointOverride);
+                        } else {
+                            // Sample not loaded - log specific reason
+                            if (note.sampleId < 0 || note.sampleId >= 256) {
+                                LOGD("❌ Invalid sampleId=%d for note at frame %lld", note.sampleId, (long long)currentFrame);
+                            } else {
+                                LOGD("❌ Sample %d not loaded! Note at frame %lld cannot play", note.sampleId, (long long)currentFrame);
+                            }
                         }
                         break;
                     }
                 }
 
                 if (!voiceFound) {
-                    LOGD("⚠️ No free voice for scheduled note at frame %lld", (long long)currentFrame);
+                    if (!foundInactiveVoice) {
+                        LOGD("⚠️ No free voice (all 8 active) for note at frame %lld, sample=%d", (long long)currentFrame, note.sampleId);
+                    }
+                    // If foundInactiveVoice but !voiceFound, it means sample wasn't loaded (already logged above)
                 }
             }
         }
@@ -664,7 +677,7 @@ public:
                     // y[n] = b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2]
                     float x0 = processedSample;
                     float y0 = voice.b0 * x0 + voice.b1 * voice.x1 + voice.b2 * voice.x2
-                             - voice.a1 * voice.y1 - voice.a2 * voice.y2;
+                               - voice.a1 * voice.y1 - voice.a2 * voice.y2;
 
                     // Update history buffers
                     voice.x2 = voice.x1;
@@ -755,15 +768,15 @@ public:
 
     // Schedule a note to be played at exact frame
     void scheduleNote(int64_t targetFrame, int sampleId, int trackId,
-                     float frequency, float baseFrequency, float volume, int startPointOverride = -1) {
+                      float frequency, float baseFrequency, float volume, int startPointOverride = -1) {
         ScheduledNote note = {
-            .targetFrame = targetFrame,
-            .sampleId = sampleId,
-            .trackId = trackId,
-            .frequency = frequency,
-            .baseFrequency = baseFrequency,
-            .volume = volume,
-            .startPointOverride = startPointOverride
+                .targetFrame = targetFrame,
+                .sampleId = sampleId,
+                .trackId = trackId,
+                .frequency = frequency,
+                .baseFrequency = baseFrequency,
+                .volume = volume,
+                .startPointOverride = startPointOverride
         };
         noteQueue.schedule(note);
     }
@@ -771,8 +784,8 @@ public:
     // Schedule a kill event (for Kill effect K00)
     void scheduleKill(int64_t targetFrame, int trackId) {
         ScheduledKill kill = {
-            .targetFrame = targetFrame,
-            .trackId = trackId
+                .targetFrame = targetFrame,
+                .trackId = trackId
         };
         killQueue.schedule(kill);
     }
@@ -899,7 +912,7 @@ Java_com_example_pockettracker_TrackerAudioEngine_native_1setInstrumentParams(
         jint filterType, jint filterCut, jint filterRes) {
     if (engine) {
         engine->setInstrumentParams(instrumentId, start, end, reverse, loopMode, loopStart,
-                                   drive, crush, downsample, filterType, filterCut, filterRes);
+                                    drive, crush, downsample, filterType, filterCut, filterRes);
     }
 }
 
@@ -1075,7 +1088,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setInst
         jint filterType, jint filterCut, jint filterRes) {
     if (engine) {
         engine->setInstrumentParams(instrumentId, start, end, reverse, loopMode, loopStart,
-                                   drive, crush, downsample, filterType, filterCut, filterRes);
+                                    drive, crush, downsample, filterType, filterCut, filterRes);
     }
 }
 

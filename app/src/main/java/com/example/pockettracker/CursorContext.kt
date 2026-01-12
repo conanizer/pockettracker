@@ -85,7 +85,7 @@ data class CursorCapabilities(
  * @param currentValue Current numeric value at cursor
  * @param minValue Minimum allowed value
  * @param maxValue Maximum allowed value
- * @param smallStep Step size for normal increment/decrement (A/B buttons)
+ * @param smallStep Step size for normal increment/decrement (A+UP/DOWN)
  * @param largeStep Step size for fast increment/decrement (A+RIGHT/LEFT)
  * @param emptyValue What value represents "empty" (usually 0xFF)
  */
@@ -109,7 +109,7 @@ data class CursorContext(
      * Helper: Can we do anything with this cursor position?
      */
     fun isEditable(): Boolean = valueType != CursorValueType.READ_ONLY &&
-                                valueType != CursorValueType.NONE
+            valueType != CursorValueType.NONE
 }
 
 /**

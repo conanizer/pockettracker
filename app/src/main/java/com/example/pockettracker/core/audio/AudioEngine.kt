@@ -341,8 +341,12 @@ class AudioEngine(
         val sampleId = if (instrumentId in 0..255) {
             project.instruments[instrumentId].sampleId
         } else {
+            android.util.Log.w("AudioEngine", "❌ Invalid instrumentId=$instrumentId, skipping note")
             return
         }
+
+        // Debug: Log what we're scheduling
+        android.util.Log.d("AudioEngine", "📋 scheduleNote: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame")
 
         val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
         val frequency = note.toFrequency()
