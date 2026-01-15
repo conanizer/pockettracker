@@ -1,8 +1,8 @@
 package com.example.pockettracker.core.audio
 
-import com.example.pockettracker.Instrument
-import com.example.pockettracker.Note
-import com.example.pockettracker.Project
+import com.example.pockettracker.core.data.Instrument
+import com.example.pockettracker.core.data.Note
+import com.example.pockettracker.core.data.Project
 import com.example.pockettracker.core.logging.ILogger
 import com.example.pockettracker.core.resources.IResourceLoader
 import java.io.File

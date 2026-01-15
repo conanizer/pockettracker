@@ -130,12 +130,13 @@ data class FileInfo(
 
 /**
  * File sorting modes.
+ * Platform-agnostic enum with display labels for UI.
  */
-enum class FileSortMode {
-    DATE_DESC,   // Newest first (default)
-    DATE_ASC,    // Oldest first
-    NAME_ASC,    // A-Z
-    NAME_DESC,   // Z-A
-    SIZE_ASC,    // Smallest first
-    SIZE_DESC    // Largest first
+enum class FileSortMode(val label: String) {
+    DATE_DESC("DATE ↓"),   // Newest first (default)
+    DATE_ASC("DATE ↑"),    // Oldest first
+    NAME_ASC("NAME ↑"),    // A-Z
+    NAME_DESC("NAME ↓"),   // Z-A
+    SIZE_ASC("SIZE ↑"),    // Smallest first
+    SIZE_DESC("SIZE ↓")    // Largest first
 }

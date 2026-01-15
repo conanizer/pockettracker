@@ -5,37 +5,38 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.Window
+import android.view.WindowManager
+import android.view.WindowInsets
+import android.view.WindowInsetsController
+import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.Button
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.pockettracker.ui.theme.PockettrackerTheme
-import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import com.example.pockettracker.core.logic.InstrumentController
 import com.example.pockettracker.core.logic.PlaybackController
 import com.example.pockettracker.core.logic.FileController
 import com.example.pockettracker.core.logic.InputAction
 import com.example.pockettracker.core.audio.AudioEngine
+import com.example.pockettracker.core.data.MAIN_ROW_SCREENS
+import com.example.pockettracker.core.data.Note
+import com.example.pockettracker.core.data.Project
+import com.example.pockettracker.core.data.ScreenType
 import com.example.pockettracker.platform.android.OboeAudioBackend
 import com.example.pockettracker.platform.android.AndroidResourceLoader
 import com.example.pockettracker.platform.android.AndroidFileSystem
 import com.example.pockettracker.core.storage.FileInfo
+import com.example.pockettracker.core.storage.FileSortMode
 import java.io.File
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -74,26 +75,28 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Step 1: Detect device type and calculate layout
-        // This tells us if we need virtual buttons or not
+        // SIMPLE: Just set the window to fullscreen
+        // This should work on most Android gaming devices
+        requestWindowFeature(Window.FEATURE_NO_TITLE)
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_FULLSCREEN,
+            WindowManager.LayoutParams.FLAG_FULLSCREEN
+        )
+
+        // Your existing code...
         val deviceAdapter = DeviceAdapter(this)
         val layout = deviceAdapter.calculateLayout()
 
-        // Step 2: Log the detection results so we can see what was detected
         Log.d("DeviceAdapter", "=== DEVICE DETECTION ===")
         Log.d("DeviceAdapter", deviceAdapter.getConfigDescription(layout))
         Log.d("DeviceAdapter", "======================")
 
-        // Step 3: Set up the UI
         setContent {
-            // This is Jetpack Compose - it defines what appears on screen
             PockettrackerTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = Color.Black
                 ) {
-                    // Pass the layout config to our app!
-                    // This is the KEY - we're telling PocketTrackerApp what kind of device we have
                     PocketTrackerApp(layoutConfig = layout)
                 }
             }
@@ -152,6 +155,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     }
 
     // Check and request permissions on first composition
+    //*
     LaunchedEffect(Unit) {
         val hasPermission = permissionsToRequest.all { permission ->
             ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
@@ -164,7 +168,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             Log.d("Permissions", "✅ Storage permissions already granted")
         }
     }
-
     // ═══════════════════════════════════════════════════════════════════════
     // FILE SYSTEM SETUP (REFACTORED ARCHITECTURE - Phase 2 COMPLETE!)
     // ═══════════════════════════════════════════════════════════════════════
@@ -552,13 +555,145 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 )
                 val context = instrumentModule.getCursorContext(instrumentState)
                 val action = handlerFunction(context)
-                val result = instrumentModule.handleInput(instrumentState, action, audioEngine)
+                val result = instrumentModule.handleInput(instrumentState, action, instrumentController)
                 if (result.modified) {
                     trackerController.projectVersion++
                 }
             }
             else -> { /* Other screens not yet implemented */ }
         }
+    }
+
+    /**
+     * Apply an InputAction based on current screen and context
+     *
+     * This dispatcher handles InputAction objects returned by InputController.
+     * It bridges the gap between input interpretation and state management.
+     *
+     * Routes NAVIGATE actions to appropriate TrackerController methods.
+     */
+    fun applyInputAction(action: InputAction) {
+        when (action) {
+            is InputAction.NAVIGATE_UP -> {
+                when (trackerController.currentScreen) {
+                    ScreenType.FILE_BROWSER -> {
+                        // File browser: move cursor up
+                        if (fileBrowserState.items.isNotEmpty()) {
+                            val newCursor = if (fileBrowserState.cursor > 0) {
+                                fileBrowserState.cursor - 1
+                            } else {
+                                fileBrowserState.items.size - 1
+                            }
+                            val newScroll = when {
+                                newCursor < fileBrowserState.scroll -> newCursor
+                                newCursor >= fileBrowserState.scroll + FileBrowserModule.VISIBLE_ROWS ->
+                                    (newCursor - FileBrowserModule.VISIBLE_ROWS + 1).coerceAtLeast(0)
+                                else -> fileBrowserState.scroll
+                            }
+                            fileBrowserState = fileBrowserState.copy(cursor = newCursor, scroll = newScroll)
+                        }
+                    }
+                    else -> trackerController.moveCursorUp()
+                }
+            }
+            is InputAction.NAVIGATE_DOWN -> {
+                when (trackerController.currentScreen) {
+                    ScreenType.FILE_BROWSER -> {
+                        // File browser: move cursor down
+                        if (fileBrowserState.items.isNotEmpty()) {
+                            val newCursor = if (fileBrowserState.cursor < fileBrowserState.items.size - 1) {
+                                fileBrowserState.cursor + 1
+                            } else {
+                                0
+                            }
+                            val newScroll = when {
+                                newCursor >= fileBrowserState.scroll + FileBrowserModule.VISIBLE_ROWS ->
+                                    newCursor - FileBrowserModule.VISIBLE_ROWS + 1
+                                newCursor < fileBrowserState.scroll -> newCursor
+                                else -> fileBrowserState.scroll
+                            }
+                            fileBrowserState = fileBrowserState.copy(cursor = newCursor, scroll = newScroll)
+                        }
+                    }
+                    else -> trackerController.moveCursorDown()
+                }
+            }
+            is InputAction.NAVIGATE_LEFT -> {
+                when (trackerController.currentScreen) {
+                    ScreenType.FILE_BROWSER -> {
+                        // File browser: page up or edit character position
+                        when (fileBrowserState.mode) {
+                            FileBrowserModule.BrowserMode.RENAME, FileBrowserModule.BrowserMode.CREATE -> {
+                                if (fileBrowserState.renameCursor > 0) {
+                                    fileBrowserState = fileBrowserState.copy(renameCursor = fileBrowserState.renameCursor - 1)
+                                }
+                            }
+                            else -> {
+                                if (fileBrowserState.items.isNotEmpty()) {
+                                    val newCursor = (fileBrowserState.cursor - FileBrowserModule.VISIBLE_ROWS).coerceAtLeast(0)
+                                    val newScroll = when {
+                                        newCursor < fileBrowserState.scroll -> newCursor
+                                        newCursor >= fileBrowserState.scroll + FileBrowserModule.VISIBLE_ROWS ->
+                                            (newCursor - FileBrowserModule.VISIBLE_ROWS + 1).coerceAtLeast(0)
+                                        else -> fileBrowserState.scroll
+                                    }
+                                    fileBrowserState = fileBrowserState.copy(cursor = newCursor, scroll = newScroll)
+                                }
+                            }
+                        }
+                    }
+                    else -> trackerController.moveCursorLeft()
+                }
+            }
+            is InputAction.NAVIGATE_RIGHT -> {
+                when (trackerController.currentScreen) {
+                    ScreenType.FILE_BROWSER -> {
+                        // File browser: page down or edit character position
+                        when (fileBrowserState.mode) {
+                            FileBrowserModule.BrowserMode.RENAME, FileBrowserModule.BrowserMode.CREATE -> {
+                                if (fileBrowserState.renameCursor < 11) {
+                                    fileBrowserState = fileBrowserState.copy(renameCursor = fileBrowserState.renameCursor + 1)
+                                }
+                            }
+                            else -> {
+                                if (fileBrowserState.items.isNotEmpty()) {
+                                    val newCursor = (fileBrowserState.cursor + FileBrowserModule.VISIBLE_ROWS)
+                                        .coerceAtMost(fileBrowserState.items.size - 1)
+                                    val newScroll = when {
+                                        newCursor >= fileBrowserState.scroll + FileBrowserModule.VISIBLE_ROWS ->
+                                            newCursor - FileBrowserModule.VISIBLE_ROWS + 1
+                                        newCursor < fileBrowserState.scroll -> newCursor
+                                        else -> fileBrowserState.scroll
+                                    }
+                                    fileBrowserState = fileBrowserState.copy(cursor = newCursor, scroll = newScroll)
+                                }
+                            }
+                        }
+                    }
+                    else -> trackerController.moveCursorRight()
+                }
+            }
+            // Other actions are handled by handleGenericInput or specific handlers
+            else -> { /* No action needed for other types */ }
+        }
+    }
+
+    /**
+     * DPAD navigation handler - gets proper context and dispatches NAVIGATE action
+     * 
+     * Unlike handleGenericInput, this directly calls applyInputAction() because
+     * modules don't understand NAVIGATE_* actions - those are screen-level navigation.
+     *
+     * @param handlerFunction Lambda that takes CursorContext and returns InputAction (typically a NAVIGATE_* action)
+     */
+    fun handleDPadNavigation(handlerFunction: () -> InputAction) {
+        // DPAD navigation: Dispatch NAVIGATE_* actions directly via applyInputAction()
+        // (NOT to module.handleInput() since modules don't understand NAVIGATE actions)
+        //
+        // Note: DPAD movement is screen-aware (handled by trackerController),
+        // not cursor-state-aware. Movement bounds are enforced per-screen, not per-context.
+        val action = handlerFunction()
+        applyInputAction(action)
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -571,201 +706,28 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     val buttonHandlers = remember {
         ButtonHandlers(
             onDPadUp = {
-                // Handle file browser separately (has its own state management)
-                if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
-                    if (fileBrowserState.items.isNotEmpty()) {
-                        val newCursor = if (fileBrowserState.cursor > 0) {
-                            fileBrowserState.cursor - 1
-                        } else {
-                            fileBrowserState.items.size - 1  // Wrap to last item
-                        }
-
-                        val newScroll = when {
-                            newCursor < fileBrowserState.scroll -> newCursor
-                            newCursor >= fileBrowserState.scroll + FileBrowserModule.VISIBLE_ROWS ->
-                                (newCursor - FileBrowserModule.VISIBLE_ROWS + 1).coerceAtLeast(0)
-                            else -> fileBrowserState.scroll
-                        }
-
-                        fileBrowserState = fileBrowserState.copy(
-                            cursor = newCursor,
-                            scroll = newScroll
-                        )
-                    }
-                } else {
-                    // All other screens: use centralized cursor navigation
-                    trackerController.moveCursorUp()
-                }
+                handleDPadNavigation { trackerController.inputController.handleDPadUp() }
             },
 
             // ───────────────────────────────────────────────────────────────
             // D-PAD DOWN
             // ───────────────────────────────────────────────────────────────
             onDPadDown = {
-                // Handle file browser separately (has its own state management)
-                if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
-                    if (fileBrowserState.items.isNotEmpty()) {
-                        val newCursor = if (fileBrowserState.cursor < fileBrowserState.items.size - 1) {
-                            fileBrowserState.cursor + 1
-                        } else {
-                            0  // Wrap to first item
-                        }
-
-                        val newScroll = when {
-                            newCursor >= fileBrowserState.scroll + FileBrowserModule.VISIBLE_ROWS ->
-                                newCursor - FileBrowserModule.VISIBLE_ROWS + 1
-                            newCursor < fileBrowserState.scroll -> newCursor
-                            else -> fileBrowserState.scroll
-                        }
-
-                        fileBrowserState = fileBrowserState.copy(
-                            cursor = newCursor,
-                            scroll = newScroll
-                        )
-                    }
-                } else {
-                    // All other screens: use centralized cursor navigation
-                    trackerController.moveCursorDown()
-                }
+                handleDPadNavigation { trackerController.inputController.handleDPadDown() }
             },
 
             // ───────────────────────────────────────────────────────────────
             // D-PAD LEFT
             // ───────────────────────────────────────────────────────────────
             onDPadLeft = {
-                // Handle file browser separately (has its own state management)
-                if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
-                    when (fileBrowserState.mode) {
-                        FileBrowserModule.BrowserMode.RENAME, FileBrowserModule.BrowserMode.CREATE -> {
-                            // In text editing mode: move character cursor left
-                            if (fileBrowserState.renameCursor > 0) {
-                                fileBrowserState = fileBrowserState.copy(
-                                    renameCursor = fileBrowserState.renameCursor - 1
-                                )
-                            }
-                        }
-                        else -> {
-                            // Normal/Delete mode: page up (20 items)
-                            if (fileBrowserState.items.isNotEmpty()) {
-                                val newCursor = (fileBrowserState.cursor - FileBrowserModule.VISIBLE_ROWS).coerceAtLeast(0)
-
-                                val newScroll = when {
-                                    newCursor < fileBrowserState.scroll -> newCursor
-                                    newCursor >= fileBrowserState.scroll + FileBrowserModule.VISIBLE_ROWS ->
-                                        (newCursor - FileBrowserModule.VISIBLE_ROWS + 1).coerceAtLeast(0)
-                                    else -> fileBrowserState.scroll
-                                }
-
-                                fileBrowserState = fileBrowserState.copy(
-                                    cursor = newCursor,
-                                    scroll = newScroll
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    when (trackerController.currentScreen) {
-                        ScreenType.PROJECT -> {
-                            if (trackerController.projectCursorColumn > 1) {
-                                trackerController.projectCursorColumn--
-                            }
-                        }
-                        ScreenType.INSTRUMENT -> {
-                            // Skip column 2 (unreachable header) on rows 5-8
-                            if (trackerController.instrumentCursorRow in 5..8) {
-                                if (trackerController.instrumentCursorColumn == 3) {
-                                    trackerController.instrumentCursorColumn = 1  // Jump from 3 to 1
-                                }
-                                // If at 1, stay at 1 (can't go further left)
-                            }
-                            // All other rows: column 1 is minimum
-                        }
-                        else -> {
-                            // Get minimum column for this screen
-                            val minColumn = when (trackerController.currentScreen) {
-                                ScreenType.SONG -> 1    // Column 0 is step number (not editable)
-                                ScreenType.CHAIN -> 1
-                                ScreenType.PHRASE -> 1
-                                else -> 0
-                            }
-                            // Move left if not at minimum
-                            if (trackerController.cursorColumn > minColumn) trackerController.cursorColumn--
-                        }
-                    }
-                }
+                handleDPadNavigation { trackerController.inputController.handleDPadLeft() }
             },
 
 // ───────────────────────────────────────────────────────────────
 // D-PAD RIGHT
 // ───────────────────────────────────────────────────────────────
             onDPadRight = {
-                // Handle file browser separately (has its own state management)
-                if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
-                    when (fileBrowserState.mode) {
-                        FileBrowserModule.BrowserMode.RENAME, FileBrowserModule.BrowserMode.CREATE -> {
-                            // In text editing mode: move character cursor right (max 11 = 12 chars)
-                            if (fileBrowserState.renameCursor < 11) {
-                                fileBrowserState = fileBrowserState.copy(
-                                    renameCursor = fileBrowserState.renameCursor + 1
-                                )
-                            }
-                        }
-                        else -> {
-                            // Normal/Delete mode: page down (20 items)
-                            if (fileBrowserState.items.isNotEmpty()) {
-                                val newCursor = (fileBrowserState.cursor + FileBrowserModule.VISIBLE_ROWS)
-                                    .coerceAtMost(fileBrowserState.items.size - 1)
-
-                                val newScroll = when {
-                                    newCursor >= fileBrowserState.scroll + FileBrowserModule.VISIBLE_ROWS ->
-                                        newCursor - FileBrowserModule.VISIBLE_ROWS + 1
-                                    newCursor < fileBrowserState.scroll -> newCursor
-                                    else -> fileBrowserState.scroll
-                                }
-
-                                fileBrowserState = fileBrowserState.copy(
-                                    cursor = newCursor,
-                                    scroll = newScroll
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    when (trackerController.currentScreen) {
-                        ScreenType.PROJECT -> {
-                            // Get max column for this row
-                            val maxColumn = when (trackerController.projectCursorRow) {
-                                2 -> 12
-                                3 -> 3
-                                else -> 1
-                            }
-                            if (trackerController.projectCursorColumn < maxColumn) {
-                                trackerController.projectCursorColumn++
-                            }
-                        }
-                        ScreenType.INSTRUMENT -> {
-                            // Skip column 2 (unreachable header) on rows 5-8
-                            if (trackerController.instrumentCursorRow in 5..8) {
-                                if (trackerController.instrumentCursorColumn == 1) {
-                                    trackerController.instrumentCursorColumn = 3  // Jump from 1 to 3
-                                }
-                                // If at 3, stay at 3 (can't go further right)
-                            }
-                            // All other rows: column 1 is maximum
-                        }
-                        else -> {
-                            // Get maximum column for this screen
-                            val maxColumn = when (trackerController.currentScreen) {
-                                ScreenType.SONG -> 8     // 8 tracks
-                                ScreenType.CHAIN -> 2    // PH + TSP columns
-                                ScreenType.PHRASE -> 9   // Note + Vol + Inst + FX1(name+val) + FX2(name+val) + FX3(name+val) = 10 columns (0-9)
-                                else -> 0
-                            }
-                            // Move right if not at maximum
-                            if (trackerController.cursorColumn < maxColumn) trackerController.cursorColumn++
-                        }
-                    }
-                }
+                handleDPadNavigation { trackerController.inputController.handleDPadRight() }
             },
 
 // ───────────────────────────────────────────────────────────────
@@ -989,9 +951,19 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         // Quick-insert only works on Note column (column 1)
                         // FX columns (4-9) should not trigger note insertion
                         if (trackerController.cursorColumn == 1) {
-                            val step = trackerController.project.phrases[trackerController.currentPhrase].steps[trackerController.cursorRow]
-                            if (step.isEmpty()) {
-                                // Insert last-used values
+                            // Build phrase state for the current cursor so we can get a CursorContext
+                            val phraseState = PhraseEditorState(
+                                trackerController.project.phrases[trackerController.currentPhrase],
+                                trackerController.cursorRow,
+                                trackerController.cursorColumn,
+                                playbackRow = 0,
+                                isPlaying = trackerController.isPlaying()
+                            )
+                            // Get cursor context to check if cell is empty via architecture
+                            val context = phraseEditorModule.getCursorContext(phraseState)
+                            if (context.capabilities.isEmpty) {
+                                // Insert last-used values on empty note
+                                val step = trackerController.project.phrases[trackerController.currentPhrase].steps[trackerController.cursorRow]
                                 step.note = trackerController.lastEditedNote
                                 step.instrument = trackerController.lastEditedInstrument
                                 step.volume = trackerController.lastEditedVolume
@@ -1349,9 +1321,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         // Capture cursor value from current screen before leaving
                         when (trackerController.currentScreen) {
                             ScreenType.PHRASE -> {
-                                // Leaving PHRASE: remember instrument under cursor
-                                val step = trackerController.project.phrases[trackerController.currentPhrase].steps[trackerController.cursorRow]
-                                if (!step.isEmpty()) {
+                                // Leaving PHRASE: remember instrument under cursor if not empty
+                                val phraseState = PhraseEditorState(
+                                    trackerController.project.phrases[trackerController.currentPhrase],
+                                    trackerController.cursorRow,
+                                    trackerController.cursorColumn,
+                                    playbackRow = 0,
+                                    isPlaying = trackerController.isPlaying()
+                                )
+                                val context = phraseEditorModule.getCursorContext(phraseState)
+                                if (!context.capabilities.isEmpty) {
+                                    val step = trackerController.project.phrases[trackerController.currentPhrase].steps[trackerController.cursorRow]
                                     trackerController.lastEditedInstrument = step.instrument
                                 }
                             }
@@ -1408,9 +1388,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         // Capture cursor value from current screen before leaving
                         when (trackerController.currentScreen) {
                             ScreenType.PHRASE -> {
-                                // Leaving PHRASE: remember instrument under cursor
-                                val step = trackerController.project.phrases[trackerController.currentPhrase].steps[trackerController.cursorRow]
-                                if (!step.isEmpty()) {
+                                // Leaving PHRASE: remember instrument under cursor if not empty
+                                val phraseState = PhraseEditorState(
+                                    trackerController.project.phrases[trackerController.currentPhrase],
+                                    trackerController.cursorRow,
+                                    trackerController.cursorColumn,
+                                    playbackRow = 0,
+                                    isPlaying = trackerController.isPlaying()
+                                )
+                                val context = phraseEditorModule.getCursorContext(phraseState)
+                                if (!context.capabilities.isEmpty) {
+                                    val step = trackerController.project.phrases[trackerController.currentPhrase].steps[trackerController.cursorRow]
                                     trackerController.lastEditedInstrument = step.instrument
                                 }
                             }
@@ -1624,7 +1612,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 // Focus requester to auto-focus the app for keyboard input
     val focusRequester = remember { FocusRequester() }
 
-// Auto-focus when app starts so keyboard works immediately
+    //Auto-focus when app starts so keyboard works immediately
     LaunchedEffect(Unit) {
         // Small delay to ensure view is ready before requesting focus
         kotlinx.coroutines.delay(100)

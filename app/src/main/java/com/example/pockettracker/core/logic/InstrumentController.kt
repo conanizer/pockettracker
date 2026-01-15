@@ -1,8 +1,8 @@
 package com.example.pockettracker.core.logic
 
-import com.example.pockettracker.Instrument
-import com.example.pockettracker.Note
-import com.example.pockettracker.Project
+import com.example.pockettracker.core.data.Instrument
+import com.example.pockettracker.core.data.Note
+import com.example.pockettracker.core.data.Project
 import com.example.pockettracker.core.audio.AudioEngine
 import com.example.pockettracker.core.logging.ILogger
 
@@ -217,6 +217,7 @@ class InstrumentController(
         logger.d(TAG, "🎹 Updated ROOT: ${instrument.root}")
     }
 
+
     /**
      * Update instrument detune parameter
      * Recalculates base frequency (ROOT + DETUNE)
@@ -227,9 +228,124 @@ class InstrumentController(
         logger.d(TAG, "🎚️ Updated DETUNE: 0x${formatHex(instrument.detune)}")
     }
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Distortion/Bitcrusher Parameters
+    // ─────────────────────────────────────────────────────────────────────────────
+
     /**
-     * Update playback parameters
-     * Called whenever START/END/REVERSE/LOOP/DRIVE/CRUSH/FILTER changes
+     * Update drive (pre-gain boost)
+     */
+    fun updateDrive(instrument: Instrument, drive: Int) {
+        instrument.drive = drive.coerceIn(0, 255)
+        audioEngine.updateInstrumentPlaybackParams(instrument)
+        logger.d(TAG, "🎛️ Updated DRIVE: 0x${formatHex(instrument.drive)}")
+    }
+
+    /**
+     * Update crush (bit depth reduction)
+     */
+    fun updateCrush(instrument: Instrument, crush: Int) {
+        instrument.crush = crush.coerceIn(0, 15)
+        audioEngine.updateInstrumentPlaybackParams(instrument)
+        logger.d(TAG, "🎛️ Updated CRUSH: ${instrument.crush}")
+    }
+
+    /**
+     * Update downsample (sample rate reduction)
+     */
+    fun updateDownsample(instrument: Instrument, downsample: Int) {
+        instrument.downsample = downsample.coerceIn(0, 15)
+        audioEngine.updateInstrumentPlaybackParams(instrument)
+        logger.d(TAG, "🎛️ Updated DOWNSAMPLE: ${instrument.downsample}")
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Filter Parameters
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Update filter type
+     */
+    fun updateFilterType(instrument: Instrument, filterType: String) {
+        instrument.filterType = filterType
+        audioEngine.updateInstrumentPlaybackParams(instrument)
+        logger.d(TAG, "🎛️ Updated FILTER TYPE: ${instrument.filterType}")
+    }
+
+    /**
+     * Update filter cutoff frequency
+     */
+    fun updateFilterCut(instrument: Instrument, filterCut: Int) {
+        instrument.filterCut = filterCut.coerceIn(0, 255)
+        audioEngine.updateInstrumentPlaybackParams(instrument)
+        logger.d(TAG, "🎛️ Updated FILTER CUT: 0x${formatHex(instrument.filterCut)}")
+    }
+
+    /**
+     * Update filter resonance
+     */
+    fun updateFilterRes(instrument: Instrument, filterRes: Int) {
+        instrument.filterRes = filterRes.coerceIn(0, 255)
+        audioEngine.updateInstrumentPlaybackParams(instrument)
+        logger.d(TAG, "🎛️ Updated FILTER RES: 0x${formatHex(instrument.filterRes)}")
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Sample Playback Parameters
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Update sample start point
+     */
+    fun updateSampleStart(instrument: Instrument, sampleStart: Int) {
+        instrument.sampleStart = sampleStart.coerceIn(0, 255)
+        audioEngine.updateInstrumentPlaybackParams(instrument)
+        logger.d(TAG, "🎛️ Updated SAMPLE START: 0x${formatHex(instrument.sampleStart)}")
+    }
+
+    /**
+     * Update sample end point
+     */
+    fun updateSampleEnd(instrument: Instrument, sampleEnd: Int) {
+        instrument.sampleEnd = sampleEnd.coerceIn(0, 255)
+        audioEngine.updateInstrumentPlaybackParams(instrument)
+        logger.d(TAG, "🎛️ Updated SAMPLE END: 0x${formatHex(instrument.sampleEnd)}")
+    }
+
+    /**
+     * Update reverse playback
+     */
+    fun updateReverse(instrument: Instrument, reverse: Boolean) {
+        instrument.reverse = reverse
+        audioEngine.updateInstrumentPlaybackParams(instrument)
+        logger.d(TAG, "🎛️ Updated REVERSE: ${instrument.reverse}")
+    }
+
+    /**
+     * Update loop mode
+     */
+    fun updateLoopMode(instrument: Instrument, loopMode: String) {
+        instrument.loopMode = loopMode
+        audioEngine.updateInstrumentPlaybackParams(instrument)
+        logger.d(TAG, "🎛️ Updated LOOP MODE: ${instrument.loopMode}")
+    }
+
+    /**
+     * Update loop start point
+     */
+    fun updateLoopStart(instrument: Instrument, loopStart: Int) {
+        instrument.loopStart = loopStart.coerceIn(0, 255)
+        audioEngine.updateInstrumentPlaybackParams(instrument)
+        logger.d(TAG, "🎛️ Updated LOOP START: 0x${formatHex(instrument.loopStart)}")
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Generic Update (legacy, kept for compatibility)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Update playback parameters (generic)
+     * @deprecated Use specific update functions instead
      */
     fun updatePlaybackParams(instrument: Instrument) {
         audioEngine.updateInstrumentPlaybackParams(instrument)

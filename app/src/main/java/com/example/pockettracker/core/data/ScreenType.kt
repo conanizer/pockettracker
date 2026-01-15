@@ -1,4 +1,4 @@
-package com.example.pockettracker
+package com.example.pockettracker.core.data
 
 // Define all available screens in the tracker
 enum class ScreenType(val label: String, val shortLabel: String) {

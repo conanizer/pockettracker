@@ -1,8 +1,9 @@
 package com.example.pockettracker.core.logic
 
-import com.example.pockettracker.Note
-import com.example.pockettracker.Project
-import com.example.pockettracker.ScreenType
+import com.example.pockettracker.core.data.MAIN_ROW_SCREENS
+import com.example.pockettracker.core.data.Note
+import com.example.pockettracker.core.data.Project
+import com.example.pockettracker.core.data.ScreenType
 import com.example.pockettracker.core.storage.FileInfo
 
 /**
@@ -537,7 +538,7 @@ class TrackerController(
         }
 
         // If in a context screen, go to main row first
-        if (currentScreen !in com.example.pockettracker.MAIN_ROW_SCREENS) {
+        if (currentScreen !in MAIN_ROW_SCREENS) {
             val mainScreen = getMainScreenForColumn(getScreenColumn(currentScreen))
             return Pair(mainScreen, getScreenColumn(currentScreen))
         }
@@ -563,7 +564,7 @@ class TrackerController(
         }
 
         // If in a context screen, go to main row first
-        if (currentScreen !in com.example.pockettracker.MAIN_ROW_SCREENS) {
+        if (currentScreen !in MAIN_ROW_SCREENS) {
             val mainScreen = getMainScreenForColumn(getScreenColumn(currentScreen))
             return Pair(mainScreen, getScreenColumn(currentScreen))
         }

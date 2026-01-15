@@ -1,10 +1,12 @@
 package com.example.pockettracker.core.logic
 
-import com.example.pockettracker.Note
-import com.example.pockettracker.PhraseStep
-import com.example.pockettracker.Project
-import com.example.pockettracker.ScreenType
+import com.example.pockettracker.core.data.Note
+import com.example.pockettracker.core.data.PhraseStep
+import com.example.pockettracker.core.data.Project
+import com.example.pockettracker.core.data.ScreenType
 import com.example.pockettracker.core.audio.AudioEngine
+import com.example.pockettracker.core.data.Chain
+import com.example.pockettracker.core.data.Phrase
 import com.example.pockettracker.core.logging.ILogger
 
 /**
@@ -389,7 +391,7 @@ class PlaybackController(
      * Helper used by playPhrase and updatePlaybackBuffer
      */
     private fun schedulePhrase(
-        phrase: com.example.pockettracker.Phrase,
+        phrase: Phrase,
         startFrame: Long,
         trackId: Int,
         transposeSemitones: Int,
@@ -476,7 +478,7 @@ class PlaybackController(
     /**
      * Find next non-empty chain row (circular, wrapping at 16)
      */
-    private fun findNextNonEmptyChainRow(startRow: Int, chain: com.example.pockettracker.Chain): Int? {
+    private fun findNextNonEmptyChainRow(startRow: Int, chain: Chain): Int? {
         var row = startRow
         var attempts = 0
         while (chain.isEmpty(row) && attempts < 16) {

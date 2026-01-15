@@ -1,4 +1,4 @@
-package com.example.pockettracker
+package com.example.pockettracker.core.data
 
 import kotlinx.serialization.Serializable
 
@@ -45,11 +45,6 @@ data class Note(
         if (pitch == -1) return "---"
         return "${NOTES[pitch]}$octave"
     }
-
-    fun toHexString(): String {
-        if (pitch == -1) return "---"
-        return String.format("%02X", toMidi())
-    }
 }
 
 // Single step in a phrase (one row)
@@ -66,14 +61,6 @@ data class PhraseStep(
     var fx3Value: Int = 0x00
 ) {
     fun isEmpty(): Boolean = note == Note.EMPTY
-
-    fun toHexString(): String {
-        return "${note} ${instrument.toString(16).padStart(2,'0').uppercase()} " +
-                "${volume.toString(16).padStart(2,'0').uppercase()} " +
-                "${fx1Type.toString(16).padStart(2,'0').uppercase()}${fx1Value.toString(16).padStart(2,'0').uppercase()} " +
-                "${fx2Type.toString(16).padStart(2,'0').uppercase()}${fx2Value.toString(16).padStart(2,'0').uppercase()}" +
-                "${fx3Type.toString(16).padStart(2,'0').uppercase()}${fx3Value.toString(16).padStart(2,'0').uppercase()}"
-    }
 }
 
 // Phrase = 16 steps
@@ -125,17 +112,6 @@ data class Chain(
         }
     }
 
-    /**
-     * Set transpose from semitones value
-     * Accepts -127 to +128
-     */
-    fun setTransposeSemitones(index: Int, semitones: Int) {
-        transposeValues[index] = if (semitones >= 0) {
-            semitones.coerceIn(0, 128)  // 0x00-0x80
-        } else {
-            (256 + semitones).coerceIn(129, 255)  // 0x81-0xFF
-        }
-    }
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

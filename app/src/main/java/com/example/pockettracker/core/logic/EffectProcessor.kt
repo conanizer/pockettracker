@@ -1,8 +1,7 @@
 package com.example.pockettracker.core.logic
 
 import com.example.pockettracker.core.logging.ILogger
-import com.example.pockettracker.Instrument
-import com.example.pockettracker.PhraseStep
+import com.example.pockettracker.core.data.PhraseStep
 import com.example.pockettracker.core.audio.IAudioBackend
 
 /**

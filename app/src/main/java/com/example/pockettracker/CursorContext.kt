@@ -24,7 +24,7 @@ import com.example.pockettracker.core.logic.EffectProcessor
 enum class CursorValueType {
     // Numeric values that can be increased/decreased
     HEX_BYTE,           // 00-FF (most common: phrases, chains, instruments)
-    HEX_NIBBLE,         // 0-F (single hex digit)
+    HEX_NIBBLE,         // 0-F (single hex digit - for BPM, effect parameters, future single-digit editing)
     SEMITONE_OFFSET,    // Transpose values (centered at 80)
 
     // Musical values
@@ -48,7 +48,7 @@ enum class CursorValueType {
     EFFECT_VALUE,       // Effect value (00-FF)
 
     // Special
-    EMPTY,              // Empty cell (can insert)
+    EMPTY,              // Empty cell type - when valueType == EMPTY, the cell has no content
     READ_ONLY,          // Can't edit (like step numbers)
     NONE                // No cursor / invalid position
 }
@@ -102,6 +102,27 @@ data class CursorContext(
 ) {
     /**
      * Helper: Is the current value empty?
+     *
+     * This checks if the value at the cursor position represents an "empty" state.
+     * Different types have different empty values:
+     * - NOTE: -1 (no note)
+     * - HEX_BYTE (phrase refs): 0xFF or -1 (no reference)
+     * - CHARACTER: ' ' (space)
+     * - etc.
+     *
+     * **Implementation Pattern:**
+     * The module determines if data is empty (e.g., `step.note == Note.EMPTY`)
+     * and passes that to the factory, which sets both:
+     * - `currentValue` to the appropriate display value
+     * - `capabilities.isEmpty` flag to indicate empty state
+     *
+     * This method provides the alternative check: `currentValue == emptyValue`
+     * Both approaches work; `capabilities.isEmpty` is currently preferred for semantic clarity.
+     *
+     * **When to Use:**
+     * - Direct validation: Check if cursor position value is actually empty
+     * - Consistency checks: Verify capabilities.isEmpty matches actual value
+     * - Future refactoring: Replace flag approach with direct isEmpty() calls
      */
     fun isEmpty(): Boolean = currentValue == emptyValue
 
@@ -296,6 +317,35 @@ object CursorContextFactory {
             smallStep = 1,
             largeStep = 16,
             emptyValue = emptyValue
+        )
+    }
+
+    /**
+     * Hex nibble (0-F single hex digit)
+     * 
+     * Used for: BPM (beats per minute), effect parameters, future single-digit editing
+     * Range: 0-15 (F)
+     * Small step: 1 (0→1→2...→F)
+     * Large step: 4 (0→4→8→C→0)
+     * No empty value: always valid (0-F)
+     */
+    fun hexNibble(currentValue: Int): CursorContext {
+        val currentNibble = currentValue and 0x0F  // Mask to 0-15
+        return CursorContext(
+            valueType = CursorValueType.HEX_NIBBLE,
+            capabilities = CursorCapabilities(
+                canIncrement = true,
+                canDecrement = true,
+                canIncrementFast = true,   // Jump +4
+                canDecrementFast = true,   // Jump -4
+                isEmpty = false  // Nibbles are never empty
+            ),
+            currentValue = currentNibble,
+            minValue = 0,
+            maxValue = 15,      // F
+            smallStep = 1,
+            largeStep = 4,      // Quarter of range
+            emptyValue = -1     // Not used for nibbles
         )
     }
 

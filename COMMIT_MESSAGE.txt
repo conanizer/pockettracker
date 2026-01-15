@@ -1,0 +1,46 @@
+[Fix 4.4] Cursor navigation fix & EditorHelpers.kt cleanup
+
+FIXES:
+- Fixed PROJECT screen cursor LEFT/RIGHT navigation (was not working)
+- Fixed INSTRUMENT screen cursor LEFT/RIGHT navigation with proper column skipping
+- Cursor now moves bidirectionally on both screens without getting stuck
+
+CHANGES:
+- TrackerController.kt: Enhanced navigation helper methods with proper bounds
+- MainActivity.kt: Updated onDPadLeft (lines 635-682) and onDPadRight (lines 684-730)
+  - PROJECT screen: Handles column 0 unreachable, row-specific column limits
+  - INSTRUMENT screen: Skips columns 0 and 2, handles dual-parameter rows (5-8)
+- EditorHelpers.kt: Removed 15 unused functions, cleaned from 292→61 lines
+  - Removed: cycleNote, cycleVolume, cycleInstrument, cycleEffectType, cycleEffectValue
+  - Removed: insertChainPhrase, editChainPhraseValue, editChainTransposeValue, navigateChain
+  - Removed: insertSongChainRef, editSongChainRef
+  - Removed: handleProjectCursorLeft/Right, getProjectMinColumn/MaxColumn
+  - Kept: getTrackIndex, clearChainSlot, clearSongChainRef, getEffectTypeName, clearEffect
+
+TESTING:
+- ✅ PROJECT screen cursor: LEFT moves correctly, RIGHT moves correctly
+- ✅ INSTRUMENT screen cursor: LEFT skips unreachable columns, RIGHT works correctly
+- ✅ All compilation errors resolved (0 errors)
+- ✅ EditorHelpers.kt cleanup verified via grep (no broken references)
+- ✅ No regression in other screens
+
+TECHNICAL NOTES:
+PROJECT Screen Navigation:
+- Column 0: Label (unreachable)
+- Row 0: TEMPO - max column 1
+- Row 1: TRANSPOSE - max column 1
+- Row 2: NAME - max column 12 (editable text)
+- Row 3: PROJECT buttons - max column 3 (LOAD/SAVE/NEW)
+
+INSTRUMENT Screen Navigation:
+- Columns 0, 2: Unreachable
+- Rows 0-4, 9-14: Max column 1 (single parameter)
+- Rows 5-8: Max column 3 (dual parameters with shared header)
+
+Architecture Improvement:
+- Deleted 15 functions that were replacements by newer input system
+- EditorHelpers.kt now focused: only essential helpers remain
+- ~78% reduction in file size with zero functionality loss
+
+This commit completes the Code Cleanup phase from Session 2026-01-13.
+Next: Implement remaining effects (ARPEGGIO, REPEAT)

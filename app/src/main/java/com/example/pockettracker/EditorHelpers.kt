@@ -1,5 +1,9 @@
 package com.example.pockettracker
 
+import com.example.pockettracker.core.data.Chain
+import com.example.pockettracker.core.data.PhraseStep
+import com.example.pockettracker.core.data.Track
+
 /**
  * EDITOR HELPERS
  *

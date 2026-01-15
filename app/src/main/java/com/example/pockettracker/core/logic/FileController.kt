@@ -2,7 +2,7 @@ package com.example.pockettracker.core.logic
 
 import com.example.pockettracker.core.logging.ILogger
 import com.example.pockettracker.FileManager
-import com.example.pockettracker.Project
+import com.example.pockettracker.core.data.Project
 import com.example.pockettracker.core.storage.FileInfo
 
 /**

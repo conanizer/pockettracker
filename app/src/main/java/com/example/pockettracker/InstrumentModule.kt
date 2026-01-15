@@ -4,6 +4,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.example.pockettracker.core.data.Instrument
+import com.example.pockettracker.core.data.Note
 
 /**
  * INSTRUMENT SCREEN MODULE
@@ -608,10 +610,9 @@ class InstrumentModule : TrackerModule {
                 // CRUSH + CUT row (columns: 0=name, 1=crush, 2=name, 3=cut)
                 when (state.cursorColumn) {
                     0, 2 -> return CursorContextFactory.readOnly()  // Parameter names
-                    1 -> return CursorContextFactory.hexByte(  // CRUSH value
+                    1 -> return CursorContextFactory.hexNibble(  // CRUSH value
                         currentValue = state.instrument.crush,
-                        min = 0,
-                        max = 15
+
                     )
                     3 -> return CursorContextFactory.hexByte(  // CUT value
                         currentValue = state.instrument.filterCut,
@@ -625,10 +626,8 @@ class InstrumentModule : TrackerModule {
                 // DWNSMPL + RES row (columns: 0=name, 1=downsample, 2=name, 3=res)
                 when (state.cursorColumn) {
                     0, 2 -> return CursorContextFactory.readOnly()  // Parameter names
-                    1 -> return CursorContextFactory.hexByte(  // DWNSMPL value
+                    1 -> return CursorContextFactory.hexNibble(  // DWNSMPL value
                         currentValue = state.instrument.downsample,
-                        min = 0,
-                        max = 15
                     )
                     3 -> return CursorContextFactory.hexByte(  // RES value
                         currentValue = state.instrument.filterRes,
@@ -696,11 +695,13 @@ class InstrumentModule : TrackerModule {
 
     /**
      * Handle input action for instrument screen.
+     *
+     * Uses InstrumentController for all business logic (proper UI/logic separation).
      */
     fun handleInput(
         state: InstrumentState,
         action: com.example.pockettracker.core.logic.InputAction,
-        audioEngine: com.example.pockettracker.core.audio.AudioEngine
+        instrumentController: com.example.pockettracker.core.logic.InstrumentController
     ): InputResult {
         when (state.cursorRow) {
             0 -> {
@@ -716,12 +717,10 @@ class InstrumentModule : TrackerModule {
                 // ROOT note
                 when (action) {
                     is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        state.instrument.root = Note.fromMidi(action.value)
-                        audioEngine.updateInstrumentBaseFrequency(state.instrument)
+                        instrumentController.updateRoot(state.instrument, Note.fromMidi(action.value))
                     }
                     is com.example.pockettracker.core.logic.InputAction.DELETE -> {
-                        state.instrument.root = Note.fromString("C-4")
-                        audioEngine.updateInstrumentBaseFrequency(state.instrument)
+                        instrumentController.updateRoot(state.instrument, Note.fromString("C-4"))
                     }
                     else -> {}
                 }
@@ -730,8 +729,7 @@ class InstrumentModule : TrackerModule {
                 // DETUNE (00-FF hex)
                 when (action) {
                     is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        state.instrument.detune = action.value.coerceIn(0, 255)
-                        audioEngine.updateInstrumentBaseFrequency(state.instrument)
+                        instrumentController.updateDetune(state.instrument, action.value)
                     }
                     else -> {}
                 }
@@ -745,8 +743,7 @@ class InstrumentModule : TrackerModule {
                     1 -> {  // DRIVE value
                         when (action) {
                             is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                                state.instrument.drive = action.value.coerceIn(0, 255)
-                                audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                                instrumentController.updateDrive(state.instrument, action.value)
                             }
                             else -> {}
                         }
@@ -756,8 +753,7 @@ class InstrumentModule : TrackerModule {
                             is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
                                 val filterTypes = listOf("off", "lp", "hp", "bp")
                                 if (action.value in 0..3) {
-                                    state.instrument.filterType = filterTypes[action.value]
-                                    audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                                    instrumentController.updateFilterType(state.instrument, filterTypes[action.value])
                                 }
                             }
                             else -> {}
@@ -771,8 +767,7 @@ class InstrumentModule : TrackerModule {
                     1 -> {  // CRUSH value
                         when (action) {
                             is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                                state.instrument.crush = action.value.coerceIn(0, 15)
-                                audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                                instrumentController.updateCrush(state.instrument, action.value)
                             }
                             else -> {}
                         }
@@ -780,8 +775,7 @@ class InstrumentModule : TrackerModule {
                     3 -> {  // CUT value
                         when (action) {
                             is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                                state.instrument.filterCut = action.value.coerceIn(0, 255)
-                                audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                                instrumentController.updateFilterCut(state.instrument, action.value)
                             }
                             else -> {}
                         }
@@ -794,8 +788,7 @@ class InstrumentModule : TrackerModule {
                     1 -> {  // DWNSMPL value
                         when (action) {
                             is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                                state.instrument.downsample = action.value.coerceIn(0, 15)
-                                audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                                instrumentController.updateDownsample(state.instrument, action.value)
                             }
                             else -> {}
                         }
@@ -803,8 +796,7 @@ class InstrumentModule : TrackerModule {
                     3 -> {  // RES value
                         when (action) {
                             is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                                state.instrument.filterRes = action.value.coerceIn(0, 255)
-                                audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                                instrumentController.updateFilterRes(state.instrument, action.value)
                             }
                             else -> {}
                         }
@@ -818,8 +810,7 @@ class InstrumentModule : TrackerModule {
                 // START (sample start point)
                 when (action) {
                     is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        state.instrument.sampleStart = action.value.coerceIn(0, 255)
-                        audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                        instrumentController.updateSampleStart(state.instrument, action.value)
                     }
                     else -> {}
                 }
@@ -828,8 +819,7 @@ class InstrumentModule : TrackerModule {
                 // END (sample end point)
                 when (action) {
                     is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        state.instrument.sampleEnd = action.value.coerceIn(0, 255)
-                        audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                        instrumentController.updateSampleEnd(state.instrument, action.value)
                     }
                     else -> {}
                 }
@@ -838,8 +828,7 @@ class InstrumentModule : TrackerModule {
                 // REV (reverse: off/on)
                 when (action) {
                     is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        state.instrument.reverse = action.value == 1
-                        audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                        instrumentController.updateReverse(state.instrument, action.value == 1)
                     }
                     else -> {}
                 }
@@ -850,9 +839,8 @@ class InstrumentModule : TrackerModule {
                     is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
                         val loopModes = listOf("off", "fwd", "png")
                         if (action.value in 0..2) {
-                            state.instrument.loopMode = loopModes[action.value]
+                            instrumentController.updateLoopMode(state.instrument, loopModes[action.value])
                         }
-                        audioEngine.updateInstrumentPlaybackParams(state.instrument)
                     }
                     else -> {}
                 }
@@ -861,8 +849,7 @@ class InstrumentModule : TrackerModule {
                 // LOOP ST (loop start point)
                 when (action) {
                     is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        state.instrument.loopStart = action.value.coerceIn(0, 255)
-                        audioEngine.updateInstrumentPlaybackParams(state.instrument)
+                        instrumentController.updateLoopStart(state.instrument, action.value)
                     }
                     else -> {}
                 }

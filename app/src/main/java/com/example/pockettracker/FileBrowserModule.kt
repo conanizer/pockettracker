@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.example.pockettracker.core.storage.FileSortMode
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -483,18 +484,6 @@ class FileBrowserModule : TrackerModule {
             else -> "${bytes / (1024 * 1024)}MB"
         }
     }
-}
-
-/**
- * Sort modes for file browser
- */
-enum class FileSortMode(val label: String) {
-    DATE_DESC("DATE ↓"),
-    DATE_ASC("DATE ↑"),
-    NAME_ASC("NAME ↑"),
-    NAME_DESC("NAME ↓"),
-    SIZE_ASC("SIZE ↑"),
-    SIZE_DESC("SIZE ↓")
 }
 
 /**

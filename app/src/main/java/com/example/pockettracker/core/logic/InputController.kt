@@ -38,11 +38,12 @@ class InputController(
     }
 
     // ========================================
-    // SELECTION STATE (for copy/paste)
+    // SELECTION STATE (for copy/paste - Milestone 2.5)
     // ========================================
 
     /**
      * Whether selection mode is active (SELECT+B to enter).
+     * ⏳ Milestone 2.5 - Copy/Paste Feature
      */
     var selectionMode = false
         private set(value) {
@@ -51,16 +52,25 @@ class InputController(
         }
 
     /**
-     * Selection start/end positions.
+     * Selection cursor position (row, column).
+     * ⏳ Milestone 2.5 - Copy/Paste Feature
      */
     data class CursorPosition(val row: Int, val column: Int)
 
+    /**
+     * Selection start position.
+     * ⏳ Milestone 2.5 - Copy/Paste Feature
+     */
     var selectionStart: CursorPosition? = null
         private set(value) {
             field = value
             stateObserver.onStateChanged()
         }
 
+    /**
+     * Selection end position.
+     * ⏳ Milestone 2.5 - Copy/Paste Feature
+     */
     var selectionEnd: CursorPosition? = null
         private set(value) {
             field = value
@@ -182,17 +192,78 @@ class InputController(
     }
 
     /**
-     * Handle A+A double-tap (CREATE NEW)
+     * Handle A+A double-tap (CREATE NEW - Insert next unused item)
+     *
+     * Creates next unused phrase/chain/instrument in sequence:
+     * - PHRASE screen: Find next unused phrase slot (0-255)
+     * - CHAIN screen: Find next unused chain slot (0-255)
+     * - INSTRUMENT screen: Find next empty instrument slot (0C-FF)
+     *
+     * ⏳ Implementation: Pending double-tap detection in InputMapper
      *
      * @param context What the cursor is on
      * @return Action to perform
      */
     fun handleAACombo(context: CursorContext): InputAction {
         if (context.capabilities.canCreate) {
-            logger.d(TAG, "A+A - creating new item")
+            logger.d(TAG, "A+A - creating next unused item")
             return InputAction.CREATE_NEW
         }
         return InputAction.NONE
+    }
+
+    /**
+     * Handle DPAD UP (Navigate within screen)
+     *
+     * Moves cursor up within current screen with wrapping.
+     * Different behavior per screen (rows vary: PHRASE=16, PROJECT=7, etc.)
+     *
+     * @return Action to perform (dispatched by MainActivity via applyInputAction)
+     */
+    fun handleDPadUp(): InputAction {
+        logger.d(TAG, "DPAD UP - navigate up within screen")
+        return InputAction.NAVIGATE_UP
+    }
+
+    /**
+     * Handle DPAD DOWN (Navigate within screen)
+     *
+     * Moves cursor down within current screen with wrapping.
+     * Different behavior per screen (rows vary: PHRASE=16, PROJECT=7, etc.)
+     *
+     * @return Action to perform (dispatched by MainActivity via applyInputAction)
+     */
+    fun handleDPadDown(): InputAction {
+        logger.d(TAG, "DPAD DOWN - navigate down within screen")
+        return InputAction.NAVIGATE_DOWN
+    }
+
+    /**
+     * Handle DPAD LEFT (Navigate within screen or between screens)
+     *
+     * Behavior depends on current screen:
+     * - Most screens: Move cursor left within screen
+     * - With R modifier (future): Move to previous screen
+     *
+     * @return Action to perform (dispatched by MainActivity via applyInputAction)
+     */
+    fun handleDPadLeft(): InputAction {
+        logger.d(TAG, "DPAD LEFT - navigate left within screen or to previous screen")
+        return InputAction.NAVIGATE_LEFT
+    }
+
+    /**
+     * Handle DPAD RIGHT (Navigate within screen or between screens)
+     *
+     * Behavior depends on current screen:
+     * - Most screens: Move cursor right within screen
+     * - With R modifier (future): Move to next screen
+     *
+     * @return Action to perform (dispatched by MainActivity via applyInputAction)
+     */
+    fun handleDPadRight(): InputAction {
+        logger.d(TAG, "DPAD RIGHT - navigate right within screen or to next screen")
+        return InputAction.NAVIGATE_RIGHT
     }
 
     /**
@@ -218,7 +289,7 @@ class InputController(
      * Handle SELECT+B combination.
      * Enters selection mode OR exits if already in selection mode.
      *
-     * TODO: Full implementation in Milestone 2.5
+     * ⏳ Milestone 2.5 - Copy/Paste Feature: Full implementation pending
      */
     fun handleSelectB() {
         if (selectionMode) {
@@ -232,38 +303,42 @@ class InputController(
      * Handle SELECT+A combination.
      * Paste clipboard contents at cursor.
      *
-     * TODO: Full implementation in Milestone 2.5
+     * ⏳ Milestone 2.5 - Copy/Paste Feature: Full implementation pending
      */
     fun handleSelectA(): InputAction {
-        logger.d(TAG, "⏳ SELECT+A - paste (stub, implementation in Milestone 2.5)")
+        logger.d(TAG, "⏳ SELECT+A - paste (Milestone 2.5 - Copy/Paste Feature)")
         return InputAction.NONE
     }
 
     /**
      * Enter selection mode.
+     * ⏳ Milestone 2.5 - Copy/Paste Feature
      */
     private fun enterSelectionMode() {
         selectionMode = true
-        logger.d(TAG, "📋 Entered selection mode")
+        logger.d(TAG, "📋 Entered selection mode (Milestone 2.5)")
     }
 
     /**
      * Exit selection mode.
+     * ⏳ Milestone 2.5 - Copy/Paste Feature
      */
     private fun exitSelectionMode() {
         selectionMode = false
         selectionStart = null
         selectionEnd = null
-        logger.d(TAG, "📋 Exited selection mode")
+        logger.d(TAG, "📋 Exited selection mode (Milestone 2.5)")
     }
 
     /**
      * Check if selection mode is active.
+     * ⏳ Milestone 2.5 - Copy/Paste Feature
      */
     fun isSelectionModeActive(): Boolean = selectionMode
 
     /**
      * Get selection info for UI display.
+     * ⏳ Milestone 2.5 - Copy/Paste Feature
      */
     fun getSelectionInfo(): String {
         if (!selectionMode) return ""

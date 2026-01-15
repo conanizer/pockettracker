@@ -13,8 +13,9 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.platform.LocalDensity
 import kotlin.math.min
 import kotlinx.coroutines.delay
-import android.os.SystemClock
 import com.example.pockettracker.core.audio.AudioEngine
+import com.example.pockettracker.core.data.Project
+import com.example.pockettracker.core.data.ScreenType
 
 /**
  * PIXEL-PERFECT TRACKER - MODULAR VERSION
