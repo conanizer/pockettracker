@@ -1,9 +1,13 @@
 package com.example.pockettracker
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import android.util.Log
 import android.view.Window
 import android.view.WindowManager
@@ -166,6 +170,27 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             permissionLauncher.launch(permissionsToRequest)
         } else {
             Log.d("Permissions", "✅ Storage permissions already granted")
+        }
+
+        // Android 11+ (API 30+): Request MANAGE_EXTERNAL_STORAGE for full file access
+        // This is needed to see files copied from other devices via USB/file manager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                Log.d("Permissions", "Requesting MANAGE_EXTERNAL_STORAGE permission...")
+                try {
+                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                    }
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    // Fallback for devices that don't support the app-specific intent
+                    Log.w("Permissions", "App-specific intent failed, trying general intent: ${e.message}")
+                    val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                    context.startActivity(intent)
+                }
+            } else {
+                Log.d("Permissions", "✅ MANAGE_EXTERNAL_STORAGE already granted")
+            }
         }
     }
     // ═══════════════════════════════════════════════════════════════════════

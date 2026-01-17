@@ -269,8 +269,11 @@ class AndroidFileSystem(
      * Check if storage is accessible and writable.
      */
     override fun hasStoragePermission(): Boolean {
-        // For API 29+ (Android 10+), we use scoped storage which doesn't require permission
-        // For API 23-28, we would need WRITE_EXTERNAL_STORAGE permission
+        // For API 30+ (Android 11+), check MANAGE_EXTERNAL_STORAGE
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            return Environment.isExternalStorageManager()
+        }
+        // For API 29 and below, check if directory is accessible
         val dir = File(getProjectsDirectory())
         return dir.exists() && dir.canWrite()
     }

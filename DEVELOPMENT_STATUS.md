@@ -1,7 +1,7 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-01-13
+2026-01-18
 
 ## Current Phase
 **Phase A Complete** → **Architecture Refactoring (Phases 1-4 Complete ✅)** → Effects System (TOP-5 In Progress) → Copy/Paste → MVP Release
@@ -162,12 +162,12 @@
 - Resolution: 640×480
 - Status: All features working smoothly!
 
-### Secondary Device (Arriving Soon)
+### Secondary Device ✅
 **Ayaneo Pocket Air Mini**
 - RAM: 3GB
 - OS: Android 11
-- Resolution: TBD
-- Purpose: Performance comparison, verify 60fps possible
+- Resolution: Working with scaling adjustments
+- Status: All features working! Project file transfer between devices working ✅
 
 ### Minimum Requirements (Verified)
 - Android 8.0+ (API 26)
@@ -178,6 +178,19 @@
 
 ## Known Issues
 - ⚠️ Generic input warning spam after device restart (harmless, goes away after reboot)
+
+## Recent Fixes
+
+### Cross-Device Project File Transfer (2026-01-18) ✅
+**Problem:** Project files copied via USB/file manager from another device were invisible to the app.
+
+**Root Cause:** Android scoped storage (API 29+) restricts apps to only see files they created. Files copied externally aren't registered in the app's file ownership.
+
+**Solution:** Added `MANAGE_EXTERNAL_STORAGE` permission for Android 11+ (API 30+):
+- Added permission to `AndroidManifest.xml`
+- Added runtime check in `MainActivity.kt` that redirects to Settings if not granted
+- Updated `AndroidFileSystem.hasStoragePermission()` to check the new permission
+- On first launch, user is prompted to enable "All Files Access" in Settings (one-time setup)
 
 ## What's NOT Implemented Yet (MVP Remaining Work)
 
