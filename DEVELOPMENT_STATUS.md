@@ -250,9 +250,16 @@
 - [x] Offset (Oxx) - Sample start point ✅ WORKING
 - [x] Volume (Vxx) - Volume automation ✅ WORKING
 - [x] Kill (K00) - Stop sample immediately ✅ WORKING
-- [ ] Repeat (Rxx) - Retrigger within step (stub ready)
+- [x] Repeat (Rxx) - Retrigger every xx tics ✅ WORKING (2026-01-18)
 
 **Architecture:** Centralized in EffectProcessor.resolveStepParams() (2026-01-10)
+
+**TIC SYSTEM (added 2026-01-18):**
+- TICS_PER_STEP = 12 (configurable in future Groove screen)
+- REPEAT uses tic-interval approach (LGPT/M8 style):
+  - R01 = retrig every 1 tic = 12 triggers/step
+  - R03 = retrig every 3 tics = 4 triggers/step (triplets!)
+  - R06 = retrig every 6 tics = 2 triggers/step
 
 **Table screen effects:** Early Post-MVP
 
@@ -350,10 +357,10 @@ Planned global settings:
 - ✅ OFFSET (Oxx) - Sample start point offset
 - ✅ VOLUME (Vxx) - Volume automation
 - ✅ KILL (K00) - Stop sample immediately
+- ✅ REPEAT (Rxx) - Retrigger every xx tics (tic-interval approach)
 
 **Still Need:**
 - [ ] ARPEGGIO (Axx) - Note pattern automation
-- [ ] REPEAT (Rxx) - Retrigger within step
 
 **See:** `MVP_ROADMAP.md` Milestone 2 for full effects implementation
 

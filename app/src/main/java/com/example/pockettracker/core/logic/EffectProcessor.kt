@@ -14,6 +14,11 @@ import com.example.pockettracker.core.audio.IAudioBackend
  * - startPoint: OFFSET effect (Oxx) > instrument.sampleStart
  * - volume: VOLUME effect (Vxx) > step.volume
  * - killAtFrame: Only set if KILL effect (K00) is present
+ *
+ * TIC SYSTEM:
+ * Effects like REPEAT and ARPEGGIO use tics for precise timing.
+ * A step is divided into TICS_PER_STEP tics (default: 12).
+ * See PlaybackController.TICS_PER_STEP for configuration.
  */
 data class ResolvedStepParams(
     /** Sample start point (0-255), or -1 to use instrument default */
@@ -28,7 +33,20 @@ data class ResolvedStepParams(
     /** Arpeggio semitones (high nibble, low nibble), or null if no ARPEGGIO effect */
     val arpeggioValue: Int? = null,
 
-    /** Repeat count (1-15), or null if no REPEAT effect */
+    /**
+     * Repeat tic interval, or null if no REPEAT effect.
+     *
+     * REPEAT (Rxx) uses tic-interval approach (LGPT/M8 style):
+     * - Rxx = retrigger note every xx tics within the step
+     * - R00 = no effect
+     * - R01 = retrig every 1 tic = 12 triggers/step (fastest)
+     * - R02 = retrig every 2 tics = 6 triggers/step
+     * - R03 = retrig every 3 tics = 4 triggers/step (triplets!)
+     * - R04 = retrig every 4 tics = 3 triggers/step
+     * - R06 = retrig every 6 tics = 2 triggers/step
+     * - R0C = retrig every 12 tics = 1 trigger/step (no effect)
+     * - R0D+ = no effect (interval > TICS_PER_STEP)
+     */
     val repeatCount: Int? = null
 )
 
@@ -37,17 +55,21 @@ data class ResolvedStepParams(
  *
  * Processes effect commands and applies them to scheduled notes.
  *
- * ✅ PLATFORM-AGNOSTIC - No Android dependencies (except Log which will be abstracted later)
+ * ✅ PLATFORM-AGNOSTIC - No Android dependencies
  *
- * NOTE: Full effects implementation comes in MVP Milestone 2.
- * This provides the structure and integration points for now.
+ * ## TIC SYSTEM
+ * PocketTracker uses a tic-based timing system (like LGPT/M8):
+ * - Each step is divided into TICS_PER_STEP tics (default: 12)
+ * - Time-based effects (REPEAT, ARPEGGIO) operate at tic resolution
+ * - 12 tics allows triplets (divisible by 3), half-steps (÷2), and quarter-steps (÷4)
+ * - Future: Configurable via Groove screen (post-MVP)
  *
- * TOP-5 Effects (to be implemented in Milestone 2):
- * - Arpeggio (Axx) - Note pattern automation
- * - Offset (Oxx) - Sample start point automation
- * - Volume (Vxx) - Volume automation within step
- * - Kill (K00) - Stop sample immediately
- * - Repeat (Rxx) - Retrigger sample N times per step
+ * ## TOP-5 Effects (MVP Milestone 2)
+ * - Arpeggio (Axx) - Note pattern automation (3 notes per step)
+ * - Offset (Oxx) - Sample start point automation ✅ IMPLEMENTED
+ * - Volume (Vxx) - Volume automation within step ✅ IMPLEMENTED
+ * - Kill (K00) - Stop sample immediately ✅ IMPLEMENTED
+ * - Repeat (Rxx) - Retrigger every xx tics ✅ IMPLEMENTED
  */
 class EffectProcessor(
     private val audioBackend: IAudioBackend,

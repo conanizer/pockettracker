@@ -107,6 +107,15 @@ PocketTracker is an Android music tracker application inspired by M8 and LSDJ, d
 
 **Important:** The project uses CMake for native code compilation. NDK and CMake 3.22.1+ must be installed.
 
+### ⚠️ DO NOT RUN BUILDS AUTOMATICALLY
+
+**IMPORTANT FOR CLAUDE CODE:**
+- **DO NOT** run `./gradlew build` or similar commands automatically
+- The developer will build and test manually
+- Running builds wastes tokens and time
+- Just write the code and let the developer test it
+- If asked to verify compilation, ask the developer to do it instead
+
 ---
 
 ## 📐 Architecture
@@ -215,10 +224,10 @@ Each module receives state objects and renders itself independently.
 
 **TOP-5 Effects in PHRASE screen only:**
 - Arpeggio (Axx) - Note pattern automation
-- Offset (Oxx) - Sample start point automation(DONE)
-- Volume (Vxx) - Volume automation within step(DONE)
-- Kill (K00) - Stop sample immediately(DONE)
-- Repeat (Rxx) - Retrigger sample N times per step
+- Offset (Oxx) - Sample start point automation (DONE)
+- Volume (Vxx) - Volume automation within step (DONE)
+- Kill (K00) - Stop sample immediately (DONE)
+- Repeat (Rxx) - Retrigger every xx tics (DONE) - uses tic-interval approach (LGPT/M8 style)
 
 **Implementation:**
 - Parser: Extract fx1Type/fx1Value from PhraseStep

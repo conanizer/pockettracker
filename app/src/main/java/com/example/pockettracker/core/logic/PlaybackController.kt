@@ -86,6 +86,23 @@ class PlaybackController(
     companion object {
         const val LOOKAHEAD_MS = 50L           // Minimal latency for responsive start
         const val BUFFER_PHRASES = 2           // Keep 2+ phrases queued ahead
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // TIC SYSTEM - Subdivisions within a step for precise effect timing
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Tics are the smallest timing unit in tracker music.
+        // A step is divided into TICS_PER_STEP tics.
+        // Effects like REPEAT and ARPEGGIO operate at tic resolution.
+        //
+        // 12 tics/step is a good default because it's divisible by:
+        // - 2 (half-step subdivisions)
+        // - 3 (triplets!)
+        // - 4 (quarter-step subdivisions)
+        // - 6 (sextuplets)
+        //
+        // Future: This will be configurable via Groove screen (post-MVP)
+        // Common values: 6 (classic), 12 (default), 24 (high resolution)
+        const val TICS_PER_STEP = 12
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -653,11 +670,61 @@ class PlaybackController(
             audioEngine.scheduleKill(params.killAtFrame, trackId)
         }
 
+        // Handle REPEAT effect (Rxx) - retrigger note every xx tics within step
+        // Uses tic-interval approach (LGPT/M8 style):
+        // - Rxx = retrig every xx tics (where step = TICS_PER_STEP tics)
+        // - R00 = no effect
+        // - R01 = retrig every 1 tic = 12 triggers/step (fastest, with 12 tics/step)
+        // - R02 = retrig every 2 tics = 6 triggers/step
+        // - R03 = retrig every 3 tics = 4 triggers/step (triplets!)
+        // - R04 = retrig every 4 tics = 3 triggers/step
+        // - R06 = retrig every 6 tics = 2 triggers/step
+        // - R0C = retrig every 12 tics = 1 trigger/step (no effect with 12 tics/step)
+        // - R0D+ = no effect (interval > step)
+        if (params.repeatCount != null && params.repeatCount > 0 && params.repeatCount < TICS_PER_STEP && !step.isEmpty()) {
+            val ticInterval = params.repeatCount
+
+            // Calculate timing
+            val framesPerTic = stepDuration / TICS_PER_STEP
+            val triggersCount = TICS_PER_STEP / ticInterval  // Integer division
+
+            // Main note is already scheduled at tic 0 (targetFrame)
+            // Schedule additional retriggers at subsequent tic intervals
+            // Retrigger at tics: ticInterval, 2*ticInterval, 3*ticInterval, etc.
+            for (i in 1 until triggersCount) {
+                val ticPosition = i * ticInterval
+                val retrigFrame = targetFrame + (ticPosition * framesPerTic)
+
+                // Apply same transposition as main note
+                val note = if (transposeSemitones != 0) {
+                    val originalMidi = step.note.toMidi()
+                    if (originalMidi >= 0) {
+                        val transposedMidi = (originalMidi + transposeSemitones).coerceIn(0, 127)
+                        Note.fromMidi(transposedMidi)
+                    } else {
+                        step.note
+                    }
+                } else {
+                    step.note
+                }
+
+                audioEngine.scheduleNote(
+                    targetFrame = retrigFrame,
+                    note = note,
+                    instrumentId = step.instrument,
+                    trackId = trackId,
+                    volume = params.volume,
+                    project = project,
+                    startPointOverride = params.startPoint  // Apply OFFSET to retriggers too
+                )
+            }
+
+            logger.d(TAG, "🔁 REPEAT R${ticInterval.toString(16).uppercase().padStart(2, '0')}: " +
+                    "$triggersCount triggers (every $ticInterval tics, ${ticInterval * framesPerTic} frames)")
+        }
+
         // TODO: Handle ARPEGGIO effect (schedule 3 notes)
         // if (params.arpeggioValue != null) { ... }
-
-        // TODO: Handle REPEAT effect (schedule N retriggers)
-        // if (params.repeatCount != null) { ... }
 
         return noteScheduled
     }
