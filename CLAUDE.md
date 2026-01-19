@@ -25,13 +25,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - ✅ Audio engine (professional-grade, sample-accurate)
 - ✅ All UI screens working
 - ✅ Playback system complete
-- ⚠️ Effects system NOT implemented yet
+- ✅ Architecture refactoring COMPLETE
+- 🚧 Effects system (4/5 TOP-5 done: Offset, Volume, Kill, Repeat)
 - ⚠️ Copy/paste NOT implemented yet
-- 🚧 **Currently refactoring architecture** (preparing for Linux port)
 
 **Next Steps:**
-1. Complete refactoring (Phase 4 - extracting controllers)
-2. Implement effects system (TOP-5 effects in phrase screen)
+1. ~~Complete refactoring (Phase 4 - extracting controllers)~~ ✅ DONE
+2. Finish effects system (only Arpeggio remaining!)
 3. Implement copy/paste (M8-style)
 4. Testing & polish
 5. MVP release (Late February 2025)
@@ -223,11 +223,15 @@ Each module receives state objects and renders itself independently.
 ### 1. Effects System (1-2 weeks)
 
 **TOP-5 Effects in PHRASE screen only:**
-- Arpeggio (Axx) - Note pattern automation
-- Offset (Oxx) - Sample start point automation (DONE)
-- Volume (Vxx) - Volume automation within step (DONE)
-- Kill (K00) - Stop sample immediately (DONE)
-- Repeat (Rxx) - Retrigger every xx tics (DONE) - uses tic-interval approach (LGPT/M8 style)
+- Arpeggio (Axx) - Note pattern automation (TODO)
+- Offset (Oxx) - Sample start point automation ✅ DONE
+- Volume (Vxx) - Volume automation within step ✅ DONE
+- Kill (K00) - Stop sample immediately ✅ DONE
+- Repeat (Rxx) - Full LGPT/M8-style retrigger ✅ DONE (2026-01-19)
+  - Sub-step (R01-R0B): multiple triggers per step
+  - Multi-step (R0C+): R30 = 4 kicks in phrase, R12 = dotted notes
+  - Persistence: continues until new note, same-column FX, or KILL
+  - Cross-phrase: persists through Chain/Song playback!
 
 **Implementation:**
 - Parser: Extract fx1Type/fx1Value from PhraseStep

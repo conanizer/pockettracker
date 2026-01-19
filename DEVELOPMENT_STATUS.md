@@ -1,7 +1,7 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-01-18
+2026-01-19
 
 ## Current Phase
 **Phase A Complete** → **Architecture Refactoring (Phases 1-4 Complete ✅)** → Effects System (TOP-5 In Progress) → Copy/Paste → MVP Release
@@ -250,16 +250,35 @@
 - [x] Offset (Oxx) - Sample start point ✅ WORKING
 - [x] Volume (Vxx) - Volume automation ✅ WORKING
 - [x] Kill (K00) - Stop sample immediately ✅ WORKING
-- [x] Repeat (Rxx) - Retrigger every xx tics ✅ WORKING (2026-01-18)
+- [x] Repeat (Rxx) - Retrigger with full persistence ✅ WORKING (2026-01-19)
 
 **Architecture:** Centralized in EffectProcessor.resolveStepParams() (2026-01-10)
 
 **TIC SYSTEM (added 2026-01-18):**
 - TICS_PER_STEP = 12 (configurable in future Groove screen)
-- REPEAT uses tic-interval approach (LGPT/M8 style):
-  - R01 = retrig every 1 tic = 12 triggers/step
+- REPEAT uses tic-interval approach (LGPT/M8 style)
+
+**REPEAT EFFECT - Full Feature Set (2026-01-19):**
+
+*Sub-step intervals (R01-R0B):*
+  - R01 = retrig every 1 tic = 12 triggers/step (fastest)
   - R03 = retrig every 3 tics = 4 triggers/step (triplets!)
   - R06 = retrig every 6 tics = 2 triggers/step
+
+*Multi-step intervals (R0C+):*
+  - R0C (12) = every 1 step
+  - R12 (18) = every 1.5 steps (dotted notes!)
+  - R18 (24) = every 2 steps
+  - R30 (48) = every 4 steps (4 kicks in 16-step phrase!)
+  - R60 (96) = every 8 steps
+
+*Persistence (LGPT/M8 style):*
+  - REPEAT persists until cancelled by:
+    1. New note on the same track
+    2. Any effect in the same FX column
+    3. KILL effect (K00) in any column
+  - Cross-phrase persistence in Chain/Song mode!
+  - Example: Phrase 00 with `C-4 R30` → Phrase 01 empty → kicks continue!
 
 **Table screen effects:** Early Post-MVP
 
@@ -357,10 +376,12 @@ Planned global settings:
 - ✅ OFFSET (Oxx) - Sample start point offset
 - ✅ VOLUME (Vxx) - Volume automation
 - ✅ KILL (K00) - Stop sample immediately
-- ✅ REPEAT (Rxx) - Retrigger every xx tics (tic-interval approach)
+- ✅ REPEAT (Rxx) - Full implementation with persistence and multi-step intervals!
 
 **Still Need:**
 - [ ] ARPEGGIO (Axx) - Note pattern automation
+
+**REPEAT is now feature-complete:** Sub-step (R01-R0B), multi-step (R0C+), persistence, cross-phrase!
 
 **See:** `MVP_ROADMAP.md` Milestone 2 for full effects implementation
 

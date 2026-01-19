@@ -37,15 +37,29 @@ data class ResolvedStepParams(
      * Repeat tic interval, or null if no REPEAT effect.
      *
      * REPEAT (Rxx) uses tic-interval approach (LGPT/M8 style):
-     * - Rxx = retrigger note every xx tics within the step
-     * - R00 = no effect
+     *
+     * ## Sub-step intervals (R01-R0B) - multiple triggers within one step:
+     * - R00 = no effect / cancel persistent REPEAT
      * - R01 = retrig every 1 tic = 12 triggers/step (fastest)
      * - R02 = retrig every 2 tics = 6 triggers/step
      * - R03 = retrig every 3 tics = 4 triggers/step (triplets!)
      * - R04 = retrig every 4 tics = 3 triggers/step
      * - R06 = retrig every 6 tics = 2 triggers/step
-     * - R0C = retrig every 12 tics = 1 trigger/step (no effect)
-     * - R0D+ = no effect (interval > TICS_PER_STEP)
+     *
+     * ## Multi-step intervals (R0C+) - one trigger every N steps:
+     * - R0C (12) = every 1 step (same timing as no retrig)
+     * - R12 (18) = every 1.5 steps (dotted quarter notes!)
+     * - R18 (24) = every 2 steps
+     * - R24 (36) = every 3 steps
+     * - R30 (48) = every 4 steps (4 kicks in 16-step phrase!)
+     * - R3C (60) = every 5 steps
+     * - R60 (96) = every 8 steps (2 triggers per phrase)
+     *
+     * ## Persistence
+     * REPEAT persists until cancelled by:
+     * 1. A new note on the same track
+     * 2. Any effect in the same FX column where REPEAT was set
+     * 3. KILL effect (K00) in any FX column
      */
     val repeatCount: Int? = null
 )
@@ -69,7 +83,10 @@ data class ResolvedStepParams(
  * - Offset (Oxx) - Sample start point automation ✅ IMPLEMENTED
  * - Volume (Vxx) - Volume automation within step ✅ IMPLEMENTED
  * - Kill (K00) - Stop sample immediately ✅ IMPLEMENTED
- * - Repeat (Rxx) - Retrigger every xx tics ✅ IMPLEMENTED
+ * - Repeat (Rxx) - Retrigger with persistence ✅ IMPLEMENTED
+ *   - R01-R0B: Sub-step intervals (multiple triggers per step)
+ *   - R0C+: Multi-step intervals (one trigger every N steps)
+ *   - Persists until new note, same-column FX, or KILL
  */
 class EffectProcessor(
     private val audioBackend: IAudioBackend,

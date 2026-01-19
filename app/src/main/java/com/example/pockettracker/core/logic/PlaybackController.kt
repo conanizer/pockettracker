@@ -10,6 +10,45 @@ import com.example.pockettracker.core.data.Phrase
 import com.example.pockettracker.core.logging.ILogger
 
 /**
+ * Per-track state for persistent effects and note memory.
+ *
+ * Used to implement M8/LGPT-style persistent effects where an effect
+ * continues until cancelled by specific conditions:
+ * - REPEAT (Rxx) persists until:
+ *   1. A new note is triggered on this track
+ *   2. Any effect in the same FX column where REPEAT was set
+ *   3. KILL effect (K00) in any FX column
+ */
+data class TrackState(
+    /** Last played note on this track (for persistent REPEAT retrigger) */
+    var lastNote: Note = Note.EMPTY,
+    /** Last played instrument ID */
+    var lastInstrument: Int = 0,
+    /** Last played volume (0.0-1.0) */
+    var lastVolume: Float = 1.0f,
+    /** Last played start point override (-1 = instrument default) */
+    var lastStartPoint: Int = -1,
+
+    // Persistent REPEAT state
+    /** Which FX column (1, 2, or 3) the REPEAT was set in, or 0 if not active */
+    var repeatActiveColumn: Int = 0,
+    /** Repeat tic interval (Rxx value) - can be sub-step (<12) or multi-step (>=12) */
+    var repeatTicInterval: Int = 0,
+    /** Audio frame where REPEAT was started (for cross-phrase persistence) */
+    var repeatStartFrame: Long = 0
+) {
+    /** Check if persistent REPEAT is active */
+    fun hasActiveRepeat(): Boolean = repeatActiveColumn > 0 && repeatTicInterval > 0
+
+    /** Clear persistent REPEAT */
+    fun clearRepeat() {
+        repeatActiveColumn = 0
+        repeatTicInterval = 0
+        repeatStartFrame = 0
+    }
+}
+
+/**
  * PlaybackController
  *
  * Manages all playback operations including:
@@ -17,6 +56,7 @@ import com.example.pockettracker.core.logging.ILogger
  * - Phrase/chain/song playback scheduling with continuous lookahead buffering
  * - Sample-accurate note queue management
  * - Playback cursors and position tracking
+ * - Per-track persistent effect state (REPEAT, etc.)
  *
  * ✅ PLATFORM-AGNOSTIC - No Android dependencies!
  * ✅ SINGLE SOURCE OF TRUTH - All scheduling logic centralized here
@@ -28,6 +68,7 @@ import com.example.pockettracker.core.logging.ILogger
  * Updated in Phase 1 refactoring to use the new AudioEngine architecture.
  * Updated in Phase 5 to remove Compose state dependencies.
  * Updated Phase 6 to consolidate all scheduling logic (eliminate duplication).
+ * Updated Phase 7 to add persistent REPEAT effect (LGPT/M8 style).
  */
 class PlaybackController(
     private val audioEngine: AudioEngine,
@@ -81,6 +122,9 @@ class PlaybackController(
 
     /** Track current playing position for UI cursor (song mode) */
     private val songPositionStartFrames = mutableMapOf<Pair<Int,Int>, Long>()  // Map (songRow, chainRow) to start frame
+
+    /** Per-track state for persistent effects (REPEAT, note memory) - 8 tracks */
+    private val trackStates = Array(8) { TrackState() }
 
     /** Lookahead configuration */
     companion object {
@@ -215,6 +259,8 @@ class PlaybackController(
         chainRowStartFrames.clear()
         songPositionStartFrames.clear()
         nextSongChainRowToSchedule = 0
+        // Clear all track states (persistent effects, note memory)
+        trackStates.forEach { it.clearRepeat() }
         logger.d(TAG, "⏹️ Playback stopped")
     }
 
@@ -406,6 +452,11 @@ class PlaybackController(
     /**
      * Schedule a single phrase for playback
      * Helper used by playPhrase and updatePlaybackBuffer
+     *
+     * Now handles persistent REPEAT effect:
+     * - Passes track state to each step for persistence tracking
+     * - REPEAT continues until cancelled by note, same-column FX, or KILL
+     * - Supports multi-step intervals (R0C+ = every N steps)
      */
     private fun schedulePhrase(
         phrase: Phrase,
@@ -416,6 +467,8 @@ class PlaybackController(
         framesPerStep: Long
     ) {
         var scheduledNotes = 0
+        val trackState = trackStates[trackId.coerceIn(0, 7)]
+
         phrase.steps.forEachIndexed { stepIndex, step ->
             val targetFrame = startFrame + (stepIndex * framesPerStep)
 
@@ -425,7 +478,9 @@ class PlaybackController(
                 stepDuration = framesPerStep,
                 trackId = trackId,
                 transposeSemitones = transposeSemitones,
-                project = project
+                project = project,
+                trackState = trackState,
+                stepIndex = stepIndex  // Pass step index for multi-step REPEAT
             )
 
             if (noteScheduled) {
@@ -614,7 +669,26 @@ class PlaybackController(
      * - Note scheduling with optional transposition
      * - OFFSET effect (Oxx) - modifies sample start point
      * - VOLUME effect (Vxx) - overrides step volume
-     * - Other effects via EffectProcessor (KILL, ARPEGGIO, REPEAT)
+     * - KILL effect (K00) - stops sample and clears persistent REPEAT
+     * - REPEAT effect (Rxx) - retrigger with PERSISTENCE (LGPT/M8 style)
+     *
+     * ## Persistent REPEAT (Rxx)
+     * REPEAT persists until cancelled by:
+     * 1. A new note on this track
+     * 2. Any effect in the same FX column where REPEAT was set
+     * 3. KILL effect (K00) in any FX column
+     *
+     * ## Sub-step vs Multi-step REPEAT
+     * - R01-R0B: Sub-step intervals (multiple triggers within one step)
+     * - R0C+: Multi-step intervals (one trigger every N steps)
+     *   - R0C (12) = every 1 step
+     *   - R18 (24) = every 2 steps
+     *   - R24 (36) = every 3 steps
+     *   - R30 (48) = every 4 steps (4 kicks in 16-step phrase!)
+     *   - R12 (18) = every 1.5 steps (dotted notes)
+     *
+     * When persistent REPEAT is active and step has no note, the last played
+     * note/instrument is retriggered at the REPEAT interval.
      *
      * @param step The phrase step to schedule
      * @param targetFrame When this step should trigger (audio frame)
@@ -622,6 +696,8 @@ class PlaybackController(
      * @param trackId Which track (0-7)
      * @param transposeSemitones Semitones to transpose (0 for Phrase, varies for Chain/Song)
      * @param project Project containing instrument data
+     * @param trackState Per-track state for persistent effects (modified in place)
+     * @param stepIndex Current step index in phrase (0-15), for multi-step REPEAT
      * @return true if a note was scheduled, false if step was empty
      */
     fun scheduleStepWithEffects(
@@ -630,15 +706,55 @@ class PlaybackController(
         stepDuration: Long,
         trackId: Int,
         transposeSemitones: Int,
-        project: Project
+        project: Project,
+        trackState: TrackState = trackStates[trackId.coerceIn(0, 7)],
+        stepIndex: Int = 0
     ): Boolean {
-        // Resolve all effect parameters via EffectProcessor (single source of truth)
+        // ═══════════════════════════════════════════════════════════════════════════
+        // STEP 1: Check cancellation conditions for persistent REPEAT
+        // ═══════════════════════════════════════════════════════════════════════════
+
+        // Check if KILL effect is present in ANY column → clears persistent REPEAT
+        val hasKill = step.fx1Type == EffectProcessor.FX_KILL ||
+                step.fx2Type == EffectProcessor.FX_KILL ||
+                step.fx3Type == EffectProcessor.FX_KILL
+
+        if (hasKill) {
+            trackState.clearRepeat()
+            logger.d(TAG, "🔪 KILL detected → persistent REPEAT cancelled")
+        }
+
+        // Check if step has a note → clears persistent REPEAT (new note triggers)
+        val hasNote = !step.isEmpty()
+        if (hasNote) {
+            trackState.clearRepeat()
+            // Note: We don't log here because a new REPEAT might be set below
+        }
+
+        // Check if persistent REPEAT's column has any effect → clears REPEAT
+        // (Any effect in the same column overrides the persistent REPEAT)
+        if (trackState.hasActiveRepeat()) {
+            val columnHasEffect = when (trackState.repeatActiveColumn) {
+                1 -> step.fx1Type != EffectProcessor.FX_NONE
+                2 -> step.fx2Type != EffectProcessor.FX_NONE
+                3 -> step.fx3Type != EffectProcessor.FX_NONE
+                else -> false
+            }
+            if (columnHasEffect) {
+                logger.d(TAG, "🔄 FX in column ${trackState.repeatActiveColumn} → persistent REPEAT cancelled")
+                trackState.clearRepeat()
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // STEP 2: Resolve effects and schedule note if present
+        // ═══════════════════════════════════════════════════════════════════════════
+
         val defaultVolume = step.volume / 255.0f
         val params = effectProcessor.resolveStepParams(step, targetFrame, defaultVolume)
 
-        // Schedule note if step has one
         var noteScheduled = false
-        if (!step.isEmpty()) {
+        if (hasNote) {
             // Apply transposition if needed
             val note = if (transposeSemitones != 0) {
                 val originalMidi = step.note.toMidi()
@@ -663,6 +779,12 @@ class PlaybackController(
                 startPointOverride = params.startPoint
             )
             noteScheduled = true
+
+            // Update track state with this note (for persistent REPEAT retrigger)
+            trackState.lastNote = note
+            trackState.lastInstrument = step.instrument
+            trackState.lastVolume = params.volume
+            trackState.lastStartPoint = params.startPoint
         }
 
         // Handle KILL effect - schedule kill at the specified frame
@@ -670,57 +792,143 @@ class PlaybackController(
             audioEngine.scheduleKill(params.killAtFrame, trackId)
         }
 
-        // Handle REPEAT effect (Rxx) - retrigger note every xx tics within step
-        // Uses tic-interval approach (LGPT/M8 style):
-        // - Rxx = retrig every xx tics (where step = TICS_PER_STEP tics)
-        // - R00 = no effect
-        // - R01 = retrig every 1 tic = 12 triggers/step (fastest, with 12 tics/step)
-        // - R02 = retrig every 2 tics = 6 triggers/step
-        // - R03 = retrig every 3 tics = 4 triggers/step (triplets!)
-        // - R04 = retrig every 4 tics = 3 triggers/step
-        // - R06 = retrig every 6 tics = 2 triggers/step
-        // - R0C = retrig every 12 tics = 1 trigger/step (no effect with 12 tics/step)
-        // - R0D+ = no effect (interval > step)
-        if (params.repeatCount != null && params.repeatCount > 0 && params.repeatCount < TICS_PER_STEP && !step.isEmpty()) {
-            val ticInterval = params.repeatCount
+        // ═══════════════════════════════════════════════════════════════════════════
+        // STEP 3: Handle REPEAT effect (new or persistent)
+        // ═══════════════════════════════════════════════════════════════════════════
 
-            // Calculate timing
+        // Find which column has REPEAT effect (if any) and its value
+        var newRepeatColumn = 0
+        var newRepeatValue = 0
+        if (step.fx1Type == EffectProcessor.FX_REPEAT && step.fx1Value > 0) {
+            newRepeatColumn = 1
+            newRepeatValue = step.fx1Value
+        } else if (step.fx2Type == EffectProcessor.FX_REPEAT && step.fx2Value > 0) {
+            newRepeatColumn = 2
+            newRepeatValue = step.fx2Value
+        } else if (step.fx3Type == EffectProcessor.FX_REPEAT && step.fx3Value > 0) {
+            newRepeatColumn = 3
+            newRepeatValue = step.fx3Value
+        }
+
+        // If new REPEAT is set, update persistent state
+        if (newRepeatColumn > 0) {
+            trackState.repeatActiveColumn = newRepeatColumn
+            trackState.repeatTicInterval = newRepeatValue
+            trackState.repeatStartFrame = targetFrame  // Remember absolute frame where REPEAT started
+            val intervalType = if (newRepeatValue < TICS_PER_STEP) "sub-step" else "multi-step"
+            logger.d(TAG, "🔁 REPEAT R${newRepeatValue.toString(16).uppercase().padStart(2, '0')} " +
+                    "($intervalType) set in column $newRepeatColumn at frame $targetFrame → now PERSISTENT (cross-phrase)")
+        }
+
+        // Determine which REPEAT to apply (new from this step, or persistent)
+        val activeRepeatInterval = when {
+            // If this step has a new REPEAT, use it
+            newRepeatValue > 0 -> newRepeatValue
+            // If persistent REPEAT is active, use it
+            trackState.hasActiveRepeat() -> trackState.repeatTicInterval
+            // No REPEAT active
+            else -> 0
+        }
+
+        // Apply REPEAT if active
+        if (activeRepeatInterval > 0 && trackState.lastNote != Note.EMPTY) {
             val framesPerTic = stepDuration / TICS_PER_STEP
-            val triggersCount = TICS_PER_STEP / ticInterval  // Integer division
 
-            // Main note is already scheduled at tic 0 (targetFrame)
-            // Schedule additional retriggers at subsequent tic intervals
-            // Retrigger at tics: ticInterval, 2*ticInterval, 3*ticInterval, etc.
-            for (i in 1 until triggersCount) {
-                val ticPosition = i * ticInterval
-                val retrigFrame = targetFrame + (ticPosition * framesPerTic)
-
-                // Apply same transposition as main note
-                val note = if (transposeSemitones != 0) {
+            // Determine note/instrument to retrigger
+            val retrigNote = if (hasNote) {
+                if (transposeSemitones != 0) {
                     val originalMidi = step.note.toMidi()
-                    if (originalMidi >= 0) {
-                        val transposedMidi = (originalMidi + transposeSemitones).coerceIn(0, 127)
-                        Note.fromMidi(transposedMidi)
-                    } else {
-                        step.note
-                    }
-                } else {
-                    step.note
+                    if (originalMidi >= 0) Note.fromMidi((originalMidi + transposeSemitones).coerceIn(0, 127))
+                    else step.note
+                } else step.note
+            } else {
+                trackState.lastNote
+            }
+            val retrigInstrument = if (hasNote) step.instrument else trackState.lastInstrument
+            val retrigVolume = if (hasNote) params.volume else trackState.lastVolume
+            val retrigStartPoint = if (hasNote) params.startPoint else trackState.lastStartPoint
+
+            if (activeRepeatInterval < TICS_PER_STEP) {
+                // ═══════════════════════════════════════════════════════════════════
+                // SUB-STEP REPEAT (R01-R0B): Multiple triggers within this step
+                // ═══════════════════════════════════════════════════════════════════
+                val triggersCount = TICS_PER_STEP / activeRepeatInterval
+
+                // If step has note, main trigger is at tic 0 (already scheduled above)
+                // For persistent REPEAT on empty step, schedule trigger at tic 0 too
+                val startTic = if (hasNote) 1 else 0
+
+                for (i in startTic until triggersCount) {
+                    val ticPosition = i * activeRepeatInterval
+                    val retrigFrame = targetFrame + (ticPosition * framesPerTic)
+
+                    audioEngine.scheduleNote(
+                        targetFrame = retrigFrame,
+                        note = retrigNote,
+                        instrumentId = retrigInstrument,
+                        trackId = trackId,
+                        volume = retrigVolume,
+                        project = project,
+                        startPointOverride = retrigStartPoint
+                    )
                 }
 
-                audioEngine.scheduleNote(
-                    targetFrame = retrigFrame,
-                    note = note,
-                    instrumentId = step.instrument,
-                    trackId = trackId,
-                    volume = params.volume,
-                    project = project,
-                    startPointOverride = params.startPoint  // Apply OFFSET to retriggers too
-                )
-            }
+                val isPersistent = !hasNote && trackState.hasActiveRepeat()
+                val modeLabel = if (isPersistent) "PERSISTENT" else "step"
+                logger.d(TAG, "🔁 REPEAT R${activeRepeatInterval.toString(16).uppercase().padStart(2, '0')} ($modeLabel): " +
+                        "$triggersCount triggers within step")
+            } else {
+                // ═══════════════════════════════════════════════════════════════════
+                // MULTI-STEP REPEAT (R0C+): One trigger every N steps
+                // ═══════════════════════════════════════════════════════════════════
+                // Uses FRAME-BASED calculation for cross-phrase persistence!
+                // Triggers occur at frames: repeatStartFrame + k * triggerIntervalFrames
+                // where k = 1, 2, 3, ... (k=0 was the original note)
 
-            logger.d(TAG, "🔁 REPEAT R${ticInterval.toString(16).uppercase().padStart(2, '0')}: " +
-                    "$triggersCount triggers (every $ticInterval tics, ${ticInterval * framesPerTic} frames)")
+                val triggerIntervalFrames = activeRepeatInterval * framesPerTic
+                val stepEndFrame = targetFrame + stepDuration
+
+                // For the step where REPEAT starts (with note), the note is already scheduled
+                if (hasNote && newRepeatValue > 0) {
+                    // Note already scheduled above, nothing more to do for this step
+                    // (First trigger is the note itself at repeatStartFrame)
+                    logger.d(TAG, "🔁 REPEAT R${activeRepeatInterval.toString(16).uppercase().padStart(2, '0')} (multi-step): " +
+                            "started at frame $targetFrame, interval = ${activeRepeatInterval / TICS_PER_STEP.toFloat()} steps")
+                } else {
+                    // Calculate trigger points using absolute frames (works across phrases!)
+                    // Find the first trigger index k where repeatStartFrame + k*interval >= targetFrame
+                    val framesSinceStart = targetFrame - trackState.repeatStartFrame
+                    if (framesSinceStart >= 0) {
+                        // Find first trigger at or after targetFrame
+                        val firstTriggerIndex = ((framesSinceStart + triggerIntervalFrames - 1) / triggerIntervalFrames).toInt()
+                        var triggerFrame = trackState.repeatStartFrame + (firstTriggerIndex * triggerIntervalFrames)
+
+                        // Schedule all triggers that fall within this step's frame range
+                        var triggersInStep = 0
+                        while (triggerFrame < stepEndFrame) {
+                            if (triggerFrame >= targetFrame) {
+                                audioEngine.scheduleNote(
+                                    targetFrame = triggerFrame,
+                                    note = retrigNote,
+                                    instrumentId = retrigInstrument,
+                                    trackId = trackId,
+                                    volume = retrigVolume,
+                                    project = project,
+                                    startPointOverride = retrigStartPoint
+                                )
+                                triggersInStep++
+                            }
+                            triggerFrame += triggerIntervalFrames
+                        }
+
+                        if (triggersInStep > 0) {
+                            val phraseInfo = if (framesSinceStart > stepDuration * 16) " (cross-phrase!)" else ""
+                            logger.d(TAG, "🔁 REPEAT R${activeRepeatInterval.toString(16).uppercase().padStart(2, '0')} (PERSISTENT multi-step)$phraseInfo: " +
+                                    "$triggersInStep trigger(s)")
+                        }
+                    }
+                }
+            }
         }
 
         // TODO: Handle ARPEGGIO effect (schedule 3 notes)

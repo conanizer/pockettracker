@@ -428,40 +428,50 @@ if (step.fx1Type == FX_KILL) {
 
 ---
 
-#### Slice E6: Repeat Effect (R01-RFF)
+#### Slice E6: Repeat Effect (R01-RFF) ✅ COMPLETE
 
-**Goal:** Retrigger sample multiple times within step
+**Goal:** Retrigger sample with persistence and multi-step intervals (LGPT/M8 style)
 
-**Effect Behavior:**
+**Effect Behavior - Sub-step intervals (R01-R0B):**
 ```
-R01 = play once (no effect)
-R02 = play twice per step
-R04 = play 4 times per step
-R10 = play 16 times per step (fast tremolo)
+R01 = retrig every 1 tic = 12 triggers/step (fastest)
+R02 = retrig every 2 tics = 6 triggers/step
+R03 = retrig every 3 tics = 4 triggers/step (triplets!)
+R06 = retrig every 6 tics = 2 triggers/step
 ```
+
+**Effect Behavior - Multi-step intervals (R0C+):**
+```
+R0C (12) = every 1 step
+R12 (18) = every 1.5 steps (dotted notes!)
+R18 (24) = every 2 steps
+R30 (48) = every 4 steps (4 kicks in 16-step phrase!)
+R60 (96) = every 8 steps
+```
+
+**Persistence (LGPT/M8 style):**
+- REPEAT persists until cancelled by:
+  1. New note on the same track
+  2. Any effect in the same FX column where REPEAT was set
+  3. KILL effect (K00) in any column
+- Cross-phrase persistence in Chain/Song mode!
 
 **DoD:**
-- [ ] Parse repeat count (0x01-0xFF)
-- [ ] C++ effect processor: schedule N note triggers within step
-- [ ] Test: Kick drum with R04 (stutter effect)
-- [ ] Test: Hi-hat with R10 (tremolo/roll)
-- [ ] Even timing between repeats
+- [x] Parse repeat tic interval (0x01-0xFF)
+- [x] Sub-step intervals: multiple triggers within one step
+- [x] Multi-step intervals: triggers across multiple steps
+- [x] Persistence: effect continues until cancelled
+- [x] Cross-phrase persistence in Chain/Song playback
+- [x] Test: Kick drum with R03 (triplet stutter)
+- [x] Test: R30 for 4 evenly-spaced kicks in phrase
+- [x] Test: Chain with persistent REPEAT across phrases
 
-**Implementation:**
-```cpp
-if (step.fx1Type == FX_REPEAT && step.fx1Value > 0x01) {
-    int repeatCount = step.fx1Value;
-    long stepDuration = getStepDurationInFrames(tempo);
-    long repeatInterval = stepDuration / repeatCount;
-    
-    // Schedule N note triggers
-    for (int i = 0; i < repeatCount; i++) {
-        scheduleNote(frame + i * repeatInterval, sampleId, trackId, freq, vol);
-    }
-}
-```
+**Implementation:** Frame-based tracking in PlaybackController.kt
+- TrackState tracks: lastNote, lastInstrument, repeatStartFrame, repeatTicInterval
+- scheduleStepWithEffects handles cancellation conditions
+- Multi-step uses absolute frame arithmetic for cross-phrase accuracy
 
-**Effort:** 2 days
+**Effort:** 2 days (completed 2026-01-19)
 
 ---
 
