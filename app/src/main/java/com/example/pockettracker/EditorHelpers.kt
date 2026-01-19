@@ -41,10 +41,11 @@ fun clearEffect(step: PhraseStep, fxSlot: Int) {
 
 /**
  * Get effect type 3-letter name for display
- * Returns: ---, ARP, KIL, OFF, RPT, VOL
+ * Returns: ---, ARC, ARP, KIL, OFF, RPT, VOL
  */
 fun getEffectTypeName(effectType: Int): String {
     return when (effectType) {
+        0x03 -> "ARC"  // Arpeggio Config
         0x0A -> "ARP"  // Arpeggio
         0x0B -> "KIL"  // Kill
         0x0F -> "OFF"  // Offset

@@ -1,7 +1,7 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-01-19
+2026-01-20
 
 ## Current Phase
 **Phase A Complete** → **Architecture Refactoring (Phases 1-4 Complete ✅)** → Effects System (TOP-5 In Progress) → Copy/Paste → MVP Release
@@ -244,9 +244,9 @@
 
 **See:** `REFACTORING_ROADMAP.md` for detailed step-by-step guide
 
-### 2. Effects System (1-2 weeks) 🚧
+### 2. Effects System (1-2 weeks) ✅ COMPLETE!
 **TOP-5 Effects in PHRASE screen only:**
-- [ ] Arpeggio (Axx) - Note pattern automation (stub ready)
+- [x] Arpeggio (Axx) - Note pattern automation ✅ WORKING (2026-01-20)
 - [x] Offset (Oxx) - Sample start point ✅ WORKING
 - [x] Volume (Vxx) - Volume automation ✅ WORKING
 - [x] Kill (K00) - Stop sample immediately ✅ WORKING
@@ -370,18 +370,41 @@ Planned global settings:
 
 **Result:** Navigation fully bidirectional, codebase cleaner! 🎉
 
-### Next Priority: Effects System (TOP-5 in PHRASE)
+### Next Priority: Copy/Paste System (Milestone 2.5)
 
-**Currently Working:**
+**Effects System COMPLETE:**
 - ✅ OFFSET (Oxx) - Sample start point offset
 - ✅ VOLUME (Vxx) - Volume automation
 - ✅ KILL (K00) - Stop sample immediately
 - ✅ REPEAT (Rxx) - Full implementation with persistence and multi-step intervals!
+- ✅ ARPEGGIO (Axx) - Note pattern automation with ARC config!
 
-**Still Need:**
-- [ ] ARPEGGIO (Axx) - Note pattern automation
+**All TOP-5 effects done!** Moving to copy/paste system.
 
 **REPEAT is now feature-complete:** Sub-step (R01-R0B), multi-step (R0C+), persistence, cross-phrase!
+
+**ARPEGGIO EFFECT - Full Feature Set (2026-01-20):**
+
+*ARP (Axx) - Arpeggio intervals:*
+  - A00 = cancel arpeggio
+  - A37 = minor chord (root, +3, +7)
+  - A47 = major chord (root, +4, +7)
+  - ACC = double octave (root, +12, +12)
+
+*ARC (Cxx) - Arpeggio config (NEW):*
+  - High nibble = mode: 0=UP, 1=DOWN, 2=PINGPONG, 3=RANDOM
+  - Low nibble = speed in tics (4=default, 1=fast, 6=slow)
+  - Example: C14 = DOWN mode, speed 4 tics
+
+*Persistence (LGPT/M8 style):*
+  - ARP persists until cancelled by: new note, ARP00, KILL, or same-column FX
+  - ARC config persists until another ARC command
+  - Cross-step phase continuity (arpeggio pattern continues across steps!)
+
+*TODO (Post-MVP): Additional ARC modes:*
+  - 4 = UP_OCT, 5 = DOWN_OCT, 6 = CHORD, 7 = SHUFFLE
+
+**ALL TOP-5 EFFECTS COMPLETE!** Ready for copy/paste milestone.
 
 **See:** `MVP_ROADMAP.md` Milestone 2 for full effects implementation
 
@@ -391,10 +414,10 @@ Planned global settings:
    - ✅ Verify no broken references
    - ✅ All compilation errors resolved
 
-2. **Finish Effects System** (Milestone 2)
-   - Implement ARPEGGIO (Axx) - stubs ready in EffectProcessor
-   - Implement REPEAT (Rxx) - stubs ready in EffectProcessor
-   - OFFSET, VOLUME, KILL already working ✅
+2. ✅ **Effects System** (Milestone 2) - COMPLETE!
+   - ✅ ARPEGGIO (Axx) with ARC config (Cxx)
+   - ✅ REPEAT (Rxx) with persistence
+   - ✅ OFFSET, VOLUME, KILL
 
 ### Next 2 Weeks:
 2. **Copy/Paste System** (Milestone 2.5)

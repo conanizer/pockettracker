@@ -34,6 +34,28 @@ data class ResolvedStepParams(
     val arpeggioValue: Int? = null,
 
     /**
+     * Arpeggio config (ARC Cxx), or null if no ARC effect.
+     *
+     * High nibble (X) = mode:
+     *   0 = UP (default): root -> +X -> +Y
+     *   1 = DOWN: +Y -> +X -> root
+     *   2 = PINGPONG: root -> +X -> +Y -> +X -> ...
+     *   3 = RANDOM
+     *
+     * Low nibble (Y) = speed in tics:
+     *   4 = default (3 notes/step at 12 tics)
+     *   1 = fast (12 notes/step)
+     *   6 = slow (2 notes/step)
+     *
+     * TODO (Post-MVP): Additional ARC modes to consider:
+     *   4 = UP_OCT: root -> +X -> +Y -> root+12 -> +X+12 -> +Y+12 -> ...
+     *   5 = DOWN_OCT: reverse of UP_OCT
+     *   6 = CHORD: all notes triggered simultaneously (no arpeggio)
+     *   7 = SHUFFLE: like RANDOM but never repeats same note twice
+     */
+    val arcValue: Int? = null,
+
+    /**
      * Repeat tic interval, or null if no REPEAT effect.
      *
      * REPEAT (Rxx) uses tic-interval approach (LGPT/M8 style):
@@ -103,6 +125,7 @@ class EffectProcessor(
         const val FX_NONE = 0x00      // No effect
 
         // TOP-5 Effects (Phrase screen only)
+        const val FX_ARC = 0x03       // Cxx - Arpeggio Config (mode/speed)
         const val FX_ARPEGGIO = 0x0A  // Axx - Note pattern automation
         const val FX_KILL = 0x0B      // K00 - Kill sample
         const val FX_OFFSET = 0x0F    // Oxx - Sample start point
@@ -112,9 +135,9 @@ class EffectProcessor(
         /**
          * List of all valid effect types for UI cycling.
          * Used by editors to cycle through effect types with UP/DOWN.
-         * Order: NONE, ARPEGGIO, KILL, OFFSET, REPEAT, VOLUME (sorted by hex value)
+         * Order: NONE, ARC, ARPEGGIO, KILL, OFFSET, REPEAT, VOLUME (sorted by hex value)
          */
-        val EFFECT_TYPES = listOf(FX_NONE, FX_ARPEGGIO, FX_KILL, FX_OFFSET, FX_REPEAT, FX_VOLUME)
+        val EFFECT_TYPES = listOf(FX_NONE, FX_ARC, FX_ARPEGGIO, FX_KILL, FX_OFFSET, FX_REPEAT, FX_VOLUME)
 
         // More effects will be added in Milestone 2
         // Table screen effects (Post-MVP):
@@ -150,6 +173,7 @@ class EffectProcessor(
         var volume = defaultVolume
         var killAtFrame: Long? = null
         var arpeggioValue: Int? = null
+        var arcValue: Int? = null
         var repeatCount: Int? = null
 
         // Check all 3 FX columns
@@ -187,6 +211,15 @@ class EffectProcessor(
                     logger.d(TAG, "🎵 ARPEGGIO effect: +$semi1, +$semi2 semitones")
                 }
 
+                FX_ARC -> {
+                    arcValue = value
+                    val mode = (value shr 4) and 0x0F
+                    val speed = value and 0x0F
+                    val modeNames = listOf("UP", "DOWN", "PINGPONG", "RANDOM")
+                    val modeName = modeNames.getOrElse(mode) { "UP" }
+                    logger.d(TAG, "🎼 ARC effect: mode=$modeName, speed=$speed tics")
+                }
+
                 FX_REPEAT -> {
                     repeatCount = value
                     logger.d(TAG, "🔁 REPEAT effect: $value retriggers")
@@ -199,6 +232,7 @@ class EffectProcessor(
             volume = volume,
             killAtFrame = killAtFrame,
             arpeggioValue = arpeggioValue,
+            arcValue = arcValue,
             repeatCount = repeatCount
         )
     }

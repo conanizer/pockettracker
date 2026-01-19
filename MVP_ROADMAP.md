@@ -104,12 +104,12 @@ The smallest version of PocketTracker that:
 ### Remaining MVP Work ⚠️
 
 **Critical for MVP:**
-1. **Effects System** - BIG task (1-2 weeks)
-   - [ ] Effect command parser (FX1/FX2/FX3 columns)
-   - [ ] Implement TOP-5 effects in C++ audio engine
-   - [ ] Effects in PHRASE screen only (table screen Post-MVP)
+1. ~~**Effects System**~~ ✅ COMPLETE! (2026-01-20)
+   - [x] Effect command parser (FX1/FX2/FX3 columns)
+   - [x] TOP-5 effects: ARPEGGIO (with ARC config), OFFSET, VOLUME, KILL, REPEAT
+   - [x] Persistence and cross-step continuity (LGPT/M8 style)
 
-2. **Copy/Paste System** - ESSENTIAL (4-5 days)
+2. **Copy/Paste System** - ESSENTIAL (4-5 days) ← NEXT
    - [ ] M8-style selection mode
    - [ ] Copy/paste phrase steps and selections
    - [ ] Copy/paste between different phrases
@@ -286,44 +286,40 @@ data class PhraseStep(
 
 ---
 
-#### Slice E2: Arpeggio Effect (A00-AFF)
+#### Slice E2: Arpeggio Effect (A00-AFF) ✅ COMPLETE
 
 **Goal:** Implement first automation effect - proves the system works!
 
 **Effect Behavior:**
 ```
-A00 = no arpeggio
-A01 = play note, note+1 semitone, note (repeats every 1/3 step)
-A0C = play note, note+12 semitones (octave), note (major chord simulation)
-A37 = play note, note+3, note+7 (major chord: C-E-G)
+ARP (Axx) - Arpeggio intervals:
+  A00 = cancel arpeggio
+  A37 = minor chord (root, +3, +7)
+  A47 = major chord (root, +4, +7)
+  ACC = double octave (root, +12, +12)
+
+ARC (Cxx) - Arpeggio config (NEW EFFECT!):
+  High nibble = mode: 0=UP, 1=DOWN, 2=PINGPONG, 3=RANDOM
+  Low nibble = speed in tics (4=default, 1=fast, 6=slow)
+  Example: C14 = DOWN mode, speed 4 tics
 ```
 
 **DoD:**
-- [ ] Parse arpeggio value: high nibble = semitone 1, low nibble = semitone 2
-- [ ] C++ effect processor: `processArpeggio(step, value, currentFrame)`
-- [ ] Retrigger note at 1/3 step intervals with pitch offset
-- [ ] Test song: Phrase with single note, different arpeggio values per step
-- [ ] Hear distinct arpeggiated patterns
+- [x] Parse arpeggio value: high nibble = semitone 1, low nibble = semitone 2
+- [x] ARC config effect: mode and speed parameters
+- [x] Retrigger at tic intervals with pitch offset
+- [x] Cross-step phase continuity (arpeggio pattern continues!)
+- [x] Persistence: ARP persists until cancelled (LGPT/M8 style)
+- [x] Test: Phrase with arpeggios across multiple steps
 
-**Implementation Strategy:**
-```cpp
-// In audio callback (C++)
-if (step.fx1Type == FX_ARPEGGIO && step.fx1Value != 0x00) {
-    int semitone1 = (step.fx1Value >> 4) & 0x0F;  // High nibble
-    int semitone2 = step.fx1Value & 0x0F;          // Low nibble
-    
-    // Calculate frame positions for 3 notes within step
-    long stepDuration = getStepDurationInFrames(tempo);
-    long arpInterval = stepDuration / 3;
-    
-    // Schedule 3 notes: base, +semitone1, +semitone2
-    scheduleNote(frame, sampleId, trackId, baseFreq, vol);
-    scheduleNote(frame + arpInterval, sampleId, trackId, baseFreq * semitoneRatio(semitone1), vol);
-    scheduleNote(frame + 2*arpInterval, sampleId, trackId, baseFreq * semitoneRatio(semitone2), vol);
-}
-```
+**Implementation:** Kotlin in PlaybackController.kt
+- scheduleArpeggioNotes() calculates frame-based positions
+- getArpeggioNote() returns correct MIDI note for pattern position
+- TrackState tracks: arpeggioValue, arpeggioMode, arpeggioSpeed, arpeggioStartFrame
 
-**Effort:** 2-3 days
+**TODO (Post-MVP):** Additional ARC modes: UP_OCT, DOWN_OCT, CHORD, SHUFFLE
+
+**Effort:** 2 days (completed 2026-01-20)
 
 ---
 
@@ -1252,7 +1248,7 @@ MVP is considered **DONE** when ALL of the following are true:
 - [x] User can create a song with 2+ chains on different tracks
 - [x] User can play back their song at any tempo (20-999 BPM)
 - [x] Playback is sample-accurate (no drift, no timing jitter)
-- [ ] **User can apply effects (TOP-5 in phrase screen)** ⚠️
+- [x] **User can apply effects (TOP-5 in phrase screen)** ✅ COMPLETE!
 - [ ] **User can copy/paste phrase steps (selection mode)** ⚠️
 - [ ] **User can copy/paste between different phrases** ⚠️
 - [ ] **User can cut/delete selections with A+B** ⚠️

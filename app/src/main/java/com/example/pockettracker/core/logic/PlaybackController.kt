@@ -20,7 +20,7 @@ import com.example.pockettracker.core.logging.ILogger
  *   3. KILL effect (K00) in any FX column
  */
 data class TrackState(
-    /** Last played note on this track (for persistent REPEAT retrigger) */
+    /** Last played note on this track (for persistent REPEAT/ARPEGGIO retrigger) */
     var lastNote: Note = Note.EMPTY,
     /** Last played instrument ID */
     var lastInstrument: Int = 0,
@@ -35,7 +35,19 @@ data class TrackState(
     /** Repeat tic interval (Rxx value) - can be sub-step (<12) or multi-step (>=12) */
     var repeatTicInterval: Int = 0,
     /** Audio frame where REPEAT was started (for cross-phrase persistence) */
-    var repeatStartFrame: Long = 0
+    var repeatStartFrame: Long = 0,
+
+    // Persistent ARPEGGIO state (ARP Axx and ARC Cxx)
+    /** Which FX column (1, 2, or 3) the ARPEGGIO (Axx) was set in, or 0 if not active */
+    var arpeggioActiveColumn: Int = 0,
+    /** Arpeggio value (Axx) - high nibble = +semitone1, low nibble = +semitone2 */
+    var arpeggioValue: Int = 0,
+    /** Arpeggio mode from ARC (Cxx) - 0=UP, 1=DOWN, 2=PINGPONG, 3=RANDOM */
+    var arpeggioMode: Int = 0,
+    /** Arpeggio speed in tics from ARC (Cxx) - default 4 (3 notes/step at 12 tics) */
+    var arpeggioSpeed: Int = 4,
+    /** Audio frame where ARPEGGIO was started (for cross-step phase continuity) */
+    var arpeggioStartFrame: Long = 0
 ) {
     /** Check if persistent REPEAT is active */
     fun hasActiveRepeat(): Boolean = repeatActiveColumn > 0 && repeatTicInterval > 0
@@ -45,6 +57,23 @@ data class TrackState(
         repeatActiveColumn = 0
         repeatTicInterval = 0
         repeatStartFrame = 0
+    }
+
+    /** Check if persistent ARPEGGIO is active */
+    fun hasActiveArpeggio(): Boolean = arpeggioActiveColumn > 0 && arpeggioValue > 0
+
+    /** Clear persistent ARPEGGIO (keeps ARC config) */
+    fun clearArpeggio() {
+        arpeggioActiveColumn = 0
+        arpeggioValue = 0
+        arpeggioStartFrame = 0
+    }
+
+    /** Clear all ARPEGGIO state including ARC config */
+    fun clearAllArpeggioState() {
+        clearArpeggio()
+        arpeggioMode = 0
+        arpeggioSpeed = 4
     }
 }
 
@@ -260,7 +289,10 @@ class PlaybackController(
         songPositionStartFrames.clear()
         nextSongChainRowToSchedule = 0
         // Clear all track states (persistent effects, note memory)
-        trackStates.forEach { it.clearRepeat() }
+        trackStates.forEach {
+            it.clearRepeat()
+            it.clearAllArpeggioState()
+        }
         logger.d(TAG, "⏹️ Playback stopped")
     }
 
@@ -711,24 +743,26 @@ class PlaybackController(
         stepIndex: Int = 0
     ): Boolean {
         // ═══════════════════════════════════════════════════════════════════════════
-        // STEP 1: Check cancellation conditions for persistent REPEAT
+        // STEP 1: Check cancellation conditions for persistent REPEAT and ARPEGGIO
         // ═══════════════════════════════════════════════════════════════════════════
 
-        // Check if KILL effect is present in ANY column → clears persistent REPEAT
+        // Check if KILL effect is present in ANY column → clears persistent REPEAT and ARPEGGIO
         val hasKill = step.fx1Type == EffectProcessor.FX_KILL ||
                 step.fx2Type == EffectProcessor.FX_KILL ||
                 step.fx3Type == EffectProcessor.FX_KILL
 
         if (hasKill) {
             trackState.clearRepeat()
-            logger.d(TAG, "🔪 KILL detected → persistent REPEAT cancelled")
+            trackState.clearArpeggio()
+            logger.d(TAG, "🔪 KILL detected → persistent REPEAT and ARPEGGIO cancelled")
         }
 
-        // Check if step has a note → clears persistent REPEAT (new note triggers)
+        // Check if step has a note → clears persistent REPEAT and ARPEGGIO (new note triggers)
         val hasNote = !step.isEmpty()
         if (hasNote) {
             trackState.clearRepeat()
-            // Note: We don't log here because a new REPEAT might be set below
+            trackState.clearArpeggio()
+            // Note: We don't log here because new effects might be set below
         }
 
         // Check if persistent REPEAT's column has any effect → clears REPEAT
@@ -743,6 +777,21 @@ class PlaybackController(
             if (columnHasEffect) {
                 logger.d(TAG, "🔄 FX in column ${trackState.repeatActiveColumn} → persistent REPEAT cancelled")
                 trackState.clearRepeat()
+            }
+        }
+
+        // Check if persistent ARPEGGIO's column has any effect → clears ARPEGGIO
+        // (Any effect in the same column overrides the persistent ARPEGGIO)
+        if (trackState.hasActiveArpeggio()) {
+            val columnHasEffect = when (trackState.arpeggioActiveColumn) {
+                1 -> step.fx1Type != EffectProcessor.FX_NONE
+                2 -> step.fx2Type != EffectProcessor.FX_NONE
+                3 -> step.fx3Type != EffectProcessor.FX_NONE
+                else -> false
+            }
+            if (columnHasEffect) {
+                logger.d(TAG, "🔄 FX in column ${trackState.arpeggioActiveColumn} → persistent ARPEGGIO cancelled")
+                trackState.clearArpeggio()
             }
         }
 
@@ -931,10 +980,257 @@ class PlaybackController(
             }
         }
 
-        // TODO: Handle ARPEGGIO effect (schedule 3 notes)
-        // if (params.arpeggioValue != null) { ... }
+        // ═══════════════════════════════════════════════════════════════════════════
+        // STEP 4: Handle ARC (Arpeggio Config) effect - mode and speed
+        // ═══════════════════════════════════════════════════════════════════════════
+
+        // ARC (Cxx) only updates config, doesn't start arpeggio on its own
+        if (params.arcValue != null) {
+            val mode = (params.arcValue shr 4) and 0x0F
+            val speed = params.arcValue and 0x0F
+            trackState.arpeggioMode = mode.coerceIn(0, 3)
+            trackState.arpeggioSpeed = if (speed > 0) speed else 4  // Default speed is 4 tics
+            val modeNames = listOf("UP", "DOWN", "PINGPONG", "RANDOM")
+            logger.d(TAG, "🎼 ARC C${params.arcValue.toString(16).uppercase().padStart(2, '0')}: " +
+                    "mode=${modeNames.getOrElse(trackState.arpeggioMode) { "UP" }}, speed=${trackState.arpeggioSpeed} tics")
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // STEP 5: Handle ARPEGGIO effect (ARP Axx) - new or persistent
+        // ═══════════════════════════════════════════════════════════════════════════
+
+        // Find which column has ARPEGGIO effect (if any) and its value
+        var newArpColumn = 0
+        var newArpValue = 0
+        if (step.fx1Type == EffectProcessor.FX_ARPEGGIO) {
+            newArpColumn = 1
+            newArpValue = step.fx1Value
+        } else if (step.fx2Type == EffectProcessor.FX_ARPEGGIO) {
+            newArpColumn = 2
+            newArpValue = step.fx2Value
+        } else if (step.fx3Type == EffectProcessor.FX_ARPEGGIO) {
+            newArpColumn = 3
+            newArpValue = step.fx3Value
+        }
+
+        // ARP00 cancels arpeggio (explicit cancellation)
+        if (newArpColumn > 0 && newArpValue == 0) {
+            trackState.clearArpeggio()
+            logger.d(TAG, "🎵 ARP00 → arpeggio cancelled")
+        } else if (newArpColumn > 0 && newArpValue > 0) {
+            // New ARPEGGIO is set, update persistent state
+            trackState.arpeggioActiveColumn = newArpColumn
+            trackState.arpeggioValue = newArpValue
+            trackState.arpeggioStartFrame = targetFrame  // Track start frame for phase continuity
+            val semi1 = (newArpValue shr 4) and 0x0F
+            val semi2 = newArpValue and 0x0F
+            logger.d(TAG, "🎵 ARP A${newArpValue.toString(16).uppercase().padStart(2, '0')} " +
+                    "(+$semi1, +$semi2) set in column $newArpColumn at frame $targetFrame → now PERSISTENT")
+        }
+
+        // Determine which ARPEGGIO to apply (new from this step, or persistent)
+        val activeArpValue = when {
+            // If this step has a new ARP (and not ARP00), use it
+            newArpValue > 0 -> newArpValue
+            // If persistent ARPEGGIO is active, use it
+            trackState.hasActiveArpeggio() -> trackState.arpeggioValue
+            // No ARPEGGIO active
+            else -> 0
+        }
+
+        // Apply ARPEGGIO if active
+        if (activeArpValue > 0 && trackState.lastNote != Note.EMPTY) {
+            scheduleArpeggioNotes(
+                targetFrame = targetFrame,
+                stepDuration = stepDuration,
+                trackId = trackId,
+                trackState = trackState,
+                project = project,
+                hasNote = hasNote,
+                step = step,
+                params = params,
+                transposeSemitones = transposeSemitones
+            )
+        }
 
         return noteScheduled
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ARPEGGIO HELPERS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Schedule arpeggio notes for the current step.
+     *
+     * Generates a sequence of notes based on the arpeggio value (Axx) and config (Cxx),
+     * then schedules them at regular tic intervals within the step.
+     *
+     * @param targetFrame When this step starts (audio frame)
+     * @param stepDuration Duration of step in frames
+     * @param trackId Which track (0-7)
+     * @param trackState Per-track state (contains arpeggio config)
+     * @param project Project containing instrument data
+     * @param hasNote Whether this step has a note
+     * @param step The phrase step
+     * @param params Resolved step parameters
+     * @param transposeSemitones Semitones to transpose
+     */
+    private fun scheduleArpeggioNotes(
+        targetFrame: Long,
+        stepDuration: Long,
+        trackId: Int,
+        trackState: TrackState,
+        project: Project,
+        hasNote: Boolean,
+        step: PhraseStep,
+        params: ResolvedStepParams,
+        transposeSemitones: Int
+    ) {
+        val semi1 = (trackState.arpeggioValue shr 4) and 0x0F
+        val semi2 = trackState.arpeggioValue and 0x0F
+
+        // Get base note (from step or last played)
+        val baseNote = if (hasNote) {
+            if (transposeSemitones != 0) {
+                val originalMidi = step.note.toMidi()
+                if (originalMidi >= 0) {
+                    Note.fromMidi((originalMidi + transposeSemitones).coerceIn(0, 127))
+                } else step.note
+            } else step.note
+        } else {
+            trackState.lastNote
+        }
+
+        val baseMidi = baseNote.toMidi()
+        if (baseMidi < 0) return  // Invalid note, can't arpeggio
+
+        // Calculate timing - FRAME-BASED for cross-step continuity
+        val framesPerTic = stepDuration / TICS_PER_STEP
+        val ticInterval = trackState.arpeggioSpeed
+        val framesPerArpNote = ticInterval * framesPerTic  // How many frames between each arp note
+
+        // Get the arpeggio pattern length based on mode
+        val patternLength = if (trackState.arpeggioMode == 2) 4 else 3  // PINGPONG uses 4, others use 3
+
+        // Get instrument and volume
+        val instrumentId = if (hasNote) step.instrument else trackState.lastInstrument
+        val volume = if (hasNote) params.volume else trackState.lastVolume
+        val startPoint = if (hasNote) params.startPoint else trackState.lastStartPoint
+
+        // Calculate step boundaries
+        val stepEndFrame = targetFrame + stepDuration
+
+        // For step where ARP starts (with note), the first note was already scheduled
+        // We need to find subsequent notes within this step
+        val isNewArp = hasNote && trackState.arpeggioStartFrame == targetFrame
+
+        // Calculate trigger points using absolute frames (works across steps!)
+        val framesSinceStart = targetFrame - trackState.arpeggioStartFrame
+        var notesScheduled = 0
+
+        if (framesSinceStart >= 0) {
+            // Find the first trigger index at or after targetFrame
+            // triggerIndex = how many arp notes have played since start
+            val firstTriggerIndex = if (isNewArp) {
+                1L  // Skip index 0, it was the original note
+            } else {
+                // Find first trigger at or after targetFrame
+                ((framesSinceStart + framesPerArpNote - 1) / framesPerArpNote)
+            }
+
+            var triggerIndex = firstTriggerIndex
+            var triggerFrame = trackState.arpeggioStartFrame + (triggerIndex * framesPerArpNote)
+
+            // Schedule all notes that fall within this step's frame range
+            while (triggerFrame < stepEndFrame) {
+                if (triggerFrame >= targetFrame) {
+                    // Calculate which note in the pattern this is
+                    val patternPosition = (triggerIndex % patternLength).toInt()
+                    val arpMidi = getArpeggioNote(baseMidi, semi1, semi2, trackState.arpeggioMode, patternPosition)
+                    val arpNote = Note.fromMidi(arpMidi.coerceIn(0, 127))
+
+                    audioEngine.scheduleNote(
+                        targetFrame = triggerFrame,
+                        note = arpNote,
+                        instrumentId = instrumentId,
+                        trackId = trackId,
+                        volume = volume,
+                        project = project,
+                        startPointOverride = startPoint
+                    )
+                    notesScheduled++
+                }
+                triggerIndex++
+                triggerFrame += framesPerArpNote
+            }
+        }
+
+        if (notesScheduled > 0) {
+            val isPersistent = !hasNote && trackState.hasActiveArpeggio()
+            val modeLabel = if (isPersistent) "PERSISTENT" else "step"
+            val modeNames = listOf("UP", "DOWN", "PINGPONG", "RANDOM")
+            val crossStepInfo = if (framesSinceStart > 0) " (cross-step)" else ""
+            logger.d(TAG, "🎵 ARP A${trackState.arpeggioValue.toString(16).uppercase().padStart(2, '0')} " +
+                    "($modeLabel, ${modeNames.getOrElse(trackState.arpeggioMode) { "UP" }})$crossStepInfo: " +
+                    "$notesScheduled notes at speed ${trackState.arpeggioSpeed}")
+        }
+    }
+
+    /**
+     * Get the MIDI note for a specific position in the arpeggio pattern.
+     *
+     * @param baseMidi Base note MIDI number
+     * @param semi1 First semitone offset
+     * @param semi2 Second semitone offset
+     * @param mode Arpeggio mode (0=UP, 1=DOWN, 2=PINGPONG, 3=RANDOM)
+     * @param position Position in the pattern (0, 1, 2, or 3 for PINGPONG)
+     * @return MIDI note number
+     */
+    private fun getArpeggioNote(baseMidi: Int, semi1: Int, semi2: Int, mode: Int, position: Int): Int {
+        val note0 = baseMidi            // Root
+        val note1 = baseMidi + semi1    // +semi1
+        val note2 = baseMidi + semi2    // +semi2
+
+        return when (mode) {
+            0 -> {
+                // UP: root → +semi1 → +semi2 → ...
+                when (position % 3) {
+                    0 -> note0
+                    1 -> note1
+                    else -> note2
+                }
+            }
+            1 -> {
+                // DOWN: +semi2 → +semi1 → root → ...
+                when (position % 3) {
+                    0 -> note2
+                    1 -> note1
+                    else -> note0
+                }
+            }
+            2 -> {
+                // PINGPONG: root → +semi1 → +semi2 → +semi1 → ...
+                when (position % 4) {
+                    0 -> note0
+                    1 -> note1
+                    2 -> note2
+                    else -> note1
+                }
+            }
+            3 -> {
+                // RANDOM: random selection
+                listOf(note0, note1, note2).random()
+            }
+            else -> {
+                // Default to UP
+                when (position % 3) {
+                    0 -> note0
+                    1 -> note1
+                    else -> note2
+                }
+            }
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
