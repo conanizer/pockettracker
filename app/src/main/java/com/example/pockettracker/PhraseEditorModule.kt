@@ -123,9 +123,13 @@ class PhraseEditorModule : TrackerModule {
         // Calculate row Y position
         val dataRowY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (index * ROW_HEIGHT)
 
+        // Check if any cell in this row is selected
+        val isRowSelected = state.selectionMode && (1..9).any { col -> state.isCellSelected(index, col) }
+
         // Row background color logic
         val bgColor = when {
             state.isPlaying && index == state.playbackRow -> Color(0xFF004400)  // Green playing
+            isRowSelected -> Color(0xFF1a3a1a)                                   // Selection green
             index == state.cursorRow -> Color(0xFF333333)                        // Gray cursor
             index % 4 == 0 -> Color(0xFF151515)                                  // Lighter every 4
             else -> Color(0xFF0a0a0a)                                            // Default dark
@@ -160,6 +164,7 @@ class PhraseEditorModule : TrackerModule {
             scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 1 -> Color.Yellow
+                state.selectionMode && state.isCellSelected(index, 1) -> Color(0xFF00DD00)  // Selection green
                 step.note == Note.EMPTY -> Color(0xFF444444)
                 else -> Color.White
             },
@@ -175,6 +180,7 @@ class PhraseEditorModule : TrackerModule {
             scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 2 -> Color.Yellow
+                state.selectionMode && state.isCellSelected(index, 2) -> Color(0xFF00DD00)
                 step.note == Note.EMPTY -> Color(0xFF444444)
                 else -> Color(0xFFaaaaaa)
             },
@@ -190,6 +196,7 @@ class PhraseEditorModule : TrackerModule {
             scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 3 -> Color.Yellow
+                state.selectionMode && state.isCellSelected(index, 3) -> Color(0xFF00DD00)
                 step.note == Note.EMPTY -> Color(0xFF444444)
                 else -> Color(0xFFaaaaaa)
             },
@@ -205,6 +212,7 @@ class PhraseEditorModule : TrackerModule {
             scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 4 -> Color.Yellow
+                state.selectionMode && state.isCellSelected(index, 4) -> Color(0xFF00DD00)
                 step.fx1Type == 0x00 -> Color(0xFF444444)  // Dim if no effect
                 else -> Color.Cyan  // Cyan for effect names
             },
@@ -220,6 +228,7 @@ class PhraseEditorModule : TrackerModule {
             scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 5 -> Color.Yellow
+                state.selectionMode && state.isCellSelected(index, 5) -> Color(0xFF00DD00)
                 step.fx1Type == 0x00 -> Color(0xFF444444)  // Dim if no effect
                 else -> Color(0xFFaaaaaa)
             },
@@ -235,6 +244,7 @@ class PhraseEditorModule : TrackerModule {
             scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 6 -> Color.Yellow
+                state.selectionMode && state.isCellSelected(index, 6) -> Color(0xFF00DD00)
                 step.fx2Type == 0x00 -> Color(0xFF444444)
                 else -> Color.Cyan
             },
@@ -250,6 +260,7 @@ class PhraseEditorModule : TrackerModule {
             scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 7 -> Color.Yellow
+                state.selectionMode && state.isCellSelected(index, 7) -> Color(0xFF00DD00)
                 step.fx2Type == 0x00 -> Color(0xFF444444)
                 else -> Color(0xFFaaaaaa)
             },
@@ -265,6 +276,7 @@ class PhraseEditorModule : TrackerModule {
             scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 8 -> Color.Yellow
+                state.selectionMode && state.isCellSelected(index, 8) -> Color(0xFF00DD00)
                 step.fx3Type == 0x00 -> Color(0xFF444444)
                 else -> Color.Cyan
             },
@@ -280,6 +292,7 @@ class PhraseEditorModule : TrackerModule {
             scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 9 -> Color.Yellow
+                state.selectionMode && state.isCellSelected(index, 9) -> Color(0xFF00DD00)
                 step.fx3Type == 0x00 -> Color(0xFF444444)
                 else -> Color(0xFFaaaaaa)
             },
@@ -468,5 +481,7 @@ data class PhraseEditorState(
     val cursorRow: Int,
     val cursorColumn: Int,
     val playbackRow: Int,
-    val isPlaying: Boolean
+    val isPlaying: Boolean,
+    val selectionMode: Boolean = false,
+    val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }
 )

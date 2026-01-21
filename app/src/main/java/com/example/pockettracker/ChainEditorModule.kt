@@ -167,12 +167,18 @@ class ChainEditorModule : TrackerModule {
         // ===================================
         val dataRowY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (index * ROW_HEIGHT)
 
+        // Check if any cell in this row is selected
+        val isRowSelected = state.selectionMode && (1..2).any { col -> state.isCellSelected(index, col) }
+
         // ===================================
         // STEP 2: Row background color
         // ===================================
         val bgColor = when {
             // Green background when playing this row
             state.isPlaying && index == state.playbackRow -> Color(0xFF004400)
+
+            // Selection green
+            isRowSelected -> Color(0xFF1a3a1a)
 
             // Cursor on this row
             index == state.cursorRow -> Color(0xFF333333)
@@ -223,6 +229,7 @@ class ChainEditorModule : TrackerModule {
 
         val phraseColor = when {
             index == state.cursorRow && state.cursorColumn == 1 -> Color.Yellow
+            state.selectionMode && state.isCellSelected(index, 1) -> Color(0xFF00DD00)
             isEmpty -> Color(0xFF444444)
             else -> Color.White
         }
@@ -249,6 +256,7 @@ class ChainEditorModule : TrackerModule {
 
         val transposeColor = when {
             index == state.cursorRow && state.cursorColumn == 2 -> Color.Yellow
+            state.selectionMode && state.isCellSelected(index, 2) -> Color(0xFF00DD00)
             isEmpty -> Color(0xFF444444)
             transposeValue == 0x80 -> Color(0xFF888888)  // Dimmed when no transpose
             else -> Color(0xFFaaaaaa)  // Normal gray when transposed
@@ -364,11 +372,15 @@ class ChainEditorModule : TrackerModule {
  * @param cursorColumn Which column (0=step, 1=phrase, 2=transpose)
  * @param playbackRow Which chain row is currently playing (0-15)
  * @param isPlaying Whether playback is active
+ * @param selectionMode Whether selection mode is active
+ * @param isCellSelected Function to check if a cell is selected
  */
 data class ChainEditorState(
     val chain: Chain,
     val cursorRow: Int,
     val cursorColumn: Int,
     val playbackRow: Int = 0,
-    val isPlaying: Boolean = false
+    val isPlaying: Boolean = false,
+    val selectionMode: Boolean = false,
+    val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }
 )

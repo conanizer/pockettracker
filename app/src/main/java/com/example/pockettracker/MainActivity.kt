@@ -36,6 +36,7 @@ import com.example.pockettracker.core.data.MAIN_ROW_SCREENS
 import com.example.pockettracker.core.data.Note
 import com.example.pockettracker.core.data.Project
 import com.example.pockettracker.core.data.ScreenType
+import com.example.pockettracker.core.logic.ClipboardManager
 import com.example.pockettracker.platform.android.OboeAudioBackend
 import com.example.pockettracker.platform.android.AndroidResourceLoader
 import com.example.pockettracker.platform.android.AndroidFileSystem
@@ -712,6 +713,28 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
      * @param handlerFunction Lambda that takes CursorContext and returns InputAction (typically a NAVIGATE_* action)
      */
     fun handleDPadNavigation(handlerFunction: () -> InputAction) {
+        // Check if in selection mode first - expand selection instead of navigating
+        if (trackerController.inputController.isSelectionModeActive()) {
+            val action = handlerFunction()
+            val direction = when (action) {
+                InputAction.NAVIGATE_UP -> "UP"
+                InputAction.NAVIGATE_DOWN -> "DOWN"
+                InputAction.NAVIGATE_LEFT -> "LEFT"
+                InputAction.NAVIGATE_RIGHT -> "RIGHT"
+                else -> null
+            }
+            if (direction != null) {
+                val maxColumn = when (trackerController.currentScreen) {
+                    ScreenType.PHRASE -> 9
+                    ScreenType.CHAIN -> 2
+                    ScreenType.SONG -> 8
+                    else -> 1
+                }
+                trackerController.inputController.expandSelection(direction, 15, maxColumn)
+                return
+            }
+        }
+
         // DPAD navigation: Dispatch NAVIGATE_* actions directly via applyInputAction()
         // (NOT to module.handleInput() since modules don't understand NAVIGATE actions)
         //
@@ -748,9 +771,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 handleDPadNavigation { trackerController.inputController.handleDPadLeft() }
             },
 
-// ───────────────────────────────────────────────────────────────
-// D-PAD RIGHT
-// ───────────────────────────────────────────────────────────────
+            // ───────────────────────────────────────────────────────────────
+            // D-PAD RIGHT
+            // ───────────────────────────────────────────────────────────────
             onDPadRight = {
                 handleDPadNavigation { trackerController.inputController.handleDPadRight() }
             },
@@ -1031,9 +1054,47 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             },
 
 // ───────────────────────────────────────────────────────────────
-// BUTTON B - Secondary action (decrement)
+// BUTTON B - Secondary action
 // ───────────────────────────────────────────────────────────────
             onButtonB = {
+                // Check if in selection mode first - B = COPY
+                if (trackerController.inputController.isSelectionModeActive()) {
+                    val bounds = trackerController.inputController.getSelectionBounds()
+                    if (bounds != null) {
+                        when (trackerController.currentScreen) {
+                            ScreenType.PHRASE -> {
+                                clipboardManager.copyPhraseSteps(
+                                    trackerController.project,
+                                    trackerController.currentPhrase,
+                                    bounds.topLeftRow, bounds.topLeftColumn,
+                                    bounds.bottomRightRow, bounds.bottomRightColumn
+                                )
+                                Log.d("CopyPaste", "Copied phrase selection: ${bounds.width}x${bounds.height}")
+                            }
+                            ScreenType.CHAIN -> {
+                                clipboardManager.copyChainRows(
+                                    trackerController.project,
+                                    trackerController.currentChain,
+                                    bounds.topLeftRow, bounds.topLeftColumn,
+                                    bounds.bottomRightRow, bounds.bottomRightColumn
+                                )
+                                Log.d("CopyPaste", "Copied chain selection: ${bounds.width}x${bounds.height}")
+                            }
+                            ScreenType.SONG -> {
+                                clipboardManager.copySongCells(
+                                    trackerController.project,
+                                    bounds.topLeftRow, bounds.topLeftColumn,
+                                    bounds.bottomRightRow, bounds.bottomRightColumn
+                                )
+                                Log.d("CopyPaste", "Copied song selection: ${bounds.width}x${bounds.height}")
+                            }
+                            else -> { }
+                        }
+                        trackerController.inputController.exitSelectionMode()
+                    }
+                    return@ButtonHandlers
+                }
+
                 when (trackerController.currentScreen) {
                     // FILE BROWSER: Cancel operation or go back
                     ScreenType.FILE_BROWSER -> {
@@ -1055,13 +1116,13 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         }
                     }
 
-                    // SONG SCREEN: Decrement chain reference
+                    // SONG SCREEN:
                     ScreenType.SONG -> {
                         // All song value editing is now handled via generic input handler
                         // No need for manual cycling here
                     }
 
-                    // CHAIN SCREEN: Use generic input system
+                    // CHAIN SCREEN:
                     ScreenType.CHAIN -> {
                         // No need for manual cycling here
                     }
@@ -1072,7 +1133,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         // No need for manual cycling here
                     }
 
-                    // PROJECT SCREEN: Decrement values
+                    // PROJECT SCREEN:
                     ScreenType.PROJECT -> {
                         when (trackerController.projectCursorRow) {
                             // ROW 0: TEMPO (decrease by 1)
@@ -1303,18 +1364,86 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             },
 
 // ───────────────────────────────────────────────────────────────
+// B + DIRECTION COMBINATIONS (Item cycling: chain/phrase/instrument)
+// ───────────────────────────────────────────────────────────────
+            onBLeft = {
+                // B+LEFT: Navigate to previous chain/phrase/instrument
+                Log.d("Navigation", "B+LEFT: currentScreen=${trackerController.currentScreen}")
+                when (trackerController.currentScreen) {
+                    ScreenType.CHAIN -> {
+                        // Previous chain (wrap around)
+                        trackerController.currentChain = if (trackerController.currentChain > 0) trackerController.currentChain - 1 else 255
+                        trackerController.lastEditedChain = trackerController.currentChain
+                        Log.d("Navigation", "  -> Changed to chain ${trackerController.currentChain}")
+                    }
+                    ScreenType.PHRASE -> {
+                        // Previous phrase (wrap around)
+                        trackerController.currentPhrase = if (trackerController.currentPhrase > 0) trackerController.currentPhrase - 1 else 255
+                        trackerController.lastEditedPhrase = trackerController.currentPhrase
+                        Log.d("Navigation", "  -> Changed to phrase ${trackerController.currentPhrase}")
+                    }
+                    ScreenType.INSTRUMENT -> {
+                        // Previous instrument (wrap around)
+                        val newInst = if (trackerController.currentInstrument > 0)
+                            trackerController.currentInstrument - 1 else 255
+                        trackerController.currentInstrument = newInst
+                        trackerController.lastEditedInstrument = newInst
+                        instrumentController.currentInstrument = newInst  // Keep in sync!
+                        Log.d("Navigation", "  -> Changed to instrument $newInst")
+                    }
+                    else -> { Log.d("Navigation", "  -> No action for screen ${trackerController.currentScreen}") }
+                }
+            },
+
+            onBRight = {
+                // B+RIGHT: Navigate to next chain/phrase/instrument
+                Log.d("Navigation", "B+RIGHT: currentScreen=${trackerController.currentScreen}")
+                when (trackerController.currentScreen) {
+                    ScreenType.CHAIN -> {
+                        // Next chain (wrap around)
+                        trackerController.currentChain = if (trackerController.currentChain < 255) trackerController.currentChain + 1 else 0
+                        trackerController.lastEditedChain = trackerController.currentChain
+                        Log.d("Navigation", "  -> Changed to chain ${trackerController.currentChain}")
+                    }
+                    ScreenType.PHRASE -> {
+                        // Next phrase (wrap around)
+                        trackerController.currentPhrase = if (trackerController.currentPhrase < 255) trackerController.currentPhrase + 1 else 0
+                        trackerController.lastEditedPhrase = trackerController.currentPhrase
+                        Log.d("Navigation", "  -> Changed to phrase ${trackerController.currentPhrase}")
+                    }
+                    ScreenType.INSTRUMENT -> {
+                        // Next instrument (wrap around)
+                        val newInst = if (trackerController.currentInstrument < 255)
+                            trackerController.currentInstrument + 1 else 0
+                        trackerController.currentInstrument = newInst
+                        trackerController.lastEditedInstrument = newInst
+                        instrumentController.currentInstrument = newInst  // Keep in sync!
+                        Log.d("Navigation", "  -> Changed to instrument $newInst")
+                    }
+                    else -> { Log.d("Navigation", "  -> No action for screen ${trackerController.currentScreen}") }
+                }
+            },
+
+// ───────────────────────────────────────────────────────────────
 // R + DIRECTION COMBINATIONS (Screen navigation)
 // ───────────────────────────────────────────────────────────────
             onRUp = {
-                // R+UP: Navigate to screen above in 5×5 grid (disabled in FILE_BROWSER)
-                // Read directly from trackerController to avoid stale captured values
-                if (trackerController.currentScreen != ScreenType.FILE_BROWSER) {
+                // R+UP: Navigate to screen above in 5×5 grid OR cycle sort mode up in FILE_BROWSER
+                if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
+                    // File browser: cycle sort mode up
+                    val modes = FileSortMode.values()
+                    val currentIndex = modes.indexOf(fileBrowserState.sortMode)
+                    val nextMode = modes[(currentIndex + 1) % modes.size]
+                    fileBrowserState = fileBrowserState.copy(sortMode = nextMode)
+                    Log.d("Navigation", "R+UP: Sort mode changed to $nextMode")
+                } else {
                     val (newScreen, newCol) = trackerController.navigateUp(trackerController.currentScreen, trackerController.previousColumn)
                     if (newScreen != trackerController.currentScreen) {
-                        // Screen changed - reset cursor to default position
+                        // Screen changed - reset cursor to default position and exit selection mode
                         val (defaultRow, defaultCol) = trackerController.getDefaultCursorPosition(newScreen)
                         trackerController.cursorRow = defaultRow
                         trackerController.cursorColumn = defaultCol
+                        trackerController.inputController.exitSelectionMode()
                     }
                     trackerController.currentScreen = newScreen
                     trackerController.previousColumn = newCol
@@ -1322,15 +1451,22 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             },
 
             onRDown = {
-                // R+DOWN: Navigate to screen below in 5×5 grid (disabled in FILE_BROWSER)
-                // Read directly from trackerController to avoid stale captured values
-                if (trackerController.currentScreen != ScreenType.FILE_BROWSER) {
+                // R+DOWN: Navigate to screen below in 5×5 grid OR cycle sort mode down in FILE_BROWSER
+                if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
+                    // File browser: cycle sort mode down
+                    val modes = FileSortMode.values()
+                    val currentIndex = modes.indexOf(fileBrowserState.sortMode)
+                    val prevMode = modes[(currentIndex - 1 + modes.size) % modes.size]
+                    fileBrowserState = fileBrowserState.copy(sortMode = prevMode)
+                    Log.d("Navigation", "R+DOWN: Sort mode changed to $prevMode")
+                } else {
                     val (newScreen, newCol) = trackerController.navigateDown(trackerController.currentScreen, trackerController.previousColumn)
                     if (newScreen != trackerController.currentScreen) {
-                        // Screen changed - reset cursor to default position
+                        // Screen changed - reset cursor to default position and exit selection mode
                         val (defaultRow, defaultCol) = trackerController.getDefaultCursorPosition(newScreen)
                         trackerController.cursorRow = defaultRow
                         trackerController.cursorColumn = defaultCol
+                        trackerController.inputController.exitSelectionMode()
                     }
                     trackerController.currentScreen = newScreen
                     trackerController.previousColumn = newCol
@@ -1338,9 +1474,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             },
 
             onRLeft = {
-                // R+LEFT: Navigate to screen on left in main row (disabled in FILE_BROWSER)
-                // Read directly from trackerController to avoid stale captured values
-                if (trackerController.currentScreen != ScreenType.FILE_BROWSER) {
+                // R+LEFT: Navigate to screen on left OR go to parent folder in FILE_BROWSER
+                if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
+                    // File browser: navigate to parent folder
+                    fileBrowserState = fileBrowserModule.navigateToParent(fileBrowserState)
+                    Log.d("Navigation", "R+LEFT: Navigated to parent: ${fileBrowserState.currentDirectory.absolutePath}")
+                } else {
                     val (newScreen, newCol) = trackerController.navigateLeft(trackerController.currentScreen, trackerController.previousColumn)
                     if (newScreen != trackerController.currentScreen) {
                         // Capture cursor value from current screen before leaving
@@ -1394,10 +1533,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                             else -> {}
                         }
 
-                        // Screen changed - reset cursor to default position
+                        // Screen changed - reset cursor to default position and exit selection mode
                         val (defaultRow, defaultCol) = trackerController.getDefaultCursorPosition(newScreen)
                         trackerController.cursorRow = defaultRow
                         trackerController.cursorColumn = defaultCol
+                        trackerController.inputController.exitSelectionMode()
                     }
                     trackerController.currentScreen = newScreen
                     trackerController.previousColumn = newCol
@@ -1461,10 +1601,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                             else -> {}
                         }
 
-                        // Screen changed - reset cursor to default position
+                        // Screen changed - reset cursor to default position and exit selection mode
                         val (defaultRow, defaultCol) = trackerController.getDefaultCursorPosition(newScreen)
                         trackerController.cursorRow = defaultRow
                         trackerController.cursorColumn = defaultCol
+                        trackerController.inputController.exitSelectionMode()
                     }
                     trackerController.currentScreen = newScreen
                     trackerController.previousColumn = newCol
@@ -1472,110 +1613,181 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             },
 
 // ───────────────────────────────────────────────────────────────
-// L + DIRECTION COMBINATIONS (Context navigation)
+// L + DIRECTION COMBINATIONS (Reserved for future use)
+// Item cycling moved to B+direction, file browser actions moved to R+direction
 // ───────────────────────────────────────────────────────────────
             onLLeft = {
-                // L+LEFT: Navigate to previous chain/phrase/instrument OR parent folder
-                // Read directly from trackerController to avoid stale captured values
-                Log.d("Navigation", "L+LEFT: currentScreen=${trackerController.currentScreen}, currentChain=${trackerController.currentChain}, currentPhrase=${trackerController.currentPhrase}")
-                when (trackerController.currentScreen) {
-                    ScreenType.CHAIN -> {
-                        // Previous chain (wrap around)
-                        trackerController.currentChain = if (trackerController.currentChain > 0) trackerController.currentChain - 1 else 255
-                        trackerController.lastEditedChain = trackerController.currentChain
-                        Log.d("Navigation", "  -> Changed to chain ${trackerController.currentChain}")
-                    }
-                    ScreenType.PHRASE -> {
-                        // Previous phrase (wrap around)
-                        trackerController.currentPhrase = if (trackerController.currentPhrase > 0) trackerController.currentPhrase - 1 else 255
-                        trackerController.lastEditedPhrase = trackerController.currentPhrase
-                        Log.d("Navigation", "  -> Changed to phrase ${trackerController.currentPhrase}")
-                    }
-                    ScreenType.INSTRUMENT -> {
-                        // Previous instrument (wrap around)
-                        // NOTE: Must update BOTH trackerController and instrumentController
-                        // - trackerController.currentInstrument: UI reads from here
-                        // - instrumentController.currentInstrument: preview/operations use this
-                        val newInst = if (trackerController.currentInstrument > 0)
-                            trackerController.currentInstrument - 1 else 255
-                        trackerController.currentInstrument = newInst
-                        trackerController.lastEditedInstrument = newInst
-                        instrumentController.currentInstrument = newInst  // Keep in sync!
-                        Log.d("Navigation", "  -> Changed to instrument $newInst")
-                    }
-                    ScreenType.FILE_BROWSER -> {
-                        // Navigate to parent folder
-                        fileBrowserState = fileBrowserModule.navigateToParent(fileBrowserState)
-                        Log.d("Navigation", "  -> Navigated to parent: ${fileBrowserState.currentDirectory.absolutePath}")
-                    }
-                    else -> { Log.d("Navigation", "  -> No action for screen ${trackerController.currentScreen}") }
-                }
+                // L+LEFT: Reserved for future use (selection expand?)
             },
 
             onLRight = {
-                // L+RIGHT: Navigate to next chain/phrase/instrument
-                // Read directly from trackerController to avoid stale captured values
-                Log.d("Navigation", "L+RIGHT: currentScreen=${trackerController.currentScreen}, currentChain=${trackerController.currentChain}, currentPhrase=${trackerController.currentPhrase}")
-                when (trackerController.currentScreen) {
-                    ScreenType.CHAIN -> {
-                        // Next chain (wrap around)
-                        trackerController.currentChain = if (trackerController.currentChain < 255) trackerController.currentChain + 1 else 0
-                        trackerController.lastEditedChain = trackerController.currentChain
-                        Log.d("Navigation", "  -> Changed to chain ${trackerController.currentChain}")
-                    }
-                    ScreenType.PHRASE -> {
-                        // Next phrase (wrap around)
-                        trackerController.currentPhrase = if (trackerController.currentPhrase < 255) trackerController.currentPhrase + 1 else 0
-                        trackerController.lastEditedPhrase = trackerController.currentPhrase
-                        Log.d("Navigation", "  -> Changed to phrase ${trackerController.currentPhrase}")
-                    }
-                    ScreenType.INSTRUMENT -> {
-                        // Next instrument (wrap around)
-                        // NOTE: Must update BOTH trackerController and instrumentController
-                        val newInst = if (trackerController.currentInstrument < 255)
-                            trackerController.currentInstrument + 1 else 0
-                        trackerController.currentInstrument = newInst
-                        trackerController.lastEditedInstrument = newInst
-                        instrumentController.currentInstrument = newInst  // Keep in sync!
-                        Log.d("Navigation", "  -> Changed to instrument $newInst")
-                    }
-                    else -> { Log.d("Navigation", "  -> No action for screen ${trackerController.currentScreen}") }
-                }
+                // L+RIGHT: Reserved for future use (selection expand?)
             },
 
-// ─────────────────────────────────────────────────────────────────────
-// L+UP/DOWN: Sort mode cycling (file browser)
-// ─────────────────────────────────────────────────────────────────────
             onLUp = {
-                if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
-                    val modes = FileSortMode.values()
-                    val currentIndex = modes.indexOf(fileBrowserState.sortMode)
-                    val nextMode = modes[(currentIndex + 1) % modes.size]
-                    fileBrowserState = fileBrowserState.copy(
-                        sortMode = nextMode
-                    )
-                }
+                // L+UP: Reserved for future use
             },
 
             onLDown = {
-                if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
-                    val modes = FileSortMode.values()
-                    val currentIndex = modes.indexOf(fileBrowserState.sortMode)
-                    val prevMode = modes[(currentIndex - 1 + modes.size) % modes.size]
-                    fileBrowserState = fileBrowserState.copy(
-                        sortMode = prevMode
-                    )
+                // L+DOWN: Reserved for future use
+            },
+
+// ─────────────────────────────────────────────────────────────────────
+// L+A: Cut (in selection) / Paste (outside selection)
+// ─────────────────────────────────────────────────────────────────────
+            onLA = {
+                when (trackerController.currentScreen) {
+                    ScreenType.PHRASE -> {
+                        val action = trackerController.inputController.handleSelectA()
+                        when (action) {
+                            is InputAction.CUT -> {
+                                // Cut selection
+                                val bounds = trackerController.inputController.getSelectionBounds()
+                                if (bounds != null) {
+                                    clipboardManager.cutPhraseSteps(
+                                        trackerController.project,
+                                        trackerController.currentPhrase,
+                                        bounds.topLeftRow, bounds.topLeftColumn,
+                                        bounds.bottomRightRow, bounds.bottomRightColumn
+                                    )
+                                    trackerController.projectVersion++
+                                    trackerController.inputController.exitSelectionMode()
+                                    Log.d("CopyPaste", "Cut phrase selection")
+                                }
+                            }
+                            is InputAction.PASTE -> {
+                                // Paste at cursor
+                                val result = clipboardManager.paste(
+                                    trackerController.project,
+                                    "PHRASE",
+                                    trackerController.currentPhrase,
+                                    trackerController.cursorRow,
+                                    trackerController.cursorColumn
+                                )
+                                if (result is ClipboardManager.PasteResult.Success) {
+                                    trackerController.projectVersion++
+                                    Log.d("CopyPaste", "Pasted ${result.itemsPasted} items to phrase")
+                                }
+                            }
+                            else -> { }
+                        }
+                    }
+                    ScreenType.CHAIN -> {
+                        val action = trackerController.inputController.handleSelectA()
+                        when (action) {
+                            is InputAction.CUT -> {
+                                // Cut selection
+                                val bounds = trackerController.inputController.getSelectionBounds()
+                                if (bounds != null) {
+                                    clipboardManager.cutChainRows(
+                                        trackerController.project,
+                                        trackerController.currentChain,
+                                        bounds.topLeftRow, bounds.topLeftColumn,
+                                        bounds.bottomRightRow, bounds.bottomRightColumn
+                                    )
+                                    trackerController.projectVersion++
+                                    trackerController.inputController.exitSelectionMode()
+                                    Log.d("CopyPaste", "Cut chain selection")
+                                }
+                            }
+                            is InputAction.PASTE -> {
+                                // Paste at cursor
+                                val result = clipboardManager.paste(
+                                    trackerController.project,
+                                    "CHAIN",
+                                    trackerController.currentChain,
+                                    trackerController.cursorRow,
+                                    trackerController.cursorColumn
+                                )
+                                if (result is ClipboardManager.PasteResult.Success) {
+                                    trackerController.projectVersion++
+                                    Log.d("CopyPaste", "Pasted ${result.itemsPasted} items to chain")
+                                }
+                            }
+                            else -> { }
+                        }
+                    }
+                    ScreenType.SONG -> {
+                        val action = trackerController.inputController.handleSelectA()
+                        when (action) {
+                            is InputAction.CUT -> {
+                                // Cut selection
+                                val bounds = trackerController.inputController.getSelectionBounds()
+                                if (bounds != null) {
+                                    clipboardManager.cutSongCells(
+                                        trackerController.project,
+                                        bounds.topLeftRow, bounds.topLeftColumn,
+                                        bounds.bottomRightRow, bounds.bottomRightColumn
+                                    )
+                                    trackerController.projectVersion++
+                                    trackerController.inputController.exitSelectionMode()
+                                    Log.d("CopyPaste", "Cut song selection")
+                                }
+                            }
+                            is InputAction.PASTE -> {
+                                // Paste at cursor
+                                val result = clipboardManager.paste(
+                                    trackerController.project,
+                                    "SONG",
+                                    0,  // Not used for song paste
+                                    trackerController.cursorRow,
+                                    trackerController.cursorColumn
+                                )
+                                if (result is ClipboardManager.PasteResult.Success) {
+                                    trackerController.projectVersion++
+                                    Log.d("CopyPaste", "Pasted ${result.itemsPasted} items to song")
+                                }
+                            }
+                            else -> { }
+                        }
+                    }
+                    else -> { }
                 }
             },
 
 // ─────────────────────────────────────────────────────────────────────
-// SELECT+A: Rename file/folder
+// L+B: Enter/cycle selection mode (CELL → ROW → SCREEN)
+// ─────────────────────────────────────────────────────────────────────
+            onLB = {
+                when (trackerController.currentScreen) {
+                    ScreenType.PHRASE -> {
+                        // Enter/cycle selection mode (CELL → ROW → SCREEN)
+                        trackerController.inputController.handleSelectB(
+                            trackerController.cursorRow,
+                            trackerController.cursorColumn,
+                            9  // Max column for phrase (FX3 value)
+                        )
+                        Log.d("CopyPaste", "Selection: ${trackerController.inputController.getSelectionInfo()}")
+                    }
+                    ScreenType.CHAIN -> {
+                        // Enter/cycle selection mode
+                        trackerController.inputController.handleSelectB(
+                            trackerController.cursorRow,
+                            trackerController.cursorColumn,
+                            2  // Max column for chain (transpose)
+                        )
+                        Log.d("CopyPaste", "Selection: ${trackerController.inputController.getSelectionInfo()}")
+                    }
+                    ScreenType.SONG -> {
+                        // Enter/cycle selection mode
+                        trackerController.inputController.handleSelectB(
+                            trackerController.cursorRow,
+                            trackerController.cursorColumn,
+                            8  // Max column for song (track 8)
+                        )
+                        Log.d("CopyPaste", "Selection: ${trackerController.inputController.getSelectionInfo()}")
+                    }
+                    else -> { }
+                }
+            },
+
+// ─────────────────────────────────────────────────────────────────────
+// SELECT+A: Rename file/folder (file browser only)
 // ─────────────────────────────────────────────────────────────────────
             onSelectA = {
                 if (trackerController.currentScreen == ScreenType.FILE_BROWSER &&
                     fileBrowserState.mode == FileBrowserModule.BrowserMode.NORMAL) {
                     val item = fileBrowserState.items.getOrNull(fileBrowserState.cursor)
-                    // Don't allow renaming parent directory (..)
                     if (item != null && item !is FileBrowserModule.BrowserItem.Parent) {
                         fileBrowserState = fileBrowserState.copy(
                             mode = FileBrowserModule.BrowserMode.RENAME,
@@ -1589,13 +1801,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             },
 
 // ─────────────────────────────────────────────────────────────────────
-// SELECT+B: Delete file/folder
+// SELECT+B: Delete file/folder (file browser only)
 // ─────────────────────────────────────────────────────────────────────
             onSelectB = {
                 if (trackerController.currentScreen == ScreenType.FILE_BROWSER &&
                     fileBrowserState.mode == FileBrowserModule.BrowserMode.NORMAL) {
                     val item = fileBrowserState.items.getOrNull(fileBrowserState.cursor)
-                    // Don't allow deleting parent directory (..)
                     if (item != null && item !is FileBrowserModule.BrowserItem.Parent) {
                         fileBrowserState = fileBrowserState.copy(
                             mode = FileBrowserModule.BrowserMode.DELETE,
@@ -1664,6 +1875,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     val instrumentStatusMessage = stateVersion.let { trackerController.statusMessage }
     val instrumentStatusSuccess = stateVersion.let { trackerController.statusSuccess }
 
+    // Selection/clipboard state for copy/paste
+    val selectionInfo = stateVersion.let { trackerController.inputController.getSelectionInfo() }
+    val clipboardInfo = stateVersion.let { clipboardManager.getClipboardInfo() }
+    val selectionModeActive = stateVersion.let { trackerController.inputController.selectionMode }
+    val isCellSelectedFn: (Int, Int) -> Boolean = { row, col ->
+        trackerController.inputController.isCellSelected(row, col)
+    }
+
     if (layoutConfig.needsVirtualButtons) {
         // SCENARIOS 2/3: Touchscreen devices need virtual buttons
 
@@ -1694,7 +1913,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 instrumentStatusMessage = instrumentStatusMessage,
                 instrumentStatusSuccess = instrumentStatusSuccess,
                 fileBrowserState = fileBrowserState,
-                playbackController = playbackController
+                playbackController = playbackController,
+                selectionInfo = selectionInfo,
+                clipboardInfo = clipboardInfo,
+                selectionMode = selectionModeActive,
+                isCellSelected = isCellSelectedFn
             )
         } else {
             // PORTRAIT: Buttons below screen
@@ -1723,7 +1946,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 instrumentStatusMessage = instrumentStatusMessage,
                 instrumentStatusSuccess = instrumentStatusSuccess,
                 fileBrowserState = fileBrowserState,
-                playbackController = playbackController
+                playbackController = playbackController,
+                selectionInfo = selectionInfo,
+                clipboardInfo = clipboardInfo,
+                selectionMode = selectionModeActive,
+                isCellSelected = isCellSelectedFn
             )
         }
     } else {
@@ -1753,7 +1980,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             instrumentStatusMessage = instrumentStatusMessage,
             instrumentStatusSuccess = instrumentStatusSuccess,
             fileBrowserState = fileBrowserState,
-            playbackController = playbackController
+            playbackController = playbackController,
+            selectionInfo = selectionInfo,
+            clipboardInfo = clipboardInfo,
+            selectionMode = selectionModeActive,
+            isCellSelected = isCellSelectedFn
         )
     }
 }

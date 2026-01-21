@@ -450,7 +450,7 @@ class FileBrowserModule : TrackerModule {
 
         // Basic controls on left
         drawBitmapText(
-            text = "A=OPEN B=BACK L+←=UP L+↑↓=SORT",
+            text = "A=OPEN B=BACK R+←=UP R+↑↓=SORT",
             x = x + 10,
             y = bottomBarY + TEXT_PADDING,
             scale = scale,

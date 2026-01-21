@@ -59,17 +59,25 @@ data class ButtonHandlers(
     // A+B combination for delete
     val onAB: () -> Unit,           // A+B: Delete/clear value at cursor
 
+    // B+direction combinations for item cycling (chain/phrase/instrument)
+    val onBLeft: () -> Unit,        // B+LEFT: Previous chain/phrase/instrument
+    val onBRight: () -> Unit,       // B+RIGHT: Next chain/phrase/instrument
+
     // R+direction combinations for screen navigation
     val onRUp: () -> Unit,          // R+UP: Navigate screen up
     val onRDown: () -> Unit,        // R+DOWN: Navigate screen down
     val onRLeft: () -> Unit,        // R+LEFT: Navigate screen left
     val onRRight: () -> Unit,       // R+RIGHT: Navigate screen right
 
-    // L+direction combinations for context navigation
-    val onLLeft: () -> Unit,        // L+LEFT: Previous chain/phrase/instrument OR parent folder
-    val onLRight: () -> Unit,       // L+RIGHT: Next chain/phrase/instrument
-    val onLUp: () -> Unit,          // L+UP: Sort mode up (file browser)
-    val onLDown: () -> Unit,        // L+DOWN: Sort mode down (file browser)
+    // L+direction combinations (reserved for future use)
+    val onLLeft: () -> Unit,        // L+LEFT: Reserved
+    val onLRight: () -> Unit,       // L+RIGHT: Reserved
+    val onLUp: () -> Unit,          // L+UP: Reserved
+    val onLDown: () -> Unit,        // L+DOWN: Reserved
+
+    // L+button combinations for copy/paste
+    val onLA: () -> Unit,           // L+A: Cut (in selection) / Paste (outside selection)
+    val onLB: () -> Unit,           // L+B: Enter/cycle selection mode
 
     // SELECT+button combinations for file operations
     val onSelectA: () -> Unit,      // SELECT+A: Rename file/folder
@@ -374,6 +382,24 @@ class InputMapper(
             }
         }
 
+        // B + direction combinations (item cycling: chain/phrase/instrument)
+        // When B is held, LEFT/RIGHT cycle through items instead of normal navigation
+        if (isBPressed && !isLPressed && !isRPressed && !isAPressed) {
+            when (button) {
+                VirtualButton.DPAD_LEFT -> {
+                    if (logInput) Log.d(TAG, "B+LEFT (previous item)")
+                    buttonHandlers.onBLeft()
+                    return
+                }
+                VirtualButton.DPAD_RIGHT -> {
+                    if (logInput) Log.d(TAG, "B+RIGHT (next item)")
+                    buttonHandlers.onBRight()
+                    return
+                }
+                else -> { }
+            }
+        }
+
         // L + R + button combinations (most specific)
         if (isLPressed && isRPressed) {
             when (button) {
@@ -401,13 +427,13 @@ class InputMapper(
             if (logInput) Log.d(TAG, "L is held, checking L+button combo for button=$button")
             when (button) {
                 VirtualButton.A -> {
-                    if (logInput) Log.d(TAG, "L+A (paste)")
-                    // TODO: Add handler for L+A (paste)
+                    if (logInput) Log.d(TAG, "L+A (cut/paste)")
+                    buttonHandlers.onLA()
                     return
                 }
                 VirtualButton.B -> {
                     if (logInput) Log.d(TAG, "L+B (selection mode)")
-                    // TODO: Add handler for L+B (selection mode)
+                    buttonHandlers.onLB()
                     return
                 }
                 VirtualButton.DPAD_UP -> {
@@ -581,15 +607,15 @@ class InputMapper(
 }
 
 /**
- * Modifier extension to add input handling to any Composable
- *
- * This is how you attach the input system to your UI.
- *
- * Usage:
- * Box(modifier = Modifier.inputHandler(inputMapper).focusable()) {
- *     // Your tracker UI here
- * }
- *
+ * Modifier extension to add input handling to any Composble
+ *  *
+ *  * This is how you attach the input system to your UI.
+ *  *
+ *  * Usage:
+ *  * Box(modifier = Modifier.inputHandler(inputMapper).focusable()) {
+ *  *     // Your tracker UI here
+ *  * }
+ *  *a
  * IMPORTANT: Must be combined with .focusable() modifier or keyboard won't work!
  *
  * @param inputMapper - The InputMapper instance that handles events

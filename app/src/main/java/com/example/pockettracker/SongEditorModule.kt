@@ -189,9 +189,15 @@ class SongEditorModule : TrackerModule {
         // ===================================
         // STEP 2: Determine background color
         // ===================================
+        // Check if any cell in this row is selected (tracks are 1-8 in selection, mapped to columns 1-8)
+        val isRowSelected = state.selectionMode && (1..8).any { col -> state.isCellSelected(absoluteRow, col) }
+
         val bgColor = when {
             // Playing row -> green highlight
             state.isPlaying && absoluteRow == state.playbackRow -> Color(0xFF004400)
+
+            // Selection green
+            isRowSelected -> Color(0xFF1a3a1a)
 
             // If cursor is on this row -> highlight
             absoluteRow == state.cursorRow -> Color(0xFF333333)
@@ -250,10 +256,15 @@ class SongEditorModule : TrackerModule {
             }
 
             // Determine text color
+            // Note: trackId is 0-7, but cursorTrack and selection columns are 1-8
+            val selectionCol = trackId + 1  // Convert to selection column (1-8)
             val textColor = when {
                 // Cursor is on this cell (track column starts at 1, not 0)
                 absoluteRow == state.cursorRow &&
                         trackId == (state.cursorTrack - 1) -> Color.Yellow
+
+                // Selection highlight (bright green)
+                state.selectionMode && state.isCellSelected(absoluteRow, selectionCol) -> Color(0xFF00DD00)
 
                 // Empty cell
                 chainId == -1 -> Color(0xFF444444)
@@ -364,6 +375,8 @@ class SongEditorModule : TrackerModule {
  * @param scrollPosition Vertical scroll offset (for showing more than 16 rows)
  * @param isPlaying Whether song playback is active
  * @param playbackRow Current playback position (0-255, synchronized across all tracks)
+ * @param selectionMode Whether selection mode is active
+ * @param isCellSelected Function to check if a cell is selected
  */
 data class SongEditorState(
     val project: Project,       // Full project data
@@ -371,5 +384,7 @@ data class SongEditorState(
     val cursorTrack: Int,       // Which track (1-8, step column is not selectable)
     val scrollPosition: Int = 0, // Scroll offset (0 = top of song)
     val isPlaying: Boolean = false, // Playback state
-    val playbackRow: Int = 0    // Current playback row (all tracks play in sync)
+    val playbackRow: Int = 0,   // Current playback row (all tracks play in sync)
+    val selectionMode: Boolean = false,
+    val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }
 )

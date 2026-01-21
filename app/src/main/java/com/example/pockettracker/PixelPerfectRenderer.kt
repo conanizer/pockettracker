@@ -59,7 +59,12 @@ fun PixelPerfectTracker(
     instrumentCursorColumn: Int,
     instrumentStatusMessage: String,
     instrumentStatusSuccess: Boolean,
-    fileBrowserState: FileBrowserModule.State? = null
+    fileBrowserState: FileBrowserModule.State? = null,
+    // Copy/paste state
+    selectionInfo: String = "",        // e.g., "SEL:CELL", "SEL:ROW", "SEL:ALL"
+    clipboardInfo: String = "",        // e.g., "PHR:3x4", "CHN:1x8"
+    selectionMode: Boolean = false,    // Whether selection mode is active
+    isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }  // Check if cell is selected
 ) {
     android.util.Log.d("PixelPerfectTracker", "==== PixelPerfectTracker called ====")
     android.util.Log.d("PixelPerfectTracker", "Screen: $currentScreen")
@@ -161,7 +166,11 @@ fun PixelPerfectTracker(
                             instrumentCursorColumn = instrumentCursorColumn,
                             instrumentStatusMessage = instrumentStatusMessage,
                             instrumentStatusSuccess = instrumentStatusSuccess,
-                            fileBrowserState = fileBrowserState
+                            fileBrowserState = fileBrowserState,
+                            selectionInfo = selectionInfo,
+                            clipboardInfo = clipboardInfo,
+                            selectionMode = selectionMode,
+                            isCellSelected = isCellSelected
                         )
                     }
                 }
@@ -216,7 +225,12 @@ class TrackerLayout {
         instrumentCursorColumn: Int = 1,
         instrumentStatusMessage: String = "",
         instrumentStatusSuccess: Boolean = true,
-        fileBrowserState: FileBrowserModule.State? = null  // File browser state
+        fileBrowserState: FileBrowserModule.State? = null,  // File browser state
+        // Copy/paste state
+        selectionInfo: String = "",
+        clipboardInfo: String = "",
+        selectionMode: Boolean = false,
+        isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }
     ) {
         // ===================================
         // DRAW BACKGROUND
@@ -253,26 +267,42 @@ class TrackerLayout {
                 state = audioEngine.waveformBuffer  // Pass audio waveform data
             )
         }
+
+        // Draw clipboard/selection indicator on the right side of oscilloscope
+        if (selectionInfo.isNotEmpty() || clipboardInfo.isNotEmpty()) {
+            val indicatorY = currentY + 10  // 10px from top
+            val indicatorX = moduleX + 620 - 150  // Right-aligned within module
+
+            // Show selection info (green)
+            if (selectionInfo.isNotEmpty()) {
+                drawBitmapText(
+                    text = selectionInfo,
+                    x = indicatorX,
+                    y = indicatorY,
+                    scale = scale,
+                    color = Color(0xFF00DD00),
+                    spacing = 2,
+                    fontScale = 3
+                )
+            }
+
+            // Show clipboard info (cyan) below selection info
+            if (clipboardInfo.isNotEmpty()) {
+                val clipY = if (selectionInfo.isNotEmpty()) indicatorY + 21 else indicatorY
+                drawBitmapText(
+                    text = clipboardInfo,
+                    x = indicatorX,
+                    y = clipY,
+                    scale = scale,
+                    color = Color.Cyan,
+                    spacing = 2,
+                    fontScale = 3
+                )
+            }
+        }
+
         // Move down for next module
         currentY += oscilloscope.height + SCREEN_SPACER  // 70 + 6 = 76px
-
-        // MODULE 2: PHRASE EDITOR (main content)
-        // Position: Below oscilloscope
-        // Size: 620×392
-        with(phraseEditor) {
-            draw(
-                x = moduleX,
-                y = currentY,
-                scale = scale,
-                state = PhraseEditorState(
-                    phrase = project.phrases[currentPhrase],
-                    cursorRow = cursorRow,
-                    cursorColumn = cursorColumn,
-                    playbackRow = playbackRow,
-                    isPlaying = isPlaying
-                )
-            )
-        }
 
         // MODULE 2: Switch between editors based on current screen
         when (currentScreen) {
@@ -306,7 +336,9 @@ class TrackerLayout {
                             cursorRow = cursorRow,
                             cursorColumn = cursorColumn,
                             playbackRow = playbackRow,
-                            isPlaying = isPlaying
+                            isPlaying = isPlaying,
+                            selectionMode = selectionMode,
+                            isCellSelected = isCellSelected
                         )
                     )
                 }
@@ -326,7 +358,9 @@ class TrackerLayout {
                             cursorRow = cursorRow,
                             cursorColumn = cursorColumn,
                             playbackRow = playbackChainRow,
-                            isPlaying = isPlaying
+                            isPlaying = isPlaying,
+                            selectionMode = selectionMode,
+                            isCellSelected = isCellSelected
                         )
                     )
                 }
@@ -346,7 +380,9 @@ class TrackerLayout {
                             cursorRow = cursorRow,
                             cursorTrack = cursorColumn,  // Use cursorColumn as track selector
                             isPlaying = isPlaying && currentScreen == ScreenType.SONG,
-                            playbackRow = playbackSongRow
+                            playbackRow = playbackSongRow,
+                            selectionMode = selectionMode,
+                            isCellSelected = isCellSelected
                         )
                     )
                 }

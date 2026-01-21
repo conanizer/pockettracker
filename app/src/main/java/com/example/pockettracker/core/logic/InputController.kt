@@ -16,8 +16,10 @@ import com.example.pockettracker.core.logging.ILogger
  * - A button = increase/decrease/edit value
  * - A+B = delete/clear
  * - A+A = create new item
- * - SELECT+B = enter/exit selection mode (for copy/paste)
- * - SELECT+A = paste
+ * - SELECT+B = enter/cycle selection mode (CELL → ROW → SCREEN)
+ * - B (in selection) = copy
+ * - SELECT+A (in selection) = cut
+ * - SELECT+A (outside selection) = paste
  *
  * The specific behavior depends on the CursorContext provided by each module.
  *
@@ -35,15 +37,57 @@ class InputController(
          * Order: A-Z, 0-9, underscore, dash, space
          */
         private val ALLOWED_CHARS = ('A'..'Z') + ('0'..'9') + '_' + '-' + ' '
+
+        /**
+         * Multi-tap detection window in milliseconds.
+         * Taps within this window cycle through selection modes.
+         */
+        private const val MULTI_TAP_WINDOW = 500L
     }
 
     // ========================================
-    // SELECTION STATE (for copy/paste - Milestone 2.5)
+    // SELECTION MODE STATE
     // ========================================
 
     /**
-     * Whether selection mode is active (SELECT+B to enter).
-     * ⏳ Milestone 2.5 - Copy/Paste Feature
+     * Selection scope states for LGPT-style selection.
+     */
+    enum class SelectionScope {
+        NONE,       // Not in selection mode
+        CELL,       // Single cell selected (just cursor position)
+        ROW,        // Entire row selected
+        SCREEN      // All 16 rows selected
+    }
+
+    /**
+     * Selection bounds for multi-cell selection.
+     */
+    data class SelectionBounds(
+        val topLeftRow: Int,
+        val topLeftColumn: Int,
+        val bottomRightRow: Int,
+        val bottomRightColumn: Int
+    ) {
+        val width: Int get() = bottomRightColumn - topLeftColumn + 1
+        val height: Int get() = bottomRightRow - topLeftRow + 1
+
+        fun contains(row: Int, column: Int): Boolean {
+            return row in topLeftRow..bottomRightRow &&
+                   column in topLeftColumn..bottomRightColumn
+        }
+    }
+
+    /**
+     * Current selection scope.
+     */
+    var selectionScope = SelectionScope.NONE
+        private set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
+
+    /**
+     * Whether selection mode is active.
      */
     var selectionMode = false
         private set(value) {
@@ -53,13 +97,11 @@ class InputController(
 
     /**
      * Selection cursor position (row, column).
-     * ⏳ Milestone 2.5 - Copy/Paste Feature
      */
     data class CursorPosition(val row: Int, val column: Int)
 
     /**
      * Selection start position.
-     * ⏳ Milestone 2.5 - Copy/Paste Feature
      */
     var selectionStart: CursorPosition? = null
         private set(value) {
@@ -69,13 +111,183 @@ class InputController(
 
     /**
      * Selection end position.
-     * ⏳ Milestone 2.5 - Copy/Paste Feature
      */
     var selectionEnd: CursorPosition? = null
         private set(value) {
             field = value
             stateObserver.onStateChanged()
         }
+
+    /**
+     * Timestamp of last SELECT+B press for multi-tap detection.
+     */
+    private var lastSelectBTime: Long = 0
+
+    // ========================================
+    // SELECTION MODE OPERATIONS
+    // ========================================
+
+    /**
+     * Handle SELECT+B combination.
+     * Implements LGPT-style multi-tap selection:
+     * - 1st tap: CELL mode (cursor position only)
+     * - 2nd tap within window: ROW mode (full row)
+     * - 3rd tap within window: SCREEN mode (all 16 rows)
+     * - 4th tap: wraps back to CELL
+     * - Tap after window expires: exit selection mode
+     *
+     * @param cursorRow Current cursor row
+     * @param cursorColumn Current cursor column
+     * @param maxColumn Maximum column for current screen (e.g., 9 for phrase, 2 for chain)
+     */
+    fun handleSelectB(cursorRow: Int, cursorColumn: Int, maxColumn: Int) {
+        val now = System.currentTimeMillis()
+
+        if (selectionScope == SelectionScope.NONE) {
+            // First tap - enter CELL mode
+            selectionScope = SelectionScope.CELL
+            initializeSelectionForScope(cursorRow, cursorColumn, maxColumn)
+            logger.d(TAG, "📋 Selection: CELL mode at ($cursorRow, $cursorColumn)")
+        } else if (now - lastSelectBTime < MULTI_TAP_WINDOW) {
+            // Multi-tap within window - cycle through modes
+            selectionScope = when (selectionScope) {
+                SelectionScope.CELL -> SelectionScope.ROW
+                SelectionScope.ROW -> SelectionScope.SCREEN
+                SelectionScope.SCREEN -> SelectionScope.CELL
+                else -> SelectionScope.CELL
+            }
+            initializeSelectionForScope(cursorRow, cursorColumn, maxColumn)
+            logger.d(TAG, "📋 Selection: ${selectionScope.name} mode")
+        } else {
+            // Too slow - exit selection mode
+            exitSelectionMode()
+            logger.d(TAG, "📋 Selection: exited (tap timeout)")
+        }
+
+        lastSelectBTime = now
+    }
+
+    /**
+     * Initialize selection bounds for current scope.
+     */
+    private fun initializeSelectionForScope(cursorRow: Int, cursorColumn: Int, maxColumn: Int) {
+        when (selectionScope) {
+            SelectionScope.CELL -> {
+                selectionStart = CursorPosition(cursorRow, cursorColumn)
+                selectionEnd = CursorPosition(cursorRow, cursorColumn)
+            }
+            SelectionScope.ROW -> {
+                selectionStart = CursorPosition(cursorRow, 1)  // Column 1 is first editable
+                selectionEnd = CursorPosition(cursorRow, maxColumn)
+            }
+            SelectionScope.SCREEN -> {
+                selectionStart = CursorPosition(0, 1)
+                selectionEnd = CursorPosition(15, maxColumn)
+            }
+            else -> { }
+        }
+        selectionMode = true
+    }
+
+    /**
+     * Expand or contract selection in given direction.
+     *
+     * @param direction "UP", "DOWN", "LEFT", "RIGHT"
+     * @param maxRow Maximum row (15 for phrase/chain)
+     * @param maxColumn Maximum column for current screen
+     */
+    fun expandSelection(direction: String, maxRow: Int, maxColumn: Int) {
+        if (!selectionMode || selectionEnd == null) return
+
+        val end = selectionEnd!!
+        val newEnd = when (direction) {
+            "UP" -> CursorPosition(maxOf(0, end.row - 1), end.column)
+            "DOWN" -> CursorPosition(minOf(maxRow, end.row + 1), end.column)
+            "LEFT" -> CursorPosition(end.row, maxOf(1, end.column - 1))
+            "RIGHT" -> CursorPosition(end.row, minOf(maxColumn, end.column + 1))
+            else -> end
+        }
+        selectionEnd = newEnd
+        logger.d(TAG, "📋 Selection expanded: ${selectionStart} to ${selectionEnd}")
+    }
+
+    /**
+     * Get current selection bounds.
+     */
+    fun getSelectionBounds(): SelectionBounds? {
+        val start = selectionStart ?: return null
+        val end = selectionEnd ?: return null
+
+        return SelectionBounds(
+            topLeftRow = minOf(start.row, end.row),
+            topLeftColumn = minOf(start.column, end.column),
+            bottomRightRow = maxOf(start.row, end.row),
+            bottomRightColumn = maxOf(start.column, end.column)
+        )
+    }
+
+    /**
+     * Check if a cell is within the current selection.
+     */
+    fun isCellSelected(row: Int, column: Int): Boolean {
+        if (!selectionMode) return false
+        return getSelectionBounds()?.contains(row, column) ?: false
+    }
+
+    /**
+     * Exit selection mode.
+     */
+    fun exitSelectionMode() {
+        selectionMode = false
+        selectionScope = SelectionScope.NONE
+        selectionStart = null
+        selectionEnd = null
+        logger.d(TAG, "📋 Exited selection mode")
+    }
+
+    /**
+     * Check if selection mode is active.
+     */
+    fun isSelectionModeActive(): Boolean = selectionMode
+
+    /**
+     * Get selection info for UI display.
+     */
+    fun getSelectionInfo(): String {
+        if (!selectionMode) return ""
+
+        return when (selectionScope) {
+            SelectionScope.CELL -> "SEL:CELL"
+            SelectionScope.ROW -> "SEL:ROW"
+            SelectionScope.SCREEN -> "SEL:ALL"
+            else -> ""
+        }
+    }
+
+    /**
+     * Handle SELECT+A combination.
+     * - In selection mode: returns CUT action
+     * - Outside selection mode: returns PASTE action
+     */
+    fun handleSelectA(): InputAction {
+        return if (selectionMode) {
+            logger.d(TAG, "📋 SELECT+A: Cut (in selection mode)")
+            InputAction.CUT
+        } else {
+            logger.d(TAG, "📋 SELECT+A: Paste (outside selection mode)")
+            InputAction.PASTE
+        }
+    }
+
+    /**
+     * Handle B button press in selection mode (COPY).
+     * @return true if handled (was in selection mode), false otherwise
+     */
+    fun handleCopyInSelection(): Boolean {
+        if (!selectionMode) return false
+        logger.d(TAG, "📋 B pressed in selection: Copy")
+        return true  // Signal that copy should happen
+    }
 
     // ========================================
     // BUTTON HANDLERS (based on CursorContext)
@@ -282,77 +494,6 @@ class InputController(
     }
 
     // ========================================
-    // SELECTION MODE (for copy/paste - Milestone 2.5)
-    // ========================================
-
-    /**
-     * Handle SELECT+B combination.
-     * Enters selection mode OR exits if already in selection mode.
-     *
-     * ⏳ Milestone 2.5 - Copy/Paste Feature: Full implementation pending
-     */
-    fun handleSelectB() {
-        if (selectionMode) {
-            exitSelectionMode()
-        } else {
-            enterSelectionMode()
-        }
-    }
-
-    /**
-     * Handle SELECT+A combination.
-     * Paste clipboard contents at cursor.
-     *
-     * ⏳ Milestone 2.5 - Copy/Paste Feature: Full implementation pending
-     */
-    fun handleSelectA(): InputAction {
-        logger.d(TAG, "⏳ SELECT+A - paste (Milestone 2.5 - Copy/Paste Feature)")
-        return InputAction.NONE
-    }
-
-    /**
-     * Enter selection mode.
-     * ⏳ Milestone 2.5 - Copy/Paste Feature
-     */
-    private fun enterSelectionMode() {
-        selectionMode = true
-        logger.d(TAG, "📋 Entered selection mode (Milestone 2.5)")
-    }
-
-    /**
-     * Exit selection mode.
-     * ⏳ Milestone 2.5 - Copy/Paste Feature
-     */
-    private fun exitSelectionMode() {
-        selectionMode = false
-        selectionStart = null
-        selectionEnd = null
-        logger.d(TAG, "📋 Exited selection mode (Milestone 2.5)")
-    }
-
-    /**
-     * Check if selection mode is active.
-     * ⏳ Milestone 2.5 - Copy/Paste Feature
-     */
-    fun isSelectionModeActive(): Boolean = selectionMode
-
-    /**
-     * Get selection info for UI display.
-     * ⏳ Milestone 2.5 - Copy/Paste Feature
-     */
-    fun getSelectionInfo(): String {
-        if (!selectionMode) return ""
-
-        val start = selectionStart ?: return "SELECTING..."
-        val end = selectionEnd ?: return "SELECTING..."
-
-        val width = kotlin.math.abs(end.column - start.column) + 1
-        val height = kotlin.math.abs(end.row - start.row) + 1
-
-        return "SEL: ${width}x${height}"
-    }
-
-    // ========================================
     // HELPER FUNCTIONS
     // ========================================
 
@@ -474,4 +615,13 @@ sealed class InputAction {
 
     /** Navigate to next screen */
     object NAVIGATE_RIGHT : InputAction()
+
+    /** Copy selection to clipboard */
+    object COPY : InputAction()
+
+    /** Cut selection to clipboard (copy + delete) */
+    object CUT : InputAction()
+
+    /** Paste clipboard at cursor */
+    object PASTE : InputAction()
 }

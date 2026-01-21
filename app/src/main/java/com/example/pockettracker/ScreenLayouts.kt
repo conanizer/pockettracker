@@ -51,7 +51,12 @@ fun FullScreenLayout(
     instrumentStatusMessage: String,
     instrumentStatusSuccess: Boolean,
     fileBrowserState: FileBrowserModule.State? = null,  // File browser state
-    playbackController: PlaybackController  // For scheduling with effect resolution
+    playbackController: PlaybackController,  // For scheduling with effect resolution
+    // Copy/paste state
+    selectionInfo: String = "",
+    clipboardInfo: String = "",
+    selectionMode: Boolean = false,
+    isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }
 ) {
     Box(
         modifier = Modifier
@@ -84,7 +89,11 @@ fun FullScreenLayout(
             instrumentCursorColumn = instrumentCursorColumn,
             instrumentStatusMessage = instrumentStatusMessage,
             instrumentStatusSuccess = instrumentStatusSuccess,
-            fileBrowserState = fileBrowserState
+            fileBrowserState = fileBrowserState,
+            selectionInfo = selectionInfo,
+            clipboardInfo = clipboardInfo,
+            selectionMode = selectionMode,
+            isCellSelected = isCellSelected
         )
     }
 }
@@ -119,7 +128,12 @@ fun PortraitLayoutWithVirtualButtons(
     instrumentStatusMessage: String,
     instrumentStatusSuccess: Boolean,
     fileBrowserState: FileBrowserModule.State? = null,
-    playbackController: PlaybackController
+    playbackController: PlaybackController,
+    // Copy/paste state
+    selectionInfo: String = "",
+    clipboardInfo: String = "",
+    selectionMode: Boolean = false,
+    isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }
 ) {
     // FIXED SPACER HEIGHT
     val spacerHeight = 200
@@ -184,7 +198,11 @@ fun PortraitLayoutWithVirtualButtons(
                     instrumentCursorColumn = instrumentCursorColumn,
                     instrumentStatusMessage = instrumentStatusMessage,
                     instrumentStatusSuccess = instrumentStatusSuccess,
-                    fileBrowserState = fileBrowserState
+                    fileBrowserState = fileBrowserState,
+                    selectionInfo = selectionInfo,
+                    clipboardInfo = clipboardInfo,
+                    selectionMode = selectionMode,
+                    isCellSelected = isCellSelected
                 )
             }
         }
@@ -244,7 +262,12 @@ fun LandscapeLayoutWithVirtualButtons(
     instrumentStatusMessage: String,
     instrumentStatusSuccess: Boolean,
     fileBrowserState: FileBrowserModule.State? = null,
-    playbackController: PlaybackController
+    playbackController: PlaybackController,
+    // Copy/paste state
+    selectionInfo: String = "",
+    clipboardInfo: String = "",
+    selectionMode: Boolean = false,
+    isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }
 ) {
     // Calculate available space for each button panel
     // Formula: (deviceWidth - scaledScreenWidth) / 2
@@ -313,7 +336,11 @@ fun LandscapeLayoutWithVirtualButtons(
                     instrumentCursorColumn = instrumentCursorColumn,
                     instrumentStatusMessage = instrumentStatusMessage,
                     instrumentStatusSuccess = instrumentStatusSuccess,
-                    fileBrowserState = fileBrowserState
+                    fileBrowserState = fileBrowserState,
+                    selectionInfo = selectionInfo,
+                    clipboardInfo = clipboardInfo,
+                    selectionMode = selectionMode,
+                    isCellSelected = isCellSelected
                 )
             }
         }

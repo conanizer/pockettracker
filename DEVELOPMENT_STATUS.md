@@ -1,7 +1,7 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-01-20
+2026-01-22
 
 ## Current Phase
 **Phase A Complete** → **Architecture Refactoring (Phases 1-4 Complete ✅)** → Effects System (TOP-5 In Progress) → Copy/Paste → MVP Release
@@ -284,15 +284,18 @@
 
 **See:** `MVP_ROADMAP.md` Milestone 2 for implementation details
 
-### 3. Copy/Paste System (4-5 days) ⚠️
+### 3. Copy/Paste System (4-5 days) ✅ COMPLETE!
 **M8-style workflow:**
-- [ ] Selection mode (SELECT+B to enter)
-- [ ] Copy selection (B in selection mode)
-- [ ] Paste (SELECT+A) ✅
-- [ ] Cut (A+B)
-- [ ] Copy/paste phrase steps
-- [ ] Copy/paste between different phrases
-- [ ] Clipboard indicator in header row
+- [x] Selection mode (L+B to enter/cycle: CELL → ROW → SCREEN) ✅
+- [x] Copy selection (B in selection mode) ✅
+- [x] Paste (L+A) ✅
+- [x] Cut (L+A in selection mode) ✅
+- [x] Copy/paste phrase steps ✅
+- [x] Copy/paste chain rows ✅
+- [x] Copy/paste song cells ✅
+- [x] Selection auto-exits on screen navigation ✅
+
+**Screens supported:** PHRASE, CHAIN, SONG
 
 **Advanced features:** Early Post-MVP (instrument settings copy, etc.)
 
@@ -370,7 +373,7 @@ Planned global settings:
 
 **Result:** Navigation fully bidirectional, codebase cleaner! 🎉
 
-### Next Priority: Copy/Paste System (Milestone 2.5)
+### ✅ COPY/PASTE SYSTEM COMPLETE! (2026-01-22)
 
 **Effects System COMPLETE:**
 - ✅ OFFSET (Oxx) - Sample start point offset
@@ -420,10 +423,10 @@ Planned global settings:
    - ✅ OFFSET, VOLUME, KILL
 
 ### Next 2 Weeks:
-2. **Copy/Paste System** (Milestone 2.5)
-   - M8-style selection mode
-   - Copy/paste phrase steps
-   - Clipboard indicator
+2. ✅ **Copy/Paste System** (Milestone 2.5) - COMPLETE!
+   - ✅ M8-style selection mode (L+B to cycle)
+   - ✅ Copy/paste for PHRASE, CHAIN, SONG screens
+   - ✅ Selection auto-exits on screen navigation
 
 ### Following Weeks:
 3. **Testing & Polish** (Milestone 3-4)
