@@ -1,10 +1,12 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-01-22
+2026-01-23
 
 ## Current Phase
-**Phase A Complete** → **Architecture Refactoring (Phases 1-4 Complete ✅)** → Effects System (TOP-5 In Progress) → Copy/Paste → MVP Release
+**Original MVP Scope COMPLETE!** → **MVP Expansion (Mixer + WAV Export)** → Testing → MVP Release
+
+**See:** `MVP_EXPANSION_PLAN.md` for detailed implementation plan
 
 ## What's Working ✅
 
@@ -325,6 +327,16 @@
 - [ ] Short demo video
 - [ ] Known issues list
 
+## MVP Expansion (NOW IN PROGRESS)
+
+**Moving from Post-MVP to MVP due to extra time:**
+- 🚧 **Mixer Screen** - 8 track volumes + master with dB meters
+- 🚧 **WAV Export** - Render song to stereo WAV file
+- 🚧 **Instrument VOL/PAN** - Expose in UI, proper gain staging
+- 🚧 **Stereo Pan** - True stereo output in audio engine
+
+**See:** `MVP_EXPANSION_PLAN.md` for detailed implementation plan
+
 ## Post-MVP Features (Future Ideas)
 
 ### Early Post-MVP (With Mentor)
@@ -332,13 +344,14 @@
 2. **Advanced Copy/Paste** - Instrument settings
 3. **Linux Port** - GTK/Qt UI with same controllers
 4. **Braids Synthesizers** - Mutable Instruments integration
-5. **Remaining Effects** - Pitch, pan, filter, etc.
+5. **Remaining Effects** - Pitch, filter automation, etc.
 
 ### Later Features
 - Undo/redo
-- WAV export
-- Advanced filters
-- Mixer screen
+- Per-track stem export
+- Advanced filters (EQ, compressor)
+- Stereo meters per track
+- Effect sends (reverb, delay, chorus)
 - Themes/polish
 
 ### System Settings (Global, Not Per-Project)
@@ -423,44 +436,46 @@ Planned global settings:
 
 **See:** `MVP_ROADMAP.md` Milestone 2 for full effects implementation
 
-### This Week:
-1. ✅ **Code Cleanup** - COMPLETE!
-   - ✅ Delete dead code from EditorHelpers.kt
-   - ✅ Verify no broken references
-   - ✅ All compilation errors resolved
+### ✅ Original MVP Scope COMPLETE! (2026-01-22)
 
-2. ✅ **Effects System** (Milestone 2) - COMPLETE!
-   - ✅ ARPEGGIO (Axx) with ARC config (Cxx)
-   - ✅ REPEAT (Rxx) with persistence
-   - ✅ OFFSET, VOLUME, KILL
+**All original MVP features done:**
+- ✅ Architecture refactoring
+- ✅ Effects system (all TOP-5)
+- ✅ Copy/paste system
 
-### Next 2 Weeks:
-2. ✅ **Copy/Paste System** (Milestone 2.5) - COMPLETE!
-   - ✅ M8-style selection mode (L+B to cycle)
-   - ✅ Copy/paste for PHRASE, CHAIN, SONG screens
-   - ✅ Selection auto-exits on screen navigation
+### 🚧 MVP Expansion (Current Work)
 
-### Following Weeks:
-3. **Testing & Polish** (Milestone 3-4)
-4. **Documentation & Video**
-5. **MVP Release!**
+**See:** `MVP_EXPANSION_PLAN.md` for detailed plan
+
+**Phase 1-2 (Days 1-2):** Instrument VOL/PAN in UI
+**Phase 3 (Days 2-3):** Stereo pan in audio engine
+**Phase 4 (Days 3-4):** Volume multiplication chain
+**Phase 5 (Days 4-6):** Mixer screen with dB meters
+**Phase 6 (Days 6-8):** WAV Export
+**Phase 7 (Days 8-10):** Integration testing
+
+### Following:
+- Testing & Polish
+- Documentation & Video
+- MVP Release!
 
 ## Timeline to MVP
 
-**Realistic Timeline:** Mid-Late February 2025 (6-8 weeks from now)
+**Updated Timeline:** Late February 2026
 
 ```
-✅ Weeks 1-2:   Refactoring (clean architecture) - COMPLETE!
-Weeks 3-4:      Effects system (TOP-5 in phrase)  ← NEXT
-Week 5:         Copy/paste system (M8-style)
-Week 6:         Integration & testing
-Weeks 7-8:      Bug fixes & performance
-Week 9:         Documentation & video
+✅ Weeks 1-2:   Refactoring - COMPLETE!
+✅ Weeks 3-4:   Effects system - COMPLETE!
+✅ Week 5:      Copy/paste system - COMPLETE!
+🚧 Weeks 6-7:   MVP Expansion (Mixer + WAV Export) ← CURRENT
+   Week 8:      Integration & testing
+   Week 9:      Documentation & video
+   Week 10:     MVP Release!
 ```
 
-**Status:** Ahead of schedule! Refactoring complete in 2 weeks.
+**Status:** ~1 month ahead of original schedule! Adding Mixer + Export to MVP.
 
-**See:** `MVP_ROADMAP.md` for complete vertical slice breakdown
+**See:** `MVP_EXPANSION_PLAN.md` for expansion implementation details
 
 ## Technical Notes
 

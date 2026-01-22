@@ -10,31 +10,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 1. **DEVELOPMENT_STATUS.md** - What's done, what's remaining
 2. **MVP_ROADMAP.md** - Overall path to MVP
+3. **MVP_EXPANSION_PLAN.md** - Mixer, Volume/Pan, WAV Export plan (NEW!)
 
-**Current Phase:** Architecture Refactoring (Finalizing)
+**Current Phase:** MVP Expansion (Mixer + WAV Export)
 
-**Current Task:** Extract controllers from MainActivity
+**Current Task:** Implement Mixer screen and WAV export functionality
 
 ---
 
 ## 📋 Quick Reference
 
-### Current Project State (January 2025)
+### Current Project State (January 2026)
 
-**Status:** ~95% complete to MVP
+**Status:** Original MVP scope complete! Now expanding with extra time.
+
+**Completed:**
 - ✅ Audio engine (professional-grade, sample-accurate)
 - ✅ All UI screens working
 - ✅ Playback system complete
 - ✅ Architecture refactoring COMPLETE
-- 🚧 Effects system (4/5 TOP-5 done: Offset, Volume, Kill, Repeat)
-- ⚠️ Copy/paste NOT implemented yet
+- ✅ Effects system (ALL TOP-5: Arpeggio, Offset, Volume, Kill, Repeat)
+- ✅ Copy/paste system (M8-style selection)
+
+**MVP Expansion (NEW - ~2 weeks):**
+- 🚧 Instrument VOL/PAN in UI
+- 🚧 Volume multiplication chain (inst × phrase × track × master)
+- 🚧 Stereo pan in audio engine
+- 🚧 Mixer screen (8 tracks + master with dB meters)
+- 🚧 WAV Export (render song to stereo WAV)
 
 **Next Steps:**
-1. ~~Complete refactoring (Phase 4 - extracting controllers)~~ ✅ DONE
-2. Finish effects system (only Arpeggio remaining!)
-3. Implement copy/paste (M8-style)
-4. Testing & polish
-5. MVP release (Late February 2025)
+1. ~~Complete refactoring (Phase 4)~~ ✅ DONE
+2. ~~Finish effects system~~ ✅ DONE
+3. ~~Implement copy/paste~~ ✅ DONE
+4. **Implement Mixer + WAV Export** ← CURRENT
+5. Testing & polish
+6. MVP release (Late February 2026)
 
 ---
 
@@ -220,55 +231,72 @@ Each module receives state objects and renders itself independently.
 
 ## 🎵 MVP Remaining Work
 
-### 1. Effects System (1-2 weeks)
+### ✅ COMPLETED: Effects System
 
-**TOP-5 Effects in PHRASE screen only:**
-- Arpeggio (Axx) - Note pattern automation (TODO)
-- Offset (Oxx) - Sample start point automation ✅ DONE
-- Volume (Vxx) - Volume automation within step ✅ DONE
-- Kill (K00) - Stop sample immediately ✅ DONE
-- Repeat (Rxx) - Full LGPT/M8-style retrigger ✅ DONE (2026-01-19)
-  - Sub-step (R01-R0B): multiple triggers per step
-  - Multi-step (R0C+): R30 = 4 kicks in phrase, R12 = dotted notes
-  - Persistence: continues until new note, same-column FX, or KILL
-  - Cross-phrase: persists through Chain/Song playback!
+**ALL TOP-5 Effects working in PHRASE screen:**
+- ✅ Arpeggio (Axx) - Note pattern automation with ARC config (Cxx)
+- ✅ Offset (Oxx) - Sample start point automation
+- ✅ Volume (Vxx) - Volume automation within step
+- ✅ Kill (K00) - Stop sample immediately
+- ✅ Repeat (Rxx) - Full LGPT/M8-style retrigger with persistence
 
-**Implementation:**
-- Parser: Extract fx1Type/fx1Value from PhraseStep
-- Processor: EffectProcessor.kt calculates effect behavior
-- Audio: Apply effects in C++ audio callback
+### ✅ COMPLETED: Copy/Paste System
 
-**Table screen effects:** Early Post-MVP
+**M8-style workflow fully implemented:**
+- ✅ Selection mode (L+B to enter/cycle)
+- ✅ Copy selection (B in selection mode)
+- ✅ Paste (L+A outside selection)
+- ✅ Cut (L+A in selection)
+- ✅ Delete (A+B in selection)
 
-**See:** `MVP_ROADMAP.md` Milestone 2 for detailed implementation
+### 🚧 NEW: MVP Expansion (~2 weeks)
 
-### 2. Copy/Paste System (4-5 days)
+**See:** `MVP_EXPANSION_PLAN.md` for detailed implementation plan
 
-**M8-style workflow:**
-- Selection mode (SELECT+B to enter)
-- Copy selection (B in selection mode)
-- Paste (SELECT+A)
-- Cut (A+B)
-- Clipboard indicator in header row
+**Phase 1-2: Instrument VOL/PAN (Days 1-2)**
+- [ ] Expose VOL (00-FF) in instrument screen UI
+- [ ] Expose PAN (00-FF, 80=center) in instrument screen UI
+- [ ] Cursor navigation and editing
 
-**Implementation:**
-- InputController: Manages selection state
-- ClipboardManager: Handles copy/paste/cut operations
-- UI: Visual selection highlighting
+**Phase 3: Stereo Pan in Audio Engine (Days 2-3)**
+- [ ] C++ pan parameter in scheduleNote
+- [ ] Constant-power pan law implementation
+- [ ] True stereo output (not mono duplicated)
 
-**See:** `MVP_ROADMAP.md` Milestone 2.5 for detailed implementation
+**Phase 4: Volume Chain (Days 3-4)**
+- [ ] Volume = instrument × phrase × track × master
+- [ ] Track.volume added to data model
+- [ ] All playback modes use new volume calculation
 
-### 3. Testing & Polish (1 week)
+**Phase 5: Mixer Screen (Days 4-6)**
+- [ ] MixerModule.kt with 8 track columns + master
+- [ ] Peak meters (mono per track)
+- [ ] Volume editing via A+direction
+- [ ] Navigation from row 4 in screen grid
+
+**Phase 6: WAV Export (Days 6-8)**
+- [ ] RenderController.kt for offline rendering
+- [ ] WavWriter.kt for 16-bit stereo WAV output
+- [ ] "WAV MIX" button in Project screen
+- [ ] Auto-increment filenames (ProjectName_0001.wav)
+- [ ] Output to Documents/PocketTracker/Renders/
+
+**Phase 7: Testing (Days 8-10)**
+- [ ] Volume chain verification
+- [ ] Pan verification (L/C/R)
+- [ ] WAV export verification
+
+### 5. Testing & Polish (1 week)
 
 - Usability testing ("hello world" in <5 min)
 - Bug hunting on Miyoo Flip and Ayaneo
 - Performance verification
 - Example project creation
 
-### 4. Documentation (3-5 days)
+### 6. Documentation (3-5 days)
 
 - README finalization
-- Controls guide (including copy/paste)
+- Controls guide (including copy/paste and mixer)
 - Short demo video
 - Known issues list
 
@@ -634,11 +662,11 @@ project.phrases[0] = project.phrases[0].copy(
 | Document | Purpose | When to Read |
 |----------|---------|--------------|
 | **DEVELOPMENT_STATUS.md** | Current progress | Every session start |
-| **REFACTORING_ROADMAP.md** | Step-by-step refactoring | During Phase 4 |
-| **MVP_ROADMAP.md** | Feature roadmap | Planning features |
+| **MVP_EXPANSION_PLAN.md** | Mixer/Export implementation | **Current work!** |
+| **MVP_ROADMAP.md** | Original feature roadmap | Reference |
 | **TECHNICAL_ARCHITECTURE.md** | System design | Understanding architecture |
 | **INPUT_COMBINATIONS.md** | Controls reference | Adding input handling |
-| **REFACTORING_SIMPLE_EXPLANATION.md** | Simple concepts | Explaining to others |
+| **REFACTORING_ROADMAP.md** | Step-by-step refactoring | Reference (completed) |
 
 ---
 
@@ -654,18 +682,28 @@ project.phrases[0] = project.phrases[0].copy(
 
 ---
 
-## ✅ Definition of Done (MVP)
+## ✅ Definition of Done (Expanded MVP)
 
-**MVP is complete when:**
-- [ ] All refactoring phases complete (portable architecture)
-- [ ] TOP-5 effects working in phrase screen
-- [ ] Copy/paste working (M8-style)
+**Original MVP (COMPLETE):**
+- [x] All refactoring phases complete (portable architecture)
+- [x] TOP-5 effects working in phrase screen
+- [x] Copy/paste working (M8-style)
+
+**MVP Expansion (IN PROGRESS):**
+- [ ] Instrument VOL/PAN editable in UI
+- [ ] Stereo pan working in audio engine
+- [ ] Volume chain: instrument × phrase × track × master
+- [ ] Mixer screen with 8 tracks + master
+- [ ] Peak meters updating during playback
+- [ ] WAV Export ("WAV MIX" button renders song)
+
+**Final Steps:**
 - [ ] Tested on Miyoo Flip and Ayaneo
 - [ ] README complete with installation guide
 - [ ] Demo video recorded
 - [ ] No known crash bugs
 
-**See:** `MVP_ROADMAP.md` for complete checklist
+**See:** `MVP_EXPANSION_PLAN.md` for detailed checklist
 
 ---
 
