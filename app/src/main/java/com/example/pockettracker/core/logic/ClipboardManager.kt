@@ -528,6 +528,116 @@ class ClipboardManager(
     }
 
     // ========================================
+    // DELETE OPERATIONS (clear without copy)
+    // ========================================
+
+    /**
+     * Delete phrase steps (clear without copying to clipboard).
+     * Used by A+B in selection mode.
+     */
+    fun deletePhraseSteps(
+        project: Project,
+        phraseId: Int,
+        startRow: Int,
+        startColumn: Int,
+        endRow: Int,
+        endColumn: Int
+    ): DeleteResult {
+        val phrase = project.phrases[phraseId]
+        val minRow = minOf(startRow, endRow)
+        val maxRow = maxOf(startRow, endRow)
+        val minCol = minOf(startColumn, endColumn)
+        val maxCol = maxOf(startColumn, endColumn)
+        var itemsDeleted = 0
+
+        for (row in minRow..maxRow) {
+            val step = phrase.steps[row]
+            for (col in minCol..maxCol) {
+                when (col) {
+                    1 -> { step.note = Note.EMPTY; itemsDeleted++ }
+                    2 -> { step.volume = 0xFF; itemsDeleted++ }
+                    3 -> { step.instrument = 0; itemsDeleted++ }
+                    4 -> { step.fx1Type = 0; itemsDeleted++ }
+                    5 -> { step.fx1Value = 0; itemsDeleted++ }
+                    6 -> { step.fx2Type = 0; itemsDeleted++ }
+                    7 -> { step.fx2Value = 0; itemsDeleted++ }
+                    8 -> { step.fx3Type = 0; itemsDeleted++ }
+                    9 -> { step.fx3Value = 0; itemsDeleted++ }
+                }
+            }
+        }
+
+        logger.d(TAG, "🗑️ Deleted $itemsDeleted phrase items from phrase $phraseId")
+        return DeleteResult.Success(itemsDeleted)
+    }
+
+    /**
+     * Delete chain rows (clear without copying to clipboard).
+     * Used by A+B in selection mode.
+     */
+    fun deleteChainRows(
+        project: Project,
+        chainId: Int,
+        startRow: Int,
+        startColumn: Int,
+        endRow: Int,
+        endColumn: Int
+    ): DeleteResult {
+        val chain = project.chains[chainId]
+        val minRow = minOf(startRow, endRow)
+        val maxRow = maxOf(startRow, endRow)
+        val minCol = minOf(startColumn, endColumn)
+        val maxCol = maxOf(startColumn, endColumn)
+        var itemsDeleted = 0
+
+        for (row in minRow..maxRow) {
+            for (col in minCol..maxCol) {
+                when (col) {
+                    1 -> { chain.phraseRefs[row] = 0xFF; itemsDeleted++ }
+                    2 -> { chain.transposeValues[row] = 0x00; itemsDeleted++ }
+                }
+            }
+        }
+
+        logger.d(TAG, "🗑️ Deleted $itemsDeleted chain items from chain $chainId")
+        return DeleteResult.Success(itemsDeleted)
+    }
+
+    /**
+     * Delete song cells (clear without copying to clipboard).
+     * Used by A+B in selection mode.
+     */
+    fun deleteSongCells(
+        project: Project,
+        startRow: Int,
+        startColumn: Int,  // 1-8 (track number)
+        endRow: Int,
+        endColumn: Int     // 1-8 (track number)
+    ): DeleteResult {
+        val minRow = minOf(startRow, endRow)
+        val maxRow = maxOf(startRow, endRow)
+        val minCol = minOf(startColumn, endColumn)
+        val maxCol = maxOf(startColumn, endColumn)
+        var itemsDeleted = 0
+
+        for (row in minRow..maxRow) {
+            for (col in minCol..maxCol) {
+                val trackIndex = col - 1
+                if (trackIndex < 0 || trackIndex >= 8) continue
+
+                val track = project.tracks[trackIndex]
+                if (row < track.chainRefs.size) {
+                    track.chainRefs[row] = -1  // Clear to empty
+                    itemsDeleted++
+                }
+            }
+        }
+
+        logger.d(TAG, "🗑️ Deleted $itemsDeleted song cells")
+        return DeleteResult.Success(itemsDeleted)
+    }
+
+    // ========================================
     // UTILITY METHODS
     // ========================================
 
@@ -576,5 +686,13 @@ class ClipboardManager(
     sealed class CutResult {
         data class Success(val itemsCut: Int) : CutResult()
         data class Error(val message: String) : CutResult()
+    }
+
+    /**
+     * Result of delete operation (clear without copy).
+     */
+    sealed class DeleteResult {
+        data class Success(val itemsDeleted: Int) : DeleteResult()
+        data class Error(val message: String) : DeleteResult()
     }
 }

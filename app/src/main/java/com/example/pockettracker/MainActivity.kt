@@ -1315,11 +1315,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             },
 
 // ───────────────────────────────────────────────────────────────
-// L BUTTON - Hold modifier (tracked by InputMapper)
+// L BUTTON - Cancel selection mode (or hold modifier)
 // ───────────────────────────────────────────────────────────────
             onL = {
-                // L button alone
-                // L is tracked as a hold modifier by InputMapper
+                // L alone: Cancel selection mode without copying (M8-style)
+                if (trackerController.inputController.isSelectionModeActive()) {
+                    trackerController.inputController.exitSelectionMode()
+                    Log.d("Selection", "L alone: Cancelled selection mode")
+                }
+                // Otherwise L is tracked as a hold modifier by InputMapper
                 // Combinations like L+A, L+direction are handled in InputMapper
             },
 
@@ -1356,11 +1360,54 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             },
 
 // ───────────────────────────────────────────────────────────────
-// A + B COMBINATION (Delete)
+// A + B COMBINATION (Delete selection or single cell)
 // ───────────────────────────────────────────────────────────────
             onAB = {
-                // A+B: Delete/clear value at cursor
-                handleGenericInput { context -> trackerController.inputController.handleABCombo(context) }
+                // A+B in selection mode: Delete selection (no clipboard)
+                if (trackerController.inputController.isSelectionModeActive()) {
+                    val bounds = trackerController.inputController.getSelectionBounds()
+                    if (bounds != null) {
+                        when (trackerController.currentScreen) {
+                            ScreenType.PHRASE -> {
+                                clipboardManager.deletePhraseSteps(
+                                    trackerController.project,
+                                    trackerController.currentPhrase,
+                                    bounds.topLeftRow,
+                                    bounds.topLeftColumn,
+                                    bounds.bottomRightRow,
+                                    bounds.bottomRightColumn
+                                )
+                                Log.d("Selection", "A+B: Deleted phrase selection")
+                            }
+                            ScreenType.CHAIN -> {
+                                clipboardManager.deleteChainRows(
+                                    trackerController.project,
+                                    trackerController.currentChain,
+                                    bounds.topLeftRow,
+                                    bounds.topLeftColumn,
+                                    bounds.bottomRightRow,
+                                    bounds.bottomRightColumn
+                                )
+                                Log.d("Selection", "A+B: Deleted chain selection")
+                            }
+                            ScreenType.SONG -> {
+                                clipboardManager.deleteSongCells(
+                                    trackerController.project,
+                                    bounds.topLeftRow,
+                                    bounds.topLeftColumn,
+                                    bounds.bottomRightRow,
+                                    bounds.bottomRightColumn
+                                )
+                                Log.d("Selection", "A+B: Deleted song selection")
+                            }
+                            else -> { }
+                        }
+                        trackerController.inputController.exitSelectionMode()
+                    }
+                } else {
+                    // A+B outside selection: Delete/clear single value at cursor
+                    handleGenericInput { context -> trackerController.inputController.handleABCombo(context) }
+                }
             },
 
 // ───────────────────────────────────────────────────────────────

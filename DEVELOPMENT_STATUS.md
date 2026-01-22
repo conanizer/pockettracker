@@ -288,12 +288,24 @@
 **M8-style workflow:**
 - [x] Selection mode (L+B to enter/cycle: CELL → ROW → SCREEN) ✅
 - [x] Copy selection (B in selection mode) ✅
-- [x] Paste (L+A) ✅
+- [x] Paste (L+A outside selection) ✅
 - [x] Cut (L+A in selection mode) ✅
+- [x] Delete selection (A+B in selection mode) ✅
+- [x] Cancel selection (L alone) ✅
 - [x] Copy/paste phrase steps ✅
 - [x] Copy/paste chain rows ✅
 - [x] Copy/paste song cells ✅
 - [x] Selection auto-exits on screen navigation ✅
+
+**Controls summary:**
+| Control | Action |
+|---------|--------|
+| L+B | Enter/cycle selection (CELL → ROW → SCREEN) |
+| B (in selection) | Copy + exit |
+| L+A (in selection) | Cut (copy + delete) + exit |
+| L+A (outside) | Paste at cursor |
+| A+B (in selection) | Delete (no clipboard) + exit |
+| L alone | Cancel selection (no copy) |
 
 **Screens supported:** PHRASE, CHAIN, SONG
 
