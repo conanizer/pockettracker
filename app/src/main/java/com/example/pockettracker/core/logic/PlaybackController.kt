@@ -4,6 +4,7 @@ import com.example.pockettracker.core.data.Note
 import com.example.pockettracker.core.data.PhraseStep
 import com.example.pockettracker.core.data.Project
 import com.example.pockettracker.core.data.ScreenType
+import com.example.pockettracker.core.data.VolumeUtils
 import com.example.pockettracker.core.audio.AudioEngine
 import com.example.pockettracker.core.data.Chain
 import com.example.pockettracker.core.data.Phrase
@@ -26,6 +27,8 @@ data class TrackState(
     var lastInstrument: Int = 0,
     /** Last played volume (0.0-1.0) */
     var lastVolume: Float = 1.0f,
+    /** Last played pan (0.0=left, 0.5=center, 1.0=right) */
+    var lastPan: Float = 0.5f,
     /** Last played start point override (-1 = instrument default) */
     var lastStartPoint: Int = -1,
 
@@ -675,6 +678,7 @@ class PlaybackController(
                 instrumentId = kickInstrument,
                 trackId = 0,
                 volume = 0.8f,
+                pan = 0.5f,  // Center
                 project = project
             )
 
@@ -802,6 +806,19 @@ class PlaybackController(
         val defaultVolume = step.volume / 255.0f
         val params = effectProcessor.resolveStepParams(step, targetFrame, defaultVolume)
 
+        // Apply full volume chain: instrument × phrase × track × master
+        val instrument = project.instruments[step.instrument]
+        val track = project.tracks[trackId]
+        val finalVolume = VolumeUtils.calculateFinalVolume(
+            instrumentVol = instrument.volume,
+            phraseVol = (params.volume * 255).toInt().coerceIn(0, 255),  // Convert back to hex
+            trackVol = track.volume,
+            masterVol = project.masterVolume
+        )
+
+        // Get instrument pan (hex 0x00-0xFF → float 0.0-1.0)
+        val instrumentPan = VolumeUtils.hexToFloat(instrument.pan)
+
         var noteScheduled = false
         if (hasNote) {
             // Apply transposition if needed
@@ -817,13 +834,14 @@ class PlaybackController(
                 step.note
             }
 
-            // Schedule the note with resolved effect parameters
+            // Schedule the note with resolved effect parameters and full volume chain
             audioEngine.scheduleNote(
                 targetFrame = targetFrame,
                 note = note,
                 instrumentId = step.instrument,
                 trackId = trackId,
-                volume = params.volume,
+                volume = finalVolume,
+                pan = instrumentPan,
                 project = project,
                 startPointOverride = params.startPoint
             )
@@ -832,8 +850,9 @@ class PlaybackController(
             // Update track state with this note (for persistent REPEAT retrigger)
             trackState.lastNote = note
             trackState.lastInstrument = step.instrument
-            trackState.lastVolume = params.volume
+            trackState.lastVolume = finalVolume
             trackState.lastStartPoint = params.startPoint
+            trackState.lastPan = instrumentPan
         }
 
         // Handle KILL effect - schedule kill at the specified frame
@@ -894,7 +913,8 @@ class PlaybackController(
                 trackState.lastNote
             }
             val retrigInstrument = if (hasNote) step.instrument else trackState.lastInstrument
-            val retrigVolume = if (hasNote) params.volume else trackState.lastVolume
+            val retrigVolume = if (hasNote) finalVolume else trackState.lastVolume  // Use finalVolume with full chain
+            val retrigPan = if (hasNote) instrumentPan else trackState.lastPan
             val retrigStartPoint = if (hasNote) params.startPoint else trackState.lastStartPoint
 
             if (activeRepeatInterval < TICS_PER_STEP) {
@@ -917,6 +937,7 @@ class PlaybackController(
                         instrumentId = retrigInstrument,
                         trackId = trackId,
                         volume = retrigVolume,
+                        pan = retrigPan,
                         project = project,
                         startPointOverride = retrigStartPoint
                     )
@@ -962,6 +983,7 @@ class PlaybackController(
                                     instrumentId = retrigInstrument,
                                     trackId = trackId,
                                     volume = retrigVolume,
+                                    pan = retrigPan,
                                     project = project,
                                     startPointOverride = retrigStartPoint
                                 )
@@ -1049,7 +1071,9 @@ class PlaybackController(
                 hasNote = hasNote,
                 step = step,
                 params = params,
-                transposeSemitones = transposeSemitones
+                transposeSemitones = transposeSemitones,
+                finalVolume = finalVolume,
+                finalPan = instrumentPan
             )
         }
 
@@ -1075,6 +1099,8 @@ class PlaybackController(
      * @param step The phrase step
      * @param params Resolved step parameters
      * @param transposeSemitones Semitones to transpose
+     * @param finalVolume Pre-calculated volume with full chain (inst × phrase × track × master)
+     * @param finalPan Pre-calculated pan (0.0=left, 0.5=center, 1.0=right)
      */
     private fun scheduleArpeggioNotes(
         targetFrame: Long,
@@ -1085,7 +1111,9 @@ class PlaybackController(
         hasNote: Boolean,
         step: PhraseStep,
         params: ResolvedStepParams,
-        transposeSemitones: Int
+        transposeSemitones: Int,
+        finalVolume: Float,
+        finalPan: Float
     ) {
         val semi1 = (trackState.arpeggioValue shr 4) and 0x0F
         val semi2 = trackState.arpeggioValue and 0x0F
@@ -1113,9 +1141,10 @@ class PlaybackController(
         // Get the arpeggio pattern length based on mode
         val patternLength = if (trackState.arpeggioMode == 2) 4 else 3  // PINGPONG uses 4, others use 3
 
-        // Get instrument and volume
+        // Get instrument, volume, and pan (finalVolume/finalPan already have full chain applied)
         val instrumentId = if (hasNote) step.instrument else trackState.lastInstrument
-        val volume = if (hasNote) params.volume else trackState.lastVolume
+        val arpVolume = if (hasNote) finalVolume else trackState.lastVolume
+        val arpPan = if (hasNote) finalPan else trackState.lastPan
         val startPoint = if (hasNote) params.startPoint else trackState.lastStartPoint
 
         // Calculate step boundaries
@@ -1155,7 +1184,8 @@ class PlaybackController(
                         note = arpNote,
                         instrumentId = instrumentId,
                         trackId = trackId,
-                        volume = volume,
+                        volume = arpVolume,
+                        pan = arpPan,
                         project = project,
                         startPointOverride = startPoint
                     )

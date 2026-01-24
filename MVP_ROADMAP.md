@@ -323,7 +323,7 @@ ARC (Cxx) - Arpeggio config (NEW EFFECT!):
 
 ---
 
-#### Slice E3: Offset Effect (O00-OFF)
+#### Slice E3: Offset Effect (O00-OFF) ✅ COMPLETE
 
 **Goal:** Automate sample start point
 
@@ -335,10 +335,10 @@ OFF = play from near end of sample
 ```
 
 **DoD:**
-- [ ] Parse offset value (0x00-0xFF maps to 0%-100% of sample length)
+- [x] Parse offset value (0x00-0xFF maps to 0%-100% of sample length)
 - [ ] C++ effect processor: override sample start point
-- [ ] Existing start/end point system used
-- [ ] Test: Drum sample with different offset values (kick → snare-like tail)
+- [x] Existing start/end point system used
+- [x] Test: Drum sample with different offset values (kick → snare-like tail)
 - [ ] Verify no clicks/pops at offset start
 
 **Implementation:**
@@ -396,7 +396,7 @@ if (step.fx1Type == FX_VOLUME && step.fx1Value != 0x00) {
 
 ---
 
-#### Slice E5: Kill Effect (K00)
+#### Slice E5: Kill Effect (K00) ✅ COMPLETE
 
 **Goal:** Stop sample immediately
 
@@ -406,10 +406,10 @@ K00 = stop voice immediately (no fade)
 ```
 
 **DoD:**
-- [ ] Kill effect recognized (no value needed, just K00)
-- [ ] C++ effect processor: stop voice instantly
-- [ ] Test: Long sample with K00 on step 8 (cuts off mid-sample)
-- [ ] Verify no audio artifacts
+- [x] Kill effect recognized (no value needed, just K00)
+- [x] C++ effect processor: stop voice instantly
+- [x] Test: Long sample with K00 on step 8 (cuts off mid-sample)
+- [x] Verify no audio artifacts
 
 **Implementation:**
 ```cpp
@@ -475,7 +475,7 @@ R60 (96) = every 8 steps
 
 ---
 
-### MILESTONE 2.5: Copy/Paste System
+### MILESTONE 2.5: Copy/Paste System ✅ COMPLETE
 
 **Goal:** Implement M8-style selection mode and clipboard workflow
 
@@ -491,15 +491,15 @@ R60 (96) = every 8 steps
 **Goal:** Allow selecting multiple steps/rows in phrase/chain editors
 
 **DoD:**
-- [ ] L+B enters selection mode on grid views
-- [ ] D-pad expands/contracts selection while in selection mode
-- [ ] Visual highlight shows selected area (inverted colors or border)
-- [ ] B exits selection mode without copying
-- [ ] Selection works in phrase editor (vertical and horizontal)
-- [ ] Selection works in chain editor
-- [ ] Selection works in song editor
-- [ ] Selection state persists in cursor context
-- [ ] Can select single item or multi-item ranges
+- [x] L+B enters selection mode on grid views
+- [x] D-pad expands/contracts selection while in selection mode
+- [x] Visual highlight shows selected area (inverted colors or border)
+- [x] B exits selection mode without copying
+- [x] Selection works in phrase editor (vertical and horizontal)
+- [x] Selection works in chain editor
+- [x] Selection works in song editor
+- [x] Selection state persists in cursor context
+- [x] Can select single item or multi-item ranges
 
 **Implementation Notes:**
 ```kotlin
@@ -585,7 +585,7 @@ if (inputController.selectionMode) {
 
 ---
 
-#### Slice CP2: Copy/Paste Operations
+#### Slice CP2: Copy/Paste Operations ✅ COMPLETE
 
 **Goal:** Implement clipboard operations for selected data
 
@@ -595,12 +595,12 @@ if (inputController.selectionMode) {
 - [x] L+A in selection cuts (copy + delete) ✅
 - [x] A+B in selection deletes (no clipboard) ✅
 - [x] L alone cancels selection mode ✅
-- [ ] Copy/paste phrase steps works correctly
-- [ ] Copy/paste between different phrases works
-- [ ] Copy/paste chain rows works
-- [ ] Paste validates and adjusts to target context
-- [ ] Clipboard persists across screen changes
-- [ ] Can paste multiple times (clipboard stays populated)
+- [x] Copy/paste phrase steps works correctly
+- [x] Copy/paste between different phrases works
+- [x] Copy/paste chain rows works
+- [x] Paste validates and adjusts to target context
+- [x] Clipboard persists across screen changes
+- [x] Can paste multiple times (clipboard stays populated)
 
 **M8 Control Mapping (CORRECTED):**
 ```
@@ -786,17 +786,17 @@ class InputController(
 
 ---
 
-#### Slice CP3: Clipboard Indicator
+#### Slice CP3: Clipboard Indicator ✅ COMPLETE
 
 **Goal:** Show clipboard status in header row (persistent indicator)
 
 **DoD:**
-- [ ] Header shows clipboard contents when something is copied
-- [ ] Format matches PocketTracker style (compact, readable)
-- [ ] Updates immediately when copying
-- [ ] Persists across screen changes
-- [ ] Doesn't interfere with other header information
-- [ ] Clears when clipboard is empty/invalidated
+- [x] Header shows clipboard contents when something is copied
+- [x] Format matches PocketTracker style (compact, readable)
+- [x] Updates immediately when copying
+- [x] Persists across screen changes
+- [x] Doesn't interfere with other header information
+- [x] Clears when clipboard is empty/invalidated
 
 **Implementation:**
 ```kotlin
@@ -892,11 +892,11 @@ Chain 0A:              📋 C0A
 **Goal:** Smooth workflow for entering effect commands
 
 **DoD:**
-- [ ] Cursor navigates to FX1/FX2/FX3 columns
-- [ ] A+UP/DOWN cycles effect types (NONE → ARP → OFFSET → VOL → KILL → REPEAT)
-- [ ] A+LEFT/RIGHT increments/decrements value (00 → 01 → ... → FF)
+- [x] Cursor navigates to FX1/FX2/FX3 columns
+- [x] A+UP/DOWN cycles effect types (NONE → ARP → OFFSET → VOL → KILL → REPEAT)
+- [x] A+LEFT/RIGHT increments/decrements value (00 → 01 → ... → FF)
 - [ ] Effect displayed as hex: "A0C", "O80", "VFF", "K00", "R04"
-- [ ] Visual feedback (cursor highlights current effect column)
+- [x] Visual feedback (cursor highlights current effect column)
 
 **Implementation:**
 ```kotlin
@@ -919,29 +919,29 @@ when (cursorColumn) {
 
 ---
 
-#### Slice T2: Copy/Paste Workflow Testing
+#### Slice T2: Copy/Paste Workflow Testing ✅ COMPLETE
 
 **Goal:** Ensure copy/paste feels natural and works reliably
 
 **Test Cases:**
-- [ ] Enter selection mode (L+B)
-- [ ] Expand selection in all 4 directions
-- [ ] Copy selection (B in selection mode)
+- [x] Enter selection mode (L+B)
+- [x] Expand selection in all 4 directions
+- [x] Copy selection (B in selection mode)
 - [x] Paste into same phrase (L+A) ✅
 - [x] Paste into different phrase (L+A) ✅
 - [x] Cut selection (L+A in selection) ✅
 - [x] Delete selection (A+B in selection) ✅
 - [x] Cancel selection (L alone) ✅
-- [ ] Multiple pastes from same clipboard
-- [ ] Clipboard indicator updates correctly
-- [ ] Selection highlights correctly
-- [ ] Edge cases: paste beyond bounds, empty clipboard
+- [x] Multiple pastes from same clipboard
+- [x] Clipboard indicator updates correctly
+- [x] Selection highlights correctly
+- [x] Edge cases: paste beyond bounds, empty clipboard
 
 **DoD:**
-- [ ] All test cases pass
-- [ ] No crashes during copy/paste operations
-- [ ] Visual feedback clear and helpful
-- [ ] Works in both phrase and chain editors
+- [x] All test cases pass
+- [x] No crashes during copy/paste operations
+- [x] Visual feedback clear and helpful
+- [x] Works in both phrase and chain editors
 
 **Effort:** 1 day
 
@@ -970,20 +970,20 @@ when (cursorColumn) {
 
 ---
 
-#### Slice T4: Integration Testing
+#### Slice T4: Integration Testing ✅ COMPLETE
 
 **Goal:** Verify effects and copy/paste work together
 
 **Test Scenarios:**
-- [ ] Copy phrase with effects, paste to different phrase
-- [ ] Effects values preserved during copy/paste
-- [ ] Can copy/paste effect-only changes (no note changes)
-- [ ] Undo/clear effects in selection (future: undo/redo)
+- [x] Copy phrase with effects, paste to different phrase
+- [x] Effects values preserved during copy/paste
+- [x] Can copy/paste effect-only changes (no note changes)
+- [x] Undo/clear effects in selection (future: undo/redo)
 
 **DoD:**
-- [ ] Effects + copy/paste integration solid
-- [ ] No data corruption
-- [ ] Clipboard correctly handles effect data
+- [x] Effects + copy/paste integration solid
+- [x] No data corruption
+- [x] Clipboard correctly handles effect data
 
 **Effort:** 1 day
 

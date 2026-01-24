@@ -109,12 +109,12 @@ object VolumeUtils {
 ```
 
 ### Definition of Done - Phase 1
-- [ ] Instrument.volume changed to Int (00-FF)
-- [ ] Instrument.pan changed to Int (00-FF, 80=center)
-- [ ] Track.volume added (00-FF)
-- [ ] Track.mute added (Boolean)
-- [ ] Project.masterVolume changed to Int (00-FF)
-- [ ] VolumeUtils object created with helper functions
+- [x] Instrument.volume changed to Int (00-FF)
+- [x] Instrument.pan changed to Int (00-FF, 80=center)
+- [x] Track.volume added (00-FF)
+- [x] Track.mute added (Boolean)
+- [x] Project.masterVolume changed to Int (00-FF)
+- [x] VolumeUtils object created with helper functions
 - [ ] Existing projects still load (migration: Float→Int conversion)
 - [ ] Compiles without errors
 
@@ -156,13 +156,13 @@ START: 00    END: FF       REV: off   LOOP: off
 - A + LEFT/RIGHT: Increment/decrement by 16 (0x10)
 
 ### Definition of Done - Phase 2
-- [ ] VOL field visible in instrument screen
-- [ ] PAN field visible in instrument screen
-- [ ] Cursor can navigate to VOL/PAN
-- [ ] A+direction edits VOL (00-FF)
-- [ ] A+direction edits PAN (00-FF)
+- [x] VOL field visible in instrument screen
+- [x] PAN field visible in instrument screen
+- [x] Cursor can navigate to VOL/PAN
+- [x] A+direction edits VOL (00-FF)
+- [x] A+direction edits PAN (00-FF)
 - [ ] Values save/load correctly in .ptp files
-- [ ] Values display as 2-digit hex
+- [x] Values display as 2-digit hex
 
 ---
 
@@ -284,16 +284,16 @@ fun scheduleNoteWithParams(/* ... */) {
 ```
 
 ### Definition of Done - Phase 3
-- [ ] C++ scheduleNote accepts pan parameter
-- [ ] Voice struct stores pan and L/R gains
-- [ ] Audio callback mixes with correct pan
-- [ ] JNI signature updated
-- [ ] Kotlin backend passes pan
-- [ ] PlaybackController reads instrument pan
-- [ ] Pan 0x00 = full left verified by ear
-- [ ] Pan 0x80 = center verified by ear
-- [ ] Pan 0xFF = full right verified by ear
-- [ ] No audio artifacts or clicks
+- [x] C++ scheduleNote accepts pan parameter
+- [x] Voice struct stores pan and L/R gains
+- [x] Audio callback mixes with correct pan
+- [x] JNI signature updated
+- [x] Kotlin backend passes pan
+- [x] PlaybackController reads instrument pan
+- [x] Pan 0x00 = full left verified by ear
+- [x] Pan 0x80 = center verified by ear
+- [x] Pan 0xFF = full right verified by ear
+- [x] No audio artifacts or clicks
 
 ---
 

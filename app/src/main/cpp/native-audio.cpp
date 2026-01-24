@@ -104,6 +104,7 @@ struct ScheduledNote {
     float frequency;         // Target playback frequency
     float baseFrequency;     // Sample's base frequency
     float volume;            // Playback volume (0.0-1.0)
+    float pan;               // Stereo pan position (0.0=left, 0.5=center, 1.0=right)
     int startPointOverride;  // Optional start point override (-1 = use instrument default)
 
     // For priority queue sorting (earliest frame first)
@@ -247,6 +248,8 @@ struct Voice {
     int trackId;
     float playbackRate;
     float volume;
+    float panLeft;           // Left channel gain (0.0-1.0)
+    float panRight;          // Right channel gain (0.0-1.0)
 
     // Playback parameters (calculated from instrument params)
     int actualStart;     // Actual sample index to start from
@@ -274,6 +277,7 @@ struct Voice {
 
     Voice() : isActive(false), sampleData(nullptr), sampleLength(0),
               position(0), trackId(-1), playbackRate(1.0f), volume(1.0f),
+              panLeft(0.707f), panRight(0.707f),  // Default to center
               actualStart(0), actualEnd(0), actualLoopStart(0),
               reverse(false), loopMode(0), loopingBack(false),
               drive(0), crush(0), downsample(0),
@@ -281,13 +285,19 @@ struct Voice {
               b0(1.0f), b1(0.0f), b2(0.0f), a1(0.0f), a2(0.0f),
               x1(0.0f), x2(0.0f), y1(0.0f), y2(0.0f) {}
 
-    void trigger(float* sample, int length, int track, float rate, float vol,
+    void trigger(float* sample, int length, int track, float rate, float vol, float pan,
                  const InstrumentParams& params, float sampleRate, int startPointOverride = -1) {
         sampleData = sample;
         sampleLength = length;
         trackId = track;
         playbackRate = rate;
         volume = vol;
+
+        // Calculate constant-power pan gains
+        // pan: 0.0=left, 0.5=center, 1.0=right
+        float panAngle = pan * (float)M_PI * 0.5f;  // 0 to π/2
+        panLeft = cosf(panAngle);
+        panRight = sinf(panAngle);
 
         // Convert normalized 0-255 values to actual sample positions
         // Use startPointOverride if provided (Offset effect), otherwise use instrument default
@@ -455,7 +465,7 @@ public:
              instrumentId, start, end, rev, loop, loopSt, drv, crsh, dwn, fType, fCut, fRes);
     }
 
-    void triggerNote(int sampleId, int trackId, float freq, float baseFreq, float vol) {
+    void triggerNote(int sampleId, int trackId, float freq, float baseFreq, float vol, float pan = 0.5f) {
         if (sampleId < 0 || sampleId >= 256 || !samples[sampleId]) return;
 
         // Resume stream if paused (prevents hum when not playing)
@@ -474,9 +484,9 @@ public:
                 float rate = freq / baseFreq;
                 float sampleRate = stream ? (float)stream->getSampleRate() : 44100.0f;
                 // Use stored instrument parameters
-                voices[i].trigger(samples[sampleId], sampleLengths[sampleId], trackId, rate, vol,
+                voices[i].trigger(samples[sampleId], sampleLengths[sampleId], trackId, rate, vol, pan,
                                   instrumentParams[sampleId], sampleRate);
-                LOGD("Note: track=%d, sampleId=%d, rate=%.3f", trackId, sampleId, rate);
+                LOGD("Note: track=%d, sampleId=%d, rate=%.3f, pan=%.2f", trackId, sampleId, rate, pan);
                 return;
             }
         }
@@ -580,11 +590,11 @@ public:
                             float rate = note.frequency / note.baseFrequency;
                             float sampleRate = (float)audioStream->getSampleRate();
                             voices[v].trigger(samples[note.sampleId], sampleLengths[note.sampleId],
-                                              note.trackId, rate, note.volume, instrumentParams[note.sampleId],
+                                              note.trackId, rate, note.volume, note.pan, instrumentParams[note.sampleId],
                                               sampleRate, note.startPointOverride);
                             voiceFound = true;
-                            LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, startOverride=%d",
-                                 (long long)currentFrame, note.sampleId, note.trackId, rate, note.startPointOverride);
+                            LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, pan=%.2f, startOverride=%d",
+                                 (long long)currentFrame, note.sampleId, note.trackId, rate, note.pan, note.startPointOverride);
                         } else {
                             // Sample not loaded - log specific reason
                             if (note.sampleId < 0 || note.sampleId >= 256) {
@@ -620,8 +630,8 @@ public:
                     // Handle edge case: exactly at last sample
                     if (idx == voice.sampleLength - 1 && frac == 0.0f) {
                         float sample = voice.sampleData[idx] * voice.volume * 0.25f;
-                        output[i * channelCount] += sample;      // Left
-                        output[i * channelCount + 1] += sample;  // Right
+                        output[i * channelCount] += sample * voice.panLeft;       // Left
+                        output[i * channelCount + 1] += sample * voice.panRight;  // Right
                     }
                     voice.isActive = false;
                     break;
@@ -691,9 +701,9 @@ public:
                 // STEP 6: Apply volume after effects
                 float sample = processedSample * voice.volume * 0.25f;
 
-                // Write to both channels (stereo)
-                output[i * channelCount] += sample;      // Left
-                output[i * channelCount + 1] += sample;  // Right
+                // Write to stereo channels with pan applied
+                output[i * channelCount] += sample * voice.panLeft;       // Left
+                output[i * channelCount + 1] += sample * voice.panRight;  // Right
 
                 // Update position based on playback mode
                 if (voice.loopMode == 2) {
@@ -768,7 +778,7 @@ public:
 
     // Schedule a note to be played at exact frame
     void scheduleNote(int64_t targetFrame, int sampleId, int trackId,
-                      float frequency, float baseFrequency, float volume, int startPointOverride = -1) {
+                      float frequency, float baseFrequency, float volume, float pan = 0.5f, int startPointOverride = -1) {
         ScheduledNote note = {
                 .targetFrame = targetFrame,
                 .sampleId = sampleId,
@@ -776,6 +786,7 @@ public:
                 .frequency = frequency,
                 .baseFrequency = baseFrequency,
                 .volume = volume,
+                .pan = pan,
                 .startPointOverride = startPointOverride
         };
         noteQueue.schedule(note);
@@ -1007,9 +1018,9 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1loadSam
 JNIEXPORT void JNICALL
 Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1scheduleNote(
         JNIEnv *env, jobject thiz, jlong targetFrame, jint sampleId, jint trackId,
-        jfloat frequency, jfloat baseFrequency, jfloat volume, jint startPointOverride) {
+        jfloat frequency, jfloat baseFrequency, jfloat volume, jfloat pan, jint startPointOverride) {
     if (engine) {
-        engine->scheduleNote(targetFrame, sampleId, trackId, frequency, baseFrequency, volume, startPointOverride);
+        engine->scheduleNote(targetFrame, sampleId, trackId, frequency, baseFrequency, volume, pan, startPointOverride);
     }
 }
 

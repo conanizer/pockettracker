@@ -242,11 +242,11 @@ vs **LGPT:**
 ### 8. Copy/Paste System
 
 **M8-style workflow:**
-- Selection mode (SELECT+B to enter)
+- Selection mode (L+B to enter)
 - Visual selection highlighting
 - Copy selection (B in selection mode)
-- Paste at cursor (SELECT+A)
-- Cut selection (A+B)
+- Paste at cursor (L+A)
+- Cut selection (L+A in selection mode)
 - Clipboard indicator in header row
 
 **Scope:**

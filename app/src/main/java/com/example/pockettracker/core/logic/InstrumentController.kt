@@ -229,6 +229,28 @@ class InstrumentController(
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // Volume/Pan Parameters (MVP Expansion)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Update instrument volume
+     * @param volume 00-FF (FF = max volume)
+     */
+    fun updateVolume(instrument: Instrument, volume: Int) {
+        instrument.volume = volume.coerceIn(0, 255)
+        logger.d(TAG, "🔊 Updated VOLUME: 0x${formatHex(instrument.volume)}")
+    }
+
+    /**
+     * Update instrument pan
+     * @param pan 00-FF (00=left, 80=center, FF=right)
+     */
+    fun updatePan(instrument: Instrument, pan: Int) {
+        instrument.pan = pan.coerceIn(0, 255)
+        logger.d(TAG, "🔊 Updated PAN: 0x${formatHex(instrument.pan)}")
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // Distortion/Bitcrusher Parameters
     // ─────────────────────────────────────────────────────────────────────────────
 
@@ -423,6 +445,8 @@ sealed class LoadResult {
 enum class InstrumentParameter {
     ROOT,
     DETUNE,
+    VOLUME,
+    PAN,
     DRIVE,
     CRUSH,
     DOWNSAMPLE,

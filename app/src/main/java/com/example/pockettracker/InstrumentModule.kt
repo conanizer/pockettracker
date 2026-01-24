@@ -131,36 +131,44 @@ class InstrumentModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 3: ROOT (note value)
+        // ROW 3: ROOT + VOL (dual parameter row)
         // ─────────────────────────────────────
-        drawParameterRow(
+        val volHex = instrument.volume.toString(16).padStart(2, '0').uppercase()
+        drawDualParameterRow(
             x = x,
             y = rowY,
             scale = scale,
             nameColumnX = nameColumnX,
             valueColumnX = valueColumnX,
-            parameterName = "ROOT",
-            parameterValue = instrument.root.toString(),  // Shows as "C-4", etc.
-            isCursorOnName = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
-            isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1
+            param1Name = "ROOT",
+            param1Value = instrument.root.toString(),
+            param2Name = "VOL",
+            param2Value = volHex,
+            cursorRow = instrumentState.cursorRow,
+            cursorColumn = instrumentState.cursorColumn,
+            currentRow = currentRow
         )
         rowY += ROW_HEIGHT
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 4: DETUNE (00-FF hex)
+        // ROW 4: DETUNE + PAN (dual parameter row)
         // ─────────────────────────────────────
         val detuneHex = instrument.detune.toString(16).padStart(2, '0').uppercase()
-        drawParameterRow(
+        val panHex = instrument.pan.toString(16).padStart(2, '0').uppercase()
+        drawDualParameterRow(
             x = x,
             y = rowY,
             scale = scale,
             nameColumnX = nameColumnX,
             valueColumnX = valueColumnX,
-            parameterName = "DETUNE",
-            parameterValue = detuneHex,
-            isCursorOnName = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
-            isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1
+            param1Name = "DETUNE",
+            param1Value = detuneHex,
+            param2Name = "PAN",
+            param2Value = panHex,
+            cursorRow = instrumentState.cursorRow,
+            cursorColumn = instrumentState.cursorColumn,
+            currentRow = currentRow
         )
         rowY += ROW_HEIGHT
         currentRow++
@@ -551,6 +559,23 @@ class InstrumentModule : TrackerModule {
      *
      * This tells the generic input system what kind of value we're on
      * and what actions are available.
+     *
+     * Row layout:
+     * - Row 0: TYPE (read-only)
+     * - Row 1: LOAD (button)
+     * - Row 2: NAME (read-only)
+     * - Row 3: ROOT + VOL (dual: cols 0=name, 1=ROOT, 2=name, 3=VOL)
+     * - Row 4: DETUNE + PAN (dual: cols 0=name, 1=DETUNE, 2=name, 3=PAN)
+     * - Row 5: SPACER
+     * - Row 6: DRIVE + FILTER (dual)
+     * - Row 7: CRUSH + CUT (dual)
+     * - Row 8: DWNSMPL + RES (dual)
+     * - Row 9: SPACER
+     * - Row 10: START
+     * - Row 11: END
+     * - Row 12: REV
+     * - Row 13: LOOP
+     * - Row 14: LOOP ST
      */
     fun getCursorContext(state: InstrumentState): CursorContext {
         when (state.cursorRow) {
@@ -567,24 +592,38 @@ class InstrumentModule : TrackerModule {
                 return CursorContextFactory.readOnly()
             }
             3 -> {
-                // ROOT row - note value
-                if (state.cursorColumn == 0) {
-                    return CursorContextFactory.readOnly()
+                // ROOT + VOL row (columns: 0=name, 1=ROOT, 2=name, 3=VOL)
+                when (state.cursorColumn) {
+                    0, 2 -> return CursorContextFactory.readOnly()  // Parameter names
+                    1 -> {  // ROOT value
+                        val isEmpty = state.instrument.root == Note.EMPTY
+                        val currentValue = if (isEmpty) 0 else state.instrument.root.toMidi()
+                        return CursorContextFactory.note(currentValue, isEmpty)
+                    }
+                    3 -> return CursorContextFactory.hexByte(  // VOL value
+                        currentValue = state.instrument.volume,
+                        min = 0,
+                        max = 255
+                    )
+                    else -> return CursorContextFactory.none()
                 }
-                val isEmpty = state.instrument.root == Note.EMPTY
-                val currentValue = if (isEmpty) 0 else state.instrument.root.toMidi()
-                return CursorContextFactory.note(currentValue, isEmpty)
             }
             4 -> {
-                // DETUNE row - hex byte (00-FF)
-                if (state.cursorColumn == 0) {
-                    return CursorContextFactory.readOnly()
+                // DETUNE + PAN row (columns: 0=name, 1=DETUNE, 2=name, 3=PAN)
+                when (state.cursorColumn) {
+                    0, 2 -> return CursorContextFactory.readOnly()  // Parameter names
+                    1 -> return CursorContextFactory.hexByte(  // DETUNE value
+                        currentValue = state.instrument.detune,
+                        min = 0,
+                        max = 255
+                    )
+                    3 -> return CursorContextFactory.hexByte(  // PAN value
+                        currentValue = state.instrument.pan,
+                        min = 0,
+                        max = 255
+                    )
+                    else -> return CursorContextFactory.none()
                 }
-                return CursorContextFactory.hexByte(
-                    currentValue = state.instrument.detune,
-                    min = 0,
-                    max = 255
-                )
             }
             5 -> {
                 // SPACER row - no editing
@@ -714,24 +753,48 @@ class InstrumentModule : TrackerModule {
                 // NAME row - read-only (shows loaded sample filename)
             }
             3 -> {
-                // ROOT note
-                when (action) {
-                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        instrumentController.updateRoot(state.instrument, Note.fromMidi(action.value))
+                // ROOT + VOL row (columns: 0=name, 1=ROOT, 2=name, 3=VOL)
+                when (state.cursorColumn) {
+                    1 -> {  // ROOT value
+                        when (action) {
+                            is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                                instrumentController.updateRoot(state.instrument, Note.fromMidi(action.value))
+                            }
+                            is com.example.pockettracker.core.logic.InputAction.DELETE -> {
+                                instrumentController.updateRoot(state.instrument, Note.fromString("C-4"))
+                            }
+                            else -> {}
+                        }
                     }
-                    is com.example.pockettracker.core.logic.InputAction.DELETE -> {
-                        instrumentController.updateRoot(state.instrument, Note.fromString("C-4"))
+                    3 -> {  // VOL value
+                        when (action) {
+                            is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                                instrumentController.updateVolume(state.instrument, action.value)
+                            }
+                            else -> {}
+                        }
                     }
-                    else -> {}
                 }
             }
             4 -> {
-                // DETUNE (00-FF hex)
-                when (action) {
-                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        instrumentController.updateDetune(state.instrument, action.value)
+                // DETUNE + PAN row (columns: 0=name, 1=DETUNE, 2=name, 3=PAN)
+                when (state.cursorColumn) {
+                    1 -> {  // DETUNE value
+                        when (action) {
+                            is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                                instrumentController.updateDetune(state.instrument, action.value)
+                            }
+                            else -> {}
+                        }
                     }
-                    else -> {}
+                    3 -> {  // PAN value
+                        when (action) {
+                            is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                                instrumentController.updatePan(state.instrument, action.value)
+                            }
+                            else -> {}
+                        }
+                    }
                 }
             }
             5 -> {
@@ -871,13 +934,15 @@ class InstrumentModule : TrackerModule {
  *
  * @param instrument The instrument being edited
  * @param cursorRow Which row:
- *   - 0=TYPE, 1=LOAD, 2=NAME, 3=ROOT, 4=DETUNE, 5=SPACER
- *   - 6=DRIVE, 7=CRUSH, 8=DWNSMPL, 9=SPACER
+ *   - 0=TYPE, 1=LOAD, 2=NAME
+ *   - 3=ROOT+VOL, 4=DETUNE+PAN, 5=SPACER
+ *   - 6=DRIVE+FILTER, 7=CRUSH+CUT, 8=DWNSMPL+RES, 9=SPACER
  *   - 10=START, 11=END, 12=REV, 13=LOOP, 14=LOOP ST
  * @param cursorColumn Which column:
  *   - 0 = Parameter name (left column)
- *   - 1+ = Value columns (specific to each row)
- *   For NAME row: 1-12 = character position
+ *   - 1 = Value 1 (for dual-param rows)
+ *   - 2 = Name 2 (for dual-param rows)
+ *   - 3 = Value 2 (for dual-param rows)
  * @param statusMessage Status message to show at bottom
  * @param isSuccess True if status is success, false if error
  */

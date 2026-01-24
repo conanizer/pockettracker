@@ -135,7 +135,9 @@ data class Chain(
 @Serializable
 data class Track(
     val id: Int,  // 0-7
-    val chainRefs: MutableList<Int> = mutableListOf()  // Chain IDs
+    val chainRefs: MutableList<Int> = mutableListOf(),  // Chain IDs
+    var volume: Int = 0xFF,  // 00-FF track volume (FF = max)
+    var mute: Boolean = false  // Track mute state
 )
 
 // Instrument definition
@@ -144,8 +146,8 @@ data class Instrument(
     val id: Int,  // 00-7F
     var name: String = "INST${id.toString(16).padStart(2,'0').uppercase()}",
     var sampleId: Int = -1,  // Which sample from resources (-1 = empty/no sample)
-    var volume: Float = 1.0f,
-    var pan: Float = 0.5f,  // 0.0 = left, 0.5 = center, 1.0 = right
+    var volume: Int = 0xFF,  // 00-FF instrument volume (FF = max)
+    var pan: Int = 0x80,  // 00-FF pan (00=left, 80=center, FF=right)
 
     // Sample playback parameters
     var root: Note = Note.fromString("C-4"),  // Root note for sample pitch
@@ -169,13 +171,65 @@ data class Instrument(
     var sampleFilePath: String? = null  // Path to loaded WAV file (null = use resource)
 )
 
+/**
+ * Volume conversion utilities for hex-based gain staging
+ */
+object VolumeUtils {
+    /**
+     * Convert 00-FF hex value to 0.0-1.0 float
+     */
+    fun hexToFloat(hex: Int): Float = (hex and 0xFF) / 255f
+
+    /**
+     * Convert 0.0-1.0 float to 00-FF hex
+     */
+    fun floatToHex(f: Float): Int = (f.coerceIn(0f, 1f) * 255).toInt()
+
+    /**
+     * Calculate final volume with 4-stage gain staging:
+     * instrument × phrase × track × master
+     *
+     * All inputs are 00-FF hex values, output is 0.0-1.0 float
+     */
+    fun calculateFinalVolume(
+        instrumentVol: Int,
+        phraseVol: Int,
+        trackVol: Int,
+        masterVol: Int
+    ): Float {
+        return hexToFloat(instrumentVol) *
+               hexToFloat(phraseVol) *
+               hexToFloat(trackVol) *
+               hexToFloat(masterVol)
+    }
+
+    /**
+     * Convert 00-FF pan value to left/right gains using constant-power pan law.
+     *
+     * @param pan 00=full left, 80=center, FF=full right
+     * @return Pair(leftGain, rightGain) where each is 0.0-1.0
+     */
+    fun panToGains(pan: Int): Pair<Float, Float> {
+        val p = hexToFloat(pan)  // 0.0 = left, 1.0 = right
+        val angle = p * (kotlin.math.PI / 2)
+        val leftGain = kotlin.math.cos(angle).toFloat()
+        val rightGain = kotlin.math.sin(angle).toFloat()
+        return Pair(leftGain, rightGain)
+    }
+
+    /**
+     * Format volume as 2-digit hex string
+     */
+    fun formatHex(value: Int): String = (value and 0xFF).toString(16).uppercase().padStart(2, '0')
+}
+
 // The entire project
 @Serializable
 data class Project(
     var name: String = "UNTITLED",
     var tempo: Int = 128,  // BPM
     var transpose: Int = 0,
-    var masterVolume: Float = 1.0f,
+    var masterVolume: Int = 0xFF,  // 00-FF master volume (FF = max)
 
     // All phrases (256 slots)
     val phrases: Array<Phrase> = Array(256) { Phrase(it) },

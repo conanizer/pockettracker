@@ -964,8 +964,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         when (trackerController.instrumentCursorRow) {
                             1 -> {  // ROW 1: LOAD button
                                 if (trackerController.instrumentCursorColumn == 1) {
+                                    // Sync instrumentController before opening file browser
+                                    instrumentController.currentInstrument = trackerController.currentInstrument
                                     val samplesDir = File(fileManager.getSamplesDirectory())
-                                    Log.d("InstrumentScreen", "LOAD button pressed - opening file browser for WAV files")
+                                    Log.d("InstrumentScreen", "LOAD button pressed - opening file browser for instrument ${trackerController.currentInstrument}")
                                     Log.d("InstrumentScreen", "Samples directory: ${samplesDir.absolutePath}")
                                     Log.d("InstrumentScreen", "Directory exists: ${samplesDir.exists()}")
                                     Log.d("InstrumentScreen", "Directory can read: ${samplesDir.canRead()}")

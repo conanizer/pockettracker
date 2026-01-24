@@ -3,6 +3,7 @@ package com.example.pockettracker.core.audio
 import com.example.pockettracker.core.data.Instrument
 import com.example.pockettracker.core.data.Note
 import com.example.pockettracker.core.data.Project
+import com.example.pockettracker.core.data.VolumeUtils
 import com.example.pockettracker.core.logging.ILogger
 import com.example.pockettracker.core.resources.IResourceLoader
 import java.io.File
@@ -189,7 +190,8 @@ class AudioEngine(
                 trackId = 0,
                 freq = c4Freq,
                 baseFreq = adjustedBaseFreq,
-                vol = 1.0f
+                vol = 1.0f,
+                pan = 0.5f  // Center
             )
 
             logger.d(TAG, "🔊 Preview sample at C-4: $filePath (baseFreq=$adjustedBaseFreq)")
@@ -226,16 +228,22 @@ class AudioEngine(
 
         // Schedule slightly in the future to avoid race conditions
         val targetFrame = backend.getCurrentFrame() + 100  // Small buffer
+
+        // Apply instrument volume and pan
+        val volume = VolumeUtils.hexToFloat(instrument.volume)
+        val pan = VolumeUtils.hexToFloat(instrument.pan)  // 0x00=left, 0x80=center, 0xFF=right
+
         backend.scheduleNote(
             frame = targetFrame,
             sampleId = sampleId,
             trackId = 0,
             freq = targetFreq,
             baseFreq = compensatedBaseFreq,
-            vol = 1.0f
+            vol = volume,
+            pan = pan
         )
 
-        logger.d(TAG, "🔊 Preview instrument ${instrument.id.toString(16).padStart(2,'0').uppercase()}: freq=$targetFreq Hz")
+        logger.d(TAG, "🔊 Preview instrument ${instrument.id.toString(16).padStart(2,'0').uppercase()}: freq=$targetFreq Hz, vol=$volume, pan=$pan")
     }
 
     /**
@@ -268,7 +276,7 @@ class AudioEngine(
     /**
      * Play a note on a specific track.
      */
-    fun playNote(note: Note, instrumentId: Int, trackId: Int, volume: Float = 1.0f, project: Project? = null) {
+    fun playNote(note: Note, instrumentId: Int, trackId: Int, volume: Float = 1.0f, pan: Float = 0.5f, project: Project? = null) {
         if (note == Note.EMPTY) return
 
         val sampleId = if (project != null && instrumentId in 0..255) {
@@ -286,7 +294,8 @@ class AudioEngine(
             trackId = trackId,
             freq = frequency,
             baseFreq = baseFreq,
-            vol = volume
+            vol = volume,
+            pan = pan
         )
     }
 
@@ -333,6 +342,7 @@ class AudioEngine(
         instrumentId: Int,
         trackId: Int,
         volume: Float = 1.0f,
+        pan: Float = 0.5f,  // 0.0=left, 0.5=center, 1.0=right
         project: Project,
         startPointOverride: Int = -1  // -1 = use instrument default, 0-255 = Offset effect override
     ) {
@@ -346,7 +356,7 @@ class AudioEngine(
         }
 
         // Debug: Log what we're scheduling
-        android.util.Log.d("AudioEngine", "📋 scheduleNote: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame")
+        android.util.Log.d("AudioEngine", "📋 scheduleNote: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, pan=$pan")
 
         val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
         val frequency = note.toFrequency()
@@ -354,7 +364,7 @@ class AudioEngine(
         // Resume stream so audio callback can process the queue
         backend.resumeStream()
 
-        backend.scheduleNote(targetFrame, sampleId, trackId, frequency, baseFreq, volume, startPointOverride)
+        backend.scheduleNote(targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan, startPointOverride)
     }
 
     /**

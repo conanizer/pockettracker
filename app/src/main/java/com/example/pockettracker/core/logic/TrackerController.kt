@@ -639,8 +639,10 @@ class TrackerController(
                     else -> 14  // Wrap to bottom
                 }
 
-                // Preserve column 3 when navigating within rows 6-8, otherwise reset to column 1
-                instrumentCursorColumn = if (oldRow in 6..8 && instrumentCursorRow in 6..8 && oldColumn == 3) {
+                // Dual-param rows: 3, 4, 6, 7, 8 (ROOT+VOL, DETUNE+PAN, DRIVE+FILTER, CRUSH+CUT, DWNSMPL+RES)
+                val dualParamRows = setOf(3, 4, 6, 7, 8)
+                // Preserve column 3 when navigating between dual-parameter rows
+                instrumentCursorColumn = if (oldRow in dualParamRows && instrumentCursorRow in dualParamRows && oldColumn == 3) {
                     3  // Stay in column 3 when moving within dual-parameter rows
                 } else {
                     1  // Reset to column 1 for all other cases
@@ -677,8 +679,10 @@ class TrackerController(
                     else -> 0  // Wrap to top
                 }
 
-                // Preserve column 3 when navigating within rows 6-8, otherwise reset to column 1
-                instrumentCursorColumn = if (oldRow in 6..8 && instrumentCursorRow in 6..8 && oldColumn == 3) {
+                // Dual-param rows: 3, 4, 6, 7, 8 (ROOT+VOL, DETUNE+PAN, DRIVE+FILTER, CRUSH+CUT, DWNSMPL+RES)
+                val dualParamRows = setOf(3, 4, 6, 7, 8)
+                // Preserve column 3 when navigating between dual-parameter rows
+                instrumentCursorColumn = if (oldRow in dualParamRows && instrumentCursorRow in dualParamRows && oldColumn == 3) {
                     3  // Stay in column 3 when moving within dual-parameter rows
                 } else {
                     1  // Reset to column 1 for all other cases
@@ -795,11 +799,13 @@ class TrackerController(
     private fun getInstrumentCursorLeftColumn(row: Int, currentColumn: Int): Int {
         // INSTRUMENT screen column layout per row:
         // All rows: min column is 1 (column 0 is unreachable header)
-        // Rows 0-4, 9-14: column 1 only (single value)
-        // Rows 5-8: columns 1 and 3 (dual values: skip col 2)
-        
-        return if (row in 5..8) {
-            // Rows 5-8: columns 1 and 3 (skip 2)
+        // Dual-param rows (3, 4, 6, 7, 8): columns 1 and 3
+        // Single-param rows (0-2, 10-14): column 1 only
+        // Spacer rows (5, 9): not reachable
+
+        val dualParamRows = setOf(3, 4, 6, 7, 8)
+        return if (row in dualParamRows) {
+            // Dual-param rows: columns 1 and 3 (skip 2)
             if (currentColumn > 1) 1 else 1
         } else {
             // All other rows: column 1 only
@@ -814,11 +820,13 @@ class TrackerController(
     private fun getInstrumentCursorRightColumn(row: Int, currentColumn: Int): Int {
         // INSTRUMENT screen column layout per row:
         // All rows: min column is 1 (column 0 is unreachable header)
-        // Rows 0-4, 9-14: column 1 only (single value - max is col 1)
-        // Rows 5-8: columns 1 and 3 (dual values: skip col 2)
-        
-        return if (row in 5..8) {
-            // Rows 5-8: columns 1 and 3 (skip 2)
+        // Dual-param rows (3, 4, 6, 7, 8): columns 1 and 3
+        // Single-param rows (0-2, 10-14): column 1 only
+        // Spacer rows (5, 9): not reachable
+
+        val dualParamRows = setOf(3, 4, 6, 7, 8)
+        return if (row in dualParamRows) {
+            // Dual-param rows: columns 1 and 3 (skip 2)
             if (currentColumn < 3) 3 else 3
         } else {
             // All other rows: column 1 only

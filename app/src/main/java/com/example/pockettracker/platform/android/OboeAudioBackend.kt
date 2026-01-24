@@ -64,9 +64,10 @@ class OboeAudioBackend : IAudioBackend {
         freq: Float,
         baseFreq: Float,
         vol: Float,
+        pan: Float,
         startPointOverride: Int
     ) {
-        native_scheduleNote(frame, sampleId, trackId, freq, baseFreq, vol, startPointOverride)
+        native_scheduleNote(frame, sampleId, trackId, freq, baseFreq, vol, pan, startPointOverride)
     }
 
     override fun getCurrentFrame(): Long {
@@ -155,6 +156,7 @@ class OboeAudioBackend : IAudioBackend {
         frequency: Float,
         baseFrequency: Float,
         volume: Float,
+        pan: Float,
         startPointOverride: Int
     )
     private external fun native_getCurrentFrame(): Long

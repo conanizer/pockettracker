@@ -1,7 +1,7 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-01-23
+2026-01-24
 
 ## Current Phase
 **Original MVP Scope COMPLETE!** → **MVP Expansion (Mixer + WAV Export)** → Testing → MVP Release
@@ -332,8 +332,9 @@
 **Moving from Post-MVP to MVP due to extra time:**
 - 🚧 **Mixer Screen** - 8 track volumes + master with dB meters
 - 🚧 **WAV Export** - Render song to stereo WAV file
-- 🚧 **Instrument VOL/PAN** - Expose in UI, proper gain staging
-- 🚧 **Stereo Pan** - True stereo output in audio engine
+- ✅ **Instrument VOL/PAN** - Expose in UI, proper gain staging (2026-01-24)
+- ✅ **Stereo Pan** - True stereo output in audio engine (2026-01-24)
+- ✅ **Volume Chain** - instrument × phrase × track × master (2026-01-24)
 
 **See:** `MVP_EXPANSION_PLAN.md` for detailed implementation plan
 
@@ -447,10 +448,10 @@ Planned global settings:
 
 **See:** `MVP_EXPANSION_PLAN.md` for detailed plan
 
-**Phase 1-2 (Days 1-2):** Instrument VOL/PAN in UI
-**Phase 3 (Days 2-3):** Stereo pan in audio engine
-**Phase 4 (Days 3-4):** Volume multiplication chain
-**Phase 5 (Days 4-6):** Mixer screen with dB meters
+**Phase 1-2 (Days 1-2):** ✅ Instrument VOL/PAN in UI - COMPLETE
+**Phase 3 (Days 2-3):** ✅ Stereo pan in audio engine - COMPLETE
+**Phase 4 (Days 3-4):** ✅ Volume multiplication chain - COMPLETE
+**Phase 5 (Days 4-6):** 🚧 Mixer screen with dB meters - NEXT
 **Phase 6 (Days 6-8):** WAV Export
 **Phase 7 (Days 8-10):** Integration testing
 
