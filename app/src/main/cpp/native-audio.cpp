@@ -765,6 +765,38 @@ public:
             }
         }
 
+        // Update peak levels for mixer meters
+        {
+            std::lock_guard<std::mutex> lock(peakMutex);
+
+            // Apply decay to all peaks first
+            for (int t = 0; t < 8; t++) {
+                trackPeaks[t] *= PEAK_DECAY;
+            }
+            masterPeakL *= PEAK_DECAY;
+            masterPeakR *= PEAK_DECAY;
+
+            // Calculate per-track peaks by examining active voices
+            for (int v = 0; v < MAX_VOICES; v++) {
+                if (voices[v].isActive && voices[v].trackId >= 0 && voices[v].trackId < 8) {
+                    // Estimate voice contribution based on volume
+                    float voiceLevel = voices[v].volume * 0.25f;  // Same scaling as mix
+                    trackPeaks[voices[v].trackId] = fmaxf(trackPeaks[voices[v].trackId], voiceLevel);
+                }
+            }
+
+            // Calculate master peaks from actual output
+            float maxL = 0.0f, maxR = 0.0f;
+            for (int i = 0; i < numFrames; i++) {
+                float absL = fabsf(output[i * channelCount]);
+                float absR = fabsf(output[i * channelCount + 1]);
+                if (absL > maxL) maxL = absL;
+                if (absR > maxR) maxR = absR;
+            }
+            masterPeakL = fmaxf(masterPeakL, maxL);
+            masterPeakR = fmaxf(masterPeakR, maxR);
+        }
+
         // Update global frame counter for next callback
         globalFrameCounter += numFrames;
 
@@ -819,6 +851,21 @@ public:
         }
     }
 
+    // Get per-track peak levels for mixer meters
+    void getTrackPeaks(float* outBuffer) {
+        std::lock_guard<std::mutex> lock(peakMutex);
+        for (int i = 0; i < 8; i++) {
+            outBuffer[i] = trackPeaks[i];
+        }
+    }
+
+    // Get master peak levels (stereo) for mixer meters
+    void getMasterPeaks(float* outBuffer) {
+        std::lock_guard<std::mutex> lock(peakMutex);
+        outBuffer[0] = masterPeakL;
+        outBuffer[1] = masterPeakR;
+    }
+
 private:
     std::shared_ptr<oboe::AudioStream> stream;
     Voice voices[MAX_VOICES];
@@ -836,6 +883,13 @@ private:
     float waveformBuffer[WAVEFORM_SIZE];
     int waveformIndex = 0;
     std::mutex waveformMutex;
+
+    // Peak level tracking for mixer meters
+    float trackPeaks[8] = {0};      // Per-track peak levels (0.0 - 1.0)
+    float masterPeakL = 0;          // Master left channel peak
+    float masterPeakR = 0;          // Master right channel peak
+    std::mutex peakMutex;
+    static constexpr float PEAK_DECAY = 0.95f;  // Decay rate per callback (smooth falloff)
 
     // Downsampling for oscilloscope (capture every Nth sample)
     // Lower = faster scrolling (more zoomed in), Higher = slower scrolling (more time visible)
@@ -1100,6 +1154,28 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setInst
     if (engine) {
         engine->setInstrumentParams(instrumentId, start, end, reverse, loopMode, loopStart,
                                     drive, crush, downsample, filterType, filterCut, filterRes);
+    }
+}
+
+// ===================================
+// MIXER PEAK METER JNI METHODS
+// ===================================
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getTrackPeaks(JNIEnv *env, jobject thiz, jfloatArray outArray) {
+    if (engine && outArray != nullptr) {
+        float buffer[8];
+        engine->getTrackPeaks(buffer);
+        env->SetFloatArrayRegion(outArray, 0, 8, buffer);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getMasterPeaks(JNIEnv *env, jobject thiz, jfloatArray outArray) {
+    if (engine && outArray != nullptr) {
+        float buffer[2];
+        engine->getMasterPeaks(buffer);
+        env->SetFloatArrayRegion(outArray, 0, 2, buffer);
     }
 }
 

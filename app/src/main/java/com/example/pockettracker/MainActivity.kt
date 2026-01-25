@@ -329,6 +329,13 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // InstrumentModule: Used for instrument editing screen
     val instrumentModule = remember { InstrumentModule() }
 
+    // MixerModule: Used for mixer screen (8 tracks + master)
+    val mixerModule = remember { MixerModule() }
+
+    // Peak level buffers for mixer meters (updated periodically)
+    val trackPeakBuffer = remember { FloatArray(8) }
+    val masterPeakBuffer = remember { FloatArray(2) }
+
     // ═══════════════════════════════════════════════════════════════════════
     // STATE ALIASES (read from TrackerController, triggered by stateVersion)
     // ═══════════════════════════════════════════════════════════════════════
@@ -401,6 +408,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     }
 
     // (Audio engine cleanup moved to line 168-172 with new architecture)
+
+    // Update peak levels for mixer meters (every ~60ms = ~16fps update rate)
+    LaunchedEffect(currentScreen) {
+        if (currentScreen == ScreenType.MIXER) {
+            while (true) {
+                audioBackend.getTrackPeaks(trackPeakBuffer)
+                audioBackend.getMasterPeaks(masterPeakBuffer)
+                stateVersion++  // Trigger recomposition
+                kotlinx.coroutines.delay(60)
+            }
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     // INPUT ACTION HELPERS
@@ -585,6 +604,20 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 if (result.modified) {
                     trackerController.projectVersion++
                 }
+            }
+            ScreenType.MIXER -> {
+                val mixerState = MixerState(
+                    trackerController.project,
+                    trackerController.mixerCursorColumn,
+                    trackPeakBuffer,
+                    masterPeakBuffer
+                )
+                val context = mixerModule.getCursorContext(mixerState)
+                val action = handlerFunction(context)
+                val result = mixerModule.handleInput(mixerState, action) {
+                    trackerController.projectVersion++
+                }
+                // Result handled in callback
             }
             else -> { /* Other screens not yet implemented */ }
         }
@@ -1305,6 +1338,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                     trackerController.playSong()
                                 }
 
+                                ScreenType.MIXER -> {
+                                    Log.d("Playback", "  → Starting song (from mixer)")
+                                    trackerController.playSong()
+                                }
+
                                 else -> {
                                     Log.d("Playback", "  → Default togglePlayback")
                                     // Default to phrase playback
@@ -1966,7 +2004,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 selectionInfo = selectionInfo,
                 clipboardInfo = clipboardInfo,
                 selectionMode = selectionModeActive,
-                isCellSelected = isCellSelectedFn
+                isCellSelected = isCellSelectedFn,
+                mixerCursorColumn = trackerController.mixerCursorColumn,
+                trackPeaks = trackPeakBuffer,
+                masterPeaks = masterPeakBuffer
             )
         } else {
             // PORTRAIT: Buttons below screen
@@ -1999,7 +2040,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 selectionInfo = selectionInfo,
                 clipboardInfo = clipboardInfo,
                 selectionMode = selectionModeActive,
-                isCellSelected = isCellSelectedFn
+                isCellSelected = isCellSelectedFn,
+                mixerCursorColumn = trackerController.mixerCursorColumn,
+                trackPeaks = trackPeakBuffer,
+                masterPeaks = masterPeakBuffer
             )
         }
     } else {
@@ -2033,7 +2077,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             selectionInfo = selectionInfo,
             clipboardInfo = clipboardInfo,
             selectionMode = selectionModeActive,
-            isCellSelected = isCellSelectedFn
+            isCellSelected = isCellSelectedFn,
+            mixerCursorColumn = trackerController.mixerCursorColumn,
+            trackPeaks = trackPeakBuffer,
+            masterPeaks = masterPeakBuffer
         )
     }
 }

@@ -64,7 +64,11 @@ fun PixelPerfectTracker(
     selectionInfo: String = "",        // e.g., "SEL:CELL", "SEL:ROW", "SEL:ALL"
     clipboardInfo: String = "",        // e.g., "PHR:3x4", "CHN:1x8"
     selectionMode: Boolean = false,    // Whether selection mode is active
-    isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }  // Check if cell is selected
+    isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },  // Check if cell is selected
+    // Mixer state
+    mixerCursorColumn: Int = 0,        // 0-7 = tracks, 8 = master
+    trackPeaks: FloatArray = FloatArray(8),
+    masterPeaks: FloatArray = FloatArray(2)
 ) {
     android.util.Log.d("PixelPerfectTracker", "==== PixelPerfectTracker called ====")
     android.util.Log.d("PixelPerfectTracker", "Screen: $currentScreen")
@@ -170,7 +174,10 @@ fun PixelPerfectTracker(
                             selectionInfo = selectionInfo,
                             clipboardInfo = clipboardInfo,
                             selectionMode = selectionMode,
-                            isCellSelected = isCellSelected
+                            isCellSelected = isCellSelected,
+                            mixerCursorColumn = mixerCursorColumn,
+                            trackPeaks = trackPeaks,
+                            masterPeaks = masterPeaks
                         )
                     }
                 }
@@ -193,6 +200,7 @@ class TrackerLayout {
     private val phraseEditor = PhraseEditorModule()
     private val navigationMap = NavigationMapModule()
     private val instrumentModule = InstrumentModule()
+    private val mixerModule = MixerModule()
     private val chainEditor = ChainEditorModule()
     private val songEditor = SongEditorModule()
     private val projectModule = ProjectModule()
@@ -230,7 +238,11 @@ class TrackerLayout {
         selectionInfo: String = "",
         clipboardInfo: String = "",
         selectionMode: Boolean = false,
-        isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }
+        isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
+        // Mixer state
+        mixerCursorColumn: Int = 0,
+        trackPeaks: FloatArray = FloatArray(8),
+        masterPeaks: FloatArray = FloatArray(2)
     ) {
         // ===================================
         // DRAW BACKGROUND
@@ -403,6 +415,25 @@ class TrackerLayout {
                             cursorColumn = instrumentCursorColumn,
                             statusMessage = instrumentStatusMessage,
                             isSuccess = instrumentStatusSuccess
+                        )
+                    )
+                }
+            }
+
+            // ===================================
+            // MIXER SCREEN: Show mixer with 8 tracks + master
+            // ===================================
+            ScreenType.MIXER -> {
+                with(mixerModule) {
+                    draw(
+                        x = moduleX,
+                        y = currentY,
+                        scale = scale,
+                        state = MixerState(
+                            project = project,
+                            cursorColumn = mixerCursorColumn,
+                            trackPeaks = trackPeaks,
+                            masterPeaks = masterPeaks
                         )
                     )
                 }

@@ -136,6 +136,13 @@ class TrackerController(
             stateObserver.onStateChanged()
         }
 
+    // Mixer screen cursor (0-7 = tracks, 8 = master)
+    var mixerCursorColumn = 0
+        set(value) {
+            field = value.coerceIn(0, 8)
+            stateObserver.onStateChanged()
+        }
+
     // Current editing context
     var currentChain = 0
         set(value) {
@@ -712,6 +719,10 @@ class TrackerController(
                     instrumentCursorColumn = minColumn
                 }
             }
+            ScreenType.MIXER -> {
+                // Mixer: move between track columns (0-7) and master (8)
+                if (mixerCursorColumn > 0) mixerCursorColumn--
+            }
             else -> {
                 // Get minimum column for this screen
                 val minColumn = when (currentScreen) {
@@ -742,6 +753,10 @@ class TrackerController(
                 if (instrumentCursorColumn < maxColumn) {
                     instrumentCursorColumn = maxColumn
                 }
+            }
+            ScreenType.MIXER -> {
+                // Mixer: move between track columns (0-7) and master (8)
+                if (mixerCursorColumn < 8) mixerCursorColumn++
             }
             else -> {
                 // Get maximum column for this screen

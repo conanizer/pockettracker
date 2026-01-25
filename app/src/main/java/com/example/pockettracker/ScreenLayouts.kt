@@ -56,7 +56,11 @@ fun FullScreenLayout(
     selectionInfo: String = "",
     clipboardInfo: String = "",
     selectionMode: Boolean = false,
-    isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }
+    isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
+    // Mixer state
+    mixerCursorColumn: Int = 0,
+    trackPeaks: FloatArray = FloatArray(8),
+    masterPeaks: FloatArray = FloatArray(2)
 ) {
     Box(
         modifier = Modifier
@@ -93,7 +97,10 @@ fun FullScreenLayout(
             selectionInfo = selectionInfo,
             clipboardInfo = clipboardInfo,
             selectionMode = selectionMode,
-            isCellSelected = isCellSelected
+            isCellSelected = isCellSelected,
+            mixerCursorColumn = mixerCursorColumn,
+            trackPeaks = trackPeaks,
+            masterPeaks = masterPeaks
         )
     }
 }
@@ -133,7 +140,11 @@ fun PortraitLayoutWithVirtualButtons(
     selectionInfo: String = "",
     clipboardInfo: String = "",
     selectionMode: Boolean = false,
-    isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }
+    isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
+    // Mixer state
+    mixerCursorColumn: Int = 0,
+    trackPeaks: FloatArray = FloatArray(8),
+    masterPeaks: FloatArray = FloatArray(2)
 ) {
     // FIXED SPACER HEIGHT
     val spacerHeight = 200
@@ -202,7 +213,10 @@ fun PortraitLayoutWithVirtualButtons(
                     selectionInfo = selectionInfo,
                     clipboardInfo = clipboardInfo,
                     selectionMode = selectionMode,
-                    isCellSelected = isCellSelected
+                    isCellSelected = isCellSelected,
+                    mixerCursorColumn = mixerCursorColumn,
+                    trackPeaks = trackPeaks,
+                    masterPeaks = masterPeaks
                 )
             }
         }
@@ -267,7 +281,11 @@ fun LandscapeLayoutWithVirtualButtons(
     selectionInfo: String = "",
     clipboardInfo: String = "",
     selectionMode: Boolean = false,
-    isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }
+    isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
+    // Mixer state
+    mixerCursorColumn: Int = 0,
+    trackPeaks: FloatArray = FloatArray(8),
+    masterPeaks: FloatArray = FloatArray(2)
 ) {
     // Calculate available space for each button panel
     // Formula: (deviceWidth - scaledScreenWidth) / 2
@@ -340,7 +358,10 @@ fun LandscapeLayoutWithVirtualButtons(
                     selectionInfo = selectionInfo,
                     clipboardInfo = clipboardInfo,
                     selectionMode = selectionMode,
-                    isCellSelected = isCellSelected
+                    isCellSelected = isCellSelected,
+                    mixerCursorColumn = mixerCursorColumn,
+                    trackPeaks = trackPeaks,
+                    masterPeaks = masterPeaks
                 )
             }
         }

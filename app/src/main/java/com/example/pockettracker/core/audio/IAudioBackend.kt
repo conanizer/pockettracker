@@ -179,4 +179,24 @@ interface IAudioBackend {
      * After calling this, create() must be called again to use audio.
      */
     fun close()
+
+    /**
+     * Get per-track peak levels for mixer meters.
+     *
+     * Returns an array of 8 floats (0.0-1.0) representing peak levels
+     * for tracks 0-7. Values decay over time when no audio is playing.
+     *
+     * @param buffer Float array of size 8 to fill with peak levels
+     */
+    fun getTrackPeaks(buffer: FloatArray)
+
+    /**
+     * Get master stereo peak levels for mixer meters.
+     *
+     * Returns an array of 2 floats (0.0-1.0) representing peak levels
+     * for left and right channels. Values decay over time.
+     *
+     * @param buffer Float array of size 2 to fill with [left, right] peak levels
+     */
+    fun getMasterPeaks(buffer: FloatArray)
 }

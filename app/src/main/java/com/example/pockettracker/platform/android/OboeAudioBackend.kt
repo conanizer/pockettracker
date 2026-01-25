@@ -142,6 +142,18 @@ class OboeAudioBackend : IAudioBackend {
         Log.d(TAG, "🔌 Audio backend closed")
     }
 
+    override fun getTrackPeaks(buffer: FloatArray) {
+        if (buffer.size >= 8) {
+            native_getTrackPeaks(buffer)
+        }
+    }
+
+    override fun getMasterPeaks(buffer: FloatArray) {
+        if (buffer.size >= 2) {
+            native_getMasterPeaks(buffer)
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Native Methods (JNI → C++)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -181,4 +193,6 @@ class OboeAudioBackend : IAudioBackend {
         filterCut: Int,
         filterRes: Int
     )
+    private external fun native_getTrackPeaks(outArray: FloatArray)
+    private external fun native_getMasterPeaks(outArray: FloatArray)
 }
