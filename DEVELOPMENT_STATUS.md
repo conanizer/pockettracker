@@ -344,7 +344,11 @@
 ## MVP Expansion (NOW IN PROGRESS)
 
 **Moving from Post-MVP to MVP due to extra time:**
-- 🚧 **Mixer Screen** - 8 track volumes + master with dB meters
+- ✅ **Mixer Screen** - 8 track volumes + master with dB meters (2026-01-27)
+  - True dBFS metering (-42dB to +6dB scale)
+  - Actual per-track audio level measurement
+  - Color zones: Red (>=0dB clipping), Yellow (>=-6dB hot), Green (safe)
+  - Removed 0.25x headroom for full dynamic range
 - ✅ **WAV Export** - Render song to stereo WAV file (2026-01-27)
   - Multi-track rendering with proper chain transpose
   - ARPEGGIO (Axx) effect with persistence across steps

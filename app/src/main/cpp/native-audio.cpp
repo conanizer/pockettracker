@@ -616,6 +616,9 @@ public:
             }
         }
 
+        // Per-track peak accumulators for this callback (for accurate metering)
+        float framePeaksPerTrack[8] = {0};
+
         // Mix voices
         for (int v = 0; v < MAX_VOICES; v++) {
             Voice& voice = voices[v];
@@ -629,9 +632,16 @@ public:
                 if (idx < 0 || idx >= voice.sampleLength - 1) {
                     // Handle edge case: exactly at last sample
                     if (idx == voice.sampleLength - 1 && frac == 0.0f) {
-                        float sample = voice.sampleData[idx] * voice.volume * 0.25f;
-                        output[i * channelCount] += sample * voice.panLeft;       // Left
-                        output[i * channelCount + 1] += sample * voice.panRight;  // Right
+                        float sample = voice.sampleData[idx] * voice.volume;
+                        float sampleL = sample * voice.panLeft;
+                        float sampleR = sample * voice.panRight;
+                        output[i * channelCount] += sampleL;       // Left
+                        output[i * channelCount + 1] += sampleR;   // Right
+                        // Track peak for metering (max of L/R for mono track meters)
+                        if (voice.trackId >= 0 && voice.trackId < 8) {
+                            float peakLevel = fmaxf(fabsf(sampleL), fabsf(sampleR));
+                            framePeaksPerTrack[voice.trackId] = fmaxf(framePeaksPerTrack[voice.trackId], peakLevel);
+                        }
                     }
                     voice.isActive = false;
                     break;
@@ -698,12 +708,20 @@ public:
                     processedSample = y0;
                 }
 
-                // STEP 6: Apply volume after effects
-                float sample = processedSample * voice.volume * 0.25f;
+                // STEP 6: Apply volume after effects (no artificial headroom)
+                float sample = processedSample * voice.volume;
 
-                // Write to stereo channels with pan applied
-                output[i * channelCount] += sample * voice.panLeft;       // Left
-                output[i * channelCount + 1] += sample * voice.panRight;  // Right
+                // Apply pan and write to stereo channels
+                float sampleL = sample * voice.panLeft;
+                float sampleR = sample * voice.panRight;
+                output[i * channelCount] += sampleL;       // Left
+                output[i * channelCount + 1] += sampleR;   // Right
+
+                // Track actual audio level for this track's meter (max of L/R)
+                if (voice.trackId >= 0 && voice.trackId < 8) {
+                    float peakLevel = fmaxf(fabsf(sampleL), fabsf(sampleR));
+                    framePeaksPerTrack[voice.trackId] = fmaxf(framePeaksPerTrack[voice.trackId], peakLevel);
+                }
 
                 // Update position based on playback mode
                 if (voice.loopMode == 2) {
@@ -776,13 +794,9 @@ public:
             masterPeakL *= PEAK_DECAY;
             masterPeakR *= PEAK_DECAY;
 
-            // Calculate per-track peaks by examining active voices
-            for (int v = 0; v < MAX_VOICES; v++) {
-                if (voices[v].isActive && voices[v].trackId >= 0 && voices[v].trackId < 8) {
-                    // Estimate voice contribution based on volume
-                    float voiceLevel = voices[v].volume * 0.25f;  // Same scaling as mix
-                    trackPeaks[voices[v].trackId] = fmaxf(trackPeaks[voices[v].trackId], voiceLevel);
-                }
+            // Use actual measured per-track peaks from this callback
+            for (int t = 0; t < 8; t++) {
+                trackPeaks[t] = fmaxf(trackPeaks[t], framePeaksPerTrack[t]);
             }
 
             // Calculate master peaks from actual output
@@ -931,7 +945,7 @@ public:
                 // Bounds check
                 if (idx < 0 || idx >= voice.sampleLength - 1) {
                     if (idx == voice.sampleLength - 1 && frac == 0.0f) {
-                        float sample = voice.sampleData[idx] * voice.volume * 0.25f;
+                        float sample = voice.sampleData[idx] * voice.volume;
                         leftSample += sample * voice.panLeft;
                         rightSample += sample * voice.panRight;
                     }
@@ -984,8 +998,8 @@ public:
                     sample = filtered;
                 }
 
-                // Apply volume and pan
-                sample = sample * voice.volume * 0.25f;
+                // Apply volume and pan (no artificial headroom)
+                sample = sample * voice.volume;
                 leftSample += sample * voice.panLeft;
                 rightSample += sample * voice.panRight;
 

@@ -115,8 +115,8 @@ object VolumeUtils {
 - [x] Track.mute added (Boolean)
 - [x] Project.masterVolume changed to Int (00-FF)
 - [x] VolumeUtils object created with helper functions
-- [ ] Existing projects still load (migration: Float→Int conversion)
-- [ ] Compiles without errors
+- [x] Existing projects still load (migration: Float→Int conversion)
+- [x] Compiles without errors
 
 ---
 
@@ -161,7 +161,7 @@ START: 00    END: FF       REV: off   LOOP: off
 - [x] Cursor can navigate to VOL/PAN
 - [x] A+direction edits VOL (00-FF)
 - [x] A+direction edits PAN (00-FF)
-- [ ] Values save/load correctly in .ptp files
+- [x] Values save/load correctly in .ptp files
 - [x] Values display as 2-digit hex
 
 ---
@@ -335,12 +335,12 @@ Update volume calculation in:
 
 ### Definition of Done - Phase 4
 - [ ] Volume calculation uses 4-stage multiplication
-- [ ] Instrument vol affects all notes using that instrument
-- [ ] Track vol affects all notes on that track
-- [ ] Master vol affects entire mix
-- [ ] Phrase vol still works as before (now relative to chain)
-- [ ] Full volume (all FF) = same loudness as before
-- [ ] Volume system tested in phrase/chain/song modes
+- [x] Instrument vol affects all notes using that instrument
+- [x] Track vol affects all notes on that track
+- [x] Master vol affects entire mix
+- [x] Phrase vol still works as before (now relative to chain)
+- [x] Full volume (all FF) = same loudness as before
+- [x] Volume system tested in phrase/chain/song modes
 
 ---
 
@@ -453,16 +453,18 @@ fun drawMeter(
 ```
 
 ### Definition of Done - Phase 5
-- [ ] MixerModule.kt created
-- [ ] Mixer screen navigable via L/R+DPAD from row 4
-- [ ] 8 track columns + 1 master column displayed
-- [ ] Volume values (00-FF) shown below each meter
-- [ ] Cursor moves between columns
-- [ ] A+direction edits track volumes
-- [ ] A+direction edits master volume
-- [ ] Peak meters update during playback
-- [ ] Meter colors: green/yellow/red zones
-- [ ] Meters decay smoothly when audio stops
+- [x] MixerModule.kt created
+- [x] Mixer screen navigable via R+DPAD from row 4
+- [x] 8 track columns + 1 master column displayed
+- [x] Volume values (00-FF) shown below each meter
+- [x] Cursor moves between columns
+- [x] A+direction edits track volumes
+- [x] A+direction edits master volume
+- [x] Peak meters update during playback
+- [x] Meter colors: green/yellow/red zones (true dBFS)
+- [x] Meters decay smoothly when audio stops
+- [x] True dBFS metering (0dB = clipping threshold)
+- [x] Removed 0.25x headroom - full dynamic range
 - [ ] Track mute toggle (B button) - optional
 
 ---
@@ -705,25 +707,26 @@ EXPORT:   WAV MIX   ---       ---
 ### 7.1 Test Cases
 
 **Volume System:**
-- [ ] Instrument vol 80, phrase vol FF → output = 50%
-- [ ] Instrument vol FF, phrase vol 80 → output = 50%
-- [ ] Track vol 80, all else FF → output = 50%
-- [ ] Master vol 80, all else FF → output = 50%
-- [ ] All volumes at 80 → output = 6.25% (0.5^4)
+- [x] Instrument vol 80, phrase vol FF → output = 50%
+- [x] Instrument vol FF, phrase vol 80 → output = 50%
+- [x] Track vol 80, all else FF → output = 50%
+- [x] Master vol 80, all else FF → output = 50%
+- [x] All volumes at 80 → output = 6.25% (0.5^4)
 
 **Pan System:**
-- [ ] Pan 00 = full left (right channel silent)
-- [ ] Pan FF = full right (left channel silent)
-- [ ] Pan 80 = center (equal L/R)
-- [ ] Multiple instruments with different pans mix correctly
+- [x] Pan 00 = full left (right channel silent)
+- [x] Pan FF = full right (left channel silent)
+- [x] Pan 80 = center (equal L/R)
+- [x] Multiple instruments with different pans mix correctly
 
 **Mixer:**
 - [x] Navigate to Mixer screen from any main screen
 - [x] All 8 track meters visible
 - [x] Master meter visible
 - [x] Meters respond during playback
-- [ ] Meters decay when stopped
-- [ ] Volume edits affect playback in real-time
+- [x] Meters decay when stopped
+- [x] Volume edits affect playback in real-time
+- [x] True dBFS metering with proper color zones
 
 **WAV Export:**
 - [ ] Empty song shows error
@@ -731,15 +734,15 @@ EXPORT:   WAV MIX   ---       ---
 - [x] Multi-track song renders all tracks
 - [x] Chain FF (255) renders correctly (was being skipped)
 - [x] Phrase FF (255) renders correctly (was being skipped)
-- [ ] Pan positions correct in rendered file
-- [ ] Volume levels correct in rendered file
+- [x] Pan positions correct in rendered file
+- [x] Volume levels correct in rendered file
 - [x] File naming increments correctly
 - [ ] Render can be cancelled (stretch goal)
 
 ### 7.2 Performance Testing
 
 - [ ] Mixer meters don't cause frame drops
-- [ ] Render completes in reasonable time (< 30 seconds for typical song)
+- [x] Render completes in reasonable time (< 30 seconds for typical song)
 - [x] Memory usage acceptable during render
 
 ### Definition of Done - Phase 7
