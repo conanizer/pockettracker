@@ -718,34 +718,36 @@ EXPORT:   WAV MIX   ---       ---
 - [ ] Multiple instruments with different pans mix correctly
 
 **Mixer:**
-- [ ] Navigate to Mixer screen from any main screen
-- [ ] All 8 track meters visible
-- [ ] Master meter visible
-- [ ] Meters respond during playback
+- [x] Navigate to Mixer screen from any main screen
+- [x] All 8 track meters visible
+- [x] Master meter visible
+- [x] Meters respond during playback
 - [ ] Meters decay when stopped
 - [ ] Volume edits affect playback in real-time
 
 **WAV Export:**
 - [ ] Empty song shows error
-- [ ] Single-phrase song renders correctly
-- [ ] Multi-track song renders all tracks
+- [x] Single-phrase song renders correctly
+- [x] Multi-track song renders all tracks
+- [x] Chain FF (255) renders correctly (was being skipped)
+- [x] Phrase FF (255) renders correctly (was being skipped)
 - [ ] Pan positions correct in rendered file
 - [ ] Volume levels correct in rendered file
-- [ ] File naming increments correctly
+- [x] File naming increments correctly
 - [ ] Render can be cancelled (stretch goal)
 
 ### 7.2 Performance Testing
 
 - [ ] Mixer meters don't cause frame drops
 - [ ] Render completes in reasonable time (< 30 seconds for typical song)
-- [ ] Memory usage acceptable during render
+- [x] Memory usage acceptable during render
 
 ### Definition of Done - Phase 7
 - [ ] All test cases pass
 - [ ] No audio clicks/pops
 - [ ] No UI freezes
 - [ ] Tested on Miyoo Flip
-- [ ] Tested on Ayaneo (when available)
+- [x] Tested on Ayaneo (when available)
 
 ---
 

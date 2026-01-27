@@ -219,7 +219,7 @@ class ChainEditorModule : TrackerModule {
         // ===================================
         // COLUMN 1: PHRASE REFERENCE (PH)
         // ===================================
-        val isEmpty = phraseRef == 0xFF
+        val isEmpty = phraseRef == -1
 
         val phraseText = if (isEmpty) {
             "--"
@@ -293,7 +293,7 @@ class ChainEditorModule : TrackerModule {
             // Column 2: Transpose (00-FF, 80 = no transpose)
             2 -> {
                 val phraseRef = state.chain.phraseRefs[state.cursorRow]
-                val isEmpty = phraseRef == 0xFF
+                val isEmpty = phraseRef == -1
                 val transposeValue = state.chain.transposeValues[state.cursorRow]
                 CursorContextFactory.transpose(transposeValue, isEmpty)
             }
@@ -333,7 +333,7 @@ class ChainEditorModule : TrackerModule {
                 when (state.cursorColumn) {
                     1 -> {
                         // Clear phrase reference
-                        chain.phraseRefs[state.cursorRow] = 0xFF  // Empty
+                        chain.phraseRefs[state.cursorRow] = -1  // Empty
                         chain.transposeValues[state.cursorRow] = 0x00  // Reset transpose to default
                     }
                 }

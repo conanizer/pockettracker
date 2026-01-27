@@ -183,6 +183,20 @@
 
 ## Recent Fixes
 
+### Phrase/Chain Reference Fix (2026-01-27) ✅
+**Problem:** Phrase references in Chain screen had different cycling behavior than chain references in Song screen:
+- Phrase refs used 0xFF as empty, limiting range to 00-FE
+- Couldn't cycle from 00 to FF (would go to empty instead)
+- Chain/Phrase FF (255) was skipped during WAV rendering
+
+**Solution:** Unified phrase refs to use -1 for empty (like chain refs):
+- Changed Chain data model to use -1 for empty phrase refs
+- Updated CursorContext.phraseRef to match chainRef behavior
+- Fixed RenderController to not skip FF values
+- Added migration for old project files (0xFF → -1 on load)
+
+**Result:** Full 00-FF range available for both phrase and chain IDs, proper cycling, correct rendering.
+
 ### Cross-Device Project File Transfer (2026-01-18) ✅
 **Problem:** Project files copied via USB/file manager from another device were invisible to the app.
 

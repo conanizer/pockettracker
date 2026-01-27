@@ -87,13 +87,13 @@ data class Phrase(
 @Serializable
 data class Chain(
     val id: Int,  // 00-FF
-    val phraseRefs: IntArray = IntArray(16) { 0xFF },  // 0xFF = empty
+    val phraseRefs: IntArray = IntArray(16) { -1 },  // -1 = empty (allows full 00-FF range)
     val transposeValues: IntArray = IntArray(16) { 0x00 }  // Default: 0x00 (can cycle 00-FF)
 ) {
     /**
      * Check if a slot is empty
      */
-    fun isEmpty(index: Int): Boolean = phraseRefs[index] == 0xFF
+    fun isEmpty(index: Int): Boolean = phraseRefs[index] == -1
 
     /**
      * Get transpose in semitones (-127 to +128)

@@ -403,7 +403,7 @@ class RenderController(
 
         for (row in 0 until 256) {
             val hasContent = project.tracks.any { track ->
-                row < track.chainRefs.size && track.chainRefs[row] != 0xFF && track.chainRefs[row] >= 0
+                row < track.chainRefs.size && track.chainRefs[row] >= 0 && track.chainRefs[row] < 256
             }
             if (hasContent) {
                 if (firstUsed < 0) firstUsed = row
@@ -457,11 +457,11 @@ class RenderController(
                 if (row >= track.chainRefs.size) continue
 
                 val chainRef = track.chainRefs[row]
-                if (chainRef < 0 || chainRef >= 256 || chainRef == 0xFF) continue
+                if (chainRef < 0 || chainRef >= 256) continue  // -1 = empty
 
                 val chain = project.chains[chainRef]
                 val phraseRef = chain.phraseRefs[phraseSlot]
-                if (phraseRef >= 0 && phraseRef < 256 && phraseRef != 0xFF) {
+                if (phraseRef >= 0 && phraseRef < 256) {  // -1 = empty
                     slotHasContent = true
                     break
                 }
@@ -486,7 +486,7 @@ class RenderController(
             val trk = project.tracks[t]
             if (row < trk.chainRefs.size) {
                 val ref = trk.chainRefs[row]
-                if (ref >= 0 && ref < 256 && ref != 0xFF && !trk.mute) {
+                if (ref >= 0 && ref < 256 && !trk.mute) {  // -1 = empty
                     Log.d(TAG, "  Track $t: chain=${ref.toString(16).uppercase()}, mute=${trk.mute}")
                 }
             }
@@ -510,13 +510,13 @@ class RenderController(
                 if (row >= track.chainRefs.size) continue
 
                 val chainRef = track.chainRefs[row]
-                if (chainRef < 0 || chainRef >= 256 || chainRef == 0xFF) continue
+                if (chainRef < 0 || chainRef >= 256) continue  // -1 = empty
 
                 val chain = project.chains[chainRef]
 
                 // Check if this track has a phrase at this slot
                 val phraseRef = chain.phraseRefs[phraseSlot]
-                if (phraseRef < 0 || phraseRef >= 256 || phraseRef == 0xFF) continue
+                if (phraseRef < 0 || phraseRef >= 256) continue  // -1 = empty
 
                 val phrase = project.phrases[phraseRef]
                 val transpose = chain.getTransposeSemitones(phraseSlot)
@@ -702,13 +702,13 @@ class RenderController(
                 if (row >= track.chainRefs.size) continue
 
                 val chainRef = track.chainRefs[row]
-                if (chainRef < 0 || chainRef >= 256 || chainRef == 0xFF) continue
+                if (chainRef < 0 || chainRef >= 256) continue  // -1 = empty
 
                 val chain = project.chains[chainRef]
 
                 for (phraseSlot in 0 until 16) {
                     val phraseRef = chain.phraseRefs[phraseSlot]
-                    if (phraseRef < 0 || phraseRef >= 256 || phraseRef == 0xFF) continue
+                    if (phraseRef < 0 || phraseRef >= 256) continue  // -1 = empty
 
                     val phrase = project.phrases[phraseRef]
 

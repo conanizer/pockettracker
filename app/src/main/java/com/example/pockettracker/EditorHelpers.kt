@@ -63,7 +63,7 @@ fun getEffectTypeName(effectType: Int): String {
  * Clear chain slot (set to empty)
  */
 fun clearChainSlot(chain: Chain, row: Int) {
-    chain.phraseRefs[row] = 0xFF
+    chain.phraseRefs[row] = -1  // -1 = empty
     chain.transposeValues[row] = 0x00  // Reset transpose to default
 }
 

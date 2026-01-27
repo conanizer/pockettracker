@@ -158,20 +158,22 @@ object CursorContextFactory {
     // HEX BYTE BASED VALUES (00-FF range)
     // ============================================================================
     // These all use hexByte() internally with different empty values:
-    // - phraseRef uses 0xFF (255) as empty because Chain stores phrase refs as UByte
-    // - chainRef uses -1 as empty because Song stores chain refs as nullable Int
+    // - phraseRef uses -1 as empty (allows full 00-FF range for phrase IDs)
+    // - chainRef uses -1 as empty (allows full 00-FF range for chain IDs)
     // - volume has no empty value (always valid)
     // ============================================================================
 
     /**
-     * Phrase reference (00-FF, 0xFF = empty)
+     * Phrase reference (00-FF, -1 = empty)
+     * When empty, starts cycling from 0 for user convenience.
      */
     fun phraseRef(currentValue: Int, canCreate: Boolean = true) =
-        hexByte(currentValue, emptyValue = 0xFF, canDelete = true, canInsert = true, canCreate = canCreate)
+        hexByte(if (currentValue == -1) 0 else currentValue, emptyValue = -1, canDelete = true, canInsert = true, canCreate = canCreate)
             .copy(valueType = CursorValueType.PHRASE_REF)
 
     /**
      * Chain reference (00-FF, -1 = empty)
+     * When empty, starts cycling from 0 for user convenience.
      */
     fun chainRef(currentValue: Int, canCreate: Boolean = true) =
         hexByte(if (currentValue == -1) 0 else currentValue, emptyValue = -1, canDelete = true, canInsert = true, canCreate = canCreate)

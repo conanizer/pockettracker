@@ -57,7 +57,7 @@ class ClipboardManager(
     data class ChainRowClipItem(
         val row: Int,           // Row in source chain (0-15)
         val column: Int,        // 1=phraseRef, 2=transpose
-        val phraseRef: Int?,    // Phrase reference (0xFF = empty)
+        val phraseRef: Int?,    // Phrase reference (-1 = empty)
         val transpose: Int?     // Transpose value
     )
 
@@ -480,7 +480,7 @@ class ClipboardManager(
         for (row in minRow..maxRow) {
             for (col in minCol..maxCol) {
                 when (col) {
-                    1 -> { chain.phraseRefs[row] = 0xFF; itemsCut++ }
+                    1 -> { chain.phraseRefs[row] = -1; itemsCut++ }  // -1 = empty
                     2 -> { chain.transposeValues[row] = 0x00; itemsCut++ }
                 }
             }
@@ -593,7 +593,7 @@ class ClipboardManager(
         for (row in minRow..maxRow) {
             for (col in minCol..maxCol) {
                 when (col) {
-                    1 -> { chain.phraseRefs[row] = 0xFF; itemsDeleted++ }
+                    1 -> { chain.phraseRefs[row] = -1; itemsDeleted++ }  // -1 = empty
                     2 -> { chain.transposeValues[row] = 0x00; itemsDeleted++ }
                 }
             }

@@ -116,6 +116,9 @@ class FileManager(private val fileSystem: IFileSystem) {
             val jsonString = fileSystem.readFile(filePath)
             val project = json.decodeFromString<Project>(jsonString)
 
+            // Migrate old 0xFF empty values to -1 for phrase refs
+            migrateOldPhraseRefs(project)
+
             Log.d(TAG, "✅ Loaded project: $filePath")
             project
         } catch (e: Exception) {
@@ -139,12 +142,34 @@ class FileManager(private val fileSystem: IFileSystem) {
             val jsonString = fileSystem.readFile(fileInfo.path)
             val project = json.decodeFromString<Project>(jsonString)
 
+            // Migrate old 0xFF empty values to -1 for phrase refs
+            migrateOldPhraseRefs(project)
+
             Log.d(TAG, "✅ Loaded project: ${fileInfo.path}")
             project
         } catch (e: Exception) {
             Log.e(TAG, "❌ Failed to load project: ${e.message}")
             e.printStackTrace()
             null
+        }
+    }
+
+    /**
+     * Migrate old project files that use 0xFF for empty phrase refs.
+     * New format uses -1 for empty to allow full 00-FF range for phrase IDs.
+     */
+    private fun migrateOldPhraseRefs(project: Project) {
+        var migratedCount = 0
+        for (chain in project.chains) {
+            for (i in chain.phraseRefs.indices) {
+                if (chain.phraseRefs[i] == 0xFF) {
+                    chain.phraseRefs[i] = -1
+                    migratedCount++
+                }
+            }
+        }
+        if (migratedCount > 0) {
+            Log.d(TAG, "🔄 Migrated $migratedCount phrase refs from 0xFF to -1")
         }
     }
 
