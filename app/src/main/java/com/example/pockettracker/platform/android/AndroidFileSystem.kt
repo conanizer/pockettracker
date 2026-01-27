@@ -285,4 +285,45 @@ class AndroidFileSystem(
         val file = File(path)
         return file.parent
     }
+
+    /**
+     * Get the renders directory (for WAV export).
+     * Creates it if it doesn't exist.
+     *
+     * Location: Documents/PocketTracker/Renders/
+     */
+    override fun getRendersDirectory(): String {
+        val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+        val rendersDir = File(documentsDir, "PocketTracker/Renders")
+
+        if (!rendersDir.exists()) {
+            val created = rendersDir.mkdirs()
+            if (created) {
+                Log.d(TAG, "Created renders directory: ${rendersDir.absolutePath}")
+            } else {
+                Log.e(TAG, "Failed to create renders directory")
+                // Fallback to internal storage if external fails
+                val fallback = File(context.filesDir, "Renders")
+                fallback.mkdirs()
+                return fallback.absolutePath
+            }
+        }
+
+        return rendersDir.absolutePath
+    }
+
+    /**
+     * Write binary data to file (overwrites if exists).
+     */
+    override fun writeBytes(path: String, data: ByteArray): Boolean {
+        return try {
+            val file = File(path)
+            file.writeBytes(data)
+            Log.d(TAG, "Wrote binary file: $path (${file.length()} bytes)")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write binary file: ${e.message}")
+            false
+        }
+    }
 }

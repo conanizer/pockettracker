@@ -106,6 +106,21 @@ interface IFileSystem {
      * @return Parent directory path, or null if no parent
      */
     fun getParentPath(path: String): String?
+
+    /**
+     * Get the renders directory path (for WAV export).
+     * Creates the directory if it doesn't exist.
+     * @return Absolute path to renders directory
+     */
+    fun getRendersDirectory(): String
+
+    /**
+     * Write binary data to file (overwrites if exists).
+     * @param path Absolute path to file
+     * @param data Byte array to write
+     * @return true if successful
+     */
+    fun writeBytes(path: String, data: ByteArray): Boolean
 }
 
 /**

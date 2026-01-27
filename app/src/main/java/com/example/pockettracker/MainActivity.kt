@@ -37,7 +37,12 @@ import com.example.pockettracker.core.data.Note
 import com.example.pockettracker.core.data.Project
 import com.example.pockettracker.core.data.ScreenType
 import com.example.pockettracker.core.logic.ClipboardManager
+import com.example.pockettracker.core.logic.RenderController
 import com.example.pockettracker.platform.android.OboeAudioBackend
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.example.pockettracker.platform.android.AndroidResourceLoader
 import com.example.pockettracker.platform.android.AndroidFileSystem
 import com.example.pockettracker.core.storage.FileInfo
@@ -275,6 +280,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     val clipboardManager = remember {
         com.example.pockettracker.core.logic.ClipboardManager(logger)
     }
+
+    // RenderController: Handles offline rendering to WAV files
+    // MVP EXPANSION Phase 6: WAV Export functionality
+    val renderController = remember {
+        RenderController(audioBackend, fileSystem)
+    }
+
+    // Render state for WAV export
+    var isRendering by remember { mutableStateOf(false) }
+    var renderProgress by remember { mutableFloatStateOf(0f) }
 
     // InputController: Handles button input
     // PHASE 4: Extracted from MainActivity to separate business logic
@@ -568,11 +583,13 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             }
             ScreenType.PROJECT -> {
                 val projectState = ProjectState(
-                    trackerController.project,
-                    trackerController.projectCursorRow,
-                    trackerController.projectCursorColumn,
-                    trackerController.statusMessage,
-                    trackerController.statusSuccess
+                    project = trackerController.project,
+                    cursorRow = trackerController.projectCursorRow,
+                    cursorColumn = trackerController.projectCursorColumn,
+                    statusMessage = trackerController.statusMessage,
+                    isSuccess = trackerController.statusSuccess,
+                    isRendering = isRendering,
+                    renderProgress = renderProgress
                 )
                 val context = projectModule.getCursorContext(projectState)
                 val action = handlerFunction(context)
@@ -988,7 +1005,56 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                     }
                                 }
                             }
-                            // Rows 4-6 (EXPORT, CLEAN, SYSTEM) - placeholder for now
+                            // ROW 4: EXPORT actions (WAV MIX)
+                            4 -> {
+                                Log.d("ProjectScreen", "Row 4 action: column=${trackerController.projectCursorColumn}")
+                                when (trackerController.projectCursorColumn) {
+                                    1 -> {  // WAV MIX - Render song to WAV
+                                        if (!isRendering) {
+                                            Log.d("RenderWav", "Starting WAV render...")
+                                            isRendering = true
+                                            renderProgress = 0f
+                                            trackerController.statusMessage = "RENDERING..."
+                                            trackerController.statusSuccess = true
+
+                                            // Stop playback before rendering
+                                            trackerController.stopPlayback()
+
+                                            // Run render in background
+                                            CoroutineScope(Dispatchers.Default).launch {
+                                                val result = renderController.renderSongToWav(
+                                                    project = trackerController.project,
+                                                    progressCallback = object : RenderController.ProgressCallback {
+                                                        override fun onProgress(progress: Float, message: String) {
+                                                            renderProgress = progress
+                                                            Log.d("RenderWav", "Progress: ${(progress * 100).toInt()}% - $message")
+                                                        }
+                                                    }
+                                                )
+
+                                                withContext(Dispatchers.Main) {
+                                                    isRendering = false
+                                                    renderProgress = 0f
+
+                                                    when (result) {
+                                                        is RenderController.RenderResult.Success -> {
+                                                            Log.d("RenderWav", "Render complete: ${result.filename}")
+                                                            trackerController.statusMessage = "EXPORTED!"
+                                                            trackerController.statusSuccess = true
+                                                        }
+                                                        is RenderController.RenderResult.Error -> {
+                                                            Log.e("RenderWav", "Render failed: ${result.message}")
+                                                            trackerController.statusMessage = "EXPORT FAILED"
+                                                            trackerController.statusSuccess = false
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Rows 5-6 (CLEAN, SYSTEM) - placeholder for now
                         }
                     }
 
@@ -2007,7 +2073,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 isCellSelected = isCellSelectedFn,
                 mixerCursorColumn = trackerController.mixerCursorColumn,
                 trackPeaks = trackPeakBuffer,
-                masterPeaks = masterPeakBuffer
+                masterPeaks = masterPeakBuffer,
+                isRendering = isRendering,
+                renderProgress = renderProgress
             )
         } else {
             // PORTRAIT: Buttons below screen
@@ -2043,7 +2111,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 isCellSelected = isCellSelectedFn,
                 mixerCursorColumn = trackerController.mixerCursorColumn,
                 trackPeaks = trackPeakBuffer,
-                masterPeaks = masterPeakBuffer
+                masterPeaks = masterPeakBuffer,
+                isRendering = isRendering,
+                renderProgress = renderProgress
             )
         }
     } else {
@@ -2080,7 +2150,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             isCellSelected = isCellSelectedFn,
             mixerCursorColumn = trackerController.mixerCursorColumn,
             trackPeaks = trackPeakBuffer,
-            masterPeaks = masterPeakBuffer
+            masterPeaks = masterPeakBuffer,
+            isRendering = isRendering,
+            renderProgress = renderProgress
         )
     }
 }

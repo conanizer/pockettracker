@@ -1,7 +1,7 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-01-24
+2026-01-27
 
 ## Current Phase
 **Original MVP Scope COMPLETE!** → **MVP Expansion (Mixer + WAV Export)** → Testing → MVP Release
@@ -331,7 +331,11 @@
 
 **Moving from Post-MVP to MVP due to extra time:**
 - 🚧 **Mixer Screen** - 8 track volumes + master with dB meters
-- 🚧 **WAV Export** - Render song to stereo WAV file
+- ✅ **WAV Export** - Render song to stereo WAV file (2026-01-27)
+  - Multi-track rendering with proper chain transpose
+  - ARPEGGIO (Axx) effect with persistence across steps
+  - REPEAT (Rxx) effect with persistence across steps
+  - Per-track state tracking for effect continuity
 - ✅ **Instrument VOL/PAN** - Expose in UI, proper gain staging (2026-01-24)
 - ✅ **Stereo Pan** - True stereo output in audio engine (2026-01-24)
 - ✅ **Volume Chain** - instrument × phrase × track × master (2026-01-24)
@@ -452,7 +456,11 @@ Planned global settings:
 **Phase 3 (Days 2-3):** ✅ Stereo pan in audio engine - COMPLETE
 **Phase 4 (Days 3-4):** ✅ Volume multiplication chain - COMPLETE
 **Phase 5 (Days 4-6):** 🚧 Mixer screen with dB meters - NEXT
-**Phase 6 (Days 6-8):** WAV Export
+**Phase 6 (Days 6-8):** ✅ WAV Export - COMPLETE (2026-01-27)
+  - ✅ Multi-track rendering with proper transpose
+  - ✅ ARPEGGIO effect with persistence across steps
+  - ✅ REPEAT effect with persistence across steps
+  - ✅ Per-track state tracking for effect continuity
 **Phase 7 (Days 8-10):** Integration testing
 
 ### Following:

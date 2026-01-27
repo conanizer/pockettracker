@@ -68,7 +68,10 @@ fun PixelPerfectTracker(
     // Mixer state
     mixerCursorColumn: Int = 0,        // 0-7 = tracks, 8 = master
     trackPeaks: FloatArray = FloatArray(8),
-    masterPeaks: FloatArray = FloatArray(2)
+    masterPeaks: FloatArray = FloatArray(2),
+    // Render state (WAV export)
+    isRendering: Boolean = false,
+    renderProgress: Float = 0f
 ) {
     android.util.Log.d("PixelPerfectTracker", "==== PixelPerfectTracker called ====")
     android.util.Log.d("PixelPerfectTracker", "Screen: $currentScreen")
@@ -177,7 +180,9 @@ fun PixelPerfectTracker(
                             isCellSelected = isCellSelected,
                             mixerCursorColumn = mixerCursorColumn,
                             trackPeaks = trackPeaks,
-                            masterPeaks = masterPeaks
+                            masterPeaks = masterPeaks,
+                            isRendering = isRendering,
+                            renderProgress = renderProgress
                         )
                     }
                 }
@@ -242,7 +247,10 @@ class TrackerLayout {
         // Mixer state
         mixerCursorColumn: Int = 0,
         trackPeaks: FloatArray = FloatArray(8),
-        masterPeaks: FloatArray = FloatArray(2)
+        masterPeaks: FloatArray = FloatArray(2),
+        // Render state (WAV export)
+        isRendering: Boolean = false,
+        renderProgress: Float = 0f
     ) {
         // ===================================
         // DRAW BACKGROUND
@@ -329,7 +337,9 @@ class TrackerLayout {
                             cursorRow = projectCursorRow,  // Pass cursor state
                             cursorColumn = projectCursorColumn,
                             statusMessage = projectStatusMessage,
-                            isSuccess = projectStatusSuccess
+                            isSuccess = projectStatusSuccess,
+                            isRendering = isRendering,
+                            renderProgress = renderProgress
                         )
                     )
                 }

@@ -866,6 +866,170 @@ public:
         outBuffer[1] = masterPeakR;
     }
 
+    // ===================================
+    // OFFLINE RENDER (for WAV export)
+    // ===================================
+    // Renders audio frames without the Oboe stream.
+    // Processes note queue and voices sample-by-sample, returns interleaved stereo output.
+    void renderOffline(int numFrames, float* output, int sampleRate) {
+        // Clear output buffer
+        for (int i = 0; i < numFrames * 2; i++) {
+            output[i] = 0.0f;
+        }
+
+        // Process sample-by-sample (note triggering + voice mixing together)
+        for (int32_t frame = 0; frame < numFrames; frame++) {
+            int64_t currentFrame = globalFrameCounter + frame;
+
+            // Process kill events at this frame
+            while (killQueue.hasKillAt(currentFrame)) {
+                ScheduledKill kill = killQueue.pop();
+                for (int v = 0; v < MAX_VOICES; v++) {
+                    if (voices[v].trackId == kill.trackId && voices[v].isActive) {
+                        voices[v].stop();
+                    }
+                }
+            }
+
+            // Trigger scheduled notes at this frame
+            while (noteQueue.hasNoteAt(currentFrame)) {
+                ScheduledNote note = noteQueue.pop();
+
+                // Voice stealing: stop any voice on this track
+                for (int v = 0; v < MAX_VOICES; v++) {
+                    if (voices[v].trackId == note.trackId) {
+                        voices[v].stop();
+                    }
+                }
+
+                // Find free voice slot
+                for (int v = 0; v < MAX_VOICES; v++) {
+                    if (!voices[v].isActive) {
+                        if (note.sampleId >= 0 && note.sampleId < 256 && samples[note.sampleId]) {
+                            float rate = note.frequency / note.baseFrequency;
+                            voices[v].trigger(samples[note.sampleId], sampleLengths[note.sampleId],
+                                              note.trackId, rate, note.volume, note.pan,
+                                              instrumentParams[note.sampleId],
+                                              (float)sampleRate, note.startPointOverride);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Mix all active voices for this frame
+            float leftSample = 0.0f;
+            float rightSample = 0.0f;
+
+            for (int v = 0; v < MAX_VOICES; v++) {
+                Voice& voice = voices[v];
+                if (!voice.isActive || !voice.sampleData) continue;
+
+                int idx = (int)voice.position;
+                float frac = voice.position - (float)idx;
+
+                // Bounds check
+                if (idx < 0 || idx >= voice.sampleLength - 1) {
+                    if (idx == voice.sampleLength - 1 && frac == 0.0f) {
+                        float sample = voice.sampleData[idx] * voice.volume * 0.25f;
+                        leftSample += sample * voice.panLeft;
+                        rightSample += sample * voice.panRight;
+                    }
+                    voice.isActive = false;
+                    continue;
+                }
+
+                // Read samples for interpolation
+                float sample1 = voice.sampleData[idx];
+                float sample2 = voice.sampleData[idx + 1];
+
+                // Apply downsample effect
+                if (voice.downsample > 0) {
+                    int dsAmount = voice.downsample;
+                    int quantizedIdx = (idx / dsAmount) * dsAmount;
+                    sample1 = voice.sampleData[std::min(quantizedIdx, voice.sampleLength - 1)];
+                    sample2 = sample1;
+                }
+
+                // Apply bit crush effect
+                if (voice.crush > 0) {
+                    int bits = 16 - voice.crush;
+                    if (bits < 1) bits = 1;
+                    float levels = (float)(1 << bits);
+                    sample1 = floorf(sample1 * levels) / levels;
+                    sample2 = floorf(sample2 * levels) / levels;
+                }
+
+                // Linear interpolation
+                float sample = sample1 + frac * (sample2 - sample1);
+
+                // Apply drive (soft clipping)
+                if (voice.drive > 0) {
+                    float driveAmount = 1.0f + (voice.drive / 32.0f);
+                    sample = sample * driveAmount;
+                    sample = tanhf(sample);
+                }
+
+                // Apply biquad filter
+                if (voice.filterType > 0) {
+                    float filtered = voice.b0 * sample +
+                                     voice.b1 * voice.x1 +
+                                     voice.b2 * voice.x2 -
+                                     voice.a1 * voice.y1 -
+                                     voice.a2 * voice.y2;
+                    voice.x2 = voice.x1;
+                    voice.x1 = sample;
+                    voice.y2 = voice.y1;
+                    voice.y1 = filtered;
+                    sample = filtered;
+                }
+
+                // Apply volume and pan
+                sample = sample * voice.volume * 0.25f;
+                leftSample += sample * voice.panLeft;
+                rightSample += sample * voice.panRight;
+
+                // Advance position
+                voice.position += voice.playbackRate;
+
+                // Handle looping
+                if (voice.loopMode > 0) {
+                    float loopStart = (float)voice.actualLoopStart;
+                    float loopEnd = (float)voice.actualEnd;
+
+                    if (voice.position >= loopEnd) {
+                        if (voice.loopMode == 1) {
+                            voice.position = loopStart + fmodf(voice.position - loopEnd, loopEnd - loopStart);
+                        } else if (voice.loopMode == 2) {
+                            voice.playbackRate = -voice.playbackRate;
+                            voice.position = loopEnd - 1;
+                        }
+                    } else if (voice.loopMode == 2 && voice.position < loopStart) {
+                        voice.playbackRate = -voice.playbackRate;
+                        voice.position = loopStart;
+                    }
+                }
+            }
+
+            // Write mixed output for this frame
+            output[frame * 2] = leftSample;
+            output[frame * 2 + 1] = rightSample;
+        }
+
+        // Update global frame counter
+        globalFrameCounter += numFrames;
+    }
+
+    // Reset frame counter (for starting a new render)
+    void resetFrameCounter() {
+        globalFrameCounter = 0;
+    }
+
+    // Get current frame counter
+    int64_t getFrameCounter() {
+        return globalFrameCounter;
+    }
+
 private:
     std::shared_ptr<oboe::AudioStream> stream;
     Voice voices[MAX_VOICES];
@@ -1177,6 +1341,50 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getMast
         engine->getMasterPeaks(buffer);
         env->SetFloatArrayRegion(outArray, 0, 2, buffer);
     }
+}
+
+// ===================================
+// OFFLINE RENDER JNI METHODS (for WAV export)
+// ===================================
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1renderFrames(
+        JNIEnv *env, jobject thiz, jint numFrames, jint sampleRate) {
+    if (!engine) {
+        return nullptr;
+    }
+
+    // Create output array for interleaved stereo
+    jfloatArray result = env->NewFloatArray(numFrames * 2);
+    if (result == nullptr) {
+        return nullptr;
+    }
+
+    // Allocate temporary buffer
+    std::vector<float> buffer(numFrames * 2);
+
+    // Render frames
+    engine->renderOffline(numFrames, buffer.data(), sampleRate);
+
+    // Copy to Java array
+    env->SetFloatArrayRegion(result, 0, numFrames * 2, buffer.data());
+
+    return result;
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1resetFrameCounter(JNIEnv *env, jobject thiz) {
+    if (engine) {
+        engine->resetFrameCounter();
+    }
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getFrameCounter(JNIEnv *env, jobject thiz) {
+    if (engine) {
+        return engine->getFrameCounter();
+    }
+    return 0;
 }
 
 }

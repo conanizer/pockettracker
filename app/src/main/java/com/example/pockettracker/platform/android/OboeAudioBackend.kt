@@ -154,6 +154,18 @@ class OboeAudioBackend : IAudioBackend {
         }
     }
 
+    override fun renderFrames(numFrames: Int, sampleRate: Int): FloatArray {
+        return native_renderFrames(numFrames, sampleRate) ?: FloatArray(numFrames * 2)
+    }
+
+    override fun resetFrameCounter() {
+        native_resetFrameCounter()
+    }
+
+    override fun getFrameCounter(): Long {
+        return native_getFrameCounter()
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Native Methods (JNI → C++)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -195,4 +207,7 @@ class OboeAudioBackend : IAudioBackend {
     )
     private external fun native_getTrackPeaks(outArray: FloatArray)
     private external fun native_getMasterPeaks(outArray: FloatArray)
+    private external fun native_renderFrames(numFrames: Int, sampleRate: Int): FloatArray?
+    private external fun native_resetFrameCounter()
+    private external fun native_getFrameCounter(): Long
 }

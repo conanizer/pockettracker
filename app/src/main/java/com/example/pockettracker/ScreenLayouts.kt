@@ -60,7 +60,10 @@ fun FullScreenLayout(
     // Mixer state
     mixerCursorColumn: Int = 0,
     trackPeaks: FloatArray = FloatArray(8),
-    masterPeaks: FloatArray = FloatArray(2)
+    masterPeaks: FloatArray = FloatArray(2),
+    // Render state (WAV export)
+    isRendering: Boolean = false,
+    renderProgress: Float = 0f
 ) {
     Box(
         modifier = Modifier
@@ -100,7 +103,9 @@ fun FullScreenLayout(
             isCellSelected = isCellSelected,
             mixerCursorColumn = mixerCursorColumn,
             trackPeaks = trackPeaks,
-            masterPeaks = masterPeaks
+            masterPeaks = masterPeaks,
+            isRendering = isRendering,
+            renderProgress = renderProgress
         )
     }
 }
@@ -144,7 +149,10 @@ fun PortraitLayoutWithVirtualButtons(
     // Mixer state
     mixerCursorColumn: Int = 0,
     trackPeaks: FloatArray = FloatArray(8),
-    masterPeaks: FloatArray = FloatArray(2)
+    masterPeaks: FloatArray = FloatArray(2),
+    // Render state (WAV export)
+    isRendering: Boolean = false,
+    renderProgress: Float = 0f
 ) {
     // FIXED SPACER HEIGHT
     val spacerHeight = 200
@@ -216,7 +224,9 @@ fun PortraitLayoutWithVirtualButtons(
                     isCellSelected = isCellSelected,
                     mixerCursorColumn = mixerCursorColumn,
                     trackPeaks = trackPeaks,
-                    masterPeaks = masterPeaks
+                    masterPeaks = masterPeaks,
+                    isRendering = isRendering,
+                    renderProgress = renderProgress
                 )
             }
         }
@@ -285,7 +295,10 @@ fun LandscapeLayoutWithVirtualButtons(
     // Mixer state
     mixerCursorColumn: Int = 0,
     trackPeaks: FloatArray = FloatArray(8),
-    masterPeaks: FloatArray = FloatArray(2)
+    masterPeaks: FloatArray = FloatArray(2),
+    // Render state (WAV export)
+    isRendering: Boolean = false,
+    renderProgress: Float = 0f
 ) {
     // Calculate available space for each button panel
     // Formula: (deviceWidth - scaledScreenWidth) / 2
@@ -361,7 +374,9 @@ fun LandscapeLayoutWithVirtualButtons(
                     isCellSelected = isCellSelected,
                     mixerCursorColumn = mixerCursorColumn,
                     trackPeaks = trackPeaks,
-                    masterPeaks = masterPeaks
+                    masterPeaks = masterPeaks,
+                    isRendering = isRendering,
+                    renderProgress = renderProgress
                 )
             }
         }

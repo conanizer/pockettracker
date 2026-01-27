@@ -150,18 +150,16 @@ class ProjectModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 4: EXPORT (placeholder)
+        // ROW 4: EXPORT (WAV MIX button)
         // ─────────────────────────────────────
-        drawParameterRow(
+        drawExportRow(
             x = x,
             y = rowY,
             scale = scale,
             nameColumnX = nameColumnX,
             valueColumnX = valueColumnX,
-            parameterName = "EXPORT",
-            parameterValue = "---",
-            isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
-            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
+            projectState = projectState,
+            currentRow = currentRow
         )
         rowY += ROW_HEIGHT
         currentRow++
@@ -417,6 +415,67 @@ class ProjectModule : TrackerModule {
     }
 
     /**
+     * Draw EXPORT row with WAV MIX option
+     * Example: EXPORT   WAV MIX
+     */
+    private fun DrawScope.drawExportRow(
+        x: Int,
+        y: Int,
+        scale: Int,
+        nameColumnX: Int,
+        valueColumnX: Int,
+        projectState: ProjectState,
+        currentRow: Int
+    ) {
+        val textY = y + TEXT_PADDING
+        val isCursorOnThisRow = projectState.cursorRow == currentRow
+
+        // Draw row background if cursor is here
+        if (isCursorOnThisRow) {
+            drawRect(
+                color = Color(0xFF333333),
+                topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
+                size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
+            )
+        }
+
+        // COLUMN 1: "EXPORT" label
+        drawBitmapText(
+            text = "EXPORT",
+            x = nameColumnX,
+            y = textY,
+            scale = scale,
+            color = if (isCursorOnThisRow) Color.Yellow else Color.Gray,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        // COLUMN 2: WAV MIX option
+        val isCursorOnWavMix = isCursorOnThisRow && projectState.cursorColumn == 1
+
+        // Show render status or "WAV MIX" button
+        val buttonText = if (projectState.isRendering) {
+            "RENDERING ${(projectState.renderProgress * 100).toInt()}%"
+        } else {
+            "WAV MIX"
+        }
+
+        drawBitmapText(
+            text = buttonText,
+            x = valueColumnX,
+            y = textY,
+            scale = scale,
+            color = when {
+                projectState.isRendering -> Color.Cyan
+                isCursorOnWavMix -> Color.Yellow
+                else -> Color.White
+            },
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+    }
+
+    /**
      * Get cursor context for current cursor position
      *
      * This tells the generic input system what kind of value we're on
@@ -484,6 +543,14 @@ class ProjectModule : TrackerModule {
             3 -> {
                 // PROJECT row (LOAD/SAVE/NEW) - not value editing, read-only for now
                 return CursorContextFactory.readOnly()
+            }
+            4 -> {
+                // EXPORT row (WAV MIX) - actionable button
+                if (state.cursorColumn == 0) {
+                    return CursorContextFactory.readOnly()
+                }
+                // WAV MIX button - can be activated with A button
+                return CursorContextFactory.readOnly()  // Action handled in MainActivity
             }
             else -> return CursorContextFactory.none()
         }
@@ -572,5 +639,7 @@ data class ProjectState(
     val cursorRow: Int = 0,
     val cursorColumn: Int = 1,  // Start on value, not name
     val statusMessage: String = "",
-    val isSuccess: Boolean = true
+    val isSuccess: Boolean = true,
+    val isRendering: Boolean = false,
+    val renderProgress: Float = 0f
 )

@@ -680,20 +680,23 @@ EXPORT:   WAV MIX   ---       ---
 - On completion: "Saved: MY_SONG_0001.wav"
 
 ### Definition of Done - Phase 6
-- [ ] RenderController.kt created
-- [ ] Offline render function in C++
-- [ ] WavWriter.kt writes valid 16-bit stereo WAV
-- [ ] "WAV MIX" button visible in Project screen
-- [ ] A button triggers render
-- [ ] Progress text shows during render
-- [ ] Completion message shows filename
-- [ ] Renders correct song range (first to last used row)
-- [ ] All 8 tracks mixed correctly
-- [ ] Pan applied in render
-- [ ] Volume chain applied in render
-- [ ] Auto-increment prevents overwriting (ProjectName_0001.wav, _0002.wav)
-- [ ] Renders directory created if not exists
-- [ ] Rendered WAV plays correctly in external player
+- [x] RenderController.kt created
+- [x] Offline render function in C++
+- [x] WavWriter.kt writes valid 16-bit stereo WAV
+- [x] "WAV MIX" button visible in Project screen
+- [x] A button triggers render
+- [x] Progress text shows during render
+- [x] Completion message shows filename
+- [x] Renders correct song range (first to last used row)
+- [x] All 8 tracks mixed correctly
+- [x] Pan applied in render
+- [x] Volume chain applied in render
+- [x] Auto-increment prevents overwriting (ProjectName_0001.wav, _0002.wav)
+- [x] Renders directory created if not exists
+- [x] Rendered WAV plays correctly in external player
+- [x] ARPEGGIO effect (Axx) persists across steps in render
+- [x] REPEAT effect (Rxx) persists across steps in render
+- [x] Effects use per-track state tracking for proper persistence
 
 ---
 

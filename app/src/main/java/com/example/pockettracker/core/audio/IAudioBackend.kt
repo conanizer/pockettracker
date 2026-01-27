@@ -199,4 +199,32 @@ interface IAudioBackend {
      * @param buffer Float array of size 2 to fill with [left, right] peak levels
      */
     fun getMasterPeaks(buffer: FloatArray)
+
+    // ===================================
+    // OFFLINE RENDER (for WAV export)
+    // ===================================
+
+    /**
+     * Render a specified number of audio frames offline.
+     *
+     * This processes scheduled notes and voices without using the audio stream,
+     * suitable for rendering to a file.
+     *
+     * @param numFrames Number of frames to render
+     * @param sampleRate Sample rate in Hz (typically 44100)
+     * @return Interleaved stereo float array [L0, R0, L1, R1, ...]
+     */
+    fun renderFrames(numFrames: Int, sampleRate: Int): FloatArray
+
+    /**
+     * Reset the frame counter to 0.
+     * Call this before starting a new render to ensure proper timing.
+     */
+    fun resetFrameCounter()
+
+    /**
+     * Get the current frame counter value.
+     * @return Current frame count (frames processed since last reset)
+     */
+    fun getFrameCounter(): Long
 }
