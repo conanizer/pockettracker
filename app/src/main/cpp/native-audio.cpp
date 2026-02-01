@@ -711,6 +711,16 @@ public:
                 // STEP 6: Apply volume after effects (no artificial headroom)
                 float sample = processedSample * voice.volume;
 
+                // STEP 7: Apply real-time track and master volume
+                // This allows volume changes to take effect immediately without rescheduling
+                float trackVol, masterVol;
+                {
+                    std::lock_guard<std::mutex> lock(volumeMutex);
+                    trackVol = trackVolumes[voice.trackId];
+                    masterVol = masterVolume;
+                }
+                sample = sample * trackVol * masterVol;
+
                 // Apply pan and write to stereo channels
                 float sampleL = sample * voice.panLeft;
                 float sampleR = sample * voice.panRight;
@@ -878,6 +888,60 @@ public:
         std::lock_guard<std::mutex> lock(peakMutex);
         outBuffer[0] = masterPeakL;
         outBuffer[1] = masterPeakR;
+    }
+
+    // Decay peaks manually (call when audio stream is not running)
+    void decayPeaks() {
+        std::lock_guard<std::mutex> lock(peakMutex);
+        const float MANUAL_DECAY = 0.92f;  // Slightly faster for visual feedback
+
+        for (int t = 0; t < 8; t++) {
+            trackPeaks[t] *= MANUAL_DECAY;
+            if (trackPeaks[t] < 0.001f) trackPeaks[t] = 0.0f;
+        }
+        masterPeakL *= MANUAL_DECAY;
+        masterPeakR *= MANUAL_DECAY;
+        if (masterPeakL < 0.001f) masterPeakL = 0.0f;
+        if (masterPeakR < 0.001f) masterPeakR = 0.0f;
+    }
+
+    // Decay waveform buffer (call when audio stream is not running)
+    void decayWaveform() {
+        std::lock_guard<std::mutex> lock(waveformMutex);
+        const float WAVEFORM_DECAY = 0.90f;
+
+        for (int i = 0; i < WAVEFORM_SIZE; i++) {
+            waveformBuffer[i] *= WAVEFORM_DECAY;
+            if (fabsf(waveformBuffer[i]) < 0.001f) waveformBuffer[i] = 0.0f;
+        }
+    }
+
+    // Set real-time track volume (affects playback immediately)
+    void setTrackVolume(int trackId, float volume) {
+        if (trackId < 0 || trackId >= 8) return;
+        std::lock_guard<std::mutex> lock(volumeMutex);
+        trackVolumes[trackId] = volume;
+        LOGD("🔊 Track %d volume set to %.2f", trackId, volume);
+    }
+
+    // Set real-time master volume (affects playback immediately)
+    void setMasterVolume(float volume) {
+        std::lock_guard<std::mutex> lock(volumeMutex);
+        masterVolume = volume;
+        LOGD("🔊 Master volume set to %.2f", volume);
+    }
+
+    // Get current track volume
+    float getTrackVolume(int trackId) {
+        if (trackId < 0 || trackId >= 8) return 1.0f;
+        std::lock_guard<std::mutex> lock(volumeMutex);
+        return trackVolumes[trackId];
+    }
+
+    // Get current master volume
+    float getMasterVolume() {
+        std::lock_guard<std::mutex> lock(volumeMutex);
+        return masterVolume;
     }
 
     // ===================================
@@ -1068,6 +1132,11 @@ private:
     float masterPeakR = 0;          // Master right channel peak
     std::mutex peakMutex;
     static constexpr float PEAK_DECAY = 0.95f;  // Decay rate per callback (smooth falloff)
+
+    // Real-time volume control (can be changed without rescheduling notes)
+    float trackVolumes[8] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+    float masterVolume = 1.0f;
+    std::mutex volumeMutex;
 
     // Downsampling for oscilloscope (capture every Nth sample)
     // Lower = faster scrolling (more zoomed in), Higher = slower scrolling (more time visible)
@@ -1399,6 +1468,38 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getFram
         return engine->getFrameCounter();
     }
     return 0;
+}
+
+// ===================================
+// PHASE 1 BUG FIXES: DECAY AND REAL-TIME VOLUME
+// ===================================
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1decayPeaks(JNIEnv *env, jobject thiz) {
+    if (engine) {
+        engine->decayPeaks();
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1decayWaveform(JNIEnv *env, jobject thiz) {
+    if (engine) {
+        engine->decayWaveform();
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setTrackVolume(JNIEnv *env, jobject thiz, jint trackId, jfloat volume) {
+    if (engine) {
+        engine->setTrackVolume(trackId, volume);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setMasterVolume(JNIEnv *env, jobject thiz, jfloat volume) {
+    if (engine) {
+        engine->setMasterVolume(volume);
+    }
 }
 
 }

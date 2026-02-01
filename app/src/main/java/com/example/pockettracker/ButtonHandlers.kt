@@ -82,7 +82,10 @@ data class ButtonHandlers(
     // SELECT+button combinations for file operations
     val onSelectA: () -> Unit,      // SELECT+A: Rename file/folder
     val onSelectB: () -> Unit,      // SELECT+B: Delete file/folder
-    val onSelectR: () -> Unit       // SELECT+R: Create new folder
+    val onSelectR: () -> Unit,      // SELECT+R: Create new folder
+
+    // L+R combination for exiting selection mode
+    val onLR: () -> Unit            // L+R: Exit selection mode (fixes L+A cut combo)
 )
 
 /**
@@ -400,8 +403,10 @@ class InputMapper(
             }
         }
 
-        // L + R + button combinations (most specific)
+        // L + R combination (exit selection mode)
+        // Check when R is pressed while L is held, or L is pressed while R is held
         if (isLPressed && isRPressed) {
+            // Check for more specific L+R+button combos first
             when (button) {
                 VirtualButton.SELECT -> {
                     if (logInput) Log.d(TAG, "L+R+SELECT (quit to project)")
@@ -416,6 +421,12 @@ class InputMapper(
                 VirtualButton.B -> {
                     if (logInput) Log.d(TAG, "L+R+B (load snapshot)")
                     // TODO: Add handler for L+R+B
+                    return
+                }
+                // L+R alone (when second button of the pair is pressed)
+                VirtualButton.L_SHIFT, VirtualButton.R_SHIFT -> {
+                    if (logInput) Log.d(TAG, "L+R (exit selection mode)")
+                    buttonHandlers.onLR()
                     return
                 }
                 else -> { }

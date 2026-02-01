@@ -227,4 +227,39 @@ interface IAudioBackend {
      * @return Current frame count (frames processed since last reset)
      */
     fun getFrameCounter(): Long
+
+    // ===================================
+    // PHASE 1 BUG FIXES: DECAY AND REAL-TIME VOLUME
+    // ===================================
+
+    /**
+     * Manually decay peak levels.
+     * Call this periodically when audio stream is not running (playback stopped)
+     * to smoothly fade out the mixer meters.
+     */
+    fun decayPeaks()
+
+    /**
+     * Manually decay waveform buffer.
+     * Call this periodically when audio stream is not running (playback stopped)
+     * to smoothly fade out the oscilloscope display.
+     */
+    fun decayWaveform()
+
+    /**
+     * Set real-time track volume.
+     * This affects playback immediately without needing to reschedule notes.
+     *
+     * @param trackId Track index (0-7)
+     * @param volume Volume level (0.0 to 1.0)
+     */
+    fun setTrackVolume(trackId: Int, volume: Float)
+
+    /**
+     * Set real-time master volume.
+     * This affects playback immediately without needing to reschedule notes.
+     *
+     * @param volume Volume level (0.0 to 1.0)
+     */
+    fun setMasterVolume(volume: Float)
 }

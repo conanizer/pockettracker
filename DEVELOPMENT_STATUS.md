@@ -1,12 +1,22 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-01-27
+2026-02-01
 
 ## Current Phase
-**Original MVP Scope COMPLETE!** → **MVP Expansion (Mixer + WAV Export)** → Testing → MVP Release
+**MVP Expansion #1 COMPLETE!** → **MVP Extension Pack 2 (Tables + Pitch Effects)** → Testing → MVP Release
 
-**See:** `MVP_EXPANSION_PLAN.md` for detailed implementation plan
+**See:** `MVP_EXTENSION_PACK_2.md` for detailed implementation plan
+
+### Extension Pack 2 Overview
+- 🚧 Phase 1: Bug fixes (meter decay, volume immediate, L+A cut)
+- 🚧 Phase 2: Table data model
+- 🚧 Phase 3: Table screen UI
+- 🚧 Phase 4: TIC effect (table tick rate)
+- 🚧 Phase 5: HOP effect (phrase/table jump)
+- 🚧 Phase 6: Real-time parameter system
+- 🚧 Phase 7: Pitch effects (PSL, PBN, PVB, PVX)
+- 🚧 Phase 8: Integration testing
 
 ## What's Working ✅
 
@@ -341,33 +351,51 @@
 - [ ] Short demo video
 - [ ] Known issues list
 
-## MVP Expansion (NOW IN PROGRESS)
+## MVP Expansion #1 ✅ COMPLETE (2026-01-27)
 
-**Moving from Post-MVP to MVP due to extra time:**
-- ✅ **Mixer Screen** - 8 track volumes + master with dB meters (2026-01-27)
+**Completed features:**
+- ✅ **Mixer Screen** - 8 track volumes + master with dB meters
   - True dBFS metering (-42dB to +6dB scale)
   - Actual per-track audio level measurement
   - Color zones: Red (>=0dB clipping), Yellow (>=-6dB hot), Green (safe)
-  - Removed 0.25x headroom for full dynamic range
-- ✅ **WAV Export** - Render song to stereo WAV file (2026-01-27)
+- ✅ **WAV Export** - Render song to stereo WAV file
   - Multi-track rendering with proper chain transpose
-  - ARPEGGIO (Axx) effect with persistence across steps
-  - REPEAT (Rxx) effect with persistence across steps
-  - Per-track state tracking for effect continuity
-- ✅ **Instrument VOL/PAN** - Expose in UI, proper gain staging (2026-01-24)
-- ✅ **Stereo Pan** - True stereo output in audio engine (2026-01-24)
-- ✅ **Volume Chain** - instrument × phrase × track × master (2026-01-24)
+  - ARPEGGIO/REPEAT effects with persistence
+- ✅ **Instrument VOL/PAN** - Expose in UI, proper gain staging
+- ✅ **Stereo Pan** - True stereo output in audio engine
+- ✅ **Volume Chain** - instrument × phrase × track × master
 
-**See:** `MVP_EXPANSION_PLAN.md` for detailed implementation plan
+**See:** `MVP_EXPANSION_PLAN.md` for details
+
+## MVP Extension Pack 2 🚧 IN PROGRESS (Started 2026-02-01)
+
+**Bug Fixes:**
+- [ ] Mixer/oscilloscope decay when stopped (C++ decayPeaks())
+- [ ] Track volume changes affect playback immediately (C++ real-time volume)
+- [ ] Remove old project migration script
+- [ ] L+R exits selection mode (fixes L+A cut combo)
+
+**Table Screen:**
+- [ ] Table data model (16 rows: transpose, volume, 3 FX)
+- [ ] TableModule.kt UI (similar to PhraseEditorModule)
+- [ ] Table screen at nav position (2,4) - right of INST
+
+**New Effects:**
+- [ ] TIC effect - Table tick rate control
+- [ ] HOP effect - Phrase/table jump, odd time signatures
+- [ ] PSL effect - Pitch slide (portamento)
+- [ ] PBN effect - Pitch bend (continuous)
+- [ ] PVB/PVX effects - Vibrato
+
+**See:** `MVP_EXTENSION_PACK_2.md` for detailed implementation plan
 
 ## Post-MVP Features (Future Ideas)
 
 ### Early Post-MVP (With Mentor)
-1. **Table Screen** - Effects for instruments
-2. **Advanced Copy/Paste** - Instrument settings
-3. **Linux Port** - GTK/Qt UI with same controllers
-4. **Braids Synthesizers** - Mutable Instruments integration
-5. **Remaining Effects** - Pitch, filter automation, etc.
+1. **Advanced Copy/Paste** - Instrument settings
+2. **Linux Port** - GTK/Qt UI with same controllers
+3. **Braids Synthesizers** - Mutable Instruments integration
+4. **Filter Automation** - CUT, RES effects
 
 ### Later Features
 - Undo/redo

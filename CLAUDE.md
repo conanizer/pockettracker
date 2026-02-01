@@ -10,19 +10,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 1. **DEVELOPMENT_STATUS.md** - What's done, what's remaining
 2. **MVP_ROADMAP.md** - Overall path to MVP
-3. **MVP_EXPANSION_PLAN.md** - Mixer, Volume/Pan, WAV Export plan (NEW!)
+3. **MVP_EXPANSION_PLAN.md** - Mixer, Volume/Pan, WAV Export (COMPLETE!)
+4. **MVP_EXTENSION_PACK_2.md** - Tables, HOP/TIC, Pitch Effects (CURRENT!)
 
-**Current Phase:** MVP Expansion (Mixer + WAV Export)
+**Current Phase:** MVP Extension Pack 2 (Tables + Pitch Effects)
 
-**Current Task:** Implement Mixer screen and WAV export functionality
+**Current Task:** Implement Table screen, HOP/TIC effects, pitch automation
 
 ---
 
 ## 📋 Quick Reference
 
-### Current Project State (January 2026)
+### Current Project State (February 2026)
 
-**Status:** Original MVP scope complete! Now expanding with extra time.
+**Status:** MVP Expansion #1 COMPLETE! Now working on Extension Pack #2.
 
 **Completed:**
 - ✅ Audio engine (professional-grade, sample-accurate)
@@ -31,21 +32,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - ✅ Architecture refactoring COMPLETE
 - ✅ Effects system (ALL TOP-5: Arpeggio, Offset, Volume, Kill, Repeat)
 - ✅ Copy/paste system (M8-style selection)
+- ✅ MVP Expansion #1: Mixer, VOL/PAN, Stereo, WAV Export
 
-**MVP Expansion (NEW - ~2 weeks):**
-- 🚧 Instrument VOL/PAN in UI
-- 🚧 Volume multiplication chain (inst × phrase × track × master)
-- 🚧 Stereo pan in audio engine
-- 🚧 Mixer screen (8 tracks + master with dB meters)
-- 🚧 WAV Export (render song to stereo WAV)
+**MVP Extension Pack 2 (CURRENT - ~4 weeks):**
+- 🚧 Bug fixes (meter decay, volume immediate, L+A cut)
+- 🚧 Table screen UI (mini-sequencer per instrument)
+- 🚧 TIC effect (table tick rate control)
+- 🚧 HOP effect (phrase/table jump)
+- 🚧 Real-time pitch parameter system
+- 🚧 Pitch effects (PSL, PBN, PVB, PVX)
 
 **Next Steps:**
-1. ~~Complete refactoring (Phase 4)~~ ✅ DONE
+1. ~~Complete refactoring~~ ✅ DONE
 2. ~~Finish effects system~~ ✅ DONE
 3. ~~Implement copy/paste~~ ✅ DONE
-4. **Implement Mixer + WAV Export** ← CURRENT
-5. Testing & polish
-6. MVP release (Late February 2026)
+4. ~~Implement Mixer + WAV Export~~ ✅ DONE
+5. **Extension Pack 2** ← CURRENT
+6. Testing & polish
+7. MVP release (Late February/March 2026)
 
 ---
 
@@ -307,18 +311,18 @@ Each module receives state objects and renders itself independently.
 **5×5 Navigation Grid:**
 
 ```
-  0       1         2       3       4
-┌───────────────────────────────────────┐
-│ PROJ    SONG    CHAIN   PHRASE   INST │ 0
-│                                        │
-│ MIXER   FX      TABLE   GROOVE   NAV  │ 1
-│                                        │
-│ (empty) (empty) (empty) (empty) SCALE │ 2
-│                                        │
-│ (empty) (empty) (empty) (empty) MODS  │ 3
-│                                        │
-│ (empty) (empty) (empty) (empty) (empty)│ 4
-└───────────────────────────────────────┘
+      0         1         2         3         4
+┌─────────────────────────────────────────────────┐
+│ ----      ----      SCALE   INST_POOL   ----   │ 0
+│                                                  │
+│ PROJ      PROJ     GROOVE     MODS      ----   │ 1
+│                                                  │
+│ SONG     CHAIN     PHRASE     INST     TABLE   │ 2  ← Main editing row
+│                                                  │
+│ MIXER    MIXER     MIXER     MIXER     MIXER   │ 3
+│                                                  │
+│ EFFECTS  EFFECTS  EFFECTS   EFFECTS   EFFECTS  │ 4
+└─────────────────────────────────────────────────┘
 ```
 
 **Navigation:**
@@ -326,7 +330,9 @@ Each module receives state objects and renders itself independently.
 - Release L/R: Jump to selected screen
 
 **Implemented Screens:**
-- Row 0: PROJECT, SONG, CHAIN, PHRASE, INSTRUMENT ✅
+- Row 1: PROJECT ✅
+- Row 2: SONG ✅, CHAIN ✅, PHRASE ✅, INSTRUMENT ✅, TABLE 🚧
+- Row 3: MIXER ✅
 - Others: Coming in Post-MVP
 
 ---

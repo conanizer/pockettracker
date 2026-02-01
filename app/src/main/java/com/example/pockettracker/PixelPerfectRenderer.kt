@@ -273,8 +273,8 @@ class TrackerLayout {
         var currentY = SCREEN_SPACER  // Start 6px from top
 
         // Update waveform data from native audio engine (every frame)
-        // NOTE: Adjust update rate here if needed (e.g., skip frames for slower update)
-        audioEngine.updateWaveform()
+        // When not playing, decay waveform to smoothly fade out oscilloscope
+        audioEngine.updateWaveformWithDecay(isPlaying)
 
         // MODULE 1: OSCILLOSCOPE (waveform display)
         // Position: Top of screen

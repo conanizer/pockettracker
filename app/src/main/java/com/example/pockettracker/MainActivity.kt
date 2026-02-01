@@ -329,6 +329,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // NOTE: GenericInputHandler has been migrated to InputController (Phase 4)
     // All input handling now goes through trackerController.inputController
 
+    // Initialize real-time volumes in audio backend on startup
+    LaunchedEffect(Unit) {
+        // Sync all track/master volumes to audio backend
+        for (i in 0 until 8) {
+            val vol = trackerController.project.tracks[i].volume
+            audioBackend.setTrackVolume(i, com.example.pockettracker.core.data.VolumeUtils.hexToFloat(vol))
+        }
+        audioBackend.setMasterVolume(com.example.pockettracker.core.data.VolumeUtils.hexToFloat(trackerController.project.masterVolume))
+        Log.d("VolumeSync", "Initial volume sync to audio backend complete")
+    }
+
     // ChainEditorModule: Used to get cursor context for chain editing
     val chainEditorModule = remember { ChainEditorModule() }
 
@@ -425,9 +436,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // (Audio engine cleanup moved to line 168-172 with new architecture)
 
     // Update peak levels for mixer meters (every ~60ms = ~16fps update rate)
+    // When not playing, manually decay peaks and waveform (fixes freeze on stop bug)
     LaunchedEffect(currentScreen) {
         if (currentScreen == ScreenType.MIXER) {
             while (true) {
+                // When not playing, manually decay peaks (audio callback not running)
+                if (!trackerController.isPlaying()) {
+                    audioBackend.decayPeaks()
+                    audioBackend.decayWaveform()
+                }
+                // Always read current peak values for display
                 audioBackend.getTrackPeaks(trackPeakBuffer)
                 audioBackend.getMasterPeaks(masterPeakBuffer)
                 stateVersion++  // Trigger recomposition
@@ -478,6 +496,27 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     }
 
     /**
+     * Sync all track and master volumes to the audio backend.
+     *
+     * This ensures the C++ real-time volume array matches the project data.
+     * Called on project load and app initialization.
+     */
+    fun syncVolumesToAudioBackend() {
+        val project = trackerController.project
+
+        // Sync all 8 track volumes
+        for (i in 0 until 8) {
+            val vol = project.tracks[i].volume
+            audioBackend.setTrackVolume(i, com.example.pockettracker.core.data.VolumeUtils.hexToFloat(vol))
+        }
+
+        // Sync master volume
+        audioBackend.setMasterVolume(com.example.pockettracker.core.data.VolumeUtils.hexToFloat(project.masterVolume))
+
+        Log.d("VolumeSync", "Synced all track/master volumes to audio backend")
+    }
+
+    /**
      * Reload all custom samples from a loaded project
      *
      * When a project is loaded from JSON, the sampleFilePath is preserved but the actual
@@ -516,6 +555,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
         if (loadedCount > 0 || failedCount > 0) {
             Log.d("ProjectLoad", "Sample reload complete: $loadedCount loaded, $failedCount failed")
         }
+
+        // Sync all track/master volumes to audio backend
+        syncVolumesToAudioBackend()
     }
 
     /**
@@ -634,7 +676,19 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 val result = mixerModule.handleInput(mixerState, action) {
                     trackerController.projectVersion++
                 }
-                // Result handled in callback
+                // Sync real-time volume to audio backend if modified
+                if (result.modified) {
+                    val cursorCol = trackerController.mixerCursorColumn
+                    if (cursorCol < 8) {
+                        // Track volume changed - update audio backend immediately
+                        val vol = trackerController.project.tracks[cursorCol].volume
+                        audioBackend.setTrackVolume(cursorCol, com.example.pockettracker.core.data.VolumeUtils.hexToFloat(vol))
+                    } else {
+                        // Master volume changed - update audio backend immediately
+                        val vol = trackerController.project.masterVolume
+                        audioBackend.setMasterVolume(com.example.pockettracker.core.data.VolumeUtils.hexToFloat(vol))
+                    }
+                }
             }
             else -> { /* Other screens not yet implemented */ }
         }
@@ -1421,16 +1475,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             },
 
 // ───────────────────────────────────────────────────────────────
-// L BUTTON - Cancel selection mode (or hold modifier)
+// L BUTTON - Now only a hold modifier (L+R exits selection mode)
 // ───────────────────────────────────────────────────────────────
             onL = {
-                // L alone: Cancel selection mode without copying (M8-style)
-                if (trackerController.inputController.isSelectionModeActive()) {
-                    trackerController.inputController.exitSelectionMode()
-                    Log.d("Selection", "L alone: Cancelled selection mode")
-                }
-                // Otherwise L is tracked as a hold modifier by InputMapper
-                // Combinations like L+A, L+direction are handled in InputMapper
+                // L alone: Reserved as hold modifier only
+                // Selection mode exit moved to L+R combo (fixes L+A cut combo bug)
+                // Combinations like L+A, L+B, L+R are handled in InputMapper
             },
 
 // ───────────────────────────────────────────────────────────────
@@ -1983,6 +2033,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         statusMessage = "",
                         statusSuccess = true
                     )
+                }
+            },
+
+// ─────────────────────────────────────────────────────────────────────
+// L+R: Exit selection mode (fixes L+A cut combo bug)
+// ─────────────────────────────────────────────────────────────────────
+            onLR = {
+                if (trackerController.inputController.isSelectionModeActive()) {
+                    trackerController.inputController.exitSelectionMode()
+                    Log.d("Selection", "L+R: Exited selection mode")
                 }
             }
         )

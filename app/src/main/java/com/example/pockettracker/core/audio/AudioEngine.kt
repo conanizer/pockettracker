@@ -307,6 +307,33 @@ class AudioEngine(
     }
 
     /**
+     * Decay waveform buffer (call when playback is stopped).
+     * This smoothly fades out the oscilloscope display.
+     */
+    fun decayWaveform() {
+        backend.decayWaveform()
+    }
+
+    /**
+     * Decay peak meters (call when playback is stopped).
+     * This smoothly fades out the mixer meter display.
+     */
+    fun decayPeaks() {
+        backend.decayPeaks()
+    }
+
+    /**
+     * Update waveform with automatic decay when not playing.
+     * @param isPlaying Whether playback is currently active
+     */
+    fun updateWaveformWithDecay(isPlaying: Boolean) {
+        if (!isPlaying) {
+            backend.decayWaveform()
+        }
+        backend.updateWaveform(waveformBuffer)
+    }
+
+    /**
      * Stop all playback.
      */
     fun stopAll() {

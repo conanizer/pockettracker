@@ -167,6 +167,26 @@ class OboeAudioBackend : IAudioBackend {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // PHASE 1 BUG FIXES: DECAY AND REAL-TIME VOLUME
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    override fun decayPeaks() {
+        native_decayPeaks()
+    }
+
+    override fun decayWaveform() {
+        native_decayWaveform()
+    }
+
+    override fun setTrackVolume(trackId: Int, volume: Float) {
+        native_setTrackVolume(trackId, volume)
+    }
+
+    override fun setMasterVolume(volume: Float) {
+        native_setMasterVolume(volume)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // Native Methods (JNI → C++)
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -210,4 +230,10 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_renderFrames(numFrames: Int, sampleRate: Int): FloatArray?
     private external fun native_resetFrameCounter()
     private external fun native_getFrameCounter(): Long
+
+    // Phase 1 bug fixes
+    private external fun native_decayPeaks()
+    private external fun native_decayWaveform()
+    private external fun native_setTrackVolume(trackId: Int, volume: Float)
+    private external fun native_setMasterVolume(volume: Float)
 }
