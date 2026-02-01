@@ -190,6 +190,10 @@ object VolumeUtils {
      * instrument × phrase × track × master
      *
      * All inputs are 00-FF hex values, output is 0.0-1.0 float
+     *
+     * NOTE: Use this for OFFLINE RENDERING where all volumes need to be baked in.
+     * For REAL-TIME PLAYBACK, use calculateNoteVolume() instead, which only bakes
+     * instrument × phrase and lets C++ apply track × master in real-time.
      */
     fun calculateFinalVolume(
         instrumentVol: Int,
@@ -201,6 +205,26 @@ object VolumeUtils {
                hexToFloat(phraseVol) *
                hexToFloat(trackVol) *
                hexToFloat(masterVol)
+    }
+
+    /**
+     * Calculate note volume with 2-stage gain staging:
+     * instrument × phrase
+     *
+     * All inputs are 00-FF hex values, output is 0.0-1.0 float
+     *
+     * IMPORTANT: Use this for REAL-TIME PLAYBACK where track × master volumes
+     * are applied in the C++ audio engine in real-time. This allows volume
+     * changes in the mixer to take effect immediately without rescheduling notes.
+     *
+     * For OFFLINE RENDERING, use calculateFinalVolume() instead which bakes
+     * all 4 volume stages into the scheduled note's volume.
+     */
+    fun calculateNoteVolume(
+        instrumentVol: Int,
+        phraseVol: Int
+    ): Float {
+        return hexToFloat(instrumentVol) * hexToFloat(phraseVol)
     }
 
     /**

@@ -806,14 +806,13 @@ class PlaybackController(
         val defaultVolume = step.volume / 255.0f
         val params = effectProcessor.resolveStepParams(step, targetFrame, defaultVolume)
 
-        // Apply full volume chain: instrument × phrase × track × master
+        // Apply volume chain: instrument × phrase only
+        // NOTE: Track × master are applied in C++ in real-time, allowing mixer changes
+        // to take effect immediately without rescheduling notes
         val instrument = project.instruments[step.instrument]
-        val track = project.tracks[trackId]
-        val finalVolume = VolumeUtils.calculateFinalVolume(
+        val finalVolume = VolumeUtils.calculateNoteVolume(
             instrumentVol = instrument.volume,
-            phraseVol = (params.volume * 255).toInt().coerceIn(0, 255),  // Convert back to hex
-            trackVol = track.volume,
-            masterVol = project.masterVolume
+            phraseVol = (params.volume * 255).toInt().coerceIn(0, 255)  // Convert back to hex
         )
 
         // Get instrument pan (hex 0x00-0xFF → float 0.0-1.0)
@@ -834,7 +833,7 @@ class PlaybackController(
                 step.note
             }
 
-            // Schedule the note with resolved effect parameters and full volume chain
+            // Schedule the note with resolved effect parameters (track × master applied in C++)
             audioEngine.scheduleNote(
                 targetFrame = targetFrame,
                 note = note,
@@ -913,7 +912,7 @@ class PlaybackController(
                 trackState.lastNote
             }
             val retrigInstrument = if (hasNote) step.instrument else trackState.lastInstrument
-            val retrigVolume = if (hasNote) finalVolume else trackState.lastVolume  // Use finalVolume with full chain
+            val retrigVolume = if (hasNote) finalVolume else trackState.lastVolume  // Track × master in C++
             val retrigPan = if (hasNote) instrumentPan else trackState.lastPan
             val retrigStartPoint = if (hasNote) params.startPoint else trackState.lastStartPoint
 
@@ -1099,7 +1098,7 @@ class PlaybackController(
      * @param step The phrase step
      * @param params Resolved step parameters
      * @param transposeSemitones Semitones to transpose
-     * @param finalVolume Pre-calculated volume with full chain (inst × phrase × track × master)
+     * @param finalVolume Pre-calculated volume (inst × phrase); track × master applied in C++
      * @param finalPan Pre-calculated pan (0.0=left, 0.5=center, 1.0=right)
      */
     private fun scheduleArpeggioNotes(
@@ -1141,7 +1140,7 @@ class PlaybackController(
         // Get the arpeggio pattern length based on mode
         val patternLength = if (trackState.arpeggioMode == 2) 4 else 3  // PINGPONG uses 4, others use 3
 
-        // Get instrument, volume, and pan (finalVolume/finalPan already have full chain applied)
+        // Get instrument, volume, and pan (finalVolume has inst × phrase; track × master in C++)
         val instrumentId = if (hasNote) step.instrument else trackState.lastInstrument
         val arpVolume = if (hasNote) finalVolume else trackState.lastVolume
         val arpPan = if (hasNote) finalPan else trackState.lastPan
