@@ -277,6 +277,13 @@ fun handleSelectionModeInput(event: InputEvent): Boolean {
 - [x] L+A cut works correctly in selection mode
 - [x] All changes tested on device ✅
 
+**Phase 1.1 Fix (2026-02-01):** Volume double-application bug
+- [x] Fixed: Changing mixer volume caused ~1 bar mute before working
+- [x] Root cause: Track × master was baked into scheduled notes AND applied in C++
+- [x] Solution: Added `VolumeUtils.calculateNoteVolume(inst, phrase)` for real-time playback
+- [x] PlaybackController now only bakes inst × phrase; C++ applies track × master
+- [x] Offline render (RenderController) unchanged - still bakes all 4 volumes
+
 **Note:** Always test on real device after completing each phase before proceeding.
 
 ---
@@ -376,13 +383,13 @@ data class Project(
 )
 ```
 
-### Definition of Done - Phase 2
-- [ ] Table data class created with 16 rows
-- [ ] TableRow has transpose, volume, 3 FX slots
-- [ ] Instrument has tableId and tableTicRate fields
-- [ ] Project has 256 tables
-- [ ] Existing projects still load (tables default to empty)
-- [ ] Compiles without errors
+### Definition of Done - Phase 2 ✅ COMPLETE (2026-02-02)
+- [x] Table data class created with 16 rows
+- [x] TableRow has transpose, volume, 3 FX slots
+- [x] Instrument has tableId and tableTicRate fields
+- [x] Project has 256 tables
+- [x] Existing projects still load (tables default to empty - new fields have defaults)
+- [x] Compiles without errors
 
 ---
 

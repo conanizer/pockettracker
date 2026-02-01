@@ -131,6 +131,78 @@ data class Chain(
     }
 }
 
+/**
+ * Table - A mini-sequencer that runs alongside an instrument
+ *
+ * Tables are powerful tools for:
+ * - Arpeggios and chord patterns
+ * - Volume slides and envelopes
+ * - Pitch automation
+ * - Multi-stage effects
+ *
+ * Each table has 16 rows with: transpose, volume, and 3 FX columns
+ * Tables run at their own tick rate (set by TIC effect or instrument setting)
+ */
+@Serializable
+data class Table(
+    val id: Int,  // 00-FF
+    var name: String = "TBL${id.toString(16).padStart(2,'0').uppercase()}",
+    val rows: Array<TableRow> = Array(16) { TableRow() }
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+        other as Table
+        return id == other.id && rows.contentEquals(other.rows)
+    }
+
+    override fun hashCode(): Int {
+        var result = id
+        result = 31 * result + rows.contentHashCode()
+        return result
+    }
+}
+
+/**
+ * Single row in a table
+ */
+@Serializable
+data class TableRow(
+    var transpose: Int = 0x00,      // Note transpose: 00-7F = +semitones, 80-FF = -semitones (signed)
+    var volume: Int = 0xFF,         // Volume multiplier: 00-FF (FF = no change)
+    var fx1Type: Int = 0x00,        // Effect 1 type
+    var fx1Value: Int = 0x00,       // Effect 1 value
+    var fx2Type: Int = 0x00,        // Effect 2 type
+    var fx2Value: Int = 0x00,       // Effect 2 value
+    var fx3Type: Int = 0x00,        // Effect 3 type
+    var fx3Value: Int = 0x00        // Effect 3 value
+) {
+    companion object {
+        fun empty() = TableRow()
+
+        /**
+         * Convert transpose value to semitones
+         * 00 = 0 semitones (no change)
+         * 01-7F = +1 to +127 semitones (up)
+         * 80-FF = -128 to -1 semitones (down)
+         */
+        fun transposeToSemitones(transpose: Int): Int {
+            return if (transpose < 0x80) transpose else transpose - 256
+        }
+    }
+
+    /**
+     * Check if this row is effectively empty (no transpose, full volume, no effects)
+     */
+    fun isEmpty(): Boolean {
+        return transpose == 0x00 &&
+               volume == 0xFF &&
+               fx1Type == 0x00 &&
+               fx2Type == 0x00 &&
+               fx3Type == 0x00
+    }
+}
+
 // Track in song = sequence of chain references
 @Serializable
 data class Track(
@@ -168,7 +240,11 @@ data class Instrument(
     var reverse: Boolean = false,  // Reverse playback
     var loopMode: String = "off",  // "off", "fwd" (forward), "png" (ping-pong)
     var loopStart: Int = 0x00,  // 00-FF loop start point
-    var sampleFilePath: String? = null  // Path to loaded WAV file (null = use resource)
+    var sampleFilePath: String? = null,  // Path to loaded WAV file (null = use resource)
+
+    // Table parameters
+    var tableId: Int = -1,          // -1 = no table, 0-255 = table ID
+    var tableTicRate: Int = 0x06    // Default: 6 tics per row (2 rows per phrase step at 12 tics/step)
 )
 
 /**
@@ -283,7 +359,10 @@ data class Project(
                 sampleId = 0  // Default to kick, but name is empty so it's "uninitialized"
             )
         }
-    }
+    },
+
+    // Tables (256 slots, like phrases)
+    val tables: Array<Table> = Array(256) { Table(it) }
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
