@@ -61,6 +61,10 @@ fun FullScreenLayout(
     mixerCursorColumn: Int = 0,
     trackPeaks: FloatArray = FloatArray(8),
     masterPeaks: FloatArray = FloatArray(2),
+    // Table state
+    currentTable: Int = 0,
+    tableCursorRow: Int = 0,
+    tableCursorColumn: Int = 1,
     // Render state (WAV export)
     isRendering: Boolean = false,
     renderProgress: Float = 0f
@@ -104,6 +108,9 @@ fun FullScreenLayout(
             mixerCursorColumn = mixerCursorColumn,
             trackPeaks = trackPeaks,
             masterPeaks = masterPeaks,
+            currentTable = currentTable,
+            tableCursorRow = tableCursorRow,
+            tableCursorColumn = tableCursorColumn,
             isRendering = isRendering,
             renderProgress = renderProgress
         )
@@ -150,6 +157,10 @@ fun PortraitLayoutWithVirtualButtons(
     mixerCursorColumn: Int = 0,
     trackPeaks: FloatArray = FloatArray(8),
     masterPeaks: FloatArray = FloatArray(2),
+    // Table state
+    currentTable: Int = 0,
+    tableCursorRow: Int = 0,
+    tableCursorColumn: Int = 1,
     // Render state (WAV export)
     isRendering: Boolean = false,
     renderProgress: Float = 0f
@@ -225,6 +236,9 @@ fun PortraitLayoutWithVirtualButtons(
                     mixerCursorColumn = mixerCursorColumn,
                     trackPeaks = trackPeaks,
                     masterPeaks = masterPeaks,
+                    currentTable = currentTable,
+                    tableCursorRow = tableCursorRow,
+                    tableCursorColumn = tableCursorColumn,
                     isRendering = isRendering,
                     renderProgress = renderProgress
                 )
@@ -296,6 +310,10 @@ fun LandscapeLayoutWithVirtualButtons(
     mixerCursorColumn: Int = 0,
     trackPeaks: FloatArray = FloatArray(8),
     masterPeaks: FloatArray = FloatArray(2),
+    // Table state
+    currentTable: Int = 0,
+    tableCursorRow: Int = 0,
+    tableCursorColumn: Int = 1,
     // Render state (WAV export)
     isRendering: Boolean = false,
     renderProgress: Float = 0f
@@ -375,6 +393,9 @@ fun LandscapeLayoutWithVirtualButtons(
                     mixerCursorColumn = mixerCursorColumn,
                     trackPeaks = trackPeaks,
                     masterPeaks = masterPeaks,
+                    currentTable = currentTable,
+                    tableCursorRow = tableCursorRow,
+                    tableCursorColumn = tableCursorColumn,
                     isRendering = isRendering,
                     renderProgress = renderProgress
                 )

@@ -203,6 +203,24 @@ class InstrumentController(
         audioEngine.previewInstrument(instrument)
     }
 
+    /**
+     * Preview instrument with its associated table
+     * For now, just previews the instrument (table processing not yet implemented)
+     *
+     * @param project Project containing instrument and table data
+     * @param instrumentId Instrument to preview
+     * @param tableId Table associated with this instrument
+     */
+    fun previewInstrumentWithTable(project: Project, instrumentId: Int, tableId: Int) {
+        val instrument = project.instruments[instrumentId.coerceIn(0, 255)]
+
+        logger.d(TAG, "🎵 Previewing instrument ${formatHex(instrumentId)} with table ${formatHex(tableId)}: root=${instrument.root}, detune=0x${formatHex(instrument.detune)}")
+
+        // TODO: When table processing is implemented, tables will modify pitch/volume/effects over time
+        // For now, just preview the instrument normally
+        audioEngine.previewInstrument(instrument)
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // PARAMETER UPDATES
     // ═══════════════════════════════════════════════════════════════════════════

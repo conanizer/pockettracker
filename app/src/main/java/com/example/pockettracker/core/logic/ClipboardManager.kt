@@ -4,6 +4,7 @@ import com.example.pockettracker.core.logging.ILogger
 import com.example.pockettracker.core.data.Project
 import com.example.pockettracker.core.data.Note
 import com.example.pockettracker.core.data.PhraseStep
+import com.example.pockettracker.core.data.TableRow
 
 /**
  * CLIPBOARD MANAGER
@@ -90,6 +91,29 @@ class ClipboardManager(
     )
 
     /**
+     * Clipboard item for a table row.
+     * Columns: 1=transpose, 2=volume, 3=fx1Type, 4=fx1Value, 5=fx2Type, 6=fx2Value, 7=fx3Type, 8=fx3Value
+     */
+    data class TableRowClipItem(
+        val row: Int,           // Row in source table (0-15)
+        val column: Int,        // Column type (1-8)
+        val transpose: Int?,    // Transpose value (column 1)
+        val volume: Int?,       // Volume value (column 2)
+        val fxType: Int?,       // FX type (columns 3,5,7)
+        val fxValue: Int?       // FX value (columns 4,6,8)
+    )
+
+    /**
+     * Container for table rows clipboard data.
+     */
+    data class TableRowsData(
+        val items: List<TableRowClipItem>,
+        val sourceTable: Int,
+        val width: Int,         // Number of columns
+        val height: Int         // Number of rows
+    )
+
+    /**
      * Current clipboard contents.
      * Null = clipboard is empty.
      */
@@ -112,7 +136,8 @@ class ClipboardManager(
     enum class ClipboardType {
         PHRASE_STEPS,   // Selection of phrase steps (rows × columns)
         CHAIN_ROWS,     // Selection of chain rows
-        SONG_CELLS      // Selection of song cells (chain refs across tracks)
+        SONG_CELLS,     // Selection of song cells (chain refs across tracks)
+        TABLE_ROWS      // Selection of table rows (transpose, volume, fx)
     }
 
     // ========================================
@@ -254,6 +279,55 @@ class ClipboardManager(
         logger.d(TAG, "📋 Copied song cells: ${data.width}x${data.height}")
     }
 
+    /**
+     * Copy table rows to clipboard.
+     * Columns: 1=transpose, 2=volume, 3=fx1Type, 4=fx1Value, 5=fx2Type, 6=fx2Value, 7=fx3Type, 8=fx3Value
+     */
+    fun copyTableRows(
+        project: Project,
+        tableId: Int,
+        startRow: Int,
+        startColumn: Int,
+        endRow: Int,
+        endColumn: Int
+    ) {
+        val table = project.tables[tableId]
+        val items = mutableListOf<TableRowClipItem>()
+
+        val minRow = minOf(startRow, endRow)
+        val maxRow = maxOf(startRow, endRow)
+        val minCol = minOf(startColumn, endColumn)
+        val maxCol = maxOf(startColumn, endColumn)
+
+        for (row in minRow..maxRow) {
+            val tableRow = table.rows[row]
+            for (col in minCol..maxCol) {
+                val item = when (col) {
+                    1 -> TableRowClipItem(row - minRow, col, tableRow.transpose, null, null, null)
+                    2 -> TableRowClipItem(row - minRow, col, null, tableRow.volume, null, null)
+                    3 -> TableRowClipItem(row - minRow, col, null, null, tableRow.fx1Type, null)
+                    4 -> TableRowClipItem(row - minRow, col, null, null, null, tableRow.fx1Value)
+                    5 -> TableRowClipItem(row - minRow, col, null, null, tableRow.fx2Type, null)
+                    6 -> TableRowClipItem(row - minRow, col, null, null, null, tableRow.fx2Value)
+                    7 -> TableRowClipItem(row - minRow, col, null, null, tableRow.fx3Type, null)
+                    8 -> TableRowClipItem(row - minRow, col, null, null, null, tableRow.fx3Value)
+                    else -> continue
+                }
+                items.add(item)
+            }
+        }
+
+        val data = TableRowsData(
+            items = items,
+            sourceTable = tableId,
+            width = maxCol - minCol + 1,
+            height = maxRow - minRow + 1
+        )
+
+        clipboard = ClipboardData(ClipboardType.TABLE_ROWS, data, data.width, data.height)
+        logger.d(TAG, "📋 Copied table rows: ${data.width}x${data.height} from table $tableId")
+    }
+
     // ========================================
     // PASTE OPERATIONS
     // ========================================
@@ -295,6 +369,12 @@ class ClipboardManager(
                     return PasteResult.Error("Can only paste song data to song screen")
                 }
                 pasteSongCells(project, cursorRow, cursorColumn, clip.data as SongCellsData)
+            }
+            ClipboardType.TABLE_ROWS -> {
+                if (targetScreen != "TABLE") {
+                    return PasteResult.Error("Can only paste table data to table screen")
+                }
+                pasteTableRows(project, targetId, cursorRow, cursorColumn, clip.data as TableRowsData)
             }
         }
     }
@@ -405,6 +485,45 @@ class ClipboardManager(
         }
 
         logger.d(TAG, "📋 Pasted $itemsPasted song cells at ($cursorRow, track $cursorColumn)")
+        return PasteResult.Success(itemsPasted)
+    }
+
+    /**
+     * Paste table rows at cursor position.
+     */
+    private fun pasteTableRows(
+        project: Project,
+        tableId: Int,
+        cursorRow: Int,
+        cursorColumn: Int,
+        data: TableRowsData
+    ): PasteResult {
+        val table = project.tables[tableId]
+        var itemsPasted = 0
+
+        for (item in data.items) {
+            val targetRow = cursorRow + item.row
+            val targetCol = cursorColumn + (item.column - data.items.minOf { it.column })
+
+            // Skip if out of bounds
+            if (targetRow < 0 || targetRow >= 16) continue
+            if (targetCol < 1 || targetCol > 8) continue
+
+            val tableRow = table.rows[targetRow]
+
+            when (targetCol) {
+                1 -> item.transpose?.let { tableRow.transpose = it; itemsPasted++ }
+                2 -> item.volume?.let { tableRow.volume = it; itemsPasted++ }
+                3 -> item.fxType?.let { tableRow.fx1Type = it; itemsPasted++ }
+                4 -> item.fxValue?.let { tableRow.fx1Value = it; itemsPasted++ }
+                5 -> item.fxType?.let { tableRow.fx2Type = it; itemsPasted++ }
+                6 -> item.fxValue?.let { tableRow.fx2Value = it; itemsPasted++ }
+                7 -> item.fxType?.let { tableRow.fx3Type = it; itemsPasted++ }
+                8 -> item.fxValue?.let { tableRow.fx3Value = it; itemsPasted++ }
+            }
+        }
+
+        logger.d(TAG, "📋 Pasted $itemsPasted table items to table $tableId at ($cursorRow, $cursorColumn)")
         return PasteResult.Success(itemsPasted)
     }
 
@@ -527,6 +646,48 @@ class ClipboardManager(
         return CutResult.Success(itemsCut)
     }
 
+    /**
+     * Cut table rows (copy + clear source).
+     */
+    fun cutTableRows(
+        project: Project,
+        tableId: Int,
+        startRow: Int,
+        startColumn: Int,
+        endRow: Int,
+        endColumn: Int
+    ): CutResult {
+        // First copy
+        copyTableRows(project, tableId, startRow, startColumn, endRow, endColumn)
+
+        // Then clear source
+        val table = project.tables[tableId]
+        val minRow = minOf(startRow, endRow)
+        val maxRow = maxOf(startRow, endRow)
+        val minCol = minOf(startColumn, endColumn)
+        val maxCol = maxOf(startColumn, endColumn)
+        var itemsCut = 0
+
+        for (row in minRow..maxRow) {
+            val tableRow = table.rows[row]
+            for (col in minCol..maxCol) {
+                when (col) {
+                    1 -> { tableRow.transpose = 0x00; itemsCut++ }
+                    2 -> { tableRow.volume = 0xFF; itemsCut++ }
+                    3 -> { tableRow.fx1Type = 0; itemsCut++ }
+                    4 -> { tableRow.fx1Value = 0; itemsCut++ }
+                    5 -> { tableRow.fx2Type = 0; itemsCut++ }
+                    6 -> { tableRow.fx2Value = 0; itemsCut++ }
+                    7 -> { tableRow.fx3Type = 0; itemsCut++ }
+                    8 -> { tableRow.fx3Value = 0; itemsCut++ }
+                }
+            }
+        }
+
+        logger.d(TAG, "✂️ Cut $itemsCut table items from table $tableId")
+        return CutResult.Success(itemsCut)
+    }
+
     // ========================================
     // DELETE OPERATIONS (clear without copy)
     // ========================================
@@ -637,6 +798,45 @@ class ClipboardManager(
         return DeleteResult.Success(itemsDeleted)
     }
 
+    /**
+     * Delete table rows (clear without copying to clipboard).
+     * Used by A+B in selection mode.
+     */
+    fun deleteTableRows(
+        project: Project,
+        tableId: Int,
+        startRow: Int,
+        startColumn: Int,
+        endRow: Int,
+        endColumn: Int
+    ): DeleteResult {
+        val table = project.tables[tableId]
+        val minRow = minOf(startRow, endRow)
+        val maxRow = maxOf(startRow, endRow)
+        val minCol = minOf(startColumn, endColumn)
+        val maxCol = maxOf(startColumn, endColumn)
+        var itemsDeleted = 0
+
+        for (row in minRow..maxRow) {
+            val tableRow = table.rows[row]
+            for (col in minCol..maxCol) {
+                when (col) {
+                    1 -> { tableRow.transpose = 0x00; itemsDeleted++ }
+                    2 -> { tableRow.volume = 0xFF; itemsDeleted++ }
+                    3 -> { tableRow.fx1Type = 0; itemsDeleted++ }
+                    4 -> { tableRow.fx1Value = 0; itemsDeleted++ }
+                    5 -> { tableRow.fx2Type = 0; itemsDeleted++ }
+                    6 -> { tableRow.fx2Value = 0; itemsDeleted++ }
+                    7 -> { tableRow.fx3Type = 0; itemsDeleted++ }
+                    8 -> { tableRow.fx3Value = 0; itemsDeleted++ }
+                }
+            }
+        }
+
+        logger.d(TAG, "🗑️ Deleted $itemsDeleted table items from table $tableId")
+        return DeleteResult.Success(itemsDeleted)
+    }
+
     // ========================================
     // UTILITY METHODS
     // ========================================
@@ -663,6 +863,7 @@ class ClipboardManager(
             ClipboardType.PHRASE_STEPS -> "PHR"
             ClipboardType.CHAIN_ROWS -> "CHN"
             ClipboardType.SONG_CELLS -> "SNG"
+            ClipboardType.TABLE_ROWS -> "TBL"
         }
         return "$typeStr:${clip.width}x${clip.height}"
     }

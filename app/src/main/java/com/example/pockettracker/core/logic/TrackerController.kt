@@ -59,6 +59,10 @@ class TrackerController(
             if (value == ScreenType.INSTRUMENT) {
                 instrumentController.syncToLastEdited(project)
             }
+            if (value == ScreenType.TABLE) {
+                // Sync table to match current instrument
+                currentTable = currentInstrument
+            }
         }
 
     /**
@@ -142,6 +146,29 @@ class TrackerController(
             field = value.coerceIn(0, 8)
             stateObserver.onStateChanged()
         }
+
+    // Table screen cursor
+    var tableCursorRow = 0
+        set(value) {
+            field = value.coerceIn(0, 15)
+            stateObserver.onStateChanged()
+        }
+
+    var tableCursorColumn = 1  // Start on transpose column
+        set(value) {
+            field = value.coerceIn(0, 8)  // 0=step, 1=transpose, 2=vol, 3-8=fx
+            stateObserver.onStateChanged()
+        }
+
+    // Current table being edited
+    var currentTable = 0
+        set(value) {
+            field = value.coerceIn(0, 255)
+            lastEditedTable = value
+            stateObserver.onStateChanged()
+        }
+
+    var lastEditedTable = 0
 
     // Current editing context
     var currentChain = 0
@@ -354,6 +381,14 @@ class TrackerController(
         // Sync InstrumentController to TrackerController's currentInstrument before previewing
         instrumentController.currentInstrument = currentInstrument
         instrumentController.previewInstrument(project)
+    }
+
+    /**
+     * Preview instrument with its associated table.
+     * For now, just previews the instrument (table processing not yet implemented).
+     */
+    fun previewInstrumentWithTable(instrumentId: Int, tableId: Int) {
+        instrumentController.previewInstrumentWithTable(project, instrumentId, tableId)
     }
 
     /**
@@ -655,6 +690,10 @@ class TrackerController(
                     1  // Reset to column 1 for all other cases
                 }
             }
+            ScreenType.TABLE -> {
+                // Table: 16 rows (0-15) with wrapping
+                tableCursorRow = if (tableCursorRow > 0) tableCursorRow - 1 else 15
+            }
             else -> {
                 // All other screens: simple cursor movement with wrapping (rows 0-15)
                 cursorRow = if (cursorRow > 0) cursorRow - 1 else 15
@@ -695,6 +734,10 @@ class TrackerController(
                     1  // Reset to column 1 for all other cases
                 }
             }
+            ScreenType.TABLE -> {
+                // Table: 16 rows (0-15) with wrapping
+                tableCursorRow = if (tableCursorRow < 15) tableCursorRow + 1 else 0
+            }
             else -> {
                 // Most screens have 16 rows (0-15) with wrapping
                 cursorRow = if (cursorRow < 15) cursorRow + 1 else 0
@@ -722,6 +765,11 @@ class TrackerController(
             ScreenType.MIXER -> {
                 // Mixer: move between track columns (0-7) and master (8)
                 if (mixerCursorColumn > 0) mixerCursorColumn--
+            }
+            ScreenType.TABLE -> {
+                // Table: columns 0=step (read-only), 1-8 editable
+                // Move left if not at minimum editable column (1)
+                if (tableCursorColumn > 1) tableCursorColumn--
             }
             else -> {
                 // Get minimum column for this screen
@@ -757,6 +805,11 @@ class TrackerController(
             ScreenType.MIXER -> {
                 // Mixer: move between track columns (0-7) and master (8)
                 if (mixerCursorColumn < 8) mixerCursorColumn++
+            }
+            ScreenType.TABLE -> {
+                // Table: columns 0=step, 1=transpose, 2=vol, 3-8=fx (0-8 total)
+                // Move right if not at maximum column (8)
+                if (tableCursorColumn < 8) tableCursorColumn++
             }
             else -> {
                 // Get maximum column for this screen

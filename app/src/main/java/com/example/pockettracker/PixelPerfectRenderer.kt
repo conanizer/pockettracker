@@ -69,6 +69,10 @@ fun PixelPerfectTracker(
     mixerCursorColumn: Int = 0,        // 0-7 = tracks, 8 = master
     trackPeaks: FloatArray = FloatArray(8),
     masterPeaks: FloatArray = FloatArray(2),
+    // Table state
+    currentTable: Int = 0,
+    tableCursorRow: Int = 0,
+    tableCursorColumn: Int = 1,
     // Render state (WAV export)
     isRendering: Boolean = false,
     renderProgress: Float = 0f
@@ -181,6 +185,9 @@ fun PixelPerfectTracker(
                             mixerCursorColumn = mixerCursorColumn,
                             trackPeaks = trackPeaks,
                             masterPeaks = masterPeaks,
+                            currentTable = currentTable,
+                            tableCursorRow = tableCursorRow,
+                            tableCursorColumn = tableCursorColumn,
                             isRendering = isRendering,
                             renderProgress = renderProgress
                         )
@@ -210,6 +217,7 @@ class TrackerLayout {
     private val songEditor = SongEditorModule()
     private val projectModule = ProjectModule()
     private val fileBrowser = FileBrowserModule()
+    private val tableModule = TableModule()
     /**
      * Main layout drawing function
      * This arranges all modules on the 640×480 screen
@@ -248,6 +256,10 @@ class TrackerLayout {
         mixerCursorColumn: Int = 0,
         trackPeaks: FloatArray = FloatArray(8),
         masterPeaks: FloatArray = FloatArray(2),
+        // Table state
+        currentTable: Int = 0,
+        tableCursorRow: Int = 0,
+        tableCursorColumn: Int = 1,
         // Render state (WAV export)
         isRendering: Boolean = false,
         renderProgress: Float = 0f
@@ -425,6 +437,28 @@ class TrackerLayout {
                             cursorColumn = instrumentCursorColumn,
                             statusMessage = instrumentStatusMessage,
                             isSuccess = instrumentStatusSuccess
+                        )
+                    )
+                }
+            }
+
+            // ===================================
+            // TABLE SCREEN: Show table editor
+            // ===================================
+            ScreenType.TABLE -> {
+                with(tableModule) {
+                    draw(
+                        x = moduleX,
+                        y = currentY,
+                        scale = scale,
+                        state = TableState(
+                            table = project.tables[currentTable],
+                            cursorRow = tableCursorRow,
+                            cursorColumn = tableCursorColumn,
+                            playbackRow = null,  // TODO: Table playback row tracking
+                            ticRate = project.instruments.getOrNull(currentInstrument)?.tableTicRate ?: 0x06,
+                            selectionMode = selectionMode,
+                            isCellSelected = isCellSelected
                         )
                     )
                 }

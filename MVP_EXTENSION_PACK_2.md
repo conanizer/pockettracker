@@ -584,19 +584,271 @@ fun handleInput(
 }
 ```
 
-### Definition of Done - Phase 3
-- [ ] TableModule.kt created
-- [ ] Table screen displays 16 rows correctly
-- [ ] Transpose shows as signed (+00 to +7F, -80 to -01)
-- [ ] Volume shows as hex (00-FF)
-- [ ] FX columns match phrase screen format
-- [ ] Cursor navigation works (row and column)
-- [ ] A+direction edits all fields
-- [ ] TIC rate displays in header
-- [ ] Table screen at position (2,4) - right of INST screen
-- [ ] R+RIGHT from INST navigates to TABLE
-- [ ] R+LEFT from TABLE navigates back to INST
-- [ ] Playback row highlighting works
+### Definition of Done - Phase 3 ✅ COMPLETE (2026-02-02)
+- [x] TableModule.kt created (510×392 pixels)
+- [x] Table screen displays 16 rows correctly
+- [x] Transpose shows as hex 00-FF (simplified from signed format)
+- [x] Volume shows as hex (00-FF or -- if FF)
+- [x] FX columns match phrase screen format (3 FX slots)
+- [x] Cursor navigation works (row 0-15, column 0-8)
+- [x] A+direction edits all fields (transpose, volume, FX type/value)
+- [x] TIC rate displays in header ("XX TIC")
+- [x] Table screen at position (2,4) - right of INST screen
+- [x] R+RIGHT from INST navigates to TABLE
+- [x] R+LEFT from TABLE navigates back to INST
+- [x] B+LEFT/RIGHT cycles between tables (0-255)
+- [x] Table syncs to current instrument on screen entry
+- [x] START button previews instrument (table processing pending)
+- [x] Copy/paste works (L+B selection, B copy, L+A cut/paste, A+B delete)
+- [x] Selection highlighting works (green background/text)
+- [ ] Playback row highlighting works (requires table audio processing)
+
+**Note:** Table UI is complete, but tables don't affect audio yet. See Phase 3.5 below.
+
+---
+
+## Phase 3.5: Table Audio Processing (Days 8-10)
+
+### Overview
+
+Tables are mini-sequencers that run alongside each playing voice. They modify:
+- **Pitch** via transpose (semitones offset)
+- **Volume** via volume column
+- **Effects** via 3 FX columns
+
+Tables run at their own tick rate (TIC), independent of the phrase step rate.
+
+### 3.5.1 Architecture Decision
+
+**Option A: Kotlin-side scheduling** (simpler, less accurate)
+- Schedule individual parameter changes from Kotlin
+- Pro: Less C++ complexity
+- Con: Can't do smooth pitch slides, limited timing accuracy
+
+**Option B: C++-side processing** (recommended, more accurate)
+- Pass table data to C++ audio engine
+- C++ processes table ticks in audio callback
+- Pro: Sample-accurate, smooth pitch slides possible
+- Con: More complex C++ code
+
+**Decision:** Option B - C++ side processing for professional quality
+
+### 3.5.2 Data Flow
+
+```
+Note triggered → C++ receives:
+  - Sample ID
+  - Frequency
+  - Volume
+  - Pan
+  - Table ID (NEW)
+  - TIC rate (NEW)
+
+C++ audio callback:
+  1. Check if voice has active table
+  2. Increment tick counter
+  3. When tick counter >= TIC rate:
+     - Advance table row
+     - Apply transpose to frequency
+     - Apply volume modifier
+     - Process table effects (HOP, etc.)
+  4. Render sample with modified parameters
+```
+
+### 3.5.3 C++ Changes (native-audio.cpp)
+
+```cpp
+// Table data structure (mirrors Kotlin)
+struct TableRow {
+    int8_t transpose;    // Semitones (-128 to +127)
+    uint8_t volume;      // 00-FF (FF = no change)
+    uint8_t fx1Type, fx1Value;
+    uint8_t fx2Type, fx2Value;
+    uint8_t fx3Type, fx3Value;
+};
+
+struct Table {
+    TableRow rows[16];
+};
+
+// Tables array (256 tables, loaded from Kotlin)
+Table tables[256];
+bool tablesLoaded[256] = {false};
+
+// Per-voice table state
+struct Voice {
+    // ... existing fields
+
+    // Table state
+    int tableId;           // -1 = no table
+    int tableRow;          // Current row (0-15)
+    int tableTicRate;      // Ticks per row
+    int tableTicCounter;   // Current tick count
+    float tableTranspose;  // Current transpose in semitones
+    float tableVolume;     // Current volume multiplier
+};
+
+// JNI: Load table data from Kotlin
+extern "C" JNIEXPORT void JNICALL
+Java_..._loadTable(JNIEnv *env, jobject thiz,
+    jint tableId, jbyteArray rowData) {
+    // Parse 16 rows × 8 bytes per row = 128 bytes
+    // Store in tables[tableId]
+}
+
+// JNI: Schedule note with table
+extern "C" JNIEXPORT void JNICALL
+Java_..._scheduleNoteWithTable(JNIEnv *env, jobject thiz,
+    jlong frame, jint sampleId, jint trackId,
+    jfloat freq, jfloat baseFreq, jfloat vol, jfloat pan,
+    jint tableId, jint ticRate, jint startPointOverride) {
+    // Similar to scheduleNote but initializes table state
+}
+
+// In audio callback - process table for each voice
+void processTableTick(Voice& voice) {
+    if (voice.tableId < 0 || !tablesLoaded[voice.tableId]) return;
+
+    voice.tableTicCounter++;
+    if (voice.tableTicCounter >= voice.tableTicRate) {
+        voice.tableTicCounter = 0;
+
+        // Get current table row
+        TableRow& row = tables[voice.tableId].rows[voice.tableRow];
+
+        // Apply transpose
+        voice.tableTranspose = row.transpose; // Will be converted to pitch ratio
+
+        // Apply volume
+        voice.tableVolume = (row.volume == 0xFF) ? 1.0f : row.volume / 255.0f;
+
+        // Process effects (HOP changes tableRow, etc.)
+        processTableEffects(voice, row);
+
+        // Advance row
+        voice.tableRow = (voice.tableRow + 1) % 16;
+    }
+}
+
+// Apply table modifiers to sample playback
+float getModifiedPlaybackRate(Voice& voice) {
+    float transposeRatio = pow(2.0f, voice.tableTranspose / 12.0f);
+    return voice.playbackRate * transposeRatio;
+}
+
+float getModifiedVolume(Voice& voice) {
+    return voice.volume * voice.tableVolume;
+}
+```
+
+### 3.5.4 Kotlin Interface Changes
+
+**File:** `IAudioBackend.kt`
+```kotlin
+interface IAudioBackend {
+    // ... existing
+
+    // Load table data to native layer
+    fun loadTable(tableId: Int, rowData: ByteArray)
+
+    // Schedule note with table
+    fun scheduleNoteWithTable(
+        frame: Long,
+        sampleId: Int,
+        trackId: Int,
+        freq: Float,
+        baseFreq: Float,
+        vol: Float,
+        pan: Float,
+        tableId: Int,
+        ticRate: Int,
+        startPointOverride: Int = -1
+    )
+}
+```
+
+**File:** `PlaybackController.kt`
+```kotlin
+// When scheduling a note, check if instrument has table
+fun scheduleNote(...) {
+    val instrument = project.instruments[instrumentId]
+
+    if (instrument.tableId >= 0) {
+        // Ensure table is loaded in native layer
+        loadTableIfNeeded(instrument.tableId)
+
+        // Schedule with table
+        audioBackend.scheduleNoteWithTable(
+            frame, sampleId, trackId, freq, baseFreq, vol, pan,
+            instrument.tableId, instrument.tableTicRate, startPointOverride
+        )
+    } else {
+        // Schedule without table (existing code)
+        audioBackend.scheduleNote(...)
+    }
+}
+
+// Load table to native layer (lazy loading)
+private val loadedTables = mutableSetOf<Int>()
+
+fun loadTableIfNeeded(tableId: Int) {
+    if (tableId in loadedTables) return
+
+    val table = project.tables[tableId]
+    val rowData = ByteArray(128) // 16 rows × 8 bytes
+
+    for (i in 0 until 16) {
+        val row = table.rows[i]
+        val offset = i * 8
+        rowData[offset + 0] = row.transpose.toByte()
+        rowData[offset + 1] = row.volume.toByte()
+        rowData[offset + 2] = row.fx1Type.toByte()
+        rowData[offset + 3] = row.fx1Value.toByte()
+        rowData[offset + 4] = row.fx2Type.toByte()
+        rowData[offset + 5] = row.fx2Value.toByte()
+        rowData[offset + 6] = row.fx3Type.toByte()
+        rowData[offset + 7] = row.fx3Value.toByte()
+    }
+
+    audioBackend.loadTable(tableId, rowData)
+    loadedTables.add(tableId)
+}
+```
+
+### 3.5.5 Playback Row Tracking
+
+For UI feedback (highlighting current table row during playback):
+
+```kotlin
+// In native layer, track current table row per voice
+// JNI function to query table playback state
+extern "C" JNIEXPORT jint JNICALL
+Java_..._getVoiceTableRow(JNIEnv *env, jobject thiz, jint trackId) {
+    return voices[trackId].tableRow;
+}
+
+// In Kotlin, query for UI update
+fun getTablePlaybackRow(trackId: Int): Int? {
+    if (!isPlaying) return null
+    return audioBackend.getVoiceTableRow(trackId)
+}
+```
+
+### Definition of Done - Phase 3.5
+- [ ] C++ Table/TableRow structs added
+- [ ] C++ loadTable() JNI function
+- [ ] C++ scheduleNoteWithTable() JNI function
+- [ ] C++ table tick processing in audio callback
+- [ ] C++ transpose applied to playback rate
+- [ ] C++ volume applied to voice volume
+- [ ] Kotlin IAudioBackend interface updated
+- [ ] Kotlin lazy table loading implemented
+- [ ] Tables affect playback (pitch changes with transpose)
+- [ ] Tables affect playback (volume changes with volume column)
+- [ ] Table row advances based on TIC rate
+- [ ] Table playback row queryable for UI
+- [ ] Table screen shows playback row highlighting
+- [ ] START on table screen previews with table effects
 
 ---
 

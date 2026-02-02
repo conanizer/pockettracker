@@ -1,7 +1,7 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-02-01
+2026-02-02
 
 ## Current Phase
 **MVP Expansion #1 COMPLETE!** → **MVP Extension Pack 2 (Tables + Pitch Effects)** → Testing → MVP Release
@@ -9,9 +9,10 @@
 **See:** `MVP_EXTENSION_PACK_2.md` for detailed implementation plan
 
 ### Extension Pack 2 Overview
-- 🚧 Phase 1: Bug fixes (meter decay, volume immediate, L+A cut)
-- 🚧 Phase 2: Table data model
-- 🚧 Phase 3: Table screen UI
+- ✅ Phase 1: Bug fixes (meter decay, volume immediate, L+A cut) - COMPLETE
+- ✅ Phase 2: Table data model - COMPLETE
+- ✅ Phase 3: Table screen UI - COMPLETE (editing, navigation, copy/paste)
+- 🚧 Phase 3.5: Table audio processing (tables actually affect playback) - NEXT
 - 🚧 Phase 4: TIC effect (table tick rate)
 - 🚧 Phase 5: HOP effect (phrase/table jump)
 - 🚧 Phase 6: Real-time parameter system
@@ -369,18 +370,45 @@
 
 ## MVP Extension Pack 2 🚧 IN PROGRESS (Started 2026-02-01)
 
-**Bug Fixes:**
-- [ ] Mixer/oscilloscope decay when stopped (C++ decayPeaks())
-- [ ] Track volume changes affect playback immediately (C++ real-time volume)
-- [ ] Remove old project migration script
-- [ ] L+R exits selection mode (fixes L+A cut combo)
+**Bug Fixes (Phase 1):** ✅ COMPLETE
+- [x] Mixer/oscilloscope decay when stopped (C++ decayPeaks())
+- [x] Track volume changes affect playback immediately (C++ real-time volume)
+- [x] Remove old project migration script
+- [x] L+R exits selection mode (fixes L+A cut combo)
+- [x] Fixed volume double-application bug (baked vs real-time separation)
 
-**Table Screen:**
-- [ ] Table data model (16 rows: transpose, volume, 3 FX)
-- [ ] TableModule.kt UI (similar to PhraseEditorModule)
-- [ ] Table screen at nav position (2,4) - right of INST
+**Table Data Model (Phase 2):** ✅ COMPLETE
+- [x] Table data class (16 rows × 8 fields)
+- [x] TableRow: transpose, volume, fx1-3 type/value
+- [x] Instrument: tableId, tableTicRate fields
+- [x] Project: 256 tables array
 
-**New Effects:**
+**Table Screen UI (Phase 3):** ✅ COMPLETE (2026-02-02)
+- [x] TableModule.kt (510×392 pixels)
+- [x] 16 rows with transpose (00-FF), volume (00-FF/--), 3 FX columns
+- [x] Cursor navigation (row 0-15, column 0-8)
+- [x] A+direction editing for all fields
+- [x] FX type cycling via EFFECT_TYPES
+- [x] TIC rate display in header
+- [x] Table screen at nav position (2,4) - right of INST
+- [x] B+LEFT/RIGHT cycles between tables
+- [x] Table syncs to current instrument on navigation
+- [x] START button preview (calls previewInstrumentWithTable)
+- [x] Copy/paste support (L+B selection, B copy, L+A cut/paste, A+B delete)
+- [x] Selection highlighting (green background/text)
+- [ ] Playback row highlighting (requires table audio processing)
+
+**Table Audio Processing (Phase 3.5):** 🚧 NEXT
+- [ ] C++ Table/TableRow structs
+- [ ] JNI loadTable() function
+- [ ] JNI scheduleNoteWithTable() function
+- [ ] C++ table tick processing in audio callback
+- [ ] Transpose affects playback pitch
+- [ ] Volume affects playback volume
+- [ ] Table row advances based on TIC rate
+- [ ] Table playback row queryable for UI
+
+**New Effects (Phases 4-7):**
 - [ ] TIC effect - Table tick rate control
 - [ ] HOP effect - Phrase/table jump, odd time signatures
 - [ ] PSL effect - Pitch slide (portamento)

@@ -358,6 +358,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // MixerModule: Used for mixer screen (8 tracks + master)
     val mixerModule = remember { MixerModule() }
 
+    // TableModule: Used for table editing screen
+    val tableModule = remember { TableModule() }
+
     // Peak level buffers for mixer meters (updated periodically)
     val trackPeakBuffer = remember { FloatArray(8) }
     val masterPeakBuffer = remember { FloatArray(2) }
@@ -688,6 +691,23 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         val vol = trackerController.project.masterVolume
                         audioBackend.setMasterVolume(com.example.pockettracker.core.data.VolumeUtils.hexToFloat(vol))
                     }
+                }
+            }
+            ScreenType.TABLE -> {
+                val tableState = TableState(
+                    trackerController.project.tables[trackerController.currentTable],
+                    trackerController.tableCursorRow,
+                    trackerController.tableCursorColumn,
+                    playbackRow = null,  // TODO: Table playback row tracking
+                    ticRate = trackerController.project.instruments.getOrNull(trackerController.currentInstrument)?.tableTicRate ?: 0x06,
+                    selectionMode = trackerController.inputController.isSelectionModeActive(),
+                    isCellSelected = { row, col -> trackerController.inputController.isCellSelected(row, col) }
+                )
+                val context = tableModule.getCursorContext(tableState)
+                val action = handlerFunction(context)
+                val result = tableModule.handleInput(tableState, action)
+                if (result.modified) {
+                    trackerController.projectVersion++
                 }
             }
             else -> { /* Other screens not yet implemented */ }
@@ -1243,6 +1263,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                 )
                                 Log.d("CopyPaste", "Copied song selection: ${bounds.width}x${bounds.height}")
                             }
+                            ScreenType.TABLE -> {
+                                clipboardManager.copyTableRows(
+                                    trackerController.project,
+                                    trackerController.currentTable,
+                                    bounds.topLeftRow, bounds.topLeftColumn,
+                                    bounds.bottomRightRow, bounds.bottomRightColumn
+                                )
+                                Log.d("CopyPaste", "Copied table selection: ${bounds.width}x${bounds.height}")
+                            }
                             else -> { }
                         }
                         trackerController.inputController.exitSelectionMode()
@@ -1433,6 +1462,13 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         trackerController.previewInstrument()
                     }
 
+                    // Table screen: Preview instrument using this table
+                    ScreenType.TABLE -> {
+                        // Preview instrument with same ID as current table
+                        val instrumentId = trackerController.currentTable
+                        trackerController.previewInstrumentWithTable(instrumentId, trackerController.currentTable)
+                    }
+
                     // Other screens: Toggle playback USING TrackerController
                     else -> {
                         Log.d("Playback", "▶️ START pressed on ${trackerController.currentScreen}, isPlaying=${trackerController.isPlaying()}")
@@ -1556,6 +1592,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                 )
                                 Log.d("Selection", "A+B: Deleted song selection")
                             }
+                            ScreenType.TABLE -> {
+                                clipboardManager.deleteTableRows(
+                                    trackerController.project,
+                                    trackerController.currentTable,
+                                    bounds.topLeftRow,
+                                    bounds.topLeftColumn,
+                                    bounds.bottomRightRow,
+                                    bounds.bottomRightColumn
+                                )
+                                Log.d("Selection", "A+B: Deleted table selection")
+                            }
                             else -> { }
                         }
                         trackerController.inputController.exitSelectionMode()
@@ -1594,6 +1641,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         instrumentController.currentInstrument = newInst  // Keep in sync!
                         Log.d("Navigation", "  -> Changed to instrument $newInst")
                     }
+                    ScreenType.TABLE -> {
+                        // Previous table (wrap around)
+                        val newTable = if (trackerController.currentTable > 0)
+                            trackerController.currentTable - 1 else 255
+                        trackerController.currentTable = newTable
+                        trackerController.lastEditedTable = newTable
+                        Log.d("Navigation", "  -> Changed to table $newTable")
+                    }
                     else -> { Log.d("Navigation", "  -> No action for screen ${trackerController.currentScreen}") }
                 }
             },
@@ -1622,6 +1677,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         trackerController.lastEditedInstrument = newInst
                         instrumentController.currentInstrument = newInst  // Keep in sync!
                         Log.d("Navigation", "  -> Changed to instrument $newInst")
+                    }
+                    ScreenType.TABLE -> {
+                        // Next table (wrap around)
+                        val newTable = if (trackerController.currentTable < 255)
+                            trackerController.currentTable + 1 else 0
+                        trackerController.currentTable = newTable
+                        trackerController.lastEditedTable = newTable
+                        Log.d("Navigation", "  -> Changed to table $newTable")
                     }
                     else -> { Log.d("Navigation", "  -> No action for screen ${trackerController.currentScreen}") }
                 }
@@ -1944,6 +2007,41 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                             else -> { }
                         }
                     }
+                    ScreenType.TABLE -> {
+                        val action = trackerController.inputController.handleSelectA()
+                        when (action) {
+                            is InputAction.CUT -> {
+                                // Cut selection
+                                val bounds = trackerController.inputController.getSelectionBounds()
+                                if (bounds != null) {
+                                    clipboardManager.cutTableRows(
+                                        trackerController.project,
+                                        trackerController.currentTable,
+                                        bounds.topLeftRow, bounds.topLeftColumn,
+                                        bounds.bottomRightRow, bounds.bottomRightColumn
+                                    )
+                                    trackerController.projectVersion++
+                                    trackerController.inputController.exitSelectionMode()
+                                    Log.d("CopyPaste", "Cut table selection")
+                                }
+                            }
+                            is InputAction.PASTE -> {
+                                // Paste at cursor
+                                val result = clipboardManager.paste(
+                                    trackerController.project,
+                                    "TABLE",
+                                    trackerController.currentTable,
+                                    trackerController.tableCursorRow,
+                                    trackerController.tableCursorColumn
+                                )
+                                if (result is ClipboardManager.PasteResult.Success) {
+                                    trackerController.projectVersion++
+                                    Log.d("CopyPaste", "Pasted ${result.itemsPasted} items to table")
+                                }
+                            }
+                            else -> { }
+                        }
+                    }
                     else -> { }
                 }
             },
@@ -1977,6 +2075,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                             trackerController.cursorRow,
                             trackerController.cursorColumn,
                             8  // Max column for song (track 8)
+                        )
+                        Log.d("CopyPaste", "Selection: ${trackerController.inputController.getSelectionInfo()}")
+                    }
+                    ScreenType.TABLE -> {
+                        // Enter/cycle selection mode
+                        trackerController.inputController.handleSelectB(
+                            trackerController.tableCursorRow,
+                            trackerController.tableCursorColumn,
+                            8  // Max column for table (fx3 value)
                         )
                         Log.d("CopyPaste", "Selection: ${trackerController.inputController.getSelectionInfo()}")
                     }
@@ -2134,6 +2241,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 mixerCursorColumn = trackerController.mixerCursorColumn,
                 trackPeaks = trackPeakBuffer,
                 masterPeaks = masterPeakBuffer,
+                currentTable = trackerController.currentTable,
+                tableCursorRow = trackerController.tableCursorRow,
+                tableCursorColumn = trackerController.tableCursorColumn,
                 isRendering = isRendering,
                 renderProgress = renderProgress
             )
@@ -2172,6 +2282,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 mixerCursorColumn = trackerController.mixerCursorColumn,
                 trackPeaks = trackPeakBuffer,
                 masterPeaks = masterPeakBuffer,
+                currentTable = trackerController.currentTable,
+                tableCursorRow = trackerController.tableCursorRow,
+                tableCursorColumn = trackerController.tableCursorColumn,
                 isRendering = isRendering,
                 renderProgress = renderProgress
             )
@@ -2211,6 +2324,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             mixerCursorColumn = trackerController.mixerCursorColumn,
             trackPeaks = trackPeakBuffer,
             masterPeaks = masterPeakBuffer,
+            currentTable = trackerController.currentTable,
+            tableCursorRow = trackerController.tableCursorRow,
+            tableCursorColumn = trackerController.tableCursorColumn,
             isRendering = isRendering,
             renderProgress = renderProgress
         )
