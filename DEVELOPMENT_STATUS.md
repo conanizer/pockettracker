@@ -1,7 +1,7 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-02-02
+2026-02-03
 
 ## Current Phase
 **MVP Expansion #1 COMPLETE!** → **MVP Extension Pack 2 (Tables + Pitch Effects)** → Testing → MVP Release
@@ -12,8 +12,8 @@
 - ✅ Phase 1: Bug fixes (meter decay, volume immediate, L+A cut) - COMPLETE
 - ✅ Phase 2: Table data model - COMPLETE
 - ✅ Phase 3: Table screen UI - COMPLETE (editing, navigation, copy/paste)
-- 🚧 Phase 3.5: Table audio processing (tables actually affect playback) - NEXT
-- 🚧 Phase 4: TIC effect (table tick rate)
+- ✅ Phase 3.5: Table audio processing - COMPLETE (transpose, volume, effects)
+- 🚧 Phase 4: TIC effect (table tick rate) - NEXT
 - 🚧 Phase 5: HOP effect (phrase/table jump)
 - 🚧 Phase 6: Real-time parameter system
 - 🚧 Phase 7: Pitch effects (PSL, PBN, PVB, PVX)
@@ -396,17 +396,20 @@
 - [x] START button preview (calls previewInstrumentWithTable)
 - [x] Copy/paste support (L+B selection, B copy, L+A cut/paste, A+B delete)
 - [x] Selection highlighting (green background/text)
-- [ ] Playback row highlighting (requires table audio processing)
+- [x] Playback row highlighting
 
-**Table Audio Processing (Phase 3.5):** 🚧 NEXT
-- [ ] C++ Table/TableRow structs
-- [ ] JNI loadTable() function
-- [ ] JNI scheduleNoteWithTable() function
-- [ ] C++ table tick processing in audio callback
-- [ ] Transpose affects playback pitch
-- [ ] Volume affects playback volume
-- [ ] Table row advances based on TIC rate
-- [ ] Table playback row queryable for UI
+**Table Audio Processing (Phase 3.5):** ✅ COMPLETE (2026-02-03)
+- [x] C++ Table/TableRow structs with effect constants
+- [x] JNI loadTable() function (128 bytes: 16 rows × 8 fields)
+- [x] JNI scheduleNoteWithTable() function
+- [x] C++ table tick processing in audio callback
+- [x] Transpose affects playback pitch (signed: 00-7F = +, 80-FF = -)
+- [x] Volume affects playback volume (00-FE = multiplier, FF = pass-through)
+- [x] Table effects working: KIL, HOP, VOL, OFF
+- [x] Table row advances based on TIC rate
+- [x] Table playback row queryable for UI (getVoiceTableRow/getVoiceTableId)
+- [x] Automatic instrument→table ID mapping (instrument 03 → table 03)
+- [x] Table caching with invalidation on edit/load
 
 **New Effects (Phases 4-7):**
 - [ ] TIC effect - Table tick rate control

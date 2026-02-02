@@ -198,27 +198,28 @@ class InstrumentController(
     fun previewInstrument(project: Project) {
         val instrument = project.instruments[currentInstrument]
 
-        logger.d(TAG, "🎵 Previewing instrument ${formatHex(currentInstrument)}: root=${instrument.root}, detune=0x${formatHex(instrument.detune)}")
+        // Each instrument uses the table with the same ID (instrument 03 → table 03)
+        logger.d(TAG, "🎵 Previewing instrument ${formatHex(currentInstrument)} (uses table ${formatHex(currentInstrument)}): root=${instrument.root}, detune=0x${formatHex(instrument.detune)}")
 
-        audioEngine.previewInstrument(instrument)
+        // Pass project so table can be loaded
+        audioEngine.previewInstrument(instrument, project)
     }
 
     /**
-     * Preview instrument with its associated table
-     * For now, just previews the instrument (table processing not yet implemented)
+     * Preview instrument with a specific table
+     * Table processing is applied during audio playback
      *
      * @param project Project containing instrument and table data
      * @param instrumentId Instrument to preview
-     * @param tableId Table associated with this instrument
+     * @param tableId Table to use for preview (overrides instrument's default tableId)
      */
     fun previewInstrumentWithTable(project: Project, instrumentId: Int, tableId: Int) {
         val instrument = project.instruments[instrumentId.coerceIn(0, 255)]
 
         logger.d(TAG, "🎵 Previewing instrument ${formatHex(instrumentId)} with table ${formatHex(tableId)}: root=${instrument.root}, detune=0x${formatHex(instrument.detune)}")
 
-        // TODO: When table processing is implemented, tables will modify pitch/volume/effects over time
-        // For now, just preview the instrument normally
-        audioEngine.previewInstrument(instrument)
+        // Pass project and tableId override so the specified table is used
+        audioEngine.previewInstrument(instrument, project, tableIdOverride = tableId)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

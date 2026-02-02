@@ -13,6 +13,18 @@
 const int MAX_VOICES = 8;  // Reduced for testing
 
 // ===================================
+// EFFECT TYPE CONSTANTS (must match EffectProcessor.kt)
+// ===================================
+const int FX_NONE = 0x00;
+const int FX_ARC = 0x03;       // Cxx - Arpeggio Config
+const int FX_ARPEGGIO = 0x0A;  // Axx - Arpeggio
+const int FX_KILL = 0x0B;      // K00 - Kill voice
+const int FX_HOP = 0x08;       // Hxx - Table hop (jump to row, FF = stop table)
+const int FX_OFFSET = 0x0F;    // Oxx - Sample offset
+const int FX_REPEAT = 0x12;    // Rxx - Retrigger
+const int FX_VOLUME = 0x16;    // Vxx - Volume
+
+// ===================================
 // BIQUAD FILTER COEFFICIENT CALCULATION
 // ===================================
 // Calculates resonant low-pass, high-pass, and band-pass filter coefficients
@@ -106,6 +118,10 @@ struct ScheduledNote {
     float volume;            // Playback volume (0.0-1.0)
     float pan;               // Stereo pan position (0.0=left, 0.5=center, 1.0=right)
     int startPointOverride;  // Optional start point override (-1 = use instrument default)
+
+    // Table parameters (Phase 3.5)
+    int tableId;             // Table to use (-1 = no table)
+    int tableTicRate;        // Ticks per table row advance (default 6)
 
     // For priority queue sorting (earliest frame first)
     bool operator>(const ScheduledNote& other) const {
@@ -240,6 +256,46 @@ struct InstrumentParams {
                          filterType(0), filterCut(128), filterRes(0) {}
 };
 
+// ===================================
+// TABLE DATA STRUCTURES (Phase 3.5)
+// ===================================
+// Tables are mini-sequencers that run alongside playing voices
+// Each table has 16 rows with transpose, volume, and 3 FX columns
+
+struct TableRow {
+    int8_t transpose;       // Semitones: 00=0, 01-7F=+1 to +127, 80-FF=-128 to -1
+    uint8_t volume;         // 00-FF (FF = no change / pass-through)
+    uint8_t fx1Type;        // Effect 1 type (0 = none)
+    uint8_t fx1Value;       // Effect 1 value
+    uint8_t fx2Type;        // Effect 2 type
+    uint8_t fx2Value;       // Effect 2 value
+    uint8_t fx3Type;        // Effect 3 type
+    uint8_t fx3Value;       // Effect 3 value
+
+    TableRow() : transpose(0), volume(0xFF),
+                 fx1Type(0), fx1Value(0),
+                 fx2Type(0), fx2Value(0),
+                 fx3Type(0), fx3Value(0) {}
+};
+
+struct Table {
+    TableRow rows[16];      // 16 rows per table
+    bool loaded;            // Whether this table has been loaded from Kotlin
+
+    Table() : loaded(false) {
+        // Rows initialized by default constructor
+    }
+};
+
+// Convert unsigned transpose byte to signed semitones
+inline int transposeToSemitones(uint8_t transpose) {
+    if (transpose < 0x80) {
+        return transpose;  // 00-7F = 0 to +127
+    } else {
+        return transpose - 256;  // 80-FF = -128 to -1
+    }
+}
+
 struct Voice {
     bool isActive;
     float* sampleData;
@@ -247,6 +303,7 @@ struct Voice {
     float position;
     int trackId;
     float playbackRate;
+    float basePlaybackRate;  // Original rate without table transpose
     float volume;
     float panLeft;           // Left channel gain (0.0-1.0)
     float panRight;          // Right channel gain (0.0-1.0)
@@ -275,22 +332,34 @@ struct Voice {
     float x1, x2;        // Input history
     float y1, y2;        // Output history
 
+    // Table state (Phase 3.5)
+    int tableId;             // -1 = no table, 0-255 = table ID
+    int tableRow;            // Current table row (0-15)
+    int tableTicRate;        // Ticks per table row advance
+    int tableTicCounter;     // Counter for tic-based advance
+    float tableTranspose;    // Current transpose from table (semitones)
+    float tableVolume;       // Current volume multiplier from table (0.0-1.0)
+
     Voice() : isActive(false), sampleData(nullptr), sampleLength(0),
-              position(0), trackId(-1), playbackRate(1.0f), volume(1.0f),
+              position(0), trackId(-1), playbackRate(1.0f), basePlaybackRate(1.0f), volume(1.0f),
               panLeft(0.707f), panRight(0.707f),  // Default to center
               actualStart(0), actualEnd(0), actualLoopStart(0),
               reverse(false), loopMode(0), loopingBack(false),
               drive(0), crush(0), downsample(0),
               filterType(0), filterCut(128), filterRes(0),
               b0(1.0f), b1(0.0f), b2(0.0f), a1(0.0f), a2(0.0f),
-              x1(0.0f), x2(0.0f), y1(0.0f), y2(0.0f) {}
+              x1(0.0f), x2(0.0f), y1(0.0f), y2(0.0f),
+              tableId(-1), tableRow(0), tableTicRate(6), tableTicCounter(0),
+              tableTranspose(0.0f), tableVolume(1.0f) {}
 
     void trigger(float* sample, int length, int track, float rate, float vol, float pan,
-                 const InstrumentParams& params, float sampleRate, int startPointOverride = -1) {
+                 const InstrumentParams& params, float sampleRate, int startPointOverride = -1,
+                 int tblId = -1, int tblTicRate = 6) {
         sampleData = sample;
         sampleLength = length;
         trackId = track;
         playbackRate = rate;
+        basePlaybackRate = rate;  // Store original rate for table transpose
         volume = vol;
 
         // Calculate constant-power pan gains
@@ -337,6 +406,14 @@ struct Voice {
         // Reset filter history (important to avoid clicks)
         x1 = 0.0f; x2 = 0.0f;
         y1 = 0.0f; y2 = 0.0f;
+
+        // Initialize table state (Phase 3.5)
+        tableId = tblId;
+        tableRow = 0;
+        tableTicRate = tblTicRate;
+        tableTicCounter = 0;
+        tableTranspose = 0.0f;
+        tableVolume = 1.0f;
 
         // Set initial position based on direction
         // For reverse: start at actualEnd - 1 (not actualEnd) because we need to read idx+1 for interpolation
@@ -591,10 +668,12 @@ public:
                             float sampleRate = (float)audioStream->getSampleRate();
                             voices[v].trigger(samples[note.sampleId], sampleLengths[note.sampleId],
                                               note.trackId, rate, note.volume, note.pan, instrumentParams[note.sampleId],
-                                              sampleRate, note.startPointOverride);
+                                              sampleRate, note.startPointOverride,
+                                              note.tableId, note.tableTicRate);
                             voiceFound = true;
-                            LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, pan=%.2f, startOverride=%d",
-                                 (long long)currentFrame, note.sampleId, note.trackId, rate, note.pan, note.startPointOverride);
+                            LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, pan=%.2f, startOverride=%d, table=%d, tic=%d",
+                                 (long long)currentFrame, note.sampleId, note.trackId, rate, note.pan, note.startPointOverride,
+                                 note.tableId, note.tableTicRate);
                         } else {
                             // Sample not loaded - log specific reason
                             if (note.sampleId < 0 || note.sampleId >= 256) {
@@ -618,6 +697,118 @@ public:
 
         // Per-track peak accumulators for this callback (for accurate metering)
         float framePeaksPerTrack[8] = {0};
+
+        // ===================================
+        // TABLE PROCESSING (Phase 3.5)
+        // ===================================
+        // Process table ticks for each active voice once per callback
+        // This is a simplified approach: 1 tic = 1 audio callback (~6ms)
+        for (int v = 0; v < MAX_VOICES; v++) {
+            Voice& voice = voices[v];
+            if (!voice.isActive || voice.tableId < 0) continue;
+
+            // Check if table is loaded
+            bool tableLoaded = false;
+            {
+                std::lock_guard<std::mutex> lock(tableMutex);
+                tableLoaded = tables[voice.tableId].loaded;
+            }
+            if (!tableLoaded) continue;
+
+            // Increment tic counter
+            voice.tableTicCounter++;
+
+            // Check if we should advance to next table row
+            if (voice.tableTicCounter >= voice.tableTicRate) {
+                voice.tableTicCounter = 0;
+
+                // Get current table row data
+                TableRow row;
+                {
+                    std::lock_guard<std::mutex> lock(tableMutex);
+                    row = tables[voice.tableId].rows[voice.tableRow];
+                }
+
+                // Apply transpose (convert semitones to playback rate modifier)
+                int semitones = transposeToSemitones(row.transpose);
+                voice.tableTranspose = (float)semitones;
+                float transposeRatio = powf(2.0f, voice.tableTranspose / 12.0f);
+                voice.playbackRate = voice.basePlaybackRate * transposeRatio;
+
+                // Apply volume (FF = no change = 1.0, 00 = silence = 0.0)
+                if (row.volume == 0xFF) {
+                    voice.tableVolume = 1.0f;  // No change
+                } else {
+                    voice.tableVolume = row.volume / 255.0f;
+                }
+
+                // Process table effects (3 effect slots per row)
+                bool hopExecuted = false;
+                int hopTarget = -1;
+
+                // Helper lambda to process a single effect
+                auto processEffect = [&](uint8_t fxType, uint8_t fxValue) {
+                    switch (fxType) {
+                        case FX_KILL:
+                            // K00 - Kill voice immediately
+                            if (fxValue == 0x00) {
+                                voice.isActive = false;
+                                LOGD("📋 Table effect: KILL voice %d", v);
+                            }
+                            break;
+
+                        case FX_HOP:
+                            // Hxx - Jump to row (00-0F), or FF = stop table processing
+                            if (fxValue == 0xFF) {
+                                // Stop table processing for this voice
+                                voice.tableId = -1;
+                                LOGD("📋 Table effect: HOP FF - stopped table for voice %d", v);
+                            } else if (fxValue <= 0x0F) {
+                                // Jump to specified row
+                                hopExecuted = true;
+                                hopTarget = fxValue;
+                            }
+                            break;
+
+                        case FX_VOLUME:
+                            // Vxx - Set volume (overrides volume column)
+                            voice.tableVolume = fxValue / 255.0f;
+                            break;
+
+                        case FX_OFFSET:
+                            // Oxx - Change sample position (relative to current)
+                            // Map 00-FF to sample position
+                            if (voice.sampleLength > 0) {
+                                float normalizedPos = fxValue / 255.0f;
+                                voice.position = normalizedPos * (voice.sampleLength - 1);
+                            }
+                            break;
+
+                        default:
+                            // Unknown or unimplemented effect - ignore
+                            break;
+                    }
+                };
+
+                // Process all 3 effect slots
+                processEffect(row.fx1Type, row.fx1Value);
+                processEffect(row.fx2Type, row.fx2Value);
+                processEffect(row.fx3Type, row.fx3Value);
+
+                // Advance to next row (or jump if HOP was executed)
+                if (hopExecuted && hopTarget >= 0) {
+                    voice.tableRow = hopTarget % 16;
+                } else {
+                    voice.tableRow = (voice.tableRow + 1) % 16;
+                }
+
+                // Debug log (only occasionally to avoid spam)
+                if (voice.tableRow == 0) {
+                    LOGD("📋 Table %d loop: voice=%d, transpose=%.0f, vol=%.2f",
+                         voice.tableId, v, voice.tableTranspose, voice.tableVolume);
+                }
+            }
+        }
 
         // Mix voices
         for (int v = 0; v < MAX_VOICES; v++) {
@@ -709,7 +900,8 @@ public:
                 }
 
                 // STEP 6: Apply volume after effects (no artificial headroom)
-                float sample = processedSample * voice.volume;
+                // Include table volume modifier (Phase 3.5)
+                float sample = processedSample * voice.volume * voice.tableVolume;
 
                 // STEP 7: Apply real-time track and master volume
                 // This allows volume changes to take effect immediately without rescheduling
@@ -834,7 +1026,8 @@ public:
 
     // Schedule a note to be played at exact frame
     void scheduleNote(int64_t targetFrame, int sampleId, int trackId,
-                      float frequency, float baseFrequency, float volume, float pan = 0.5f, int startPointOverride = -1) {
+                      float frequency, float baseFrequency, float volume, float pan = 0.5f,
+                      int startPointOverride = -1, int tableId = -1, int tableTicRate = 6) {
         ScheduledNote note = {
                 .targetFrame = targetFrame,
                 .sampleId = sampleId,
@@ -843,7 +1036,9 @@ public:
                 .baseFrequency = baseFrequency,
                 .volume = volume,
                 .pan = pan,
-                .startPointOverride = startPointOverride
+                .startPointOverride = startPointOverride,
+                .tableId = tableId,
+                .tableTicRate = tableTicRate
         };
         noteQueue.schedule(note);
     }
@@ -861,6 +1056,62 @@ public:
     void clearScheduledNotes() {
         noteQueue.clear();
         killQueue.clear();  // Also clear kill events
+    }
+
+    // ===================================
+    // TABLE METHODS (Phase 3.5)
+    // ===================================
+
+    // Load table data from Kotlin
+    // rowData format: 16 rows × 8 bytes = 128 bytes
+    // Each row: [transpose, volume, fx1Type, fx1Value, fx2Type, fx2Value, fx3Type, fx3Value]
+    void loadTable(int tableId, const uint8_t* rowData) {
+        if (tableId < 0 || tableId >= 256) return;
+
+        std::lock_guard<std::mutex> lock(tableMutex);
+        Table& table = tables[tableId];
+
+        for (int row = 0; row < 16; row++) {
+            int offset = row * 8;
+            table.rows[row].transpose = (int8_t)rowData[offset + 0];
+            table.rows[row].volume = rowData[offset + 1];
+            table.rows[row].fx1Type = rowData[offset + 2];
+            table.rows[row].fx1Value = rowData[offset + 3];
+            table.rows[row].fx2Type = rowData[offset + 4];
+            table.rows[row].fx2Value = rowData[offset + 5];
+            table.rows[row].fx3Type = rowData[offset + 6];
+            table.rows[row].fx3Value = rowData[offset + 7];
+        }
+        table.loaded = true;
+
+        LOGD("📋 Loaded table %d", tableId);
+    }
+
+    // Check if a table is loaded
+    bool isTableLoaded(int tableId) {
+        if (tableId < 0 || tableId >= 256) return false;
+        std::lock_guard<std::mutex> lock(tableMutex);
+        return tables[tableId].loaded;
+    }
+
+    // Get current table row for a voice (for UI feedback)
+    int getVoiceTableRow(int trackId) {
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (voices[v].isActive && voices[v].trackId == trackId) {
+                return voices[v].tableRow;
+            }
+        }
+        return -1;  // No active voice on this track
+    }
+
+    // Get table ID for a voice
+    int getVoiceTableId(int trackId) {
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (voices[v].isActive && voices[v].trackId == trackId) {
+                return voices[v].tableId;
+            }
+        }
+        return -1;  // No active voice on this track
     }
 
     // Get waveform data for oscilloscope display
@@ -1114,6 +1365,10 @@ private:
     float* samples[256];
     int sampleLengths[256];
     InstrumentParams instrumentParams[256];
+
+    // Table data (Phase 3.5)
+    Table tables[256];             // 256 tables, each with 16 rows
+    std::mutex tableMutex;         // Protect table data during load/access
 
     // PHASE 1: Sample-accurate timing infrastructure
     NoteQueue noteQueue;           // Thread-safe queue of scheduled notes
@@ -1500,6 +1755,55 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setMast
     if (engine) {
         engine->setMasterVolume(volume);
     }
+}
+
+// ===================================
+// TABLE JNI METHODS (Phase 3.5)
+// ===================================
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1loadTable(
+        JNIEnv *env, jobject thiz, jint tableId, jbyteArray rowData) {
+    if (!engine || rowData == nullptr) return;
+
+    jsize len = env->GetArrayLength(rowData);
+    if (len != 128) {
+        LOGE("❌ loadTable: Invalid rowData length %d (expected 128)", len);
+        return;
+    }
+
+    jbyte* data = env->GetByteArrayElements(rowData, nullptr);
+    engine->loadTable(tableId, reinterpret_cast<uint8_t*>(data));
+    env->ReleaseByteArrayElements(rowData, data, JNI_ABORT);
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1scheduleNoteWithTable(
+        JNIEnv *env, jobject thiz, jlong targetFrame, jint sampleId, jint trackId,
+        jfloat frequency, jfloat baseFrequency, jfloat volume, jfloat pan,
+        jint startPointOverride, jint tableId, jint tableTicRate) {
+    if (engine) {
+        engine->scheduleNote(targetFrame, sampleId, trackId, frequency, baseFrequency,
+                             volume, pan, startPointOverride, tableId, tableTicRate);
+    }
+}
+
+JNIEXPORT jint JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getVoiceTableRow(
+        JNIEnv *env, jobject thiz, jint trackId) {
+    if (engine) {
+        return engine->getVoiceTableRow(trackId);
+    }
+    return -1;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getVoiceTableId(
+        JNIEnv *env, jobject thiz, jint trackId) {
+    if (engine) {
+        return engine->getVoiceTableId(trackId);
+    }
+    return -1;
 }
 
 }

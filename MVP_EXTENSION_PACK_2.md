@@ -601,9 +601,9 @@ fun handleInput(
 - [x] START button previews instrument (table processing pending)
 - [x] Copy/paste works (L+B selection, B copy, L+A cut/paste, A+B delete)
 - [x] Selection highlighting works (green background/text)
-- [ ] Playback row highlighting works (requires table audio processing)
+- [x] Playback row highlighting works (implemented in Phase 3.5)
 
-**Note:** Table UI is complete, but tables don't affect audio yet. See Phase 3.5 below.
+**Note:** Table UI is complete! Table audio processing completed in Phase 3.5.
 
 ---
 
@@ -834,21 +834,26 @@ fun getTablePlaybackRow(trackId: Int): Int? {
 }
 ```
 
-### Definition of Done - Phase 3.5
-- [ ] C++ Table/TableRow structs added
-- [ ] C++ loadTable() JNI function
-- [ ] C++ scheduleNoteWithTable() JNI function
-- [ ] C++ table tick processing in audio callback
-- [ ] C++ transpose applied to playback rate
-- [ ] C++ volume applied to voice volume
-- [ ] Kotlin IAudioBackend interface updated
-- [ ] Kotlin lazy table loading implemented
-- [ ] Tables affect playback (pitch changes with transpose)
-- [ ] Tables affect playback (volume changes with volume column)
-- [ ] Table row advances based on TIC rate
-- [ ] Table playback row queryable for UI
-- [ ] Table screen shows playback row highlighting
-- [ ] START on table screen previews with table effects
+### Definition of Done - Phase 3.5 ✅ COMPLETE (2026-02-03)
+- [x] C++ Table/TableRow structs added
+- [x] C++ loadTable() JNI function
+- [x] C++ scheduleNoteWithTable() JNI function
+- [x] C++ table tick processing in audio callback
+- [x] C++ transpose applied to playback rate
+- [x] C++ volume applied to voice volume
+- [x] Kotlin IAudioBackend interface updated
+- [x] Kotlin lazy table loading implemented
+- [x] Tables affect playback (pitch changes with transpose)
+- [x] Tables affect playback (volume changes with volume column)
+- [x] Table effects working (KIL, HOP, VOL, OFF)
+- [x] Table row advances based on TIC rate
+- [x] Table playback row queryable for UI
+- [x] Table screen shows playback row highlighting
+- [x] START on table screen previews with table effects
+- [x] Automatic instrument→table ID mapping (instrument N uses table N)
+- [x] Table caching with invalidation on edit/project load
+
+**Note:** Always test on real device after completing each phase before proceeding.
 
 ---
 

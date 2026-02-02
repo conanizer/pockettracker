@@ -187,6 +187,43 @@ class OboeAudioBackend : IAudioBackend {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // TABLE METHODS (Phase 3.5)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    override fun loadTable(tableId: Int, rowData: ByteArray) {
+        if (rowData.size != 128) {
+            Log.e(TAG, "❌ loadTable: Invalid rowData size ${rowData.size} (expected 128)")
+            return
+        }
+        native_loadTable(tableId, rowData)
+        Log.d(TAG, "📋 Loaded table $tableId")
+    }
+
+    override fun scheduleNoteWithTable(
+        frame: Long,
+        sampleId: Int,
+        trackId: Int,
+        freq: Float,
+        baseFreq: Float,
+        vol: Float,
+        pan: Float,
+        startPointOverride: Int,
+        tableId: Int,
+        tableTicRate: Int
+    ) {
+        native_scheduleNoteWithTable(frame, sampleId, trackId, freq, baseFreq, vol, pan,
+            startPointOverride, tableId, tableTicRate)
+    }
+
+    override fun getVoiceTableRow(trackId: Int): Int {
+        return native_getVoiceTableRow(trackId)
+    }
+
+    override fun getVoiceTableId(trackId: Int): Int {
+        return native_getVoiceTableId(trackId)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // Native Methods (JNI → C++)
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -236,4 +273,21 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_decayWaveform()
     private external fun native_setTrackVolume(trackId: Int, volume: Float)
     private external fun native_setMasterVolume(volume: Float)
+
+    // Phase 3.5 table methods
+    private external fun native_loadTable(tableId: Int, rowData: ByteArray)
+    private external fun native_scheduleNoteWithTable(
+        targetFrame: Long,
+        sampleId: Int,
+        trackId: Int,
+        frequency: Float,
+        baseFrequency: Float,
+        volume: Float,
+        pan: Float,
+        startPointOverride: Int,
+        tableId: Int,
+        tableTicRate: Int
+    )
+    private external fun native_getVoiceTableRow(trackId: Int): Int
+    private external fun native_getVoiceTableId(trackId: Int): Int
 }

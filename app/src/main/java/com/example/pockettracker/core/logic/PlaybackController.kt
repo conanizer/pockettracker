@@ -834,6 +834,7 @@ class PlaybackController(
             }
 
             // Schedule the note with resolved effect parameters (track × master applied in C++)
+            // scheduleNote automatically handles table processing based on instrument's tableId
             audioEngine.scheduleNote(
                 targetFrame = targetFrame,
                 note = note,

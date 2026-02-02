@@ -708,6 +708,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 val result = tableModule.handleInput(tableState, action)
                 if (result.modified) {
                     trackerController.projectVersion++
+                    // Invalidate table cache so changes are reloaded to native on next preview/playback
+                    audioEngine.invalidateTable(trackerController.currentTable)
                 }
             }
             else -> { /* Other screens not yet implemented */ }
@@ -937,6 +939,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                                         trackerController.project = result.project
                                                         // Reload all custom samples from the loaded project
                                                         reloadProjectSamples()
+                                                        // Clear table cache so new project tables are loaded
+                                                        audioEngine.clearLoadedTables()
                                                         trackerController.statusMessage = "LOADED: ${item.file.nameWithoutExtension}"
                                                         trackerController.statusSuccess = true
                                                         trackerController.projectVersion++
@@ -974,6 +978,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                                         trackerController.project = result.project
                                                         // Reload all custom samples from the loaded project
                                                         reloadProjectSamples()
+                                                        // Clear table cache so new project tables are loaded
+                                                        audioEngine.clearLoadedTables()
                                                         trackerController.projectVersion++
                                                         trackerController.currentScreen = previousScreen
                                                     }
@@ -1074,6 +1080,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                     }
                                     3 -> {  // NEW
                                         trackerController.project = Project()
+                                        // Clear table cache so old tables don't persist
+                                        audioEngine.clearLoadedTables()
                                         trackerController.statusMessage = "NEW PROJECT"
                                         trackerController.statusSuccess = true
                                     }
@@ -1601,6 +1609,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                     bounds.bottomRightRow,
                                     bounds.bottomRightColumn
                                 )
+                                audioEngine.invalidateTable(trackerController.currentTable)
                                 Log.d("Selection", "A+B: Deleted table selection")
                             }
                             else -> { }
@@ -2021,6 +2030,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                         bounds.bottomRightRow, bounds.bottomRightColumn
                                     )
                                     trackerController.projectVersion++
+                                    audioEngine.invalidateTable(trackerController.currentTable)
                                     trackerController.inputController.exitSelectionMode()
                                     Log.d("CopyPaste", "Cut table selection")
                                 }
@@ -2036,6 +2046,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                 )
                                 if (result is ClipboardManager.PasteResult.Success) {
                                     trackerController.projectVersion++
+                                    audioEngine.invalidateTable(trackerController.currentTable)
                                     Log.d("CopyPaste", "Pasted ${result.itemsPasted} items to table")
                                 }
                             }

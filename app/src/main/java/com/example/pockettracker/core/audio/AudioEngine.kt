@@ -3,6 +3,7 @@ package com.example.pockettracker.core.audio
 import com.example.pockettracker.core.data.Instrument
 import com.example.pockettracker.core.data.Note
 import com.example.pockettracker.core.data.Project
+import com.example.pockettracker.core.data.Table
 import com.example.pockettracker.core.data.VolumeUtils
 import com.example.pockettracker.core.logging.ILogger
 import com.example.pockettracker.core.resources.IResourceLoader
@@ -204,8 +205,18 @@ class AudioEngine(
 
     /**
      * Preview current instrument with all parameters applied.
+     * If project is provided, table processing will be applied.
+     * Each instrument uses the table with the same ID (instrument 03 → table 03).
+     *
+     * @param instrument Instrument to preview
+     * @param project Project for table data (optional)
+     * @param tableIdOverride Override the table ID (-1 = use instrument's ID as table ID)
      */
-    fun previewInstrument(instrument: Instrument) {
+    fun previewInstrument(
+        instrument: Instrument,
+        project: Project? = null,
+        tableIdOverride: Int = -1
+    ) {
         val sampleId = instrument.sampleId
 
         // Calculate target frequency from ROOT + DETUNE
@@ -233,17 +244,29 @@ class AudioEngine(
         val volume = VolumeUtils.hexToFloat(instrument.volume)
         val pan = VolumeUtils.hexToFloat(instrument.pan)  // 0x00=left, 0x80=center, 0xFF=right
 
-        backend.scheduleNote(
+        // Use override if provided, otherwise use instrument's ID as table ID
+        val tableId = if (tableIdOverride >= 0) tableIdOverride else instrument.id
+        val tableTicRate = instrument.tableTicRate
+
+        // Force reload table when previewing (user may have just edited it)
+        if (tableId >= 0 && project != null && tableId < 256) {
+            forceReloadTable(project.tables[tableId])
+        }
+
+        backend.scheduleNoteWithTable(
             frame = targetFrame,
             sampleId = sampleId,
             trackId = 0,
             freq = targetFreq,
             baseFreq = compensatedBaseFreq,
             vol = volume,
-            pan = pan
+            pan = pan,
+            startPointOverride = -1,
+            tableId = tableId,
+            tableTicRate = tableTicRate
         )
 
-        logger.d(TAG, "🔊 Preview instrument ${instrument.id.toString(16).padStart(2,'0').uppercase()}: freq=$targetFreq Hz, vol=$volume, pan=$pan")
+        logger.d(TAG, "🔊 Preview instrument ${instrument.id.toString(16).padStart(2,'0').uppercase()}: freq=$targetFreq Hz, vol=$volume, pan=$pan, tableId=$tableId")
     }
 
     /**
@@ -362,6 +385,7 @@ class AudioEngine(
 
     /**
      * Schedule a note to be played at exact audio frame.
+     * Automatically handles table processing - each instrument uses the table with the same ID.
      */
     fun scheduleNote(
         targetFrame: Long,
@@ -375,15 +399,26 @@ class AudioEngine(
     ) {
         if (note == Note.EMPTY) return
 
-        val sampleId = if (instrumentId in 0..255) {
-            project.instruments[instrumentId].sampleId
+        val instrument = if (instrumentId in 0..255) {
+            project.instruments[instrumentId]
         } else {
             android.util.Log.w("AudioEngine", "❌ Invalid instrumentId=$instrumentId, skipping note")
             return
         }
 
+        val sampleId = instrument.sampleId
+
+        // Each instrument uses the table with the same ID (instrument 03 → table 03)
+        val tableId = instrumentId
+        val tableTicRate = instrument.tableTicRate
+
+        // Ensure table is loaded
+        if (tableId in 0..255) {
+            ensureTableLoaded(project.tables[tableId])
+        }
+
         // Debug: Log what we're scheduling
-        android.util.Log.d("AudioEngine", "📋 scheduleNote: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, pan=$pan")
+        android.util.Log.d("AudioEngine", "📋 scheduleNote: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, pan=$pan, tableId=$tableId")
 
         val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
         val frequency = note.toFrequency()
@@ -391,7 +426,11 @@ class AudioEngine(
         // Resume stream so audio callback can process the queue
         backend.resumeStream()
 
-        backend.scheduleNote(targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan, startPointOverride)
+        // Always use scheduleNoteWithTable - C++ handles tableId=-1 as "no table"
+        backend.scheduleNoteWithTable(
+            targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan,
+            startPointOverride, tableId, tableTicRate
+        )
     }
 
     /**
@@ -465,6 +504,167 @@ class AudioEngine(
             filterCut = instrument.filterCut,
             filterRes = instrument.filterRes
         )
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // TABLE SUPPORT (Phase 3.5)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /** Track which tables have been loaded to native layer */
+    private val loadedTables = mutableSetOf<Int>()
+
+    /**
+     * Load a table to the native audio engine.
+     *
+     * Serializes the table data into the format expected by C++:
+     * 16 rows × 8 bytes per row = 128 bytes
+     * Each row: [transpose, volume, fx1Type, fx1Value, fx2Type, fx2Value, fx3Type, fx3Value]
+     *
+     * @param table The table to load
+     */
+    fun loadTable(table: Table) {
+        val rowData = ByteArray(128)
+        for (rowIndex in 0 until 16) {
+            val row = table.rows[rowIndex]
+            val offset = rowIndex * 8
+            rowData[offset + 0] = row.transpose.toByte()
+            rowData[offset + 1] = row.volume.toByte()
+            rowData[offset + 2] = row.fx1Type.toByte()
+            rowData[offset + 3] = row.fx1Value.toByte()
+            rowData[offset + 4] = row.fx2Type.toByte()
+            rowData[offset + 5] = row.fx2Value.toByte()
+            rowData[offset + 6] = row.fx3Type.toByte()
+            rowData[offset + 7] = row.fx3Value.toByte()
+        }
+
+        // Log first row for debugging
+        val firstRow = table.rows[0]
+        android.util.Log.d(TAG, "📋 Loading table ${table.id}: row0=[transpose=${firstRow.transpose}, vol=${firstRow.volume}]")
+
+        backend.loadTable(table.id, rowData)
+        loadedTables.add(table.id)
+        logger.d(TAG, "📋 Loaded table ${table.id} to native layer")
+    }
+
+    /**
+     * Ensure a table is loaded to the native layer.
+     * Only loads if not already loaded.
+     *
+     * @param table The table to ensure is loaded
+     */
+    fun ensureTableLoaded(table: Table) {
+        if (table.id !in loadedTables) {
+            loadTable(table)
+        }
+    }
+
+    /**
+     * Force reload a table to the native layer.
+     * Use this after editing table data to ensure changes take effect.
+     *
+     * @param table The table to reload
+     */
+    fun forceReloadTable(table: Table) {
+        loadedTables.remove(table.id)
+        loadTable(table)
+    }
+
+    /**
+     * Mark a table as needing reload (call after editing table data).
+     *
+     * @param tableId The table ID that was modified
+     */
+    fun invalidateTable(tableId: Int) {
+        loadedTables.remove(tableId)
+        android.util.Log.d(TAG, "🔄 Invalidated table $tableId cache")
+    }
+
+    /**
+     * Clear loaded table tracking (call when project changes).
+     */
+    fun clearLoadedTables() {
+        loadedTables.clear()
+        logger.d(TAG, "🗑️ Cleared loaded tables tracking")
+    }
+
+    /**
+     * Schedule a note with explicit table control.
+     * Use this when you need to override the default table (instrument ID = table ID).
+     *
+     * @param targetFrame When this note should trigger (audio frame)
+     * @param note The note to play
+     * @param instrumentId Instrument ID (0-255)
+     * @param trackId Track ID (0-7)
+     * @param volume Note volume (0.0-1.0)
+     * @param pan Pan position (0.0=left, 0.5=center, 1.0=right)
+     * @param project Project for instrument lookup
+     * @param startPointOverride Optional start point override (-1 = use instrument default)
+     * @param tableIdOverride Override table ID (-1 = use instrument ID as table ID)
+     */
+    fun scheduleNoteWithTable(
+        targetFrame: Long,
+        note: Note,
+        instrumentId: Int,
+        trackId: Int,
+        volume: Float = 1.0f,
+        pan: Float = 0.5f,
+        project: Project,
+        startPointOverride: Int = -1,
+        tableIdOverride: Int = -1
+    ) {
+        if (note == Note.EMPTY) return
+
+        val instrument = if (instrumentId in 0..255) {
+            project.instruments[instrumentId]
+        } else {
+            android.util.Log.w("AudioEngine", "❌ Invalid instrumentId=$instrumentId, skipping note")
+            return
+        }
+
+        val sampleId = instrument.sampleId
+
+        // Use override if provided, otherwise use instrument ID as table ID
+        val tableId = if (tableIdOverride >= 0) tableIdOverride else instrumentId
+        val tableTicRate = instrument.tableTicRate
+
+        // Ensure table is loaded
+        if (tableId >= 0 && tableId < 256) {
+            ensureTableLoaded(project.tables[tableId])
+        }
+
+        val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
+        val frequency = note.toFrequency()
+
+        // Resume stream so audio callback can process the queue
+        backend.resumeStream()
+
+        android.util.Log.d("AudioEngine", "📋 scheduleNoteWithTable: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, tableId=$tableId, ticRate=$tableTicRate")
+
+        backend.scheduleNoteWithTable(
+            targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan,
+            startPointOverride, tableId, tableTicRate
+        )
+    }
+
+    /**
+     * Get the current table row for a voice on a specific track.
+     * Used for UI feedback (highlighting current table row during playback).
+     *
+     * @param trackId Which track to query (0-7)
+     * @return Current table row (0-15), or -1 if no active voice or no table
+     */
+    fun getVoiceTableRow(trackId: Int): Int {
+        return backend.getVoiceTableRow(trackId)
+    }
+
+    /**
+     * Get the table ID being used by a voice on a specific track.
+     *
+     * @param trackId Which track to query (0-7)
+     * @return Table ID (0-255), or -1 if no active voice or no table
+     */
+    fun getVoiceTableId(trackId: Int): Int {
+        return backend.getVoiceTableId(trackId)
     }
 
     /**

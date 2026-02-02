@@ -262,4 +262,68 @@ interface IAudioBackend {
      * @param volume Volume level (0.0 to 1.0)
      */
     fun setMasterVolume(volume: Float)
+
+    // ===================================
+    // TABLE METHODS (Phase 3.5)
+    // ===================================
+
+    /**
+     * Load table data into the audio engine.
+     *
+     * Tables are mini-sequencers that run alongside playing voices,
+     * modifying pitch, volume, and effects over time.
+     *
+     * @param tableId Table slot (0-255)
+     * @param rowData 128 bytes: 16 rows × 8 bytes per row
+     *                Each row: [transpose, volume, fx1Type, fx1Value, fx2Type, fx2Value, fx3Type, fx3Value]
+     */
+    fun loadTable(tableId: Int, rowData: ByteArray)
+
+    /**
+     * Schedule a note with table processing.
+     *
+     * Like scheduleNote(), but the voice will process table data during playback,
+     * modifying pitch and volume based on the table rows.
+     *
+     * @param frame Absolute audio frame number
+     * @param sampleId Which sample to play (0-255)
+     * @param trackId Which track this note belongs to (0-7)
+     * @param freq Target playback frequency in Hz
+     * @param baseFreq Base frequency of the sample
+     * @param vol Volume (0.0 to 1.0)
+     * @param pan Stereo pan position (0.0=left, 0.5=center, 1.0=right)
+     * @param startPointOverride Optional start point override (-1 = use default)
+     * @param tableId Table to use (-1 = no table)
+     * @param tableTicRate Ticks per table row advance (default 6)
+     */
+    fun scheduleNoteWithTable(
+        frame: Long,
+        sampleId: Int,
+        trackId: Int,
+        freq: Float,
+        baseFreq: Float,
+        vol: Float,
+        pan: Float = 0.5f,
+        startPointOverride: Int = -1,
+        tableId: Int = -1,
+        tableTicRate: Int = 6
+    )
+
+    /**
+     * Get the current table row for a voice on a specific track.
+     *
+     * Used for UI feedback (highlighting current table row during playback).
+     *
+     * @param trackId Which track to query (0-7)
+     * @return Current table row (0-15), or -1 if no active voice or no table
+     */
+    fun getVoiceTableRow(trackId: Int): Int
+
+    /**
+     * Get the table ID being used by a voice on a specific track.
+     *
+     * @param trackId Which track to query (0-7)
+     * @return Table ID (0-255), or -1 if no active voice or no table
+     */
+    fun getVoiceTableId(trackId: Int): Int
 }

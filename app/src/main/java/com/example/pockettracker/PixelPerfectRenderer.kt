@@ -447,6 +447,18 @@ class TrackerLayout {
             // ===================================
             ScreenType.TABLE -> {
                 with(tableModule) {
+                    // Find which track is playing with this table (if any)
+                    var tablePlaybackRow: Int? = null
+                    for (trackId in 0 until 8) {
+                        if (audioEngine.getVoiceTableId(trackId) == currentTable) {
+                            val row = audioEngine.getVoiceTableRow(trackId)
+                            if (row >= 0) {
+                                tablePlaybackRow = row
+                                break
+                            }
+                        }
+                    }
+
                     draw(
                         x = moduleX,
                         y = currentY,
@@ -455,7 +467,7 @@ class TrackerLayout {
                             table = project.tables[currentTable],
                             cursorRow = tableCursorRow,
                             cursorColumn = tableCursorColumn,
-                            playbackRow = null,  // TODO: Table playback row tracking
+                            playbackRow = tablePlaybackRow,
                             ticRate = project.instruments.getOrNull(currentInstrument)?.tableTicRate ?: 0x06,
                             selectionMode = selectionMode,
                             isCellSelected = isCellSelected
