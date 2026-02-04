@@ -263,7 +263,9 @@ class AudioEngine(
             pan = pan,
             startPointOverride = -1,
             tableId = tableId,
-            tableTicRate = tableTicRate
+            tableTicRate = tableTicRate,
+            noteOctave = instrument.root.octave,
+            notePitch = instrument.root.pitch
         )
 
         logger.d(TAG, "🔊 Preview instrument ${instrument.id.toString(16).padStart(2,'0').uppercase()}: freq=$targetFreq Hz, vol=$volume, pan=$pan, tableId=$tableId")
@@ -429,7 +431,7 @@ class AudioEngine(
         // Always use scheduleNoteWithTable - C++ handles tableId=-1 as "no table"
         backend.scheduleNoteWithTable(
             targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan,
-            startPointOverride, tableId, tableTicRate
+            startPointOverride, tableId, tableTicRate, note.octave, note.pitch
         )
     }
 
@@ -642,7 +644,7 @@ class AudioEngine(
 
         backend.scheduleNoteWithTable(
             targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan,
-            startPointOverride, tableId, tableTicRate
+            startPointOverride, tableId, tableTicRate, note.octave, note.pitch
         )
     }
 

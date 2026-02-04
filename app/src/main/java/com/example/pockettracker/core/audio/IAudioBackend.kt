@@ -295,6 +295,8 @@ interface IAudioBackend {
      * @param startPointOverride Optional start point override (-1 = use default)
      * @param tableId Table to use (-1 = no table)
      * @param tableTicRate Ticks per table row advance (default 6)
+     * @param noteOctave Octave of the note (0-9) for TICFC mode
+     * @param notePitch Pitch of the note (0-11, C=0) for TICFE mode
      */
     fun scheduleNoteWithTable(
         frame: Long,
@@ -306,7 +308,9 @@ interface IAudioBackend {
         pan: Float = 0.5f,
         startPointOverride: Int = -1,
         tableId: Int = -1,
-        tableTicRate: Int = 6
+        tableTicRate: Int = 6,
+        noteOctave: Int = 4,
+        notePitch: Int = 0
     )
 
     /**

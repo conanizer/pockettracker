@@ -17,9 +17,10 @@ const int MAX_VOICES = 8;  // Reduced for testing
 // ===================================
 const int FX_NONE = 0x00;
 const int FX_ARC = 0x03;       // Cxx - Arpeggio Config
+const int FX_HOP = 0x08;       // Hxx - Table hop (jump to row, FF = stop table)
+const int FX_TIC = 0x09;       // Txx - Table tick rate (01-FB = tics/row, FC-FF = special modes)
 const int FX_ARPEGGIO = 0x0A;  // Axx - Arpeggio
 const int FX_KILL = 0x0B;      // K00 - Kill voice
-const int FX_HOP = 0x08;       // Hxx - Table hop (jump to row, FF = stop table)
 const int FX_OFFSET = 0x0F;    // Oxx - Sample offset
 const int FX_REPEAT = 0x12;    // Rxx - Retrigger
 const int FX_VOLUME = 0x16;    // Vxx - Volume
@@ -122,6 +123,10 @@ struct ScheduledNote {
     // Table parameters (Phase 3.5)
     int tableId;             // Table to use (-1 = no table)
     int tableTicRate;        // Ticks per table row advance (default 6)
+
+    // Note info for special TIC modes (Phase 4)
+    int noteOctave;          // Octave of note (0-9) for TICFC mode
+    int notePitch;           // Pitch of note (0-11, C=0) for TICFE mode
 
     // For priority queue sorting (earliest frame first)
     bool operator>(const ScheduledNote& other) const {
@@ -335,10 +340,16 @@ struct Voice {
     // Table state (Phase 3.5)
     int tableId;             // -1 = no table, 0-255 = table ID
     int tableRow;            // Current table row (0-15)
-    int tableTicRate;        // Ticks per table row advance
+    int lastProcessedRow;    // Last row that had effects processed (-1 = none)
+    int tableTicRate;        // Ticks per table row advance (special: 0=trigger, FC=octave, FE=note, FF=200Hz)
     int tableTicCounter;     // Counter for tic-based advance
     float tableTranspose;    // Current transpose from table (semitones)
     float tableVolume;       // Current volume multiplier from table (0.0-1.0)
+
+    // Special TIC mode support (Phase 4)
+    int triggerOctave;       // Octave of triggered note (0-9) for TICFC mode
+    int triggerPitch;        // Pitch of triggered note (0-11, C=0) for TICFE mode
+    float tic200HzAccum;     // Accumulator for 200Hz mode (TICFF)
 
     Voice() : isActive(false), sampleData(nullptr), sampleLength(0),
               position(0), trackId(-1), playbackRate(1.0f), basePlaybackRate(1.0f), volume(1.0f),
@@ -349,12 +360,13 @@ struct Voice {
               filterType(0), filterCut(128), filterRes(0),
               b0(1.0f), b1(0.0f), b2(0.0f), a1(0.0f), a2(0.0f),
               x1(0.0f), x2(0.0f), y1(0.0f), y2(0.0f),
-              tableId(-1), tableRow(0), tableTicRate(6), tableTicCounter(0),
-              tableTranspose(0.0f), tableVolume(1.0f) {}
+              tableId(-1), tableRow(0), lastProcessedRow(-1), tableTicRate(6), tableTicCounter(0),
+              tableTranspose(0.0f), tableVolume(1.0f),
+              triggerOctave(4), triggerPitch(0), tic200HzAccum(0.0f) {}
 
     void trigger(float* sample, int length, int track, float rate, float vol, float pan,
                  const InstrumentParams& params, float sampleRate, int startPointOverride = -1,
-                 int tblId = -1, int tblTicRate = 6) {
+                 int tblId = -1, int tblTicRate = 6, int octave = 4, int pitch = 0, int startRow = 0) {
         sampleData = sample;
         sampleLength = length;
         trackId = track;
@@ -409,11 +421,28 @@ struct Voice {
 
         // Initialize table state (Phase 3.5)
         tableId = tblId;
-        tableRow = 0;
+        tableRow = startRow % 16;  // Use provided start row, wrap to 0-15
+        lastProcessedRow = -1;     // Reset so first row gets processed
         tableTicRate = tblTicRate;
         tableTicCounter = 0;
         tableTranspose = 0.0f;
         tableVolume = 1.0f;
+
+        // Store note info for special TIC modes (Phase 4)
+        triggerOctave = std::max(0, std::min(octave, 9));   // Clamp to 0-9
+        triggerPitch = std::max(0, std::min(pitch, 11));    // Clamp to 0-11
+        tic200HzAccum = 0.0f;
+
+        // For special TIC modes, set initial table row based on mode
+        // These override the startRow parameter
+        if (tblTicRate == 0xFC) {
+            // TICFC: Octave map - row = octave (clamped to 0-15)
+            tableRow = std::min(triggerOctave, 15);
+        } else if (tblTicRate == 0xFE) {
+            // TICFE: Note map - row = pitch (0-11, wraps to 0-11)
+            tableRow = triggerPitch;
+        }
+        // Note: For TIC00 (trigger mode), startRow is used directly (set by caller)
 
         // Set initial position based on direction
         // For reverse: start at actualEnd - 1 (not actualEnd) because we need to read idx+1 for interpolation
@@ -651,6 +680,20 @@ public:
                 // Find free voice (same logic as triggerNote)
                 bool voiceFound = false;
 
+                // TIC00 support: Check if previous voice on this track was using trigger mode
+                // If so, save its table row so we can advance it on the new voice
+                int savedTableRow = 0;
+                bool wasTIC00Mode = false;
+                for (int v = 0; v < MAX_VOICES; v++) {
+                    if (voices[v].trackId == note.trackId && voices[v].isActive) {
+                        if (voices[v].tableTicRate == 0x00 && voices[v].tableId >= 0) {
+                            wasTIC00Mode = true;
+                            savedTableRow = (voices[v].tableRow + 1) % 16;  // Advance and wrap
+                            LOGD("📋 TIC00: Saving table row %d for track %d retrigger", savedTableRow, note.trackId);
+                        }
+                    }
+                }
+
                 // First, stop any voice on this track (voice stealing)
                 for (int v = 0; v < MAX_VOICES; v++) {
                     if (voices[v].trackId == note.trackId) {
@@ -666,14 +709,51 @@ public:
                         if (note.sampleId >= 0 && note.sampleId < 256 && samples[note.sampleId]) {
                             float rate = note.frequency / note.baseFrequency;
                             float sampleRate = (float)audioStream->getSampleRate();
+
+                            // M8-style: Check if table's last row (row 15) has TIC effect
+                            // If so, use that TIC value for the whole table from the start
+                            // This saves the first row for other FX commands while still setting global table speed
+                            int effectiveTicRate = note.tableTicRate;
+                            if (note.tableId >= 0 && note.tableId < 256) {
+                                std::lock_guard<std::mutex> lock(tableMutex);
+                                if (tables[note.tableId].loaded) {
+                                    TableRow& lastRow = tables[note.tableId].rows[15];
+                                    // Check all 3 FX slots for TIC effect
+                                    // Accept all valid TIC values: 00 (trigger), 01-FB (standard), FC-FF (special)
+                                    auto checkTic = [](uint8_t fxType, uint8_t fxValue) -> int {
+                                        if (fxType == FX_TIC) {
+                                            // All TIC values are valid: 00, 01-FB, FC, FD, FE, FF
+                                            return fxValue;
+                                        }
+                                        return -1;
+                                    };
+                                    int tic1 = checkTic(lastRow.fx1Type, lastRow.fx1Value);
+                                    int tic2 = checkTic(lastRow.fx2Type, lastRow.fx2Value);
+                                    int tic3 = checkTic(lastRow.fx3Type, lastRow.fx3Value);
+                                    if (tic1 >= 0) {
+                                        effectiveTicRate = tic1;
+                                        LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
+                                    } else if (tic2 >= 0) {
+                                        effectiveTicRate = tic2;
+                                        LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
+                                    } else if (tic3 >= 0) {
+                                        effectiveTicRate = tic3;
+                                        LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
+                                    }
+                                }
+                            }
+
+                            // For TIC00 mode, use saved row from previous voice; otherwise start at row 0
+                            int startRow = (wasTIC00Mode && effectiveTicRate == 0x00) ? savedTableRow : 0;
+
                             voices[v].trigger(samples[note.sampleId], sampleLengths[note.sampleId],
                                               note.trackId, rate, note.volume, note.pan, instrumentParams[note.sampleId],
                                               sampleRate, note.startPointOverride,
-                                              note.tableId, note.tableTicRate);
+                                              note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
                             voiceFound = true;
-                            LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, pan=%.2f, startOverride=%d, table=%d, tic=%d",
+                            LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
                                  (long long)currentFrame, note.sampleId, note.trackId, rate, note.pan, note.startPointOverride,
-                                 note.tableId, note.tableTicRate);
+                                 note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
                         } else {
                             // Sample not loaded - log specific reason
                             if (note.sampleId < 0 || note.sampleId >= 256) {
@@ -699,10 +779,15 @@ public:
         float framePeaksPerTrack[8] = {0};
 
         // ===================================
-        // TABLE PROCESSING (Phase 3.5)
+        // TABLE PROCESSING (Phase 3.5 + Phase 4 special modes)
         // ===================================
         // Process table ticks for each active voice once per callback
-        // This is a simplified approach: 1 tic = 1 audio callback (~6ms)
+        // Special TIC modes (Phase 4):
+        //   TIC00 (0x00): Trigger mode - table doesn't advance automatically
+        //   TIC01-FB: Standard tic rate (1 tic = 1 audio callback ~6ms)
+        //   TICFC (0xFC): Octave map - row = triggered note's octave (0-9)
+        //   TICFE (0xFE): Note map - row = triggered note's pitch (0-11)
+        //   TICFF (0xFF): 200Hz mode - advance ~1 row per 5ms
         for (int v = 0; v < MAX_VOICES; v++) {
             Voice& voice = voices[v];
             if (!voice.isActive || voice.tableId < 0) continue;
@@ -715,12 +800,45 @@ public:
             }
             if (!tableLoaded) continue;
 
-            // Increment tic counter
-            voice.tableTicCounter++;
+            // Handle special TIC modes
+            bool shouldProcessRow = false;
+            bool shouldAdvance = false;
 
-            // Check if we should advance to next table row
-            if (voice.tableTicCounter >= voice.tableTicRate) {
-                voice.tableTicCounter = 0;
+            if (voice.tableTicRate == 0x00) {
+                // TIC00: Trigger mode - apply row effects ONCE, don't advance automatically
+                // Table row only advances when note is retriggered (handled in trigger logic)
+                // Only process if we haven't processed this row yet
+                shouldProcessRow = (voice.tableRow != voice.lastProcessedRow);
+                shouldAdvance = false;
+            } else if (voice.tableTicRate == 0xFC || voice.tableTicRate == 0xFE) {
+                // TICFC/TICFE: Static mapping modes - row is fixed, process ONCE
+                // Only process if we haven't processed this row yet
+                shouldProcessRow = (voice.tableRow != voice.lastProcessedRow);
+                shouldAdvance = false;
+            } else if (voice.tableTicRate == 0xFF) {
+                // TICFF: 200Hz mode - faster advancement
+                // At 44100Hz with ~256 sample callbacks, that's ~172 callbacks/sec
+                // We want 200Hz, so advance roughly every callback with some accumulation
+                // 200Hz = advance every 220.5 samples, so accumulate frames
+                voice.tic200HzAccum += numFrames;
+                float samplesPerTic = 44100.0f / 200.0f;  // ~220.5 samples per tic
+                if (voice.tic200HzAccum >= samplesPerTic) {
+                    voice.tic200HzAccum -= samplesPerTic;
+                    shouldProcessRow = true;
+                    shouldAdvance = true;
+                }
+            } else {
+                // Standard tic mode (01-FB): advance every N tics
+                voice.tableTicCounter++;
+                if (voice.tableTicCounter >= voice.tableTicRate) {
+                    voice.tableTicCounter = 0;
+                    shouldProcessRow = true;
+                    shouldAdvance = true;
+                }
+            }
+
+            // Process current table row if needed
+            if (shouldProcessRow) {
 
                 // Get current table row data
                 TableRow row;
@@ -784,6 +902,19 @@ public:
                             }
                             break;
 
+                        case FX_TIC:
+                            // Txx - Set table tick rate (tics per row advance)
+                            // 01-FB = standard tic rate (01=fastest, FB=slowest)
+                            // FC-FF = special modes (future: octave map, note map, etc.)
+                            if (fxValue >= 0x01 && fxValue <= 0xFB) {
+                                voice.tableTicRate = fxValue;
+                                voice.tableTicCounter = 0;  // Reset counter when rate changes
+                                LOGD("📋 Table effect: TIC %02X - set tick rate to %d", fxValue, fxValue);
+                            }
+                            // Note: TIC00 is handled specially - it means "trigger mode"
+                            // where table advances only when the note is triggered
+                            break;
+
                         default:
                             // Unknown or unimplemented effect - ignore
                             break;
@@ -795,15 +926,24 @@ public:
                 processEffect(row.fx2Type, row.fx2Value);
                 processEffect(row.fx3Type, row.fx3Value);
 
-                // Advance to next row (or jump if HOP was executed)
+                // Mark this row as processed (before any jumps change tableRow)
+                int processedRow = voice.tableRow;
+                voice.lastProcessedRow = processedRow;
+
+                // Handle row advancement:
+                // - HOP always works (jumps to target row) regardless of shouldAdvance
+                // - Normal advancement only happens if shouldAdvance is true and no HOP
                 if (hopExecuted && hopTarget >= 0) {
+                    // HOP effect: jump to target row (works in all TIC modes including TIC00)
                     voice.tableRow = hopTarget % 16;
-                } else {
+                    LOGD("📋 Table HOP: voice %d jumped to row %d", v, voice.tableRow);
+                } else if (shouldAdvance) {
+                    // Normal advancement (only for non-TIC00/TICFC/TICFE modes)
                     voice.tableRow = (voice.tableRow + 1) % 16;
                 }
 
                 // Debug log (only occasionally to avoid spam)
-                if (voice.tableRow == 0) {
+                if (shouldAdvance && voice.tableRow == 0) {
                     LOGD("📋 Table %d loop: voice=%d, transpose=%.0f, vol=%.2f",
                          voice.tableId, v, voice.tableTranspose, voice.tableVolume);
                 }
@@ -1027,7 +1167,8 @@ public:
     // Schedule a note to be played at exact frame
     void scheduleNote(int64_t targetFrame, int sampleId, int trackId,
                       float frequency, float baseFrequency, float volume, float pan = 0.5f,
-                      int startPointOverride = -1, int tableId = -1, int tableTicRate = 6) {
+                      int startPointOverride = -1, int tableId = -1, int tableTicRate = 6,
+                      int noteOctave = 4, int notePitch = 0) {
         ScheduledNote note = {
                 .targetFrame = targetFrame,
                 .sampleId = sampleId,
@@ -1038,7 +1179,9 @@ public:
                 .pan = pan,
                 .startPointOverride = startPointOverride,
                 .tableId = tableId,
-                .tableTicRate = tableTicRate
+                .tableTicRate = tableTicRate,
+                .noteOctave = noteOctave,
+                .notePitch = notePitch
         };
         noteQueue.schedule(note);
     }
@@ -1781,10 +1924,12 @@ JNIEXPORT void JNICALL
 Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1scheduleNoteWithTable(
         JNIEnv *env, jobject thiz, jlong targetFrame, jint sampleId, jint trackId,
         jfloat frequency, jfloat baseFrequency, jfloat volume, jfloat pan,
-        jint startPointOverride, jint tableId, jint tableTicRate) {
+        jint startPointOverride, jint tableId, jint tableTicRate,
+        jint noteOctave, jint notePitch) {
     if (engine) {
         engine->scheduleNote(targetFrame, sampleId, trackId, frequency, baseFrequency,
-                             volume, pan, startPointOverride, tableId, tableTicRate);
+                             volume, pan, startPointOverride, tableId, tableTicRate,
+                             noteOctave, notePitch);
     }
 }
 

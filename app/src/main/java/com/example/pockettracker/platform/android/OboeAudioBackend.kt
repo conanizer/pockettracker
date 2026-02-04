@@ -209,10 +209,12 @@ class OboeAudioBackend : IAudioBackend {
         pan: Float,
         startPointOverride: Int,
         tableId: Int,
-        tableTicRate: Int
+        tableTicRate: Int,
+        noteOctave: Int,
+        notePitch: Int
     ) {
         native_scheduleNoteWithTable(frame, sampleId, trackId, freq, baseFreq, vol, pan,
-            startPointOverride, tableId, tableTicRate)
+            startPointOverride, tableId, tableTicRate, noteOctave, notePitch)
     }
 
     override fun getVoiceTableRow(trackId: Int): Int {
@@ -286,7 +288,9 @@ class OboeAudioBackend : IAudioBackend {
         pan: Float,
         startPointOverride: Int,
         tableId: Int,
-        tableTicRate: Int
+        tableTicRate: Int,
+        noteOctave: Int,
+        notePitch: Int
     )
     private external fun native_getVoiceTableRow(trackId: Int): Int
     private external fun native_getVoiceTableId(trackId: Int): Int

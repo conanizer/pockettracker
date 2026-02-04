@@ -1143,8 +1143,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     // INSTRUMENT: Handle LOAD button
                     ScreenType.INSTRUMENT -> {
                         when (trackerController.instrumentCursorRow) {
-                            1 -> {  // ROW 1: LOAD button
-                                if (trackerController.instrumentCursorColumn == 1) {
+                            0 -> {  // ROW 0: TYPE + [LOAD] button (column 3)
+                                if (trackerController.instrumentCursorColumn == 3) {
                                     // Sync instrumentController before opening file browser
                                     instrumentController.currentInstrument = trackerController.currentInstrument
                                     val samplesDir = File(fileManager.getSamplesDirectory())

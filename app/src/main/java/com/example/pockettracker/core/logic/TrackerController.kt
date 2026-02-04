@@ -681,8 +681,10 @@ class TrackerController(
                     else -> 14  // Wrap to bottom
                 }
 
-                // Dual-param rows: 3, 4, 6, 7, 8 (ROOT+VOL, DETUNE+PAN, DRIVE+FILTER, CRUSH+CUT, DWNSMPL+RES)
-                val dualParamRows = setOf(3, 4, 6, 7, 8)
+                // Dual-param rows (updated 2026-02-04):
+                // Row 0: TYPE+[LOAD], Row 2: ROOT+VOL, Row 3: DETUNE+PAN
+                // Row 6: DRIVE+FILTER, Row 7: CRUSH+CUT, Row 8: DWNSMPL+RES
+                val dualParamRows = setOf(0, 2, 3, 6, 7, 8)
                 // Preserve column 3 when navigating between dual-parameter rows
                 instrumentCursorColumn = if (oldRow in dualParamRows && instrumentCursorRow in dualParamRows && oldColumn == 3) {
                     3  // Stay in column 3 when moving within dual-parameter rows
@@ -725,8 +727,10 @@ class TrackerController(
                     else -> 0  // Wrap to top
                 }
 
-                // Dual-param rows: 3, 4, 6, 7, 8 (ROOT+VOL, DETUNE+PAN, DRIVE+FILTER, CRUSH+CUT, DWNSMPL+RES)
-                val dualParamRows = setOf(3, 4, 6, 7, 8)
+                // Dual-param rows (updated 2026-02-04):
+                // Row 0: TYPE+[LOAD], Row 2: ROOT+VOL, Row 3: DETUNE+PAN
+                // Row 6: DRIVE+FILTER, Row 7: CRUSH+CUT, Row 8: DWNSMPL+RES
+                val dualParamRows = setOf(0, 2, 3, 6, 7, 8)
                 // Preserve column 3 when navigating between dual-parameter rows
                 instrumentCursorColumn = if (oldRow in dualParamRows && instrumentCursorRow in dualParamRows && oldColumn == 3) {
                     3  // Stay in column 3 when moving within dual-parameter rows
@@ -865,13 +869,20 @@ class TrackerController(
      * Columns 0 and 2 are always unreachable (headers/labels)
      */
     private fun getInstrumentCursorLeftColumn(row: Int, currentColumn: Int): Int {
-        // INSTRUMENT screen column layout per row:
-        // All rows: min column is 1 (column 0 is unreachable header)
-        // Dual-param rows (3, 4, 6, 7, 8): columns 1 and 3
-        // Single-param rows (0-2, 10-14): column 1 only
-        // Spacer rows (5, 9): not reachable
+        // INSTRUMENT screen column layout per row (updated 2026-02-04):
+        // Row 0: TYPE + [LOAD] - columns 1 and 3 (TYPE at col 1, LOAD button at col 3)
+        // Row 1: NAME - column 1 only
+        // Row 2: ROOT + VOL - columns 1 and 3
+        // Row 3: DETUNE + PAN - columns 1 and 3
+        // Row 4: TBL TIC - column 1 only
+        // Row 5: SPACER (not reachable)
+        // Row 6: DRIVE + FILTER - columns 1 and 3
+        // Row 7: CRUSH + CUT - columns 1 and 3
+        // Row 8: DWNSMPL + RES - columns 1 and 3
+        // Row 9: SPACER (not reachable)
+        // Row 10-14: single param rows - column 1 only
 
-        val dualParamRows = setOf(3, 4, 6, 7, 8)
+        val dualParamRows = setOf(0, 2, 3, 6, 7, 8)
         return if (row in dualParamRows) {
             // Dual-param rows: columns 1 and 3 (skip 2)
             if (currentColumn > 1) 1 else 1
@@ -886,13 +897,20 @@ class TrackerController(
      * Columns 0 and 2 are always unreachable (headers/labels)
      */
     private fun getInstrumentCursorRightColumn(row: Int, currentColumn: Int): Int {
-        // INSTRUMENT screen column layout per row:
-        // All rows: min column is 1 (column 0 is unreachable header)
-        // Dual-param rows (3, 4, 6, 7, 8): columns 1 and 3
-        // Single-param rows (0-2, 10-14): column 1 only
-        // Spacer rows (5, 9): not reachable
+        // INSTRUMENT screen column layout per row (updated 2026-02-04):
+        // Row 0: TYPE + [LOAD] - columns 1 and 3 (TYPE at col 1, LOAD button at col 3)
+        // Row 1: NAME - column 1 only
+        // Row 2: ROOT + VOL - columns 1 and 3
+        // Row 3: DETUNE + PAN - columns 1 and 3
+        // Row 4: TBL TIC - column 1 only
+        // Row 5: SPACER (not reachable)
+        // Row 6: DRIVE + FILTER - columns 1 and 3
+        // Row 7: CRUSH + CUT - columns 1 and 3
+        // Row 8: DWNSMPL + RES - columns 1 and 3
+        // Row 9: SPACER (not reachable)
+        // Row 10-14: single param rows - column 1 only
 
-        val dualParamRows = setOf(3, 4, 6, 7, 8)
+        val dualParamRows = setOf(0, 2, 3, 6, 7, 8)
         return if (row in dualParamRows) {
             // Dual-param rows: columns 1 and 3 (skip 2)
             if (currentColumn < 3) 3 else 3

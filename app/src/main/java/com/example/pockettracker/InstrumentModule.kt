@@ -82,41 +82,24 @@ class InstrumentModule : TrackerModule {
         var currentRow = 0
 
         // ─────────────────────────────────────
-        // ROW 0: TYPE (read-only for now)
+        // ROW 0: TYPE + LOAD button
+        // TYPE at columns 0-1, LOAD button at column 3 (value2ColumnX)
         // ─────────────────────────────────────
-        drawParameterRow(
+        drawTypeLoadRow(
             x = x,
             y = rowY,
             scale = scale,
             nameColumnX = nameColumnX,
             valueColumnX = valueColumnX,
-            parameterName = "TYPE",
-            parameterValue = "sample",  // TODO: Will be changeable with A+DPAD
-            isCursorOnName = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
-            isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1
+            cursorRow = instrumentState.cursorRow,
+            cursorColumn = instrumentState.cursorColumn,
+            currentRow = currentRow
         )
         rowY += ROW_HEIGHT
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 1: LOAD (button to open file browser)
-        // ─────────────────────────────────────
-        drawParameterRow(
-            x = x,
-            y = rowY,
-            scale = scale,
-            nameColumnX = nameColumnX,
-            valueColumnX = valueColumnX,
-            parameterName = "LOAD",
-            parameterValue = "[LOAD]",
-            isCursorOnName = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
-            isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1
-        )
-        rowY += ROW_HEIGHT
-        currentRow++
-
-        // ─────────────────────────────────────
-        // ROW 2: NAME (character editing, 12 chars)
+        // ROW 1: NAME (shows loaded sample filename)
         // ─────────────────────────────────────
         drawNameRow(
             x = x,
@@ -131,7 +114,7 @@ class InstrumentModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 3: ROOT + VOL (dual parameter row)
+        // ROW 2: ROOT + VOL (dual parameter row)
         // ─────────────────────────────────────
         val volHex = instrument.volume.toString(16).padStart(2, '0').uppercase()
         drawDualParameterRow(
@@ -152,7 +135,7 @@ class InstrumentModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 4: DETUNE + PAN (dual parameter row)
+        // ROW 3: DETUNE + PAN (dual parameter row)
         // ─────────────────────────────────────
         val detuneHex = instrument.detune.toString(16).padStart(2, '0').uppercase()
         val panHex = instrument.pan.toString(16).padStart(2, '0').uppercase()
@@ -169,6 +152,24 @@ class InstrumentModule : TrackerModule {
             cursorRow = instrumentState.cursorRow,
             cursorColumn = instrumentState.cursorColumn,
             currentRow = currentRow
+        )
+        rowY += ROW_HEIGHT
+        currentRow++
+
+        // ─────────────────────────────────────
+        // ROW 4: TBL TIC (table tick rate)
+        // ─────────────────────────────────────
+        val ticHex = instrument.tableTicRate.toString(16).padStart(2, '0').uppercase()
+        drawParameterRow(
+            x = x,
+            y = rowY,
+            scale = scale,
+            nameColumnX = nameColumnX,
+            valueColumnX = valueColumnX,
+            parameterName = "TBL TIC",
+            parameterValue = ticHex,
+            isCursorOnName = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
+            isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1
         )
         rowY += ROW_HEIGHT
         currentRow++
@@ -493,6 +494,70 @@ class InstrumentModule : TrackerModule {
     }
 
     /**
+     * Draw TYPE + LOAD row
+     * TYPE at columns 0-1, LOAD button at column 3 (no parameter name in column 2)
+     * Columns: 0=TYPE name, 1=TYPE value, 2=empty, 3=LOAD button
+     */
+    private fun DrawScope.drawTypeLoadRow(
+        x: Int,
+        y: Int,
+        scale: Int,
+        nameColumnX: Int,
+        valueColumnX: Int,
+        cursorRow: Int,
+        cursorColumn: Int,
+        currentRow: Int
+    ) {
+        val textY = y + TEXT_PADDING
+        val isCursorOnThisRow = cursorRow == currentRow
+
+        // Draw row background if cursor is on this row
+        if (isCursorOnThisRow) {
+            drawRect(
+                color = Color(0xFF333333),
+                topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
+                size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
+            )
+        }
+
+        // COLUMN 0: "TYPE" label
+        drawBitmapText(
+            text = "TYPE",
+            x = nameColumnX,
+            y = textY,
+            scale = scale,
+            color = if (isCursorOnThisRow && cursorColumn == 1) Color.Yellow else Color.Gray,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        // COLUMN 1: "sample" value (read-only for now)
+        drawBitmapText(
+            text = "sample",
+            x = valueColumnX,
+            y = textY,
+            scale = scale,
+            color = if (isCursorOnThisRow && cursorColumn == 1) Color.Yellow else Color.White,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        // COLUMN 2: empty (no parameter name)
+
+        // COLUMN 3: LOAD button at value2ColumnX
+        val value2ColumnX = valueColumnX + 220
+        drawBitmapText(
+            text = "LOAD",
+            x = value2ColumnX,
+            y = textY,
+            scale = scale,
+            color = if (isCursorOnThisRow && cursorColumn == 3) Color.Yellow else Color.White,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+    }
+
+    /**
      * Draw NAME row showing loaded sample filename (read-only)
      * Example: NAME
      */
@@ -561,11 +626,11 @@ class InstrumentModule : TrackerModule {
      * and what actions are available.
      *
      * Row layout:
-     * - Row 0: TYPE (read-only)
-     * - Row 1: LOAD (button)
-     * - Row 2: NAME (read-only)
-     * - Row 3: ROOT + VOL (dual: cols 0=name, 1=ROOT, 2=name, 3=VOL)
-     * - Row 4: DETUNE + PAN (dual: cols 0=name, 1=DETUNE, 2=name, 3=PAN)
+     * - Row 0: TYPE (col 1) + LOAD (col 3)
+     * - Row 1: NAME (read-only)
+     * - Row 2: ROOT + VOL (dual: cols 0=name, 1=ROOT, 2=name, 3=VOL)
+     * - Row 3: DETUNE + PAN (dual: cols 0=name, 1=DETUNE, 2=name, 3=PAN)
+     * - Row 4: TBL TIC (col 1)
      * - Row 5: SPACER
      * - Row 6: DRIVE + FILTER (dual)
      * - Row 7: CRUSH + CUT (dual)
@@ -580,18 +645,19 @@ class InstrumentModule : TrackerModule {
     fun getCursorContext(state: InstrumentState): CursorContext {
         when (state.cursorRow) {
             0 -> {
-                // TYPE row - read-only for now
-                return CursorContextFactory.readOnly()
+                // TYPE + LOAD row (columns: 0=name, 1=TYPE, 2=empty, 3=LOAD)
+                when (state.cursorColumn) {
+                    0, 2 -> return CursorContextFactory.readOnly()  // Parameter names / empty
+                    1 -> return CursorContextFactory.readOnly()  // TYPE value (read-only for now)
+                    3 -> return CursorContextFactory.readOnly()  // LOAD button (handled in MainActivity)
+                    else -> return CursorContextFactory.none()
+                }
             }
             1 -> {
-                // LOAD row - read-only (handled as button action in MainActivity)
-                return CursorContextFactory.readOnly()
-            }
-            2 -> {
                 // NAME row - read-only (shows loaded sample filename)
                 return CursorContextFactory.readOnly()
             }
-            3 -> {
+            2 -> {
                 // ROOT + VOL row (columns: 0=name, 1=ROOT, 2=name, 3=VOL)
                 when (state.cursorColumn) {
                     0, 2 -> return CursorContextFactory.readOnly()  // Parameter names
@@ -608,7 +674,7 @@ class InstrumentModule : TrackerModule {
                     else -> return CursorContextFactory.none()
                 }
             }
-            4 -> {
+            3 -> {
                 // DETUNE + PAN row (columns: 0=name, 1=DETUNE, 2=name, 3=PAN)
                 when (state.cursorColumn) {
                     0, 2 -> return CursorContextFactory.readOnly()  // Parameter names
@@ -624,6 +690,17 @@ class InstrumentModule : TrackerModule {
                     )
                     else -> return CursorContextFactory.none()
                 }
+            }
+            4 -> {
+                // TBL TIC row - hex byte (00-FF)
+                if (state.cursorColumn == 0) {
+                    return CursorContextFactory.readOnly()
+                }
+                return CursorContextFactory.hexByte(
+                    currentValue = state.instrument.tableTicRate,
+                    min = 0,
+                    max = 255
+                )
             }
             5 -> {
                 // SPACER row - no editing
@@ -736,6 +813,23 @@ class InstrumentModule : TrackerModule {
      * Handle input action for instrument screen.
      *
      * Uses InstrumentController for all business logic (proper UI/logic separation).
+     *
+     * Row layout:
+     * - Row 0: TYPE (col 1) + LOAD (col 3)
+     * - Row 1: NAME (read-only)
+     * - Row 2: ROOT + VOL
+     * - Row 3: DETUNE + PAN
+     * - Row 4: TBL TIC
+     * - Row 5: SPACER
+     * - Row 6: DRIVE + FILTER
+     * - Row 7: CRUSH + CUT
+     * - Row 8: DWNSMPL + RES
+     * - Row 9: SPACER
+     * - Row 10: START
+     * - Row 11: END
+     * - Row 12: REV
+     * - Row 13: LOOP
+     * - Row 14: LOOP ST
      */
     fun handleInput(
         state: InstrumentState,
@@ -744,15 +838,14 @@ class InstrumentModule : TrackerModule {
     ): InputResult {
         when (state.cursorRow) {
             0 -> {
-                // TYPE row - read-only for now (TODO: A+DPAD to change type)
+                // TYPE + LOAD row
+                // Column 1: TYPE (read-only for now)
+                // Column 3: LOAD button (handled in MainActivity as button action)
             }
             1 -> {
-                // LOAD row - handled as button action, not value editing
-            }
-            2 -> {
                 // NAME row - read-only (shows loaded sample filename)
             }
-            3 -> {
+            2 -> {
                 // ROOT + VOL row (columns: 0=name, 1=ROOT, 2=name, 3=VOL)
                 when (state.cursorColumn) {
                     1 -> {  // ROOT value
@@ -776,7 +869,7 @@ class InstrumentModule : TrackerModule {
                     }
                 }
             }
-            4 -> {
+            3 -> {
                 // DETUNE + PAN row (columns: 0=name, 1=DETUNE, 2=name, 3=PAN)
                 when (state.cursorColumn) {
                     1 -> {  // DETUNE value
@@ -795,6 +888,15 @@ class InstrumentModule : TrackerModule {
                             else -> {}
                         }
                     }
+                }
+            }
+            4 -> {
+                // TBL TIC row - table tick rate
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        instrumentController.updateTableTicRate(state.instrument, action.value)
+                    }
+                    else -> {}
                 }
             }
             5 -> {
@@ -934,15 +1036,15 @@ class InstrumentModule : TrackerModule {
  *
  * @param instrument The instrument being edited
  * @param cursorRow Which row:
- *   - 0=TYPE, 1=LOAD, 2=NAME
- *   - 3=ROOT+VOL, 4=DETUNE+PAN, 5=SPACER
+ *   - 0=TYPE+LOAD, 1=NAME
+ *   - 2=ROOT+VOL, 3=DETUNE+PAN, 4=TBL TIC, 5=SPACER
  *   - 6=DRIVE+FILTER, 7=CRUSH+CUT, 8=DWNSMPL+RES, 9=SPACER
  *   - 10=START, 11=END, 12=REV, 13=LOOP, 14=LOOP ST
  * @param cursorColumn Which column:
  *   - 0 = Parameter name (left column)
  *   - 1 = Value 1 (for dual-param rows)
- *   - 2 = Name 2 (for dual-param rows)
- *   - 3 = Value 2 (for dual-param rows)
+ *   - 2 = Name 2 (for dual-param rows, empty for TYPE+LOAD row)
+ *   - 3 = Value 2 / LOAD button (for dual-param rows)
  * @param statusMessage Status message to show at bottom
  * @param isSuccess True if status is success, false if error
  */

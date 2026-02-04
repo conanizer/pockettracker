@@ -127,6 +127,7 @@ class EffectProcessor(
         // TOP-5 Effects (Phrase screen)
         const val FX_ARC = 0x03       // Cxx - Arpeggio Config (mode/speed)
         const val FX_HOP = 0x08       // Hxx - Table hop (00-0F = jump to row, FF = stop table)
+        const val FX_TIC = 0x09       // Txx - Table tick rate (01-FB = tics/row, FC-FF = special modes)
         const val FX_ARPEGGIO = 0x0A  // Axx - Note pattern automation
         const val FX_KILL = 0x0B      // K00 - Kill sample
         const val FX_OFFSET = 0x0F    // Oxx - Sample start point
@@ -136,9 +137,9 @@ class EffectProcessor(
         /**
          * List of all valid effect types for UI cycling.
          * Used by editors to cycle through effect types with UP/DOWN.
-         * Order: NONE, ARC, HOP, ARPEGGIO, KILL, OFFSET, REPEAT, VOLUME (sorted by hex value)
+         * Order: NONE, ARC, HOP, TIC, ARPEGGIO, KILL, OFFSET, REPEAT, VOLUME (sorted by hex value)
          */
-        val EFFECT_TYPES = listOf(FX_NONE, FX_ARC, FX_HOP, FX_ARPEGGIO, FX_KILL, FX_OFFSET, FX_REPEAT, FX_VOLUME)
+        val EFFECT_TYPES = listOf(FX_NONE, FX_ARC, FX_HOP, FX_TIC, FX_ARPEGGIO, FX_KILL, FX_OFFSET, FX_REPEAT, FX_VOLUME)
 
         // More effects will be added in future phases
         // Table screen effects: Pitch bend, vibrato, filter sweep, etc.

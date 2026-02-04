@@ -1003,17 +1003,21 @@ data class TableModifiers(
 }
 ```
 
-### Definition of Done - Phase 4
-- [ ] TIC effect type added to enum
-- [ ] TableState tracks table playback per voice
-- [ ] TIC00 advances row on trigger
-- [ ] TIC01-FB advances row every N tics
-- [ ] TICFC maps octave to row
-- [ ] TICFE maps note to row
-- [ ] TICFF advances at 200Hz
-- [ ] TIC effect works in phrase FX columns
-- [ ] TIC effect works in table FX columns
-- [ ] Table TIC rate displayed in header updates
+### Definition of Done - Phase 4 ✅ COMPLETE (2026-02-04)
+- [x] TIC effect type added to enum (FX_TIC = 0x09)
+- [x] TIC effect name "TIC" added to EditorHelpers.getEffectTypeName()
+- [x] TIC effect added to EFFECT_TYPES list for UI cycling
+- [x] Instrument screen UI updated: TBL TIC parameter on row 4
+- [x] Instrument screen: LOAD button moved to row 0, column 3
+- [x] updateTableTicRate() function added to InstrumentController
+- [x] TABLE_TIC_RATE added to InstrumentParameter enum
+- [x] TIC effect works in table FX columns (C++ processEffect)
+- [x] M8-style last row TIC: If TIC in row 15, affects whole table
+- [x] TIC00 advances row on trigger (trigger mode)
+- [x] TICFC maps octave to row
+- [x] TICFE maps note to row
+- [x] TICFF advances at 200Hz
+- [x] JNI and Kotlin interfaces updated for octave/pitch parameters
 
 ---
 

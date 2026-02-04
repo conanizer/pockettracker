@@ -381,6 +381,19 @@ class InstrumentController(
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // Table Parameters
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Update table TIC rate (ticks per table row)
+     * @param ticRate 00-FF (default 06 = 6 tics per row = 2 rows per phrase step)
+     */
+    fun updateTableTicRate(instrument: Instrument, ticRate: Int) {
+        instrument.tableTicRate = ticRate.coerceIn(0, 255)
+        logger.d(TAG, "🎛️ Updated TBL TIC: 0x${formatHex(instrument.tableTicRate)}")
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // Generic Update (legacy, kept for compatibility)
     // ─────────────────────────────────────────────────────────────────────────────
 
@@ -475,5 +488,6 @@ enum class InstrumentParameter {
     SAMPLE_START,
     SAMPLE_END,
     LOOP_MODE,
-    LOOP_START
+    LOOP_START,
+    TABLE_TIC_RATE
 }
