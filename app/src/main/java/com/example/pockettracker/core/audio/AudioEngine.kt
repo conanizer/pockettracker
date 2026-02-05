@@ -265,7 +265,12 @@ class AudioEngine(
             tableId = tableId,
             tableTicRate = tableTicRate,
             noteOctave = instrument.root.octave,
-            notePitch = instrument.root.pitch
+            notePitch = instrument.root.pitch,
+            pslInitialOffset = 0f,
+            pslDuration = 0f,
+            pbnRate = 0f,
+            vibratoSpeed = 0f,
+            vibratoDepth = 0f
         )
 
         logger.d(TAG, "🔊 Preview instrument ${instrument.id.toString(16).padStart(2,'0').uppercase()}: freq=$targetFreq Hz, vol=$volume, pan=$pan, tableId=$tableId")
@@ -388,6 +393,13 @@ class AudioEngine(
     /**
      * Schedule a note to be played at exact audio frame.
      * Automatically handles table processing - each instrument uses the table with the same ID.
+     * Supports per-note pitch modulation effects (PSL, PBN, PVB, PVX).
+     *
+     * @param pslInitialOffset PSL initial pitch offset in semitones (0 = no PSL)
+     * @param pslDuration PSL slide duration in ticks (0 = no slide)
+     * @param pbnRate PBN pitch bend rate in semitones/tick (0 = no bend)
+     * @param vibratoSpeed PVB/PVX vibrato speed in Hz (0 = no vibrato)
+     * @param vibratoDepth PVB/PVX vibrato depth in semitones (0 = no vibrato)
      */
     fun scheduleNote(
         targetFrame: Long,
@@ -397,7 +409,12 @@ class AudioEngine(
         volume: Float = 1.0f,
         pan: Float = 0.5f,  // 0.0=left, 0.5=center, 1.0=right
         project: Project,
-        startPointOverride: Int = -1  // -1 = use instrument default, 0-255 = Offset effect override
+        startPointOverride: Int = -1,  // -1 = use instrument default, 0-255 = Offset effect override
+        pslInitialOffset: Float = 0f,
+        pslDuration: Float = 0f,
+        pbnRate: Float = 0f,
+        vibratoSpeed: Float = 0f,
+        vibratoDepth: Float = 0f
     ) {
         if (note == Note.EMPTY) return
 
@@ -431,7 +448,8 @@ class AudioEngine(
         // Always use scheduleNoteWithTable - C++ handles tableId=-1 as "no table"
         backend.scheduleNoteWithTable(
             targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan,
-            startPointOverride, tableId, tableTicRate, note.octave, note.pitch
+            startPointOverride, tableId, tableTicRate, note.octave, note.pitch,
+            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth
         )
     }
 
@@ -602,6 +620,11 @@ class AudioEngine(
      * @param project Project for instrument lookup
      * @param startPointOverride Optional start point override (-1 = use instrument default)
      * @param tableIdOverride Override table ID (-1 = use instrument ID as table ID)
+     * @param pslInitialOffset PSL initial pitch offset in semitones (0 = no PSL)
+     * @param pslDuration PSL slide duration in ticks (0 = no slide)
+     * @param pbnRate PBN pitch bend rate in semitones/tick (0 = no bend)
+     * @param vibratoSpeed PVB/PVX vibrato speed in Hz (0 = no vibrato)
+     * @param vibratoDepth PVB/PVX vibrato depth in semitones (0 = no vibrato)
      */
     fun scheduleNoteWithTable(
         targetFrame: Long,
@@ -612,7 +635,12 @@ class AudioEngine(
         pan: Float = 0.5f,
         project: Project,
         startPointOverride: Int = -1,
-        tableIdOverride: Int = -1
+        tableIdOverride: Int = -1,
+        pslInitialOffset: Float = 0f,
+        pslDuration: Float = 0f,
+        pbnRate: Float = 0f,
+        vibratoSpeed: Float = 0f,
+        vibratoDepth: Float = 0f
     ) {
         if (note == Note.EMPTY) return
 
@@ -644,7 +672,8 @@ class AudioEngine(
 
         backend.scheduleNoteWithTable(
             targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan,
-            startPointOverride, tableId, tableTicRate, note.octave, note.pitch
+            startPointOverride, tableId, tableTicRate, note.octave, note.pitch,
+            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth
         )
     }
 
@@ -667,6 +696,63 @@ class AudioEngine(
      */
     fun getVoiceTableId(trackId: Int): Int {
         return backend.getVoiceTableId(trackId)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PITCH MODULATION (Phase 7)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Set pitch slide for a voice (PSL effect).
+     *
+     * @param trackId Which track (0-7)
+     * @param targetSemitones Target pitch offset in semitones
+     * @param durationTicks Duration in ticks
+     * @param tempo Current tempo in BPM
+     */
+    fun setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int) {
+        backend.setPitchSlide(trackId, targetSemitones, durationTicks, tempo)
+    }
+
+    /**
+     * Set continuous pitch bend for a voice (PBN effect).
+     *
+     * @param trackId Which track (0-7)
+     * @param semitonesPerTick Rate of pitch change per tick
+     * @param tempo Current tempo in BPM
+     */
+    fun setPitchBend(trackId: Int, semitonesPerTick: Float, tempo: Int) {
+        backend.setPitchBend(trackId, semitonesPerTick, tempo)
+    }
+
+    /**
+     * Set vibrato for a voice (PVB/PVX effect).
+     *
+     * @param trackId Which track (0-7)
+     * @param speed LFO frequency in Hz
+     * @param depth Modulation depth in semitones
+     */
+    fun setVibrato(trackId: Int, speed: Float, depth: Float) {
+        backend.setVibrato(trackId, speed, depth)
+    }
+
+    /**
+     * Clear all pitch modulation for a voice.
+     *
+     * @param trackId Which track (0-7)
+     */
+    fun clearPitchMod(trackId: Int) {
+        backend.clearPitchMod(trackId)
+    }
+
+    /**
+     * Set initial pitch offset for a voice (used by PSL portamento effect).
+     *
+     * @param trackId Which track (0-7)
+     * @param semitones Pitch offset in semitones
+     */
+    fun setInitialPitchOffset(trackId: Int, semitones: Float) {
+        backend.setInitialPitchOffset(trackId, semitones)
     }
 
     /**

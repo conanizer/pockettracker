@@ -56,7 +56,15 @@ data class TrackState(
     /** Target row for NEXT phrase in chain (-1 = no hop, start at row 0) */
     var hopTargetRow: Int = -1,
     /** Track is stopped by HOPFF (remains stopped until new chain starts) */
-    var trackStopped: Boolean = false
+    var trackStopped: Boolean = false,
+
+    // Pitch effect state (Phase 7)
+    /** Whether pitch bend (PBN) is active */
+    var pitchBendActive: Boolean = false,
+    /** Whether vibrato (PVB/PVX) is active */
+    var vibratoActive: Boolean = false,
+    /** Last note MIDI for PSL (pitch slide) calculation */
+    var lastNoteMidi: Int = -1
 ) {
     /** Check if persistent REPEAT is active */
     fun hasActiveRepeat(): Boolean = repeatActiveColumn > 0 && repeatTicInterval > 0
@@ -99,6 +107,15 @@ data class TrackState(
     fun clearHopState() {
         hopTargetRow = -1
         trackStopped = false
+    }
+
+    /** Check if any pitch modulation is active */
+    fun hasPitchMod(): Boolean = pitchBendActive || vibratoActive
+
+    /** Clear pitch modulation state */
+    fun clearPitchMod() {
+        pitchBendActive = false
+        vibratoActive = false
     }
 }
 
@@ -968,8 +985,65 @@ class PlaybackController(
                 step.note
             }
 
-            // Schedule the note with resolved effect parameters (track × master applied in C++)
-            // scheduleNote automatically handles table processing based on instrument's tableId
+            // Save previous MIDI for PSL calculation BEFORE updating track state
+            val previousMidi = trackState.lastNoteMidi
+
+            // ═══════════════════════════════════════════════════════════════════════════
+            // Calculate pitch mod params BEFORE scheduling (they travel with the note)
+            // ═══════════════════════════════════════════════════════════════════════════
+            var pslInitialOffset = 0f
+            var pslDuration = 0f
+            var pbnRate = 0f
+            var vibratoSpeed = 0f
+            var vibratoDepth = 0f
+
+            // PSL: Calculate portamento from previous note
+            if (params.pslDuration != null && params.pslDuration > 0 && previousMidi >= 0) {
+                val currentMidi = note.toMidi()
+                if (currentMidi >= 0 && previousMidi != currentMidi) {
+                    pslInitialOffset = (previousMidi - currentMidi).toFloat()
+                    pslDuration = params.pslDuration.toFloat()
+                    logger.d(TAG, "🎵 PSL: Portamento from ${Note.fromMidi(previousMidi)} to $note " +
+                            "(offset=$pslInitialOffset) over ${params.pslDuration} ticks")
+                }
+            }
+
+            // PBN: Calculate pitch bend rate (non-zero = start bend)
+            if (params.pbnValue != null && params.pbnValue != 0) {
+                pbnRate = if (params.pbnValue < 0x80) {
+                    params.pbnValue / 16f  // UP
+                } else {
+                    -((params.pbnValue and 0x7F) / 16f)  // DOWN
+                }
+                trackState.pitchBendActive = true
+                val direction = if (params.pbnValue < 0x80) "UP" else "DOWN"
+                logger.d(TAG, "🎵 PBN ${params.pbnValue.toString(16).uppercase().padStart(2, '0')}: " +
+                        "Bend $direction at $pbnRate semitones/tick")
+            }
+
+            // PVB: Calculate standard vibrato
+            if (params.pvbValue != null && params.pvbValue != 0) {
+                val speedNibble = (params.pvbValue shr 4) and 0x0F
+                val depthNibble = params.pvbValue and 0x0F
+                vibratoSpeed = 2f + speedNibble * 0.5f
+                vibratoDepth = depthNibble * 0.125f
+                trackState.vibratoActive = true
+                logger.d(TAG, "🎵 PVB ${params.pvbValue.toString(16).uppercase().padStart(2, '0')}: " +
+                        "Vibrato speed=${vibratoSpeed}Hz, depth=$vibratoDepth semitones")
+            }
+
+            // PVX: Calculate extreme vibrato (2x speed, 4x depth)
+            if (params.pvxValue != null && params.pvxValue != 0) {
+                val speedNibble = (params.pvxValue shr 4) and 0x0F
+                val depthNibble = params.pvxValue and 0x0F
+                vibratoSpeed = (2f + speedNibble * 0.5f) * 2f  // 2x speed
+                vibratoDepth = depthNibble * 0.125f * 4f       // 4x depth
+                trackState.vibratoActive = true
+                logger.d(TAG, "🎵 PVX ${params.pvxValue.toString(16).uppercase().padStart(2, '0')}: " +
+                        "EXTREME vibrato speed=${vibratoSpeed}Hz, depth=$vibratoDepth semitones")
+            }
+
+            // Schedule the note with all pitch mod params (applied when note triggers in C++)
             audioEngine.scheduleNote(
                 targetFrame = targetFrame,
                 note = note,
@@ -978,7 +1052,12 @@ class PlaybackController(
                 volume = finalVolume,
                 pan = instrumentPan,
                 project = project,
-                startPointOverride = params.startPoint
+                startPointOverride = params.startPoint,
+                pslInitialOffset = pslInitialOffset,
+                pslDuration = pslDuration,
+                pbnRate = pbnRate,
+                vibratoSpeed = vibratoSpeed,
+                vibratoDepth = vibratoDepth
             )
             noteScheduled = true
 
@@ -988,11 +1067,85 @@ class PlaybackController(
             trackState.lastVolume = finalVolume
             trackState.lastStartPoint = params.startPoint
             trackState.lastPan = instrumentPan
+            trackState.lastNoteMidi = note.toMidi()
+
+            // Clear old pitch mod tracking state (new note resets)
+            if (trackState.hasPitchMod() && pbnRate == 0f && vibratoDepth == 0f) {
+                trackState.clearPitchMod()
+            }
         }
 
-        // Handle KILL effect - schedule kill at the specified frame
+        // Handle KILL effect - schedule kill at the specified frame and clear pitch mods
         if (params.killAtFrame != null) {
             audioEngine.scheduleKill(params.killAtFrame, trackId)
+            trackState.clearPitchMod()
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // STEP 2.4: Handle Pitch Effects on steps WITHOUT notes (mid-note changes)
+        // ═══════════════════════════════════════════════════════════════════════════
+        // PBN/PVB/PVX on empty steps modify the currently playing voice
+        // This allows changing pitch mod mid-note without retriggering
+
+        if (!hasNote) {
+            val tempo = currentProject?.tempo ?: 120
+
+            // Handle PBN (Pitch Bend) - modify currently playing voice
+            if (params.pbnValue != null) {
+                if (params.pbnValue == 0) {
+                    // PBN 00: Stop pitch bend
+                    audioEngine.setPitchBend(trackId, 0f, tempo)
+                    trackState.pitchBendActive = false
+                    logger.d(TAG, "🎵 PBN 00: Pitch bend stopped (mid-note)")
+                } else {
+                    val semitonesPerTick = if (params.pbnValue < 0x80) {
+                        params.pbnValue / 16f
+                    } else {
+                        -((params.pbnValue and 0x7F) / 16f)
+                    }
+                    audioEngine.setPitchBend(trackId, semitonesPerTick, tempo)
+                    trackState.pitchBendActive = true
+                    val direction = if (params.pbnValue < 0x80) "UP" else "DOWN"
+                    logger.d(TAG, "🎵 PBN ${params.pbnValue.toString(16).uppercase().padStart(2, '0')}: " +
+                            "Bend $direction (mid-note)")
+                }
+            }
+
+            // Handle PVB (Vibrato) - modify currently playing voice
+            if (params.pvbValue != null) {
+                if (params.pvbValue == 0) {
+                    audioEngine.setVibrato(trackId, 0f, 0f)
+                    trackState.vibratoActive = false
+                    logger.d(TAG, "🎵 PVB 00: Vibrato stopped (mid-note)")
+                } else {
+                    val speedNibble = (params.pvbValue shr 4) and 0x0F
+                    val depthNibble = params.pvbValue and 0x0F
+                    val speed = 2f + speedNibble * 0.5f
+                    val depth = depthNibble * 0.125f
+                    audioEngine.setVibrato(trackId, speed, depth)
+                    trackState.vibratoActive = true
+                    logger.d(TAG, "🎵 PVB ${params.pvbValue.toString(16).uppercase().padStart(2, '0')}: " +
+                            "Vibrato (mid-note)")
+                }
+            }
+
+            // Handle PVX (Extreme Vibrato) - modify currently playing voice
+            if (params.pvxValue != null) {
+                if (params.pvxValue == 0) {
+                    audioEngine.setVibrato(trackId, 0f, 0f)
+                    trackState.vibratoActive = false
+                    logger.d(TAG, "🎵 PVX 00: Extreme vibrato stopped (mid-note)")
+                } else {
+                    val speedNibble = (params.pvxValue shr 4) and 0x0F
+                    val depthNibble = params.pvxValue and 0x0F
+                    val speed = (2f + speedNibble * 0.5f) * 2f
+                    val depth = depthNibble * 0.125f * 4f
+                    audioEngine.setVibrato(trackId, speed, depth)
+                    trackState.vibratoActive = true
+                    logger.d(TAG, "🎵 PVX ${params.pvxValue.toString(16).uppercase().padStart(2, '0')}: " +
+                            "EXTREME vibrato (mid-note)")
+                }
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════════════════

@@ -280,10 +280,11 @@ interface IAudioBackend {
     fun loadTable(tableId: Int, rowData: ByteArray)
 
     /**
-     * Schedule a note with table processing.
+     * Schedule a note with table processing and pitch modulation.
      *
      * Like scheduleNote(), but the voice will process table data during playback,
      * modifying pitch and volume based on the table rows.
+     * Also supports per-note pitch modulation effects (PSL, PBN, PVB, PVX).
      *
      * @param frame Absolute audio frame number
      * @param sampleId Which sample to play (0-255)
@@ -297,6 +298,11 @@ interface IAudioBackend {
      * @param tableTicRate Ticks per table row advance (default 6)
      * @param noteOctave Octave of the note (0-9) for TICFC mode
      * @param notePitch Pitch of the note (0-11, C=0) for TICFE mode
+     * @param pslInitialOffset PSL initial pitch offset in semitones (0 = no PSL)
+     * @param pslDuration PSL slide duration in ticks (0 = no slide)
+     * @param pbnRate PBN pitch bend rate in semitones/tick (0 = no bend)
+     * @param vibratoSpeed PVB/PVX vibrato speed in Hz (0 = no vibrato)
+     * @param vibratoDepth PVB/PVX vibrato depth in semitones (0 = no vibrato)
      */
     fun scheduleNoteWithTable(
         frame: Long,
@@ -310,7 +316,12 @@ interface IAudioBackend {
         tableId: Int = -1,
         tableTicRate: Int = 6,
         noteOctave: Int = 4,
-        notePitch: Int = 0
+        notePitch: Int = 0,
+        pslInitialOffset: Float = 0f,
+        pslDuration: Float = 0f,
+        pbnRate: Float = 0f,
+        vibratoSpeed: Float = 0f,
+        vibratoDepth: Float = 0f
     )
 
     /**
@@ -330,4 +341,67 @@ interface IAudioBackend {
      * @return Table ID (0-255), or -1 if no active voice or no table
      */
     fun getVoiceTableId(trackId: Int): Int
+
+    // ===================================
+    // PITCH MODULATION METHODS (Phase 6)
+    // ===================================
+
+    /**
+     * Set pitch slide for a voice (PSL effect).
+     *
+     * Slides the pitch from current offset to target over the specified duration.
+     * Used for portamento effects between notes.
+     *
+     * @param trackId Which track to apply pitch slide (0-7)
+     * @param targetSemitones Target pitch offset in semitones (can be negative)
+     * @param durationTicks Duration of slide in ticks (1 tick = 1/12 of a step at default groove)
+     * @param tempo Current tempo in BPM (needed for timing calculations)
+     */
+    fun setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int)
+
+    /**
+     * Set continuous pitch bend for a voice (PBN effect).
+     *
+     * Bends the pitch continuously at a specified rate until stopped or a new note.
+     * Use semitonesPerTick = 0 to stop bending.
+     *
+     * @param trackId Which track to apply pitch bend (0-7)
+     * @param semitonesPerTick Rate of pitch change per tick (positive = up, negative = down)
+     * @param tempo Current tempo in BPM (needed for timing calculations)
+     */
+    fun setPitchBend(trackId: Int, semitonesPerTick: Float, tempo: Int)
+
+    /**
+     * Set vibrato for a voice (PVB/PVX effect).
+     *
+     * Applies a sine wave LFO modulation to the pitch.
+     * Use depth = 0 to stop vibrato.
+     *
+     * @param trackId Which track to apply vibrato (0-7)
+     * @param speed LFO frequency in Hz (typically 2-20 Hz)
+     * @param depth Modulation depth in semitones (typically 0.1-2.0, up to 8 for extreme)
+     */
+    fun setVibrato(trackId: Int, speed: Float, depth: Float)
+
+    /**
+     * Clear all pitch modulation for a voice.
+     *
+     * Resets pitch offset to 0, stops any pitch slide, and disables vibrato.
+     * Called automatically when a new note is triggered on the same track.
+     *
+     * @param trackId Which track to clear pitch modulation (0-7)
+     */
+    fun clearPitchMod(trackId: Int)
+
+    /**
+     * Set initial pitch offset for a voice (used by PSL portamento effect).
+     *
+     * This sets the starting pitch offset before calling setPitchSlide.
+     * Used for portamento: set offset to (previousNote - currentNote) semitones,
+     * then call setPitchSlide with target=0 to slide to the current note.
+     *
+     * @param trackId Which track to set pitch offset (0-7)
+     * @param semitones Pitch offset in semitones (can be negative)
+     */
+    fun setInitialPitchOffset(trackId: Int, semitones: Float)
 }

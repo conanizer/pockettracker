@@ -211,10 +211,16 @@ class OboeAudioBackend : IAudioBackend {
         tableId: Int,
         tableTicRate: Int,
         noteOctave: Int,
-        notePitch: Int
+        notePitch: Int,
+        pslInitialOffset: Float,
+        pslDuration: Float,
+        pbnRate: Float,
+        vibratoSpeed: Float,
+        vibratoDepth: Float
     ) {
         native_scheduleNoteWithTable(frame, sampleId, trackId, freq, baseFreq, vol, pan,
-            startPointOverride, tableId, tableTicRate, noteOctave, notePitch)
+            startPointOverride, tableId, tableTicRate, noteOctave, notePitch,
+            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth)
     }
 
     override fun getVoiceTableRow(trackId: Int): Int {
@@ -223,6 +229,43 @@ class OboeAudioBackend : IAudioBackend {
 
     override fun getVoiceTableId(trackId: Int): Int {
         return native_getVoiceTableId(trackId)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PITCH MODULATION METHODS (Phase 6)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    override fun setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int) {
+        native_setPitchSlide(trackId, targetSemitones, durationTicks, tempo)
+        Log.d(TAG, "🎵 Pitch slide: track=$trackId, target=$targetSemitones, duration=$durationTicks ticks")
+    }
+
+    override fun setPitchBend(trackId: Int, semitonesPerTick: Float, tempo: Int) {
+        native_setPitchBend(trackId, semitonesPerTick, tempo)
+        if (semitonesPerTick == 0f) {
+            Log.d(TAG, "🎵 Pitch bend stopped: track=$trackId")
+        } else {
+            Log.d(TAG, "🎵 Pitch bend: track=$trackId, rate=$semitonesPerTick semitones/tick")
+        }
+    }
+
+    override fun setVibrato(trackId: Int, speed: Float, depth: Float) {
+        native_setVibrato(trackId, speed, depth)
+        if (depth < 0.01f) {
+            Log.d(TAG, "🎵 Vibrato stopped: track=$trackId")
+        } else {
+            Log.d(TAG, "🎵 Vibrato: track=$trackId, speed=${speed}Hz, depth=$depth semitones")
+        }
+    }
+
+    override fun clearPitchMod(trackId: Int) {
+        native_clearPitchMod(trackId)
+        Log.d(TAG, "🎵 Pitch mod cleared: track=$trackId")
+    }
+
+    override fun setInitialPitchOffset(trackId: Int, semitones: Float) {
+        native_setInitialPitchOffset(trackId, semitones)
+        Log.d(TAG, "🎵 Pitch offset set: track=$trackId, offset=$semitones semitones")
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -290,8 +333,20 @@ class OboeAudioBackend : IAudioBackend {
         tableId: Int,
         tableTicRate: Int,
         noteOctave: Int,
-        notePitch: Int
+        notePitch: Int,
+        pslInitialOffset: Float,
+        pslDuration: Float,
+        pbnRate: Float,
+        vibratoSpeed: Float,
+        vibratoDepth: Float
     )
     private external fun native_getVoiceTableRow(trackId: Int): Int
     private external fun native_getVoiceTableId(trackId: Int): Int
+
+    // Phase 6 pitch modulation methods
+    private external fun native_setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int)
+    private external fun native_setPitchBend(trackId: Int, semitonesPerTick: Float, tempo: Int)
+    private external fun native_setVibrato(trackId: Int, speed: Float, depth: Float)
+    private external fun native_clearPitchMod(trackId: Int)
+    private external fun native_setInitialPitchOffset(trackId: Int, semitones: Float)
 }

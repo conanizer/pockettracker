@@ -15,9 +15,9 @@
 - ✅ Phase 3.5: Table audio processing - COMPLETE (transpose, volume, effects)
 - ✅ Phase 4: TIC effect (table tick rate + special modes) - COMPLETE
 - ✅ Phase 5: HOP effect (phrase/table jump) - COMPLETE
-- 🚧 Phase 6: Real-time parameter system - NEXT
-- 🚧 Phase 7: Pitch effects (PSL, PBN, PVB, PVX)
-- 🚧 Phase 8: Integration testing
+- ✅ Phase 6: Real-time parameter system - COMPLETE
+- ✅ Phase 7: Pitch effects (PSL, PBN, PVB, PVX) - COMPLETE
+- 🚧 Phase 8: Integration testing - NEXT
 
 ## What's Working ✅
 
@@ -414,9 +414,32 @@
 **New Effects (Phases 4-7):**
 - [x] TIC effect - Table tick rate control (TIC00/FC/FE/FF special modes)
 - [x] HOP effect - Phrase/table jump, odd time signatures (3/4, 5/4, 7/8, etc.)
-- [ ] PSL effect - Pitch slide (portamento)
-- [ ] PBN effect - Pitch bend (continuous)
-- [ ] PVB/PVX effects - Vibrato
+- [x] PSL effect - Pitch slide (portamento)
+- [x] PBN effect - Pitch bend (continuous)
+- [x] PVB/PVX effects - Vibrato
+
+**Pitch Effects - Full Feature Set (2026-02-05):**
+
+*PSL (Pitch Slide/Portamento):*
+  - PSL XX = Slide from previous note to current over XX ticks
+  - Per-note effect (travels with scheduled note)
+  - Creates smooth pitch transitions between consecutive notes
+
+*PBN (Pitch Bend):*
+  - PBN 00-7F = Bend UP (higher values = faster)
+  - PBN 80-FF = Bend DOWN (higher values = faster)
+  - Persists until PBN00, new note, or KILL
+  - Can be applied mid-note (steps without notes)
+
+*PVB (Vibrato):*
+  - PVB XY = Speed X (0-F), Depth Y (0-F)
+  - Speed: 2-9.5 Hz, Depth: 0-1.875 semitones
+  - Persists until PVB00, new note, or KILL
+
+*PVX (Extreme Vibrato):*
+  - PVX XY = Same parameters as PVB
+  - 4x deeper, 2x faster than PVB
+  - For dramatic pitch wobble effects
 
 **See:** `MVP_EXTENSION_PACK_2.md` for detailed implementation plan
 

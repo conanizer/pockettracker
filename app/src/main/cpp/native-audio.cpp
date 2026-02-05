@@ -128,6 +128,14 @@ struct ScheduledNote {
     int noteOctave;          // Octave of note (0-9) for TICFC mode
     int notePitch;           // Pitch of note (0-11, C=0) for TICFE mode
 
+    // Pitch modulation parameters (Phase 7)
+    // These are applied when the note triggers, allowing per-note pitch effects
+    float pslInitialOffset;  // PSL: Initial pitch offset in semitones (0 = no PSL)
+    float pslDuration;       // PSL: Slide duration in ticks (0 = no slide)
+    float pbnRate;           // PBN: Semitones per tick (0 = no bend)
+    float vibratoSpeed;      // PVB/PVX: LFO speed in Hz (0 = no vibrato)
+    float vibratoDepth;      // PVB/PVX: Depth in semitones (0 = no vibrato)
+
     // For priority queue sorting (earliest frame first)
     bool operator>(const ScheduledNote& other) const {
         return targetFrame > other.targetFrame;
@@ -356,6 +364,23 @@ struct Voice {
     int hopRepeatCount;      // Number of times left to jump (0 = done or infinite mode)
     int hopTargetRow;        // Target row for active HOP (-1 = no active HOP)
 
+    // ===================================
+    // PITCH MODULATION (Phase 6)
+    // ===================================
+    // Real-time pitch modulation for PSL, PBN, PVB, PVX effects
+
+    // Pitch slide state
+    float pitchOffset;           // Current semitones offset from base pitch (can be fractional)
+    float pitchSlideTarget;      // Target semitones for pitch slide (PSL effect)
+    float pitchSlideRate;        // Semitones per sample (for smooth interpolation)
+    bool pitchSliding;           // Whether pitch slide is active
+
+    // Vibrato state (sine wave LFO modulation)
+    float vibratoPhase;          // Current LFO phase (0 to 2π)
+    float vibratoSpeed;          // LFO frequency in Hz (2-20 Hz typical)
+    float vibratoDepth;          // Modulation depth in semitones (0-2 typical, up to 8 for PVX)
+    bool vibratoActive;          // Whether vibrato is active
+
     Voice() : isActive(false), sampleData(nullptr), sampleLength(0),
               position(0), trackId(-1), playbackRate(1.0f), basePlaybackRate(1.0f), volume(1.0f),
               panLeft(0.707f), panRight(0.707f),  // Default to center
@@ -368,7 +393,9 @@ struct Voice {
               tableId(-1), tableRow(0), lastProcessedRow(-1), tableTicRate(6), tableTicCounter(0),
               tableTranspose(0.0f), tableVolume(1.0f),
               triggerOctave(4), triggerPitch(0), tic200HzAccum(0.0f),
-              hopRepeatCount(0), hopTargetRow(-1) {}
+              hopRepeatCount(0), hopTargetRow(-1),
+              pitchOffset(0.0f), pitchSlideTarget(0.0f), pitchSlideRate(0.0f), pitchSliding(false),
+              vibratoPhase(0.0f), vibratoSpeed(0.0f), vibratoDepth(0.0f), vibratoActive(false) {}
 
     void trigger(float* sample, int length, int track, float rate, float vol, float pan,
                  const InstrumentParams& params, float sampleRate, int startPointOverride = -1,
@@ -437,6 +464,17 @@ struct Voice {
         // Reset HOP state (Phase 5)
         hopRepeatCount = 0;
         hopTargetRow = -1;
+
+        // Reset pitch modulation state (Phase 6)
+        // New notes clear all pitch effects (PSL, PBN, PVB, PVX)
+        pitchOffset = 0.0f;
+        pitchSlideTarget = 0.0f;
+        pitchSlideRate = 0.0f;
+        pitchSliding = false;
+        vibratoPhase = 0.0f;
+        vibratoSpeed = 0.0f;
+        vibratoDepth = 0.0f;
+        vibratoActive = false;
 
         // Store note info for special TIC modes (Phase 4)
         triggerOctave = std::max(0, std::min(octave, 9));   // Clamp to 0-9
@@ -760,6 +798,46 @@ public:
                                               note.trackId, rate, note.volume, note.pan, instrumentParams[note.sampleId],
                                               sampleRate, note.startPointOverride,
                                               note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
+
+                            // Apply pitch modulation from scheduled note (Phase 7)
+                            // PSL: Set initial offset and start slide to 0
+                            if (fabsf(note.pslInitialOffset) > 0.001f && note.pslDuration > 0.0f) {
+                                voices[v].pitchOffset = note.pslInitialOffset;
+                                // Calculate slide rate based on tempo (assume 120 BPM if not specified)
+                                float beatsPerSecond = 120.0f / 60.0f;  // Default tempo
+                                float stepsPerBeat = 4.0f;
+                                float ticsPerStep = 12.0f;
+                                float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
+                                float framesPerTic = sampleRate / ticsPerSecond;
+                                float totalFrames = framesPerTic * note.pslDuration;
+                                if (totalFrames < 1.0f) totalFrames = 1.0f;
+                                voices[v].pitchSlideTarget = 0.0f;  // Slide to the actual note pitch
+                                voices[v].pitchSlideRate = -note.pslInitialOffset / totalFrames;
+                                voices[v].pitchSliding = true;
+                                LOGD("🎵 PSL applied: offset=%.2f, duration=%.0f ticks, rate=%.6f",
+                                     note.pslInitialOffset, note.pslDuration, voices[v].pitchSlideRate);
+                            }
+                            // PBN: Set continuous pitch bend rate
+                            if (fabsf(note.pbnRate) > 0.0001f) {
+                                float beatsPerSecond = 120.0f / 60.0f;
+                                float stepsPerBeat = 4.0f;
+                                float ticsPerStep = 12.0f;
+                                float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
+                                float framesPerTic = sampleRate / ticsPerSecond;
+                                voices[v].pitchSlideRate = note.pbnRate / framesPerTic;
+                                voices[v].pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
+                                voices[v].pitchSliding = true;
+                                LOGD("🎵 PBN applied: rate=%.4f semitones/tick", note.pbnRate);
+                            }
+                            // PVB/PVX: Set vibrato
+                            if (note.vibratoDepth > 0.01f) {
+                                voices[v].vibratoSpeed = note.vibratoSpeed;
+                                voices[v].vibratoDepth = note.vibratoDepth;
+                                voices[v].vibratoActive = true;
+                                LOGD("🎵 Vibrato applied: speed=%.1fHz, depth=%.2f semitones",
+                                     note.vibratoSpeed, note.vibratoDepth);
+                            }
+
                             voiceFound = true;
                             LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
                                  (long long)currentFrame, note.sampleId, note.trackId, rate, note.pan, note.startPointOverride,
@@ -993,10 +1071,25 @@ public:
             }
         }
 
+        // ===================================
+        // PITCH MODULATION PROCESSING (Phase 6)
+        // ===================================
+        // Process pitch slide and vibrato for each active voice once per callback
+        for (int v = 0; v < MAX_VOICES; v++) {
+            Voice& voice = voices[v];
+            if (!voice.isActive) continue;
+
+            // Update pitch slide and vibrato state
+            updateVoicePitchMod(voice, numFrames);
+        }
+
         // Mix voices
         for (int v = 0; v < MAX_VOICES; v++) {
             Voice& voice = voices[v];
             if (!voice.isActive || !voice.sampleData) continue;
+
+            // Get modulated playback rate (includes pitch slide + vibrato)
+            float modulatedRate = getModulatedPlaybackRate(voice);
 
             for (int i = 0; i < numFrames; i++) {
                 int idx = (int)voice.position;
@@ -1109,16 +1202,17 @@ public:
                 }
 
                 // Update position based on playback mode
+                // Use modulatedRate which includes pitch slide + vibrato modulation
                 if (voice.loopMode == 2) {
                     // Ping-pong loop
                     if (voice.loopingBack) {
-                        voice.position -= voice.playbackRate;
+                        voice.position -= modulatedRate;
                         if (voice.position <= voice.actualLoopStart) {
                             voice.loopingBack = false;
                             voice.position = (float)voice.actualLoopStart;
                         }
                     } else {
-                        voice.position += voice.playbackRate;
+                        voice.position += modulatedRate;
                         if (voice.position >= voice.actualEnd) {
                             voice.loopingBack = true;
                             voice.position = (float)voice.actualEnd;
@@ -1126,7 +1220,7 @@ public:
                     }
                 } else if (voice.reverse) {
                     // Reverse playback
-                    voice.position -= voice.playbackRate;
+                    voice.position -= modulatedRate;
                     if (voice.position <= voice.actualStart) {
                         if (voice.loopMode == 1) {
                             // Forward loop (restart from loop point)
@@ -1139,7 +1233,7 @@ public:
                     }
                 } else {
                     // Forward playback
-                    voice.position += voice.playbackRate;
+                    voice.position += modulatedRate;
                     if (voice.position >= voice.actualEnd) {
                         if (voice.loopMode == 1) {
                             // Forward loop (restart from loop point)
@@ -1211,7 +1305,9 @@ public:
     void scheduleNote(int64_t targetFrame, int sampleId, int trackId,
                       float frequency, float baseFrequency, float volume, float pan = 0.5f,
                       int startPointOverride = -1, int tableId = -1, int tableTicRate = 6,
-                      int noteOctave = 4, int notePitch = 0) {
+                      int noteOctave = 4, int notePitch = 0,
+                      float pslInitialOffset = 0.0f, float pslDuration = 0.0f,
+                      float pbnRate = 0.0f, float vibratoSpeed = 0.0f, float vibratoDepth = 0.0f) {
         ScheduledNote note = {
                 .targetFrame = targetFrame,
                 .sampleId = sampleId,
@@ -1224,7 +1320,12 @@ public:
                 .tableId = tableId,
                 .tableTicRate = tableTicRate,
                 .noteOctave = noteOctave,
-                .notePitch = notePitch
+                .notePitch = notePitch,
+                .pslInitialOffset = pslInitialOffset,
+                .pslDuration = pslDuration,
+                .pbnRate = pbnRate,
+                .vibratoSpeed = vibratoSpeed,
+                .vibratoDepth = vibratoDepth
         };
         noteQueue.schedule(note);
     }
@@ -1382,6 +1483,176 @@ public:
     }
 
     // ===================================
+    // PITCH MODULATION METHODS (Phase 6)
+    // ===================================
+
+    // Set pitch slide for a voice (PSL effect)
+    // Slides from current pitch offset to target over duration
+    void setPitchSlide(int trackId, float targetSemitones, float durationTicks, int tempo) {
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (voices[v].isActive && voices[v].trackId == trackId) {
+                Voice& voice = voices[v];
+
+                // Calculate frames per tick based on tempo
+                // At 44100Hz, 120BPM, 12 tics/step: ~230 samples per tic
+                float beatsPerSecond = tempo / 60.0f;
+                float stepsPerBeat = 4.0f;  // 16 steps = 4 beats
+                float ticsPerStep = 12.0f;  // Standard tics per step
+                float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
+                float framesPerTic = 44100.0f / ticsPerSecond;
+                float totalFrames = framesPerTic * durationTicks;
+
+                if (totalFrames < 1.0f) totalFrames = 1.0f;
+
+                float delta = targetSemitones - voice.pitchOffset;
+                voice.pitchSlideTarget = targetSemitones;
+                voice.pitchSlideRate = delta / totalFrames;
+                voice.pitchSliding = true;
+
+                LOGD("🎵 Pitch slide: track=%d, from=%.2f to=%.2f over %.0f frames (rate=%.6f)",
+                     trackId, voice.pitchOffset, targetSemitones, totalFrames, voice.pitchSlideRate);
+                return;
+            }
+        }
+    }
+
+    // Set continuous pitch bend (PBN effect)
+    // Bends pitch continuously at specified rate until stopped
+    void setPitchBend(int trackId, float semitonesPerTick, int tempo) {
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (voices[v].isActive && voices[v].trackId == trackId) {
+                Voice& voice = voices[v];
+
+                if (fabsf(semitonesPerTick) < 0.0001f) {
+                    // PBN00 = Stop bending
+                    voice.pitchSliding = false;
+                    voice.pitchSlideRate = 0.0f;
+                    LOGD("🎵 Pitch bend stopped: track=%d", trackId);
+                } else {
+                    // Calculate rate per frame
+                    float beatsPerSecond = tempo / 60.0f;
+                    float stepsPerBeat = 4.0f;
+                    float ticsPerStep = 12.0f;
+                    float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
+                    float framesPerTic = 44100.0f / ticsPerSecond;
+
+                    voice.pitchSlideRate = semitonesPerTick / framesPerTic;
+                    // Set target far in the direction of bend (will slide until stopped)
+                    voice.pitchSlideTarget = (semitonesPerTick > 0) ? 127.0f : -127.0f;
+                    voice.pitchSliding = true;
+
+                    LOGD("🎵 Pitch bend: track=%d, rate=%.4f semitones/tic", trackId, semitonesPerTick);
+                }
+                return;
+            }
+        }
+    }
+
+    // Set vibrato (PVB/PVX effect)
+    void setVibrato(int trackId, float speed, float depth) {
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (voices[v].isActive && voices[v].trackId == trackId) {
+                Voice& voice = voices[v];
+
+                if (depth < 0.01f) {
+                    // Stop vibrato
+                    voice.vibratoActive = false;
+                    voice.vibratoDepth = 0.0f;
+                    LOGD("🎵 Vibrato stopped: track=%d", trackId);
+                } else {
+                    voice.vibratoSpeed = speed;
+                    voice.vibratoDepth = depth;
+                    voice.vibratoActive = true;
+                    // Don't reset phase - allows smooth parameter changes
+                    LOGD("🎵 Vibrato: track=%d, speed=%.1fHz, depth=%.2f semitones",
+                         trackId, speed, depth);
+                }
+                return;
+            }
+        }
+    }
+
+    // Clear all pitch modulation for a voice
+    void clearPitchMod(int trackId) {
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (voices[v].isActive && voices[v].trackId == trackId) {
+                Voice& voice = voices[v];
+                voice.pitchOffset = 0.0f;
+                voice.pitchSliding = false;
+                voice.pitchSlideRate = 0.0f;
+                voice.vibratoActive = false;
+                voice.vibratoDepth = 0.0f;
+                LOGD("🎵 Pitch mod cleared: track=%d", trackId);
+                return;
+            }
+        }
+    }
+
+    // Set initial pitch offset for a voice (used by PSL portamento effect)
+    // This sets the starting pitch offset before calling setPitchSlide
+    void setInitialPitchOffset(int trackId, float semitones) {
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (voices[v].isActive && voices[v].trackId == trackId) {
+                voices[v].pitchOffset = semitones;
+                LOGD("🎵 Pitch offset set: track=%d, offset=%.2f semitones", trackId, semitones);
+                return;
+            }
+        }
+    }
+
+    // Update pitch modulation for a single voice (called per frame in audio callback)
+    void updateVoicePitchMod(Voice& voice, int numFrames) {
+        // Process pitch slide
+        if (voice.pitchSliding) {
+            float delta = voice.pitchSlideTarget - voice.pitchOffset;
+
+            // Check if we've reached or passed the target
+            float totalDelta = voice.pitchSlideRate * numFrames;
+            if (fabsf(totalDelta) >= fabsf(delta)) {
+                // Reached target
+                voice.pitchOffset = voice.pitchSlideTarget;
+
+                // Only stop if this was a PSL (finite slide), not PBN (continuous)
+                // PBN has extreme target values (±127)
+                if (fabsf(voice.pitchSlideTarget) < 100.0f) {
+                    voice.pitchSliding = false;
+                }
+            } else {
+                voice.pitchOffset += totalDelta;
+            }
+        }
+
+        // Process vibrato LFO
+        if (voice.vibratoActive) {
+            // Advance LFO phase
+            // Phase increment per frame = 2π × frequency / sample_rate
+            float phaseIncrement = (2.0f * (float)M_PI * voice.vibratoSpeed / 44100.0f) * numFrames;
+            voice.vibratoPhase += phaseIncrement;
+
+            // Wrap phase to [0, 2π]
+            while (voice.vibratoPhase >= 2.0f * (float)M_PI) {
+                voice.vibratoPhase -= 2.0f * (float)M_PI;
+            }
+        }
+    }
+
+    // Get modulated playback rate including pitch offset and vibrato
+    float getModulatedPlaybackRate(Voice& voice) {
+        float pitchMod = voice.pitchOffset;
+
+        // Add vibrato modulation (sine wave)
+        if (voice.vibratoActive) {
+            pitchMod += sinf(voice.vibratoPhase) * voice.vibratoDepth;
+        }
+
+        // Convert total semitones to rate multiplier
+        // rate = 2^(semitones/12)
+        float rateMod = powf(2.0f, pitchMod / 12.0f);
+
+        return voice.playbackRate * rateMod;
+    }
+
+    // ===================================
     // OFFLINE RENDER (for WAV export)
     // ===================================
     // Renders audio frames without the Oboe stream.
@@ -1426,6 +1697,39 @@ public:
                                               note.trackId, rate, note.volume, note.pan,
                                               instrumentParams[note.sampleId],
                                               (float)sampleRate, note.startPointOverride);
+
+                            // Apply pitch modulation from scheduled note (Phase 7)
+                            // PSL: Set initial offset and start slide to 0
+                            if (fabsf(note.pslInitialOffset) > 0.001f && note.pslDuration > 0.0f) {
+                                voices[v].pitchOffset = note.pslInitialOffset;
+                                float beatsPerSecond = 120.0f / 60.0f;
+                                float stepsPerBeat = 4.0f;
+                                float ticsPerStep = 12.0f;
+                                float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
+                                float framesPerTic = (float)sampleRate / ticsPerSecond;
+                                float totalFrames = framesPerTic * note.pslDuration;
+                                if (totalFrames < 1.0f) totalFrames = 1.0f;
+                                voices[v].pitchSlideTarget = 0.0f;
+                                voices[v].pitchSlideRate = -note.pslInitialOffset / totalFrames;
+                                voices[v].pitchSliding = true;
+                            }
+                            // PBN: Set continuous pitch bend rate
+                            if (fabsf(note.pbnRate) > 0.0001f) {
+                                float beatsPerSecond = 120.0f / 60.0f;
+                                float stepsPerBeat = 4.0f;
+                                float ticsPerStep = 12.0f;
+                                float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
+                                float framesPerTic = (float)sampleRate / ticsPerSecond;
+                                voices[v].pitchSlideRate = note.pbnRate / framesPerTic;
+                                voices[v].pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
+                                voices[v].pitchSliding = true;
+                            }
+                            // PVB/PVX: Set vibrato
+                            if (note.vibratoDepth > 0.01f) {
+                                voices[v].vibratoSpeed = note.vibratoSpeed;
+                                voices[v].vibratoDepth = note.vibratoDepth;
+                                voices[v].vibratoActive = true;
+                            }
                         }
                         break;
                     }
@@ -1968,11 +2272,14 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1schedul
         JNIEnv *env, jobject thiz, jlong targetFrame, jint sampleId, jint trackId,
         jfloat frequency, jfloat baseFrequency, jfloat volume, jfloat pan,
         jint startPointOverride, jint tableId, jint tableTicRate,
-        jint noteOctave, jint notePitch) {
+        jint noteOctave, jint notePitch,
+        jfloat pslInitialOffset, jfloat pslDuration,
+        jfloat pbnRate, jfloat vibratoSpeed, jfloat vibratoDepth) {
     if (engine) {
         engine->scheduleNote(targetFrame, sampleId, trackId, frequency, baseFrequency,
                              volume, pan, startPointOverride, tableId, tableTicRate,
-                             noteOctave, notePitch);
+                             noteOctave, notePitch,
+                             pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth);
     }
 }
 
@@ -1992,6 +2299,50 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getVoic
         return engine->getVoiceTableId(trackId);
     }
     return -1;
+}
+
+// ===================================
+// PITCH MODULATION JNI METHODS (Phase 6)
+// ===================================
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setPitchSlide(
+        JNIEnv *env, jobject thiz, jint trackId, jfloat targetSemitones, jfloat durationTicks, jint tempo) {
+    if (engine) {
+        engine->setPitchSlide(trackId, targetSemitones, durationTicks, tempo);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setPitchBend(
+        JNIEnv *env, jobject thiz, jint trackId, jfloat semitonesPerTick, jint tempo) {
+    if (engine) {
+        engine->setPitchBend(trackId, semitonesPerTick, tempo);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setVibrato(
+        JNIEnv *env, jobject thiz, jint trackId, jfloat speed, jfloat depth) {
+    if (engine) {
+        engine->setVibrato(trackId, speed, depth);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1clearPitchMod(
+        JNIEnv *env, jobject thiz, jint trackId) {
+    if (engine) {
+        engine->clearPitchMod(trackId);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setInitialPitchOffset(
+        JNIEnv *env, jobject thiz, jint trackId, jfloat semitones) {
+    if (engine) {
+        engine->setInitialPitchOffset(trackId, semitones);
+    }
 }
 
 }

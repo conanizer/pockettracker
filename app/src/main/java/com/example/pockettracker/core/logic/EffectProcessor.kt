@@ -98,7 +98,68 @@ data class ResolvedStepParams(
      * - Odd time signatures (e.g., HOP at row F to row 4 = 5/4 time)
      * - Track muting (HOPFF)
      */
-    val hopValue: Int? = null
+    val hopValue: Int? = null,
+
+    // ===================================
+    // PITCH EFFECTS (Phase 7)
+    // ===================================
+
+    /**
+     * PSL (Pitch Slide) duration in ticks, or null if no PSL effect.
+     *
+     * PSL xx enables portamento for the note:
+     * - When a new note is triggered after a previous note, the pitch
+     *   slides from the previous note's pitch to the new pitch.
+     * - xx = slide duration in ticks (01 = fast, FF = slow)
+     * - PSL 00 = instant (no slide)
+     *
+     * Example:
+     * Row 0: C-4 01 FF ---      ← Note plays at C-4
+     * Row 4: E-4 01 FF PSL 18  ← Pitch slides from C-4 to E-4 over 24 ticks
+     */
+    val pslDuration: Int? = null,
+
+    /**
+     * PBN (Pitch Bend) value, or null if no PBN effect.
+     *
+     * PBN xx bends the pitch continuously:
+     * - 00 = stop bending (pitch stays at current offset)
+     * - 01-7F = bend UP at rate (value / 16) semitones per step
+     * - 80-FF = bend DOWN at rate ((value & 0x7F) / 16) semitones per step
+     *
+     * Persists until: PBN 00, new note, or KILL effect.
+     *
+     * Example:
+     * Row 0: C-4 01 FF PBN 10  ← Bend up 1 semitone per step
+     * Row 8: --- -- -- PBN 00  ← Stop bending
+     */
+    val pbnValue: Int? = null,
+
+    /**
+     * PVB (Vibrato) value, or null if no PVB effect.
+     *
+     * PVB xy sets vibrato parameters:
+     * - x (high nibble) = speed (0-F): Hz = 2 + x * 0.5 (2Hz to 9.5Hz)
+     * - y (low nibble) = depth (0-F): semitones = y * 0.125 (0 to 1.875 semitones)
+     * - PVB 00 = stop vibrato
+     *
+     * Persists until: PVB 00, new note, or KILL effect.
+     *
+     * Example:
+     * Row 0: C-4 01 FF PVB 64  ← Medium speed (6), subtle depth (4)
+     */
+    val pvbValue: Int? = null,
+
+    /**
+     * PVX (Extreme Vibrato) value, or null if no PVX effect.
+     *
+     * Same format as PVB but with 4x depth and 2x speed for wild wobble effects.
+     *
+     * PVX xy:
+     * - x = speed: effective Hz = (2 + x * 0.5) * 2
+     * - y = depth: effective semitones = y * 0.125 * 4
+     */
+    val pvxValue: Int? = null
 )
 
 /**
@@ -149,15 +210,21 @@ class EffectProcessor(
         const val FX_REPEAT = 0x12    // Rxx - Retrigger sample
         const val FX_VOLUME = 0x16    // Vxx - Volume automation
 
+        // Pitch Effects (Phase 7)
+        const val FX_PSL = 0x19       // PSL xx - Pitch Slide (portamento), xx = duration in ticks
+        const val FX_PBN = 0x1A       // PBN xx - Pitch Bend, 00-7F = up, 80-FF = down, 00 = stop
+        const val FX_PVB = 0x1B       // PVB xy - Vibrato, x = speed (0-F), y = depth (0-F)
+        const val FX_PVX = 0x1C       // PVX xy - Extreme Vibrato (4x depth, 2x speed)
+
         /**
          * List of all valid effect types for UI cycling.
          * Used by editors to cycle through effect types with UP/DOWN.
-         * Order: NONE, ARC, HOP, TIC, ARPEGGIO, KILL, OFFSET, REPEAT, VOLUME (sorted by hex value)
+         * Order: NONE, ARC, HOP, TIC, ARPEGGIO, KILL, OFFSET, REPEAT, VOLUME, PSL, PBN, PVB, PVX (sorted by hex value)
          */
-        val EFFECT_TYPES = listOf(FX_NONE, FX_ARC, FX_HOP, FX_TIC, FX_ARPEGGIO, FX_KILL, FX_OFFSET, FX_REPEAT, FX_VOLUME)
-
-        // More effects will be added in future phases
-        // Table screen effects: Pitch bend, vibrato, filter sweep, etc.
+        val EFFECT_TYPES = listOf(
+            FX_NONE, FX_ARC, FX_HOP, FX_TIC, FX_ARPEGGIO, FX_KILL, FX_OFFSET, FX_REPEAT, FX_VOLUME,
+            FX_PSL, FX_PBN, FX_PVB, FX_PVX
+        )
     }
 
     // ========================================
@@ -192,6 +259,12 @@ class EffectProcessor(
         var arcValue: Int? = null
         var repeatCount: Int? = null
         var hopValue: Int? = null
+
+        // Pitch effects (Phase 7)
+        var pslDuration: Int? = null
+        var pbnValue: Int? = null
+        var pvbValue: Int? = null
+        var pvxValue: Int? = null
 
         // Check all 3 FX columns
         for (fxSlot in 1..3) {
@@ -251,6 +324,48 @@ class EffectProcessor(
                         logger.d(TAG, "🦘 HOP effect: jump to row $targetRow on next phrase")
                     }
                 }
+
+                // ===================================
+                // PITCH EFFECTS (Phase 7)
+                // ===================================
+
+                FX_PSL -> {
+                    pslDuration = value
+                    logger.d(TAG, "🎵 PSL effect: portamento duration=$value ticks")
+                }
+
+                FX_PBN -> {
+                    pbnValue = value
+                    if (value == 0) {
+                        logger.d(TAG, "🎵 PBN effect: stop pitch bend")
+                    } else {
+                        val direction = if (value < 0x80) "UP" else "DOWN"
+                        val rate = (value and 0x7F) / 16f
+                        logger.d(TAG, "🎵 PBN effect: bend $direction at $rate semitones/step")
+                    }
+                }
+
+                FX_PVB -> {
+                    pvbValue = value
+                    if (value == 0) {
+                        logger.d(TAG, "🎵 PVB effect: stop vibrato")
+                    } else {
+                        val speed = 2f + ((value shr 4) and 0x0F) * 0.5f
+                        val depth = (value and 0x0F) * 0.125f
+                        logger.d(TAG, "🎵 PVB effect: speed=${speed}Hz, depth=$depth semitones")
+                    }
+                }
+
+                FX_PVX -> {
+                    pvxValue = value
+                    if (value == 0) {
+                        logger.d(TAG, "🎵 PVX effect: stop extreme vibrato")
+                    } else {
+                        val speed = (2f + ((value shr 4) and 0x0F) * 0.5f) * 2f
+                        val depth = (value and 0x0F) * 0.125f * 4f
+                        logger.d(TAG, "🎵 PVX effect: speed=${speed}Hz, depth=$depth semitones (extreme)")
+                    }
+                }
             }
         }
 
@@ -261,7 +376,11 @@ class EffectProcessor(
             arpeggioValue = arpeggioValue,
             arcValue = arcValue,
             repeatCount = repeatCount,
-            hopValue = hopValue
+            hopValue = hopValue,
+            pslDuration = pslDuration,
+            pbnValue = pbnValue,
+            pvbValue = pvbValue,
+            pvxValue = pvxValue
         )
     }
 }

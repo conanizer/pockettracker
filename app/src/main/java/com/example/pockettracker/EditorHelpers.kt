@@ -41,7 +41,7 @@ fun clearEffect(step: PhraseStep, fxSlot: Int) {
 
 /**
  * Get effect type 3-letter name for display
- * Returns: ---, ARC, HOP, TIC, ARP, KIL, OFF, RPT, VOL
+ * Returns: ---, ARC, HOP, TIC, ARP, KIL, OFF, RPT, VOL, PSL, PBN, PVB, PVX
  */
 fun getEffectTypeName(effectType: Int): String {
     return when (effectType) {
@@ -53,6 +53,11 @@ fun getEffectTypeName(effectType: Int): String {
         0x0F -> "OFF"  // Offset
         0x12 -> "RPT"  // Repeat
         0x16 -> "VOL"  // Volume
+        // Pitch effects (Phase 7)
+        0x19 -> "PSL"  // Pitch Slide (portamento)
+        0x1A -> "PBN"  // Pitch Bend
+        0x1B -> "PVB"  // Vibrato
+        0x1C -> "PVX"  // Extreme Vibrato
         else -> "---"   // NONE
     }
 }

@@ -1327,15 +1327,16 @@ interface IAudioBackend {
 }
 ```
 
-### Definition of Done - Phase 6
-- [ ] Voice struct has pitch modulation fields
-- [ ] Pitch slide interpolates smoothly
-- [ ] Vibrato LFO runs in audio callback
-- [ ] Playback rate affected by pitch mods
-- [ ] JNI functions for all pitch controls
-- [ ] Kotlin IAudioBackend interface updated
-- [ ] No audio clicks during parameter changes
-- [ ] Pitch mods cleared on new note trigger
+### Definition of Done - Phase 6 ✅ COMPLETE (2026-02-05)
+- [x] Voice struct has pitch modulation fields (pitchOffset, pitchSliding, vibrato*)
+- [x] Pitch slide interpolates smoothly
+- [x] Vibrato LFO runs in audio callback
+- [x] Playback rate affected by pitch mods
+- [x] JNI functions for all pitch controls (setPitchSlide, setPitchBend, setVibrato, clearPitchMod)
+- [x] Kotlin IAudioBackend interface updated
+- [x] No audio clicks during parameter changes
+- [x] Pitch mods cleared on new note trigger
+- [x] setInitialPitchOffset() for PSL portamento effect
 
 ---
 
@@ -1491,17 +1492,24 @@ fun onNewNoteTrigger(trackId: Int) {
 }
 ```
 
-### Definition of Done - Phase 7
-- [ ] PSL effect slides pitch over duration
-- [ ] PSL works when note changes (A→B slides)
-- [ ] PBN bends pitch continuously up/down
-- [ ] PBN00 stops bending
-- [ ] PVB adds vibrato with speed/depth control
-- [ ] PVX is 4x deeper, 2x faster vibrato
-- [ ] All pitch effects respect persistence rules
-- [ ] New note clears pitch mods
-- [ ] KILL clears pitch mods
-- [ ] No audio artifacts during pitch changes
+### Definition of Done - Phase 7 ✅ COMPLETE (2026-02-05)
+- [x] PSL effect slides pitch over duration
+- [x] PSL works when note changes (A→B slides via portamento)
+- [x] PBN bends pitch continuously up/down
+- [x] PBN00 stops bending
+- [x] PVB adds vibrato with speed/depth control
+- [x] PVX is 4x deeper, 2x faster vibrato
+- [x] All pitch effects respect persistence rules
+- [x] New note clears pitch mods
+- [x] KILL clears pitch mods
+- [x] No audio artifacts during pitch changes
+
+**Implementation Details:**
+- Per-note pitch effects: PSL/PBN/PVB/PVX params travel with ScheduledNote
+- C++ applies pitch mods when note triggers (not scheduled ahead)
+- Mid-note changes: Steps without notes can still set PBN/PVB/PVX on active voice
+- EffectProcessor tracks pitch effect state per track (pslDuration, pbnRate, vibrato*)
+- PlaybackController calculates pitch params before scheduling each note
 
 ---
 
