@@ -83,7 +83,22 @@ data class ResolvedStepParams(
      * 2. Any effect in the same FX column where REPEAT was set
      * 3. KILL effect (K00) in any FX column
      */
-    val repeatCount: Int? = null
+    val repeatCount: Int? = null,
+
+    /**
+     * HOP effect value, or null if no HOP effect (Phase 5).
+     *
+     * HOP (Hxx) in phrase context:
+     * - HOPFF (0xFF) = Stop track playback
+     * - HOP XY = Jump to row Y on the NEXT phrase in chain
+     *   - X is ignored in phrase context (used for repeat count in tables)
+     *   - Y (low nibble) = target row (0x00-0x0F)
+     *
+     * Used for:
+     * - Odd time signatures (e.g., HOP at row F to row 4 = 5/4 time)
+     * - Track muting (HOPFF)
+     */
+    val hopValue: Int? = null
 )
 
 /**
@@ -126,7 +141,7 @@ class EffectProcessor(
 
         // TOP-5 Effects (Phrase screen)
         const val FX_ARC = 0x03       // Cxx - Arpeggio Config (mode/speed)
-        const val FX_HOP = 0x08       // Hxx - Table hop (00-0F = jump to row, FF = stop table)
+        const val FX_HOP = 0x08       // Hxx - HOP: Phrase (jump row on next phrase, FF=stop track), Table (jump row with repeat count)
         const val FX_TIC = 0x09       // Txx - Table tick rate (01-FB = tics/row, FC-FF = special modes)
         const val FX_ARPEGGIO = 0x0A  // Axx - Note pattern automation
         const val FX_KILL = 0x0B      // K00 - Kill sample
@@ -176,6 +191,7 @@ class EffectProcessor(
         var arpeggioValue: Int? = null
         var arcValue: Int? = null
         var repeatCount: Int? = null
+        var hopValue: Int? = null
 
         // Check all 3 FX columns
         for (fxSlot in 1..3) {
@@ -225,6 +241,16 @@ class EffectProcessor(
                     repeatCount = value
                     logger.d(TAG, "🔁 REPEAT effect: $value retriggers")
                 }
+
+                FX_HOP -> {
+                    hopValue = value
+                    if (value == 0xFF) {
+                        logger.d(TAG, "🦘 HOP FF: stop track")
+                    } else {
+                        val targetRow = value and 0x0F
+                        logger.d(TAG, "🦘 HOP effect: jump to row $targetRow on next phrase")
+                    }
+                }
             }
         }
 
@@ -234,7 +260,8 @@ class EffectProcessor(
             killAtFrame = killAtFrame,
             arpeggioValue = arpeggioValue,
             arcValue = arcValue,
-            repeatCount = repeatCount
+            repeatCount = repeatCount,
+            hopValue = hopValue
         )
     }
 }

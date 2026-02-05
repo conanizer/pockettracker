@@ -50,7 +50,13 @@ data class TrackState(
     /** Arpeggio speed in tics from ARC (Cxx) - default 4 (3 notes/step at 12 tics) */
     var arpeggioSpeed: Int = 4,
     /** Audio frame where ARPEGGIO was started (for cross-step phase continuity) */
-    var arpeggioStartFrame: Long = 0
+    var arpeggioStartFrame: Long = 0,
+
+    // HOP state (Phase 5)
+    /** Target row for NEXT phrase in chain (-1 = no hop, start at row 0) */
+    var hopTargetRow: Int = -1,
+    /** Track is stopped by HOPFF (remains stopped until new chain starts) */
+    var trackStopped: Boolean = false
 ) {
     /** Check if persistent REPEAT is active */
     fun hasActiveRepeat(): Boolean = repeatActiveColumn > 0 && repeatTicInterval > 0
@@ -77,6 +83,22 @@ data class TrackState(
         clearArpeggio()
         arpeggioMode = 0
         arpeggioSpeed = 4
+    }
+
+    /** Check if HOP is pending for next phrase */
+    fun hasHopPending(): Boolean = hopTargetRow >= 0
+
+    /** Get and consume the HOP target row (returns -1 if no HOP pending) */
+    fun consumeHopTarget(): Int {
+        val target = hopTargetRow
+        hopTargetRow = -1
+        return target
+    }
+
+    /** Clear HOP state (called when new chain starts) */
+    fun clearHopState() {
+        hopTargetRow = -1
+        trackStopped = false
     }
 }
 
@@ -291,10 +313,11 @@ class PlaybackController(
         chainRowStartFrames.clear()
         songPositionStartFrames.clear()
         nextSongChainRowToSchedule = 0
-        // Clear all track states (persistent effects, note memory)
+        // Clear all track states (persistent effects, note memory, HOP)
         trackStates.forEach {
             it.clearRepeat()
             it.clearAllArpeggioState()
+            it.clearHopState()
         }
         logger.d(TAG, "⏹️ Playback stopped")
     }
@@ -335,22 +358,48 @@ class PlaybackController(
         if (bufferRemaining < minBuffer) {
             when (playbackMode) {
                 PlaybackMode.PHRASE -> {
-                    // For phrase: just reschedule the same phrase
+                    // For phrase: reschedule the same phrase (looping)
                     val phrase = project.phrases[currentPhraseId]
-                    schedulePhrase(phrase, nextFrameToSchedule, 0, 0, project, framesPerStep)
-                    nextFrameToSchedule += framesPerPhrase
+                    val trackState = trackStates[0]
+
+                    // Check if HOP target row is set from previous iteration
+                    val hopStartRow = trackState.consumeHopTarget()
+                    val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
+
+                    val result = schedulePhrase(phrase, nextFrameToSchedule, 0, 0, project, framesPerStep, effectiveStartRow)
+                    nextFrameToSchedule += framesPerStep * result.rowsScheduled
                 }
 
                 PlaybackMode.CHAIN -> {
                     // For chain: schedule next non-empty phrase in chain
                     val chain = project.chains[currentChainId]
+                    val trackState = trackStates[0]  // Chain mode uses track 0
+
+                    // Check if track is stopped by HOPFF
+                    if (trackState.trackStopped) {
+                        // Track is stopped, don't schedule more phrases
+                        // Keep playback running but silent until chain ends
+                        nextChainRowToSchedule = (nextChainRowToSchedule + 1) % 16
+                        nextFrameToSchedule += framesPerPhrase
+                        return
+                    }
+
                     val nextRow = findNextNonEmptyChainRow(nextChainRowToSchedule, chain)
                     if (nextRow != null) {
                         val phraseId = chain.phraseRefs[nextRow]
                         val transposeSemitones = chain.getTransposeSemitones(nextRow)
-                        schedulePhrase(project.phrases[phraseId], nextFrameToSchedule, 0, transposeSemitones, project, framesPerStep)
+
+                        // Check if HOP target row is set from previous phrase
+                        val hopStartRow = trackState.consumeHopTarget()
+                        val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
+
+                        // Schedule phrase starting from HOP target row (or 0 if no HOP)
+                        val result = schedulePhrase(project.phrases[phraseId], nextFrameToSchedule, 0, transposeSemitones, project, framesPerStep, effectiveStartRow)
                         chainRowStartFrames[nextRow] = nextFrameToSchedule  // Track start frame for cursor
-                        nextFrameToSchedule += framesPerPhrase
+
+                        // Advance frame by actual rows scheduled (HOP may cut phrase short)
+                        nextFrameToSchedule += framesPerStep * result.rowsScheduled
+
                         nextChainRowToSchedule = (nextRow + 1) % 16
                     } else {
                         // Chain is empty, stop playback
@@ -388,13 +437,23 @@ class PlaybackController(
                         if (maxChainLength == 0) {
                             nextSongRowToSchedule++
                             nextSongChainRowToSchedule = 0
+                            // Clear trackStopped when new chain starts (new song row)
+                            trackStates.forEach { it.trackStopped = false }
                             if (nextSongRowToSchedule >= songLength) {
                                 nextSongRowToSchedule = 0  // Loop song
                             }
                         } else if (nextSongChainRowToSchedule < maxChainLength) {
                             // Schedule this chain row for all 8 tracks
                             var scheduledAny = false
+                            var maxRowsScheduled = 0  // Track max rows for frame advancement
                             for (trackId in 0..7) {
+                                val trackState = trackStates[trackId]
+
+                                // Skip if track is stopped by HOPFF
+                                if (trackState.trackStopped) {
+                                    continue
+                                }
+
                                 if (nextSongRowToSchedule < song[trackId].chainRefs.size) {
                                     val chainId = song[trackId].chainRefs[nextSongRowToSchedule]
                                     if (chainId >= 0 && chainId < 256) {
@@ -402,16 +461,29 @@ class PlaybackController(
                                         if (!chain.isEmpty(nextSongChainRowToSchedule)) {
                                             val phraseId = chain.phraseRefs[nextSongChainRowToSchedule]
                                             val transposeSemitones = chain.getTransposeSemitones(nextSongChainRowToSchedule)
-                                            schedulePhrase(project.phrases[phraseId], nextFrameToSchedule, trackId, transposeSemitones, project, framesPerStep)
+
+                                            // Check if HOP target row is set from previous phrase
+                                            val hopStartRow = trackState.consumeHopTarget()
+                                            val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
+
+                                            // Schedule phrase with HOP start row
+                                            val result = schedulePhrase(project.phrases[phraseId], nextFrameToSchedule, trackId, transposeSemitones, project, framesPerStep, effectiveStartRow)
                                             songPositionStartFrames[Pair(nextSongRowToSchedule, nextSongChainRowToSchedule)] = nextFrameToSchedule
                                             scheduledAny = true
+
+                                            // Track max rows scheduled across all tracks
+                                            if (result.rowsScheduled > maxRowsScheduled) {
+                                                maxRowsScheduled = result.rowsScheduled
+                                            }
                                         }
                                     }
                                 }
                             }
 
                             if (scheduledAny) {
-                                nextFrameToSchedule += framesPerPhrase
+                                // Advance by max rows scheduled (so all tracks stay in sync)
+                                // Tracks with HOP will have empty time before their next phrase
+                                nextFrameToSchedule += framesPerStep * maxRowsScheduled
                                 nextSongChainRowToSchedule++
                             } else {
                                 // No phrases in this chain row, skip to next
@@ -421,6 +493,8 @@ class PlaybackController(
                             // Reached end of all chain rows in this song row, move to next song row
                             nextSongRowToSchedule++
                             nextSongChainRowToSchedule = 0
+                            // Clear trackStopped when new chain starts (new song row)
+                            trackStates.forEach { it.trackStopped = false }
                             if (nextSongRowToSchedule >= songLength) {
                                 nextSongRowToSchedule = 0  // Loop song
                             }
@@ -478,8 +552,8 @@ class PlaybackController(
         nextFrameToSchedule = playbackStartFrame
 
         // Schedule first phrase immediately
-        schedulePhrase(phrase, playbackStartFrame, 0, 0, project, framesPerStep)
-        nextFrameToSchedule += framesPerStep * 16  // Phrase is 16 steps
+        val result = schedulePhrase(phrase, playbackStartFrame, 0, 0, project, framesPerStep)
+        nextFrameToSchedule += framesPerStep * result.rowsScheduled
 
         logger.d(TAG, "✅ Phrase playback initialized")
     }
@@ -493,21 +567,55 @@ class PlaybackController(
      * - REPEAT continues until cancelled by note, same-column FX, or KILL
      * - Supports multi-step intervals (R0C+ = every N steps)
      */
+    /**
+     * Result of scheduling a phrase, including how many rows were actually played.
+     * Used to calculate correct frame advancement when HOP cuts phrase short.
+     */
+    data class SchedulePhraseResult(
+        val rowsScheduled: Int,      // How many rows were actually scheduled (may be < 16 due to HOP)
+        val hopTriggered: Boolean,   // Whether HOP effect ended phrase early
+        val trackStopped: Boolean    // Whether HOPFF stopped the track
+    )
+
+    /**
+     * Schedule a single phrase for playback.
+     *
+     * @param phrase The phrase to schedule
+     * @param startFrame When this phrase should start (audio frame)
+     * @param trackId Which track (0-7)
+     * @param transposeSemitones Semitones to transpose
+     * @param project Project containing instrument data
+     * @param framesPerStep Duration of each step in frames
+     * @param startRow Row to start from (0-15), used for HOP effect (default 0)
+     * @return SchedulePhraseResult with info about rows scheduled and HOP status
+     */
     private fun schedulePhrase(
         phrase: Phrase,
         startFrame: Long,
         trackId: Int,
         transposeSemitones: Int,
         project: Project,
-        framesPerStep: Long
-    ) {
+        framesPerStep: Long,
+        startRow: Int = 0
+    ): SchedulePhraseResult {
         var scheduledNotes = 0
+        var rowsScheduled = 0
         val trackState = trackStates[trackId.coerceIn(0, 7)]
 
-        phrase.steps.forEachIndexed { stepIndex, step ->
-            val targetFrame = startFrame + (stepIndex * framesPerStep)
+        // If track is stopped by HOPFF, don't schedule anything
+        if (trackState.trackStopped) {
+            logger.d(TAG, "  Track $trackId stopped by HOP FF, skipping phrase")
+            return SchedulePhraseResult(0, hopTriggered = false, trackStopped = true)
+        }
 
-            val noteScheduled = scheduleStepWithEffects(
+        // Schedule steps starting from startRow
+        val effectiveStartRow = startRow.coerceIn(0, 15)
+        for (stepIndex in effectiveStartRow until 16) {
+            val step = phrase.steps[stepIndex]
+            // Calculate frame relative to phrase start, accounting for skipped rows
+            val targetFrame = startFrame + ((stepIndex - effectiveStartRow) * framesPerStep)
+
+            val stepResult = scheduleStepWithEffects(
                 step = step,
                 targetFrame = targetFrame,
                 stepDuration = framesPerStep,
@@ -518,13 +626,32 @@ class PlaybackController(
                 stepIndex = stepIndex  // Pass step index for multi-step REPEAT
             )
 
-            if (noteScheduled) {
+            rowsScheduled++
+
+            if (stepResult.noteScheduled) {
                 scheduledNotes++
             }
+
+            // Check if HOP was triggered - stop scheduling remaining rows
+            if (stepResult.hopTriggered) {
+                if (trackState.trackStopped) {
+                    logger.d(TAG, "  HOP FF at row $stepIndex: track $trackId stopped, scheduled $rowsScheduled rows")
+                } else {
+                    logger.d(TAG, "  HOP at row $stepIndex: jumping to row ${trackState.hopTargetRow}, scheduled $rowsScheduled rows")
+                }
+                return SchedulePhraseResult(rowsScheduled, hopTriggered = true, trackStopped = trackState.trackStopped)
+            }
         }
+
         if (scheduledNotes > 0) {
-            logger.d(TAG, "  Scheduled $scheduledNotes notes")
+            if (effectiveStartRow > 0) {
+                logger.d(TAG, "  Scheduled $scheduledNotes notes (starting from row $effectiveStartRow due to HOP)")
+            } else {
+                logger.d(TAG, "  Scheduled $scheduledNotes notes")
+            }
         }
+
+        return SchedulePhraseResult(rowsScheduled, hopTriggered = false, trackStopped = false)
     }
 
     /**
@@ -573,9 +700,9 @@ class PlaybackController(
         if (firstRow != null) {
             val phraseId = chain.phraseRefs[firstRow]
             val transposeSemitones = chain.getTransposeSemitones(firstRow)
-            schedulePhrase(project.phrases[phraseId], playbackStartFrame, 0, transposeSemitones, project, framesPerStep)
+            val result = schedulePhrase(project.phrases[phraseId], playbackStartFrame, 0, transposeSemitones, project, framesPerStep)
             chainRowStartFrames[firstRow] = playbackStartFrame  // Track start frame for cursor
-            nextFrameToSchedule += framesPerPhrase
+            nextFrameToSchedule += framesPerStep * result.rowsScheduled
             nextChainRowToSchedule = firstRow + 1
         }
 
@@ -736,6 +863,14 @@ class PlaybackController(
      * @param stepIndex Current step index in phrase (0-15), for multi-step REPEAT
      * @return true if a note was scheduled, false if step was empty
      */
+    /**
+     * Result of scheduling a single step.
+     */
+    data class ScheduleStepResult(
+        val noteScheduled: Boolean,  // Whether a note was scheduled
+        val hopTriggered: Boolean    // Whether HOP effect was triggered (phrase should end)
+    )
+
     fun scheduleStepWithEffects(
         step: PhraseStep,
         targetFrame: Long,
@@ -745,7 +880,7 @@ class PlaybackController(
         project: Project,
         trackState: TrackState = trackStates[trackId.coerceIn(0, 7)],
         stepIndex: Int = 0
-    ): Boolean {
+    ): ScheduleStepResult {
         // ═══════════════════════════════════════════════════════════════════════════
         // STEP 1: Check cancellation conditions for persistent REPEAT and ARPEGGIO
         // ═══════════════════════════════════════════════════════════════════════════
@@ -858,6 +993,31 @@ class PlaybackController(
         // Handle KILL effect - schedule kill at the specified frame
         if (params.killAtFrame != null) {
             audioEngine.scheduleKill(params.killAtFrame, trackId)
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // STEP 2.5: Handle HOP effect (Phase 5)
+        // ═══════════════════════════════════════════════════════════════════════════
+        // HOP in phrase context:
+        // - HOPFF (0xFF) = Stop track playback (until new chain starts)
+        // - HOP XY = Jump to row Y, ending current phrase immediately
+        //
+        // This enables odd time signatures:
+        // - 3/4 time: HOP 00 at row 11 = play 12 rows (0-11)
+        // - 5/4 time: Phrase 0 full (16) + Phrase 1 with HOP 00 at row 3 = 20 rows
+        var hopTriggered = false
+        if (params.hopValue != null) {
+            hopTriggered = true  // HOP always ends the current phrase
+            if (params.hopValue == 0xFF) {
+                // HOPFF: Stop this track
+                trackState.trackStopped = true
+                logger.d(TAG, "🦘 HOP FF: Track $trackId stopped at step $stepIndex")
+            } else {
+                // HOP XY: Set target row for next phrase (low nibble = Y)
+                val targetRow = params.hopValue and 0x0F
+                trackState.hopTargetRow = targetRow
+                logger.d(TAG, "🦘 HOP: Track $trackId jumping at step $stepIndex, next phrase starts at row $targetRow")
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════════════════
@@ -1077,7 +1237,7 @@ class PlaybackController(
             )
         }
 
-        return noteScheduled
+        return ScheduleStepResult(noteScheduled = noteScheduled, hopTriggered = hopTriggered)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

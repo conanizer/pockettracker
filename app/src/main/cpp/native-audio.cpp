@@ -351,6 +351,11 @@ struct Voice {
     int triggerPitch;        // Pitch of triggered note (0-11, C=0) for TICFE mode
     float tic200HzAccum;     // Accumulator for 200Hz mode (TICFF)
 
+    // HOP repeat counter (Phase 5)
+    // HOP XY: X = repeat count (0 = infinite), Y = target row
+    int hopRepeatCount;      // Number of times left to jump (0 = done or infinite mode)
+    int hopTargetRow;        // Target row for active HOP (-1 = no active HOP)
+
     Voice() : isActive(false), sampleData(nullptr), sampleLength(0),
               position(0), trackId(-1), playbackRate(1.0f), basePlaybackRate(1.0f), volume(1.0f),
               panLeft(0.707f), panRight(0.707f),  // Default to center
@@ -362,7 +367,8 @@ struct Voice {
               x1(0.0f), x2(0.0f), y1(0.0f), y2(0.0f),
               tableId(-1), tableRow(0), lastProcessedRow(-1), tableTicRate(6), tableTicCounter(0),
               tableTranspose(0.0f), tableVolume(1.0f),
-              triggerOctave(4), triggerPitch(0), tic200HzAccum(0.0f) {}
+              triggerOctave(4), triggerPitch(0), tic200HzAccum(0.0f),
+              hopRepeatCount(0), hopTargetRow(-1) {}
 
     void trigger(float* sample, int length, int track, float rate, float vol, float pan,
                  const InstrumentParams& params, float sampleRate, int startPointOverride = -1,
@@ -427,6 +433,10 @@ struct Voice {
         tableTicCounter = 0;
         tableTranspose = 0.0f;
         tableVolume = 1.0f;
+
+        // Reset HOP state (Phase 5)
+        hopRepeatCount = 0;
+        hopTargetRow = -1;
 
         // Store note info for special TIC modes (Phase 4)
         triggerOctave = std::max(0, std::min(octave, 9));   // Clamp to 0-9
@@ -876,15 +886,48 @@ public:
                             break;
 
                         case FX_HOP:
-                            // Hxx - Jump to row (00-0F), or FF = stop table processing
+                            // Hxx - HOP effect (Phase 5: repeat count support)
+                            // Format: HOP XY where X = repeat count, Y = target row
+                            // HOP FF = stop table processing
+                            // HOP 0Y = infinite loop to row Y
+                            // HOP XY (X>0) = jump to row Y exactly X times, then continue
                             if (fxValue == 0xFF) {
                                 // Stop table processing for this voice
                                 voice.tableId = -1;
-                                LOGD("📋 Table effect: HOP FF - stopped table for voice %d", v);
-                            } else if (fxValue <= 0x0F) {
-                                // Jump to specified row
-                                hopExecuted = true;
-                                hopTarget = fxValue;
+                                voice.hopTargetRow = -1;
+                                voice.hopRepeatCount = 0;
+                                LOGD("📋 Table HOP FF: stopped table for voice %d", v);
+                            } else {
+                                int repeatCount = (fxValue >> 4) & 0x0F;  // High nibble = X
+                                int targetRow = fxValue & 0x0F;           // Low nibble = Y
+
+                                if (repeatCount == 0) {
+                                    // HOP 0Y = Infinite loop to row Y
+                                    hopExecuted = true;
+                                    hopTarget = targetRow;
+                                    LOGD("📋 Table HOP %02X: infinite loop to row %d, voice %d", fxValue, targetRow, v);
+                                } else {
+                                    // HOP XY (X>0) = Jump X times, then continue
+                                    // Initialize counter if this is a new HOP or different target
+                                    if (voice.hopTargetRow == -1 || voice.hopTargetRow != targetRow) {
+                                        voice.hopRepeatCount = repeatCount;
+                                        voice.hopTargetRow = targetRow;
+                                        LOGD("📋 Table HOP %02X: initialized counter=%d, target=%d, voice %d",
+                                             fxValue, repeatCount, targetRow, v);
+                                    }
+
+                                    if (voice.hopRepeatCount > 0) {
+                                        voice.hopRepeatCount--;
+                                        hopExecuted = true;
+                                        hopTarget = targetRow;
+                                        LOGD("📋 Table HOP: jump to row %d, %d jumps remaining, voice %d",
+                                             targetRow, voice.hopRepeatCount, v);
+                                    } else {
+                                        // Counter exhausted, don't jump, reset state and continue normally
+                                        voice.hopTargetRow = -1;
+                                        LOGD("📋 Table HOP: counter exhausted, continuing past row, voice %d", v);
+                                    }
+                                }
                             }
                             break;
 

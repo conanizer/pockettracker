@@ -1160,16 +1160,25 @@ Phrase 01 (rows 4-F only, due to HOP):
   Row F: --- HOP 00  ← Jump back to row 0
 ```
 
-### Definition of Done - Phase 5
-- [ ] HOP effect type added
-- [ ] In phrase: HOPFF stops track
-- [ ] In phrase: HOP XY jumps to row Y on next phrase
-- [ ] In table: HOP 0Y loops infinitely to row Y
-- [ ] In table: HOP XY jumps X times, then continues
-- [ ] Odd time signatures work (HOP at row F to row 4)
-- [ ] HOP respected in chain playback
-- [ ] HOP respected in song playback
-- [ ] Track stop persists until new chain starts
+### Definition of Done - Phase 5 ✅ COMPLETE (2026-02-05)
+- [x] HOP effect type added (FX_HOP = 0x08)
+- [x] In phrase: HOPFF stops track playback
+- [x] In phrase: HOP XY immediately jumps to row Y (enables odd time signatures!)
+- [x] In table: HOP 0Y loops infinitely to row Y
+- [x] In table: HOP XY jumps X times, then continues normally
+- [x] Odd time signatures work (3/4, 5/4, 7/8, etc.)
+  - HOP at row B with jump to row 0 = 12 steps = 3/4 time
+  - HOP at row 4 jumps to next phrase at row 4 = 20 steps for 5/4
+- [x] HOP respected in chain playback (hopTargetRow in TrackState)
+- [x] HOP respected in song playback (per-track state management)
+- [x] Track stop persists until new chain starts (trackStopped flag)
+- [x] Frame advancement uses actual rows scheduled (not assumed 16)
+
+**Implementation Details:**
+- C++ table HOP: Voice struct has hopRepeatCount and hopTargetRow fields
+- Kotlin phrase HOP: TrackState has hopTargetRow and trackStopped fields
+- schedulePhrase() returns SchedulePhraseResult with rowsScheduled
+- scheduleStepWithEffects() returns ScheduleStepResult with hopTriggered flag
 
 ---
 

@@ -1,7 +1,7 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-02-04
+2026-02-05
 
 ## Current Phase
 **MVP Expansion #1 COMPLETE!** → **MVP Extension Pack 2 (Tables + Pitch Effects)** → Testing → MVP Release
@@ -14,8 +14,8 @@
 - ✅ Phase 3: Table screen UI - COMPLETE (editing, navigation, copy/paste)
 - ✅ Phase 3.5: Table audio processing - COMPLETE (transpose, volume, effects)
 - ✅ Phase 4: TIC effect (table tick rate + special modes) - COMPLETE
-- 🚧 Phase 5: HOP effect (phrase/table jump) - NEXT
-- 🚧 Phase 6: Real-time parameter system
+- ✅ Phase 5: HOP effect (phrase/table jump) - COMPLETE
+- 🚧 Phase 6: Real-time parameter system - NEXT
 - 🚧 Phase 7: Pitch effects (PSL, PBN, PVB, PVX)
 - 🚧 Phase 8: Integration testing
 
@@ -413,7 +413,7 @@
 
 **New Effects (Phases 4-7):**
 - [x] TIC effect - Table tick rate control (TIC00/FC/FE/FF special modes)
-- [ ] HOP effect - Phrase/table jump, odd time signatures
+- [x] HOP effect - Phrase/table jump, odd time signatures (3/4, 5/4, 7/8, etc.)
 - [ ] PSL effect - Pitch slide (portamento)
 - [ ] PBN effect - Pitch bend (continuous)
 - [ ] PVB/PVX effects - Vibrato
