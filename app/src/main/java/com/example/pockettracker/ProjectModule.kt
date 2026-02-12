@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.example.pockettracker.core.data.Project
 
 /**
  * PROJECT SCREEN MODULE - FIXED STYLING
@@ -149,18 +150,16 @@ class ProjectModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 4: EXPORT (placeholder)
+        // ROW 4: EXPORT (WAV MIX button)
         // ─────────────────────────────────────
-        drawParameterRow(
+        drawExportRow(
             x = x,
             y = rowY,
             scale = scale,
             nameColumnX = nameColumnX,
             valueColumnX = valueColumnX,
-            parameterName = "EXPORT",
-            parameterValue = "---",
-            isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
-            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
+            projectState = projectState,
+            currentRow = currentRow
         )
         rowY += ROW_HEIGHT
         currentRow++
@@ -308,28 +307,39 @@ class ProjectModule : TrackerModule {
         )
 
         // COLUMN 2: Name characters (12 characters max)
-        // Pad name to 12 characters with underscores
-        val displayName = projectState.project.name
-            .take(12)  // Max 12 chars
-            .padEnd(12, '_')  // Fill with underscores
+        // Show actual name characters, then "-" for empty slots
+        val projectName = projectState.project.name.take(12)
 
         // Draw each character separately
         var charX = valueColumnX
         for (charIndex in 0..11) {
-            val char = displayName[charIndex]
+            // Get character to display:
+            // - If within name length: show actual character
+            // - If beyond name length: show "-" for empty slot
+            val char = if (charIndex < projectName.length) {
+                projectName[charIndex]
+            } else {
+                '-'  // Empty slot indicator
+            }
 
             // Is cursor on THIS specific character?
             // cursorColumn: 0=name label, 1=first char, 2=second char, etc.
             val isCursorOnThisChar = isCursorOnThisRow &&
                     projectState.cursorColumn == charIndex + 1
 
+            // Choose color: yellow for cursor, gray for empty slots, white for content
+            val charColor = when {
+                isCursorOnThisChar -> Color.Yellow
+                charIndex >= projectName.length -> Color.Gray  // Gray for empty slots
+                else -> Color.White  // White for name content
+            }
+
             drawBitmapText(
                 text = char.toString(),
                 x = charX,
                 y = textY,
                 scale = scale,
-                // Yellow if cursor is on this character, white otherwise
-                color = if (isCursorOnThisChar) Color.Yellow else Color.White,
+                color = charColor,
                 spacing = CHAR_SPACING,
                 fontScale = FONT_SCALE
             )
@@ -403,6 +413,212 @@ class ProjectModule : TrackerModule {
             optionX += 80
         }
     }
+
+    /**
+     * Draw EXPORT row with WAV MIX option
+     * Example: EXPORT   WAV MIX
+     */
+    private fun DrawScope.drawExportRow(
+        x: Int,
+        y: Int,
+        scale: Int,
+        nameColumnX: Int,
+        valueColumnX: Int,
+        projectState: ProjectState,
+        currentRow: Int
+    ) {
+        val textY = y + TEXT_PADDING
+        val isCursorOnThisRow = projectState.cursorRow == currentRow
+
+        // Draw row background if cursor is here
+        if (isCursorOnThisRow) {
+            drawRect(
+                color = Color(0xFF333333),
+                topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
+                size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
+            )
+        }
+
+        // COLUMN 1: "EXPORT" label
+        drawBitmapText(
+            text = "EXPORT",
+            x = nameColumnX,
+            y = textY,
+            scale = scale,
+            color = if (isCursorOnThisRow) Color.Yellow else Color.Gray,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        // COLUMN 2: WAV MIX option
+        val isCursorOnWavMix = isCursorOnThisRow && projectState.cursorColumn == 1
+
+        // Show render status or "WAV MIX" button
+        val buttonText = if (projectState.isRendering) {
+            "RENDERING ${(projectState.renderProgress * 100).toInt()}%"
+        } else {
+            "WAV MIX"
+        }
+
+        drawBitmapText(
+            text = buttonText,
+            x = valueColumnX,
+            y = textY,
+            scale = scale,
+            color = when {
+                projectState.isRendering -> Color.Cyan
+                isCursorOnWavMix -> Color.Yellow
+                else -> Color.White
+            },
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+    }
+
+    /**
+     * Get cursor context for current cursor position
+     *
+     * This tells the generic input system what kind of value we're on
+     * and what actions are available.
+     */
+    fun getCursorContext(state: ProjectState): CursorContext {
+        when (state.cursorRow) {
+            0 -> {
+                // TEMPO row
+                if (state.cursorColumn == 0) {
+                    // On "TEMPO" label - read only
+                    return CursorContextFactory.readOnly()
+                }
+                // On tempo value (000-999)
+                return CursorContext(
+                    valueType = CursorValueType.HEX_BYTE,  // Actually decimal, but similar behavior
+                    capabilities = CursorCapabilities(
+                        canIncrement = true,
+                        canDecrement = true,
+                        canIncrementFast = true,
+                        canDecrementFast = true
+                    ),
+                    currentValue = state.project.tempo,
+                    minValue = 20,
+                    maxValue = 999,
+                    smallStep = 1,
+                    largeStep = 10,
+                    emptyValue = -1
+                )
+            }
+            1 -> {
+                // TRANSPOSE row
+                if (state.cursorColumn == 0) {
+                    return CursorContextFactory.readOnly()
+                }
+                // Transpose value (00-FF)
+                return CursorContextFactory.hexByte(
+                    currentValue = state.project.transpose,
+                    min = 0,
+                    max = 255
+                )
+            }
+            2 -> {
+                // NAME row - per-character editing
+                if (state.cursorColumn == 0) {
+                    return CursorContextFactory.readOnly()
+                }
+                // Get the character index (column 1 = char 0, column 2 = char 1, etc.)
+                val charIndex = state.cursorColumn - 1
+                if (charIndex >= 12) {
+                    return CursorContextFactory.none()
+                }
+
+                // Get current character (or space if beyond name length)
+                val currentChar = if (charIndex < state.project.name.length) {
+                    state.project.name[charIndex]
+                } else {
+                    ' '  // Empty slot
+                }
+
+                // Use CHARACTER type for text editing
+                // Cycles through: A-Z, 0-9, underscore, dash, space
+                return CursorContextFactory.character(currentChar)
+            }
+            3 -> {
+                // PROJECT row (LOAD/SAVE/NEW) - not value editing, read-only for now
+                return CursorContextFactory.readOnly()
+            }
+            4 -> {
+                // EXPORT row (WAV MIX) - actionable button
+                if (state.cursorColumn == 0) {
+                    return CursorContextFactory.readOnly()
+                }
+                // WAV MIX button - can be activated with A button
+                return CursorContextFactory.readOnly()  // Action handled in MainActivity
+            }
+            else -> return CursorContextFactory.none()
+        }
+    }
+
+    /**
+     * Handle input action for project screen.
+     */
+    fun handleInput(
+        state: ProjectState,
+        action: com.example.pockettracker.core.logic.InputAction
+    ): InputResult {
+        when (state.cursorRow) {
+            0 -> {
+                // TEMPO row
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        state.project.tempo = action.value.coerceIn(20, 999)
+                    }
+                    else -> { /* Other actions not applicable */ }
+                }
+            }
+            1 -> {
+                // TRANSPOSE row
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        state.project.transpose = action.value.coerceIn(0, 255)
+                    }
+                    else -> { /* Other actions not applicable */ }
+                }
+            }
+            2 -> {
+                // NAME row - per-character editing
+                val charIndex = state.cursorColumn - 1
+                if (charIndex < 0 || charIndex >= 12) return InputResult(modified = false)
+
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        // Set character at position
+                        val char = action.value.toChar()
+                        val sb = StringBuilder(state.project.name.padEnd(12, ' '))
+                        sb.setCharAt(charIndex, char)
+                        state.project.name = sb.toString().trimEnd()  // Remove trailing spaces
+                    }
+                    is com.example.pockettracker.core.logic.InputAction.DELETE -> {
+                        // Delete character (replace with space)
+                        if (charIndex < state.project.name.length) {
+                            val sb = StringBuilder(state.project.name.padEnd(12, ' '))
+                            sb.setCharAt(charIndex, ' ')
+                            state.project.name = sb.toString().trimEnd()
+                        }
+                    }
+                    else -> { /* Other actions not applicable */ }
+                }
+            }
+            3 -> {
+                // PROJECT row (LOAD/SAVE/NEW) - handled elsewhere
+            }
+        }
+
+        return InputResult(
+            modified = action !is com.example.pockettracker.core.logic.InputAction.NONE
+        )
+    }
+
+    data class InputResult(
+        val modified: Boolean
+    )
 }
 
 /**
@@ -423,5 +639,7 @@ data class ProjectState(
     val cursorRow: Int = 0,
     val cursorColumn: Int = 1,  // Start on value, not name
     val statusMessage: String = "",
-    val isSuccess: Boolean = true
+    val isSuccess: Boolean = true,
+    val isRendering: Boolean = false,
+    val renderProgress: Float = 0f
 )

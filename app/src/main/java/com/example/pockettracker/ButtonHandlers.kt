@@ -48,7 +48,44 @@ data class ButtonHandlers(
     val onSelect: () -> Unit,       // Called when SELECT is pressed
     val onStart: () -> Unit,        // Called when START is pressed
     val onL: () -> Unit,            // Called when L shoulder is pressed
-    val onR: () -> Unit             // Called when R shoulder is pressed
+    val onR: () -> Unit,            // Called when R shoulder is pressed
+
+    // A+direction combinations for value editing (M8-style)
+    val onAUp: () -> Unit,          // A+UP: Small increment
+    val onADown: () -> Unit,        // A+DOWN: Small decrement
+    val onALeft: () -> Unit,        // A+LEFT: Large decrement (one octave/0x10)
+    val onARight: () -> Unit,       // A+RIGHT: Large increment (one octave/0x10)
+
+    // A+B combination for delete
+    val onAB: () -> Unit,           // A+B: Delete/clear value at cursor
+
+    // B+direction combinations for item cycling (chain/phrase/instrument)
+    val onBLeft: () -> Unit,        // B+LEFT: Previous chain/phrase/instrument
+    val onBRight: () -> Unit,       // B+RIGHT: Next chain/phrase/instrument
+
+    // R+direction combinations for screen navigation
+    val onRUp: () -> Unit,          // R+UP: Navigate screen up
+    val onRDown: () -> Unit,        // R+DOWN: Navigate screen down
+    val onRLeft: () -> Unit,        // R+LEFT: Navigate screen left
+    val onRRight: () -> Unit,       // R+RIGHT: Navigate screen right
+
+    // L+direction combinations (reserved for future use)
+    val onLLeft: () -> Unit,        // L+LEFT: Reserved
+    val onLRight: () -> Unit,       // L+RIGHT: Reserved
+    val onLUp: () -> Unit,          // L+UP: Reserved
+    val onLDown: () -> Unit,        // L+DOWN: Reserved
+
+    // L+button combinations for copy/paste
+    val onLA: () -> Unit,           // L+A: Cut (in selection) / Paste (outside selection)
+    val onLB: () -> Unit,           // L+B: Enter/cycle selection mode
+
+    // SELECT+button combinations for file operations
+    val onSelectA: () -> Unit,      // SELECT+A: Rename file/folder
+    val onSelectB: () -> Unit,      // SELECT+B: Delete file/folder
+    val onSelectR: () -> Unit,      // SELECT+R: Create new folder
+
+    // L+R combination for exiting selection mode
+    val onLR: () -> Unit            // L+R: Exit selection mode (fixes L+A cut combo)
 )
 
 /**
@@ -85,12 +122,15 @@ enum class ButtonAction {
 }
 
 /**
- * InputMapper - Core input translation system
+ * InputMapper - Core input translation system with modifier support
  *
  * This class:
  * 1. Takes raw input from keyboard/gamepad
  * 2. Maps it to VirtualButton events
- * 3. Calls the appropriate ButtonHandlers callback
+ * 3. Tracks modifier states (L/R buttons held)
+ * 4. Detects button combinations (L+A, R+arrows, etc.)
+ * 5. Supports double-tap detection (A,A)
+ * 6. Calls the appropriate ButtonHandlers callback
  *
  * @param buttonHandlers - The ButtonHandlers instance that defines what each button does
  * @param logInput - If true, logs all button presses to Logcat (useful for debugging)
@@ -99,6 +139,27 @@ class InputMapper(
     private val buttonHandlers: ButtonHandlers,
     private val logInput: Boolean = false  // Set to true to see input in Logcat
 ) {
+    // =========================================================================
+    // STATE TRACKING
+    // =========================================================================
+
+    // Track which modifier buttons are currently held down
+    private var isLPressed = false
+    private var isRPressed = false
+    private var isAPressed = false  // Track A button for A+direction combos
+    private var isBPressed = false  // Track B button to prevent B+direction old behavior
+    private var isSelectPressed = false  // Track SELECT button for SELECT+button combos
+
+    // Track which buttons are currently held (for combinations)
+    private val heldButtons = mutableSetOf<VirtualButton>()
+
+    // Track which physical keys are currently pressed (to ignore key repeat)
+    // Store native key codes (Int) for proper equality checking
+    private val pressedKeys = mutableSetOf<Int>()
+
+    // Double-tap detection
+    private var lastAPress: Long = 0
+    private val doubleTapWindow = 300L  // 300ms window for double-tap
 
     /**
      * Keyboard to VirtualButton mapping
@@ -128,8 +189,56 @@ class InputMapper(
 
         // System buttons (easily accessible with left hand)
         Key.ShiftLeft to VirtualButton.SELECT,  // Select = mode switching
-        Key.Spacebar to VirtualButton.START     // Start = play/pause
+        Key.Spacebar to VirtualButton.START,    // Start = play/pause
+
+        // Arrow keys (alternative to WASD)
+        Key.DirectionUp to VirtualButton.DPAD_UP,
+        Key.DirectionLeft to VirtualButton.DPAD_LEFT,
+        Key.DirectionDown to VirtualButton.DPAD_DOWN,
+        Key.DirectionRight to VirtualButton.DPAD_RIGHT,
+
+        // Alternative confirm/cancel keys
+        Key.Enter to VirtualButton.A,
+        Key.Escape to VirtualButton.B
     )
+
+    // Mapping for native Android key codes (for gamepad support on handhelds)
+    // These are the actual hardware button codes sent by gaming handhelds
+    private val nativeGamepadMapping = mapOf(
+        // Android gamepad D-pad (KEYCODE_DPAD_*)
+        19 to VirtualButton.DPAD_UP,        // KEYCODE_DPAD_UP
+        20 to VirtualButton.DPAD_DOWN,      // KEYCODE_DPAD_DOWN
+        21 to VirtualButton.DPAD_LEFT,      // KEYCODE_DPAD_LEFT
+        22 to VirtualButton.DPAD_RIGHT,     // KEYCODE_DPAD_RIGHT
+
+        // Android gamepad face buttons (KEYCODE_BUTTON_*)
+        96 to VirtualButton.A,              // KEYCODE_BUTTON_A
+        97 to VirtualButton.B,              // KEYCODE_BUTTON_B
+        99 to VirtualButton.A,              // KEYCODE_BUTTON_X (map to A)
+        100 to VirtualButton.B,             // KEYCODE_BUTTON_Y (map to B)
+
+        // Android gamepad shoulder buttons
+        102 to VirtualButton.L_SHIFT,       // KEYCODE_BUTTON_L1
+        103 to VirtualButton.R_SHIFT,       // KEYCODE_BUTTON_R1
+        104 to VirtualButton.L_SHIFT,       // KEYCODE_BUTTON_L2 (also L)
+        105 to VirtualButton.R_SHIFT,       // KEYCODE_BUTTON_R2 (also R)
+
+        // Android gamepad system buttons
+        108 to VirtualButton.START,         // KEYCODE_BUTTON_START
+        109 to VirtualButton.SELECT,        // KEYCODE_BUTTON_SELECT
+
+        // Alternative mappings for some handhelds
+        82 to VirtualButton.START,          // KEYCODE_MENU (used as START on some devices)
+        4 to VirtualButton.B                // KEYCODE_BACK (back button as B)
+    )
+
+    /**
+     * Get current modifier state
+     */
+    fun isLHeld() = isLPressed
+    fun isRHeld() = isRPressed
+    fun isAHeld() = isAPressed
+    fun isBothLRHeld() = isLPressed && isRPressed
 
     /**
      * Handles a keyboard event from Compose
@@ -141,30 +250,54 @@ class InputMapper(
      * @return Boolean - true if we handled this key, false if we ignored it
      */
     fun handleKeyEvent(keyEvent: androidx.compose.ui.input.key.KeyEvent): Boolean {
-        // Determine if this is a key press or release
-        val action = when (keyEvent.type) {
-            KeyEventType.KeyDown -> ButtonAction.PRESSED
-            KeyEventType.KeyUp -> ButtonAction.RELEASED
-            else -> return false  // Unknown event type, ignore
-        }
-
-        // Look up the pressed key in our mapping
+        // Try keyboard mapping first (for PC), then native gamepad codes (for handhelds)
         val virtualButton = keyboardMapping[keyEvent.key]
+            ?: nativeGamepadMapping[keyEvent.nativeKeyEvent.keyCode]
+            ?: return false  // Unknown key, ignore
 
-        // If this key is mapped to a button...
-        return if (virtualButton != null) {
-            // Optional logging for debugging
-            if (logInput) {
-                Log.d(TAG, "Key ${keyEvent.key} → Button ${virtualButton.name} ${action.name}")
+        // Determine if this is a key press or release
+        when (keyEvent.type) {
+            KeyEventType.KeyDown -> {
+                // IMPORTANT: Ignore key repeat!
+                // When you hold a key, OS sends repeated KeyDown events
+                // We only want to handle the FIRST press
+                // Use native keyCode (Int) for proper equality checking
+                val nativeKeyCode = keyEvent.nativeKeyEvent.keyCode
+                if (pressedKeys.contains(nativeKeyCode)) {
+                    // This is a key repeat - ignore it
+                    return true
+                }
+
+                // Mark this key as pressed
+                pressedKeys.add(nativeKeyCode)
+
+                // Optional logging for debugging
+                if (logInput) {
+                    Log.d(TAG, "Key ${keyEvent.key} DOWN (native=$nativeKeyCode) → Button ${virtualButton.name} PRESSED")
+                }
+
+                // Trigger the button action
+                handleButtonAction(virtualButton, ButtonAction.PRESSED)
+                return true
             }
 
-            // Trigger the button action
-            handleButtonAction(virtualButton, action)
+            KeyEventType.KeyUp -> {
+                val nativeKeyCode = keyEvent.nativeKeyEvent.keyCode
 
-            true  // Return true = "we handled this key"
-        } else {
-            // This key isn't mapped, let the system handle it
-            false
+                // Remove key from pressed set
+                pressedKeys.remove(nativeKeyCode)
+
+                // Optional logging for debugging
+                if (logInput) {
+                    Log.d(TAG, "Key ${keyEvent.key} UP → Button ${virtualButton.name} RELEASED")
+                }
+
+                // Trigger the button action
+                handleButtonAction(virtualButton, ButtonAction.RELEASED)
+                return true
+            }
+
+            else -> return false  // Unknown event type, ignore
         }
     }
 
@@ -172,45 +305,328 @@ class InputMapper(
      * Routes a virtual button action to the appropriate handler
      *
      * This is the bridge between input events and your tracker logic.
-     * Currently only responds to PRESSED events (not RELEASED).
+     * Now supports:
+     * - Modifier tracking (L/R buttons)
+     * - Button combinations (L+A, R+arrows, etc.)
+     * - Double-tap detection (A,A)
      *
      * @param button - Which virtual button was triggered
      * @param action - Was it pressed or released
      */
     private fun handleButtonAction(button: VirtualButton, action: ButtonAction) {
-        // Only respond to button presses for now
-        // Later: We can add hold/release behaviors here
+        // Update button state tracking
         if (action == ButtonAction.PRESSED) {
-            // Call the appropriate handler function
-            // Each when branch calls the corresponding callback from ButtonHandlers
+            heldButtons.add(button)
+
+            // Update modifier states
+            if (button == VirtualButton.L_SHIFT) isLPressed = true
+            if (button == VirtualButton.R_SHIFT) isRPressed = true
+            if (button == VirtualButton.A) isAPressed = true
+            if (button == VirtualButton.B) isBPressed = true
+            if (button == VirtualButton.SELECT) isSelectPressed = true
+
+        } else if (action == ButtonAction.RELEASED) {
+            heldButtons.remove(button)
+
+            // Update modifier states
+            if (button == VirtualButton.L_SHIFT) isLPressed = false
+            if (button == VirtualButton.R_SHIFT) isRPressed = false
+            if (button == VirtualButton.A) isAPressed = false
+            if (button == VirtualButton.B) isBPressed = false
+            if (button == VirtualButton.SELECT) isSelectPressed = false
+        }
+
+        // Only handle button presses (not releases) for now
+        if (action != ButtonAction.PRESSED) return
+
+        // Debug: Log modifier states when any button is pressed
+        if (logInput) {
+            Log.d(TAG, "handleButtonAction: button=$button, isA=$isAPressed, isB=$isBPressed, isL=$isLPressed, isR=$isRPressed, isSEL=$isSelectPressed")
+        }
+
+        // =====================================================================
+        // MODIFIER COMBINATION DETECTION
+        // =====================================================================
+
+        // Check for combinations - order matters!
+        // More specific combinations should be checked first
+
+        // A + direction combinations (M8-style value editing)
+        // When A is held, directions change values instead of moving cursor
+        if (isAPressed && !isLPressed && !isRPressed) {
+            if (logInput) Log.d(TAG, "A is held, checking for combos with button=$button")
+            when (button) {
+                VirtualButton.B -> {
+                    if (logInput) Log.d(TAG, "A+B (delete)")
+                    buttonHandlers.onAB()
+                    return
+                }
+                VirtualButton.DPAD_UP -> {
+                    if (logInput) Log.d(TAG, "A+UP (increment by small step)")
+                    buttonHandlers.onAUp()
+                    return
+                }
+                VirtualButton.DPAD_DOWN -> {
+                    if (logInput) Log.d(TAG, "A+DOWN (decrement by small step)")
+                    buttonHandlers.onADown()
+                    return
+                }
+                VirtualButton.DPAD_RIGHT -> {
+                    if (logInput) Log.d(TAG, "A+RIGHT (increment by large step)")
+                    buttonHandlers.onARight()
+                    return
+                }
+                VirtualButton.DPAD_LEFT -> {
+                    if (logInput) Log.d(TAG, "A+LEFT (decrement by large step)")
+                    buttonHandlers.onALeft()
+                    return
+                }
+                else -> { }
+            }
+        }
+
+        // B + direction combinations (item cycling: chain/phrase/instrument)
+        // When B is held, LEFT/RIGHT cycle through items instead of normal navigation
+        if (isBPressed && !isLPressed && !isRPressed && !isAPressed) {
+            when (button) {
+                VirtualButton.DPAD_LEFT -> {
+                    if (logInput) Log.d(TAG, "B+LEFT (previous item)")
+                    buttonHandlers.onBLeft()
+                    return
+                }
+                VirtualButton.DPAD_RIGHT -> {
+                    if (logInput) Log.d(TAG, "B+RIGHT (next item)")
+                    buttonHandlers.onBRight()
+                    return
+                }
+                else -> { }
+            }
+        }
+
+        // L + R combination (exit selection mode)
+        // Check when R is pressed while L is held, or L is pressed while R is held
+        if (isLPressed && isRPressed) {
+            // Check for more specific L+R+button combos first
+            when (button) {
+                VirtualButton.SELECT -> {
+                    if (logInput) Log.d(TAG, "L+R+SELECT (quit to project)")
+                    // TODO: Add handler for L+R+SELECT
+                    return
+                }
+                VirtualButton.A -> {
+                    if (logInput) Log.d(TAG, "L+R+A (save snapshot)")
+                    // TODO: Add handler for L+R+A
+                    return
+                }
+                VirtualButton.B -> {
+                    if (logInput) Log.d(TAG, "L+R+B (load snapshot)")
+                    // TODO: Add handler for L+R+B
+                    return
+                }
+                // L+R alone (when second button of the pair is pressed)
+                VirtualButton.L_SHIFT, VirtualButton.R_SHIFT -> {
+                    if (logInput) Log.d(TAG, "L+R (exit selection mode)")
+                    buttonHandlers.onLR()
+                    return
+                }
+                else -> { }
+            }
+        }
+
+        // L + button combinations
+        if (isLPressed && !isRPressed) {
+            if (logInput) Log.d(TAG, "L is held, checking L+button combo for button=$button")
+            when (button) {
+                VirtualButton.A -> {
+                    if (logInput) Log.d(TAG, "L+A (cut/paste)")
+                    buttonHandlers.onLA()
+                    return
+                }
+                VirtualButton.B -> {
+                    if (logInput) Log.d(TAG, "L+B (selection mode)")
+                    buttonHandlers.onLB()
+                    return
+                }
+                VirtualButton.DPAD_UP -> {
+                    if (logInput) Log.d(TAG, "L+UP (sort mode up / jump to prev) → calling onLUp()")
+                    buttonHandlers.onLUp()
+                    return
+                }
+                VirtualButton.DPAD_DOWN -> {
+                    if (logInput) Log.d(TAG, "L+DOWN (sort mode down / jump to next) → calling onLDown()")
+                    buttonHandlers.onLDown()
+                    return
+                }
+                VirtualButton.DPAD_LEFT -> {
+                    if (logInput) Log.d(TAG, "L+LEFT (prev chain/phrase) → calling onLLeft()")
+                    buttonHandlers.onLLeft()
+                    return
+                }
+                VirtualButton.DPAD_RIGHT -> {
+                    if (logInput) Log.d(TAG, "L+RIGHT (next chain/phrase) → calling onLRight()")
+                    buttonHandlers.onLRight()
+                    return
+                }
+                VirtualButton.START -> {
+                    if (logInput) Log.d(TAG, "L+START (play all from beginning)")
+                    // TODO: Add handler for L+START
+                    return
+                }
+                else -> {
+                    if (logInput) Log.d(TAG, "L held but button=$button not a combo target")
+                }
+            }
+        }
+
+        // SELECT + button combinations (file operations)
+        if (isSelectPressed && !isLPressed && !isRPressed) {
+            when (button) {
+                VirtualButton.A -> {
+                    if (logInput) Log.d(TAG, "SELECT+A (rename)")
+                    buttonHandlers.onSelectA()
+                    return
+                }
+                VirtualButton.B -> {
+                    if (logInput) Log.d(TAG, "SELECT+B (delete)")
+                    buttonHandlers.onSelectB()
+                    return
+                }
+                VirtualButton.R_SHIFT -> {
+                    if (logInput) Log.d(TAG, "SELECT+R (create folder)")
+                    buttonHandlers.onSelectR()
+                    return
+                }
+                else -> { }
+            }
+        }
+
+        // R + button combinations
+        if (isRPressed && !isLPressed) {
+            when (button) {
+                VirtualButton.DPAD_UP -> {
+                    if (logInput) Log.d(TAG, "R+UP (navigate screen up)")
+                    buttonHandlers.onRUp()
+                    return
+                }
+                VirtualButton.DPAD_DOWN -> {
+                    if (logInput) Log.d(TAG, "R+DOWN (navigate screen down)")
+                    buttonHandlers.onRDown()
+                    return
+                }
+                VirtualButton.DPAD_LEFT -> {
+                    if (logInput) Log.d(TAG, "R+LEFT (navigate screen left)")
+                    buttonHandlers.onRLeft()
+                    return
+                }
+                VirtualButton.DPAD_RIGHT -> {
+                    if (logInput) Log.d(TAG, "R+RIGHT (navigate screen right)")
+                    buttonHandlers.onRRight()
+                    return
+                }
+                VirtualButton.A -> {
+                    if (logInput) Log.d(TAG, "R+A (clone)")
+                    // TODO: Add handler for R+A (clone)
+                    return
+                }
+                VirtualButton.B -> {
+                    if (logInput) Log.d(TAG, "R+B (reset to default)")
+                    // TODO: Add handler for R+B
+                    return
+                }
+                VirtualButton.START -> {
+                    if (logInput) Log.d(TAG, "R+START (play from cursor)")
+                    // TODO: Add handler for R+START
+                    return
+                }
+                else -> { }
+            }
+        }
+
+        // =====================================================================
+        // DOUBLE-TAP DETECTION
+        // =====================================================================
+
+        if (button == VirtualButton.A && !isLPressed && !isRPressed) {
+            val now = System.currentTimeMillis()
+            if (now - lastAPress < doubleTapWindow) {
+                // Double-tap detected!
+                if (logInput) Log.d(TAG, "A,A (insert next unused)")
+                lastAPress = 0  // Reset to prevent triple-tap
+                // TODO: Add handler for A,A (insert next unused)
+                return
+            }
+            lastAPress = now
+            // Single A press - execute action
+            if (logInput) Log.d(TAG, "Single A press")
+            buttonHandlers.onButtonA()
+            return
+        }
+
+        // Handle B button alone (not as modifier)
+        if (button == VirtualButton.B && !isLPressed && !isRPressed && !isAPressed) {
+            if (logInput) Log.d(TAG, "Single B press")
+            buttonHandlers.onButtonB()
+            return
+        }
+
+        // Handle L button alone (not as modifier)
+        if (button == VirtualButton.L_SHIFT && !isRPressed && !isAPressed && !isBPressed) {
+            if (logInput) Log.d(TAG, "Single L press")
+            buttonHandlers.onL()
+            return
+        }
+
+        // Handle R button alone (not as modifier)
+        if (button == VirtualButton.R_SHIFT && !isLPressed && !isAPressed && !isBPressed) {
+            if (logInput) Log.d(TAG, "Single R press")
+            buttonHandlers.onR()
+            return
+        }
+
+        // =====================================================================
+        // BASIC BUTTON PRESSES (no modifiers)
+        // =====================================================================
+
+        // Handle SELECT button alone (before basic buttons check since isSelectPressed is already true)
+        // This fixes the bug where SELECT handler was never called because isSelectPressed=true
+        // skipped the basic buttons block
+        if (button == VirtualButton.SELECT && !isLPressed && !isRPressed && !isAPressed && !isBPressed) {
+            if (logInput) Log.d(TAG, "Single SELECT press")
+            buttonHandlers.onSelect()
+            return
+        }
+
+        // Handle START button (check explicitly to ensure it's called)
+        if (button == VirtualButton.START && !isLPressed && !isRPressed && !isAPressed && !isBPressed && !isSelectPressed) {
+            if (logInput) Log.d(TAG, "Single START press → calling onStart()")
+            buttonHandlers.onStart()
+            return
+        }
+
+        // Only call basic handlers if no modifiers are pressed
+        if (!isLPressed && !isRPressed && !isAPressed && !isBPressed && !isSelectPressed) {
             when (button) {
                 VirtualButton.DPAD_UP -> buttonHandlers.onDPadUp()
                 VirtualButton.DPAD_DOWN -> buttonHandlers.onDPadDown()
                 VirtualButton.DPAD_LEFT -> buttonHandlers.onDPadLeft()
                 VirtualButton.DPAD_RIGHT -> buttonHandlers.onDPadRight()
-                VirtualButton.A -> buttonHandlers.onButtonA()
-                VirtualButton.B -> buttonHandlers.onButtonB()
-                VirtualButton.L_SHIFT -> buttonHandlers.onL()
-                VirtualButton.R_SHIFT -> buttonHandlers.onR()
-                VirtualButton.SELECT -> buttonHandlers.onSelect()
-                VirtualButton.START -> buttonHandlers.onStart()
+                // SELECT and START now handled above with explicit logging
+                else -> { } // A, B, L, R are handled above
             }
         }
-        // If action == RELEASED, we currently do nothing
-        // But the infrastructure is here for future hold/release features
     }
 }
 
 /**
- * Modifier extension to add input handling to any Composable
- *
- * This is how you attach the input system to your UI.
- *
- * Usage:
- * Box(modifier = Modifier.inputHandler(inputMapper).focusable()) {
- *     // Your tracker UI here
- * }
- *
+ * Modifier extension to add input handling to any Composble
+ *  *
+ *  * This is how you attach the input system to your UI.
+ *  *
+ *  * Usage:
+ *  * Box(modifier = Modifier.inputHandler(inputMapper).focusable()) {
+ *  *     // Your tracker UI here
+ *  * }
+ *  *a
  * IMPORTANT: Must be combined with .focusable() modifier or keyboard won't work!
  *
  * @param inputMapper - The InputMapper instance that handles events

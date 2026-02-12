@@ -18,6 +18,13 @@ class OscilloscopeModule(
     override val height: Int = 70
 ) : TrackerModule {
 
+    companion object {
+        // OSCILLOSCOPE GAIN: Adjust this to make waveform taller/shorter
+        // 1.0 = normal, 2.0 = double height, 4.0 = quad height, etc.
+        // Higher values make quiet audio more visible but may clip loud audio
+        const val WAVEFORM_GAIN = 3.0f
+    }
+
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         // Cast state to waveform data
         val waveformData = state as? FloatArray ?: FloatArray(width)
@@ -42,9 +49,9 @@ class OscilloscopeModule(
         val maxAmplitude = (height / 2) - 8  // 8px margin top/bottom
 
         for (i in 0 until width - 1) {
-            // Get two consecutive samples
-            val sample1 = waveformData[i % waveformData.size].coerceIn(-1f, 1f)
-            val sample2 = waveformData[(i + 1) % waveformData.size].coerceIn(-1f, 1f)
+            // Get two consecutive samples and apply gain
+            val sample1 = (waveformData[i % waveformData.size] * WAVEFORM_GAIN).coerceIn(-1f, 1f)
+            val sample2 = (waveformData[(i + 1) % waveformData.size] * WAVEFORM_GAIN).coerceIn(-1f, 1f)
 
             // Convert to screen coordinates
             val y1 = centerY + (sample1 * maxAmplitude).toInt()

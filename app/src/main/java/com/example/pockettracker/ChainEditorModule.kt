@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.example.pockettracker.core.data.Chain
 
 /**
  * CHAIN EDITOR MODULE - IMPROVED VERSION
@@ -126,10 +127,8 @@ class ChainEditorModule : TrackerModule {
             // Get phrase reference at this slot
             val phraseRef = chainState.chain.phraseRefs[index]
 
-            // Get transpose value at this slot (IntArray not in Chain yet!)
-            // For now we'll use 0x80 (no transpose) as default
-            // You'll need to add transposeValues: IntArray to Chain data class
-            val transposeValue = chainState.chain.transposeValues[index]  // TODO: Add to Chain data structure
+            // Get transpose value for this slot (00-FF, default 00)
+            val transposeValue = chainState.chain.transposeValues[index]
 
             drawChainRow(
                 x = x,
@@ -168,10 +167,19 @@ class ChainEditorModule : TrackerModule {
         // ===================================
         val dataRowY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (index * ROW_HEIGHT)
 
+        // Check if any cell in this row is selected
+        val isRowSelected = state.selectionMode && (1..2).any { col -> state.isCellSelected(index, col) }
+
         // ===================================
         // STEP 2: Row background color
         // ===================================
         val bgColor = when {
+            // Green background when playing this row
+            state.isPlaying && index == state.playbackRow -> Color(0xFF004400)
+
+            // Selection green
+            isRowSelected -> Color(0xFF1a3a1a)
+
             // Cursor on this row
             index == state.cursorRow -> Color(0xFF333333)
 
@@ -211,7 +219,7 @@ class ChainEditorModule : TrackerModule {
         // ===================================
         // COLUMN 1: PHRASE REFERENCE (PH)
         // ===================================
-        val isEmpty = phraseRef == 0xFF
+        val isEmpty = phraseRef == -1
 
         val phraseText = if (isEmpty) {
             "--"
@@ -221,6 +229,7 @@ class ChainEditorModule : TrackerModule {
 
         val phraseColor = when {
             index == state.cursorRow && state.cursorColumn == 1 -> Color.Yellow
+            state.selectionMode && state.isCellSelected(index, 1) -> Color(0xFF00DD00)
             isEmpty -> Color(0xFF444444)
             else -> Color.White
         }
@@ -247,6 +256,7 @@ class ChainEditorModule : TrackerModule {
 
         val transposeColor = when {
             index == state.cursorRow && state.cursorColumn == 2 -> Color.Yellow
+            state.selectionMode && state.isCellSelected(index, 2) -> Color(0xFF00DD00)
             isEmpty -> Color(0xFF444444)
             transposeValue == 0x80 -> Color(0xFF888888)  // Dimmed when no transpose
             else -> Color(0xFFaaaaaa)  // Normal gray when transposed
@@ -262,6 +272,96 @@ class ChainEditorModule : TrackerModule {
             fontScale = FONT_SCALE
         )
     }
+
+    /**
+     * Get cursor context for current cursor position
+     *
+     * This tells the generic input system what kind of value we're on
+     * and what actions are available.
+     */
+    fun getCursorContext(state: ChainEditorState): CursorContext {
+        return when (state.cursorColumn) {
+            // Column 0: Step number (read-only, but can insert phrase)
+            0 -> CursorContextFactory.readOnly()
+
+            // Column 1: Phrase reference (00-FE, FF = empty)
+            1 -> {
+                val phraseRef = state.chain.phraseRefs[state.cursorRow]
+                CursorContextFactory.phraseRef(phraseRef, canCreate = true)
+            }
+
+            // Column 2: Transpose (00-FF, 80 = no transpose)
+            2 -> {
+                val phraseRef = state.chain.phraseRefs[state.cursorRow]
+                val isEmpty = phraseRef == -1
+                val transposeValue = state.chain.transposeValues[state.cursorRow]
+                CursorContextFactory.transpose(transposeValue, isEmpty)
+            }
+
+            // Invalid column
+            else -> CursorContextFactory.none()
+        }
+    }
+
+    /**
+     * Handle input action for chain editor.
+     */
+    fun handleInput(
+        state: ChainEditorState,
+        action: com.example.pockettracker.core.logic.InputAction
+    ): InputResult {
+        val chain = state.chain
+        var lastEditedPhrase: Int? = null
+        var lastEditedTranspose: Int? = null
+
+        when (action) {
+            is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                when (state.cursorColumn) {
+                    1 -> {
+                        // Phrase reference column
+                        chain.phraseRefs[state.cursorRow] = action.value
+                        lastEditedPhrase = action.value
+                    }
+                    2 -> {
+                        // Transpose column
+                        chain.transposeValues[state.cursorRow] = action.value
+                        lastEditedTranspose = action.value
+                    }
+                }
+            }
+            is com.example.pockettracker.core.logic.InputAction.DELETE -> {
+                when (state.cursorColumn) {
+                    1 -> {
+                        // Clear phrase reference
+                        chain.phraseRefs[state.cursorRow] = -1  // Empty
+                        chain.transposeValues[state.cursorRow] = 0x00  // Reset transpose to default
+                    }
+                }
+            }
+            is com.example.pockettracker.core.logic.InputAction.INSERT_DEFAULT -> {
+                if (state.cursorColumn == 1) {
+                    // Insert phrase 0 by default
+                    chain.phraseRefs[state.cursorRow] = 0
+                    chain.transposeValues[state.cursorRow] = 0x00  // Default transpose
+                    lastEditedPhrase = 0
+                    lastEditedTranspose = 0
+                }
+            }
+            else -> { /* NONE or unhandled - do nothing */ }
+        }
+
+        return InputResult(
+            modified = action !is com.example.pockettracker.core.logic.InputAction.NONE,
+            lastEditedPhrase = lastEditedPhrase,
+            lastEditedTranspose = lastEditedTranspose
+        )
+    }
+
+    data class InputResult(
+        val modified: Boolean,
+        val lastEditedPhrase: Int? = null,
+        val lastEditedTranspose: Int? = null
+    )
 }
 
 /**
@@ -270,9 +370,17 @@ class ChainEditorModule : TrackerModule {
  * @param chain The chain to display
  * @param cursorRow Which row (0-15)
  * @param cursorColumn Which column (0=step, 1=phrase, 2=transpose)
+ * @param playbackRow Which chain row is currently playing (0-15)
+ * @param isPlaying Whether playback is active
+ * @param selectionMode Whether selection mode is active
+ * @param isCellSelected Function to check if a cell is selected
  */
 data class ChainEditorState(
     val chain: Chain,
     val cursorRow: Int,
-    val cursorColumn: Int
+    val cursorColumn: Int,
+    val playbackRow: Int = 0,
+    val isPlaying: Boolean = false,
+    val selectionMode: Boolean = false,
+    val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }
 )

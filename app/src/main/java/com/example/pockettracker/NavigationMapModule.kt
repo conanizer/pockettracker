@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.example.pockettracker.core.data.ScreenType
 
 /**
  * SIMPLIFIED NAVIGATION MAP MODULE
@@ -71,6 +72,8 @@ class NavigationMapModule : TrackerModule {
             ScreenType.TABLE -> 4
             // Shared screens - use the column we came from
             ScreenType.PROJECT, ScreenType.MIXER, ScreenType.EFFECTS -> navState.sourceColumn
+            // Popup screens - use the column we came from
+            ScreenType.FILE_BROWSER -> navState.sourceColumn
         }
 
         // ===================================
@@ -225,6 +228,7 @@ class NavigationMapModule : TrackerModule {
             ScreenType.INST_POOL -> "PI"
             ScreenType.MIXER -> "V"
             ScreenType.EFFECTS -> "X"
+            ScreenType.FILE_BROWSER -> "FB"
         }
     }
 }

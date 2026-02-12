@@ -7,6 +7,9 @@ package com.example.pockettracker
 import android.content.Context
 import android.content.res.Configuration
 import android.view.InputDevice
+import android.view.KeyEvent
+import android.graphics.Point
+import android.view.WindowManager
 
 class DeviceAdapter(private val context: Context) {
 
@@ -38,27 +41,40 @@ class DeviceAdapter(private val context: Context) {
         val deviceIds = InputDevice.getDeviceIds()
         for (deviceId in deviceIds) {
             val device = InputDevice.getDevice(deviceId) ?: continue
+
             if (device.name == "Virtual") {
                 android.util.Log.d("DeviceAdapter", "Skipping: Virtual (emulator UI)")
                 continue
             }
+
             val sources = device.sources
-            val isKeyboard = (sources and InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD
-            if (isKeyboard) {
-                android.util.Log.d("DeviceAdapter", "Skipping: ${device.name} (keyboard)")
-                continue
-            }
+
+            // Check if device has ANY gamepad/joystick capability
             val hasGamepad = (sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD
             val hasJoystick = (sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
+
             if (hasGamepad || hasJoystick) {
-                android.util.Log.d("DeviceAdapter", "Found REAL gaming device: ${device.name}")
+                android.util.Log.d("DeviceAdapter", "Found gaming device: ${device.name}")
                 return true
             }
+
+            // If device looks like a keyboard BUT has "Xbox" or "Controller" in the name,
+            // treat it as a gamepad (this catches Xbox controllers that report as keyboards)
+            val isKeyboard = (sources and InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD
+            if (isKeyboard) {
+                val lowerName = device.name.lowercase()
+                if (lowerName.contains("xbox") ||
+                    lowerName.contains("controller") ||
+                    lowerName.contains("gamepad")) {
+                    android.util.Log.d("DeviceAdapter", "Treating as gamepad (keyboard-like): ${device.name}")
+                    return true
+                }
+            }
         }
+
         android.util.Log.d("DeviceAdapter", "No gaming controls found - virtual buttons needed")
         return false
     }
-
     private fun isLandscapeOrientation(): Boolean {
         val orientation = context.resources.configuration.orientation
         val isLandscape = orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -68,11 +84,23 @@ class DeviceAdapter(private val context: Context) {
 
     fun calculateLayout(): LayoutConfig {
         val hasButtons = hasPhysicalGameButtons()
-        val displayMetrics = context.resources.displayMetrics
-        val deviceWidth = displayMetrics.widthPixels
-        val deviceHeight = displayMetrics.heightPixels
 
-        android.util.Log.d("DeviceAdapter", "Device screen: ${deviceWidth}×${deviceHeight}")
+        // Get the real display size (not affected by system UI)
+        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val display = windowManager.defaultDisplay
+        val realSize = Point()
+        display.getRealSize(realSize)
+
+        val deviceWidth = realSize.x
+        val deviceHeight = realSize.y
+
+        // Alternative: Use DisplayMetrics with a different method
+        // val displayMetrics = DisplayMetrics()
+        // display.getRealMetrics(displayMetrics)
+        // val deviceWidth = displayMetrics.widthPixels
+        // val deviceHeight = displayMetrics.heightPixels
+
+        android.util.Log.d("DeviceAdapter", "Device PHYSICAL screen: ${deviceWidth}×${deviceHeight}")
 
         val needsVirtual = !hasButtons
         val isLandscape = if (needsVirtual) isLandscapeOrientation() else true
@@ -84,6 +112,7 @@ class DeviceAdapter(private val context: Context) {
             val finalScale = maxOf(1, scale)
 
             android.util.Log.d("DeviceAdapter", "Mode: FULL SCREEN")
+            android.util.Log.d("DeviceAdapter", "Scale factors: width=${scaleByWidth}, height=${scaleByHeight}")
 
             return LayoutConfig(
                 needsVirtualButtons = false,
@@ -97,6 +126,8 @@ class DeviceAdapter(private val context: Context) {
                 deviceHeight = deviceHeight
             )
         }
+
+        // Rest of the function remains the same...
 
         if (isLandscape) {
             return calculateLandscapeLayout(deviceWidth, deviceHeight)

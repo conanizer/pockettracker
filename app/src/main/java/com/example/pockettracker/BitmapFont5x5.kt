@@ -13,7 +13,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
  * Each character is 5px wide × 5px tall
  */
 
-private val FONT_5X5 = mapOf(
+internal val FONT_5X5 = mapOf(
     // NUMBERS 0-9
     '0' to byteArrayOf(0b11111, 0b10001, 0b10001, 0b10001, 0b11111),
     '1' to byteArrayOf(0b01100, 0b10100, 0b00100, 0b00100, 0b11111),
@@ -89,6 +89,16 @@ private val FONT_5X5 = mapOf(
     '.' to byteArrayOf(0b00000, 0b00000, 0b00000, 0b00000, 0b00100),
     ':' to byteArrayOf(0b00000, 0b00100, 0b00000, 0b00100, 0b00000),
     '/' to byteArrayOf(0b00001, 0b00010, 0b00100, 0b01000, 0b10000),
+    '+' to byteArrayOf(0b00100, 0b00100, 0b11111, 0b00100, 0b00100),
+    '↑' to byteArrayOf(0b00000, 0b00100, 0b01110, 0b11111, 0b00000),
+    '↓' to byteArrayOf(0b00000, 0b11111, 0b01110, 0b00100, 0b00000),
+    '←' to byteArrayOf(0b00010, 0b00110, 0b01110, 0b00110, 0b00010),
+    '→' to byteArrayOf(0b01000, 0b01100, 0b01110, 0b01100, 0b01000),
+    '<' to byteArrayOf(0b00010, 0b00100, 0b01000, 0b00100, 0b00010),
+    '>' to byteArrayOf(0b01000, 0b00100, 0b00010, 0b00100, 0b01000),
+    '=' to byteArrayOf(0b00000, 0b11111, 0b00000, 0b11111, 0b00000),
+    '[' to byteArrayOf(0b00110, 0b00100, 0b00100, 0b00100, 0b00110),
+    ']' to byteArrayOf(0b01100, 0b00100, 0b00100, 0b00100, 0b01100),
     ' ' to byteArrayOf(0b00000, 0b00000, 0b00000, 0b00000, 0b00000), // EMPTY
 
 )
@@ -103,7 +113,8 @@ fun DrawScope.drawBitmapChar(
     scale: Int,
     color: Color
 ) {
-    val charData = FONT_5X5[char.uppercaseChar()]
+    // Try the character as-is first, then fall back to uppercase for letters
+    val charData = FONT_5X5[char] ?: FONT_5X5[char.uppercaseChar()]
 
     if (charData == null) {
         // Missing character - draw outline square

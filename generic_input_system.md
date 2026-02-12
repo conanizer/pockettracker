@@ -6,331 +6,98 @@ Instead of checking which screen we're on, we check **what type of data the curs
 
 ---
 
-## Step 1: Define Cursor Context Types
+## Implementation Status
 
-Create a new file `CursorContext.kt`:
+✅ **Phase 1 (COMPLETE)**: Core system implemented
+- CursorContext.kt - Data structures for cursor context
+- InputHandler.kt - Generic input handling logic
+- CursorContextFactory - Helper functions for common contexts
+- Value wrapping for HEX_BYTE, PHRASE_REF, CHAIN_REF, VOLUME, SEMITONE_OFFSET
 
-```kotlin
-package com.example.pockettracker
+✅ **Phase 2 (COMPLETE)**: Chain Editor migration
+- ChainEditorModule.getCursorContext() - Returns context for cursor position
+- MainActivity - Chain screen uses GenericInputHandler
+- A+direction buttons work generically for Chain screen
 
-/**
- * CURSOR CONTEXT SYSTEM
- * 
- * Defines what type of data the cursor is currently on,
- * which determines how buttons behave.
- */
+✅ **Phase 3 (COMPLETE)**: Remaining main screens migrated
+- ✅ Phrase Editor - Note/volume/instrument editing with A+direction
+- ✅ Song Editor - Chain references with A+direction and wrapping
+- ✅ Project Editor - Tempo/transpose/name editing with A+direction
+- ⏳ Instrument Editor (future)
+- ⏳ Table Editor (future)
 
-/**
- * What kind of value is the cursor on?
- */
-enum class CursorValueType {
-    // Numeric values that can be increased/decreased
-    HEX_BYTE,           // 00-FF (most common: phrases, chains, instruments)
-    HEX_NIBBLE,         // 0-F (single hex digit)
-    SEMITONE_OFFSET,    // Transpose values (centered at 80)
-    
-    // Musical values
-    NOTE,               // Musical note (C-4, D#5, etc.)
-    VOLUME,             // Volume (00-FF)
-    
-    // Reference types
-    PHRASE_REF,         // Reference to a phrase (can be empty --)
-    CHAIN_REF,          // Reference to a chain (can be empty --)
-    INSTRUMENT_REF,     // Reference to an instrument
-    
-    // Special
-    EMPTY,              // Empty cell (can insert)
-    READ_ONLY,          // Can't edit (like step numbers)
-    NONE                // No cursor / invalid position
-}
+✅ **Phase 4 (COMPLETE)**: Screen navigation system
+- R+direction for 5×5 screen grid navigation
+- L+LEFT/RIGHT for chain/phrase/instrument navigation
+- Cursor wrapping (row 0 ↔ row 15)
 
-/**
- * What actions are available at cursor position?
- */
-data class CursorCapabilities(
-    val canIncrement: Boolean = false,      // A+UP works
-    val canDecrement: Boolean = false,      // A+DOWN works
-    val canIncrementFast: Boolean = false,  // A+RIGHT works (±16)
-    val canDecrementFast: Boolean = false,  // A+LEFT works (±16)
-    val canDelete: Boolean = false,         // A+B works
-    val canInsert: Boolean = false,         // A on empty works
-    val canCreate: Boolean = false,         // A+A works (create new)
-    val isEmpty: Boolean = false            // Is current value empty?
-)
-
-/**
- * Complete cursor context - what is cursor on and what can we do?
- */
-data class CursorContext(
-    val valueType: CursorValueType,
-    val capabilities: CursorCapabilities,
-    val currentValue: Int = 0,              // Current numeric value
-    val minValue: Int = 0,                  // Minimum allowed value
-    val maxValue: Int = 255,                // Maximum allowed value
-    val smallStep: Int = 1,                 // Step for A+UP/DOWN
-    val largeStep: Int = 16,                // Step for A+LEFT/RIGHT
-    val emptyValue: Int = 0xFF              // Value that means "empty"
-)
-```
+✅ **Phase 5 (COMPLETE)**: Hardware support
+- Physical gamepad support for Android handhelds
+- Native KEYCODE mapping (DPAD_*, BUTTON_*)
+- Dual keyboard/gamepad input working simultaneously
 
 ---
 
-## Step 2: Add Context Provider to Each Module
+## Architecture
 
-Each module (Phrase, Chain, Song) provides cursor context based on cursor position.
+### 1. Define Cursor Context Types
 
-### Example for ChainEditorModule:
+`CursorContext.kt` defines:
+
+**CursorValueType** - What kind of data:
+- HEX_BYTE - 00-FF numeric values
+- NOTE - Musical notes
+- SEMITONE_OFFSET - Transpose values
+- PHRASE_REF, CHAIN_REF - References to other data
+- READ_ONLY, EMPTY, NONE - Special states
+
+**CursorCapabilities** - What actions are available:
+- canIncrement / canDecrement - Basic A/B buttons
+- canIncrementFast / canDecrementFast - A+LEFT/RIGHT
+- canDelete - A+B or SELECT
+- canInsert - A on empty cell
+- canCreate - A+A to create new item
+
+**CursorContext** - Complete description:
+- valueType - What this is
+- capabilities - What you can do
+- currentValue, minValue, maxValue - Numeric bounds
+- smallStep, largeStep - Increment amounts
+- emptyValue - What "empty" means
+
+### 2. Each Module Provides Context
+
+Each screen module implements `getCursorContext(state)`:
 
 ```kotlin
-/**
- * Get cursor context for current cursor position
- * This tells the input system what actions are available
- */
 fun getCursorContext(state: ChainEditorState): CursorContext {
     return when (state.cursorColumn) {
-        // Column 0: Step number (read-only)
-        0 -> CursorContext(
-            valueType = CursorValueType.READ_ONLY,
-            capabilities = CursorCapabilities(
-                canInsert = true  // Can insert phrase on this row
-            )
-        )
-        
-        // Column 1: Phrase reference
-        1 -> {
-            val phraseRef = state.chain.phraseRefs[state.cursorRow]
-            val isEmpty = phraseRef == 0xFF
-            
-            CursorContext(
-                valueType = CursorValueType.PHRASE_REF,
-                capabilities = CursorCapabilities(
-                    canIncrement = !isEmpty,
-                    canDecrement = !isEmpty,
-                    canIncrementFast = !isEmpty,
-                    canDecrementFast = !isEmpty,
-                    canDelete = !isEmpty,
-                    canInsert = isEmpty,
-                    canCreate = true,  // A+A creates new phrase
-                    isEmpty = isEmpty
-                ),
-                currentValue = phraseRef,
-                minValue = 0,
-                maxValue = 254,  // 255 is reserved for "empty"
-                smallStep = 1,
-                largeStep = 16,
-                emptyValue = 0xFF
-            )
-        }
-        
-        // Column 2: Transpose
-        2 -> {
-            val phraseRef = state.chain.phraseRefs[state.cursorRow]
-            val isEmpty = phraseRef == 0xFF
-            val transposeValue = state.chain.transposeValues[state.cursorRow]
-            
-            CursorContext(
-                valueType = CursorValueType.SEMITONE_OFFSET,
-                capabilities = CursorCapabilities(
-                    canIncrement = !isEmpty,
-                    canDecrement = !isEmpty,
-                    canIncrementFast = !isEmpty,  // A+RIGHT = +12 (octave)
-                    canDecrementFast = !isEmpty,  // A+LEFT = -12 (octave)
-                    isEmpty = isEmpty
-                ),
-                currentValue = transposeValue,
-                minValue = 0,
-                maxValue = 255,
-                smallStep = 1,      // 1 semitone
-                largeStep = 12,     // 1 octave
-                emptyValue = 0xFF
-            )
-        }
-        
-        else -> CursorContext(
-            valueType = CursorValueType.NONE,
-            capabilities = CursorCapabilities()
-        )
+        0 -> CursorContextFactory.readOnly()
+        1 -> CursorContextFactory.phraseRef(phraseRef)
+        2 -> CursorContextFactory.transpose(transposeValue)
+        else -> CursorContextFactory.none()
     }
 }
 ```
 
----
+### 3. Generic Input Handler
 
-## Step 3: Generic Input Handler
-
-Create a new file `InputHandler.kt`:
+`GenericInputHandler` handles buttons based on context:
 
 ```kotlin
-package com.example.pockettracker
+val action = genericInputHandler.handleAButton(context)
 
-/**
- * GENERIC INPUT HANDLER
- * 
- * Handles button presses based on cursor context
- * instead of checking which screen we're on.
- */
-
-class InputHandler {
-    /**
-     * Handle A button press (EDIT in M8)
-     * 
-     * @param context What the cursor is on
-     * @param direction 0=normal press, 1=A+UP, -1=A+DOWN, 2=A+RIGHT, -2=A+LEFT
-     * @param doubleTap True if this is A+A double tap
-     * @return New value to set, or null if no change
-     */
-    fun handleAButton(
-        context: CursorContext,
-        direction: Int = 0,
-        doubleTap: Boolean = false
-    ): InputAction {
-        // A+A double tap - Create new item
-        if (doubleTap && context.capabilities.canCreate) {
-            return InputAction.CREATE_NEW
-        }
-        
-        // A on empty - Insert default value
-        if (direction == 0 && context.capabilities.isEmpty && context.capabilities.canInsert) {
-            return InputAction.INSERT_DEFAULT
-        }
-        
-        // A+UP - Increment by small step
-        if (direction == 1 && context.capabilities.canIncrement) {
-            val newValue = (context.currentValue + context.smallStep)
-                .coerceIn(context.minValue, context.maxValue)
-            return InputAction.SET_VALUE(newValue)
-        }
-        
-        // A+DOWN - Decrement by small step
-        if (direction == -1 && context.capabilities.canDecrement) {
-            val newValue = (context.currentValue - context.smallStep)
-                .coerceIn(context.minValue, context.maxValue)
-            return InputAction.SET_VALUE(newValue)
-        }
-        
-        // A+RIGHT - Increment by large step
-        if (direction == 2 && context.capabilities.canIncrementFast) {
-            val newValue = (context.currentValue + context.largeStep)
-                .coerceIn(context.minValue, context.maxValue)
-            return InputAction.SET_VALUE(newValue)
-        }
-        
-        // A+LEFT - Decrement by large step
-        if (direction == -2 && context.capabilities.canDecrementFast) {
-            val newValue = (context.currentValue - context.largeStep)
-                .coerceIn(context.minValue, context.maxValue)
-            return InputAction.SET_VALUE(newValue)
-        }
-        
-        return InputAction.NONE
-    }
-    
-    /**
-     * Handle A+B combination (delete)
-     */
-    fun handleABCombo(context: CursorContext): InputAction {
-        if (context.capabilities.canDelete) {
-            return InputAction.DELETE
-        }
-        return InputAction.NONE
-    }
-    
-    /**
-     * Handle B+UP/DOWN (chain/screen navigation)
-     */
-    fun handleBNavigation(direction: Int): InputAction {
-        return when (direction) {
-            1 -> InputAction.NAVIGATE_UP
-            -1 -> InputAction.NAVIGATE_DOWN
-            2 -> InputAction.NAVIGATE_RIGHT
-            -2 -> InputAction.NAVIGATE_LEFT
-            else -> InputAction.NONE
-        }
-    }
-}
-
-/**
- * Result of input handling
- */
-sealed class InputAction {
-    object NONE : InputAction()
-    data class SET_VALUE(val value: Int) : InputAction()
-    object DELETE : InputAction()
-    object INSERT_DEFAULT : InputAction()
-    object CREATE_NEW : InputAction()
-    object NAVIGATE_UP : InputAction()
-    object NAVIGATE_DOWN : InputAction()
-    object NAVIGATE_LEFT : InputAction()
-    object NAVIGATE_RIGHT : InputAction()
+when (action) {
+    is InputAction.SET_VALUE -> updateValue(action.value)
+    is InputAction.INSERT_DEFAULT -> insertDefault()
+    is InputAction.DELETE -> clearValue()
+    else -> { }
 }
 ```
 
 ---
 
-## Step 4: Use in MainActivity
-
-Now the button handlers become much simpler:
-
-```kotlin
-// Create input handler instance
-val inputHandler = remember { InputHandler() }
-
-// Button A handler
-onButtonA = {
-    // Get context from current screen
-    val context = when (currentScreen) {
-        ScreenType.CHAIN -> {
-            chainEditor.getCursorContext(
-                ChainEditorState(
-                    project.chains[currentChain],
-                    cursorRow,
-                    cursorColumn
-                )
-            )
-        }
-        ScreenType.PHRASE -> {
-            phraseEditor.getCursorContext(
-                PhraseEditorState(
-                    project.phrases[currentPhrase],
-                    cursorRow,
-                    cursorColumn,
-                    0,
-                    false
-                )
-            )
-        }
-        // ... other screens
-        else -> CursorContext(
-            CursorValueType.NONE,
-            CursorCapabilities()
-        )
-    }
-    
-    // Handle input based on context
-    val action = inputHandler.handleAButton(context, direction = 0)
-    
-    // Apply the action
-    when (action) {
-        is InputAction.SET_VALUE -> {
-            // Update the value at cursor position
-            applyValueChange(currentScreen, cursorRow, cursorColumn, action.value)
-        }
-        is InputAction.INSERT_DEFAULT -> {
-            // Insert default value
-            insertDefaultValue(currentScreen, cursorRow, cursorColumn)
-        }
-        is InputAction.CREATE_NEW -> {
-            // Create new item (phrase/chain/instrument)
-            createNewItem(currentScreen)
-        }
-        else -> { }
-    }
-}
-```
-
----
-
-## Benefits of This System:
+## Benefits
 
 ✅ **No repetition** - Write input logic once, works everywhere
 ✅ **Consistent behavior** - A+UP always means +1, everywhere
@@ -340,26 +107,81 @@ onButtonA = {
 
 ---
 
-## What Do You Think?
+## Button Mapping
 
-This is a more complex change, but it would make the codebase **much cleaner**. 
+**Current implementation:**
+- **A button** - Insert value on empty cell
+- **A + UP** - Increment by small step (1)
+- **A + DOWN** - Decrement by small step (1)
+- **A + RIGHT** - Increment by large step (16 for hex, 12 for notes)
+- **A + LEFT** - Decrement by large step (16 for hex, 12 for notes)
+- **A + B** - Delete/clear value at cursor
+- **B button** - Cancel / Back
+- **SELECT** - Quick delete (screen-specific)
+- **R + direction** - Navigate 5×5 screen grid
+- **L + LEFT/RIGHT** - Navigate between chains/phrases/instruments
 
-### Pros:
-- Generic, reusable system
-- No copy-paste code between screens
-- Easy to add new screens
+**Future additions (infrastructure ready):**
+- A+A - Create new item (double-tap detection exists)
+- L+A - Paste clipboard contents
+- L+B - Selection mode
+- L+UP/DOWN - Jump to populated rows
+- R+A - Clone item
+- L+R combinations - Snapshots
 
-### Cons:
-- More upfront work to set up
-- Needs cursor context for every screen/column
-- Can't test until you have device
+---
 
-### Alternative Approach:
+## Example: Chain Editor
 
-We could **keep simple buttons for now** (A=increment, B=decrement) and refactor to this system **later** when you have the device and can test combinations properly.
+**Column 0 (Step):** Read-only
+- No editing allowed
+- Shows row number in hex
 
-What do you prefer? 🤔
+**Column 1 (Phrase Ref):**
+- Empty (0xFF): A inserts default phrase
+- Has value: A+UP/DOWN increments/decrements by 1
+- A+LEFT/RIGHT: Fast jump by 16
+- A+B deletes (sets to 0xFF)
+- Wraps 00-FF (full 256 phrases)
 
-1. Implement generic system now (better long-term)
-2. Keep simple buttons, refactor later (faster to test)
-3. Hybrid: Generic value changes, specific actions for special cases
+**Column 2 (Transpose):**
+- Only editable if phrase exists
+- Small step: 1 semitone (A+UP/DOWN)
+- Large step: 12 semitones/octave (A+LEFT/RIGHT)
+- Range: 0x00-0xFF with wrapping (default 00)
+
+---
+
+## Migration Guide
+
+To migrate a screen to the generic input system:
+
+1. **Add getCursorContext() to the module:**
+   ```kotlin
+   fun getCursorContext(state: YourState): CursorContext {
+       // Return appropriate context for cursor position
+   }
+   ```
+
+2. **Update button handlers in MainActivity:**
+   ```kotlin
+   val context = yourModule.getCursorContext(yourState)
+   val action = genericInputHandler.handleAButton(context)
+   when (action) { /* apply changes */ }
+   ```
+
+3. **Test the behavior** with keyboard input
+
+4. **Repeat for B button, SELECT, etc.**
+
+---
+
+## Future Enhancements
+
+- **Custom key bindings** - Let users remap keys
+- ✅ **Gamepad support** - COMPLETE! Physical gamepad working on Android handhelds
+- **Gesture support** - Touch gestures for tablets
+- **Macro system** - Record and replay input sequences
+- **Undo/Redo** - Track input history for undo
+- **Selection mode** - Copy/paste/interpolate (infrastructure exists, not wired)
+- **Clipboard operations** - L+A paste, L+B selection (infrastructure exists, not wired)

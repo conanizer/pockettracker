@@ -125,3 +125,13 @@ $RECYCLE.BIN/
 
 # Kotlin
 .kotlin/
+
+# Additional temp/debug files
+nul
+*.tmp
+.vscode/
+
+# Keep build helper scripts (don't ignore)
+!build.sh
+!test.sh
+!clean.sh

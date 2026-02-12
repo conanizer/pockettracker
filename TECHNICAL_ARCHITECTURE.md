@@ -1,0 +1,860 @@
+# PocketTracker - Technical Architecture
+
+## Document Purpose
+This document defines **HOW** PocketTracker is built technically. It covers current architecture, planned refactoring for portability, and technical decisions.
+
+**Last Updated:** 2025-01-01  
+**Version:** 1.0  
+**Audience:** Developers, Contributors, Claude Code AI
+
+---
+
+## Table of Contents
+1. [Platform Strategy](#platform-strategy)
+2. [Current Architecture](#current-architecture)
+3. [Target Architecture (After Refactoring)](#target-architecture-after-refactoring)
+4. [Audio Engine](#audio-engine)
+5. [Data Model](#data-model)
+6. [Rendering System](#rendering-system)
+7. [Navigation System](#navigation-system)
+8. [File Management](#file-management)
+9. [Build System](#build-system)
+10. [Technology Stack](#technology-stack)
+
+---
+
+## Platform Strategy
+
+### Multi-Platform Vision
+
+**Primary Platform:** Android (Kotlin + Jetpack Compose)  
+**Future Platform:** Linux (C++ + GTK/Qt/SDL2)  
+**Architecture Approach:** Portable Core + Platform Adapters (Variant B)
+
+### Why Multi-Platform Architecture NOW?
+
+**Context from developer:**
+> "Linux port is a real plan. My mentor will help after MVP. We should think about how to write code, and if something already went wrong - optimize it."
+
+**Decision:** Implement proper abstraction layers during MVP development to avoid massive rewrite later.
+
+**Benefits:**
+- Shared C++ audio core (already exists!)
+- Business logic written once, works on both platforms
+- Easier to onboard contributors (clear separation of concerns)
+- Mentor can work on Linux port without touching Android-specific code
+
+**Trade-offs:**
+- MVP takes 1-2 weeks longer due to refactoring
+- More upfront architectural complexity
+- Need to maintain discipline (don't mix platform code with logic)
+
+**Developer's stance:** "I'm primarily making this for myself, I'm not reporting deadlines to anyone except myself, I have enough enthusiasm, and my mentor isn't going anywhere" → **Refactoring is worth it!**
+
+---
+
+## Current Architecture (Pre-Refactoring)
+
+### Current State (January 2025)
+
+```
+PocketTracker/
+├── MainActivity.kt (2570 lines!)
+│   ├── App state (cursor, screen, project)
+│   ├── Button handlers (all logic mixed with UI)
+│   ├── Audio engine calls
+│   ├── File I/O
+│   └── Compose UI rendering
+│
+├── TrackerAudioEngine.kt
+│   ├── JNI bridge to C++
+│   ├── Android Context dependency
+│   └── Resources loading (R.raw.*)
+│
+├── TrackerData.kt ✅
+│   └── Pure data structures (ALREADY PORTABLE!)
+│
+├── Modules/*.kt ✅
+│   └── Rendering logic (MOSTLY PORTABLE!)
+│
+├── DeviceAdapter.kt
+│   └── Android InputDevice API
+│
+├── FileManager.kt
+│   └── Android File API (scoped storage)
+│
+└── native-audio.cpp ✅
+    └── C++ audio engine (ALREADY PORTABLE!)
+```
+
+### Problems with Current Architecture
+
+1. **MainActivity.kt is a God Object** (2570 lines doing everything)
+   - Business logic mixed with UI
+   - Hard to test
+   - Impossible to port to Linux without complete rewrite
+
+2. **Android APIs everywhere**
+   - `Context` passed around
+   - `R.raw.*` resource loading
+   - Android file system APIs
+   - Platform-specific input handling
+
+3. **No abstraction layers**
+   - Can't swap audio backend
+   - Can't swap resource loading
+   - Can't swap file system
+
+**Good News:**
+- ✅ Audio engine already in C++ (most complex part is portable!)
+- ✅ Data structures are pure Kotlin (easy to port to C++ structs)
+- ✅ Rendering modules are mostly draw-only (minimal Android dependencies)
+
+---
+
+## Target Architecture (After Refactoring)
+
+### Layered Architecture with Platform Abstraction
+
+```
+┌─────────────────────────────────────────────────────┐
+│             PRESENTATION LAYER                      │
+│  (Platform-Specific UI)                             │
+│                                                      │
+│  Android: Jetpack Compose    Linux: GTK/Qt/SDL2     │
+│  - MainActivity.kt           - main.cpp             │
+│  - VirtualControls.kt        - LinuxUI.cpp          │
+│  - DeviceAdapter.kt          - LinuxInput.cpp       │
+└─────────────────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────┐
+│             BUSINESS LOGIC LAYER                    │
+│  (Platform-Agnostic Kotlin/C++)                     │
+│                                                      │
+│  - TrackerController.kt ← All button handlers       │
+│  - EffectProcessor.kt   ← Effect calculations       │
+│  - Sequencer.kt         ← Playback scheduling       │
+│  - FileManager.kt       ← Save/load (uses IFileSystem) │
+└─────────────────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────┐
+│          PLATFORM ABSTRACTION LAYER                 │
+│  (Interfaces defining platform capabilities)        │
+│                                                      │
+│  - IAudioBackend      ← Audio playback interface    │
+│  - IResourceLoader    ← Sample/asset loading        │
+│  - IFileSystem        ← File I/O interface          │
+└─────────────────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────┐
+│         PLATFORM IMPLEMENTATION LAYER               │
+│  (Concrete implementations per platform)            │
+│                                                      │
+│  Android:                    Linux:                 │
+│  - OboeAudioBackend.kt       - ALSAAudioBackend.cpp │
+│  - AndroidResourceLoader.kt  - FileResourceLoader   │
+│  - AndroidFileSystem.kt      - LinuxFileSystem.cpp  │
+└─────────────────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────┐
+│              NATIVE AUDIO CORE                      │
+│  (Shared C++ - Already Portable!)                   │
+│                                                      │
+│  - native-audio.cpp          ✅ DONE                │
+│  - Sample-accurate queue                            │
+│  - 8-voice polyphony                                │
+│  - Linear interpolation                             │
+│  - Biquad filters                                   │
+└─────────────────────────────────────────────────────┘
+```
+
+### File Structure (Target)
+
+```
+PocketTracker/
+│
+├── core/                           # Platform-agnostic code
+│   ├── data/
+│   │   ├── TrackerData.kt          ✅ Already portable!
+│   │   ├── Note.kt
+│   │   ├── Phrase.kt
+│   │   └── Project.kt
+│   │
+│   ├── logic/
+│   │   ├── TrackerController.kt    ← NEW: All button handlers
+│   │   ├── EffectProcessor.kt      ← NEW: Effect calculations
+│   │   ├── Sequencer.kt            ← NEW: Playback logic
+│   │   └── FileManager.kt          ← REFACTORED: Uses IFileSystem
+│   │
+│   ├── audio/
+│   │   ├── IAudioBackend.kt        ← NEW: Audio interface
+│   │   └── AudioEngine.kt          ← REFACTORED: Uses IAudioBackend
+│   │
+│   ├── resources/
+│   │   └── IResourceLoader.kt      ← NEW: Resource loading interface
+│   │
+│   ├── storage/
+│   │   ├── IFileSystem.kt          ← NEW: File I/O interface
+│   │   └── FileInfo.kt             ← NEW: Platform-agnostic file metadata
+│   │
+│   └── rendering/
+│       ├── TrackerModule.kt        ✅ Already portable!
+│       ├── BitmapFont.kt           ✅ Already portable!
+│       ├── PixelPerfectRenderer.kt ← Minor refactoring needed
+│       └── All *Module.kt files    ✅ Mostly portable!
+│
+├── platform/
+│   ├── android/
+│   │   ├── MainActivity.kt         ← THIN: Just creates backends + UI
+│   │   ├── OboeAudioBackend.kt     ← NEW: Oboe implementation
+│   │   ├── AndroidResourceLoader.kt ← NEW
+│   │   ├── AndroidFileSystem.kt    ← NEW
+│   │   ├── DeviceAdapter.kt        ← Android-specific input
+│   │   └── jni/
+│   │       └── native-audio.cpp    ✅ Shared with Linux!
+│   │
+│   └── linux/                      # FUTURE (after MVP)
+│       ├── main.cpp
+│       ├── ALSAAudioBackend.cpp
+│       ├── LinuxResourceLoader.cpp
+│       ├── LinuxFileSystem.cpp
+│       └── GTK_UI.cpp (or Qt/SDL2)
+│
+└── shared-native/                  # C++ shared between platforms
+    ├── audio-engine.cpp            ✅ Already exists!
+    ├── audio-engine.h
+    ├── effects.cpp                 ← NEW: Effect processing
+    ├── effects.h
+    └── CMakeLists.txt
+```
+
+---
+
+## Audio Engine
+
+### Current State ✅ (Already Professional-Grade!)
+
+**Architecture:** Sample-accurate queue system in C++
+
+**Key Features:**
+- ✅ Oboe-based real-time audio (44.1kHz, LowLatency + Exclusive mode)
+- ✅ Sample-accurate note scheduling (<0.02ms jitter)
+- ✅ Linear interpolation (eliminates aliasing)
+- ✅ 8-voice polyphony with per-track voice stealing
+- ✅ Global frame counter for precise timing
+- ✅ Resonant biquad filters (LP/HP/BP using Audio EQ Cookbook)
+- ✅ Effects chain: Downsample → Crush → Interpolate → Drive → Filter → Volume
+- ✅ Waveform capture for oscilloscope visualization
+
+**Performance:**
+- Timing precision: <0.02ms jitter (100x better than Kotlin timing)
+- Audio quality: Professional-grade (matches M8/LGPT/Picotracker)
+- Latency: <50ms on tested hardware
+
+**Why This is Good for Linux Port:**
+> The entire audio engine is already in C++! We just need to:
+> 1. Wrap Oboe calls in an interface
+> 2. Create ALSA/PulseAudio backend implementing same interface
+> 3. Rest of the audio code stays EXACTLY the same!
+
+### JNI Interface (Current)
+
+```kotlin
+// TrackerAudioEngine.kt
+external fun native_create(): Boolean
+external fun native_loadSample(id: Int, samples: FloatArray)
+external fun native_scheduleNote(frame: Long, sampleId: Int, trackId: Int, freq: Float, baseFreq: Float, vol: Float)
+external fun native_getCurrentFrame(): Long
+external fun native_clearScheduledNotes()
+external fun native_resumeStream()
+external fun native_stopAll()
+external fun native_getSampleRate(): Int
+external fun native_updateWaveform(buffer: FloatArray)
+```
+
+### Target Architecture (After Refactoring)
+
+```kotlin
+// core/audio/IAudioBackend.kt
+interface IAudioBackend {
+    fun create(): Boolean
+    fun loadSample(id: Int, samples: FloatArray)
+    fun scheduleNote(frame: Long, sampleId: Int, trackId: Int, freq: Float, baseFreq: Float, vol: Float)
+    fun getCurrentFrame(): Long
+    fun clearScheduledNotes()
+    fun resumeStream()
+    fun stopAll()
+    fun getSampleRate(): Int
+    fun updateWaveform(buffer: FloatArray)
+    fun close()
+}
+
+// platform/android/OboeAudioBackend.kt
+class OboeAudioBackend : IAudioBackend {
+    init { System.loadLibrary("pockettracker") }
+    
+    private external fun native_create(): Boolean
+    // ... JNI declarations
+    
+    override fun create() = native_create()
+    override fun loadSample(id: Int, samples: FloatArray) = native_loadSample(id, samples)
+    // ... implementations just forward to JNI
+}
+
+// core/audio/AudioEngine.kt (platform-agnostic!)
+class AudioEngine(
+    private val backend: IAudioBackend,
+    private val resourceLoader: IResourceLoader
+) {
+    val waveformBuffer = FloatArray(620)
+    
+    fun create(): Boolean {
+        val success = backend.create()
+        if (success) loadAllSamples()
+        return success
+    }
+    
+    fun playNote(sampleId: Int, trackId: Int, freq: Float, vol: Float) {
+        val frame = backend.getCurrentFrame()
+        val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
+        backend.scheduleNote(frame, sampleId, trackId, freq, baseFreq, vol)
+    }
+    
+    // All logic here - no Android dependencies!
+}
+```
+
+**Linux Implementation (Future):**
+```cpp
+// platform/linux/ALSAAudioBackend.cpp
+class ALSAAudioBackend : public IAudioBackend {
+    bool create() override {
+        // Open ALSA device
+        snd_pcm_open(&handle, "default", SND_PCM_STREAM_PLAYBACK, 0);
+        // ... setup
+    }
+    
+    void scheduleNote(...) override {
+        // Same scheduling logic as Oboe!
+    }
+}
+```
+
+---
+
+## Data Model
+
+### Current State ✅ (Already Portable!)
+
+The data model is **already platform-agnostic** - just pure Kotlin data classes with no Android dependencies!
+
+```kotlin
+@Serializable
+data class Note(val pitch: Int, val octave: Int) {
+    fun toMidi(): Int = (octave + 1) * 12 + pitch
+    fun toFrequency(): Float = 440f * Math.pow(2.0, (toMidi() - 69) / 12.0).toFloat()
+}
+
+@Serializable
+data class PhraseStep(
+    var note: Note = Note.EMPTY,
+    var instrument: Int = 0x00,
+    var volume: Int = 0xFF,
+    val fx1Type: Int = 0x00,
+    val fx1Value: Int = 0x00,
+    // ... fx2, fx3
+)
+
+@Serializable
+data class Phrase(val id: Int, val steps: Array<PhraseStep>)
+
+@Serializable
+data class Chain(val id: Int, val phraseRefs: IntArray, val transpose: IntArray)
+
+@Serializable
+data class Instrument(
+    var sampleId: Int = -1,
+    var volume: Int = 0xFF,
+    var pan: Int = 0x80,
+    // ... all parameters
+)
+
+@Serializable
+data class Project(
+    var name: String = "UNTITLED",
+    var tempo: Int = 120,
+    val phrases: Array<Phrase>,
+    val chains: Array<Chain>,
+    val instruments: Array<Instrument>,
+    val song: Song
+)
+```
+
+**Why this is great:**
+- ✅ No Context, no Resources, no Android APIs
+- ✅ Serializable to JSON (works on any platform)
+- ✅ Can be translated to C++ structs if needed for Linux
+
+**Future Linux Port:**
+```cpp
+// core/data/TrackerData.h (C++ version)
+struct Note {
+    int pitch;
+    int octave;
+    int toMidi() const { return (octave + 1) * 12 + pitch; }
+    float toFrequency() const { /* ... */ }
+};
+
+struct PhraseStep {
+    Note note;
+    int instrument;
+    int volume;
+    // ...
+};
+
+// Use nlohmann/json for serialization (same JSON format!)
+```
+
+---
+
+## Rendering System
+
+### Current State (Mostly Portable!)
+
+**Architecture:** Pixel-perfect Canvas rendering at 640×480
+
+```kotlin
+// PixelPerfectRenderer.kt
+@Composable
+fun PixelPerfectRenderer(
+    screenType: ScreenType,
+    project: Project,
+    cursorContext: CursorContext,
+    // ... state
+) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        // Calculate scaling and letterboxing
+        val scale = calculateScale(size)
+        
+        // Draw modules
+        when (screenType) {
+            ScreenType.PHRASE -> PhraseEditorModule.draw(...)
+            ScreenType.CHAIN -> ChainEditorModule.draw(...)
+            // ...
+        }
+    }
+}
+```
+
+**TrackerModule Interface:**
+```kotlin
+interface TrackerModule {
+    val width: Int
+    val height: Int
+    fun draw(
+        drawScope: DrawScope,
+        project: Project,
+        cursorContext: CursorContext,
+        // ... state
+    )
+}
+```
+
+**Portability Status:**
+- ✅ Drawing logic is pure (no Android APIs in modules)
+- ⚠️ `DrawScope` is Compose-specific
+- ⚠️ `Canvas` is Android/Compose
+
+**Refactoring Strategy:**
+
+Option A: Keep Compose for Android, rewrite rendering for Linux
+- Pros: Simple, each platform optimized
+- Cons: Duplicate rendering code
+
+Option B: Abstract rendering to portable layer
+- Pros: Single rendering codebase
+- Cons: Complex abstraction, potential performance overhead
+
+**Recommendation: Option A**
+> Rendering is not the complex part - button handlers and audio are. 
+> Let Android keep Compose (it's great!), Linux can use Cairo/SDL2.
+> Share the layout logic and constants, but platform-specific drawing.
+
+**Shared Constants:**
+```kotlin
+// core/rendering/RenderingConstants.kt
+object RenderingConstants {
+    const val SCREEN_WIDTH = 640
+    const val SCREEN_HEIGHT = 480
+    const val FONT_WIDTH = 5
+    const val FONT_HEIGHT = 5
+    const val FONT_SCALE = 3
+    const val CHAR_WIDTH = FONT_WIDTH * FONT_SCALE  // 15px
+    const val CHAR_HEIGHT = FONT_HEIGHT * FONT_SCALE  // 15px
+}
+```
+
+---
+
+## Navigation System
+
+### 5×5 Screen Grid
+
+```
+Row 0:         -      SCALE   INST_POOL    -
+Row 1:     PROJECT   GROOVE     MODS     PROJECT
+Row 2:      SONG     CHAIN    PHRASE   INSTRUMENT  TABLE
+Row 3:     MIXER     MIXER    MIXER      MIXER     MIXER
+Row 4:    EFFECTS   EFFECTS  EFFECTS    EFFECTS   EFFECTS
+```
+
+**Navigation Logic (Currently in MainActivity.kt):**
+```kotlin
+fun navigateUp() {
+    currentScreen = when (currentScreen) {
+        ScreenType.SONG -> ScreenType.PROJECT
+        ScreenType.CHAIN -> ScreenType.GROOVE
+        // ...
+    }
+}
+```
+
+**After Refactoring (TrackerController.kt):**
+```kotlin
+class TrackerController {
+    var currentScreen by mutableStateOf(ScreenType.PHRASE)
+    
+    fun handleShiftUp() {
+        currentScreen = NavigationMap.navigateUp(currentScreen)
+    }
+}
+
+object NavigationMap {
+    fun navigateUp(from: ScreenType): ScreenType = when (from) {
+        ScreenType.SONG -> ScreenType.PROJECT
+        ScreenType.CHAIN -> ScreenType.GROOVE
+        // ... pure logic, no Android!
+    }
+}
+```
+
+---
+
+## File Management
+
+### Current State (Android-Specific)
+
+```kotlin
+// FileManager.kt
+class FileManager(private val context: Context) {
+    fun saveProject(project: Project, filename: String) {
+        val dir = File(context.getExternalFilesDir(null), "Projects")
+        val file = File(dir, "$filename.ptp")
+        val json = Json.encodeToString(project)
+        file.writeText(json)
+    }
+}
+```
+
+**Problem:** Uses `Context.getExternalFilesDir()` - Android-specific!
+
+### Target State (Platform-Agnostic)
+
+```kotlin
+// core/storage/IFileSystem.kt
+interface IFileSystem {
+    fun getProjectsDirectory(): String
+    fun getSamplesDirectory(): String
+    fun listFiles(path: String): List<FileInfo>
+    fun readFile(path: String): String
+    fun writeFile(path: String, content: String)
+    fun deleteFile(path: String): Boolean
+    fun createDirectory(path: String): Boolean
+}
+
+data class FileInfo(
+    val name: String,
+    val path: String,
+    val isDirectory: Boolean,
+    val size: Long,
+    val lastModified: Long
+)
+
+// core/storage/FileManager.kt (NOW PORTABLE!)
+class FileManager(private val fileSystem: IFileSystem) {
+    fun saveProject(project: Project, filename: String) {
+        val path = "${fileSystem.getProjectsDirectory()}/$filename.ptp"
+        val json = Json.encodeToString(project)
+        fileSystem.writeFile(path, json)
+    }
+    
+    fun loadProject(filename: String): Project {
+        val path = "${fileSystem.getProjectsDirectory()}/$filename.ptp"
+        val json = fileSystem.readFile(path)
+        return Json.decodeFromString(json)
+    }
+}
+
+// platform/android/AndroidFileSystem.kt
+class AndroidFileSystem(private val context: Context) : IFileSystem {
+    override fun getProjectsDirectory(): String =
+        "${context.getExternalFilesDir(null)}/Projects"
+    
+    override fun listFiles(path: String): List<FileInfo> {
+        return File(path).listFiles()?.map { file ->
+            FileInfo(
+                name = file.name,
+                path = file.absolutePath,
+                isDirectory = file.isDirectory,
+                size = file.length(),
+                lastModified = file.lastModified()
+            )
+        } ?: emptyList()
+    }
+    
+    // ... other methods
+}
+
+// platform/linux/LinuxFileSystem.cpp (FUTURE)
+class LinuxFileSystem : public IFileSystem {
+    std::string getProjectsDirectory() override {
+        return std::string(getenv("HOME")) + "/.pockettracker/Projects";
+    }
+    
+    // ... POSIX file operations
+}
+```
+
+---
+
+## Build System
+
+### Current (Android-Only)
+
+```gradle
+// app/build.gradle.kts
+android {
+    compileSdk = 34
+    
+    defaultConfig {
+        minSdk = 26
+        targetSdk = 34
+    }
+    
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+        }
+    }
+}
+```
+
+### Target (Multi-Platform)
+
+```
+PocketTracker/
+├── android/
+│   ├── app/
+│   │   ├── build.gradle.kts
+│   │   └── src/main/
+│   │       ├── kotlin/      # Platform-specific Android code
+│   │       └── cpp/         # JNI bridge only
+│   └── settings.gradle.kts
+│
+├── linux/                   # FUTURE
+│   ├── CMakeLists.txt
+│   ├── src/
+│   │   ├── main.cpp
+│   │   └── ui/              # GTK/Qt code
+│   └── build.sh
+│
+├── core/                    # Shared Kotlin (compiles to .jar)
+│   ├── build.gradle.kts
+│   └── src/
+│       └── commonMain/kotlin/
+│
+└── shared-native/           # Shared C++ (both platforms link to it)
+    ├── CMakeLists.txt
+    └── src/
+        ├── audio-engine.cpp
+        └── effects.cpp
+```
+
+**Kotlin Multiplatform (Optional Future Enhancement):**
+```kotlin
+// core/build.gradle.kts
+kotlin {
+    android()
+    linuxX64()
+    
+    sourceSets {
+        val commonMain by getting {
+            dependencies {
+                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
+            }
+        }
+    }
+}
+```
+
+---
+
+## Technology Stack
+
+### Current Stack
+
+| Layer | Technology | Notes |
+|-------|------------|-------|
+| **UI** | Jetpack Compose | Android-specific |
+| **Language** | Kotlin 1.9+ | Primary language |
+| **Audio** | C++ with Oboe | Already portable! ✅ |
+| **Build** | Gradle 8.x | Android build system |
+| **Native Build** | CMake 3.22.1+ | C++ compilation |
+| **Serialization** | Kotlinx Serialization | JSON save/load |
+| **Min Android** | API 26 (Android 8.0) | Target budget devices |
+| **Architectures** | arm64-v8a, x86_64 | 64-bit only |
+
+### Future Stack (Linux)
+
+| Layer | Technology | Options |
+|-------|------------|---------|
+| **UI** | GTK4 / Qt6 / SDL2 | TBD (mentor will help decide) |
+| **Language** | C++17 | For Linux native code |
+| **Audio** | ALSA / PulseAudio / JACK | Multiple backend support |
+| **Build** | CMake | Same as Android native |
+| **Serialization** | nlohmann/json | Same JSON format as Android |
+
+---
+
+## Coding Conventions
+
+### Kotlin Code Style
+
+**File Organization:**
+```kotlin
+// 1. Package declaration
+package com.example.pockettracker
+
+// 2. Imports (grouped: stdlib, third-party, project)
+import kotlin.math.*
+import kotlinx.serialization.*
+import androidx.compose.*
+
+// 3. Constants
+private const val TAG = "ModuleName"
+
+// 4. Data classes / interfaces
+data class Example(...)
+
+// 5. Main class
+class MainClass {
+    // Properties first
+    private val property = value
+    
+    // Init blocks
+    init { ... }
+    
+    // Public methods
+    fun publicMethod() { ... }
+    
+    // Private methods
+    private fun privateMethod() { ... }
+}
+```
+
+**Naming:**
+- Classes: `PascalCase`
+- Functions: `camelCase`
+- Constants: `SCREAMING_SNAKE_CASE`
+- Private members: `_prefixWithUnderscore` (optional)
+
+**Comments:**
+- Every file has header comment explaining purpose
+- Public APIs have KDoc
+- Complex logic has inline comments
+- Use section separators: `// ═══════════════`
+
+### C++ Code Style
+
+```cpp
+// Constants in ALL_CAPS
+constexpr int MAX_VOICES = 8;
+
+// Classes in PascalCase
+class AudioEngine {
+private:
+    // Member variables with m_ prefix
+    float m_sampleRate;
+    
+public:
+    // Methods in camelCase
+    void playNote(int sampleId, float frequency);
+};
+
+// Free functions in camelCase
+float noteToFrequency(int midiNote);
+```
+
+---
+
+## Next Steps
+
+See **REFACTORING_ROADMAP.md** for detailed step-by-step refactoring plan.
+
+---
+
+**Version History:**
+- v1.0 (2025-01-01): Initial architecture document with refactoring plan
+
+---
+
+## Final Architecture Decision
+
+**Status:** FINALIZED (2025-01-02)
+
+**Decision:** Option B (Foundational Architecture)
+
+### Rationale
+
+- Developer preference: "Why not make great basis now?"
+- Time available (no external deadlines)
+- Long-term Linux port is planned, not hypothetical
+- Mentor will appreciate clean, organized codebase
+- Better learning opportunity (proper architecture)
+
+### Final Controller Structure
+core/logic/
+├── TrackerController.kt      # Main coordinator (owns state)
+├── InputController.kt         # Button handling, selection mode
+├── PlaybackController.kt      # Playback scheduling
+├── EffectProcessor.kt         # Effect calculations
+├── InstrumentController.kt    # Sample/instrument management
+├── FileController.kt          # Save/load operations
+└── ClipboardManager.kt        # Copy/paste operations
+
+### Benefits
+
+**For MVP Development:**
+- Clear separation makes debugging easier
+- Each controller ~200-300 lines (manageable size)
+- Can test controllers independently
+- Easy to add features (extend relevant controller)
+
+**For Linux Port:**
+- All controllers already portable (no Android deps)
+- Just need new UI layer calling same controllers
+- Audio/file/resource implementations swap easily
+
+**For Mentor Collaboration:**
+- Clear boundaries for parallel work
+- Mentor can work on InstrumentController (Braids)
+- Developer can work on EffectProcessor (new effects)
+- No merge conflicts!
+
+### Implementation
+
+See `REFACTORING_ROADMAP.md` Phase 4 for step-by-step implementation guide.

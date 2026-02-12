@@ -10,7 +10,6 @@ package com.example.pockettracker
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -19,7 +18,10 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.example.pockettracker.core.audio.AudioEngine
+import com.example.pockettracker.core.data.Project
+import com.example.pockettracker.core.data.ScreenType
+import com.example.pockettracker.core.logic.PlaybackController
 
 // ============================================================================
 // FULL SCREEN LAYOUT
@@ -29,18 +31,43 @@ fun FullScreenLayout(
     layoutConfig: DeviceAdapter.LayoutConfig,
     currentScreen: ScreenType,
     project: Project,
-    audioEngine: TrackerAudioEngine,
+    audioEngine: AudioEngine,
     cursorRow: Int,
     cursorColumn: Int,
     isPlaying: Boolean,
     previousColumn: Int,
     currentChain: Int,
+    currentPhrase: Int,
     projectCursorRow: Int,
     projectCursorColumn: Int,
     projectStatusMessage: String,
     projectStatusSuccess: Boolean,
     inputMapper: InputMapper,
-    focusRequester: FocusRequester
+    focusRequester: FocusRequester,
+    projectVersion: Int,  // Version counter to trigger recomposition on nested data changes
+    currentInstrument: Int,
+    instrumentCursorRow: Int,
+    instrumentCursorColumn: Int,
+    instrumentStatusMessage: String,
+    instrumentStatusSuccess: Boolean,
+    fileBrowserState: FileBrowserModule.State? = null,  // File browser state
+    playbackController: PlaybackController,  // For scheduling with effect resolution
+    // Copy/paste state
+    selectionInfo: String = "",
+    clipboardInfo: String = "",
+    selectionMode: Boolean = false,
+    isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
+    // Mixer state
+    mixerCursorColumn: Int = 0,
+    trackPeaks: FloatArray = FloatArray(8),
+    masterPeaks: FloatArray = FloatArray(2),
+    // Table state
+    currentTable: Int = 0,
+    tableCursorRow: Int = 0,
+    tableCursorColumn: Int = 1,
+    // Render state (WAV export)
+    isRendering: Boolean = false,
+    renderProgress: Float = 0f
 ) {
     Box(
         modifier = Modifier
@@ -50,20 +77,42 @@ fun FullScreenLayout(
             .inputHandler(inputMapper)
             .focusable(),
         contentAlignment = Alignment.Center
-    ) {
+    )
+    {
         PixelPerfectTracker(
             currentScreen = currentScreen,
             project = project,
             audioEngine = audioEngine,
+            playbackController = playbackController,
             cursorRow = cursorRow,
             cursorColumn = cursorColumn,
             isPlaying = isPlaying,
             previousColumn = previousColumn,
             currentChain = currentChain,
+            currentPhrase = currentPhrase,
             projectCursorRow = projectCursorRow,
             projectCursorColumn = projectCursorColumn,
             projectStatusMessage = projectStatusMessage,
-            projectStatusSuccess = projectStatusSuccess
+            projectStatusSuccess = projectStatusSuccess,
+            projectVersion = projectVersion,
+            currentInstrument = currentInstrument,
+            instrumentCursorRow = instrumentCursorRow,
+            instrumentCursorColumn = instrumentCursorColumn,
+            instrumentStatusMessage = instrumentStatusMessage,
+            instrumentStatusSuccess = instrumentStatusSuccess,
+            fileBrowserState = fileBrowserState,
+            selectionInfo = selectionInfo,
+            clipboardInfo = clipboardInfo,
+            selectionMode = selectionMode,
+            isCellSelected = isCellSelected,
+            mixerCursorColumn = mixerCursorColumn,
+            trackPeaks = trackPeaks,
+            masterPeaks = masterPeaks,
+            currentTable = currentTable,
+            tableCursorRow = tableCursorRow,
+            tableCursorColumn = tableCursorColumn,
+            isRendering = isRendering,
+            renderProgress = renderProgress
         )
     }
 }
@@ -77,19 +126,44 @@ fun PortraitLayoutWithVirtualButtons(
     layoutConfig: DeviceAdapter.LayoutConfig,
     currentScreen: ScreenType,
     project: Project,
-    audioEngine: TrackerAudioEngine,
+    audioEngine: AudioEngine,
     cursorRow: Int,
     cursorColumn: Int,
     isPlaying: Boolean,
     previousColumn: Int,
     currentChain: Int,
+    currentPhrase: Int,
     projectCursorRow: Int,
     projectCursorColumn: Int,
     projectStatusMessage: String,
     projectStatusSuccess: Boolean,
     buttonHandlers: ButtonHandlers,
     inputMapper: InputMapper,
-    focusRequester: FocusRequester
+    focusRequester: FocusRequester,
+    projectVersion: Int,
+    currentInstrument: Int,
+    instrumentCursorRow: Int,
+    instrumentCursorColumn: Int,
+    instrumentStatusMessage: String,
+    instrumentStatusSuccess: Boolean,
+    fileBrowserState: FileBrowserModule.State? = null,
+    playbackController: PlaybackController,
+    // Copy/paste state
+    selectionInfo: String = "",
+    clipboardInfo: String = "",
+    selectionMode: Boolean = false,
+    isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
+    // Mixer state
+    mixerCursorColumn: Int = 0,
+    trackPeaks: FloatArray = FloatArray(8),
+    masterPeaks: FloatArray = FloatArray(2),
+    // Table state
+    currentTable: Int = 0,
+    tableCursorRow: Int = 0,
+    tableCursorColumn: Int = 1,
+    // Render state (WAV export)
+    isRendering: Boolean = false,
+    renderProgress: Float = 0f
 ) {
     // FIXED SPACER HEIGHT
     val spacerHeight = 200
@@ -137,15 +211,36 @@ fun PortraitLayoutWithVirtualButtons(
                     currentScreen = currentScreen,
                     project = project,
                     audioEngine = audioEngine,
+                    playbackController = playbackController,
                     cursorRow = cursorRow,
                     cursorColumn = cursorColumn,
                     isPlaying = isPlaying,
                     previousColumn = previousColumn,
                     currentChain = currentChain,
+                    currentPhrase = currentPhrase,
                     projectCursorRow = projectCursorRow,
                     projectCursorColumn = projectCursorColumn,
                     projectStatusMessage = projectStatusMessage,
-                    projectStatusSuccess = projectStatusSuccess
+                    projectStatusSuccess = projectStatusSuccess,
+                    projectVersion = projectVersion,
+                    currentInstrument = currentInstrument,
+                    instrumentCursorRow = instrumentCursorRow,
+                    instrumentCursorColumn = instrumentCursorColumn,
+                    instrumentStatusMessage = instrumentStatusMessage,
+                    instrumentStatusSuccess = instrumentStatusSuccess,
+                    fileBrowserState = fileBrowserState,
+                    selectionInfo = selectionInfo,
+                    clipboardInfo = clipboardInfo,
+                    selectionMode = selectionMode,
+                    isCellSelected = isCellSelected,
+                    mixerCursorColumn = mixerCursorColumn,
+                    trackPeaks = trackPeaks,
+                    masterPeaks = masterPeaks,
+                    currentTable = currentTable,
+                    tableCursorRow = tableCursorRow,
+                    tableCursorColumn = tableCursorColumn,
+                    isRendering = isRendering,
+                    renderProgress = renderProgress
                 )
             }
         }
@@ -184,19 +279,44 @@ fun LandscapeLayoutWithVirtualButtons(
     layoutConfig: DeviceAdapter.LayoutConfig,
     currentScreen: ScreenType,
     project: Project,
-    audioEngine: TrackerAudioEngine,
+    audioEngine: AudioEngine,
     cursorRow: Int,
     cursorColumn: Int,
     isPlaying: Boolean,
     previousColumn: Int,
     currentChain: Int,
+    currentPhrase: Int,
     projectCursorRow: Int,
     projectCursorColumn: Int,
     projectStatusMessage: String,
     projectStatusSuccess: Boolean,
     buttonHandlers: ButtonHandlers,
     inputMapper: InputMapper,
-    focusRequester: FocusRequester
+    focusRequester: FocusRequester,
+    projectVersion: Int,
+    currentInstrument: Int,
+    instrumentCursorRow: Int,
+    instrumentCursorColumn: Int,
+    instrumentStatusMessage: String,
+    instrumentStatusSuccess: Boolean,
+    fileBrowserState: FileBrowserModule.State? = null,
+    playbackController: PlaybackController,
+    // Copy/paste state
+    selectionInfo: String = "",
+    clipboardInfo: String = "",
+    selectionMode: Boolean = false,
+    isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
+    // Mixer state
+    mixerCursorColumn: Int = 0,
+    trackPeaks: FloatArray = FloatArray(8),
+    masterPeaks: FloatArray = FloatArray(2),
+    // Table state
+    currentTable: Int = 0,
+    tableCursorRow: Int = 0,
+    tableCursorColumn: Int = 1,
+    // Render state (WAV export)
+    isRendering: Boolean = false,
+    renderProgress: Float = 0f
 ) {
     // Calculate available space for each button panel
     // Formula: (deviceWidth - scaledScreenWidth) / 2
@@ -248,15 +368,36 @@ fun LandscapeLayoutWithVirtualButtons(
                     currentScreen = currentScreen,
                     project = project,
                     audioEngine = audioEngine,
+                    playbackController = playbackController,
                     cursorRow = cursorRow,
                     cursorColumn = cursorColumn,
                     isPlaying = isPlaying,
                     previousColumn = previousColumn,
                     currentChain = currentChain,
+                    currentPhrase = currentPhrase,
                     projectCursorRow = projectCursorRow,
                     projectCursorColumn = projectCursorColumn,
                     projectStatusMessage = projectStatusMessage,
-                    projectStatusSuccess = projectStatusSuccess
+                    projectStatusSuccess = projectStatusSuccess,
+                    projectVersion = projectVersion,
+                    currentInstrument = currentInstrument,
+                    instrumentCursorRow = instrumentCursorRow,
+                    instrumentCursorColumn = instrumentCursorColumn,
+                    instrumentStatusMessage = instrumentStatusMessage,
+                    instrumentStatusSuccess = instrumentStatusSuccess,
+                    fileBrowserState = fileBrowserState,
+                    selectionInfo = selectionInfo,
+                    clipboardInfo = clipboardInfo,
+                    selectionMode = selectionMode,
+                    isCellSelected = isCellSelected,
+                    mixerCursorColumn = mixerCursorColumn,
+                    trackPeaks = trackPeaks,
+                    masterPeaks = masterPeaks,
+                    currentTable = currentTable,
+                    tableCursorRow = tableCursorRow,
+                    tableCursorColumn = tableCursorColumn,
+                    isRendering = isRendering,
+                    renderProgress = renderProgress
                 )
             }
         }

@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.example.pockettracker.core.data.Project
 
 /**
  * SONG EDITOR MODULE - FINAL DESIGN
@@ -188,7 +189,16 @@ class SongEditorModule : TrackerModule {
         // ===================================
         // STEP 2: Determine background color
         // ===================================
+        // Check if any cell in this row is selected (tracks are 1-8 in selection, mapped to columns 1-8)
+        val isRowSelected = state.selectionMode && (1..8).any { col -> state.isCellSelected(absoluteRow, col) }
+
         val bgColor = when {
+            // Playing row -> green highlight
+            state.isPlaying && absoluteRow == state.playbackRow -> Color(0xFF004400)
+
+            // Selection green
+            isRowSelected -> Color(0xFF1a3a1a)
+
             // If cursor is on this row -> highlight
             absoluteRow == state.cursorRow -> Color(0xFF333333)
 
@@ -246,10 +256,15 @@ class SongEditorModule : TrackerModule {
             }
 
             // Determine text color
+            // Note: trackId is 0-7, but cursorTrack and selection columns are 1-8
+            val selectionCol = trackId + 1  // Convert to selection column (1-8)
             val textColor = when {
                 // Cursor is on this cell (track column starts at 1, not 0)
                 absoluteRow == state.cursorRow &&
                         trackId == (state.cursorTrack - 1) -> Color.Yellow
+
+                // Selection highlight (bright green)
+                state.selectionMode && state.isCellSelected(absoluteRow, selectionCol) -> Color(0xFF00DD00)
 
                 // Empty cell
                 chainId == -1 -> Color(0xFF444444)
@@ -270,6 +285,85 @@ class SongEditorModule : TrackerModule {
             )
         }
     }
+
+    /**
+     * Get cursor context for current cursor position
+     *
+     * This tells the generic input system what kind of value we're on
+     * and what actions are available.
+     */
+    fun getCursorContext(state: SongEditorState): CursorContext {
+        // Step column is not selectable, only tracks 1-8
+        if (state.cursorTrack < 1 || state.cursorTrack > 8) {
+            return CursorContextFactory.none()
+        }
+
+        // Get the track (cursorTrack is 1-8, array index is 0-7)
+        val track = state.project.tracks[state.cursorTrack - 1]
+
+        // Get chain reference at current row
+        val chainRef = if (state.cursorRow < track.chainRefs.size) {
+            track.chainRefs[state.cursorRow]
+        } else {
+            -1  // Beyond current track length
+        }
+
+        // Return cursor context for chain reference
+        return CursorContextFactory.chainRef(chainRef, canCreate = true)
+    }
+
+    /**
+     * Handle input action for song editor.
+     */
+    fun handleInput(
+        state: SongEditorState,
+        action: com.example.pockettracker.core.logic.InputAction
+    ): InputResult {
+        // Get track index (cursorTrack is 1-8, array index is 0-7)
+        val trackIndex = state.cursorTrack - 1
+        if (trackIndex < 0 || trackIndex >= state.project.tracks.size) {
+            return InputResult(modified = false)
+        }
+
+        val track = state.project.tracks[trackIndex]
+        var lastEditedChain: Int? = null
+
+        when (action) {
+            is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                // Ensure track is long enough
+                while (track.chainRefs.size <= state.cursorRow) {
+                    track.chainRefs.add(-1)
+                }
+                track.chainRefs[state.cursorRow] = action.value
+                lastEditedChain = action.value
+            }
+            is com.example.pockettracker.core.logic.InputAction.DELETE -> {
+                // Clear chain reference
+                if (state.cursorRow < track.chainRefs.size) {
+                    track.chainRefs[state.cursorRow] = -1
+                }
+            }
+            is com.example.pockettracker.core.logic.InputAction.INSERT_DEFAULT -> {
+                // Insert chain 0 by default
+                while (track.chainRefs.size <= state.cursorRow) {
+                    track.chainRefs.add(-1)
+                }
+                track.chainRefs[state.cursorRow] = 0
+                lastEditedChain = 0
+            }
+            else -> { /* NONE or unhandled - do nothing */ }
+        }
+
+        return InputResult(
+            modified = action !is com.example.pockettracker.core.logic.InputAction.NONE,
+            lastEditedChain = lastEditedChain
+        )
+    }
+
+    data class InputResult(
+        val modified: Boolean,
+        val lastEditedChain: Int? = null
+    )
 }
 
 /**
@@ -279,10 +373,18 @@ class SongEditorModule : TrackerModule {
  * @param cursorRow Which row the cursor is on (absolute position, 0-255)
  * @param cursorTrack Which track/column the cursor is on (1-8, NOT 0-7!)
  * @param scrollPosition Vertical scroll offset (for showing more than 16 rows)
+ * @param isPlaying Whether song playback is active
+ * @param playbackRow Current playback position (0-255, synchronized across all tracks)
+ * @param selectionMode Whether selection mode is active
+ * @param isCellSelected Function to check if a cell is selected
  */
 data class SongEditorState(
     val project: Project,       // Full project data
     val cursorRow: Int,         // Cursor row (absolute position 0-255)
     val cursorTrack: Int,       // Which track (1-8, step column is not selectable)
-    val scrollPosition: Int = 0 // Scroll offset (0 = top of song)
+    val scrollPosition: Int = 0, // Scroll offset (0 = top of song)
+    val isPlaying: Boolean = false, // Playback state
+    val playbackRow: Int = 0,   // Current playback row (all tracks play in sync)
+    val selectionMode: Boolean = false,
+    val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }
 )

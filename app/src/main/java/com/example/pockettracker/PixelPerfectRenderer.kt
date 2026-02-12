@@ -13,6 +13,9 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.platform.LocalDensity
 import kotlin.math.min
 import kotlinx.coroutines.delay
+import com.example.pockettracker.core.audio.AudioEngine
+import com.example.pockettracker.core.data.Project
+import com.example.pockettracker.core.data.ScreenType
 
 /**
  * PIXEL-PERFECT TRACKER - MODULAR VERSION
@@ -38,34 +41,84 @@ const val SIDE_SPACER = 10       // Space on sides
 fun PixelPerfectTracker(
     currentScreen: ScreenType,
     project: Project,
-    audioEngine: TrackerAudioEngine,
+    audioEngine: AudioEngine,
+    playbackController: com.example.pockettracker.core.logic.PlaybackController,
     cursorRow: Int,
     cursorColumn: Int,
     isPlaying: Boolean,
     previousColumn: Int,
     currentChain: Int,
+    currentPhrase: Int,
     projectCursorRow: Int,
     projectCursorColumn: Int,
     projectStatusMessage: String,
-    projectStatusSuccess: Boolean
+    projectStatusSuccess: Boolean,
+    projectVersion: Int,
+    currentInstrument: Int,
+    instrumentCursorRow: Int,
+    instrumentCursorColumn: Int,
+    instrumentStatusMessage: String,
+    instrumentStatusSuccess: Boolean,
+    fileBrowserState: FileBrowserModule.State? = null,
+    // Copy/paste state
+    selectionInfo: String = "",        // e.g., "SEL:CELL", "SEL:ROW", "SEL:ALL"
+    clipboardInfo: String = "",        // e.g., "PHR:3x4", "CHN:1x8"
+    selectionMode: Boolean = false,    // Whether selection mode is active
+    isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },  // Check if cell is selected
+    // Mixer state
+    mixerCursorColumn: Int = 0,        // 0-7 = tracks, 8 = master
+    trackPeaks: FloatArray = FloatArray(8),
+    masterPeaks: FloatArray = FloatArray(2),
+    // Table state
+    currentTable: Int = 0,
+    tableCursorRow: Int = 0,
+    tableCursorColumn: Int = 1,
+    // Render state (WAV export)
+    isRendering: Boolean = false,
+    renderProgress: Float = 0f
 ) {
+    android.util.Log.d("PixelPerfectTracker", "==== PixelPerfectTracker called ====")
+    android.util.Log.d("PixelPerfectTracker", "Screen: $currentScreen")
+    android.util.Log.d("PixelPerfectTracker", "Instrument cursor: row=$instrumentCursorRow, col=$instrumentCursorColumn")
+
+    if (currentScreen == ScreenType.FILE_BROWSER) {
+        android.util.Log.d("PixelPerfectTracker", "FILE_BROWSER screen, fileBrowserState=${if (fileBrowserState != null) "not null (${fileBrowserState.items.size} items)" else "NULL"}")
+    }
     // Playback state
     var playbackRow by remember { mutableStateOf(0) }
+    var playbackChainRow by remember { mutableStateOf(0) }
+    var playbackPhraseStep by remember { mutableStateOf(0) }
+    var playbackSongRow by remember { mutableStateOf(0) }
 
-    // Playback loop
-    LaunchedEffect(isPlaying) {
+    // Oscilloscope refresh ticker (force continuous Canvas redraws for smooth waveform)
+    var oscilloscopeTicker by remember { mutableStateOf(0L) }
+
+    // Oscilloscope refresh loop (independent of playback position)
+    LaunchedEffect(Unit) {
+        while (true) {
+            oscilloscopeTicker++
+            delay(16L)  // ~60 FPS refresh rate
+        }
+    }
+
+    // Playback position update loop
+    // This is SIMPLIFIED: all scheduling logic moved to PlaybackController.updatePlaybackBuffer()
+    LaunchedEffect(isPlaying, currentScreen) {
         if (isPlaying) {
             while (isPlaying) {
-                val step = project.phrases[0].steps[playbackRow]
-                if (!step.isEmpty()) {
-                    audioEngine.playNote(step.note, step.instrument, 0, step.volume / 255f)
-                }
-                playbackRow = (playbackRow + 1) % 16
-                delay(60000L / 128 / 4)  // 128 BPM, 16th notes
+                // Update lookahead buffer - PlaybackController handles all scheduling
+                playbackController.updatePlaybackBuffer()
+
+                // Get current playback position for UI updates
+                val position = playbackController.getPlaybackPosition()
+                playbackRow = position.row
+                playbackChainRow = position.chainRow
+                playbackPhraseStep = position.phraseStep
+                playbackSongRow = position.songRow
+
+                // Update UI at 60 Hz
+                delay(16L)
             }
-        } else {
-            playbackRow = 0
-            audioEngine.stopAll()
         }
     }
 
@@ -92,28 +145,53 @@ fun PixelPerfectTracker(
         val offsetX = (screenWidthPx - renderWidth) / 2f
         val offsetY = (screenHeightPx - renderHeight) / 2f
 
-        // Main canvas
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            translate(offsetX, offsetY) {
-                // Use layout manager to draw modules
-                val layout = TrackerLayout()
-                with(layout) {
-                    drawLayout(
-                        scale = scale,
-                        currentScreen = currentScreen,
-                        project = project,
-                        cursorRow = cursorRow,
-                        cursorColumn = cursorColumn,
-                        isPlaying = isPlaying,
-                        playbackRow = playbackRow,
-                        audioEngine = audioEngine,
-                        previousColumn = previousColumn,
-                        currentChain = currentChain,
-                        projectCursorRow = projectCursorRow,
-                        projectCursorColumn = projectCursorColumn,
-                        projectStatusMessage = projectStatusMessage,
-                        projectStatusSuccess = projectStatusSuccess
-                    )
+        // Main canvas - use key() to force redraw when state changes
+        // Key on: projectVersion, screen type, cursor positions, and oscilloscope ticker (for smooth waveform)
+        key(projectVersion, currentScreen, cursorRow, cursorColumn, projectCursorRow, projectCursorColumn, instrumentCursorRow, instrumentCursorColumn, oscilloscopeTicker) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                translate(offsetX, offsetY) {
+                    // Use layout manager to draw modules
+                    val layout = TrackerLayout()
+                    with(layout) {
+                        drawLayout(
+                            scale = scale,
+                            currentScreen = currentScreen,
+                            project = project,
+                            cursorRow = cursorRow,
+                            cursorColumn = cursorColumn,
+                            isPlaying = isPlaying,
+                            playbackRow = playbackRow,
+                            playbackChainRow = playbackChainRow,
+                            playbackSongRow = playbackSongRow,
+                            audioEngine = audioEngine,
+                            previousColumn = previousColumn,
+                            currentChain = currentChain,
+                            currentPhrase = currentPhrase,
+                            projectCursorRow = projectCursorRow,
+                            projectCursorColumn = projectCursorColumn,
+                            projectStatusMessage = projectStatusMessage,
+                            projectStatusSuccess = projectStatusSuccess,
+                            projectVersion = projectVersion,
+                            currentInstrument = currentInstrument,
+                            instrumentCursorRow = instrumentCursorRow,
+                            instrumentCursorColumn = instrumentCursorColumn,
+                            instrumentStatusMessage = instrumentStatusMessage,
+                            instrumentStatusSuccess = instrumentStatusSuccess,
+                            fileBrowserState = fileBrowserState,
+                            selectionInfo = selectionInfo,
+                            clipboardInfo = clipboardInfo,
+                            selectionMode = selectionMode,
+                            isCellSelected = isCellSelected,
+                            mixerCursorColumn = mixerCursorColumn,
+                            trackPeaks = trackPeaks,
+                            masterPeaks = masterPeaks,
+                            currentTable = currentTable,
+                            tableCursorRow = tableCursorRow,
+                            tableCursorColumn = tableCursorColumn,
+                            isRendering = isRendering,
+                            renderProgress = renderProgress
+                        )
+                    }
                 }
             }
         }
@@ -133,9 +211,13 @@ class TrackerLayout {
     private val oscilloscope = OscilloscopeModule(width = 620, height = 70)
     private val phraseEditor = PhraseEditorModule()
     private val navigationMap = NavigationMapModule()
+    private val instrumentModule = InstrumentModule()
+    private val mixerModule = MixerModule()
     private val chainEditor = ChainEditorModule()
     private val songEditor = SongEditorModule()
     private val projectModule = ProjectModule()
+    private val fileBrowser = FileBrowserModule()
+    private val tableModule = TableModule()
     /**
      * Main layout drawing function
      * This arranges all modules on the 640×480 screen
@@ -148,13 +230,39 @@ class TrackerLayout {
         cursorColumn: Int,
         isPlaying: Boolean,
         playbackRow: Int,
-        audioEngine: TrackerAudioEngine,
+        playbackChainRow: Int,
+        playbackSongRow: Int,
+        audioEngine: AudioEngine,
         previousColumn: Int,
         currentChain: Int,
+        currentPhrase: Int = 0,
         projectCursorRow: Int = 0,
         projectCursorColumn: Int = 1,
         projectStatusMessage: String = "",
-        projectStatusSuccess: Boolean = true
+        projectStatusSuccess: Boolean = true,
+        projectVersion: Int = 0,  // Version counter to force redraw on data changes
+        currentInstrument: Int = 0,
+        instrumentCursorRow: Int = 0,
+        instrumentCursorColumn: Int = 1,
+        instrumentStatusMessage: String = "",
+        instrumentStatusSuccess: Boolean = true,
+        fileBrowserState: FileBrowserModule.State? = null,  // File browser state
+        // Copy/paste state
+        selectionInfo: String = "",
+        clipboardInfo: String = "",
+        selectionMode: Boolean = false,
+        isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
+        // Mixer state
+        mixerCursorColumn: Int = 0,
+        trackPeaks: FloatArray = FloatArray(8),
+        masterPeaks: FloatArray = FloatArray(2),
+        // Table state
+        currentTable: Int = 0,
+        tableCursorRow: Int = 0,
+        tableCursorColumn: Int = 1,
+        // Render state (WAV export)
+        isRendering: Boolean = false,
+        renderProgress: Float = 0f
     ) {
         // ===================================
         // DRAW BACKGROUND
@@ -176,6 +284,10 @@ class TrackerLayout {
         val moduleX = SIDE_SPACER
         var currentY = SCREEN_SPACER  // Start 6px from top
 
+        // Update waveform data from native audio engine (every frame)
+        // When not playing, decay waveform to smoothly fade out oscilloscope
+        audioEngine.updateWaveformWithDecay(isPlaying)
+
         // MODULE 1: OSCILLOSCOPE (waveform display)
         // Position: Top of screen
         // Size: 620×70
@@ -187,26 +299,42 @@ class TrackerLayout {
                 state = audioEngine.waveformBuffer  // Pass audio waveform data
             )
         }
+
+        // Draw clipboard/selection indicator on the right side of oscilloscope
+        if (selectionInfo.isNotEmpty() || clipboardInfo.isNotEmpty()) {
+            val indicatorY = currentY + 10  // 10px from top
+            val indicatorX = moduleX + 620 - 150  // Right-aligned within module
+
+            // Show selection info (green)
+            if (selectionInfo.isNotEmpty()) {
+                drawBitmapText(
+                    text = selectionInfo,
+                    x = indicatorX,
+                    y = indicatorY,
+                    scale = scale,
+                    color = Color(0xFF00DD00),
+                    spacing = 2,
+                    fontScale = 3
+                )
+            }
+
+            // Show clipboard info (cyan) below selection info
+            if (clipboardInfo.isNotEmpty()) {
+                val clipY = if (selectionInfo.isNotEmpty()) indicatorY + 21 else indicatorY
+                drawBitmapText(
+                    text = clipboardInfo,
+                    x = indicatorX,
+                    y = clipY,
+                    scale = scale,
+                    color = Color.Cyan,
+                    spacing = 2,
+                    fontScale = 3
+                )
+            }
+        }
+
         // Move down for next module
         currentY += oscilloscope.height + SCREEN_SPACER  // 70 + 6 = 76px
-
-        // MODULE 2: PHRASE EDITOR (main content)
-        // Position: Below oscilloscope
-        // Size: 620×392
-        with(phraseEditor) {
-            draw(
-                x = moduleX,
-                y = currentY,
-                scale = scale,
-                state = PhraseEditorState(
-                    phrase = project.phrases[0],
-                    cursorRow = cursorRow,
-                    cursorColumn = cursorColumn,
-                    playbackRow = playbackRow,
-                    isPlaying = isPlaying
-                )
-            )
-        }
 
         // MODULE 2: Switch between editors based on current screen
         when (currentScreen) {
@@ -221,7 +349,9 @@ class TrackerLayout {
                             cursorRow = projectCursorRow,  // Pass cursor state
                             cursorColumn = projectCursorColumn,
                             statusMessage = projectStatusMessage,
-                            isSuccess = projectStatusSuccess
+                            isSuccess = projectStatusSuccess,
+                            isRendering = isRendering,
+                            renderProgress = renderProgress
                         )
                     )
                 }
@@ -236,11 +366,13 @@ class TrackerLayout {
                         y = currentY,
                         scale = scale,
                         state = PhraseEditorState(
-                            phrase = project.phrases[0],
+                            phrase = project.phrases[currentPhrase],
                             cursorRow = cursorRow,
                             cursorColumn = cursorColumn,
                             playbackRow = playbackRow,
-                            isPlaying = isPlaying
+                            isPlaying = isPlaying,
+                            selectionMode = selectionMode,
+                            isCellSelected = isCellSelected
                         )
                     )
                 }
@@ -256,9 +388,13 @@ class TrackerLayout {
                         y = currentY,
                         scale = scale,
                         state = ChainEditorState(
-                            chain = project.chains[currentChain],  // Show first chain for now
+                            chain = project.chains[currentChain],
                             cursorRow = cursorRow,
-                            cursorColumn = cursorColumn
+                            cursorColumn = cursorColumn,
+                            playbackRow = playbackChainRow,
+                            isPlaying = isPlaying,
+                            selectionMode = selectionMode,
+                            isCellSelected = isCellSelected
                         )
                     )
                 }
@@ -276,9 +412,105 @@ class TrackerLayout {
                         state = SongEditorState(
                             project = project,
                             cursorRow = cursorRow,
-                            cursorTrack = cursorColumn  // Use cursorColumn as track selector
+                            cursorTrack = cursorColumn,  // Use cursorColumn as track selector
+                            isPlaying = isPlaying && currentScreen == ScreenType.SONG,
+                            playbackRow = playbackSongRow,
+                            selectionMode = selectionMode,
+                            isCellSelected = isCellSelected
                         )
                     )
+                }
+            }
+
+            // ===================================
+            // INSTRUMENT SCREEN: Show instrument editor
+            // ===================================
+            ScreenType.INSTRUMENT -> {
+                with(instrumentModule) {
+                    draw(
+                        x = moduleX,
+                        y = currentY,
+                        scale = scale,
+                        state = InstrumentState(
+                            instrument = project.instruments[currentInstrument],
+                            cursorRow = instrumentCursorRow,
+                            cursorColumn = instrumentCursorColumn,
+                            statusMessage = instrumentStatusMessage,
+                            isSuccess = instrumentStatusSuccess
+                        )
+                    )
+                }
+            }
+
+            // ===================================
+            // TABLE SCREEN: Show table editor
+            // ===================================
+            ScreenType.TABLE -> {
+                with(tableModule) {
+                    // Find which track is playing with this table (if any)
+                    var tablePlaybackRow: Int? = null
+                    for (trackId in 0 until 8) {
+                        if (audioEngine.getVoiceTableId(trackId) == currentTable) {
+                            val row = audioEngine.getVoiceTableRow(trackId)
+                            if (row >= 0) {
+                                tablePlaybackRow = row
+                                break
+                            }
+                        }
+                    }
+
+                    draw(
+                        x = moduleX,
+                        y = currentY,
+                        scale = scale,
+                        state = TableState(
+                            table = project.tables[currentTable],
+                            cursorRow = tableCursorRow,
+                            cursorColumn = tableCursorColumn,
+                            playbackRow = tablePlaybackRow,
+                            ticRate = project.instruments.getOrNull(currentInstrument)?.tableTicRate ?: 0x06,
+                            selectionMode = selectionMode,
+                            isCellSelected = isCellSelected
+                        )
+                    )
+                }
+            }
+
+            // ===================================
+            // MIXER SCREEN: Show mixer with 8 tracks + master
+            // ===================================
+            ScreenType.MIXER -> {
+                with(mixerModule) {
+                    draw(
+                        x = moduleX,
+                        y = currentY,
+                        scale = scale,
+                        state = MixerState(
+                            project = project,
+                            cursorColumn = mixerCursorColumn,
+                            trackPeaks = trackPeaks,
+                            masterPeaks = masterPeaks
+                        )
+                    )
+                }
+            }
+
+            // ===================================
+            // FILE BROWSER: Full screen file selection
+            // ===================================
+            ScreenType.FILE_BROWSER -> {
+                // Debug log removed - was spamming logcat on every frame (60+ fps)
+                if (fileBrowserState != null) {
+                    with(fileBrowser) {
+                        draw(
+                            x = 0,  // Full screen: start at 0, 0
+                            y = 0,
+                            scale = scale,
+                            state = fileBrowserState
+                        )
+                    }
+                } else {
+                    android.util.Log.e("FileBrowser", "fileBrowserState is NULL - cannot render!")
                 }
             }
 
@@ -300,27 +532,30 @@ class TrackerLayout {
         // ===================================
         // RIGHT SIDE: Navigation map (80px wide)
         // ===================================
+        // Note: Hidden when FILE_BROWSER is active to give full screen space
 
-        // Calculate position for bottom-right corner
-        // X position: 640 (screen width) - 80 (module width) - 10 (right margin) = 550px
-        val navMapX = DESIGN_WIDTH_PX - navigationMap.width - SIDE_SPACER
+        if (currentScreen != ScreenType.FILE_BROWSER) {
+            // Calculate position for bottom-right corner
+            // X position: 640 (screen width) - 80 (module width) - 10 (right margin) = 550px
+            val navMapX = DESIGN_WIDTH_PX - navigationMap.width - SIDE_SPACER
 
-        // Y position: 480 (screen height) - 105 (module height) - 6 (bottom margin) = 369px
-        val navMapY = DESIGN_HEIGHT_PX - navigationMap.height - SCREEN_SPACER
+            // Y position: 480 (screen height) - 105 (module height) - 6 (bottom margin) = 369px
+            val navMapY = DESIGN_HEIGHT_PX - navigationMap.height - SCREEN_SPACER
 
-        // MODULE 3: NAVIGATION MAP (shows current position in screen hierarchy)
-        // Position: Bottom-right corner
-        // Size: 80×105
-        with(navigationMap) {
-            draw(
-                x = navMapX,
-                y = navMapY,
-                scale = scale,
-                state = NavigationMapState(
-                    currentScreen = currentScreen,
-                    sourceColumn = previousColumn  // ✨ Use the passed value
+            // MODULE 3: NAVIGATION MAP (shows current position in screen hierarchy)
+            // Position: Bottom-right corner
+            // Size: 80×105
+            with(navigationMap) {
+                draw(
+                    x = navMapX,
+                    y = navMapY,
+                    scale = scale,
+                    state = NavigationMapState(
+                        currentScreen = currentScreen,
+                        sourceColumn = previousColumn  // ✨ Use the passed value
+                    )
                 )
-            )
+            }
         }
 
         // ===================================
@@ -411,14 +646,15 @@ fun DrawScope.drawBitmapChar(
     color: Color,
     fontScale: Int = 1
 ) {
-    val charData = FONT_5X5[char.uppercaseChar()]
+    // Try the character as-is first, then fall back to uppercase for letters
+    val charData = FONT_5X5[char] ?: FONT_5X5[char.uppercaseChar()]
 
     if (charData == null) {
         // Missing character - draw outline square
         drawRect(
             color = color,
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
-            size = androidx.compose.ui.geometry.Size(
+            size = Size(
                 (5 * fontScale * scale).toFloat(),
                 (5 * fontScale * scale).toFloat()
             ),
@@ -439,7 +675,7 @@ fun DrawScope.drawBitmapChar(
                         ((x + col * fontScale) * scale).toFloat(),
                         ((y + row * fontScale) * scale).toFloat()
                     ),
-                    size = androidx.compose.ui.geometry.Size(
+                    size = Size(
                         (scale * fontScale).toFloat(),
                         (scale * fontScale).toFloat()
                     )
@@ -449,48 +685,4 @@ fun DrawScope.drawBitmapChar(
     }
 }
 
-// Font data
-private val FONT_5X5 = mapOf(
-    '0' to byteArrayOf(0b01110, 0b10001, 0b10001, 0b10001, 0b01110),
-    '1' to byteArrayOf(0b00100, 0b01100, 0b00100, 0b00100, 0b01110),
-    '2' to byteArrayOf(0b01110, 0b10001, 0b00010, 0b00100, 0b11111),
-    '3' to byteArrayOf(0b11111, 0b00010, 0b00110, 0b00001, 0b11110),
-    '4' to byteArrayOf(0b10001, 0b10001, 0b11111, 0b00001, 0b00001),
-    '5' to byteArrayOf(0b11111, 0b10000, 0b11110, 0b00001, 0b11110),
-    '6' to byteArrayOf(0b01110, 0b10000, 0b11110, 0b10001, 0b01110),
-    '7' to byteArrayOf(0b11111, 0b00001, 0b00010, 0b00100, 0b01000),
-    '8' to byteArrayOf(0b01110, 0b10001, 0b01110, 0b10001, 0b01110),
-    '9' to byteArrayOf(0b01110, 0b10001, 0b01111, 0b00001, 0b01110),
-    'A' to byteArrayOf(0b01110, 0b10001, 0b11111, 0b10001, 0b10001),
-    'B' to byteArrayOf(0b11110, 0b10001, 0b11110, 0b10001, 0b11110),
-    'C' to byteArrayOf(0b01110, 0b10001, 0b10000, 0b10001, 0b01110),
-    'D' to byteArrayOf(0b11110, 0b10001, 0b10001, 0b10001, 0b11110),
-    'E' to byteArrayOf(0b11111, 0b10000, 0b11110, 0b10000, 0b11111),
-    'F' to byteArrayOf(0b11111, 0b10000, 0b11110, 0b10000, 0b10000),
-    'G' to byteArrayOf(0b01110, 0b10000, 0b10011, 0b10001, 0b01110),
-    'H' to byteArrayOf(0b10001, 0b10001, 0b11111, 0b10001, 0b10001),
-    'I' to byteArrayOf(0b01110, 0b00100, 0b00100, 0b00100, 0b01110),
-    'J' to byteArrayOf(0b00111, 0b00001, 0b00001, 0b10001, 0b01110),
-    'K' to byteArrayOf(0b10001, 0b10010, 0b11100, 0b10010, 0b10001),
-    'L' to byteArrayOf(0b10000, 0b10000, 0b10000, 0b10000, 0b11111),
-    'M' to byteArrayOf(0b10001, 0b11011, 0b10101, 0b10001, 0b10001),
-    'N' to byteArrayOf(0b10001, 0b11001, 0b10101, 0b10011, 0b10001),
-    'O' to byteArrayOf(0b01110, 0b10001, 0b10001, 0b10001, 0b01110),
-    'P' to byteArrayOf(0b11110, 0b10001, 0b11110, 0b10000, 0b10000),
-    'Q' to byteArrayOf(0b01110, 0b10001, 0b10001, 0b10010, 0b01101),
-    'R' to byteArrayOf(0b11110, 0b10001, 0b11110, 0b10010, 0b10001),
-    'S' to byteArrayOf(0b01111, 0b10000, 0b01110, 0b00001, 0b11110),
-    'T' to byteArrayOf(0b11111, 0b00100, 0b00100, 0b00100, 0b00100),
-    'U' to byteArrayOf(0b10001, 0b10001, 0b10001, 0b10001, 0b01110),
-    'V' to byteArrayOf(0b10001, 0b10001, 0b10001, 0b01010, 0b00100),
-    'W' to byteArrayOf(0b10001, 0b10001, 0b10101, 0b11011, 0b10001),
-    'X' to byteArrayOf(0b10001, 0b01010, 0b00100, 0b01010, 0b10001),
-    'Y' to byteArrayOf(0b10001, 0b01010, 0b00100, 0b00100, 0b00100),
-    'Z' to byteArrayOf(0b11111, 0b00010, 0b00100, 0b01000, 0b11111),
-    '-' to byteArrayOf(0b00000, 0b00000, 0b11111, 0b00000, 0b00000),
-    '#' to byteArrayOf(0b01010, 0b11111, 0b01010, 0b11111, 0b01010),
-    '.' to byteArrayOf(0b00000, 0b00000, 0b00000, 0b00000, 0b00100),
-    ':' to byteArrayOf(0b00000, 0b00100, 0b00000, 0b00100, 0b00000),
-    '/' to byteArrayOf(0b00001, 0b00010, 0b00100, 0b01000, 0b10000),
-    ' ' to byteArrayOf(0b00000, 0b00000, 0b00000, 0b00000, 0b00000),
-)
+// Font data is now imported from BitmapFont5x5.kt (internal val FONT_5X5)
