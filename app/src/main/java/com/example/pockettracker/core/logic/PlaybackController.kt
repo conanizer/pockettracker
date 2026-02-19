@@ -9,6 +9,7 @@ import com.example.pockettracker.core.audio.AudioEngine
 import com.example.pockettracker.core.data.Chain
 import com.example.pockettracker.core.data.Phrase
 import com.example.pockettracker.core.logging.ILogger
+import com.example.pockettracker.getEffectTypeName
 
 /**
  * Per-track state for persistent effects and note memory.
@@ -70,7 +71,13 @@ data class TrackState(
     /** Whether vibrato (PVB/PVX) is active */
     var vibratoActive: Boolean = false,
     /** Last note MIDI for PSL (pitch slide) calculation */
-    var lastNoteMidi: Int = -1
+    var lastNoteMidi: Int = -1,
+
+    // Per-column FX memory (for RND "previously active" command)
+    /** Last non-RND/RNL/CHA FX type per column (1-indexed: [0]=unused, [1]=FX1, [2]=FX2, [3]=FX3) */
+    var lastColFxType: IntArray = IntArray(4),
+    /** Last non-RND/RNL/CHA FX value per column */
+    var lastColFxValue: IntArray = IntArray(4)
 ) {
     /** Check if persistent REPEAT is active */
     fun hasActiveRepeat(): Boolean = repeatActiveColumn > 0 && repeatTicInterval > 0
@@ -1012,13 +1019,116 @@ class PlaybackController(
             }
         }
 
+        // RND/RNL xy: randomize FX values (evaluated BEFORE effect resolution)
+        // x = min high nibble, y = max high nibble → random value in range [x0, yF]
+        //
+        // RND: Randomizes the PREVIOUSLY ACTIVE FX in the same column (temporal).
+        //   Replaces itself with the last FX type+randomized value from this column.
+        //   If no previous FX exists, does nothing.
+        //
+        // RNL: Randomizes the FX to the LEFT in the same row (spatial).
+        //   FX2 → randomizes FX1 value, FX3 → randomizes FX2 value.
+        //   In FX1: randomizes note (X range) and instrument (Y range).
+        for (slot in 1..3) {
+            val (fxType, fxValue) = when (slot) {
+                1 -> effectiveStep.fx1Type to effectiveStep.fx1Value
+                2 -> effectiveStep.fx2Type to effectiveStep.fx2Value
+                3 -> effectiveStep.fx3Type to effectiveStep.fx3Value
+                else -> continue
+            }
+
+            val minNibble = (fxValue shr 4) and 0x0F
+            val maxNibble = fxValue and 0x0F
+
+            if (fxType == EffectProcessor.FX_RND) {
+                // RND: temporal — recall previously active FX in this column
+                val prevType = trackState.lastColFxType[slot]
+                val prevValue = trackState.lastColFxValue[slot]
+                if (prevType == 0x00) continue  // No previous FX to randomize
+
+                val minVal = minNibble shl 4
+                val maxVal = (maxNibble shl 4) or 0x0F
+                val randomValue = if (minVal <= maxVal) {
+                    kotlin.random.Random.nextInt(minVal, maxVal + 1)
+                } else {
+                    kotlin.random.Random.nextInt(maxVal, minVal + 1)
+                }
+
+                // Replace this column with the previous FX type + random value
+                effectiveStep = effectiveStep.copy().also { s ->
+                    when (slot) {
+                        1 -> { s.fx1Type = prevType; s.fx1Value = randomValue }
+                        2 -> { s.fx2Type = prevType; s.fx2Value = randomValue }
+                        3 -> { s.fx3Type = prevType; s.fx3Value = randomValue }
+                    }
+                }
+                logger.d(TAG, "🎲 RND: FX$slot recalled ${getEffectTypeName(prevType)} → " +
+                        "0x${randomValue.toString(16).uppercase().padStart(2, '0')} " +
+                        "(was 0x${prevValue.toString(16).uppercase().padStart(2, '0')}, " +
+                        "range ${minNibble.toString(16).uppercase()}0-${maxNibble.toString(16).uppercase()}F)")
+
+            } else if (fxType == EffectProcessor.FX_RNL) {
+                // RNL: spatial — randomize the column to the left
+                if (slot == 1) {
+                    // Special case: FX1 → randomize note and instrument
+                    if (hasNote) {
+                        val noteMidi = step.note.toMidi()
+                        if (noteMidi >= 0) {
+                            // X = note range (semitones ±), Y = instrument range (±)
+                            val noteRange = minNibble  // 0=no change, F=±15 semitones
+                            val instRange = maxNibble  // 0=no change, F=±15 instruments
+                            val noteOffset = if (noteRange > 0) {
+                                kotlin.random.Random.nextInt(-noteRange, noteRange + 1)
+                            } else 0
+                            val instOffset = if (instRange > 0) {
+                                kotlin.random.Random.nextInt(-instRange, instRange + 1)
+                            } else 0
+
+                            effectiveStep = effectiveStep.copy(
+                                note = Note.fromMidi((noteMidi + noteOffset).coerceIn(0, 119)),
+                                instrument = (step.instrument + instOffset).coerceIn(0, 255)
+                            )
+                            logger.d(TAG, "🎲 RNL FX1: note ${step.note}→${effectiveStep.note} " +
+                                    "(±$noteRange), inst ${step.instrument.toString(16).uppercase().padStart(2, '0')}" +
+                                    "→${effectiveStep.instrument.toString(16).uppercase().padStart(2, '0')} (±$instRange)")
+                        }
+                    }
+                } else {
+                    // FX2→FX1, FX3→FX2: randomize the left column's value
+                    val targetSlot = slot - 1
+                    val minVal = minNibble shl 4
+                    val maxVal = (maxNibble shl 4) or 0x0F
+                    val randomValue = if (minVal <= maxVal) {
+                        kotlin.random.Random.nextInt(minVal, maxVal + 1)
+                    } else {
+                        kotlin.random.Random.nextInt(maxVal, minVal + 1)
+                    }
+
+                    effectiveStep = effectiveStep.copy().also { s ->
+                        when (targetSlot) {
+                            1 -> s.fx1Value = randomValue
+                            2 -> s.fx2Value = randomValue
+                        }
+                    }
+                    val targetType = when (targetSlot) {
+                        1 -> getEffectTypeName(effectiveStep.fx1Type)
+                        2 -> getEffectTypeName(effectiveStep.fx2Type)
+                        else -> "???"
+                    }
+                    logger.d(TAG, "🎲 RNL: FX$targetSlot ($targetType) value → " +
+                            "0x${randomValue.toString(16).uppercase().padStart(2, '0')} " +
+                            "(range ${minNibble.toString(16).uppercase()}0-${maxNibble.toString(16).uppercase()}F)")
+                }
+            }
+        }
+
         val defaultVolume = effectiveStep.volume / 255.0f
         val params = effectProcessor.resolveStepParams(effectiveStep, targetFrame, defaultVolume)
 
         // Apply volume chain: instrument × phrase only
         // NOTE: Track × master are applied in C++ in real-time, allowing mixer changes
         // to take effect immediately without rescheduling notes
-        val instrument = project.instruments[step.instrument]
+        val instrument = project.instruments[effectiveStep.instrument]
         val finalVolume = VolumeUtils.calculateNoteVolume(
             instrumentVol = instrument.volume,
             phraseVol = (params.volume * 255).toInt().coerceIn(0, 255)  // Convert back to hex
@@ -1042,17 +1152,17 @@ class PlaybackController(
 
         var noteScheduled = false
         if (hasNote && !skipNote) {
-            // Apply transposition if needed
+            // Apply transposition if needed (use effectiveStep for RNL note randomization)
             val note = if (transposeSemitones != 0) {
-                val originalMidi = step.note.toMidi()
+                val originalMidi = effectiveStep.note.toMidi()
                 if (originalMidi >= 0) {
                     val transposedMidi = (originalMidi + transposeSemitones).coerceIn(0, 127)
                     Note.fromMidi(transposedMidi)
                 } else {
-                    step.note
+                    effectiveStep.note
                 }
             } else {
-                step.note
+                effectiveStep.note
             }
 
             // Save previous MIDI for PSL calculation BEFORE updating track state
@@ -1124,7 +1234,7 @@ class PlaybackController(
             audioEngine.scheduleNote(
                 targetFrame = effectiveTargetFrame,
                 note = note,
-                instrumentId = step.instrument,
+                instrumentId = effectiveStep.instrument,
                 trackId = trackId,
                 volume = finalVolume,
                 pan = instrumentPan,
@@ -1140,7 +1250,7 @@ class PlaybackController(
 
             // Update track state with this note (for persistent REPEAT retrigger)
             trackState.lastNote = note
-            trackState.lastInstrument = step.instrument
+            trackState.lastInstrument = effectiveStep.instrument
             trackState.lastVolume = finalVolume
             trackState.lastStartPoint = params.startPoint
             trackState.lastPan = instrumentPan
@@ -1343,14 +1453,14 @@ class PlaybackController(
             // Determine note/instrument to retrigger
             val retrigNote = if (hasNote) {
                 if (transposeSemitones != 0) {
-                    val originalMidi = step.note.toMidi()
+                    val originalMidi = effectiveStep.note.toMidi()
                     if (originalMidi >= 0) Note.fromMidi((originalMidi + transposeSemitones).coerceIn(0, 127))
-                    else step.note
-                } else step.note
+                    else effectiveStep.note
+                } else effectiveStep.note
             } else {
                 trackState.lastNote
             }
-            val retrigInstrument = if (hasNote) step.instrument else trackState.lastInstrument
+            val retrigInstrument = if (hasNote) effectiveStep.instrument else trackState.lastInstrument
             val retrigPan = if (hasNote) instrumentPan else trackState.lastPan
             val retrigStartPoint = if (hasNote) params.startPoint else trackState.lastStartPoint
             val rampDelta = volRampDeltas[activeVolRamp.coerceIn(0, 15)]
@@ -1504,12 +1614,28 @@ class PlaybackController(
                 trackState = trackState,
                 project = project,
                 hasNote = hasNote,
-                step = step,
+                step = effectiveStep,
                 params = params,
                 transposeSemitones = transposeSemitones,
                 finalVolume = finalVolume,
                 finalPan = instrumentPan
             )
+        }
+
+        // Update per-column FX memory for RND (stores "previously active" FX per column)
+        // Only store real effects, not meta-effects (RND, RNL, CHA, NONE)
+        val metaEffects = setOf(EffectProcessor.FX_NONE, EffectProcessor.FX_RND, EffectProcessor.FX_RNL, EffectProcessor.FX_CHA)
+        for (col in 1..3) {
+            val (fxType, fxValue) = when (col) {
+                1 -> step.fx1Type to step.fx1Value
+                2 -> step.fx2Type to step.fx2Value
+                3 -> step.fx3Type to step.fx3Value
+                else -> continue
+            }
+            if (fxType !in metaEffects) {
+                trackState.lastColFxType[col] = fxType
+                trackState.lastColFxValue[col] = fxValue
+            }
         }
 
         return ScheduleStepResult(noteScheduled = noteScheduled, hopTriggered = hopTriggered)
