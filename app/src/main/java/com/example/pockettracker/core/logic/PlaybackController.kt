@@ -970,11 +970,50 @@ class PlaybackController(
         }
 
         // ═══════════════════════════════════════════════════════════════════════════
-        // STEP 2: Resolve effects and schedule note if present
+        // STEP 2: Handle CHA (Chance), resolve effects, and schedule note
         // ═══════════════════════════════════════════════════════════════════════════
 
-        val defaultVolume = step.volume / 255.0f
-        val params = effectProcessor.resolveStepParams(step, targetFrame, defaultVolume)
+        // CHA xy: probability gate (evaluated BEFORE effect resolution)
+        // x = probability (0=never, F=always), y = target (0=note, 1-3=FX slot)
+        var skipNote = false
+        var effectiveStep = step
+        for (slot in 1..3) {
+            val (fxType, fxValue) = when (slot) {
+                1 -> step.fx1Type to step.fx1Value
+                2 -> step.fx2Type to step.fx2Value
+                3 -> step.fx3Type to step.fx3Value
+                else -> continue
+            }
+            if (fxType == EffectProcessor.FX_CHA && fxValue > 0) {
+                val probability = (fxValue shr 4) and 0x0F
+                val target = fxValue and 0x0F
+                val roll = kotlin.random.Random.nextInt(15)  // 0-14
+                val passed = roll < probability  // probability F (15) always passes, 0 never passes
+
+                if (!passed) {
+                    val targetName = if (target == 0) "note" else "FX$target"
+                    logger.d(TAG, "🎲 CHA: probability=$probability/15, roll=$roll → BLOCKED $targetName")
+                    if (target == 0) {
+                        skipNote = true
+                    } else if (target in 1..3) {
+                        // Zero out the targeted FX slot before resolution
+                        effectiveStep = effectiveStep.copy().also { s ->
+                            when (target) {
+                                1 -> { s.fx1Type = 0x00; s.fx1Value = 0x00 }
+                                2 -> { s.fx2Type = 0x00; s.fx2Value = 0x00 }
+                                3 -> { s.fx3Type = 0x00; s.fx3Value = 0x00 }
+                            }
+                        }
+                    }
+                } else {
+                    val targetName = if (target == 0) "note" else "FX$target"
+                    logger.d(TAG, "🎲 CHA: probability=$probability/15, roll=$roll → PASSED $targetName")
+                }
+            }
+        }
+
+        val defaultVolume = effectiveStep.volume / 255.0f
+        val params = effectProcessor.resolveStepParams(effectiveStep, targetFrame, defaultVolume)
 
         // Apply volume chain: instrument × phrase only
         // NOTE: Track × master are applied in C++ in real-time, allowing mixer changes
@@ -1002,7 +1041,7 @@ class PlaybackController(
         }
 
         var noteScheduled = false
-        if (hasNote) {
+        if (hasNote && !skipNote) {
             // Apply transposition if needed
             val note = if (transposeSemitones != 0) {
                 val originalMidi = step.note.toMidi()
@@ -1228,11 +1267,11 @@ class PlaybackController(
         // Find which column has REPEAT effect (if any)
         // XY parsing is done centrally by EffectProcessor.resolveStepParams()
         var newRepeatColumn = 0
-        if (step.fx1Type == EffectProcessor.FX_REPEAT && step.fx1Value > 0) {
+        if (effectiveStep.fx1Type == EffectProcessor.FX_REPEAT && effectiveStep.fx1Value > 0) {
             newRepeatColumn = 1
-        } else if (step.fx2Type == EffectProcessor.FX_REPEAT && step.fx2Value > 0) {
+        } else if (effectiveStep.fx2Type == EffectProcessor.FX_REPEAT && effectiveStep.fx2Value > 0) {
             newRepeatColumn = 2
-        } else if (step.fx3Type == EffectProcessor.FX_REPEAT && step.fx3Value > 0) {
+        } else if (effectiveStep.fx3Type == EffectProcessor.FX_REPEAT && effectiveStep.fx3Value > 0) {
             newRepeatColumn = 3
         }
         // Use centralized XY parsing from EffectProcessor
@@ -1420,15 +1459,15 @@ class PlaybackController(
         // Find which column has ARPEGGIO effect (if any) and its value
         var newArpColumn = 0
         var newArpValue = 0
-        if (step.fx1Type == EffectProcessor.FX_ARPEGGIO) {
+        if (effectiveStep.fx1Type == EffectProcessor.FX_ARPEGGIO) {
             newArpColumn = 1
-            newArpValue = step.fx1Value
-        } else if (step.fx2Type == EffectProcessor.FX_ARPEGGIO) {
+            newArpValue = effectiveStep.fx1Value
+        } else if (effectiveStep.fx2Type == EffectProcessor.FX_ARPEGGIO) {
             newArpColumn = 2
-            newArpValue = step.fx2Value
-        } else if (step.fx3Type == EffectProcessor.FX_ARPEGGIO) {
+            newArpValue = effectiveStep.fx2Value
+        } else if (effectiveStep.fx3Type == EffectProcessor.FX_ARPEGGIO) {
             newArpColumn = 3
-            newArpValue = step.fx3Value
+            newArpValue = effectiveStep.fx3Value
         }
 
         // ARP00 cancels arpeggio (explicit cancellation)
