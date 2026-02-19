@@ -58,24 +58,25 @@ data class ResolvedStepParams(
     /**
      * Repeat tic interval, or null if no REPEAT effect.
      *
-     * REPEAT (Rxx) uses tic-interval approach (LGPT/M8 style):
+     * REPEAT (RXY) - M8-style retrigger with optional volume ramping:
      *
-     * ## Sub-step intervals (R01-R0B) - multiple triggers within one step:
-     * - R00 = no effect / cancel persistent REPEAT
-     * - R01 = retrig every 1 tic = 12 triggers/step (fastest)
-     * - R02 = retrig every 2 tics = 6 triggers/step
-     * - R03 = retrig every 3 tics = 4 triggers/step (triplets!)
-     * - R04 = retrig every 4 tics = 3 triggers/step
-     * - R06 = retrig every 6 tics = 2 triggers/step
+     * ## Format:
+     * - R00 = cancel persistent REPEAT
+     * - RX0 (Y=0, X=1-F): retrig every X ticks, no volume ramp
+     * - RXY (Y!=0): retrig every Y ticks, volume ramp X
+     *   - X=0: no volume change
+     *   - X=1-7: decrease volume per retrig (1=slight, 7=heavy)
+     *   - X=8: no volume change
+     *   - X=9-F: increase volume per retrig (9=slight, F=heavy)
      *
-     * ## Multi-step intervals (R0C+) - one trigger every N steps:
-     * - R0C (12) = every 1 step (same timing as no retrig)
-     * - R12 (18) = every 1.5 steps (dotted quarter notes!)
-     * - R18 (24) = every 2 steps
-     * - R24 (36) = every 3 steps
-     * - R30 (48) = every 4 steps (4 kicks in 16-step phrase!)
-     * - R3C (60) = every 5 steps
-     * - R60 (96) = every 8 steps (2 triggers per phrase)
+     * ## Examples:
+     * - R30 = retrig every 3 ticks (4 triggers/step), no vol ramp
+     * - R03 = retrig every 3 ticks, no vol ramp
+     * - R13 = retrig every 3 ticks, slight volume decrease
+     * - R73 = retrig every 3 ticks, heavy volume decrease
+     * - RF3 = retrig every 3 ticks, heavy volume increase
+     *
+     * Max interval: F (15 ticks = 1.25 steps)
      *
      * ## Persistence
      * REPEAT persists until cancelled by:
@@ -84,6 +85,15 @@ data class ResolvedStepParams(
      * 3. KILL effect (K00) in any FX column
      */
     val repeatCount: Int? = null,
+
+    /**
+     * Volume ramp for REPEAT effect (0-F), or null if no REPEAT.
+     * Uses ADDITIVE delta per retrigger (accumulates across steps):
+     * - 0 and 8: no change (delta = 0.0)
+     * - 1-7: decrease volume per retrig (1=-0.02, 7=-0.30)
+     * - 9-F: increase volume per retrig (9=+0.02, F=+0.30)
+     */
+    val repeatVolRamp: Int? = null,
 
     /**
      * HOP effect value, or null if no HOP effect (Phase 5).
@@ -159,7 +169,82 @@ data class ResolvedStepParams(
      * - x = speed: effective Hz = (2 + x * 0.5) * 2
      * - y = depth: effective semitones = y * 0.125 * 4
      */
-    val pvxValue: Int? = null
+    val pvxValue: Int? = null,
+
+    // ===================================
+    // EXTENSION PACK 3 EFFECTS
+    // ===================================
+
+    /**
+     * DEL (Delay) ticks, or null if no DEL effect.
+     *
+     * DEL xx delays the row trigger by xx ticks.
+     * - 00 = no delay
+     * - 01-FF = delay by that many ticks before triggering
+     *
+     * Used for: swing, humanization, flams, odd groove patterns
+     */
+    val delayTicks: Int? = null,
+
+    /**
+     * CHA (Chance) value, or null if no CHA effect.
+     *
+     * CHA xy: probability-based effect execution
+     * - x = probability (0-F): 0=never, F=always, 8=~50%
+     * - y = target: 0=this row's note trigger, 1-3=FX slot 1-3
+     *
+     * Used for: generative music, random muting, stochastic patterns
+     */
+    val chanceValue: Int? = null,
+
+    /**
+     * RND (Randomize) value, or null if no RND effect.
+     *
+     * RND xy: randomizes the effect value in the PREVIOUS FX column
+     * - x = minimum random value high nibble
+     * - y = maximum random value high nibble
+     * - Actual range: x0 to yF
+     *
+     * Example: VOL 80 / RND 4C → volume randomized between 40-CF
+     */
+    val rndValue: Int? = null,
+
+    /**
+     * RNL (Randomize Left) value, or null if no RNL effect.
+     *
+     * RNL xy: randomizes the effect value in the FX column to the LEFT
+     * Same format as RND but targets the column immediately to the left.
+     * - In FX2: targets FX1
+     * - In FX3: targets FX2
+     * - In FX1: no effect (nothing to the left)
+     */
+    val rnlValue: Int? = null,
+
+    /**
+     * TBL (Table) override, or null if no TBL effect.
+     *
+     * TBL xx: assigns table xx to the current instrument for this note.
+     * - 00-FF = table ID
+     * - Overrides instrument's default table assignment
+     */
+    val tableOverride: Int? = null,
+
+    /**
+     * THO (Table Hop) target row, or null if no THO effect.
+     *
+     * THO xx: jump to row xx in the current table.
+     * - 00-0F = target row in table
+     */
+    val tableHopTarget: Int? = null,
+
+    /**
+     * GRV (Groove) ID, or null if no GRV effect.
+     *
+     * GRV xx: assign groove table xx to this track.
+     * - 00 = disable groove (use default timing)
+     * - 01-FF = groove table ID
+     */
+    val grooveId: Int? = null
 )
 
 /**
@@ -202,12 +287,19 @@ class EffectProcessor(
 
         // TOP-5 Effects (Phrase screen)
         const val FX_ARC = 0x03       // Cxx - Arpeggio Config (mode/speed)
+        const val FX_CHA = 0x04       // CHA xy - Chance: x=probability (0-F), y=target FX slot (0=all)
+        const val FX_DEL = 0x05       // DEL xx - Delay row by xx ticks before triggering
+        const val FX_GRV = 0x07       // GRV xx - Assign groove table xx to this track
         const val FX_HOP = 0x08       // Hxx - HOP: Phrase (jump row on next phrase, FF=stop track), Table (jump row with repeat count)
         const val FX_TIC = 0x09       // Txx - Table tick rate (01-FB = tics/row, FC-FF = special modes)
         const val FX_ARPEGGIO = 0x0A  // Axx - Note pattern automation
         const val FX_KILL = 0x0B      // K00 - Kill sample
         const val FX_OFFSET = 0x0F    // Oxx - Sample start point
-        const val FX_REPEAT = 0x12    // Rxx - Retrigger sample
+        const val FX_RND = 0x10       // RND xy - Randomize: apply random value to previous FX column
+        const val FX_RNL = 0x11       // RNL xy - Randomize Left: apply random value to FX column to the left
+        const val FX_REPEAT = 0x12    // Rxy - Retrigger (M8-style: y!=0: retrig y ticks + vol ramp x; y=0: retrig x ticks)
+        const val FX_TBL = 0x14       // TBL xx - Set table xx for this instrument
+        const val FX_THO = 0x15       // THO xx - Table Hop: jump to row xx in current table
         const val FX_VOLUME = 0x16    // Vxx - Volume automation
 
         // Pitch Effects (Phase 7)
@@ -219,10 +311,11 @@ class EffectProcessor(
         /**
          * List of all valid effect types for UI cycling.
          * Used by editors to cycle through effect types with UP/DOWN.
-         * Order: NONE, ARC, HOP, TIC, ARPEGGIO, KILL, OFFSET, REPEAT, VOLUME, PSL, PBN, PVB, PVX (sorted by hex value)
+         * Sorted by hex value: NONE, ARC, CHA, DEL, GRV, HOP, TIC, ARP, KIL, OFF, RND, RNL, RPT, TBL, THO, VOL, PSL, PBN, PVB, PVX
          */
         val EFFECT_TYPES = listOf(
-            FX_NONE, FX_ARC, FX_HOP, FX_TIC, FX_ARPEGGIO, FX_KILL, FX_OFFSET, FX_REPEAT, FX_VOLUME,
+            FX_NONE, FX_ARC, FX_CHA, FX_DEL, FX_GRV, FX_HOP, FX_TIC, FX_ARPEGGIO, FX_KILL, FX_OFFSET,
+            FX_RND, FX_RNL, FX_REPEAT, FX_TBL, FX_THO, FX_VOLUME,
             FX_PSL, FX_PBN, FX_PVB, FX_PVX
         )
     }
@@ -258,6 +351,7 @@ class EffectProcessor(
         var arpeggioValue: Int? = null
         var arcValue: Int? = null
         var repeatCount: Int? = null
+        var repeatVolRamp: Int? = null
         var hopValue: Int? = null
 
         // Pitch effects (Phase 7)
@@ -265,6 +359,15 @@ class EffectProcessor(
         var pbnValue: Int? = null
         var pvbValue: Int? = null
         var pvxValue: Int? = null
+
+        // Extension Pack 3 effects
+        var delayTicks: Int? = null
+        var chanceValue: Int? = null
+        var rndValue: Int? = null
+        var rnlValue: Int? = null
+        var tableOverride: Int? = null
+        var tableHopTarget: Int? = null
+        var grooveId: Int? = null
 
         // Check all 3 FX columns
         for (fxSlot in 1..3) {
@@ -311,8 +414,26 @@ class EffectProcessor(
                 }
 
                 FX_REPEAT -> {
-                    repeatCount = value
-                    logger.d(TAG, "🔁 REPEAT effect: $value retriggers")
+                    // M8-style RXY format:
+                    // R00 = cancel (handled by PlaybackController)
+                    // RX0 (Y=0): retrig every X ticks, no vol ramp
+                    // RXY (Y!=0): retrig every Y ticks, vol ramp X
+                    val highNibble = (value shr 4) and 0x0F
+                    val lowNibble = value and 0x0F
+                    if (lowNibble != 0) {
+                        repeatCount = lowNibble      // Y = tic interval
+                        repeatVolRamp = highNibble   // X = volume ramp
+                    } else {
+                        repeatCount = highNibble     // X = tic interval (when Y=0)
+                        repeatVolRamp = 0            // No volume ramp
+                    }
+                    val rampDesc = when {
+                        (repeatVolRamp ?: 0) == 0 || (repeatVolRamp ?: 0) == 8 -> "no vol ramp"
+                        (repeatVolRamp ?: 0) in 1..7 -> "vol decrease ${repeatVolRamp}"
+                        else -> "vol increase ${(repeatVolRamp ?: 0) - 8}"
+                    }
+                    logger.d(TAG, "🔁 REPEAT R${value.toString(16).uppercase().padStart(2, '0')}: " +
+                            "retrig every ${repeatCount} ticks, $rampDesc")
                 }
 
                 FX_HOP -> {
@@ -366,6 +487,60 @@ class EffectProcessor(
                         logger.d(TAG, "🎵 PVX effect: speed=${speed}Hz, depth=$depth semitones (extreme)")
                     }
                 }
+
+                // ===================================
+                // EXTENSION PACK 3 EFFECTS
+                // ===================================
+
+                FX_DEL -> {
+                    delayTicks = value
+                    logger.d(TAG, "⏳ DEL effect: delay $value ticks")
+                }
+
+                FX_CHA -> {
+                    chanceValue = value
+                    val probability = (value shr 4) and 0x0F
+                    val target = value and 0x0F
+                    val targetName = when (target) {
+                        0 -> "note trigger"
+                        in 1..3 -> "FX slot $target"
+                        else -> "unknown"
+                    }
+                    logger.d(TAG, "🎲 CHA effect: probability=$probability/15, target=$targetName")
+                }
+
+                FX_RND -> {
+                    rndValue = value
+                    val minNibble = (value shr 4) and 0x0F
+                    val maxNibble = value and 0x0F
+                    logger.d(TAG, "🎲 RND effect: randomize previous FX value range ${minNibble}0-${maxNibble}F")
+                }
+
+                FX_RNL -> {
+                    rnlValue = value
+                    val minNibble = (value shr 4) and 0x0F
+                    val maxNibble = value and 0x0F
+                    logger.d(TAG, "🎲 RNL effect: randomize left FX value range ${minNibble}0-${maxNibble}F")
+                }
+
+                FX_TBL -> {
+                    tableOverride = value
+                    logger.d(TAG, "📋 TBL effect: set table ${value.toString(16).uppercase().padStart(2, '0')}")
+                }
+
+                FX_THO -> {
+                    tableHopTarget = value
+                    logger.d(TAG, "📋 THO effect: table hop to row ${value.toString(16).uppercase().padStart(2, '0')}")
+                }
+
+                FX_GRV -> {
+                    grooveId = value
+                    if (value == 0) {
+                        logger.d(TAG, "🥁 GRV effect: disable groove (default timing)")
+                    } else {
+                        logger.d(TAG, "🥁 GRV effect: assign groove table ${value.toString(16).uppercase().padStart(2, '0')}")
+                    }
+                }
             }
         }
 
@@ -376,11 +551,19 @@ class EffectProcessor(
             arpeggioValue = arpeggioValue,
             arcValue = arcValue,
             repeatCount = repeatCount,
+            repeatVolRamp = repeatVolRamp,
             hopValue = hopValue,
             pslDuration = pslDuration,
             pbnValue = pbnValue,
             pvbValue = pvbValue,
-            pvxValue = pvxValue
+            pvxValue = pvxValue,
+            delayTicks = delayTicks,
+            chanceValue = chanceValue,
+            rndValue = rndValue,
+            rnlValue = rnlValue,
+            tableOverride = tableOverride,
+            tableHopTarget = tableHopTarget,
+            grooveId = grooveId
         )
     }
 }

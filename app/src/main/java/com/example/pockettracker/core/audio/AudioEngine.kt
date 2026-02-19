@@ -437,7 +437,7 @@ class AudioEngine(
         }
 
         // Debug: Log what we're scheduling
-        android.util.Log.d("AudioEngine", "📋 scheduleNote: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, pan=$pan, tableId=$tableId")
+        android.util.Log.d("AudioEngine", "📋 scheduleNote: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, vol=${"%.4f".format(volume)}, pan=$pan, tableId=$tableId")
 
         val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
         val frequency = note.toFrequency()

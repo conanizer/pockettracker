@@ -41,17 +41,24 @@ fun clearEffect(step: PhraseStep, fxSlot: Int) {
 
 /**
  * Get effect type 3-letter name for display
- * Returns: ---, ARC, HOP, TIC, ARP, KIL, OFF, RPT, VOL, PSL, PBN, PVB, PVX
+ * Returns: ---, ARC, CHA, DEL, GRV, HOP, TIC, ARP, KIL, OFF, RND, RNL, RPT, TBL, THO, VOL, PSL, PBN, PVB, PVX
  */
 fun getEffectTypeName(effectType: Int): String {
     return when (effectType) {
         0x03 -> "ARC"  // Arpeggio Config
+        0x04 -> "CHA"  // Chance
+        0x05 -> "DEL"  // Delay row
+        0x07 -> "GRV"  // Groove assign
         0x08 -> "HOP"  // Table hop (jump to row)
         0x09 -> "TIC"  // Table tick rate
         0x0A -> "ARP"  // Arpeggio
         0x0B -> "KIL"  // Kill
         0x0F -> "OFF"  // Offset
+        0x10 -> "RND"  // Randomize previous FX
+        0x11 -> "RNL"  // Randomize left FX
         0x12 -> "RPT"  // Repeat
+        0x14 -> "TBL"  // Table assign
+        0x15 -> "THO"  // Table Hop
         0x16 -> "VOL"  // Volume
         // Pitch effects (Phase 7)
         0x19 -> "PSL"  // Pitch Slide (portamento)

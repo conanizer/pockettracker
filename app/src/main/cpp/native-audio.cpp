@@ -839,8 +839,8 @@ public:
                             }
 
                             voiceFound = true;
-                            LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
-                                 (long long)currentFrame, note.sampleId, note.trackId, rate, note.pan, note.startPointOverride,
+                            LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, vol=%.4f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
+                                 (long long)currentFrame, note.sampleId, note.trackId, rate, note.volume, note.pan, note.startPointOverride,
                                  note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
                         } else {
                             // Sample not loaded - log specific reason
