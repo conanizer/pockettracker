@@ -988,6 +988,19 @@ class PlaybackController(
         // Get instrument pan (hex 0x00-0xFF → float 0.0-1.0)
         val instrumentPan = VolumeUtils.hexToFloat(instrument.pan)
 
+        // ═══════════════════════════════════════════════════════════════════════════
+        // STEP 2.1: Apply DEL (Delay) effect - offset the target frame
+        // ═══════════════════════════════════════════════════════════════════════════
+        val delayTicks = params.delayTicks ?: 0
+        val effectiveTargetFrame = if (delayTicks > 0) {
+            val framesPerTic = stepDuration / TICS_PER_STEP
+            val delayFrames = delayTicks * framesPerTic
+            logger.d(TAG, "⏳ DEL: delaying note by $delayTicks ticks ($delayFrames frames)")
+            targetFrame + delayFrames
+        } else {
+            targetFrame
+        }
+
         var noteScheduled = false
         if (hasNote) {
             // Apply transposition if needed
@@ -1070,7 +1083,7 @@ class PlaybackController(
 
             // Schedule the note with all pitch mod params (applied when note triggers in C++)
             audioEngine.scheduleNote(
-                targetFrame = targetFrame,
+                targetFrame = effectiveTargetFrame,
                 note = note,
                 instrumentId = step.instrument,
                 trackId = trackId,
@@ -1100,9 +1113,15 @@ class PlaybackController(
             }
         }
 
-        // Handle KILL effect - schedule kill at the specified frame and clear pitch mods
+        // Handle KILL effect - schedule kill at the specified frame (offset by DEL if present)
         if (params.killAtFrame != null) {
-            audioEngine.scheduleKill(params.killAtFrame, trackId)
+            val killFrame = if (delayTicks > 0) {
+                val framesPerTic = stepDuration / TICS_PER_STEP
+                params.killAtFrame + delayTicks * framesPerTic
+            } else {
+                params.killAtFrame
+            }
+            audioEngine.scheduleKill(killFrame, trackId)
             trackState.clearPitchMod()
         }
 
