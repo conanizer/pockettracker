@@ -169,7 +169,7 @@ data class Table(
 @Serializable
 data class TableRow(
     var transpose: Int = 0x00,      // Note transpose: 00-7F = +semitones, 80-FF = -semitones (signed)
-    var volume: Int = 0xFF,         // Volume multiplier: 00-FF (FF = no change)
+    var volume: Int = -1,            // Volume multiplier: 00-FF, -1 = no change (empty)
     var fx1Type: Int = 0x00,        // Effect 1 type
     var fx1Value: Int = 0x00,       // Effect 1 value
     var fx2Type: Int = 0x00,        // Effect 2 type
@@ -196,7 +196,7 @@ data class TableRow(
      */
     fun isEmpty(): Boolean {
         return transpose == 0x00 &&
-               volume == 0xFF &&
+               volume == -1 &&
                fx1Type == 0x00 &&
                fx2Type == 0x00 &&
                fx3Type == 0x00

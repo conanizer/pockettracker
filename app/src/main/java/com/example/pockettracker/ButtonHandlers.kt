@@ -12,6 +12,8 @@
 
 package com.example.pockettracker
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -160,6 +162,40 @@ class InputMapper(
     // Double-tap detection
     private var lastAPress: Long = 0
     private val doubleTapWindow = 300L  // 300ms window for double-tap
+
+    // Key repeat system for D-PAD, A+DPAD, B+DPAD
+    private val repeatHandler = Handler(Looper.getMainLooper())
+    private var repeatRunnable: Runnable? = null
+    private var repeatAction: (() -> Unit)? = null
+    private companion object {
+        const val REPEAT_INITIAL_DELAY = 400L  // ms before first repeat
+        const val REPEAT_INTERVAL = 100L       // ms between repeats
+    }
+
+    /**
+     * Start key repeat for a repeatable action.
+     * After initial delay, fires the action repeatedly at fixed interval.
+     */
+    private fun startKeyRepeat(action: () -> Unit) {
+        cancelKeyRepeat()
+        repeatAction = action
+        repeatRunnable = object : Runnable {
+            override fun run() {
+                repeatAction?.invoke()
+                repeatHandler.postDelayed(this, REPEAT_INTERVAL)
+            }
+        }
+        repeatHandler.postDelayed(repeatRunnable!!, REPEAT_INITIAL_DELAY)
+    }
+
+    /**
+     * Cancel any active key repeat.
+     */
+    private fun cancelKeyRepeat() {
+        repeatRunnable?.let { repeatHandler.removeCallbacks(it) }
+        repeatRunnable = null
+        repeatAction = null
+    }
 
     /**
      * Keyboard to VirtualButton mapping
@@ -336,8 +372,16 @@ class InputMapper(
             if (button == VirtualButton.SELECT) isSelectPressed = false
         }
 
-        // Only handle button presses (not releases) for now
-        if (action != ButtonAction.PRESSED) return
+        // Cancel key repeat on any key release (D-PAD, A, B)
+        if (action == ButtonAction.RELEASED) {
+            when (button) {
+                VirtualButton.DPAD_UP, VirtualButton.DPAD_DOWN,
+                VirtualButton.DPAD_LEFT, VirtualButton.DPAD_RIGHT,
+                VirtualButton.A, VirtualButton.B -> cancelKeyRepeat()
+                else -> {}
+            }
+            return
+        }
 
         // Debug: Log modifier states when any button is pressed
         if (logInput) {
@@ -364,21 +408,25 @@ class InputMapper(
                 VirtualButton.DPAD_UP -> {
                     if (logInput) Log.d(TAG, "A+UP (increment by small step)")
                     buttonHandlers.onAUp()
+                    startKeyRepeat { buttonHandlers.onAUp() }
                     return
                 }
                 VirtualButton.DPAD_DOWN -> {
                     if (logInput) Log.d(TAG, "A+DOWN (decrement by small step)")
                     buttonHandlers.onADown()
+                    startKeyRepeat { buttonHandlers.onADown() }
                     return
                 }
                 VirtualButton.DPAD_RIGHT -> {
                     if (logInput) Log.d(TAG, "A+RIGHT (increment by large step)")
                     buttonHandlers.onARight()
+                    startKeyRepeat { buttonHandlers.onARight() }
                     return
                 }
                 VirtualButton.DPAD_LEFT -> {
                     if (logInput) Log.d(TAG, "A+LEFT (decrement by large step)")
                     buttonHandlers.onALeft()
+                    startKeyRepeat { buttonHandlers.onALeft() }
                     return
                 }
                 else -> { }
@@ -392,11 +440,13 @@ class InputMapper(
                 VirtualButton.DPAD_LEFT -> {
                     if (logInput) Log.d(TAG, "B+LEFT (previous item)")
                     buttonHandlers.onBLeft()
+                    startKeyRepeat { buttonHandlers.onBLeft() }
                     return
                 }
                 VirtualButton.DPAD_RIGHT -> {
                     if (logInput) Log.d(TAG, "B+RIGHT (next item)")
                     buttonHandlers.onBRight()
+                    startKeyRepeat { buttonHandlers.onBRight() }
                     return
                 }
                 else -> { }
@@ -606,10 +656,22 @@ class InputMapper(
         // Only call basic handlers if no modifiers are pressed
         if (!isLPressed && !isRPressed && !isAPressed && !isBPressed && !isSelectPressed) {
             when (button) {
-                VirtualButton.DPAD_UP -> buttonHandlers.onDPadUp()
-                VirtualButton.DPAD_DOWN -> buttonHandlers.onDPadDown()
-                VirtualButton.DPAD_LEFT -> buttonHandlers.onDPadLeft()
-                VirtualButton.DPAD_RIGHT -> buttonHandlers.onDPadRight()
+                VirtualButton.DPAD_UP -> {
+                    buttonHandlers.onDPadUp()
+                    startKeyRepeat { buttonHandlers.onDPadUp() }
+                }
+                VirtualButton.DPAD_DOWN -> {
+                    buttonHandlers.onDPadDown()
+                    startKeyRepeat { buttonHandlers.onDPadDown() }
+                }
+                VirtualButton.DPAD_LEFT -> {
+                    buttonHandlers.onDPadLeft()
+                    startKeyRepeat { buttonHandlers.onDPadLeft() }
+                }
+                VirtualButton.DPAD_RIGHT -> {
+                    buttonHandlers.onDPadRight()
+                    startKeyRepeat { buttonHandlers.onDPadRight() }
+                }
                 // SELECT and START now handled above with explicit logging
                 else -> { } // A, B, L, R are handled above
             }

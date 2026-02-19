@@ -717,6 +717,42 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     }
 
     /**
+     * Handle A+DPAD with selection awareness.
+     *
+     * When selection is active, applies increment/decrement to ALL selected rows
+     * in the cursor's column. When no selection, delegates to handleGenericInput.
+     */
+    fun handleSelectionOrSingleIncrement(handlerFunction: (CursorContext) -> InputAction) {
+        if (!trackerController.inputController.isSelectionModeActive()) {
+            handleGenericInput(handlerFunction)
+            return
+        }
+
+        val bounds = trackerController.inputController.getSelectionBounds() ?: return
+
+        // Determine which cursor row property to use based on current screen
+        when (trackerController.currentScreen) {
+            ScreenType.PHRASE, ScreenType.CHAIN, ScreenType.SONG -> {
+                val savedRow = trackerController.cursorRow
+                for (row in bounds.topLeftRow..bounds.bottomRightRow) {
+                    trackerController.cursorRow = row
+                    handleGenericInput(handlerFunction)
+                }
+                trackerController.cursorRow = savedRow
+            }
+            ScreenType.TABLE -> {
+                val savedRow = trackerController.tableCursorRow
+                for (row in bounds.topLeftRow..bounds.bottomRightRow) {
+                    trackerController.tableCursorRow = row
+                    handleGenericInput(handlerFunction)
+                }
+                trackerController.tableCursorRow = savedRow
+            }
+            else -> handleGenericInput(handlerFunction)
+        }
+    }
+
+    /**
      * Apply an InputAction based on current screen and context
      *
      * This dispatcher handles InputAction objects returned by InputController.
@@ -1540,23 +1576,23 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 // A + DIRECTION COMBINATIONS (M8-style value editing)
 // ───────────────────────────────────────────────────────────────
             onAUp = {
-                // A+UP: Small increment (uses InputController)
-                handleGenericInput { context -> trackerController.inputController.handleAButton(context) }
+                // A+UP: Small increment (selection-aware)
+                handleSelectionOrSingleIncrement { context -> trackerController.inputController.handleAButton(context) }
             },
 
             onADown = {
-                // A+DOWN: Small decrement (uses InputController)
-                handleGenericInput { context -> trackerController.inputController.handleBButton(context) }
+                // A+DOWN: Small decrement (selection-aware)
+                handleSelectionOrSingleIncrement { context -> trackerController.inputController.handleBButton(context) }
             },
 
             onALeft = {
-                // A+LEFT: Large decrement (uses InputController)
-                handleGenericInput { context -> trackerController.inputController.handleALeft(context) }
+                // A+LEFT: Large decrement (selection-aware)
+                handleSelectionOrSingleIncrement { context -> trackerController.inputController.handleALeft(context) }
             },
 
             onARight = {
-                // A+RIGHT: Large increment (uses InputController)
-                handleGenericInput { context -> trackerController.inputController.handleARight(context) }
+                // A+RIGHT: Large increment (selection-aware)
+                handleSelectionOrSingleIncrement { context -> trackerController.inputController.handleARight(context) }
             },
 
 // ───────────────────────────────────────────────────────────────

@@ -254,7 +254,7 @@ object CursorContextFactory {
                 canIncrement = true,     // Cycle to next effect type
                 canDecrement = true,     // Cycle to previous effect type
                 canDelete = currentType != EffectProcessor.FX_NONE,  // A+B clears effect (but only if not already NONE)
-                isEmpty = currentType == EffectProcessor.FX_NONE
+                isEmpty = false  // FX_NONE is a valid position in the cycle, not "empty"
             ),
             currentValue = currentIndex,  // Store as index (0-5), not effect code
             minValue = 0,
