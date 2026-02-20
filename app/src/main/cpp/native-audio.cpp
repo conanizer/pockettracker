@@ -136,6 +136,9 @@ struct ScheduledNote {
     float vibratoSpeed;      // PVB/PVX: LFO speed in Hz (0 = no vibrato)
     float vibratoDepth;      // PVB/PVX: Depth in semitones (0 = no vibrato)
 
+    // Table start row override (Phase 8 - THO effect from phrase)
+    int tableStartRow;       // -1 = default (0 or TIC00 continuity), 0-15 = forced start row
+
     // For priority queue sorting (earliest frame first)
     bool operator>(const ScheduledNote& other) const {
         return targetFrame > other.targetFrame;
@@ -791,8 +794,18 @@ public:
                                 }
                             }
 
-                            // For TIC00 mode, use saved row from previous voice; otherwise start at row 0
-                            int startRow = (wasTIC00Mode && effectiveTicRate == 0x00) ? savedTableRow : 0;
+                            // Determine table start row:
+                            // 1. THO override from phrase (tableStartRow >= 0) takes priority
+                            // 2. TIC00 retrigger continuity (savedTableRow)
+                            // 3. Default: row 0
+                            int startRow;
+                            if (note.tableStartRow >= 0) {
+                                startRow = note.tableStartRow % 16;  // THO override
+                            } else if (wasTIC00Mode && effectiveTicRate == 0x00) {
+                                startRow = savedTableRow;  // TIC00 continuity
+                            } else {
+                                startRow = 0;  // Default
+                            }
 
                             voices[v].trigger(samples[note.sampleId], sampleLengths[note.sampleId],
                                               note.trackId, rate, note.volume, note.pan, instrumentParams[note.sampleId],
@@ -1307,7 +1320,8 @@ public:
                       int startPointOverride = -1, int tableId = -1, int tableTicRate = 6,
                       int noteOctave = 4, int notePitch = 0,
                       float pslInitialOffset = 0.0f, float pslDuration = 0.0f,
-                      float pbnRate = 0.0f, float vibratoSpeed = 0.0f, float vibratoDepth = 0.0f) {
+                      float pbnRate = 0.0f, float vibratoSpeed = 0.0f, float vibratoDepth = 0.0f,
+                      int tableStartRow = -1) {
         ScheduledNote note = {
                 .targetFrame = targetFrame,
                 .sampleId = sampleId,
@@ -1325,7 +1339,8 @@ public:
                 .pslDuration = pslDuration,
                 .pbnRate = pbnRate,
                 .vibratoSpeed = vibratoSpeed,
-                .vibratoDepth = vibratoDepth
+                .vibratoDepth = vibratoDepth,
+                .tableStartRow = tableStartRow
         };
         noteQueue.schedule(note);
     }
@@ -1399,6 +1414,19 @@ public:
             }
         }
         return -1;  // No active voice on this track
+    }
+
+    // Set table row for a voice (THO effect from phrase on empty step)
+    void setVoiceTableRow(int trackId, int row) {
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (voices[v].isActive && voices[v].trackId == trackId) {
+                voices[v].tableRow = row % 16;
+                voices[v].lastProcessedRow = -1;  // Force re-processing of new row
+                LOGD("📋 THO: Set voice %d (track %d) table row to %d", v, trackId, voices[v].tableRow);
+                return;
+            }
+        }
+        LOGD("📋 THO: No active voice on track %d, ignoring", trackId);
     }
 
     // Get waveform data for oscilloscope display
@@ -2274,12 +2302,22 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1schedul
         jint startPointOverride, jint tableId, jint tableTicRate,
         jint noteOctave, jint notePitch,
         jfloat pslInitialOffset, jfloat pslDuration,
-        jfloat pbnRate, jfloat vibratoSpeed, jfloat vibratoDepth) {
+        jfloat pbnRate, jfloat vibratoSpeed, jfloat vibratoDepth,
+        jint tableStartRow) {
     if (engine) {
         engine->scheduleNote(targetFrame, sampleId, trackId, frequency, baseFrequency,
                              volume, pan, startPointOverride, tableId, tableTicRate,
                              noteOctave, notePitch,
-                             pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth);
+                             pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
+                             tableStartRow);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setVoiceTableRow(
+        JNIEnv *env, jobject thiz, jint trackId, jint row) {
+    if (engine) {
+        engine->setVoiceTableRow(trackId, row);
     }
 }
 

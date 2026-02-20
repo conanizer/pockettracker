@@ -73,6 +73,18 @@ data class TrackState(
     /** Last note MIDI for PSL (pitch slide) calculation */
     var lastNoteMidi: Int = -1,
 
+    // Table override state (TBL/THO effects)
+    /** Last table ID override from TBL effect (-1 = use instrument default) */
+    var lastTableOverride: Int = -1,
+    /** Last table start row from THO effect (-1 = default) */
+    var lastTableStartRow: Int = -1,
+
+    // Groove state (GRV effect)
+    /** Active groove ID (0 = default uniform timing, 1-255 = groove table) */
+    var grooveId: Int = 0,
+    /** Current position within groove pattern (0-based) */
+    var grooveStep: Int = 0,
+
     // Per-column FX memory (for RND "previously active" command)
     /** Last non-RND/RNL/CHA FX type per column (1-indexed: [0]=unused, [1]=FX1, [2]=FX2, [3]=FX3) */
     var lastColFxType: IntArray = IntArray(4),
@@ -1150,6 +1162,53 @@ class PlaybackController(
             targetFrame
         }
 
+        // ═══════════════════════════════════════════════════════════════════════════
+        // STEP 2.2: Handle TBL (Table Override) and THO (Table Hop) effects
+        // ═══════════════════════════════════════════════════════════════════════════
+
+        // TBL XX: Override table ID for this note (and subsequent retrigs)
+        val tableIdOverride = if (params.tableOverride != null && params.tableOverride >= 0) {
+            trackState.lastTableOverride = params.tableOverride
+            logger.d(TAG, "📋 TBL: Override table to ${params.tableOverride.toString(16).uppercase().padStart(2, '0')}")
+            params.tableOverride
+        } else if (hasNote) {
+            // New note without TBL: reset to instrument default
+            trackState.lastTableOverride = -1
+            -1
+        } else {
+            // Empty step: use last override for retrig/arp continuity
+            trackState.lastTableOverride
+        }
+
+        // THO XX: Table hop (jump table to row Y)
+        // With note: sets table start row for the new voice
+        // Without note: jumps the active voice's table to target row
+        val tableStartRow = if (params.tableHopTarget != null) {
+            val targetRow = params.tableHopTarget % 16  // 0-15
+            trackState.lastTableStartRow = targetRow
+            if (!hasNote) {
+                // No note: jump the active voice's table row directly
+                audioEngine.setVoiceTableRow(trackId, targetRow)
+                logger.d(TAG, "📋 THO: Jumped active voice table to row $targetRow (no note)")
+            } else {
+                logger.d(TAG, "📋 THO: Will start table at row $targetRow (with note)")
+            }
+            targetRow
+        } else {
+            -1  // No THO, use default
+        }
+
+        // GRV XX: Groove assignment (stored for timing in phrase scheduler)
+        if (params.grooveId != null) {
+            trackState.grooveId = params.grooveId
+            trackState.grooveStep = 0  // Reset groove position
+            if (params.grooveId == 0) {
+                logger.d(TAG, "🥁 GRV 00: Disabled groove (default timing)")
+            } else {
+                logger.d(TAG, "🥁 GRV: Assigned groove ${params.grooveId.toString(16).uppercase().padStart(2, '0')}")
+            }
+        }
+
         var noteScheduled = false
         if (hasNote && !skipNote) {
             // Apply transposition if needed (use effectiveStep for RNL note randomization)
@@ -1244,7 +1303,9 @@ class PlaybackController(
                 pslDuration = pslDuration,
                 pbnRate = pbnRate,
                 vibratoSpeed = vibratoSpeed,
-                vibratoDepth = vibratoDepth
+                vibratoDepth = vibratoDepth,
+                tableIdOverride = tableIdOverride,
+                tableStartRow = tableStartRow
             )
             noteScheduled = true
 
@@ -1492,7 +1553,8 @@ class PlaybackController(
                         volume = retrigVolume,
                         pan = retrigPan,
                         project = project,
-                        startPointOverride = retrigStartPoint
+                        startPointOverride = retrigStartPoint,
+                        tableIdOverride = trackState.lastTableOverride
                     )
                     logger.d(TAG, "🔁 retrig[${trackState.repeatRetrigCount}] vol=${"%.4f".format(retrigVolume)} " +
                             "(base=${"%.4f".format(trackState.repeatBaseVolume)}, delta=$rampDelta)")
@@ -1532,7 +1594,8 @@ class PlaybackController(
                                     volume = retrigVolume,
                                     pan = retrigPan,
                                     project = project,
-                                    startPointOverride = retrigStartPoint
+                                    startPointOverride = retrigStartPoint,
+                                    tableIdOverride = trackState.lastTableOverride
                                 )
                                 triggersInStep++
                             }
@@ -1748,7 +1811,8 @@ class PlaybackController(
                         volume = arpVolume,
                         pan = arpPan,
                         project = project,
-                        startPointOverride = startPoint
+                        startPointOverride = startPoint,
+                        tableIdOverride = trackState.lastTableOverride
                     )
                     notesScheduled++
                 }

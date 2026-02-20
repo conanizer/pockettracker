@@ -216,11 +216,13 @@ class OboeAudioBackend : IAudioBackend {
         pslDuration: Float,
         pbnRate: Float,
         vibratoSpeed: Float,
-        vibratoDepth: Float
+        vibratoDepth: Float,
+        tableStartRow: Int
     ) {
         native_scheduleNoteWithTable(frame, sampleId, trackId, freq, baseFreq, vol, pan,
             startPointOverride, tableId, tableTicRate, noteOctave, notePitch,
-            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth)
+            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
+            tableStartRow)
     }
 
     override fun getVoiceTableRow(trackId: Int): Int {
@@ -229,6 +231,10 @@ class OboeAudioBackend : IAudioBackend {
 
     override fun getVoiceTableId(trackId: Int): Int {
         return native_getVoiceTableId(trackId)
+    }
+
+    override fun setVoiceTableRow(trackId: Int, row: Int) {
+        native_setVoiceTableRow(trackId, row)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -338,10 +344,12 @@ class OboeAudioBackend : IAudioBackend {
         pslDuration: Float,
         pbnRate: Float,
         vibratoSpeed: Float,
-        vibratoDepth: Float
+        vibratoDepth: Float,
+        tableStartRow: Int
     )
     private external fun native_getVoiceTableRow(trackId: Int): Int
     private external fun native_getVoiceTableId(trackId: Int): Int
+    private external fun native_setVoiceTableRow(trackId: Int, row: Int)
 
     // Phase 6 pitch modulation methods
     private external fun native_setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int)

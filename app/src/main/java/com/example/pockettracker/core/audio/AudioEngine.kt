@@ -414,7 +414,9 @@ class AudioEngine(
         pslDuration: Float = 0f,
         pbnRate: Float = 0f,
         vibratoSpeed: Float = 0f,
-        vibratoDepth: Float = 0f
+        vibratoDepth: Float = 0f,
+        tableIdOverride: Int = -1,  // TBL effect: override table ID (-1 = use instrument default)
+        tableStartRow: Int = -1     // THO effect: force table start row (-1 = default)
     ) {
         if (note == Note.EMPTY) return
 
@@ -427,8 +429,8 @@ class AudioEngine(
 
         val sampleId = instrument.sampleId
 
-        // Each instrument uses the table with the same ID (instrument 03 → table 03)
-        val tableId = instrumentId
+        // Use TBL override if provided, otherwise use instrument ID as table ID
+        val tableId = if (tableIdOverride >= 0) tableIdOverride else instrumentId
         val tableTicRate = instrument.tableTicRate
 
         // Ensure table is loaded
@@ -449,7 +451,8 @@ class AudioEngine(
         backend.scheduleNoteWithTable(
             targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan,
             startPointOverride, tableId, tableTicRate, note.octave, note.pitch,
-            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth
+            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
+            tableStartRow
         )
     }
 
@@ -640,7 +643,8 @@ class AudioEngine(
         pslDuration: Float = 0f,
         pbnRate: Float = 0f,
         vibratoSpeed: Float = 0f,
-        vibratoDepth: Float = 0f
+        vibratoDepth: Float = 0f,
+        tableStartRow: Int = -1
     ) {
         if (note == Note.EMPTY) return
 
@@ -673,7 +677,8 @@ class AudioEngine(
         backend.scheduleNoteWithTable(
             targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan,
             startPointOverride, tableId, tableTicRate, note.octave, note.pitch,
-            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth
+            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
+            tableStartRow
         )
     }
 
@@ -696,6 +701,14 @@ class AudioEngine(
      */
     fun getVoiceTableId(trackId: Int): Int {
         return backend.getVoiceTableId(trackId)
+    }
+
+    /**
+     * Set table row for a voice (THO effect from phrase on empty step).
+     * Jumps the currently playing voice's table to the specified row.
+     */
+    fun setVoiceTableRow(trackId: Int, row: Int) {
+        backend.setVoiceTableRow(trackId, row)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

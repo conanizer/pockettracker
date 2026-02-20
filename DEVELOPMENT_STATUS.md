@@ -1,12 +1,19 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-02-05
+2026-02-20
 
 ## Current Phase
-**MVP Expansion #1 COMPLETE!** → **MVP Extension Pack 2 (Tables + Pitch Effects)** → Testing → MVP Release
+**MVP Extension Pack 2 COMPLETE!** → **MVP Extension Pack 3 (Modulation, Groove, Effects & Polish)** → Testing → MVP Release
 
-**See:** `MVP_EXTENSION_PACK_2.md` for detailed implementation plan
+**See:** `MVP_EXTENSION_PACK_3.md` for detailed implementation plan
+
+### Extension Pack 3 Overview
+- ✅ Phase 1: Fixes & UX Updates (table vol range, FX cycling, key repeat, selection increment) - COMPLETE
+- 🚧 Phase 2: New Effects - IN PROGRESS (6/8 done; THO broken, GRV deferred to Phase 3)
+- ⏳ Phase 3: Groove Screen - NOT STARTED (Groove data model added to TrackerData)
+- ⏳ Phase 4: Modulation Screen & Engine - NOT STARTED
+- ⏳ Phase 5: Selection Resampling - NOT STARTED
 
 ### Extension Pack 2 Overview
 - ✅ Phase 1: Bug fixes (meter decay, volume immediate, L+A cut) - COMPLETE
@@ -442,6 +449,35 @@
   - For dramatic pitch wobble effects
 
 **See:** `MVP_EXTENSION_PACK_2.md` for detailed implementation plan
+
+## MVP Extension Pack 3 🚧 IN PROGRESS (Started 2026-02-18)
+
+**Phase 1 - Fixes & UX Updates:** ✅ COMPLETE
+- [x] Table volume range: -1 for empty (was 0xFF), full 00-FF range usable
+- [x] FX type bidirectional cycling (A+DOWN from NONE wraps to last, A+UP from last wraps to NONE)
+- [x] Key repeat: hold D-PAD / A+DPAD / B+DPAD for continuous input
+- [x] Selection increment: A+DPAD applies to all selected rows in active column
+
+**Phase 2 - New Effects:** 🚧 IN PROGRESS (6/8 complete)
+- [x] REP XY rework: Y=0 single retrig, Y!=0 volume ramp mode
+- [x] DEL XX: delay note/table by XX ticks
+- [x] CHA XY: probability gate (X=left chance, Y=right chance)
+- [x] RND XY: randomize previously active FX value
+- [x] RNL XY: randomize FX to the left (FX1 = randomize note)
+- [x] TBL XX: override table ID for current note (phrase effect)
+- [ ] THO XX: table hop to row - **BROKEN** (implemented but not working)
+- [ ] GRV XX: groove assign - **DEFERRED** to Phase 3 (state stored, timing not wired)
+
+**Data Model (Phase 3 prep):** ✅ PARTIAL
+- [x] Groove data class (16-step tick pattern, activeLength(), getTicksForStep())
+- [x] Project.grooves array (256 slots)
+- [ ] FileController migration for old projects
+
+**Phase 3 - Groove Screen:** ⏳ NOT STARTED
+**Phase 4 - Modulation Screen & Engine:** ⏳ NOT STARTED
+**Phase 5 - Selection Resampling:** ⏳ NOT STARTED
+
+**See:** `MVP_EXTENSION_PACK_3.md` for detailed implementation plan
 
 ## Post-MVP Features (Future Ideas)
 

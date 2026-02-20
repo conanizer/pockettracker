@@ -321,7 +321,8 @@ interface IAudioBackend {
         pslDuration: Float = 0f,
         pbnRate: Float = 0f,
         vibratoSpeed: Float = 0f,
-        vibratoDepth: Float = 0f
+        vibratoDepth: Float = 0f,
+        tableStartRow: Int = -1
     )
 
     /**
@@ -341,6 +342,17 @@ interface IAudioBackend {
      * @return Table ID (0-255), or -1 if no active voice or no table
      */
     fun getVoiceTableId(trackId: Int): Int
+
+    /**
+     * Set the table row for a voice on a specific track.
+     *
+     * Used for THO (Table Hop) effect from phrase on empty steps -
+     * jumps the currently playing voice's table to a specific row.
+     *
+     * @param trackId Which track to modify (0-7)
+     * @param row Target table row (0-15)
+     */
+    fun setVoiceTableRow(trackId: Int, row: Int)
 
     // ===================================
     // PITCH MODULATION METHODS (Phase 6)

@@ -937,6 +937,33 @@ Week 3 (Days 15-21):
 
 ---
 
-**Version:** 1.0
+**Version:** 1.1
 **Created:** 2026-02-18
-**Status:** PLANNING
+**Updated:** 2026-02-20
+**Status:** IN PROGRESS
+
+## Progress Tracker
+
+### Phase 1: Fixes & UX Updates ✅ COMPLETE
+- [x] 1.1 Table volume range fix (-1 for empty, full 00-FF range)
+- [x] 1.2 FX type bidirectional cycling
+- [x] 1.3 Key repeat system
+- [x] 1.4 Selection increment
+
+### Phase 2: New Effects 🚧 IN PROGRESS
+- [x] 2.1 REP XY volume ramping rework
+- [x] 2.2 DEL XX delay effect
+- [x] 2.3 CHA XY chance/probability
+- [x] 2.4 RND XY randomize previous FX
+- [x] 2.5 RNL XY randomize left FX
+- [x] 2.6 TBL XX table set (phrase effect)
+- [ ] 2.7 THO XX table hop — **BROKEN** (infrastructure in place, playback not working)
+- [ ] 2.8 GRV XX groove assign — **DEFERRED** (state stored in TrackState, wiring needs Phase 3)
+
+### Phase 3: Groove Screen ⏳ NOT STARTED
+- [x] 3.1 Data model: Groove class + Project.grooves array added
+- [ ] 3.2 GrooveModule.kt UI
+- [ ] 3.3 Playback integration (getTicsForStep(), GRV effect wiring)
+
+### Phase 4: Modulation Screen & Engine ⏳ NOT STARTED
+### Phase 5: Selection Resampling ⏳ NOT STARTED

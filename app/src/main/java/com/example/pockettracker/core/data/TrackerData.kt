@@ -203,6 +203,45 @@ data class TableRow(
     }
 }
 
+/**
+ * Groove - A pattern of tick values that replaces uniform step timing.
+ *
+ * Instead of every step being TICS_PER_STEP (12) ticks,
+ * a groove cycles through a list of tick values.
+ * Example: [8, 4] creates a swing feel (long-short pattern).
+ *
+ * Default groove (id=0) means uniform timing (all steps = 12 ticks).
+ */
+@Serializable
+data class Groove(
+    val id: Int,  // 00-FF
+    var name: String = "GRV${id.toString(16).padStart(2,'0').uppercase()}",
+    val steps: IntArray = IntArray(16) { 6 }  // Tick values per groove step (default 6 each = 12 per pair)
+) {
+    /** Number of active steps in this groove (non-zero entries) */
+    fun activeLength(): Int = steps.indexOfFirst { it == 0 }.let { if (it < 0) steps.size else it }
+
+    /** Get the tick duration for a groove position (wraps around) */
+    fun getTicksForStep(grooveStep: Int): Int {
+        val len = activeLength()
+        if (len == 0) return 6  // Fallback
+        return steps[grooveStep % len]
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+        other as Groove
+        return id == other.id && steps.contentEquals(other.steps)
+    }
+
+    override fun hashCode(): Int {
+        var result = id
+        result = 31 * result + steps.contentHashCode()
+        return result
+    }
+}
+
 // Track in song = sequence of chain references
 @Serializable
 data class Track(
@@ -362,7 +401,10 @@ data class Project(
     },
 
     // Tables (256 slots, like phrases)
-    val tables: Array<Table> = Array(256) { Table(it) }
+    val tables: Array<Table> = Array(256) { Table(it) },
+
+    // Grooves (256 slots)
+    val grooves: Array<Groove> = Array(256) { Groove(it) }
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
