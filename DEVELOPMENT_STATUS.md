@@ -10,7 +10,7 @@
 
 ### Extension Pack 3 Overview
 - ✅ Phase 1: Fixes & UX Updates (table vol range, FX cycling, key repeat, selection increment) - COMPLETE
-- 🚧 Phase 2: New Effects - IN PROGRESS (7/8 done; THO broken)
+- ✅ Phase 2: New Effects - COMPLETE (8/8)
 - ✅ Phase 3: Groove Screen - COMPLETE (2026-02-21)
 - ⏳ Phase 4: Modulation Screen & Engine - NOT STARTED
 - ⏳ Phase 5: Selection Resampling - NOT STARTED
@@ -465,7 +465,7 @@
 - [x] RND XY: randomize previously active FX value
 - [x] RNL XY: randomize FX to the left (FX1 = randomize note)
 - [x] TBL XX: override table ID for current note (phrase effect)
-- [ ] THO XX: table hop to row - **BROKEN** (implemented but not working)
+- [x] THO XX: table hop to row - fixed (FX_THO case added to C++ table tick loop)
 - [x] GRV XX: groove assign - wired via Phase 3 playback integration
 
 **Phase 3 - Groove Screen:** ✅ COMPLETE (2026-02-21)

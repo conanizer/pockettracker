@@ -17,12 +17,13 @@ const int MAX_VOICES = 8;  // Reduced for testing
 // ===================================
 const int FX_NONE = 0x00;
 const int FX_ARC = 0x03;       // Cxx - Arpeggio Config
-const int FX_HOP = 0x08;       // Hxx - Table hop (jump to row, FF = stop table)
+const int FX_HOP = 0x08;       // Hxx - Table hop (repeat-count jump, FF = stop table)
 const int FX_TIC = 0x09;       // Txx - Table tick rate (01-FB = tics/row, FC-FF = special modes)
 const int FX_ARPEGGIO = 0x0A;  // Axx - Arpeggio
 const int FX_KILL = 0x0B;      // K00 - Kill voice
 const int FX_OFFSET = 0x0F;    // Oxx - Sample offset
 const int FX_REPEAT = 0x12;    // Rxx - Retrigger
+const int FX_THO = 0x15;       // THO 0X - Table hop to row X (simple unconditional jump)
 const int FX_VOLUME = 0x16;    // Vxx - Volume
 
 // ===================================
@@ -1047,6 +1048,14 @@ public:
                             }
                             // Note: TIC00 is handled specially - it means "trigger mode"
                             // where table advances only when the note is triggered
+                            break;
+
+                        case FX_THO:
+                            // THO 0X - Table hop to row X (simple unconditional jump)
+                            // Unlike HOP, no repeat count — always jumps
+                            hopExecuted = true;
+                            hopTarget = fxValue & 0x0F;
+                            LOGD("📋 Table THO %02X: hop to row %d, voice %d", fxValue, hopTarget, v);
                             break;
 
                         default:

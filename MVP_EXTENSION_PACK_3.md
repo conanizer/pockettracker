@@ -950,14 +950,14 @@ Week 3 (Days 15-21):
 - [x] 1.3 Key repeat system
 - [x] 1.4 Selection increment
 
-### Phase 2: New Effects 🚧 IN PROGRESS
+### Phase 2: New Effects ✅ COMPLETE (2026-02-21)
 - [x] 2.1 REP XY volume ramping rework
 - [x] 2.2 DEL XX delay effect
 - [x] 2.3 CHA XY chance/probability
 - [x] 2.4 RND XY randomize previous FX
 - [x] 2.5 RNL XY randomize left FX
 - [x] 2.6 TBL XX table set (phrase effect)
-- [ ] 2.7 THO XX table hop — **BROKEN** (infrastructure in place, playback not working)
+- [x] 2.7 THO XX table hop — FX_THO constant + case added to C++ table tick loop
 - [x] 2.8 GRV XX groove assign — wired to playback timing in Phase 3
 
 ### Phase 3: Groove Screen ✅ COMPLETE (2026-02-21)
