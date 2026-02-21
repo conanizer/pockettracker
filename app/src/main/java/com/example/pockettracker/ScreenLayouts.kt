@@ -65,6 +65,9 @@ fun FullScreenLayout(
     currentTable: Int = 0,
     tableCursorRow: Int = 0,
     tableCursorColumn: Int = 1,
+    // Groove state
+    currentGroove: Int = 0,
+    grooveCursorRow: Int = 0,
     // Render state (WAV export)
     isRendering: Boolean = false,
     renderProgress: Float = 0f
@@ -111,6 +114,8 @@ fun FullScreenLayout(
             currentTable = currentTable,
             tableCursorRow = tableCursorRow,
             tableCursorColumn = tableCursorColumn,
+            currentGroove = currentGroove,
+            grooveCursorRow = grooveCursorRow,
             isRendering = isRendering,
             renderProgress = renderProgress
         )
@@ -161,6 +166,9 @@ fun PortraitLayoutWithVirtualButtons(
     currentTable: Int = 0,
     tableCursorRow: Int = 0,
     tableCursorColumn: Int = 1,
+    // Groove state
+    currentGroove: Int = 0,
+    grooveCursorRow: Int = 0,
     // Render state (WAV export)
     isRendering: Boolean = false,
     renderProgress: Float = 0f
@@ -239,6 +247,8 @@ fun PortraitLayoutWithVirtualButtons(
                     currentTable = currentTable,
                     tableCursorRow = tableCursorRow,
                     tableCursorColumn = tableCursorColumn,
+                    currentGroove = currentGroove,
+                    grooveCursorRow = grooveCursorRow,
                     isRendering = isRendering,
                     renderProgress = renderProgress
                 )
@@ -314,6 +324,9 @@ fun LandscapeLayoutWithVirtualButtons(
     currentTable: Int = 0,
     tableCursorRow: Int = 0,
     tableCursorColumn: Int = 1,
+    // Groove state
+    currentGroove: Int = 0,
+    grooveCursorRow: Int = 0,
     // Render state (WAV export)
     isRendering: Boolean = false,
     renderProgress: Float = 0f
@@ -396,6 +409,8 @@ fun LandscapeLayoutWithVirtualButtons(
                     currentTable = currentTable,
                     tableCursorRow = tableCursorRow,
                     tableCursorColumn = tableCursorColumn,
+                    currentGroove = currentGroove,
+                    grooveCursorRow = grooveCursorRow,
                     isRendering = isRendering,
                     renderProgress = renderProgress
                 )

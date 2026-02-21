@@ -958,12 +958,12 @@ Week 3 (Days 15-21):
 - [x] 2.5 RNL XY randomize left FX
 - [x] 2.6 TBL XX table set (phrase effect)
 - [ ] 2.7 THO XX table hop — **BROKEN** (infrastructure in place, playback not working)
-- [ ] 2.8 GRV XX groove assign — **DEFERRED** (state stored in TrackState, wiring needs Phase 3)
+- [x] 2.8 GRV XX groove assign — wired to playback timing in Phase 3
 
-### Phase 3: Groove Screen ⏳ NOT STARTED
-- [x] 3.1 Data model: Groove class + Project.grooves array added
-- [ ] 3.2 GrooveModule.kt UI
-- [ ] 3.3 Playback integration (getTicsForStep(), GRV effect wiring)
+### Phase 3: Groove Screen ✅ COMPLETE (2026-02-21)
+- [x] 3.1 Data model: Groove class (steps: IntArray, -1=empty, activeLength(), getTicksForStep())
+- [x] 3.2 GrooveModule.kt UI (16-row editor, header, TIC column, cursor, B+LEFT/RIGHT navigation)
+- [x] 3.3 Playback integration (groove 00 = default for all tracks, GRV effect switches track groove)
 
 ### Phase 4: Modulation Screen & Engine ⏳ NOT STARTED
 ### Phase 5: Selection Resampling ⏳ NOT STARTED

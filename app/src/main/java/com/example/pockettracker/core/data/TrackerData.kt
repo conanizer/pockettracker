@@ -215,16 +215,15 @@ data class TableRow(
 @Serializable
 data class Groove(
     val id: Int,  // 00-FF
-    var name: String = "GRV${id.toString(16).padStart(2,'0').uppercase()}",
-    val steps: IntArray = IntArray(16) { 6 }  // Tick values per groove step (default 6 each = 12 per pair)
+    val steps: IntArray = IntArray(16) { -1 }  // -1 = empty (end of pattern), 01-FF = ticks for this step
 ) {
-    /** Number of active steps in this groove (non-zero entries) */
-    fun activeLength(): Int = steps.indexOfFirst { it == 0 }.let { if (it < 0) steps.size else it }
+    /** Number of active steps (steps before the first -1 end marker) */
+    fun activeLength(): Int = steps.indexOfFirst { it == -1 }.let { if (it < 0) steps.size else it }
 
-    /** Get the tick duration for a groove position (wraps around) */
+    /** Get the tick duration for a groove position (wraps around active steps) */
     fun getTicksForStep(grooveStep: Int): Int {
         val len = activeLength()
-        if (len == 0) return 6  // Fallback
+        if (len == 0) return 12  // All empty — fall back to standard TICS_PER_STEP
         return steps[grooveStep % len]
     }
 

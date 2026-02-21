@@ -170,6 +170,20 @@ class TrackerController(
 
     var lastEditedTable = 0
 
+    // Groove screen cursor
+    var grooveCursorRow = 0
+        set(value) {
+            field = value.coerceIn(0, 15)
+            stateObserver.onStateChanged()
+        }
+
+    // Current groove being edited
+    var currentGroove = 0
+        set(value) {
+            field = value.coerceIn(0, 255)
+            stateObserver.onStateChanged()
+        }
+
     // Current editing context
     var currentChain = 0
         set(value) {
@@ -696,6 +710,10 @@ class TrackerController(
                 // Table: 16 rows (0-15) with wrapping
                 tableCursorRow = if (tableCursorRow > 0) tableCursorRow - 1 else 15
             }
+            ScreenType.GROOVE -> {
+                // Groove: 16 rows (0-15) with wrapping
+                grooveCursorRow = if (grooveCursorRow > 0) grooveCursorRow - 1 else 15
+            }
             else -> {
                 // All other screens: simple cursor movement with wrapping (rows 0-15)
                 cursorRow = if (cursorRow > 0) cursorRow - 1 else 15
@@ -741,6 +759,10 @@ class TrackerController(
             ScreenType.TABLE -> {
                 // Table: 16 rows (0-15) with wrapping
                 tableCursorRow = if (tableCursorRow < 15) tableCursorRow + 1 else 0
+            }
+            ScreenType.GROOVE -> {
+                // Groove: 16 rows (0-15) with wrapping
+                grooveCursorRow = if (grooveCursorRow < 15) grooveCursorRow + 1 else 0
             }
             else -> {
                 // Most screens have 16 rows (0-15) with wrapping

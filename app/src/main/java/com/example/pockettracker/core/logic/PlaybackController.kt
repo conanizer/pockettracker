@@ -412,7 +412,7 @@ class PlaybackController(
                     val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
 
                     val result = schedulePhrase(phrase, nextFrameToSchedule, 0, 0, project, framesPerStep, effectiveStartRow)
-                    nextFrameToSchedule += framesPerStep * result.rowsScheduled
+                    nextFrameToSchedule += result.framesScheduled
                 }
 
                 PlaybackMode.CHAIN -> {
@@ -442,8 +442,8 @@ class PlaybackController(
                         val result = schedulePhrase(project.phrases[phraseId], nextFrameToSchedule, 0, transposeSemitones, project, framesPerStep, effectiveStartRow)
                         chainRowStartFrames[nextRow] = nextFrameToSchedule  // Track start frame for cursor
 
-                        // Advance frame by actual rows scheduled (HOP may cut phrase short)
-                        nextFrameToSchedule += framesPerStep * result.rowsScheduled
+                        // Advance frame by actual frames scheduled (accounts for groove timing + HOP)
+                        nextFrameToSchedule += result.framesScheduled
 
                         nextChainRowToSchedule = (nextRow + 1) % 16
                     } else {
@@ -490,7 +490,7 @@ class PlaybackController(
                         } else if (nextSongChainRowToSchedule < maxChainLength) {
                             // Schedule this chain row for all 8 tracks
                             var scheduledAny = false
-                            var maxRowsScheduled = 0  // Track max rows for frame advancement
+                            var maxFramesScheduled = 0L  // Track max frames for frame advancement (groove-accurate)
                             for (trackId in 0..7) {
                                 val trackState = trackStates[trackId]
 
@@ -516,9 +516,9 @@ class PlaybackController(
                                             songPositionStartFrames[Pair(nextSongRowToSchedule, nextSongChainRowToSchedule)] = nextFrameToSchedule
                                             scheduledAny = true
 
-                                            // Track max rows scheduled across all tracks
-                                            if (result.rowsScheduled > maxRowsScheduled) {
-                                                maxRowsScheduled = result.rowsScheduled
+                                            // Track max frames scheduled across all tracks (groove-accurate)
+                                            if (result.framesScheduled > maxFramesScheduled) {
+                                                maxFramesScheduled = result.framesScheduled
                                             }
                                         }
                                     }
@@ -526,9 +526,9 @@ class PlaybackController(
                             }
 
                             if (scheduledAny) {
-                                // Advance by max rows scheduled (so all tracks stay in sync)
+                                // Advance by max frames scheduled (so all tracks stay in sync)
                                 // Tracks with HOP will have empty time before their next phrase
-                                nextFrameToSchedule += framesPerStep * maxRowsScheduled
+                                nextFrameToSchedule += maxFramesScheduled
                                 nextSongChainRowToSchedule++
                             } else {
                                 // No phrases in this chain row, skip to next
@@ -598,7 +598,7 @@ class PlaybackController(
 
         // Schedule first phrase immediately
         val result = schedulePhrase(phrase, playbackStartFrame, 0, 0, project, framesPerStep)
-        nextFrameToSchedule += framesPerStep * result.rowsScheduled
+        nextFrameToSchedule += result.framesScheduled
 
         logger.d(TAG, "✅ Phrase playback initialized")
     }
@@ -619,7 +619,8 @@ class PlaybackController(
     data class SchedulePhraseResult(
         val rowsScheduled: Int,      // How many rows were actually scheduled (may be < 16 due to HOP)
         val hopTriggered: Boolean,   // Whether HOP effect ended phrase early
-        val trackStopped: Boolean    // Whether HOPFF stopped the track
+        val trackStopped: Boolean,   // Whether HOPFF stopped the track
+        val framesScheduled: Long = 0L  // Actual frames used (accounts for groove timing)
     )
 
     /**
@@ -650,20 +651,41 @@ class PlaybackController(
         // If track is stopped by HOPFF, don't schedule anything
         if (trackState.trackStopped) {
             logger.d(TAG, "  Track $trackId stopped by HOP FF, skipping phrase")
-            return SchedulePhraseResult(0, hopTriggered = false, trackStopped = true)
+            return SchedulePhraseResult(0, hopTriggered = false, trackStopped = true, framesScheduled = 0L)
         }
+
+        // Pre-compute groove timing:
+        // framesPerTic = base frame duration per tic (constant at any tempo)
+        // Used to scale per-step durations when groove is active.
+        val framesPerTic = framesPerStep / TICS_PER_STEP
+        // All tracks use a groove — groove 00 is the default (all-empty = standard timing).
+        // Fall back to exact framesPerStep only when the groove has no active steps,
+        // to avoid integer rounding drift in the common case.
+        val groove = project.grooves[trackState.grooveId.coerceIn(0, 255)]
+        val grooveActive = groove.activeLength() > 0
+        var localGrooveStep = trackState.grooveStep
 
         // Schedule steps starting from startRow
         val effectiveStartRow = startRow.coerceIn(0, 15)
+        var frameOffset = 0L  // Accumulates actual frame count (may differ from stepIndex * framesPerStep with groove)
+
         for (stepIndex in effectiveStartRow until 16) {
             val step = phrase.steps[stepIndex]
-            // Calculate frame relative to phrase start, accounting for skipped rows
-            val targetFrame = startFrame + ((stepIndex - effectiveStartRow) * framesPerStep)
+
+            // Per-step duration: use groove if it has active steps, otherwise exact framesPerStep
+            val stepDuration = if (grooveActive) {
+                val stepTics = groove.getTicksForStep(localGrooveStep).coerceAtLeast(1)
+                framesPerTic * stepTics
+            } else {
+                framesPerStep
+            }
+
+            val targetFrame = startFrame + frameOffset
 
             val stepResult = scheduleStepWithEffects(
                 step = step,
                 targetFrame = targetFrame,
-                stepDuration = framesPerStep,
+                stepDuration = stepDuration,
                 trackId = trackId,
                 transposeSemitones = transposeSemitones,
                 project = project,
@@ -672,6 +694,8 @@ class PlaybackController(
             )
 
             rowsScheduled++
+            frameOffset += stepDuration
+            if (grooveActive) localGrooveStep++
 
             if (stepResult.noteScheduled) {
                 scheduledNotes++
@@ -679,14 +703,19 @@ class PlaybackController(
 
             // Check if HOP was triggered - stop scheduling remaining rows
             if (stepResult.hopTriggered) {
+                // Persist groove position for the next phrase (only when groove is active)
+                if (grooveActive) trackState.grooveStep = localGrooveStep
                 if (trackState.trackStopped) {
                     logger.d(TAG, "  HOP FF at row $stepIndex: track $trackId stopped, scheduled $rowsScheduled rows")
                 } else {
                     logger.d(TAG, "  HOP at row $stepIndex: jumping to row ${trackState.hopTargetRow}, scheduled $rowsScheduled rows")
                 }
-                return SchedulePhraseResult(rowsScheduled, hopTriggered = true, trackStopped = trackState.trackStopped)
+                return SchedulePhraseResult(rowsScheduled, hopTriggered = true, trackStopped = trackState.trackStopped, framesScheduled = frameOffset)
             }
         }
+
+        // Persist groove position for the next phrase (only when groove is active)
+        if (grooveActive) trackState.grooveStep = localGrooveStep
 
         if (scheduledNotes > 0) {
             if (effectiveStartRow > 0) {
@@ -696,7 +725,7 @@ class PlaybackController(
             }
         }
 
-        return SchedulePhraseResult(rowsScheduled, hopTriggered = false, trackStopped = false)
+        return SchedulePhraseResult(rowsScheduled, hopTriggered = false, trackStopped = false, framesScheduled = frameOffset)
     }
 
     /**
@@ -747,7 +776,7 @@ class PlaybackController(
             val transposeSemitones = chain.getTransposeSemitones(firstRow)
             val result = schedulePhrase(project.phrases[phraseId], playbackStartFrame, 0, transposeSemitones, project, framesPerStep)
             chainRowStartFrames[firstRow] = playbackStartFrame  // Track start frame for cursor
-            nextFrameToSchedule += framesPerStep * result.rowsScheduled
+            nextFrameToSchedule += result.framesScheduled
             nextChainRowToSchedule = firstRow + 1
         }
 

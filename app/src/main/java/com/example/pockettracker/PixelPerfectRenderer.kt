@@ -73,6 +73,9 @@ fun PixelPerfectTracker(
     currentTable: Int = 0,
     tableCursorRow: Int = 0,
     tableCursorColumn: Int = 1,
+    // Groove state
+    currentGroove: Int = 0,
+    grooveCursorRow: Int = 0,
     // Render state (WAV export)
     isRendering: Boolean = false,
     renderProgress: Float = 0f
@@ -188,6 +191,8 @@ fun PixelPerfectTracker(
                             currentTable = currentTable,
                             tableCursorRow = tableCursorRow,
                             tableCursorColumn = tableCursorColumn,
+                            currentGroove = currentGroove,
+                            grooveCursorRow = grooveCursorRow,
                             isRendering = isRendering,
                             renderProgress = renderProgress
                         )
@@ -218,6 +223,7 @@ class TrackerLayout {
     private val projectModule = ProjectModule()
     private val fileBrowser = FileBrowserModule()
     private val tableModule = TableModule()
+    private val grooveModule = GrooveModule()
     /**
      * Main layout drawing function
      * This arranges all modules on the 640×480 screen
@@ -260,6 +266,9 @@ class TrackerLayout {
         currentTable: Int = 0,
         tableCursorRow: Int = 0,
         tableCursorColumn: Int = 1,
+        // Groove state
+        currentGroove: Int = 0,
+        grooveCursorRow: Int = 0,
         // Render state (WAV export)
         isRendering: Boolean = false,
         renderProgress: Float = 0f
@@ -471,6 +480,24 @@ class TrackerLayout {
                             ticRate = project.instruments.getOrNull(currentInstrument)?.tableTicRate ?: 0x06,
                             selectionMode = selectionMode,
                             isCellSelected = isCellSelected
+                        )
+                    )
+                }
+            }
+
+            // ===================================
+            // GROOVE SCREEN: Show groove pattern editor
+            // ===================================
+            ScreenType.GROOVE -> {
+                with(grooveModule) {
+                    draw(
+                        x = moduleX,
+                        y = currentY,
+                        scale = scale,
+                        state = GrooveState(
+                            groove = project.grooves[currentGroove],
+                            cursorRow = grooveCursorRow,
+                            cursorColumn = 1
                         )
                     )
                 }

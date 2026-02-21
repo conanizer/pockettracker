@@ -1,7 +1,7 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-02-20
+2026-02-21
 
 ## Current Phase
 **MVP Extension Pack 2 COMPLETE!** → **MVP Extension Pack 3 (Modulation, Groove, Effects & Polish)** → Testing → MVP Release
@@ -10,8 +10,8 @@
 
 ### Extension Pack 3 Overview
 - ✅ Phase 1: Fixes & UX Updates (table vol range, FX cycling, key repeat, selection increment) - COMPLETE
-- 🚧 Phase 2: New Effects - IN PROGRESS (6/8 done; THO broken, GRV deferred to Phase 3)
-- ⏳ Phase 3: Groove Screen - NOT STARTED (Groove data model added to TrackerData)
+- 🚧 Phase 2: New Effects - IN PROGRESS (7/8 done; THO broken)
+- ✅ Phase 3: Groove Screen - COMPLETE (2026-02-21)
 - ⏳ Phase 4: Modulation Screen & Engine - NOT STARTED
 - ⏳ Phase 5: Selection Resampling - NOT STARTED
 
@@ -458,7 +458,7 @@
 - [x] Key repeat: hold D-PAD / A+DPAD / B+DPAD for continuous input
 - [x] Selection increment: A+DPAD applies to all selected rows in active column
 
-**Phase 2 - New Effects:** 🚧 IN PROGRESS (6/8 complete)
+**Phase 2 - New Effects:** 🚧 IN PROGRESS (7/8 complete)
 - [x] REP XY rework: Y=0 single retrig, Y!=0 volume ramp mode
 - [x] DEL XX: delay note/table by XX ticks
 - [x] CHA XY: probability gate (X=left chance, Y=right chance)
@@ -466,14 +466,15 @@
 - [x] RNL XY: randomize FX to the left (FX1 = randomize note)
 - [x] TBL XX: override table ID for current note (phrase effect)
 - [ ] THO XX: table hop to row - **BROKEN** (implemented but not working)
-- [ ] GRV XX: groove assign - **DEFERRED** to Phase 3 (state stored, timing not wired)
+- [x] GRV XX: groove assign - wired via Phase 3 playback integration
 
-**Data Model (Phase 3 prep):** ✅ PARTIAL
-- [x] Groove data class (16-step tick pattern, activeLength(), getTicksForStep())
-- [x] Project.grooves array (256 slots)
-- [ ] FileController migration for old projects
+**Phase 3 - Groove Screen:** ✅ COMPLETE (2026-02-21)
+- [x] Groove data class: steps IntArray (-1=empty, 01-FF=ticks), activeLength(), getTicksForStep()
+- [x] GrooveModule.kt: 16-row editor, GROOVE XX header, TIC column, cursor navigation
+- [x] B+LEFT/RIGHT: navigate between grooves 00-FF
+- [x] Playback: groove 00 is default for all tracks, GRV effect switches per-track groove
+- [x] Exact timing preserved when groove is all-empty (no integer rounding)
 
-**Phase 3 - Groove Screen:** ⏳ NOT STARTED
 **Phase 4 - Modulation Screen & Engine:** ⏳ NOT STARTED
 **Phase 5 - Selection Resampling:** ⏳ NOT STARTED
 

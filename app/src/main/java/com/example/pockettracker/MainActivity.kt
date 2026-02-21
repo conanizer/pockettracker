@@ -361,6 +361,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // TableModule: Used for table editing screen
     val tableModule = remember { TableModule() }
 
+    // GrooveModule: Used for groove pattern editing screen
+    val grooveModule = remember { GrooveModule() }
+
     // Peak level buffers for mixer meters (updated periodically)
     val trackPeakBuffer = remember { FloatArray(8) }
     val masterPeakBuffer = remember { FloatArray(2) }
@@ -710,6 +713,19 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     trackerController.projectVersion++
                     // Invalidate table cache so changes are reloaded to native on next preview/playback
                     audioEngine.invalidateTable(trackerController.currentTable)
+                }
+            }
+            ScreenType.GROOVE -> {
+                val grooveState = GrooveState(
+                    groove = trackerController.project.grooves[trackerController.currentGroove],
+                    cursorRow = trackerController.grooveCursorRow,
+                    cursorColumn = 1
+                )
+                val context = grooveModule.getCursorContext(grooveState)
+                val action = handlerFunction(context)
+                val result = grooveModule.handleInput(grooveState, action)
+                if (result.modified) {
+                    trackerController.projectVersion++
                 }
             }
             else -> { /* Other screens not yet implemented */ }
@@ -1694,6 +1710,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         trackerController.lastEditedTable = newTable
                         Log.d("Navigation", "  -> Changed to table $newTable")
                     }
+                    ScreenType.GROOVE -> {
+                        // Previous groove (wrap around)
+                        trackerController.currentGroove = if (trackerController.currentGroove > 0)
+                            trackerController.currentGroove - 1 else 255
+                        Log.d("Navigation", "  -> Changed to groove ${trackerController.currentGroove}")
+                    }
                     else -> { Log.d("Navigation", "  -> No action for screen ${trackerController.currentScreen}") }
                 }
             },
@@ -1730,6 +1752,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         trackerController.currentTable = newTable
                         trackerController.lastEditedTable = newTable
                         Log.d("Navigation", "  -> Changed to table $newTable")
+                    }
+                    ScreenType.GROOVE -> {
+                        // Next groove (wrap around)
+                        trackerController.currentGroove = if (trackerController.currentGroove < 255)
+                            trackerController.currentGroove + 1 else 0
+                        Log.d("Navigation", "  -> Changed to groove ${trackerController.currentGroove}")
                     }
                     else -> { Log.d("Navigation", "  -> No action for screen ${trackerController.currentScreen}") }
                 }
@@ -2291,6 +2319,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 currentTable = trackerController.currentTable,
                 tableCursorRow = trackerController.tableCursorRow,
                 tableCursorColumn = trackerController.tableCursorColumn,
+                currentGroove = trackerController.currentGroove,
+                grooveCursorRow = trackerController.grooveCursorRow,
                 isRendering = isRendering,
                 renderProgress = renderProgress
             )
@@ -2332,6 +2362,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 currentTable = trackerController.currentTable,
                 tableCursorRow = trackerController.tableCursorRow,
                 tableCursorColumn = trackerController.tableCursorColumn,
+                currentGroove = trackerController.currentGroove,
+                grooveCursorRow = trackerController.grooveCursorRow,
                 isRendering = isRendering,
                 renderProgress = renderProgress
             )
@@ -2374,6 +2406,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             currentTable = trackerController.currentTable,
             tableCursorRow = trackerController.tableCursorRow,
             tableCursorColumn = trackerController.tableCursorColumn,
+            currentGroove = trackerController.currentGroove,
+            grooveCursorRow = trackerController.grooveCursorRow,
             isRendering = isRendering,
             renderProgress = renderProgress
         )
