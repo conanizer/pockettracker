@@ -215,7 +215,7 @@ data class TableRow(
 @Serializable
 data class Groove(
     val id: Int,  // 00-FF
-    val steps: IntArray = IntArray(16) { -1 }  // -1 = empty (end of pattern), 01-FF = ticks for this step
+    val steps: IntArray = IntArray(16) { -1 }  // -1 = end marker (loop), 00 = skip step, 01-FF = ticks for this step
 ) {
     /** Number of active steps (steps before the first -1 end marker) */
     fun activeLength(): Int = steps.indexOfFirst { it == -1 }.let { if (it < 0) steps.size else it }

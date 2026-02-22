@@ -654,16 +654,11 @@ class PlaybackController(
             return SchedulePhraseResult(0, hopTriggered = false, trackStopped = true, framesScheduled = 0L)
         }
 
-        // Pre-compute groove timing:
-        // framesPerTic = base frame duration per tic (constant at any tempo)
-        // Used to scale per-step durations when groove is active.
+        // framesPerTic = base frame duration per tic (constant at any tempo).
+        // Step durations are groove-controlled: each step may have a different tic count.
         val framesPerTic = framesPerStep / TICS_PER_STEP
-        // All tracks use a groove — groove 00 is the default (all-empty = standard timing).
-        // Fall back to exact framesPerStep only when the groove has no active steps,
-        // to avoid integer rounding drift in the common case.
-        val groove = project.grooves[trackState.grooveId.coerceIn(0, 255)]
-        val grooveActive = groove.activeLength() > 0
         var localGrooveStep = trackState.grooveStep
+        var anyGrooveActive = false  // Becomes true if any step uses a groove (for post-loop persistence)
 
         // Schedule steps starting from startRow
         val effectiveStartRow = startRow.coerceIn(0, 15)
@@ -672,12 +667,38 @@ class PlaybackController(
         for (stepIndex in effectiveStartRow until 16) {
             val step = phrase.steps[stepIndex]
 
-            // Per-step duration: use groove if it has active steps, otherwise exact framesPerStep
-            val stepDuration = if (grooveActive) {
-                val stepTics = groove.getTicksForStep(localGrooveStep).coerceAtLeast(1)
-                framesPerTic * stepTics
+            // Pre-scan for GRV effect BEFORE computing step duration so the new groove
+            // takes effect immediately on the step that triggers it, not on the next phrase.
+            // scheduleStepWithEffects will also process GRV (idempotent — same values).
+            for (fxSlot in 1..3) {
+                val fxType = when (fxSlot) { 1 -> step.fx1Type; 2 -> step.fx2Type; else -> step.fx3Type }
+                val fxValue = when (fxSlot) { 1 -> step.fx1Value; 2 -> step.fx2Value; else -> step.fx3Value }
+                if (fxType == EffectProcessor.FX_GRV) {
+                    trackState.grooveId = fxValue
+                    localGrooveStep = 0  // New groove always starts at slot 0
+                    break
+                }
+            }
+
+            // Look up current groove per-step (grooveId may have changed via GRV above).
+            // Fall back to exact framesPerStep when groove has no active steps to avoid
+            // integer rounding drift in the common case.
+            val currentGroove = project.grooves[trackState.grooveId.coerceIn(0, 255)]
+            val currentGrooveActive = currentGroove.activeLength() > 0
+
+            val stepDuration = if (currentGrooveActive) {
+                anyGrooveActive = true
+                val stepTics = currentGroove.getTicksForStep(localGrooveStep)
+                framesPerTic * stepTics  // 0 tics = skip step
             } else {
                 framesPerStep
+            }
+
+            // Groove value 00: skip this phrase step entirely (no note, no effects, no time advance)
+            if (stepDuration == 0L) {
+                rowsScheduled++
+                localGrooveStep++
+                continue
             }
 
             val targetFrame = startFrame + frameOffset
@@ -695,7 +716,7 @@ class PlaybackController(
 
             rowsScheduled++
             frameOffset += stepDuration
-            if (grooveActive) localGrooveStep++
+            if (currentGrooveActive) localGrooveStep++
 
             if (stepResult.noteScheduled) {
                 scheduledNotes++
@@ -703,8 +724,8 @@ class PlaybackController(
 
             // Check if HOP was triggered - stop scheduling remaining rows
             if (stepResult.hopTriggered) {
-                // Persist groove position for the next phrase (only when groove is active)
-                if (grooveActive) trackState.grooveStep = localGrooveStep
+                // Persist groove position for the next phrase (if groove was active at any point)
+                if (anyGrooveActive) trackState.grooveStep = localGrooveStep
                 if (trackState.trackStopped) {
                     logger.d(TAG, "  HOP FF at row $stepIndex: track $trackId stopped, scheduled $rowsScheduled rows")
                 } else {
@@ -714,8 +735,8 @@ class PlaybackController(
             }
         }
 
-        // Persist groove position for the next phrase (only when groove is active)
-        if (grooveActive) trackState.grooveStep = localGrooveStep
+        // Persist groove position for the next phrase (if groove was active at any point this phrase)
+        if (anyGrooveActive) trackState.grooveStep = localGrooveStep
 
         if (scheduledNotes > 0) {
             if (effectiveStartRow > 0) {
