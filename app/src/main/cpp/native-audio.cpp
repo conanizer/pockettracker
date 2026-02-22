@@ -1270,6 +1270,17 @@ public:
             }
         }
 
+        // Brickwall limiter at -0.1 dBFS — hard clip both channels.
+        // Threshold = 10^(-0.1/20) ≈ 0.9886. Prevents inter-sample clipping on DAC
+        // while keeping the headroom loss inaudible.
+        {
+            constexpr float LIMITER_THRESHOLD = 0.98855f;  // -0.1 dBFS
+            for (int i = 0; i < numFrames; i++) {
+                output[i * channelCount]     = fmaxf(-LIMITER_THRESHOLD, fminf(LIMITER_THRESHOLD, output[i * channelCount]));
+                output[i * channelCount + 1] = fmaxf(-LIMITER_THRESHOLD, fminf(LIMITER_THRESHOLD, output[i * channelCount + 1]));
+            }
+        }
+
         // Capture waveform for oscilloscope (left channel only, with downsampling)
         {
             std::lock_guard<std::mutex> lock(waveformMutex);
