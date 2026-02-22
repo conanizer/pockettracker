@@ -76,6 +76,10 @@ fun PixelPerfectTracker(
     // Groove state
     currentGroove: Int = 0,
     grooveCursorRow: Int = 0,
+    // Modulation state
+    modCursorRow: Int = 0,
+    modCursorPair: Int = 0,
+    modCursorSide: Int = 0,
     // Render state (WAV export)
     isRendering: Boolean = false,
     renderProgress: Float = 0f
@@ -193,6 +197,9 @@ fun PixelPerfectTracker(
                             tableCursorColumn = tableCursorColumn,
                             currentGroove = currentGroove,
                             grooveCursorRow = grooveCursorRow,
+                            modCursorRow = modCursorRow,
+                            modCursorPair = modCursorPair,
+                            modCursorSide = modCursorSide,
                             isRendering = isRendering,
                             renderProgress = renderProgress
                         )
@@ -224,6 +231,7 @@ class TrackerLayout {
     private val fileBrowser = FileBrowserModule()
     private val tableModule = TableModule()
     private val grooveModule = GrooveModule()
+    private val modulationModule = ModulationModule()
     /**
      * Main layout drawing function
      * This arranges all modules on the 640×480 screen
@@ -269,6 +277,10 @@ class TrackerLayout {
         // Groove state
         currentGroove: Int = 0,
         grooveCursorRow: Int = 0,
+        // Modulation state
+        modCursorRow: Int = 0,
+        modCursorPair: Int = 0,
+        modCursorSide: Int = 0,
         // Render state (WAV export)
         isRendering: Boolean = false,
         renderProgress: Float = 0f
@@ -498,6 +510,25 @@ class TrackerLayout {
                             groove = project.grooves[currentGroove],
                             cursorRow = grooveCursorRow,
                             cursorColumn = 1
+                        )
+                    )
+                }
+            }
+
+            // ===================================
+            // MODS SCREEN: Show modulation editor
+            // ===================================
+            ScreenType.MODS -> {
+                with(modulationModule) {
+                    draw(
+                        x = moduleX,
+                        y = currentY,
+                        scale = scale,
+                        state = ModulationState(
+                            instrument = project.instruments[currentInstrument],
+                            cursorRow = modCursorRow,
+                            cursorPair = modCursorPair,
+                            cursorSide = modCursorSide
                         )
                     )
                 }

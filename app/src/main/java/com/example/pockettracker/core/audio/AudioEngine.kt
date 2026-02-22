@@ -1,6 +1,8 @@
 package com.example.pockettracker.core.audio
 
 import com.example.pockettracker.core.data.Instrument
+import com.example.pockettracker.core.data.ModDest
+import com.example.pockettracker.core.data.ModType
 import com.example.pockettracker.core.data.Note
 import com.example.pockettracker.core.data.Project
 import com.example.pockettracker.core.data.Table
@@ -444,6 +446,11 @@ class AudioEngine(
         val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
         val frequency = note.toFrequency()
 
+        // Push modulation params to C++ engine (Phase 4 — AHD)
+        // Must be done before scheduleNoteWithTable so the engine has correct params at trigger time
+        val tempo = project.tempo
+        pushInstrumentModulation(instrument, tempo)
+
         // Resume stream so audio callback can process the queue
         backend.resumeStream()
 
@@ -766,6 +773,53 @@ class AudioEngine(
      */
     fun setInitialPitchOffset(trackId: Int, semitones: Float) {
         backend.setInitialPitchOffset(trackId, semitones)
+    }
+
+    /**
+     * Push instrument modulation slots to the C++ engine before scheduling a note.
+     *
+     * Converts AHD tick values → audio samples using current tempo + sample rate,
+     * then calls setInstrumentModulation for each active slot.
+     */
+    fun pushInstrumentModulation(instrument: Instrument, tempo: Int) {
+        val sampleId = instrument.sampleId
+        val sampleRate = getDeviceSampleRate().toFloat()
+
+        // Frames per tic: at 120 BPM, 4 steps/beat, 12 tics/step → ~230 samples/tic
+        val beatsPerSecond = tempo / 60.0f
+        val stepsPerBeat = 4.0f
+        val ticsPerStep = 12.0f
+        val framesPerTic = sampleRate / (beatsPerSecond * stepsPerBeat * ticsPerStep)
+
+        var anyActive = false
+        for (slotIndex in 0..3) {
+            val slot = instrument.modSlots[slotIndex]
+            // Only AHD supported in Phase 4
+            if (slot.type == ModType.AHD) {
+                val dest = when (slot.dest) {
+                    ModDest.VOLUME -> 1
+                    else -> 0
+                }
+                if (dest == 0) {
+                    // Destination not yet supported — treat as inactive
+                    backend.setInstrumentModulation(sampleId, slotIndex, 0, 0, 0f, 0, 0, 0)
+                    continue
+                }
+                val amount = slot.amount / 255.0f
+                val attackSamples = (slot.attack * framesPerTic).toInt().coerceAtLeast(0)
+                val holdSamples   = (slot.hold   * framesPerTic).toInt().coerceAtLeast(0)
+                val decaySamples  = (slot.decay  * framesPerTic).toInt().coerceAtLeast(0)
+                backend.setInstrumentModulation(sampleId, slotIndex, 1, dest, amount,
+                    attackSamples, holdSamples, decaySamples)
+                anyActive = true
+            } else {
+                // NONE (or other types not yet implemented) — clear this slot
+                backend.setInstrumentModulation(sampleId, slotIndex, 0, 0, 0f, 0, 0, 0)
+            }
+        }
+        if (!anyActive) {
+            backend.clearInstrumentModulation(sampleId)
+        }
     }
 
     /**

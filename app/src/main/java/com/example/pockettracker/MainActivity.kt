@@ -364,6 +364,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // GrooveModule: Used for groove pattern editing screen
     val grooveModule = remember { GrooveModule() }
 
+    // ModulationModule: Used for modulation editing screen
+    val modulationModule = remember { ModulationModule() }
+
     // Peak level buffers for mixer meters (updated periodically)
     val trackPeakBuffer = remember { FloatArray(8) }
     val masterPeakBuffer = remember { FloatArray(2) }
@@ -724,6 +727,20 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 val context = grooveModule.getCursorContext(grooveState)
                 val action = handlerFunction(context)
                 val result = grooveModule.handleInput(grooveState, action)
+                if (result.modified) {
+                    trackerController.projectVersion++
+                }
+            }
+            ScreenType.MODS -> {
+                val modState = ModulationState(
+                    instrument = trackerController.project.instruments[trackerController.currentInstrument],
+                    cursorRow = trackerController.modCursorRow,
+                    cursorPair = trackerController.modCursorPair,
+                    cursorSide = trackerController.modCursorSide
+                )
+                val context = modulationModule.getCursorContext(modState)
+                val action = handlerFunction(context)
+                val result = modulationModule.handleInput(modState, action)
                 if (result.modified) {
                     trackerController.projectVersion++
                 }
@@ -1702,6 +1719,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         instrumentController.currentInstrument = newInst  // Keep in sync!
                         Log.d("Navigation", "  -> Changed to instrument $newInst")
                     }
+                    ScreenType.MODS -> {
+                        val newInst = if (trackerController.currentInstrument > 0)
+                            trackerController.currentInstrument - 1 else 255
+                        trackerController.currentInstrument = newInst
+                        trackerController.lastEditedInstrument = newInst
+                        instrumentController.currentInstrument = newInst
+                        Log.d("Navigation", "  -> MODS changed to instrument $newInst")
+                    }
                     ScreenType.TABLE -> {
                         // Previous table (wrap around)
                         val newTable = if (trackerController.currentTable > 0)
@@ -1744,6 +1769,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         trackerController.lastEditedInstrument = newInst
                         instrumentController.currentInstrument = newInst  // Keep in sync!
                         Log.d("Navigation", "  -> Changed to instrument $newInst")
+                    }
+                    ScreenType.MODS -> {
+                        val newInst = if (trackerController.currentInstrument < 255)
+                            trackerController.currentInstrument + 1 else 0
+                        trackerController.currentInstrument = newInst
+                        trackerController.lastEditedInstrument = newInst
+                        instrumentController.currentInstrument = newInst
+                        Log.d("Navigation", "  -> MODS changed to instrument $newInst")
                     }
                     ScreenType.TABLE -> {
                         // Next table (wrap around)
@@ -2321,6 +2354,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 tableCursorColumn = trackerController.tableCursorColumn,
                 currentGroove = trackerController.currentGroove,
                 grooveCursorRow = trackerController.grooveCursorRow,
+                modCursorRow = trackerController.modCursorRow,
+                modCursorPair = trackerController.modCursorPair,
+                modCursorSide = trackerController.modCursorSide,
                 isRendering = isRendering,
                 renderProgress = renderProgress
             )
@@ -2364,6 +2400,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 tableCursorColumn = trackerController.tableCursorColumn,
                 currentGroove = trackerController.currentGroove,
                 grooveCursorRow = trackerController.grooveCursorRow,
+                modCursorRow = trackerController.modCursorRow,
+                modCursorPair = trackerController.modCursorPair,
+                modCursorSide = trackerController.modCursorSide,
                 isRendering = isRendering,
                 renderProgress = renderProgress
             )
@@ -2408,6 +2447,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             tableCursorColumn = trackerController.tableCursorColumn,
             currentGroove = trackerController.currentGroove,
             grooveCursorRow = trackerController.grooveCursorRow,
+            modCursorRow = trackerController.modCursorRow,
+            modCursorPair = trackerController.modCursorPair,
+            modCursorSide = trackerController.modCursorSide,
             isRendering = isRendering,
             renderProgress = renderProgress
         )

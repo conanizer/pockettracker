@@ -184,6 +184,25 @@ class TrackerController(
             stateObserver.onStateChanged()
         }
 
+    // Modulation screen cursor
+    var modCursorRow = 0
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
+
+    var modCursorPair = 0
+        set(value) {
+            field = value.coerceIn(0, 1)
+            stateObserver.onStateChanged()
+        }
+
+    var modCursorSide = 0
+        set(value) {
+            field = value.coerceIn(0, 1)
+            stateObserver.onStateChanged()
+        }
+
     // Current editing context
     var currentChain = 0
         set(value) {
@@ -714,6 +733,21 @@ class TrackerController(
                 // Groove: 16 rows (0-15) with wrapping
                 grooveCursorRow = if (grooveCursorRow > 0) grooveCursorRow - 1 else 15
             }
+            ScreenType.MODS -> {
+                if (modCursorRow > 0) {
+                    modCursorRow--
+                } else if (modCursorPair > 0) {
+                    // Move to bottom of pair 0
+                    modCursorPair = 0
+                    val inst = project.instruments[currentInstrument]
+                    val prevPairMax = maxOf(
+                        inst.modSlots[0].rowCount(),
+                        inst.modSlots[1].rowCount()
+                    )
+                    modCursorRow = prevPairMax - 1
+                }
+                // At pair 0, row 0 — stay at top (no wrap)
+            }
             else -> {
                 // All other screens: simple cursor movement with wrapping (rows 0-15)
                 cursorRow = if (cursorRow > 0) cursorRow - 1 else 15
@@ -764,6 +798,20 @@ class TrackerController(
                 // Groove: 16 rows (0-15) with wrapping
                 grooveCursorRow = if (grooveCursorRow < 15) grooveCursorRow + 1 else 0
             }
+            ScreenType.MODS -> {
+                val inst = project.instruments[currentInstrument]
+                val pairMax = maxOf(
+                    inst.modSlots[modCursorPair * 2].rowCount(),
+                    inst.modSlots[modCursorPair * 2 + 1].rowCount()
+                )
+                if (modCursorRow < pairMax - 1) {
+                    modCursorRow++
+                } else if (modCursorPair < 1) {
+                    modCursorPair = 1
+                    modCursorRow = 0
+                }
+                // At pair 1, last row — stay at bottom (no wrap)
+            }
             else -> {
                 // Most screens have 16 rows (0-15) with wrapping
                 cursorRow = if (cursorRow < 15) cursorRow + 1 else 0
@@ -796,6 +844,9 @@ class TrackerController(
                 // Table: columns 0=step (read-only), 1-8 editable
                 // Move left if not at minimum editable column (1)
                 if (tableCursorColumn > 1) tableCursorColumn--
+            }
+            ScreenType.MODS -> {
+                modCursorSide = 0  // Switch to left slot
             }
             else -> {
                 // Get minimum column for this screen
@@ -836,6 +887,9 @@ class TrackerController(
                 // Table: columns 0=step, 1=transpose, 2=vol, 3-8=fx (0-8 total)
                 // Move right if not at maximum column (8)
                 if (tableCursorColumn < 8) tableCursorColumn++
+            }
+            ScreenType.MODS -> {
+                modCursorSide = 1  // Switch to right slot
             }
             else -> {
                 // Get maximum column for this screen

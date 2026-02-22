@@ -416,4 +416,43 @@ interface IAudioBackend {
      * @param semitones Pitch offset in semitones (can be negative)
      */
     fun setInitialPitchOffset(trackId: Int, semitones: Float)
+
+    // ===================================
+    // MODULATION METHODS (Phase 4 — AHD)
+    // ===================================
+
+    /**
+     * Set a modulation slot for an instrument.
+     *
+     * Call this before scheduling a note. The engine copies these params to the voice
+     * at note-trigger time. attackSamples/holdSamples/decaySamples are already
+     * converted from ticks by the caller (AudioEngine.kt).
+     *
+     * @param sampleId     Instrument's sample slot (0-255)
+     * @param slotIndex    Mod slot (0-3)
+     * @param type         0=NONE, 1=AHD
+     * @param dest         0=NONE, 1=VOL
+     * @param amount       Modulation depth 0.0-1.0
+     * @param attackSamples  Attack duration in audio samples
+     * @param holdSamples    Hold duration in audio samples
+     * @param decaySamples   Decay duration in audio samples
+     */
+    fun setInstrumentModulation(
+        sampleId: Int,
+        slotIndex: Int,
+        type: Int,
+        dest: Int,
+        amount: Float,
+        attackSamples: Int,
+        holdSamples: Int,
+        decaySamples: Int
+    )
+
+    /**
+     * Clear all modulation slots for an instrument.
+     * Call this when an instrument has no active modulation.
+     *
+     * @param sampleId Instrument's sample slot (0-255)
+     */
+    fun clearInstrumentModulation(sampleId: Int)
 }

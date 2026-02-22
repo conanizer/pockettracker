@@ -275,6 +275,28 @@ class OboeAudioBackend : IAudioBackend {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // MODULATION METHODS (Phase 4 — AHD)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    override fun setInstrumentModulation(
+        sampleId: Int,
+        slotIndex: Int,
+        type: Int,
+        dest: Int,
+        amount: Float,
+        attackSamples: Int,
+        holdSamples: Int,
+        decaySamples: Int
+    ) {
+        native_setInstrumentModulation(sampleId, slotIndex, type, dest, amount,
+            attackSamples, holdSamples, decaySamples)
+    }
+
+    override fun clearInstrumentModulation(sampleId: Int) {
+        native_clearInstrumentModulation(sampleId)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // Native Methods (JNI → C++)
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -357,4 +379,11 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_setVibrato(trackId: Int, speed: Float, depth: Float)
     private external fun native_clearPitchMod(trackId: Int)
     private external fun native_setInitialPitchOffset(trackId: Int, semitones: Float)
+
+    // Phase 4 modulation methods
+    private external fun native_setInstrumentModulation(
+        sampleId: Int, slotIndex: Int, type: Int, dest: Int, amount: Float,
+        attackSamples: Int, holdSamples: Int, decaySamples: Int
+    )
+    private external fun native_clearInstrumentModulation(sampleId: Int)
 }

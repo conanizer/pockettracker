@@ -68,6 +68,10 @@ fun FullScreenLayout(
     // Groove state
     currentGroove: Int = 0,
     grooveCursorRow: Int = 0,
+    // Modulation state
+    modCursorRow: Int = 0,
+    modCursorPair: Int = 0,
+    modCursorSide: Int = 0,
     // Render state (WAV export)
     isRendering: Boolean = false,
     renderProgress: Float = 0f
@@ -116,6 +120,9 @@ fun FullScreenLayout(
             tableCursorColumn = tableCursorColumn,
             currentGroove = currentGroove,
             grooveCursorRow = grooveCursorRow,
+            modCursorRow = modCursorRow,
+            modCursorPair = modCursorPair,
+            modCursorSide = modCursorSide,
             isRendering = isRendering,
             renderProgress = renderProgress
         )
@@ -169,6 +176,10 @@ fun PortraitLayoutWithVirtualButtons(
     // Groove state
     currentGroove: Int = 0,
     grooveCursorRow: Int = 0,
+    // Modulation state
+    modCursorRow: Int = 0,
+    modCursorPair: Int = 0,
+    modCursorSide: Int = 0,
     // Render state (WAV export)
     isRendering: Boolean = false,
     renderProgress: Float = 0f
@@ -249,6 +260,9 @@ fun PortraitLayoutWithVirtualButtons(
                     tableCursorColumn = tableCursorColumn,
                     currentGroove = currentGroove,
                     grooveCursorRow = grooveCursorRow,
+                    modCursorRow = modCursorRow,
+                    modCursorPair = modCursorPair,
+                    modCursorSide = modCursorSide,
                     isRendering = isRendering,
                     renderProgress = renderProgress
                 )
@@ -327,6 +341,10 @@ fun LandscapeLayoutWithVirtualButtons(
     // Groove state
     currentGroove: Int = 0,
     grooveCursorRow: Int = 0,
+    // Modulation state
+    modCursorRow: Int = 0,
+    modCursorPair: Int = 0,
+    modCursorSide: Int = 0,
     // Render state (WAV export)
     isRendering: Boolean = false,
     renderProgress: Float = 0f
@@ -411,6 +429,9 @@ fun LandscapeLayoutWithVirtualButtons(
                     tableCursorColumn = tableCursorColumn,
                     currentGroove = currentGroove,
                     grooveCursorRow = grooveCursorRow,
+                    modCursorRow = modCursorRow,
+                    modCursorPair = modCursorPair,
+                    modCursorSide = modCursorSide,
                     isRendering = isRendering,
                     renderProgress = renderProgress
                 )

@@ -965,5 +965,11 @@ Week 3 (Days 15-21):
 - [x] 3.2 GrooveModule.kt UI (16-row editor, header, TIC column, cursor, B+LEFT/RIGHT navigation)
 - [x] 3.3 Playback integration (groove 00 = default for all tracks, GRV effect switches track groove)
 
-### Phase 4: Modulation Screen & Engine ⏳ NOT STARTED
+### Phase 4: Modulation Screen & Engine 🚧 IN PROGRESS
+- [x] 4.1 Data model: ModType/ModDest enums, ModSlot data class, modSlots on Instrument
+- [x] 4.2 ModulationModule.kt UI (4-slot editor, paired layout, getCursorContext, handleInput)
+- [x] 4.3 C++ modulation engine — AHD envelope on VOL destination (other types/dests phase 2)
+- [ ] 4.4 Mod-to-mod routing
+- [ ] 4.5 PlaybackController integration (setModulation on note trigger, triggerNoteOff for ADSR)
+
 ### Phase 5: Selection Resampling ⏳ NOT STARTED

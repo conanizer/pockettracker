@@ -203,6 +203,66 @@ data class TableRow(
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MODULATION SYSTEM
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Serializable
+enum class ModType(val displayName: String) {
+    NONE("---"),
+    AHD("AHD"),
+    ADSR("ADSR"),
+    LFO("LFO"),
+    DRUM("DRUM"),     // future
+    TRIG("TRIG"),     // future
+    TRACKING("TRK")   // future
+}
+
+@Serializable
+enum class ModDest(val displayName: String) {
+    NONE("---"),
+    VOLUME("VOL"),
+    PAN("PAN"),
+    PITCH("PITCH"),
+    FINE_PITCH("FINE"),
+    FILTER_CUTOFF("CUT"),
+    FILTER_RES("RES"),
+    SAMPLE_START("STA"),
+    MOD_AMT("MOD A"),
+    MOD_RATE("MOD R"),
+    MOD_BOTH("MOD B")
+}
+
+@Serializable
+data class ModSlot(
+    var type: ModType = ModType.NONE,
+    var dest: ModDest = ModDest.NONE,
+    var amount: Int = 0x80,      // 00-FF
+
+    // Envelope: AHD, ADSR
+    var attack: Int = 0x00,      // 00-FF ticks
+    var hold: Int = 0x00,        // 00-FF ticks (AHD only)
+    var decay: Int = 0x00,       // 00-FF ticks
+    var sustain: Int = 0x80,     // 00-FF (ADSR sustain level)
+    var release: Int = 0x00,     // 00-FF ticks (ADSR only)
+
+    // LFO
+    var oscShape: Int = 0x00,    // 0-9: TRI/SIN/RMP+/RMP-/EXP+/EXP-/SQU+/SQU-/RND/DRNK
+    var lfoTrigMode: Int = 0x00, // 0=FREE, 1=RETRIG, 2=HOLD, 3=ONCE
+    var lfoFreq: Int = 0x40      // 00-FF
+) {
+    /** Number of param rows this slot occupies in the UI (including TYPE row) */
+    fun rowCount(): Int = when (type) {
+        ModType.NONE     -> 1
+        ModType.AHD      -> 6   // TYPE,DEST,AMT,ATK,HOLD,DEC
+        ModType.ADSR     -> 7   // TYPE,DEST,AMT,ATK,DEC,SUS,REL
+        ModType.LFO      -> 6   // TYPE,DEST,AMT,OSC,TRIG,FREQ
+        ModType.DRUM     -> 6   // same as AHD for now
+        ModType.TRIG     -> 7   // same as ADSR for now
+        ModType.TRACKING -> 5   // future
+    }
+}
+
 /**
  * Groove - A pattern of tick values that replaces uniform step timing.
  *
@@ -282,7 +342,10 @@ data class Instrument(
 
     // Table parameters
     var tableId: Int = -1,          // -1 = no table, 0-255 = table ID
-    var tableTicRate: Int = 0x06    // Default: 6 tics per row (2 rows per phrase step at 12 tics/step)
+    var tableTicRate: Int = 0x06,   // Default: 6 tics per row (2 rows per phrase step at 12 tics/step)
+
+    // Modulation slots (4 per instrument)
+    var modSlots: Array<ModSlot> = Array(4) { ModSlot() }
 )
 
 /**

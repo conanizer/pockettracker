@@ -274,6 +274,23 @@ struct InstrumentParams {
 };
 
 // ===================================
+// INSTRUMENT MODULATION PARAMS (Phase 4 — AHD)
+// ===================================
+// Per-slot modulation configuration set from Kotlin.
+// Copied to VoiceModSlot when a note triggers on that instrument.
+struct InstrumentModSlot {
+    int type;          // 0=NONE, 1=AHD
+    int dest;          // 0=NONE, 1=VOL (more destinations in future phases)
+    float amount;      // Modulation depth 0.0-1.0 (normalised from 00-FF)
+    int attackSamples; // Attack duration in audio samples
+    int holdSamples;   // Hold duration in audio samples
+    int decaySamples;  // Decay duration in audio samples
+
+    InstrumentModSlot() : type(0), dest(0), amount(0.5f),
+                          attackSamples(0), holdSamples(0), decaySamples(0) {}
+};
+
+// ===================================
 // TABLE DATA STRUCTURES (Phase 3.5)
 // ===================================
 // Tables are mini-sequencers that run alongside playing voices
@@ -385,6 +402,27 @@ struct Voice {
     float vibratoDepth;          // Modulation depth in semitones (0-2 typical, up to 8 for PVX)
     bool vibratoActive;          // Whether vibrato is active
 
+    // ===================================
+    // MODULATION STATE (Phase 4 — AHD)
+    // ===================================
+    struct VoiceModSlot {
+        int type;          // 0=NONE, 1=AHD
+        int dest;          // 0=NONE, 1=VOL
+        float amount;      // Depth 0.0-1.0
+        int stage;         // 0=idle, 1=attack, 2=hold, 3=decay, 4=done
+        float envValue;    // Envelope output 0.0-1.0
+        int stageCounter;  // Samples elapsed in current stage
+        int attackSamples;
+        int holdSamples;
+        int decaySamples;
+
+        VoiceModSlot() : type(0), dest(0), amount(0.5f),
+                         stage(0), envValue(0.0f), stageCounter(0),
+                         attackSamples(0), holdSamples(0), decaySamples(0) {}
+    };
+    VoiceModSlot voiceMods[4]; // 4 mod slots per voice
+    float baseVolume;          // Voice volume before modulation
+
     Voice() : isActive(false), sampleData(nullptr), sampleLength(0),
               position(0), trackId(-1), playbackRate(1.0f), basePlaybackRate(1.0f), volume(1.0f),
               panLeft(0.707f), panRight(0.707f),  // Default to center
@@ -399,7 +437,8 @@ struct Voice {
               triggerOctave(4), triggerPitch(0), tic200HzAccum(0.0f),
               hopRepeatCount(0), hopTargetRow(-1),
               pitchOffset(0.0f), pitchSlideTarget(0.0f), pitchSlideRate(0.0f), pitchSliding(false),
-              vibratoPhase(0.0f), vibratoSpeed(0.0f), vibratoDepth(0.0f), vibratoActive(false) {}
+              vibratoPhase(0.0f), vibratoSpeed(0.0f), vibratoDepth(0.0f), vibratoActive(false),
+              baseVolume(1.0f) {}
 
     void trigger(float* sample, int length, int track, float rate, float vol, float pan,
                  const InstrumentParams& params, float sampleRate, int startPointOverride = -1,
@@ -852,6 +891,28 @@ public:
                                      note.vibratoSpeed, note.vibratoDepth);
                             }
 
+                            // Initialize modulation state from instrument mod slots (Phase 4)
+                            voices[v].baseVolume = note.volume;
+                            for (int m = 0; m < 4; m++) {
+                                const InstrumentModSlot& src = instrumentModSlots[note.sampleId][m];
+                                Voice::VoiceModSlot& dst = voices[v].voiceMods[m];
+                                dst.type = src.type;
+                                dst.dest = src.dest;
+                                dst.amount = src.amount;
+                                dst.attackSamples = src.attackSamples;
+                                dst.holdSamples = src.holdSamples;
+                                dst.decaySamples = src.decaySamples;
+                                if (src.type != 0) {
+                                    dst.stage = 1;  // Begin attack
+                                    dst.envValue = 0.0f;
+                                    dst.stageCounter = 0;
+                                } else {
+                                    dst.stage = 0;
+                                    dst.envValue = 0.0f;
+                                    dst.stageCounter = 0;
+                                }
+                            }
+
                             voiceFound = true;
                             LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, vol=%.4f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
                                  (long long)currentFrame, note.sampleId, note.trackId, rate, note.volume, note.pan, note.startPointOverride,
@@ -1105,6 +1166,14 @@ public:
             updateVoicePitchMod(voice, numFrames);
         }
 
+        // ===================================
+        // MODULATION PROCESSING (Phase 4 — AHD)
+        // ===================================
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (!voices[v].isActive) continue;
+            updateVoiceModulation(voices[v], numFrames);
+        }
+
         // Mix voices
         for (int v = 0; v < MAX_VOICES; v++) {
             Voice& voice = voices[v];
@@ -1197,9 +1266,18 @@ public:
                     processedSample = y0;
                 }
 
-                // STEP 6: Apply volume after effects (no artificial headroom)
-                // Include table volume modifier (Phase 3.5)
-                float sample = processedSample * voice.volume * voice.tableVolume;
+                // STEP 6: Apply volume after effects, with modulation (Phase 4)
+                // Start from base voice volume, then apply any active VOL modulators
+                float finalVol = voice.volume;
+                for (int m = 0; m < 4; m++) {
+                    const Voice::VoiceModSlot& mod = voice.voiceMods[m];
+                    if (mod.type == 0 || mod.stage == 0) continue;
+                    if (mod.dest == 1) { // VOL destination
+                        // (envValue-1)*amount: -amount at start, 0 at peak → fade-in effect
+                        finalVol = fmaxf(0.0f, finalVol + (mod.envValue - 1.0f) * mod.amount);
+                    }
+                }
+                float sample = processedSample * finalVol * voice.tableVolume;
 
                 // STEP 7: Apply real-time track and master volume
                 // This allows volume changes to take effect immediately without rescheduling
@@ -1648,6 +1726,83 @@ public:
         }
     }
 
+    // ===================================
+    // MODULATION METHODS (Phase 4 — AHD)
+    // ===================================
+
+    // Set per-instrument modulation slot (called from Kotlin before scheduling each note)
+    // attackSamples/holdSamples/decaySamples are already converted from ticks by Kotlin
+    void setInstrumentModulation(int sampleId, int slotIndex,
+                                 int type, int dest, float amount,
+                                 int attackSamples, int holdSamples, int decaySamples) {
+        if (sampleId < 0 || sampleId >= 256 || slotIndex < 0 || slotIndex >= 4) return;
+        InstrumentModSlot& slot = instrumentModSlots[sampleId][slotIndex];
+        slot.type = type;
+        slot.dest = dest;
+        slot.amount = amount;
+        slot.attackSamples = attackSamples;
+        slot.holdSamples = holdSamples;
+        slot.decaySamples = decaySamples;
+        LOGD("🎛️ Mod slot: sample=%d, slot=%d, type=%d, dest=%d, amt=%.2f, atk=%d, hold=%d, dec=%d",
+             sampleId, slotIndex, type, dest, amount, attackSamples, holdSamples, decaySamples);
+    }
+
+    // Clear all modulation slots for an instrument
+    void clearInstrumentModulation(int sampleId) {
+        if (sampleId < 0 || sampleId >= 256) return;
+        for (int m = 0; m < 4; m++) {
+            instrumentModSlots[sampleId][m] = InstrumentModSlot();
+        }
+    }
+
+    // Advance AHD envelope stages for one voice (called once per audio callback)
+    void updateVoiceModulation(Voice& voice, int numFrames) {
+        for (int m = 0; m < 4; m++) {
+            Voice::VoiceModSlot& mod = voice.voiceMods[m];
+            if (mod.type == 0 || mod.stage == 0 || mod.stage == 4) continue;
+
+            mod.stageCounter += numFrames;
+
+            switch (mod.stage) {
+                case 1: // Attack: ramp 0 → 1
+                    if (mod.attackSamples > 0) {
+                        mod.envValue = fminf(1.0f, (float)mod.stageCounter / mod.attackSamples);
+                        if (mod.stageCounter >= mod.attackSamples) {
+                            mod.envValue = 1.0f;
+                            mod.stage = 2;
+                            mod.stageCounter = 0;
+                        }
+                    } else {
+                        mod.envValue = 1.0f;
+                        mod.stage = 2;
+                        mod.stageCounter = 0;
+                    }
+                    break;
+
+                case 2: // Hold: stay at 1
+                    mod.envValue = 1.0f;
+                    if (mod.holdSamples == 0 || mod.stageCounter >= mod.holdSamples) {
+                        mod.stage = 3;
+                        mod.stageCounter = 0;
+                    }
+                    break;
+
+                case 3: // Decay: ramp 1 → 0
+                    if (mod.decaySamples > 0) {
+                        mod.envValue = fmaxf(0.0f, 1.0f - (float)mod.stageCounter / mod.decaySamples);
+                        if (mod.stageCounter >= mod.decaySamples) {
+                            mod.envValue = 0.0f;
+                            mod.stage = 4;
+                        }
+                    } else {
+                        mod.envValue = 0.0f;
+                        mod.stage = 4;
+                    }
+                    break;
+            }
+        }
+    }
+
     // Update pitch modulation for a single voice (called per frame in audio callback)
     void updateVoicePitchMod(Voice& voice, int numFrames) {
         // Process pitch slide
@@ -1903,6 +2058,7 @@ private:
     float* samples[256];
     int sampleLengths[256];
     InstrumentParams instrumentParams[256];
+    InstrumentModSlot instrumentModSlots[256][4]; // [sampleId][slotIndex]
 
     // Table data (Phase 3.5)
     Table tables[256];             // 256 tables, each with 16 rows
@@ -2400,6 +2556,25 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setInit
         JNIEnv *env, jobject thiz, jint trackId, jfloat semitones) {
     if (engine) {
         engine->setInitialPitchOffset(trackId, semitones);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setInstrumentModulation(
+        JNIEnv *env, jobject thiz,
+        jint sampleId, jint slotIndex, jint type, jint dest, jfloat amount,
+        jint attackSamples, jint holdSamples, jint decaySamples) {
+    if (engine) {
+        engine->setInstrumentModulation(sampleId, slotIndex, type, dest, amount,
+                                        attackSamples, holdSamples, decaySamples);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1clearInstrumentModulation(
+        JNIEnv *env, jobject thiz, jint sampleId) {
+    if (engine) {
+        engine->clearInstrumentModulation(sampleId);
     }
 }
 
