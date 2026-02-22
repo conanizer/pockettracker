@@ -274,20 +274,24 @@ struct InstrumentParams {
 };
 
 // ===================================
-// INSTRUMENT MODULATION PARAMS (Phase 4 — AHD)
+// INSTRUMENT MODULATION PARAMS (Phase 4)
 // ===================================
 // Per-slot modulation configuration set from Kotlin.
 // Copied to VoiceModSlot when a note triggers on that instrument.
 struct InstrumentModSlot {
-    int type;          // 0=NONE, 1=AHD
-    int dest;          // 0=NONE, 1=VOL (more destinations in future phases)
+    int type;          // 0=NONE, 1=AHD, 2=ADSR, 3=LFO
+    int dest;          // 0=NONE, 1=VOL, 3=PITCH (mirrors ModDest ordinals)
     float amount;      // Modulation depth 0.0-1.0 (normalised from 00-FF)
     int attackSamples; // Attack duration in audio samples
-    int holdSamples;   // Hold duration in audio samples
+    int holdSamples;   // Hold duration in audio samples (AHD hold; unused in ADSR)
     int decaySamples;  // Decay duration in audio samples
+    float sustainLevel; // ADSR: sustain level 0.0-1.0
+    float lfoHz;        // LFO: frequency in Hz
+    int oscShape;       // LFO: 0=TRI,1=SIN,2=RMP+,3=RMP-,4=EXP+,5=EXP-,6=SQU+,7=SQU-,8=RND,9=DRNK
 
     InstrumentModSlot() : type(0), dest(0), amount(0.5f),
-                          attackSamples(0), holdSamples(0), decaySamples(0) {}
+                          attackSamples(0), holdSamples(0), decaySamples(0),
+                          sustainLevel(0.5f), lfoHz(4.0f), oscShape(0) {}
 };
 
 // ===================================
@@ -403,25 +407,33 @@ struct Voice {
     bool vibratoActive;          // Whether vibrato is active
 
     // ===================================
-    // MODULATION STATE (Phase 4 — AHD)
+    // MODULATION STATE (Phase 4)
     // ===================================
     struct VoiceModSlot {
-        int type;          // 0=NONE, 1=AHD
-        int dest;          // 0=NONE, 1=VOL
+        int type;          // 0=NONE, 1=AHD, 2=ADSR, 3=LFO
+        int dest;          // 0=NONE, 1=VOL, 3=PITCH
         float amount;      // Depth 0.0-1.0
-        int stage;         // 0=idle, 1=attack, 2=hold, 3=decay, 4=done
-        float envValue;    // Envelope output 0.0-1.0
+        // AHD/ADSR stage: 0=idle, 1=attack, 2=hold(AHD)/decay(ADSR), 3=decay(AHD)/sustain(ADSR), 4=done
+        // LFO stage: 1=running
+        int stage;
+        float envValue;    // AHD/ADSR: 0.0-1.0; LFO: -1.0 to +1.0
         int stageCounter;  // Samples elapsed in current stage
         int attackSamples;
         int holdSamples;
         int decaySamples;
+        float sustainLevel;  // ADSR: sustain level 0.0-1.0
+        float lfoHz;         // LFO: frequency in Hz
+        float lfoPhase;      // LFO: current phase (0 to 2π)
+        int oscShape;        // LFO: oscillator shape (0=TRI, 1=SIN, ...)
 
         VoiceModSlot() : type(0), dest(0), amount(0.5f),
                          stage(0), envValue(0.0f), stageCounter(0),
-                         attackSamples(0), holdSamples(0), decaySamples(0) {}
+                         attackSamples(0), holdSamples(0), decaySamples(0),
+                         sustainLevel(0.5f), lfoHz(4.0f), lfoPhase(0.0f), oscShape(0) {}
     };
     VoiceModSlot voiceMods[4]; // 4 mod slots per voice
     float baseVolume;          // Voice volume before modulation
+    float modPitchOffset;      // Accumulated pitch offset from PITCH-destination mods (semitones)
 
     Voice() : isActive(false), sampleData(nullptr), sampleLength(0),
               position(0), trackId(-1), playbackRate(1.0f), basePlaybackRate(1.0f), volume(1.0f),
@@ -438,7 +450,7 @@ struct Voice {
               hopRepeatCount(0), hopTargetRow(-1),
               pitchOffset(0.0f), pitchSlideTarget(0.0f), pitchSlideRate(0.0f), pitchSliding(false),
               vibratoPhase(0.0f), vibratoSpeed(0.0f), vibratoDepth(0.0f), vibratoActive(false),
-              baseVolume(1.0f) {}
+              baseVolume(1.0f), modPitchOffset(0.0f) {}
 
     void trigger(float* sample, int length, int track, float rate, float vol, float pan,
                  const InstrumentParams& params, float sampleRate, int startPointOverride = -1,
@@ -518,6 +530,7 @@ struct Voice {
         vibratoSpeed = 0.0f;
         vibratoDepth = 0.0f;
         vibratoActive = false;
+        modPitchOffset = 0.0f;
 
         // Store note info for special TIC modes (Phase 4)
         triggerOctave = std::max(0, std::min(octave, 9));   // Clamp to 0-9
@@ -893,6 +906,7 @@ public:
 
                             // Initialize modulation state from instrument mod slots (Phase 4)
                             voices[v].baseVolume = note.volume;
+                            voices[v].modPitchOffset = 0.0f;
                             for (int m = 0; m < 4; m++) {
                                 const InstrumentModSlot& src = instrumentModSlots[note.sampleId][m];
                                 Voice::VoiceModSlot& dst = voices[v].voiceMods[m];
@@ -902,8 +916,12 @@ public:
                                 dst.attackSamples = src.attackSamples;
                                 dst.holdSamples = src.holdSamples;
                                 dst.decaySamples = src.decaySamples;
+                                dst.sustainLevel = src.sustainLevel;
+                                dst.lfoHz = src.lfoHz;
+                                dst.oscShape = src.oscShape;
+                                dst.lfoPhase = 0.0f;  // Always reset phase on new note
                                 if (src.type != 0) {
-                                    dst.stage = 1;  // Begin attack
+                                    dst.stage = 1;  // Begin attack (or LFO running)
                                     dst.envValue = 0.0f;
                                     dst.stageCounter = 0;
                                 } else {
@@ -1267,15 +1285,22 @@ public:
                 }
 
                 // STEP 6: Apply volume after effects, with modulation (Phase 4)
-                // Start from base voice volume, then apply any active VOL modulators
+                // AHD/ADSR: (envValue-1)*amount — fade-in from -amount at start to 0 at peak
+                // LFO:  tremolo — multiply by (1 + envValue*amount), envValue in [-1,+1]
                 float finalVol = voice.volume;
                 for (int m = 0; m < 4; m++) {
                     const Voice::VoiceModSlot& mod = voice.voiceMods[m];
                     if (mod.type == 0 || mod.stage == 0) continue;
                     if (mod.dest == 1) { // VOL destination
-                        // (envValue-1)*amount: -amount at start, 0 at peak → fade-in effect
-                        finalVol = fmaxf(0.0f, finalVol + (mod.envValue - 1.0f) * mod.amount);
+                        if (mod.type == 3) {
+                            // LFO: bipolar tremolo
+                            finalVol = fmaxf(0.0f, finalVol * (1.0f + mod.envValue * mod.amount));
+                        } else {
+                            // AHD/ADSR: fade-in/envelope shape
+                            finalVol = fmaxf(0.0f, finalVol + (mod.envValue - 1.0f) * mod.amount);
+                        }
                     }
+                    // PITCH dest: already accumulated into voice.modPitchOffset by updateVoiceModulation
                 }
                 float sample = processedSample * finalVol * voice.tableVolume;
 
@@ -1731,10 +1756,13 @@ public:
     // ===================================
 
     // Set per-instrument modulation slot (called from Kotlin before scheduling each note)
-    // attackSamples/holdSamples/decaySamples are already converted from ticks by Kotlin
+    // attackSamples/holdSamples/decaySamples are already converted from ticks by Kotlin.
+    // sustainLevel: ADSR sustain level 0.0-1.0
+    // lfoHz: LFO frequency in Hz; oscShape: LFO shape index (0=TRI,1=SIN,...)
     void setInstrumentModulation(int sampleId, int slotIndex,
                                  int type, int dest, float amount,
-                                 int attackSamples, int holdSamples, int decaySamples) {
+                                 int attackSamples, int holdSamples, int decaySamples,
+                                 float sustainLevel, float lfoHz, int oscShape) {
         if (sampleId < 0 || sampleId >= 256 || slotIndex < 0 || slotIndex >= 4) return;
         InstrumentModSlot& slot = instrumentModSlots[sampleId][slotIndex];
         slot.type = type;
@@ -1743,8 +1771,9 @@ public:
         slot.attackSamples = attackSamples;
         slot.holdSamples = holdSamples;
         slot.decaySamples = decaySamples;
-        LOGD("🎛️ Mod slot: sample=%d, slot=%d, type=%d, dest=%d, amt=%.2f, atk=%d, hold=%d, dec=%d",
-             sampleId, slotIndex, type, dest, amount, attackSamples, holdSamples, decaySamples);
+        slot.sustainLevel = sustainLevel;
+        slot.lfoHz = lfoHz;
+        slot.oscShape = oscShape;
     }
 
     // Clear all modulation slots for an instrument
@@ -1755,50 +1784,128 @@ public:
         }
     }
 
-    // Advance AHD envelope stages for one voice (called once per audio callback)
+    // Advance modulation stages for one voice (called once per audio callback).
+    // Handles AHD (type=1), ADSR (type=2), LFO (type=3).
+    // Accumulates modPitchOffset from PITCH-destination slots.
     void updateVoiceModulation(Voice& voice, int numFrames) {
+        voice.modPitchOffset = 0.0f;  // Reset pitch accumulator each callback
+
+        float sr = stream ? (float)stream->getSampleRate() : 44100.0f;
+
         for (int m = 0; m < 4; m++) {
             Voice::VoiceModSlot& mod = voice.voiceMods[m];
-            if (mod.type == 0 || mod.stage == 0 || mod.stage == 4) continue;
+            if (mod.type == 0 || mod.stage == 0) continue;
 
-            mod.stageCounter += numFrames;
-
-            switch (mod.stage) {
-                case 1: // Attack: ramp 0 → 1
-                    if (mod.attackSamples > 0) {
-                        mod.envValue = fminf(1.0f, (float)mod.stageCounter / mod.attackSamples);
-                        if (mod.stageCounter >= mod.attackSamples) {
+            if (mod.type == 1) {
+                // ── AHD: Attack → Hold → Decay ──
+                if (mod.stage == 4) continue;
+                mod.stageCounter += numFrames;
+                switch (mod.stage) {
+                    case 1: // Attack: ramp 0 → 1
+                        if (mod.attackSamples > 0) {
+                            mod.envValue = fminf(1.0f, (float)mod.stageCounter / mod.attackSamples);
+                            if (mod.stageCounter >= mod.attackSamples) {
+                                mod.envValue = 1.0f;
+                                mod.stage = 2; mod.stageCounter = 0;
+                            }
+                        } else {
                             mod.envValue = 1.0f;
-                            mod.stage = 2;
-                            mod.stageCounter = 0;
+                            mod.stage = 2; mod.stageCounter = 0;
                         }
-                    } else {
+                        break;
+                    case 2: // Hold: stay at 1
                         mod.envValue = 1.0f;
-                        mod.stage = 2;
-                        mod.stageCounter = 0;
-                    }
-                    break;
-
-                case 2: // Hold: stay at 1
-                    mod.envValue = 1.0f;
-                    if (mod.holdSamples == 0 || mod.stageCounter >= mod.holdSamples) {
-                        mod.stage = 3;
-                        mod.stageCounter = 0;
-                    }
-                    break;
-
-                case 3: // Decay: ramp 1 → 0
-                    if (mod.decaySamples > 0) {
-                        mod.envValue = fmaxf(0.0f, 1.0f - (float)mod.stageCounter / mod.decaySamples);
-                        if (mod.stageCounter >= mod.decaySamples) {
+                        if (mod.holdSamples == 0 || mod.stageCounter >= mod.holdSamples) {
+                            mod.stage = 3; mod.stageCounter = 0;
+                        }
+                        break;
+                    case 3: // Decay: ramp 1 → 0
+                        if (mod.decaySamples > 0) {
+                            mod.envValue = fmaxf(0.0f, 1.0f - (float)mod.stageCounter / mod.decaySamples);
+                            if (mod.stageCounter >= mod.decaySamples) {
+                                mod.envValue = 0.0f;
+                                mod.stage = 4;
+                            }
+                        } else {
                             mod.envValue = 0.0f;
                             mod.stage = 4;
                         }
-                    } else {
-                        mod.envValue = 0.0f;
-                        mod.stage = 4;
-                    }
-                    break;
+                        break;
+                }
+
+            } else if (mod.type == 2) {
+                // ── ADSR: Attack → Decay → Sustain (hold until voice ends) ──
+                if (mod.stage == 4) continue;
+                mod.stageCounter += numFrames;
+                switch (mod.stage) {
+                    case 1: // Attack: ramp 0 → 1
+                        if (mod.attackSamples > 0) {
+                            mod.envValue = fminf(1.0f, (float)mod.stageCounter / mod.attackSamples);
+                            if (mod.stageCounter >= mod.attackSamples) {
+                                mod.envValue = 1.0f;
+                                mod.stage = 2; mod.stageCounter = 0;
+                            }
+                        } else {
+                            mod.envValue = 1.0f;
+                            mod.stage = 2; mod.stageCounter = 0;
+                        }
+                        break;
+                    case 2: // Decay: ramp 1 → sustainLevel
+                        if (mod.decaySamples > 0) {
+                            float t = fminf(1.0f, (float)mod.stageCounter / mod.decaySamples);
+                            mod.envValue = 1.0f - t * (1.0f - mod.sustainLevel);
+                            if (mod.stageCounter >= mod.decaySamples) {
+                                mod.envValue = mod.sustainLevel;
+                                mod.stage = 3; mod.stageCounter = 0;
+                            }
+                        } else {
+                            mod.envValue = mod.sustainLevel;
+                            mod.stage = 3; mod.stageCounter = 0;
+                        }
+                        break;
+                    case 3: // Sustain: hold at sustainLevel until voice ends
+                        mod.envValue = mod.sustainLevel;
+                        break;
+                }
+
+            } else if (mod.type == 3) {
+                // ── LFO: phase-based oscillator ──
+                float phaseAdvance = 2.0f * (float)M_PI * mod.lfoHz / sr * numFrames;
+                mod.lfoPhase += phaseAdvance;
+                while (mod.lfoPhase >= 2.0f * (float)M_PI) mod.lfoPhase -= 2.0f * (float)M_PI;
+
+                float norm = mod.lfoPhase / (2.0f * (float)M_PI);  // 0.0 to 1.0
+                switch (mod.oscShape) {
+                    case 0: // TRI: triangle wave (-1 to +1)
+                        if      (norm < 0.25f) mod.envValue = norm * 4.0f;
+                        else if (norm < 0.75f) mod.envValue = 1.0f - (norm - 0.25f) * 4.0f;
+                        else                   mod.envValue = (norm - 1.0f) * 4.0f;
+                        break;
+                    case 1: // SIN
+                        mod.envValue = sinf(mod.lfoPhase);
+                        break;
+                    case 2: // RMP+ (sawtooth rising: -1 to +1)
+                        mod.envValue = norm * 2.0f - 1.0f;
+                        break;
+                    case 3: // RMP- (sawtooth falling: +1 to -1)
+                        mod.envValue = 1.0f - norm * 2.0f;
+                        break;
+                    case 6: // SQU+ (square, starts high)
+                        mod.envValue = (norm < 0.5f) ? 1.0f : -1.0f;
+                        break;
+                    case 7: // SQU- (square, starts low)
+                        mod.envValue = (norm < 0.5f) ? -1.0f : 1.0f;
+                        break;
+                    default: // EXP+/EXP-/RND/DRNK — fall back to SIN
+                        mod.envValue = sinf(mod.lfoPhase);
+                        break;
+                }
+            }
+
+            // Accumulate PITCH modulation (dest=3)
+            if (mod.dest == 3 && mod.stage != 4) {
+                // amount (0-1) × 12 semitones = up to ±12 semitones (1 octave)
+                voice.modPitchOffset += mod.envValue * mod.amount * 12.0f;
             }
         }
     }
@@ -1839,9 +1946,9 @@ public:
         }
     }
 
-    // Get modulated playback rate including pitch offset and vibrato
+    // Get modulated playback rate including pitch offset, vibrato, and mod-slot pitch
     float getModulatedPlaybackRate(Voice& voice) {
-        float pitchMod = voice.pitchOffset;
+        float pitchMod = voice.pitchOffset + voice.modPitchOffset;
 
         // Add vibrato modulation (sine wave)
         if (voice.vibratoActive) {
@@ -2563,10 +2670,12 @@ JNIEXPORT void JNICALL
 Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setInstrumentModulation(
         JNIEnv *env, jobject thiz,
         jint sampleId, jint slotIndex, jint type, jint dest, jfloat amount,
-        jint attackSamples, jint holdSamples, jint decaySamples) {
+        jint attackSamples, jint holdSamples, jint decaySamples,
+        jfloat sustainLevel, jfloat lfoHz, jint oscShape) {
     if (engine) {
         engine->setInstrumentModulation(sampleId, slotIndex, type, dest, amount,
-                                        attackSamples, holdSamples, decaySamples);
+                                        attackSamples, holdSamples, decaySamples,
+                                        sustainLevel, lfoHz, oscShape);
     }
 }
 

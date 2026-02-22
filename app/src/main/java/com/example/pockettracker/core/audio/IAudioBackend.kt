@@ -430,12 +430,15 @@ interface IAudioBackend {
      *
      * @param sampleId     Instrument's sample slot (0-255)
      * @param slotIndex    Mod slot (0-3)
-     * @param type         0=NONE, 1=AHD
-     * @param dest         0=NONE, 1=VOL
+     * @param type         0=NONE, 1=AHD, 2=ADSR, 3=LFO
+     * @param dest         0=NONE, 1=VOL, 3=PITCH
      * @param amount       Modulation depth 0.0-1.0
      * @param attackSamples  Attack duration in audio samples
-     * @param holdSamples    Hold duration in audio samples
+     * @param holdSamples    Hold duration in audio samples (AHD hold; unused in ADSR)
      * @param decaySamples   Decay duration in audio samples
+     * @param sustainLevel   ADSR sustain level 0.0-1.0
+     * @param lfoHz          LFO frequency in Hz
+     * @param oscShape       LFO shape: 0=TRI,1=SIN,2=RMP+,3=RMP-,6=SQU+,7=SQU-
      */
     fun setInstrumentModulation(
         sampleId: Int,
@@ -445,7 +448,10 @@ interface IAudioBackend {
         amount: Float,
         attackSamples: Int,
         holdSamples: Int,
-        decaySamples: Int
+        decaySamples: Int,
+        sustainLevel: Float = 0.5f,
+        lfoHz: Float = 4.0f,
+        oscShape: Int = 0
     )
 
     /**

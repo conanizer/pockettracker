@@ -794,27 +794,48 @@ class AudioEngine(
         var anyActive = false
         for (slotIndex in 0..3) {
             val slot = instrument.modSlots[slotIndex]
-            // Only AHD supported in Phase 4
-            if (slot.type == ModType.AHD) {
-                val dest = when (slot.dest) {
-                    ModDest.VOLUME -> 1
-                    else -> 0
+
+            val dest = when (slot.dest) {
+                ModDest.VOLUME -> 1
+                ModDest.PITCH  -> 3
+                else -> 0
+            }
+
+            when (slot.type) {
+                ModType.AHD -> {
+                    if (dest == 0) { backend.setInstrumentModulation(sampleId, slotIndex, 0,0,0f,0,0,0); continue }
+                    val amount       = slot.amount / 255.0f
+                    val attackSamples  = (slot.attack * framesPerTic).toInt().coerceAtLeast(0)
+                    val holdSamples    = (slot.hold   * framesPerTic).toInt().coerceAtLeast(0)
+                    val decaySamples   = (slot.decay  * framesPerTic).toInt().coerceAtLeast(0)
+                    backend.setInstrumentModulation(sampleId, slotIndex, 1, dest, amount,
+                        attackSamples, holdSamples, decaySamples)
+                    anyActive = true
                 }
-                if (dest == 0) {
-                    // Destination not yet supported — treat as inactive
+                ModType.ADSR -> {
+                    if (dest == 0) { backend.setInstrumentModulation(sampleId, slotIndex, 0,0,0f,0,0,0); continue }
+                    val amount         = slot.amount  / 255.0f
+                    val sustainLevel   = slot.sustain / 255.0f
+                    val attackSamples  = (slot.attack  * framesPerTic).toInt().coerceAtLeast(0)
+                    val decaySamples   = (slot.decay   * framesPerTic).toInt().coerceAtLeast(0)
+                    backend.setInstrumentModulation(sampleId, slotIndex, 2, dest, amount,
+                        attackSamples, 0, decaySamples, sustainLevel)
+                    anyActive = true
+                }
+                ModType.LFO -> {
+                    if (dest == 0) { backend.setInstrumentModulation(sampleId, slotIndex, 0,0,0f,0,0,0); continue }
+                    val amount   = slot.amount / 255.0f
+                    // lfoFreq 0x00-0xFF → 0.1 to 20 Hz (linear)
+                    val lfoHz    = (slot.lfoFreq + 1) * 20.0f / 256.0f
+                    val oscShape = slot.oscShape
+                    backend.setInstrumentModulation(sampleId, slotIndex, 3, dest, amount,
+                        0, 0, 0, 0.5f, lfoHz, oscShape)
+                    anyActive = true
+                }
+                else -> {
+                    // NONE or future types — clear this slot
                     backend.setInstrumentModulation(sampleId, slotIndex, 0, 0, 0f, 0, 0, 0)
-                    continue
                 }
-                val amount = slot.amount / 255.0f
-                val attackSamples = (slot.attack * framesPerTic).toInt().coerceAtLeast(0)
-                val holdSamples   = (slot.hold   * framesPerTic).toInt().coerceAtLeast(0)
-                val decaySamples  = (slot.decay  * framesPerTic).toInt().coerceAtLeast(0)
-                backend.setInstrumentModulation(sampleId, slotIndex, 1, dest, amount,
-                    attackSamples, holdSamples, decaySamples)
-                anyActive = true
-            } else {
-                // NONE (or other types not yet implemented) — clear this slot
-                backend.setInstrumentModulation(sampleId, slotIndex, 0, 0, 0f, 0, 0, 0)
             }
         }
         if (!anyActive) {

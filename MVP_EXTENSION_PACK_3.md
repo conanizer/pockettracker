@@ -968,7 +968,7 @@ Week 3 (Days 15-21):
 ### Phase 4: Modulation Screen & Engine 🚧 IN PROGRESS
 - [x] 4.1 Data model: ModType/ModDest enums, ModSlot data class, modSlots on Instrument
 - [x] 4.2 ModulationModule.kt UI (4-slot editor, paired layout, getCursorContext, handleInput)
-- [x] 4.3 C++ modulation engine — AHD envelope on VOL destination (other types/dests phase 2)
+- [x] 4.3 C++ modulation engine — AHD + ADSR + LFO on VOL and PITCH destinations
 - [ ] 4.4 Mod-to-mod routing
 - [ ] 4.5 PlaybackController integration (setModulation on note trigger, triggerNoteOff for ADSR)
 

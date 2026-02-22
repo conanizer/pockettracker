@@ -286,10 +286,13 @@ class OboeAudioBackend : IAudioBackend {
         amount: Float,
         attackSamples: Int,
         holdSamples: Int,
-        decaySamples: Int
+        decaySamples: Int,
+        sustainLevel: Float,
+        lfoHz: Float,
+        oscShape: Int
     ) {
         native_setInstrumentModulation(sampleId, slotIndex, type, dest, amount,
-            attackSamples, holdSamples, decaySamples)
+            attackSamples, holdSamples, decaySamples, sustainLevel, lfoHz, oscShape)
     }
 
     override fun clearInstrumentModulation(sampleId: Int) {
@@ -383,7 +386,8 @@ class OboeAudioBackend : IAudioBackend {
     // Phase 4 modulation methods
     private external fun native_setInstrumentModulation(
         sampleId: Int, slotIndex: Int, type: Int, dest: Int, amount: Float,
-        attackSamples: Int, holdSamples: Int, decaySamples: Int
+        attackSamples: Int, holdSamples: Int, decaySamples: Int,
+        sustainLevel: Float, lfoHz: Float, oscShape: Int
     )
     private external fun native_clearInstrumentModulation(sampleId: Int)
 }
