@@ -289,14 +289,23 @@ class OboeAudioBackend : IAudioBackend {
         decaySamples: Int,
         sustainLevel: Float,
         lfoHz: Float,
-        oscShape: Int
+        oscShape: Int,
+        releaseSamples: Int
     ) {
         native_setInstrumentModulation(sampleId, slotIndex, type, dest, amount,
-            attackSamples, holdSamples, decaySamples, sustainLevel, lfoHz, oscShape)
+            attackSamples, holdSamples, decaySamples, sustainLevel, lfoHz, oscShape, releaseSamples)
     }
 
     override fun clearInstrumentModulation(sampleId: Int) {
         native_clearInstrumentModulation(sampleId)
+    }
+
+    override fun triggerNoteOff(trackId: Int) {
+        native_triggerNoteOff(trackId)
+    }
+
+    override fun scheduleNoteOff(frame: Long, trackId: Int) {
+        native_scheduleNoteOff(frame, trackId)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -387,7 +396,9 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_setInstrumentModulation(
         sampleId: Int, slotIndex: Int, type: Int, dest: Int, amount: Float,
         attackSamples: Int, holdSamples: Int, decaySamples: Int,
-        sustainLevel: Float, lfoHz: Float, oscShape: Int
+        sustainLevel: Float, lfoHz: Float, oscShape: Int, releaseSamples: Int
     )
     private external fun native_clearInstrumentModulation(sampleId: Int)
+    private external fun native_triggerNoteOff(trackId: Int)
+    private external fun native_scheduleNoteOff(frame: Long, trackId: Int)
 }

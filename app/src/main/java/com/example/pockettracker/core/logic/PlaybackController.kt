@@ -7,6 +7,7 @@ import com.example.pockettracker.core.data.ScreenType
 import com.example.pockettracker.core.data.VolumeUtils
 import com.example.pockettracker.core.audio.AudioEngine
 import com.example.pockettracker.core.data.Chain
+import com.example.pockettracker.core.data.ModType
 import com.example.pockettracker.core.data.Phrase
 import com.example.pockettracker.core.logging.ILogger
 import com.example.pockettracker.getEffectTypeName
@@ -358,11 +359,13 @@ class PlaybackController(
         chainRowStartFrames.clear()
         songPositionStartFrames.clear()
         nextSongChainRowToSchedule = 0
-        // Clear all track states (persistent effects, note memory, HOP)
+        // Clear all track states (persistent effects, note memory, HOP, groove)
         trackStates.forEach {
             it.clearRepeat()
             it.clearAllArpeggioState()
             it.clearHopState()
+            it.grooveId = 0
+            it.grooveStep = 0
         }
         logger.d(TAG, "⏹️ Playback stopped")
     }
@@ -851,6 +854,94 @@ class PlaybackController(
         songPositionStartFrames.clear()
 
         logger.d(TAG, "✅ Song playback initialized")
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // OFFLINE RENDER SCHEDULING
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Schedule the entire song synchronously for offline WAV rendering.
+     *
+     * Uses the exact same [schedulePhrase] logic as live song playback, so groove,
+     * DEL, arpeggio, HOP, pitch effects — everything — behaves identically.
+     *
+     * Call order:
+     *   1. audioBackend.resetFrameCounter()
+     *   2. audioBackend.clearScheduledNotes()
+     *   3. scheduleSongForRender(project, startRow, endRow)  ← fills note queue at frames 0..N
+     *   4. audioBackend.renderFrames(totalFrames, sampleRate)
+     *
+     * @param project  Project to render
+     * @param startRow First song row to render (inclusive)
+     * @param endRow   Last song row to render (inclusive)
+     * @return Total audio frames scheduled (pass directly to renderFrames)
+     */
+    fun scheduleSongForRender(project: Project, startRow: Int, endRow: Int): Long {
+        // Fresh track state — no carry-over from live playback
+        for (i in trackStates.indices) trackStates[i] = TrackState()
+
+        val sampleRate = audioEngine.getDeviceSampleRate()
+        val msPerStep  = 60000.0 / project.tempo / 4.0
+        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+
+        var currentFrame = 0L
+
+        for (songRow in startRow..endRow) {
+            // Clear per-row stop flags (mirrors updatePlaybackBuffer SONG logic)
+            trackStates.forEach { it.trackStopped = false }
+
+            // Max non-empty chain slots across all tracks determines phrase count for this row
+            var maxChainLength = 0
+            for (trackId in 0..7) {
+                val track = project.tracks[trackId]
+                if (track.mute) continue
+                if (songRow >= track.chainRefs.size) continue
+                val chainId = track.chainRefs[songRow]
+                if (chainId < 0 || chainId >= 256) continue
+                val length = (0..15).count { !project.chains[chainId].isEmpty(it) }
+                if (length > maxChainLength) maxChainLength = length
+            }
+
+            for (chainRow in 0 until maxChainLength) {
+                var maxFramesScheduled = 0L
+                var scheduledAny = false
+
+                for (trackId in 0..7) {
+                    val trackState = trackStates[trackId]
+                    if (trackState.trackStopped) continue
+
+                    val track = project.tracks[trackId]
+                    if (track.mute) continue
+                    if (songRow >= track.chainRefs.size) continue
+
+                    val chainId = track.chainRefs[songRow]
+                    if (chainId < 0 || chainId >= 256) continue
+
+                    val chain = project.chains[chainId]
+                    if (chain.isEmpty(chainRow)) continue
+
+                    val phraseId = chain.phraseRefs[chainRow]
+                    if (phraseId < 0 || phraseId >= 256) continue
+
+                    val transposeSemitones = chain.getTransposeSemitones(chainRow)
+                    val hopStartRow = trackState.consumeHopTarget()
+                    val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
+
+                    val result = schedulePhrase(
+                        project.phrases[phraseId], currentFrame, trackId,
+                        transposeSemitones, project, framesPerStep, effectiveStartRow
+                    )
+                    scheduledAny = true
+                    if (result.framesScheduled > maxFramesScheduled)
+                        maxFramesScheduled = result.framesScheduled
+                }
+
+                if (scheduledAny) currentFrame += maxFramesScheduled
+            }
+        }
+
+        return currentFrame
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1373,6 +1464,7 @@ class PlaybackController(
             }
         }
 
+
         // Handle KILL effect - schedule kill at the specified frame (offset by DEL if present)
         if (params.killAtFrame != null) {
             val killFrame = if (delayTicks > 0) {
@@ -1381,7 +1473,10 @@ class PlaybackController(
             } else {
                 params.killAtFrame
             }
-            audioEngine.scheduleKill(killFrame, trackId)
+            // scheduleNoteOff (soft kill) at the sample-accurate kill frame.
+            // triggerNoteOff transitions ADSR to Release so the release tail plays after K00.
+            // For AHD / DRUM / no-mod voices it hard-stops the voice (no release to play).
+            audioEngine.scheduleNoteOff(killFrame, trackId)
             trackState.clearPitchMod()
         }
 

@@ -29,7 +29,7 @@ import java.nio.ByteOrder
  * @param logger Platform-specific logger (e.g., AndroidLogger on Android)
  */
 class AudioEngine(
-    private val backend: IAudioBackend,
+    internal val backend: IAudioBackend,
     private val resourceLoader: IResourceLoader,
     private val logger: ILogger
 ) {
@@ -254,6 +254,10 @@ class AudioEngine(
         if (tableId >= 0 && project != null && tableId < 256) {
             forceReloadTable(project.tables[tableId])
         }
+
+        // Push current modulation params so preview reflects latest UI edits
+        val tempo = project?.tempo ?: 120
+        pushInstrumentModulation(instrument, tempo)
 
         backend.scheduleNoteWithTable(
             frame = targetFrame,
@@ -776,6 +780,29 @@ class AudioEngine(
     }
 
     /**
+     * Trigger note-off for ADSR/TRIG modulators on a track.
+     * Transitions sustain (stage 3) → release (stage 4), allowing a smooth fade-out.
+     * Called on KILL effect so looped samples with ADSR mod fade rather than cut hard.
+     *
+     * @param trackId Which track (0-7)
+     */
+    fun triggerNoteOff(trackId: Int) {
+        backend.triggerNoteOff(trackId)
+    }
+
+    /**
+     * Schedule a note-off event at a specific audio frame.
+     * Triggers ADSR release (sustain → release) at sample-accurate timing.
+     * Used to implement step-end note-off for ADSR envelopes.
+     *
+     * @param frame When to trigger note-off (absolute audio frame)
+     * @param trackId Which track (0-7)
+     */
+    fun scheduleNoteOff(frame: Long, trackId: Int) {
+        backend.scheduleNoteOff(frame, trackId)
+    }
+
+    /**
      * Push instrument modulation slots to the C++ engine before scheduling a note.
      *
      * Converts AHD tick values → audio samples using current tempo + sample rate,
@@ -796,9 +823,17 @@ class AudioEngine(
             val slot = instrument.modSlots[slotIndex]
 
             val dest = when (slot.dest) {
-                ModDest.VOLUME -> 1
-                ModDest.PITCH  -> 3
-                else -> 0
+                ModDest.VOLUME        -> 1
+                ModDest.PAN           -> 2
+                ModDest.PITCH         -> 3
+                ModDest.FINE_PITCH    -> 4
+                ModDest.FILTER_CUTOFF -> 5
+                ModDest.FILTER_RES    -> 6
+                ModDest.SAMPLE_START  -> 7
+                ModDest.MOD_AMT       -> 8   // Routes this slot's output to scale next slot's amount
+                ModDest.MOD_RATE      -> 9   // Routes this slot's output to scale next slot's time/freq
+                ModDest.MOD_BOTH      -> 10  // Routes to both amount and rate of next slot
+                else                  -> 0
             }
 
             when (slot.type) {
@@ -816,10 +851,12 @@ class AudioEngine(
                     if (dest == 0) { backend.setInstrumentModulation(sampleId, slotIndex, 0,0,0f,0,0,0); continue }
                     val amount         = slot.amount  / 255.0f
                     val sustainLevel   = slot.sustain / 255.0f
-                    val attackSamples  = (slot.attack  * framesPerTic).toInt().coerceAtLeast(0)
-                    val decaySamples   = (slot.decay   * framesPerTic).toInt().coerceAtLeast(0)
+                    val attackSamples  = (slot.attack   * framesPerTic).toInt().coerceAtLeast(0)
+                    val decaySamples   = (slot.decay    * framesPerTic).toInt().coerceAtLeast(0)
+                    val releaseSamples = (slot.release  * framesPerTic).toInt().coerceAtLeast(0)
                     backend.setInstrumentModulation(sampleId, slotIndex, 2, dest, amount,
-                        attackSamples, 0, decaySamples, sustainLevel)
+                        attackSamples, 0, decaySamples, sustainLevel,
+                        releaseSamples = releaseSamples)
                     anyActive = true
                 }
                 ModType.LFO -> {
@@ -830,6 +867,31 @@ class AudioEngine(
                     val oscShape = slot.oscShape
                     backend.setInstrumentModulation(sampleId, slotIndex, 3, dest, amount,
                         0, 0, 0, 0.5f, lfoHz, oscShape)
+                    anyActive = true
+                }
+                ModType.DRUM -> {
+                    // DRUM = AHD semantics: ATK=spike attack, HOLD=body, DEC=tail
+                    // Passes type=4 so C++ can distinguish for future per-type behaviour
+                    if (dest == 0) { backend.setInstrumentModulation(sampleId, slotIndex, 0,0,0f,0,0,0); continue }
+                    val amount        = slot.amount / 255.0f
+                    val attackSamples = (slot.attack * framesPerTic).toInt().coerceAtLeast(0)
+                    val holdSamples   = (slot.hold   * framesPerTic).toInt().coerceAtLeast(0)
+                    val decaySamples  = (slot.decay  * framesPerTic).toInt().coerceAtLeast(0)
+                    backend.setInstrumentModulation(sampleId, slotIndex, 4, dest, amount,
+                        attackSamples, holdSamples, decaySamples)
+                    anyActive = true
+                }
+                ModType.TRIG -> {
+                    // TRIG = ADSR semantics (future: externally triggered); passes type=5
+                    if (dest == 0) { backend.setInstrumentModulation(sampleId, slotIndex, 0,0,0f,0,0,0); continue }
+                    val amount         = slot.amount  / 255.0f
+                    val sustainLevel   = slot.sustain / 255.0f
+                    val attackSamples  = (slot.attack   * framesPerTic).toInt().coerceAtLeast(0)
+                    val decaySamples   = (slot.decay    * framesPerTic).toInt().coerceAtLeast(0)
+                    val releaseSamples = (slot.release  * framesPerTic).toInt().coerceAtLeast(0)
+                    backend.setInstrumentModulation(sampleId, slotIndex, 5, dest, amount,
+                        attackSamples, 0, decaySamples, sustainLevel,
+                        releaseSamples = releaseSamples)
                     anyActive = true
                 }
                 else -> {

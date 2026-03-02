@@ -146,10 +146,11 @@ struct ScheduledNote {
     }
 };
 
-// Scheduled kill event (for Kill effect K00)
+// Scheduled kill event (for Kill effect K00, and soft note-off for ADSR release)
 struct ScheduledKill {
     int64_t targetFrame;     // Exact audio frame to trigger kill
     int trackId;             // Which track to kill (0-7)
+    bool softKill = false;   // false = hard stop, true = soft note-off (triggers ADSR release)
 
     // For priority queue sorting (earliest frame first)
     bool operator>(const ScheduledKill& other) const {
@@ -280,7 +281,7 @@ struct InstrumentParams {
 // Copied to VoiceModSlot when a note triggers on that instrument.
 struct InstrumentModSlot {
     int type;          // 0=NONE, 1=AHD, 2=ADSR, 3=LFO
-    int dest;          // 0=NONE, 1=VOL, 3=PITCH (mirrors ModDest ordinals)
+    int dest;          // 0=NONE, 1=VOL, 2=PAN, 3=PITCH, 4=FINE_PITCH, 5=CUT, 6=RES, 7=STA, 8=MOD_AMT, 9=MOD_RATE, 10=MOD_BOTH
     float amount;      // Modulation depth 0.0-1.0 (normalised from 00-FF)
     int attackSamples; // Attack duration in audio samples
     int holdSamples;   // Hold duration in audio samples (AHD hold; unused in ADSR)
@@ -288,10 +289,11 @@ struct InstrumentModSlot {
     float sustainLevel; // ADSR: sustain level 0.0-1.0
     float lfoHz;        // LFO: frequency in Hz
     int oscShape;       // LFO: 0=TRI,1=SIN,2=RMP+,3=RMP-,4=EXP+,5=EXP-,6=SQU+,7=SQU-,8=RND,9=DRNK
+    int releaseSamples; // ADSR/TRIG: release duration in audio samples (0 = instant)
 
     InstrumentModSlot() : type(0), dest(0), amount(0.5f),
                           attackSamples(0), holdSamples(0), decaySamples(0),
-                          sustainLevel(0.5f), lfoHz(4.0f), oscShape(0) {}
+                          sustainLevel(0.5f), lfoHz(4.0f), oscShape(0), releaseSamples(0) {}
 };
 
 // ===================================
@@ -425,15 +427,25 @@ struct Voice {
         float lfoHz;         // LFO: frequency in Hz
         float lfoPhase;      // LFO: current phase (0 to 2π)
         int oscShape;        // LFO: oscillator shape (0=TRI, 1=SIN, ...)
+        int releaseSamples;  // ADSR/TRIG: release duration in audio samples
+        // dest values: 0=NONE, 1=VOL, 2=PAN, 3=PITCH, 4=FINE_PITCH, 5=CUT, 6=RES, 7=STA, 8=MOD_AMT, 9=MOD_RATE, 10=MOD_BOTH
 
-        VoiceModSlot() : type(0), dest(0), amount(0.5f),
+        // Mod-to-mod: computed each audio callback by updateVoiceModulation
+        float effectiveAmt;      // amount × incoming MOD_AMT/BOTH scaling
+        float effectiveRateMult; // time/freq multiplier from incoming MOD_RATE/BOTH
+
+        VoiceModSlot() : type(0), dest(0), amount(0.5f), effectiveAmt(0.5f), effectiveRateMult(1.0f),
                          stage(0), envValue(0.0f), stageCounter(0),
-                         attackSamples(0), holdSamples(0), decaySamples(0),
+                         attackSamples(0), holdSamples(0), decaySamples(0), releaseSamples(0),
                          sustainLevel(0.5f), lfoHz(4.0f), lfoPhase(0.0f), oscShape(0) {}
     };
     VoiceModSlot voiceMods[4]; // 4 mod slots per voice
     float baseVolume;          // Voice volume before modulation
-    float modPitchOffset;      // Accumulated pitch offset from PITCH-destination mods (semitones)
+    float modPitchOffset;      // Accumulated pitch offset from PITCH/FINE_PITCH-destination mods (semitones)
+    float basePan;             // Pan position at trigger time (0.0=left, 0.5=center, 1.0=right)
+    float modPanOffset;        // Accumulated pan offset from PAN-destination mods (±0.5)
+    float modCutOffset;        // Accumulated filter cutoff offset from FILTER_CUTOFF mods (±255)
+    float modResOffset;        // Accumulated filter resonance offset from FILTER_RES mods (±255)
 
     Voice() : isActive(false), sampleData(nullptr), sampleLength(0),
               position(0), trackId(-1), playbackRate(1.0f), basePlaybackRate(1.0f), volume(1.0f),
@@ -450,7 +462,8 @@ struct Voice {
               hopRepeatCount(0), hopTargetRow(-1),
               pitchOffset(0.0f), pitchSlideTarget(0.0f), pitchSlideRate(0.0f), pitchSliding(false),
               vibratoPhase(0.0f), vibratoSpeed(0.0f), vibratoDepth(0.0f), vibratoActive(false),
-              baseVolume(1.0f), modPitchOffset(0.0f) {}
+              baseVolume(1.0f), modPitchOffset(0.0f),
+              basePan(0.5f), modPanOffset(0.0f), modCutOffset(0.0f), modResOffset(0.0f) {}
 
     void trigger(float* sample, int length, int track, float rate, float vol, float pan,
                  const InstrumentParams& params, float sampleRate, int startPointOverride = -1,
@@ -531,6 +544,10 @@ struct Voice {
         vibratoDepth = 0.0f;
         vibratoActive = false;
         modPitchOffset = 0.0f;
+        basePan = pan;
+        modPanOffset = 0.0f;
+        modCutOffset = 0.0f;
+        modResOffset = 0.0f;
 
         // Store note info for special TIC modes (Phase 4)
         triggerOctave = std::max(0, std::min(octave, 9));   // Clamp to 0-9
@@ -768,11 +785,17 @@ public:
             // Process all scheduled kill events for this exact frame (BEFORE notes)
             while (killQueue.hasKillAt(currentFrame)) {
                 ScheduledKill kill = killQueue.pop();
-                // Stop all voices on this track
-                for (int v = 0; v < MAX_VOICES; v++) {
-                    if (voices[v].trackId == kill.trackId && voices[v].isActive) {
-                        voices[v].stop();
-                        LOGD("🔪 Killed track %d at frame %lld", kill.trackId, (long long)currentFrame);
+                if (kill.softKill) {
+                    // Soft kill: trigger ADSR release (graceful fade-out)
+                    triggerNoteOff(kill.trackId);
+                    LOGD("🎵 Note-off: track %d at frame %lld", kill.trackId, (long long)currentFrame);
+                } else {
+                    // Hard kill: stop all voices on this track immediately
+                    for (int v = 0; v < MAX_VOICES; v++) {
+                        if (voices[v].trackId == kill.trackId && voices[v].isActive) {
+                            voices[v].stop();
+                            LOGD("🔪 Killed track %d at frame %lld", kill.trackId, (long long)currentFrame);
+                        }
                     }
                 }
             }
@@ -919,7 +942,10 @@ public:
                                 dst.sustainLevel = src.sustainLevel;
                                 dst.lfoHz = src.lfoHz;
                                 dst.oscShape = src.oscShape;
-                                dst.lfoPhase = 0.0f;  // Always reset phase on new note
+                                dst.lfoPhase       = 0.0f;   // Always reset phase on new note
+                                dst.releaseSamples = src.releaseSamples;
+                                dst.effectiveAmt      = src.amount;  // Will be updated by updateVoiceModulation
+                                dst.effectiveRateMult = 1.0f;
                                 if (src.type != 0) {
                                     dst.stage = 1;  // Begin attack (or LFO running)
                                     dst.envValue = 0.0f;
@@ -1192,6 +1218,44 @@ public:
             updateVoiceModulation(voices[v], numFrames);
         }
 
+        // Apply per-voice PAN and FILTER modulation (once per callback)
+        for (int v = 0; v < MAX_VOICES; v++) {
+            Voice& voice = voices[v];
+            if (!voice.isActive) continue;
+
+            // PAN modulation: recalculate stereo gains from basePan + mod offset
+            if (fabsf(voice.modPanOffset) > 0.001f) {
+                float modPan = fmaxf(0.0f, fminf(1.0f, voice.basePan + voice.modPanOffset));
+                float panAngle = modPan * (float)M_PI * 0.5f;
+                voice.panLeft = cosf(panAngle);
+                voice.panRight = sinf(panAngle);
+            }
+
+            // FILTER modulation: recalculate biquad coefficients
+            if (voice.filterType != 0 && (fabsf(voice.modCutOffset) > 0.5f || fabsf(voice.modResOffset) > 0.5f)) {
+                int modCut = std::max(0, std::min(255, voice.filterCut + (int)voice.modCutOffset));
+                int modRes = std::max(0, std::min(255, voice.filterRes + (int)voice.modResOffset));
+                float sampleRate = (float)audioStream->getSampleRate();
+                calculateBiquadCoeffs(voice.filterType, modCut, modRes, sampleRate,
+                                      voice.b0, voice.b1, voice.b2, voice.a1, voice.a2);
+            }
+
+            // Auto-stop looping voice when volume envelope completes
+            // AHD/DRUM done at stage 4; ADSR/TRIG done at stage 5
+            if (voice.loopMode != 0) {
+                bool hasVolMod = false, allDone = true;
+                for (int m = 0; m < 4; m++) {
+                    const Voice::VoiceModSlot& mod = voice.voiceMods[m];
+                    if (mod.dest == 1 && (mod.type == 1 || mod.type == 2 || mod.type == 4 || mod.type == 5)) {
+                        hasVolMod = true;
+                        int doneStage = (mod.type == 2 || mod.type == 5) ? 5 : 4;
+                        if (mod.stage < doneStage) allDone = false;
+                    }
+                }
+                if (hasVolMod && allDone) voice.isActive = false;
+            }
+        }
+
         // Mix voices
         for (int v = 0; v < MAX_VOICES; v++) {
             Voice& voice = voices[v];
@@ -1285,8 +1349,9 @@ public:
                 }
 
                 // STEP 6: Apply volume after effects, with modulation (Phase 4)
-                // AHD/ADSR: (envValue-1)*amount — fade-in from -amount at start to 0 at peak
-                // LFO:  tremolo — multiply by (1 + envValue*amount), envValue in [-1,+1]
+                // AHD/ADSR: (envValue-1)*effectiveAmt — fade-in from -depth at start to 0 at peak
+                // LFO:  tremolo — multiply by (1 + envValue*effectiveAmt), envValue in [-1,+1]
+                // effectiveAmt already incorporates mod-to-mod scaling (Phase 4.4)
                 float finalVol = voice.volume;
                 for (int m = 0; m < 4; m++) {
                     const Voice::VoiceModSlot& mod = voice.voiceMods[m];
@@ -1294,10 +1359,10 @@ public:
                     if (mod.dest == 1) { // VOL destination
                         if (mod.type == 3) {
                             // LFO: bipolar tremolo
-                            finalVol = fmaxf(0.0f, finalVol * (1.0f + mod.envValue * mod.amount));
+                            finalVol = fmaxf(0.0f, finalVol * (1.0f + mod.envValue * mod.effectiveAmt));
                         } else {
-                            // AHD/ADSR: fade-in/envelope shape
-                            finalVol = fmaxf(0.0f, finalVol + (mod.envValue - 1.0f) * mod.amount);
+                            // AHD/DRUM/ADSR/TRIG: fade-in/envelope shape
+                            finalVol = fmaxf(0.0f, finalVol + (mod.envValue - 1.0f) * mod.effectiveAmt);
                         }
                     }
                     // PITCH dest: already accumulated into voice.modPitchOffset by updateVoiceModulation
@@ -1473,6 +1538,16 @@ public:
         ScheduledKill kill = {
                 .targetFrame = targetFrame,
                 .trackId = trackId
+        };
+        killQueue.schedule(kill);
+    }
+
+    // Schedule a soft note-off (triggers ADSR release instead of hard stop)
+    void scheduleNoteOff(int64_t targetFrame, int trackId) {
+        ScheduledKill kill = {
+                .targetFrame = targetFrame,
+                .trackId = trackId,
+                .softKill = true
         };
         killQueue.schedule(kill);
     }
@@ -1756,13 +1831,15 @@ public:
     // ===================================
 
     // Set per-instrument modulation slot (called from Kotlin before scheduling each note)
-    // attackSamples/holdSamples/decaySamples are already converted from ticks by Kotlin.
+    // attackSamples/holdSamples/decaySamples/releaseSamples are converted from ticks by Kotlin.
     // sustainLevel: ADSR sustain level 0.0-1.0
     // lfoHz: LFO frequency in Hz; oscShape: LFO shape index (0=TRI,1=SIN,...)
+    // releaseSamples: ADSR/TRIG release duration (0 = instant cut on triggerNoteOff)
     void setInstrumentModulation(int sampleId, int slotIndex,
                                  int type, int dest, float amount,
                                  int attackSamples, int holdSamples, int decaySamples,
-                                 float sustainLevel, float lfoHz, int oscShape) {
+                                 float sustainLevel, float lfoHz, int oscShape,
+                                 int releaseSamples = 0) {
         if (sampleId < 0 || sampleId >= 256 || slotIndex < 0 || slotIndex >= 4) return;
         InstrumentModSlot& slot = instrumentModSlots[sampleId][slotIndex];
         slot.type = type;
@@ -1774,6 +1851,39 @@ public:
         slot.sustainLevel = sustainLevel;
         slot.lfoHz = lfoHz;
         slot.oscShape = oscShape;
+        slot.releaseSamples = releaseSamples;
+    }
+
+    // Smart note-off: trigger ADSR/TRIG release if available, otherwise hard-stop.
+    // Called at the K00 kill frame (via scheduleNoteOff softKill) or at step end.
+    // - ADSR/TRIG with releaseSamples > 0 and active (stage 1-3): transitions to Release.
+    // - ADSR/TRIG already in Release (stage 4): left to play out.
+    // - AHD, DRUM, LFO, or no vol mod: hard-stops the voice immediately.
+    void triggerNoteOff(int trackId) {
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (!voices[v].isActive || voices[v].trackId != trackId) continue;
+            bool hasRelease = false;
+            for (int m = 0; m < 4; m++) {
+                Voice::VoiceModSlot& mod = voices[v].voiceMods[m];
+                if (mod.dest == 1 && (mod.type == 2 || mod.type == 5)) {
+                    if (mod.stage >= 1 && mod.stage <= 3 && mod.releaseSamples > 0) {
+                        // Transition Attack / Decay / Sustain → Release
+                        mod.stage = 4;
+                        mod.stageCounter = 0;
+                        // envValue stays at current level; release ramps it to 0
+                        hasRelease = true;
+                    } else if (mod.stage == 4) {
+                        // Already in Release — let it play out naturally
+                        hasRelease = true;
+                    }
+                }
+            }
+            if (!hasRelease) {
+                // No ADSR release available (AHD / DRUM / LFO / no-mod / release=0)
+                // → hard-stop so looping samples don't play forever
+                voices[v].stop();
+            }
+        }
     }
 
     // Clear all modulation slots for an instrument
@@ -1785,26 +1895,63 @@ public:
     }
 
     // Advance modulation stages for one voice (called once per audio callback).
-    // Handles AHD (type=1), ADSR (type=2), LFO (type=3).
-    // Accumulates modPitchOffset from PITCH-destination slots.
+    // Handles AHD (type=1), ADSR (type=2), LFO (type=3), DRUM (type=4), TRIG (type=5).
+    // Phase 4.4: Mod-to-mod routing: dest=8 (MOD_AMT), 9 (MOD_RATE), 10 (MOD_BOTH).
+    // Accumulates modPitchOffset from PITCH-destination (dest=3) slots.
     void updateVoiceModulation(Voice& voice, int numFrames) {
-        voice.modPitchOffset = 0.0f;  // Reset pitch accumulator each callback
+        voice.modPitchOffset = 0.0f;  // Reset accumulators each callback
+        voice.modPanOffset = 0.0f;
+        voice.modCutOffset = 0.0f;
+        voice.modResOffset = 0.0f;
 
         float sr = stream ? (float)stream->getSampleRate() : 44100.0f;
+
+        // ── Phase 4.4: Mod-to-mod routing ──────────────────────────────────────
+        // Each slot routes its output to the NEXT slot (0→1, 1→2, 2→3, 3→0).
+        // Uses previous frame's envValue to avoid circular-dependency issues.
+        // amtScale[N] multiplies slot N's effective amount.
+        // rateMult[N] multiplies slot N's effective time/freq (higher = faster).
+        {
+            float amtScale[4]  = {1.0f, 1.0f, 1.0f, 1.0f};
+            float rateMult[4]  = {1.0f, 1.0f, 1.0f, 1.0f};
+            for (int m = 0; m < 4; m++) {
+                const Voice::VoiceModSlot& src = voice.voiceMods[m];
+                if (src.type == 0 || src.stage == 0) continue;
+                if (src.dest != 8 && src.dest != 9 && src.dest != 10) continue;
+                int target = (m + 1) % 4;
+                // Normalize envValue to 0-1: envelopes are 0-1, LFOs are -1 to +1
+                float norm = (src.type == 3) ? (src.envValue * 0.5f + 0.5f)
+                                              : fmaxf(0.0f, src.envValue);
+                // src.amount (depth of routing): 0.5 → 1.0x scaling at full signal
+                float scale = fminf(2.0f, norm * src.amount * 2.0f);
+                if (src.dest == 8 || src.dest == 10) amtScale[target] *= scale;
+                if (src.dest == 9 || src.dest == 10) rateMult[target] *= fmaxf(0.05f, scale);
+            }
+            for (int m = 0; m < 4; m++) {
+                voice.voiceMods[m].effectiveAmt      = voice.voiceMods[m].amount * amtScale[m];
+                voice.voiceMods[m].effectiveRateMult = rateMult[m];
+            }
+        }
+        // ───────────────────────────────────────────────────────────────────────
 
         for (int m = 0; m < 4; m++) {
             Voice::VoiceModSlot& mod = voice.voiceMods[m];
             if (mod.type == 0 || mod.stage == 0) continue;
 
-            if (mod.type == 1) {
-                // ── AHD: Attack → Hold → Decay ──
+            if (mod.type == 1 || mod.type == 4) {
+                // ── AHD / DRUM: Attack → Hold → Decay ──
                 if (mod.stage == 4) continue;
                 mod.stageCounter += numFrames;
+                // Effective stage durations: higher rateMult → shorter stages (faster)
+                float rMult = fmaxf(0.01f, mod.effectiveRateMult);
+                int effAttack = mod.attackSamples > 0 ? (int)fmaxf(1.0f, mod.attackSamples / rMult) : 0;
+                int effHold   = mod.holdSamples   > 0 ? (int)fmaxf(1.0f, mod.holdSamples   / rMult) : 0;
+                int effDecay  = mod.decaySamples  > 0 ? (int)fmaxf(1.0f, mod.decaySamples  / rMult) : 0;
                 switch (mod.stage) {
                     case 1: // Attack: ramp 0 → 1
-                        if (mod.attackSamples > 0) {
-                            mod.envValue = fminf(1.0f, (float)mod.stageCounter / mod.attackSamples);
-                            if (mod.stageCounter >= mod.attackSamples) {
+                        if (effAttack > 0) {
+                            mod.envValue = fminf(1.0f, (float)mod.stageCounter / effAttack);
+                            if (mod.stageCounter >= effAttack) {
                                 mod.envValue = 1.0f;
                                 mod.stage = 2; mod.stageCounter = 0;
                             }
@@ -1815,14 +1962,14 @@ public:
                         break;
                     case 2: // Hold: stay at 1
                         mod.envValue = 1.0f;
-                        if (mod.holdSamples == 0 || mod.stageCounter >= mod.holdSamples) {
+                        if (effHold == 0 || mod.stageCounter >= effHold) {
                             mod.stage = 3; mod.stageCounter = 0;
                         }
                         break;
                     case 3: // Decay: ramp 1 → 0
-                        if (mod.decaySamples > 0) {
-                            mod.envValue = fmaxf(0.0f, 1.0f - (float)mod.stageCounter / mod.decaySamples);
-                            if (mod.stageCounter >= mod.decaySamples) {
+                        if (effDecay > 0) {
+                            mod.envValue = fmaxf(0.0f, 1.0f - (float)mod.stageCounter / effDecay);
+                            if (mod.stageCounter >= effDecay) {
                                 mod.envValue = 0.0f;
                                 mod.stage = 4;
                             }
@@ -1833,15 +1980,20 @@ public:
                         break;
                 }
 
-            } else if (mod.type == 2) {
-                // ── ADSR: Attack → Decay → Sustain (hold until voice ends) ──
-                if (mod.stage == 4) continue;
+            } else if (mod.type == 2 || mod.type == 5) {
+                // ── ADSR / TRIG: Attack → Decay → Sustain → Release ──
+                // Stage 5 = done (unlike AHD where stage 4 = done)
+                if (mod.stage == 5) continue;
                 mod.stageCounter += numFrames;
+                float rMult    = fmaxf(0.01f, mod.effectiveRateMult);
+                int effAttack  = mod.attackSamples  > 0 ? (int)fmaxf(1.0f, mod.attackSamples  / rMult) : 0;
+                int effDecay   = mod.decaySamples   > 0 ? (int)fmaxf(1.0f, mod.decaySamples   / rMult) : 0;
+                int effRelease = mod.releaseSamples > 0 ? (int)fmaxf(1.0f, mod.releaseSamples / rMult) : 0;
                 switch (mod.stage) {
                     case 1: // Attack: ramp 0 → 1
-                        if (mod.attackSamples > 0) {
-                            mod.envValue = fminf(1.0f, (float)mod.stageCounter / mod.attackSamples);
-                            if (mod.stageCounter >= mod.attackSamples) {
+                        if (effAttack > 0) {
+                            mod.envValue = fminf(1.0f, (float)mod.stageCounter / effAttack);
+                            if (mod.stageCounter >= effAttack) {
                                 mod.envValue = 1.0f;
                                 mod.stage = 2; mod.stageCounter = 0;
                             }
@@ -1851,10 +2003,10 @@ public:
                         }
                         break;
                     case 2: // Decay: ramp 1 → sustainLevel
-                        if (mod.decaySamples > 0) {
-                            float t = fminf(1.0f, (float)mod.stageCounter / mod.decaySamples);
+                        if (effDecay > 0) {
+                            float t = fminf(1.0f, (float)mod.stageCounter / effDecay);
                             mod.envValue = 1.0f - t * (1.0f - mod.sustainLevel);
-                            if (mod.stageCounter >= mod.decaySamples) {
+                            if (mod.stageCounter >= effDecay) {
                                 mod.envValue = mod.sustainLevel;
                                 mod.stage = 3; mod.stageCounter = 0;
                             }
@@ -1863,14 +2015,29 @@ public:
                             mod.stage = 3; mod.stageCounter = 0;
                         }
                         break;
-                    case 3: // Sustain: hold at sustainLevel until voice ends
+                    case 3: // Sustain: hold at sustainLevel (until triggerNoteOff)
                         mod.envValue = mod.sustainLevel;
+                        break;
+                    case 4: // Release: ramp sustainLevel → 0 (triggered by triggerNoteOff)
+                        if (effRelease > 0) {
+                            mod.envValue = fmaxf(0.0f,
+                                mod.sustainLevel * (1.0f - (float)mod.stageCounter / effRelease));
+                            if (mod.stageCounter >= effRelease) {
+                                mod.envValue = 0.0f;
+                                mod.stage = 5;
+                            }
+                        } else {
+                            mod.envValue = 0.0f;
+                            mod.stage = 5;
+                        }
                         break;
                 }
 
             } else if (mod.type == 3) {
                 // ── LFO: phase-based oscillator ──
-                float phaseAdvance = 2.0f * (float)M_PI * mod.lfoHz / sr * numFrames;
+                // effectiveRateMult speeds up LFO frequency (2.0 = 2× faster)
+                float effHz       = mod.lfoHz * mod.effectiveRateMult;
+                float phaseAdvance = 2.0f * (float)M_PI * effHz / sr * numFrames;
                 mod.lfoPhase += phaseAdvance;
                 while (mod.lfoPhase >= 2.0f * (float)M_PI) mod.lfoPhase -= 2.0f * (float)M_PI;
 
@@ -1902,10 +2069,26 @@ public:
                 }
             }
 
-            // Accumulate PITCH modulation (dest=3)
-            if (mod.dest == 3 && mod.stage != 4) {
-                // amount (0-1) × 12 semitones = up to ±12 semitones (1 octave)
-                voice.modPitchOffset += mod.envValue * mod.amount * 12.0f;
+            // Accumulate modulation to destinations
+            // Done stages (AHD=4, ADSR=5) have envValue=0 so contribute nothing
+            switch (mod.dest) {
+                case 2: // PAN: ±0.5 range (shifts centre ±0.5)
+                    voice.modPanOffset += mod.envValue * mod.effectiveAmt * 0.5f;
+                    break;
+                case 3: // PITCH: up to ±12 semitones (1 octave)
+                    voice.modPitchOffset += mod.envValue * mod.effectiveAmt * 12.0f;
+                    break;
+                case 4: // FINE_PITCH: up to ±1 semitone (fine detune / subtle vibrato)
+                    voice.modPitchOffset += mod.envValue * mod.effectiveAmt * 1.0f;
+                    break;
+                case 5: // FILTER_CUTOFF: up to ±255 cutoff param units
+                    voice.modCutOffset += mod.envValue * mod.effectiveAmt * 255.0f;
+                    break;
+                case 6: // FILTER_RES: up to ±255 resonance param units
+                    voice.modResOffset += mod.envValue * mod.effectiveAmt * 255.0f;
+                    break;
+                default:
+                    break; // VOL(1) handled in mix loop, STA(7)/MOD_*(8-10) handled elsewhere
             }
         }
     }
@@ -1980,9 +2163,13 @@ public:
             // Process kill events at this frame
             while (killQueue.hasKillAt(currentFrame)) {
                 ScheduledKill kill = killQueue.pop();
-                for (int v = 0; v < MAX_VOICES; v++) {
-                    if (voices[v].trackId == kill.trackId && voices[v].isActive) {
-                        voices[v].stop();
+                if (kill.softKill) {
+                    triggerNoteOff(kill.trackId);
+                } else {
+                    for (int v = 0; v < MAX_VOICES; v++) {
+                        if (voices[v].trackId == kill.trackId && voices[v].isActive) {
+                            voices[v].stop();
+                        }
                     }
                 }
             }
@@ -2040,9 +2227,80 @@ public:
                                 voices[v].vibratoDepth = note.vibratoDepth;
                                 voices[v].vibratoActive = true;
                             }
+
+                            // Initialize modulation state from instrument mod slots
+                            voices[v].baseVolume = note.volume;
+                            voices[v].modPitchOffset = 0.0f;
+                            voices[v].modPanOffset = 0.0f;
+                            voices[v].modCutOffset = 0.0f;
+                            voices[v].modResOffset = 0.0f;
+                            for (int m = 0; m < 4; m++) {
+                                const InstrumentModSlot& src = instrumentModSlots[note.sampleId][m];
+                                Voice::VoiceModSlot& dst = voices[v].voiceMods[m];
+                                dst.type = src.type;
+                                dst.dest = src.dest;
+                                dst.amount = src.amount;
+                                dst.attackSamples = src.attackSamples;
+                                dst.holdSamples = src.holdSamples;
+                                dst.decaySamples = src.decaySamples;
+                                dst.sustainLevel = src.sustainLevel;
+                                dst.lfoHz = src.lfoHz;
+                                dst.oscShape = src.oscShape;
+                                dst.lfoPhase = 0.0f;
+                                dst.releaseSamples = src.releaseSamples;
+                                dst.effectiveAmt = src.amount;
+                                dst.effectiveRateMult = 1.0f;
+                                if (src.type != 0) {
+                                    dst.stage = 1;
+                                    dst.envValue = 0.0f;
+                                    dst.stageCounter = 0;
+                                } else {
+                                    dst.stage = 0;
+                                    dst.envValue = 0.0f;
+                                    dst.stageCounter = 0;
+                                }
+                            }
                         }
                         break;
                     }
+                }
+            }
+
+            // Update pitch and modulation for each active voice (once per sample frame)
+            for (int v = 0; v < MAX_VOICES; v++) {
+                if (!voices[v].isActive) continue;
+                updateVoicePitchMod(voices[v], 1);
+                updateVoiceModulation(voices[v], 1);
+
+                // Apply PAN modulation
+                if (fabsf(voices[v].modPanOffset) > 0.001f) {
+                    float modPan = fmaxf(0.0f, fminf(1.0f, voices[v].basePan + voices[v].modPanOffset));
+                    float panAngle = modPan * (float)M_PI * 0.5f;
+                    voices[v].panLeft = cosf(panAngle);
+                    voices[v].panRight = sinf(panAngle);
+                }
+
+                // Apply FILTER modulation
+                if (voices[v].filterType != 0 && (fabsf(voices[v].modCutOffset) > 0.5f || fabsf(voices[v].modResOffset) > 0.5f)) {
+                    int modCut = std::max(0, std::min(255, voices[v].filterCut + (int)voices[v].modCutOffset));
+                    int modRes = std::max(0, std::min(255, voices[v].filterRes + (int)voices[v].modResOffset));
+                    calculateBiquadCoeffs(voices[v].filterType, modCut, modRes, (float)sampleRate,
+                                          voices[v].b0, voices[v].b1, voices[v].b2, voices[v].a1, voices[v].a2);
+                }
+
+                // Auto-stop looping voice when volume envelope completes
+                // AHD/DRUM done at stage 4; ADSR/TRIG done at stage 5
+                if (voices[v].loopMode != 0) {
+                    bool hasVolMod = false, allDone = true;
+                    for (int m = 0; m < 4; m++) {
+                        const Voice::VoiceModSlot& mod = voices[v].voiceMods[m];
+                        if (mod.dest == 1 && (mod.type == 1 || mod.type == 2 || mod.type == 4 || mod.type == 5)) {
+                            hasVolMod = true;
+                            int doneStage = (mod.type == 2 || mod.type == 5) ? 5 : 4;
+                            if (mod.stage < doneStage) allDone = false;
+                        }
+                    }
+                    if (hasVolMod && allDone) voices[v].isActive = false;
                 }
             }
 
@@ -2113,13 +2371,30 @@ public:
                     sample = filtered;
                 }
 
-                // Apply volume and pan (no artificial headroom)
-                sample = sample * voice.volume;
+                // Apply volume with modulation (ADSR/AHD/LFO VOL dest)
+                float finalVol = voice.volume;
+                for (int m = 0; m < 4; m++) {
+                    const Voice::VoiceModSlot& mod = voice.voiceMods[m];
+                    if (mod.type == 0 || mod.stage == 0) continue;
+                    if (mod.dest == 1) {
+                        if (mod.type == 3) {
+                            finalVol = fmaxf(0.0f, finalVol * (1.0f + mod.envValue * mod.effectiveAmt));
+                        } else {
+                            finalVol = fmaxf(0.0f, finalVol + (mod.envValue - 1.0f) * mod.effectiveAmt);
+                        }
+                    }
+                }
+                // Apply track and master volume (mirrors onAudioReady STEP 7)
+                sample = sample * finalVol
+                       * trackVolumes[voice.trackId]
+                       * masterVolume;
                 leftSample += sample * voice.panLeft;
                 rightSample += sample * voice.panRight;
 
-                // Advance position
-                voice.position += voice.playbackRate;
+                // Advance position using modulated rate (pitch/vibrato), preserving direction sign
+                float absModRate = fabsf(getModulatedPlaybackRate(voice));
+                float signedRate = (voice.playbackRate >= 0) ? absModRate : -absModRate;
+                voice.position += signedRate;
 
                 // Handle looping
                 if (voice.loopMode > 0) {
@@ -2671,11 +2946,11 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setInst
         JNIEnv *env, jobject thiz,
         jint sampleId, jint slotIndex, jint type, jint dest, jfloat amount,
         jint attackSamples, jint holdSamples, jint decaySamples,
-        jfloat sustainLevel, jfloat lfoHz, jint oscShape) {
+        jfloat sustainLevel, jfloat lfoHz, jint oscShape, jint releaseSamples) {
     if (engine) {
         engine->setInstrumentModulation(sampleId, slotIndex, type, dest, amount,
                                         attackSamples, holdSamples, decaySamples,
-                                        sustainLevel, lfoHz, oscShape);
+                                        sustainLevel, lfoHz, oscShape, releaseSamples);
     }
 }
 
@@ -2684,6 +2959,22 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1clearIn
         JNIEnv *env, jobject thiz, jint sampleId) {
     if (engine) {
         engine->clearInstrumentModulation(sampleId);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1triggerNoteOff(
+        JNIEnv *env, jobject thiz, jint trackId) {
+    if (engine) {
+        engine->triggerNoteOff(trackId);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1scheduleNoteOff(
+        JNIEnv *env, jobject thiz, jlong targetFrame, jint trackId) {
+    if (engine) {
+        engine->scheduleNoteOff(targetFrame, trackId);
     }
 }
 

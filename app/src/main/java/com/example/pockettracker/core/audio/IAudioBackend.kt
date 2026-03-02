@@ -451,7 +451,8 @@ interface IAudioBackend {
         decaySamples: Int,
         sustainLevel: Float = 0.5f,
         lfoHz: Float = 4.0f,
-        oscShape: Int = 0
+        oscShape: Int = 0,
+        releaseSamples: Int = 0  // ADSR/TRIG: release duration; 0 = instant on note-off
     )
 
     /**
@@ -461,4 +462,22 @@ interface IAudioBackend {
      * @param sampleId Instrument's sample slot (0-255)
      */
     fun clearInstrumentModulation(sampleId: Int)
+
+    /**
+     * Trigger note-off for ADSR/TRIG modulators on a track.
+     * Transitions any ADSR/TRIG mod in Sustain (stage 3) → Release (stage 4).
+     * Used by KILL effect to allow smooth fade-out via the release envelope.
+     *
+     * @param trackId Track to trigger note-off on (0-7)
+     */
+    fun triggerNoteOff(trackId: Int)
+
+    /**
+     * Schedule a note-off event at a specific audio frame.
+     * Triggers ADSR release at sample-accurate timing (used for automatic step-end release).
+     *
+     * @param frame Absolute audio frame number when to trigger note-off
+     * @param trackId Which track to trigger note-off on (0-7)
+     */
+    fun scheduleNoteOff(frame: Long, trackId: Int)
 }

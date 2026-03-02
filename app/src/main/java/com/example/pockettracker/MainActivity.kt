@@ -284,7 +284,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // RenderController: Handles offline rendering to WAV files
     // MVP EXPANSION Phase 6: WAV Export functionality
     val renderController = remember {
-        RenderController(audioBackend, fileSystem)
+        RenderController(audioEngine, playbackController, fileSystem)
     }
 
     // Render state for WAV export
@@ -1544,6 +1544,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         // Preview instrument with same ID as current table
                         val instrumentId = trackerController.currentTable
                         trackerController.previewInstrumentWithTable(instrumentId, trackerController.currentTable)
+                    }
+
+                    // MODS screen: Preview current instrument (same as INSTRUMENT screen)
+                    ScreenType.MODS -> {
+                        trackerController.previewInstrument()
                     }
 
                     // Other screens: Toggle playback USING TrackerController

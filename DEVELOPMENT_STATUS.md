@@ -475,7 +475,7 @@
 - [x] Playback: groove 00 is default for all tracks, GRV effect switches per-track groove
 - [x] Exact timing preserved when groove is all-empty (no integer rounding)
 
-**Phase 4 - Modulation Screen & Engine:** ⏳ NOT STARTED
+**Phase 4 - Modulation Screen & Engine:** 🚧 IN PROGRESS (4.1–4.4 done)
 **Phase 5 - Selection Resampling:** ⏳ NOT STARTED
 
 **See:** `MVP_EXTENSION_PACK_3.md` for detailed implementation plan

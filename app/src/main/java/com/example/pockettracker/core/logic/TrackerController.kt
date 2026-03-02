@@ -734,17 +734,15 @@ class TrackerController(
                 grooveCursorRow = if (grooveCursorRow > 0) grooveCursorRow - 1 else 15
             }
             ScreenType.MODS -> {
+                val inst = project.instruments[currentInstrument]
+                val activeRowCount = inst.modSlots[modCursorPair * 2 + modCursorSide].rowCount()
                 if (modCursorRow > 0) {
                     modCursorRow--
                 } else if (modCursorPair > 0) {
-                    // Move to bottom of pair 0
+                    // Move to bottom of pair 0, clamped to same side's rowCount
                     modCursorPair = 0
-                    val inst = project.instruments[currentInstrument]
-                    val prevPairMax = maxOf(
-                        inst.modSlots[0].rowCount(),
-                        inst.modSlots[1].rowCount()
-                    )
-                    modCursorRow = prevPairMax - 1
+                    val targetSlotRows = inst.modSlots[0 * 2 + modCursorSide].rowCount()
+                    modCursorRow = (targetSlotRows - 1).coerceAtLeast(0)
                 }
                 // At pair 0, row 0 — stay at top (no wrap)
             }
@@ -800,11 +798,8 @@ class TrackerController(
             }
             ScreenType.MODS -> {
                 val inst = project.instruments[currentInstrument]
-                val pairMax = maxOf(
-                    inst.modSlots[modCursorPair * 2].rowCount(),
-                    inst.modSlots[modCursorPair * 2 + 1].rowCount()
-                )
-                if (modCursorRow < pairMax - 1) {
+                val activeRowCount = inst.modSlots[modCursorPair * 2 + modCursorSide].rowCount()
+                if (modCursorRow < activeRowCount - 1) {
                     modCursorRow++
                 } else if (modCursorPair < 1) {
                     modCursorPair = 1
@@ -847,6 +842,9 @@ class TrackerController(
             }
             ScreenType.MODS -> {
                 modCursorSide = 0  // Switch to left slot
+                val inst = project.instruments[currentInstrument]
+                val leftRowCount = inst.modSlots[modCursorPair * 2].rowCount()
+                modCursorRow = modCursorRow.coerceIn(0, (leftRowCount - 1).coerceAtLeast(0))
             }
             else -> {
                 // Get minimum column for this screen
@@ -890,6 +888,9 @@ class TrackerController(
             }
             ScreenType.MODS -> {
                 modCursorSide = 1  // Switch to right slot
+                val inst = project.instruments[currentInstrument]
+                val rightRowCount = inst.modSlots[modCursorPair * 2 + 1].rowCount()
+                modCursorRow = modCursorRow.coerceIn(0, (rightRowCount - 1).coerceAtLeast(0))
             }
             else -> {
                 // Get maximum column for this screen
