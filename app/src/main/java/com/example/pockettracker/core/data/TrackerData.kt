@@ -443,23 +443,14 @@ data class Project(
 
     // Instruments (256 slots, but only first 12 initialized with resource samples)
     val instruments: Array<Instrument> = Array(256) { index ->
-        if (index < 12) {
-            // First 12 instruments (00-0B) map directly to the 12 resource samples
-            // 00=kick, 01=snare, 02=hihat, 03=bass, 04=shimmer, 05=tambo,
-            // 06=lofi, 07=choirstring, 08=apache162, 09=copta162, 0A=funky162, 0B=eightoeight
-            Instrument(
-                id = index,
-                name = "INST${index.toString(16).padStart(2,'0').uppercase()}",
-                sampleId = index  // Direct 1:1 mapping
-            )
-        } else {
-            // Rest are empty instruments with no sample
-            Instrument(
-                id = index,
-                name = "",
-                sampleId = 0  // Default to kick, but name is empty so it's "uninitialized"
-            )
-        }
+        // All 256 instrument slots use the same layout:
+        // name = "INSTXX", sampleId = index (slot ID), sampleFilePath = null (nothing loaded yet)
+        // "empty" state is determined by sampleFilePath == null
+        Instrument(
+            id = index,
+            name = "INST${index.toString(16).padStart(2, '0').uppercase()}",
+            sampleId = index
+        )
     },
 
     // Tables (256 slots, like phrases)

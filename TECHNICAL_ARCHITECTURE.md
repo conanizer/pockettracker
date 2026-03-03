@@ -235,6 +235,31 @@ PocketTracker/
 
 ---
 
+## Audio Processing Chain Rule
+
+**ALL audio processing lives in `processAudioBlock()` in `native-audio.cpp`.**
+
+`onAudioReady()` and `renderOffline()` are thin wrappers — they call `processAudioBlock()`
+and add only output-destination-specific work on top:
+
+| Step | processAudioBlock | onAudioReady only | renderOffline only |
+|------|-------------------|-------------------|--------------------|
+| Kill/note queue | ✅ | | |
+| Table ticks | ✅ | | |
+| Pitch/ADSR/LFO mod | ✅ | | |
+| DSP chain + mix | ✅ | | |
+| Brickwall limiter | ✅ | | |
+| Waveform capture | | ✅ | |
+| Peak meter tracking | | ✅ | |
+| Offline silence gate | | ✅ (isOfflineRendering) | |
+| Chunk loop | | | ✅ (BLOCK_SIZE=256) |
+
+**Rule: If you add a new audio processing feature (new effect, new modulation destination, etc.)
+add it to `processAudioBlock()`. NEVER add processing logic directly to `onAudioReady` or
+`renderOffline` — it will be missing from one of the two outputs.**
+
+---
+
 ## Audio Engine
 
 ### Current State ✅ (Already Professional-Grade!)

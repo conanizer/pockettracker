@@ -308,6 +308,10 @@ class OboeAudioBackend : IAudioBackend {
         native_scheduleNoteOff(frame, trackId)
     }
 
+    override fun setOfflineRendering(rendering: Boolean) {
+        native_setOfflineRendering(rendering)
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Native Methods (JNI → C++)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -401,4 +405,5 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_clearInstrumentModulation(sampleId: Int)
     private external fun native_triggerNoteOff(trackId: Int)
     private external fun native_scheduleNoteOff(frame: Long, trackId: Int)
+    private external fun native_setOfflineRendering(rendering: Boolean)
 }

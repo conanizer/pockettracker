@@ -937,10 +937,10 @@ Week 3 (Days 15-21):
 
 ---
 
-**Version:** 1.1
+**Version:** 1.2
 **Created:** 2026-02-18
-**Updated:** 2026-02-20
-**Status:** IN PROGRESS
+**Updated:** 2026-03-03
+**Status:** COMPLETE ✅
 
 ## Progress Tracker
 
@@ -965,11 +965,21 @@ Week 3 (Days 15-21):
 - [x] 3.2 GrooveModule.kt UI (16-row editor, header, TIC column, cursor, B+LEFT/RIGHT navigation)
 - [x] 3.3 Playback integration (groove 00 = default for all tracks, GRV effect switches track groove)
 
-### Phase 4: Modulation Screen & Engine 🚧 IN PROGRESS
+### Phase 4: Modulation Screen & Engine ✅ COMPLETE (2026-03-03)
 - [x] 4.1 Data model: ModType/ModDest enums, ModSlot data class, modSlots on Instrument
 - [x] 4.2 ModulationModule.kt UI (4-slot editor, paired layout, getCursorContext, handleInput)
 - [x] 4.3 C++ modulation engine — AHD + ADSR + LFO + DRUM + TRIG on VOL and PITCH destinations
 - [x] 4.4 Mod-to-mod routing — MOD_AMT(8)/MOD_RATE(9)/MOD_BOTH(10) dest; effectiveAmt/effectiveRateMult per slot; next-slot (N→N+1 circular) routing via pre-computation in updateVoiceModulation
 - [x] 4.5 PlaybackController integration: on-trigger push (AudioEngine.scheduleNote → pushInstrumentModulation) + triggerNoteOff on KILL effect; ADSR/TRIG release stage (4) wired through full JNI stack.
 
-### Phase 5: Selection Resampling ⏳ NOT STARTED
+### Phase 5: Selection Resampling ✅ COMPLETE (2026-03-03)
+- [x] 5.1 Double-tap A detection in SONG selection → resample dialog (pixel-art YES/NO overlay)
+- [x] 5.2 scheduleSelectionForRender() in PlaybackController (track-filtered render)
+- [x] 5.3 renderSelectionToWav() in RenderController → Samples/Resampled/Resample_XXXX.wav
+- [x] 5.4 createResampledInstrument() in InstrumentController → first empty instrument slot
+
+### Post-Pack Audio Bug Fixes ✅ COMPLETE (2026-03-03)
+- [x] OscilloscopeModule crash on Android 11 (Ayaneo) — replaced 619 drawLine calls with single drawPath to avoid RenderThread stack overflow
+- [x] Instrument slot unification — all 256 slots initialized identically (name="INSTXX", sampleId=index); `sampleFilePath==null` is now the single "empty" signal everywhere (display, preview guard, render skip, resample slot search)
+- [x] AHD/ADSR envelope crackling on short envelopes — block-rate `envValue` caused discrete amplitude steps (~14% per callback on short decays). Fixed with per-sample linear interpolation from `prevEnvValue` to `envValue`, applied only on falling transitions (decay/release). ATK=00 instant behavior unaffected.
+- [x] Voice-steal click when same-track notes cut each other — redesigned fade-out: `startFadeOut()` keeps `isActive=true` (slot reserved, new note gets a genuinely free slot); inline fade multiplier applied in main mix loop; `trackVolumes[-1]` UB fixed; separate drain loop removed.

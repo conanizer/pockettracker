@@ -45,6 +45,8 @@ class RenderController(
         project: Project,
         progressCallback: ProgressCallback? = null
     ): RenderResult {
+        // Silence the live stream so it cannot consume note queue entries during export
+        audioBackend.setOfflineRendering(true)
         try {
             progressCallback?.onProgress(0f, "Analyzing song...")
 
@@ -105,6 +107,84 @@ class RenderController(
         } finally {
             audioBackend.stopAll()
             audioBackend.clearScheduledNotes()
+            audioBackend.setOfflineRendering(false)  // Always re-enable live playback
+        }
+    }
+
+    /**
+     * Render the selected song rows + tracks to a WAV in the Resampled directory.
+     *
+     * @param project         Project to render
+     * @param startRow        First song row (inclusive)
+     * @param endRow          Last song row (inclusive)
+     * @param selectedTrackIds 0-indexed track IDs to include (0-7)
+     * @param progressCallback Optional progress updates
+     * @return RenderResult.Success with path in Samples/Resampled/, or Error
+     */
+    fun renderSelectionToWav(
+        project: Project,
+        startRow: Int,
+        endRow: Int,
+        selectedTrackIds: Set<Int>,
+        progressCallback: ProgressCallback? = null
+    ): RenderResult {
+        audioBackend.setOfflineRendering(true)
+        try {
+            progressCallback?.onProgress(0f, "Preparing selection...")
+
+            audioBackend.stopAll()
+            audioBackend.clearScheduledNotes()
+            audioBackend.resetFrameCounter()
+
+            setupInstrumentParams(project, startRow, endRow)
+
+            progressCallback?.onProgress(0.1f, "Scheduling notes...")
+
+            val totalFrames = playbackController.scheduleSelectionForRender(
+                project, startRow, endRow, selectedTrackIds
+            )
+
+            if (totalFrames <= 0L) return RenderResult.Error("Selection produced no audio")
+
+            Log.d(TAG, "🎬 Selection render: $totalFrames frames, tracks=$selectedTrackIds")
+
+            progressCallback?.onProgress(0.3f, "Rendering audio...")
+
+            val sampleRate = audioBackend.getSampleRate()
+            val audio = audioBackend.renderFrames(totalFrames.toInt(), sampleRate)
+
+            progressCallback?.onProgress(0.85f, "Writing WAV file...")
+
+            val n = totalFrames.toInt()
+            val leftChannel  = FloatArray(n) { audio[it * 2] }
+            val rightChannel = FloatArray(n) { audio[it * 2 + 1] }
+
+            val outputDir = fileSystem.getResampledDirectory()
+            val filename  = generateResampledFilename(outputDir)
+
+            val success = WavWriter.writeWav(
+                fileSystem   = fileSystem,
+                path         = filename,
+                leftChannel  = leftChannel,
+                rightChannel = rightChannel,
+                sampleRate   = sampleRate
+            )
+
+            return if (success) {
+                val durationMs = (n.toLong() * 1000L) / sampleRate
+                progressCallback?.onProgress(1f, "Done!")
+                RenderResult.Success(filename, durationMs)
+            } else {
+                RenderResult.Error("Failed to write WAV file")
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Selection render failed: ${e.message}", e)
+            return RenderResult.Error(e.message ?: "Unknown error")
+        } finally {
+            audioBackend.stopAll()
+            audioBackend.clearScheduledNotes()
+            audioBackend.setOfflineRendering(false)
         }
     }
 
@@ -152,7 +232,7 @@ class RenderController(
 
         for (instId in usedInstruments) {
             val instrument = project.instruments.getOrNull(instId) ?: continue
-            if (instrument.sampleId < 0) continue
+            if (instrument.sampleFilePath == null) continue
 
             val loopModeInt = when (instrument.loopMode) { "fwd" -> 1; "png" -> 2; else -> 0 }
             val filterTypeInt = when (instrument.filterType) { "lp" -> 1; "hp" -> 2; "bp" -> 3; else -> 0 }
@@ -182,6 +262,16 @@ class RenderController(
         var filename: String
         do {
             filename = "$outputDir/${base}_${index.toString().padStart(4, '0')}.wav"
+            index++
+        } while (fileSystem.fileExists(filename) && index < 10000)
+        return filename
+    }
+
+    private fun generateResampledFilename(outputDir: String): String {
+        var index = 1
+        var filename: String
+        do {
+            filename = "$outputDir/Resample_${index.toString().padStart(4, '0')}.wav"
             index++
         } while (fileSystem.fileExists(filename) && index < 10000)
         return filename

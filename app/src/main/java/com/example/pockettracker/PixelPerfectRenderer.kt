@@ -10,7 +10,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.translate
-import androidx.compose.ui.platform.LocalDensity
 import kotlin.math.min
 import kotlinx.coroutines.delay
 import com.example.pockettracker.core.audio.AudioEngine
@@ -82,12 +81,11 @@ fun PixelPerfectTracker(
     modCursorSide: Int = 0,
     // Render state (WAV export)
     isRendering: Boolean = false,
-    renderProgress: Float = 0f
+    renderProgress: Float = 0f,
+    // Resample dialog state
+    showResampleDialog: Boolean = false,
+    resampleDialogCursor: Int = 0  // 0 = YES, 1 = NO
 ) {
-    android.util.Log.d("PixelPerfectTracker", "==== PixelPerfectTracker called ====")
-    android.util.Log.d("PixelPerfectTracker", "Screen: $currentScreen")
-    android.util.Log.d("PixelPerfectTracker", "Instrument cursor: row=$instrumentCursorRow, col=$instrumentCursorColumn")
-
     if (currentScreen == ScreenType.FILE_BROWSER) {
         android.util.Log.d("PixelPerfectTracker", "FILE_BROWSER screen, fileBrowserState=${if (fileBrowserState != null) "not null (${fileBrowserState.items.size} items)" else "NULL"}")
     }
@@ -129,85 +127,88 @@ fun PixelPerfectTracker(
         }
     }
 
-    val density = LocalDensity.current
-
-    // Main container with letterboxing
-    BoxWithConstraints(
+    // NOTE: BoxWithConstraints intentionally replaced with a single Canvas.
+    // BoxWithConstraints uses SubcomposeLayout internally, which can destroy+recreate
+    // child composables (including Canvas) during remeasure, causing SEGV_ACCERR in
+    // RenderThread. Using a single Canvas with DrawScope.size is both simpler and safe:
+    // the Canvas node is never destroyed, scale is computed in the draw phase.
+    //
+    // key() also intentionally ABSENT — same reason (render node destruction race).
+    // 60fps oscilloscope: oscilloscopeTicker read inside draw lambda → snapshot observer
+    // re-invokes only the draw phase, no full recomposition, no node destruction.
+    //
+    // TrackerLayout created with remember{} (NOT inside the draw lambda).
+    // The draw lambda re-runs 60fps due to oscilloscopeTicker; allocating 12 module
+    // objects per frame causes GC pressure that can crash the RenderThread on Android 11
+    // (Snapdragon GPU drivers can't safely be paused mid-frame by the JVM GC).
+    val layout = remember { TrackerLayout() }
+    Canvas(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // Calculate scale factor
-        val screenWidthPx = with(density) { maxWidth.toPx() }.toInt()
-        val screenHeightPx = with(density) { maxHeight.toPx() }.toInt()
-
+        // Compute integer scale from DrawScope.size (available in draw phase, no BoxWithConstraints needed)
+        val screenWidthPx = size.width.toInt()
+        val screenHeightPx = size.height.toInt()
         val scaleX = screenWidthPx / DESIGN_WIDTH_PX
         val scaleY = screenHeightPx / DESIGN_HEIGHT_PX
         val scale = min(scaleX, scaleY).coerceAtLeast(1)
-
         val renderWidth = DESIGN_WIDTH_PX * scale
         val renderHeight = DESIGN_HEIGHT_PX * scale
-
-        // Center the content
         val offsetX = (screenWidthPx - renderWidth) / 2f
         val offsetY = (screenHeightPx - renderHeight) / 2f
 
-        // Main canvas - use key() to force redraw when state changes
-        // Key on: projectVersion, screen type, cursor positions, and oscilloscope ticker (for smooth waveform)
-        key(projectVersion, currentScreen, cursorRow, cursorColumn, projectCursorRow, projectCursorColumn, instrumentCursorRow, instrumentCursorColumn, oscilloscopeTicker) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                translate(offsetX, offsetY) {
-                    // Use layout manager to draw modules
-                    val layout = TrackerLayout()
-                    with(layout) {
-                        drawLayout(
-                            scale = scale,
-                            currentScreen = currentScreen,
-                            project = project,
-                            cursorRow = cursorRow,
-                            cursorColumn = cursorColumn,
-                            isPlaying = isPlaying,
-                            playbackRow = playbackRow,
-                            playbackChainRow = playbackChainRow,
-                            playbackSongRow = playbackSongRow,
-                            audioEngine = audioEngine,
-                            previousColumn = previousColumn,
-                            currentChain = currentChain,
-                            currentPhrase = currentPhrase,
-                            projectCursorRow = projectCursorRow,
-                            projectCursorColumn = projectCursorColumn,
-                            projectStatusMessage = projectStatusMessage,
-                            projectStatusSuccess = projectStatusSuccess,
-                            projectVersion = projectVersion,
-                            currentInstrument = currentInstrument,
-                            instrumentCursorRow = instrumentCursorRow,
-                            instrumentCursorColumn = instrumentCursorColumn,
-                            instrumentStatusMessage = instrumentStatusMessage,
-                            instrumentStatusSuccess = instrumentStatusSuccess,
-                            fileBrowserState = fileBrowserState,
-                            selectionInfo = selectionInfo,
-                            clipboardInfo = clipboardInfo,
-                            selectionMode = selectionMode,
-                            isCellSelected = isCellSelected,
-                            mixerCursorColumn = mixerCursorColumn,
-                            trackPeaks = trackPeaks,
-                            masterPeaks = masterPeaks,
-                            currentTable = currentTable,
-                            tableCursorRow = tableCursorRow,
-                            tableCursorColumn = tableCursorColumn,
-                            currentGroove = currentGroove,
-                            grooveCursorRow = grooveCursorRow,
-                            modCursorRow = modCursorRow,
-                            modCursorPair = modCursorPair,
-                            modCursorSide = modCursorSide,
-                            isRendering = isRendering,
-                            renderProgress = renderProgress
-                        )
-                    }
+        translate(offsetX, offsetY) {
+            with(layout) {
+                drawLayout(
+                        scale = scale,
+                        oscilloscopeTicker = oscilloscopeTicker,
+                        currentScreen = currentScreen,
+                        project = project,
+                        cursorRow = cursorRow,
+                        cursorColumn = cursorColumn,
+                        isPlaying = isPlaying,
+                        playbackRow = playbackRow,
+                        playbackChainRow = playbackChainRow,
+                        playbackSongRow = playbackSongRow,
+                        audioEngine = audioEngine,
+                        previousColumn = previousColumn,
+                        currentChain = currentChain,
+                        currentPhrase = currentPhrase,
+                        projectCursorRow = projectCursorRow,
+                        projectCursorColumn = projectCursorColumn,
+                        projectStatusMessage = projectStatusMessage,
+                        projectStatusSuccess = projectStatusSuccess,
+                        projectVersion = projectVersion,
+                        currentInstrument = currentInstrument,
+                        instrumentCursorRow = instrumentCursorRow,
+                        instrumentCursorColumn = instrumentCursorColumn,
+                        instrumentStatusMessage = instrumentStatusMessage,
+                        instrumentStatusSuccess = instrumentStatusSuccess,
+                        fileBrowserState = fileBrowserState,
+                        selectionInfo = selectionInfo,
+                        clipboardInfo = clipboardInfo,
+                        selectionMode = selectionMode,
+                        isCellSelected = isCellSelected,
+                        mixerCursorColumn = mixerCursorColumn,
+                        trackPeaks = trackPeaks,
+                        masterPeaks = masterPeaks,
+                        currentTable = currentTable,
+                        tableCursorRow = tableCursorRow,
+                        tableCursorColumn = tableCursorColumn,
+                        currentGroove = currentGroove,
+                        grooveCursorRow = grooveCursorRow,
+                        modCursorRow = modCursorRow,
+                        modCursorPair = modCursorPair,
+                        modCursorSide = modCursorSide,
+                        isRendering = isRendering,
+                        renderProgress = renderProgress,
+                        showResampleDialog = showResampleDialog,
+                        resampleDialogCursor = resampleDialogCursor
+                    )
                 }
             }
         }
-    }
 }
 
 /**
@@ -238,6 +239,7 @@ class TrackerLayout {
      */
     fun DrawScope.drawLayout(
         scale: Int,
+        oscilloscopeTicker: Long = 0L,  // Read in draw scope → Canvas redraws at 60fps for oscilloscope
         currentScreen: ScreenType,
         project: Project,
         cursorRow: Int,
@@ -283,7 +285,10 @@ class TrackerLayout {
         modCursorSide: Int = 0,
         // Render state (WAV export)
         isRendering: Boolean = false,
-        renderProgress: Float = 0f
+        renderProgress: Float = 0f,
+        // Resample dialog state
+        showResampleDialog: Boolean = false,
+        resampleDialogCursor: Int = 0  // 0 = YES, 1 = NO
     ) {
         // ===================================
         // DRAW BACKGROUND
@@ -617,10 +622,91 @@ class TrackerLayout {
         }
 
         // ===================================
+        // RESAMPLE CONFIRMATION DIALOG
+        // Drawn on top of everything when active
+        // ===================================
+        if (showResampleDialog) {
+            drawResampleDialog(scale, resampleDialogCursor)
+        }
+
+        // ===================================
         // LAYOUT COMPLETE!
         // ===================================
         // Left column: Oscilloscope + Phrase Editor (or placeholder)
         // Right corner: Navigation Map
+    }
+
+    /**
+     * Draw the "RESAMPLE SELECTION?" confirmation dialog as a pixel-art overlay.
+     * Centered on the 640×480 canvas.
+     */
+    private fun DrawScope.drawResampleDialog(scale: Int, cursor: Int) {
+        // Dialog box: 200×70 pixels, centered at (320, 240)
+        val boxW = 200
+        val boxH = 70
+        val boxX = (DESIGN_WIDTH_PX - boxW) / 2   // 220
+        val boxY = (DESIGN_HEIGHT_PX - boxH) / 2  // 205
+
+        // Semi-transparent dark backdrop (full screen)
+        drawRect(
+            color = Color(0xCC000000),
+            topLeft = Offset.Zero,
+            size = Size((DESIGN_WIDTH_PX * scale).toFloat(), (DESIGN_HEIGHT_PX * scale).toFloat())
+        )
+
+        // Dialog background
+        drawRect(
+            color = Color(0xFF1a1a1a),
+            topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
+            size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat())
+        )
+
+        // Border (1px draw as scale px)
+        drawRect(
+            color = Color(0xFF00CCCC),  // Cyan border
+            topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
+            size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat()),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
+        )
+
+        val textX = boxX + 10
+        val fs = 3  // Font scale (15px chars)
+        val cs = 2  // Char spacing
+
+        // Title: "RESAMPLE?"
+        drawBitmapText(
+            text = "RESAMPLE?",
+            x = textX,
+            y = boxY + 6,
+            scale = scale,
+            color = Color.Cyan,
+            spacing = cs,
+            fontScale = fs
+        )
+
+        // YES option
+        val yesPrefix = if (cursor == 0) ">" else " "
+        drawBitmapText(
+            text = "$yesPrefix YES",
+            x = textX,
+            y = boxY + 27,
+            scale = scale,
+            color = if (cursor == 0) Color.Yellow else Color.White,
+            spacing = cs,
+            fontScale = fs
+        )
+
+        // NO option
+        val noPrefix = if (cursor == 1) ">" else " "
+        drawBitmapText(
+            text = "$noPrefix NO",
+            x = textX,
+            y = boxY + 48,
+            scale = scale,
+            color = if (cursor == 1) Color.Yellow else Color.White,
+            spacing = cs,
+            fontScale = fs
+        )
     }
 
     /**

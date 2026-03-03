@@ -74,7 +74,10 @@ fun FullScreenLayout(
     modCursorSide: Int = 0,
     // Render state (WAV export)
     isRendering: Boolean = false,
-    renderProgress: Float = 0f
+    renderProgress: Float = 0f,
+    // Resample dialog
+    showResampleDialog: Boolean = false,
+    resampleDialogCursor: Int = 0
 ) {
     Box(
         modifier = Modifier
@@ -124,7 +127,9 @@ fun FullScreenLayout(
             modCursorPair = modCursorPair,
             modCursorSide = modCursorSide,
             isRendering = isRendering,
-            renderProgress = renderProgress
+            renderProgress = renderProgress,
+            showResampleDialog = showResampleDialog,
+            resampleDialogCursor = resampleDialogCursor
         )
     }
 }
@@ -182,7 +187,10 @@ fun PortraitLayoutWithVirtualButtons(
     modCursorSide: Int = 0,
     // Render state (WAV export)
     isRendering: Boolean = false,
-    renderProgress: Float = 0f
+    renderProgress: Float = 0f,
+    // Resample dialog
+    showResampleDialog: Boolean = false,
+    resampleDialogCursor: Int = 0
 ) {
     // FIXED SPACER HEIGHT
     val spacerHeight = 200
@@ -264,7 +272,9 @@ fun PortraitLayoutWithVirtualButtons(
                     modCursorPair = modCursorPair,
                     modCursorSide = modCursorSide,
                     isRendering = isRendering,
-                    renderProgress = renderProgress
+                    renderProgress = renderProgress,
+                    showResampleDialog = showResampleDialog,
+                    resampleDialogCursor = resampleDialogCursor
                 )
             }
         }
@@ -347,7 +357,10 @@ fun LandscapeLayoutWithVirtualButtons(
     modCursorSide: Int = 0,
     // Render state (WAV export)
     isRendering: Boolean = false,
-    renderProgress: Float = 0f
+    renderProgress: Float = 0f,
+    // Resample dialog
+    showResampleDialog: Boolean = false,
+    resampleDialogCursor: Int = 0
 ) {
     // Calculate available space for each button panel
     // Formula: (deviceWidth - scaledScreenWidth) / 2
@@ -433,7 +446,9 @@ fun LandscapeLayoutWithVirtualButtons(
                     modCursorPair = modCursorPair,
                     modCursorSide = modCursorSide,
                     isRendering = isRendering,
-                    renderProgress = renderProgress
+                    renderProgress = renderProgress,
+                    showResampleDialog = showResampleDialog,
+                    resampleDialogCursor = resampleDialogCursor
                 )
             }
         }

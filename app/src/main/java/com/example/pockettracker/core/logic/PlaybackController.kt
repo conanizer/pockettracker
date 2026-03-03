@@ -944,6 +944,89 @@ class PlaybackController(
         return currentFrame
     }
 
+    /**
+     * Schedule only the selected tracks in a song row range for offline rendering.
+     *
+     * Identical to [scheduleSongForRender] but skips tracks not in [selectedTrackIds].
+     * This allows rendering just the selected tracks from a song selection to a WAV.
+     *
+     * @param project  Project to render
+     * @param startRow First song row (inclusive)
+     * @param endRow   Last song row (inclusive)
+     * @param selectedTrackIds  0-indexed track IDs to include (0-7)
+     * @return Total audio frames scheduled
+     */
+    fun scheduleSelectionForRender(
+        project: Project,
+        startRow: Int,
+        endRow: Int,
+        selectedTrackIds: Set<Int>
+    ): Long {
+        for (i in trackStates.indices) trackStates[i] = TrackState()
+
+        val sampleRate = audioEngine.getDeviceSampleRate()
+        val msPerStep  = 60000.0 / project.tempo / 4.0
+        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+
+        var currentFrame = 0L
+
+        for (songRow in startRow..endRow) {
+            trackStates.forEach { it.trackStopped = false }
+
+            var maxChainLength = 0
+            for (trackId in 0..7) {
+                if (trackId !in selectedTrackIds) continue
+                val track = project.tracks[trackId]
+                if (track.mute) continue
+                if (songRow >= track.chainRefs.size) continue
+                val chainId = track.chainRefs[songRow]
+                if (chainId < 0 || chainId >= 256) continue
+                val length = (0..15).count { !project.chains[chainId].isEmpty(it) }
+                if (length > maxChainLength) maxChainLength = length
+            }
+
+            for (chainRow in 0 until maxChainLength) {
+                var maxFramesScheduled = 0L
+                var scheduledAny = false
+
+                for (trackId in 0..7) {
+                    if (trackId !in selectedTrackIds) continue
+                    val trackState = trackStates[trackId]
+                    if (trackState.trackStopped) continue
+
+                    val track = project.tracks[trackId]
+                    if (track.mute) continue
+                    if (songRow >= track.chainRefs.size) continue
+
+                    val chainId = track.chainRefs[songRow]
+                    if (chainId < 0 || chainId >= 256) continue
+
+                    val chain = project.chains[chainId]
+                    if (chain.isEmpty(chainRow)) continue
+
+                    val phraseId = chain.phraseRefs[chainRow]
+                    if (phraseId < 0 || phraseId >= 256) continue
+
+                    val transposeSemitones = chain.getTransposeSemitones(chainRow)
+                    val hopStartRow = trackState.consumeHopTarget()
+                    val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
+
+                    val result = schedulePhrase(
+                        project.phrases[phraseId], currentFrame, trackId,
+                        transposeSemitones, project, framesPerStep, effectiveStartRow
+                    )
+                    scheduledAny = true
+                    if (result.framesScheduled > maxFramesScheduled)
+                        maxFramesScheduled = result.framesScheduled
+                }
+
+                if (scheduledAny) currentFrame += maxFramesScheduled
+            }
+        }
+
+        return currentFrame
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // TEST / DEMO PLAYBACK
     // ═══════════════════════════════════════════════════════════════════════════

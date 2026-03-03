@@ -291,6 +291,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     var isRendering by remember { mutableStateOf(false) }
     var renderProgress by remember { mutableFloatStateOf(0f) }
 
+    // Resample dialog state (triggered by double-tap A in SONG selection mode)
+    var showResampleDialog by remember { mutableStateOf(false) }
+    var resampleDialogCursor by remember { mutableIntStateOf(0) }  // 0=YES, 1=NO
+    var lastSongATapTime by remember { mutableLongStateOf(0L) }
+
     // InputController: Handles button input
     // PHASE 4: Extracted from MainActivity to separate business logic
     // PHASE 5: Uses StateObserver for UI reactivity
@@ -949,14 +954,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     val buttonHandlers = remember {
         ButtonHandlers(
             onDPadUp = {
-                handleDPadNavigation { trackerController.inputController.handleDPadUp() }
+                if (showResampleDialog) { resampleDialogCursor = 0 }
+                else handleDPadNavigation { trackerController.inputController.handleDPadUp() }
             },
 
             // ───────────────────────────────────────────────────────────────
             // D-PAD DOWN
             // ───────────────────────────────────────────────────────────────
             onDPadDown = {
-                handleDPadNavigation { trackerController.inputController.handleDPadDown() }
+                if (showResampleDialog) { resampleDialogCursor = 1 }
+                else handleDPadNavigation { trackerController.inputController.handleDPadDown() }
             },
 
             // ───────────────────────────────────────────────────────────────
@@ -976,7 +983,80 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 // ───────────────────────────────────────────────────────────────
 // BUTTON A - Primary action (insert/increment)
 // ───────────────────────────────────────────────────────────────
-            onButtonA = {
+            onButtonA = { run buttonA@{
+                // ── Resample dialog takes priority ──────────────────────────
+                if (showResampleDialog) {
+                    if (resampleDialogCursor == 0) {
+                        // YES: Execute resampling
+                        showResampleDialog = false
+                        val bounds = trackerController.inputController.getSelectionBounds()
+                        if (bounds != null && !isRendering) {
+                            // Convert selection columns (1-8) to track IDs (0-7)
+                            val selectedTracks = (bounds.topLeftColumn - 1..bounds.bottomRightColumn - 1)
+                                .filter { it in 0..7 }.toSet()
+                            isRendering = true
+                            renderProgress = 0f
+                            trackerController.stopPlayback()
+
+                            CoroutineScope(Dispatchers.Default).launch {
+                                val result = renderController.renderSelectionToWav(
+                                    project = trackerController.project,
+                                    startRow = bounds.topLeftRow,
+                                    endRow = bounds.bottomRightRow,
+                                    selectedTrackIds = selectedTracks,
+                                    progressCallback = object : RenderController.ProgressCallback {
+                                        override fun onProgress(progress: Float, message: String) {
+                                            renderProgress = progress
+                                        }
+                                    }
+                                )
+
+                                withContext(Dispatchers.Main) {
+                                    isRendering = false
+                                    renderProgress = 0f
+                                    when (result) {
+                                        is RenderController.RenderResult.Success -> {
+                                            val instId = instrumentController.createResampledInstrument(
+                                                trackerController.project, result.filename
+                                            )
+                                            if (instId >= 0) {
+                                                trackerController.statusMessage =
+                                                    "RESAMPLED → INST ${instId.toString(16).padStart(2,'0').uppercase()}"
+                                                trackerController.statusSuccess = true
+                                                trackerController.projectVersion++
+                                            }
+                                        }
+                                        is RenderController.RenderResult.Error -> {
+                                            trackerController.statusMessage = "RESAMPLE FAILED"
+                                            trackerController.statusSuccess = false
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // NO: dismiss dialog
+                        showResampleDialog = false
+                    }
+                    return@buttonA
+                }
+
+                // ── Double-tap A on SONG+selection → show resample dialog ──
+                if (trackerController.currentScreen == ScreenType.SONG
+                    && trackerController.inputController.isSelectionModeActive()
+                ) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastSongATapTime < 500L) {
+                        // Double tap confirmed
+                        showResampleDialog = true
+                        resampleDialogCursor = 0
+                        lastSongATapTime = 0L
+                        return@buttonA
+                    }
+                    lastSongATapTime = now
+                    // Fall through to normal SONG A handling (first tap = no-op or insert)
+                }
+
                 // Read directly from trackerController to avoid stale captured values
                 when (trackerController.currentScreen) {
                     // FILE BROWSER: Open folder, load file, or confirm actions
@@ -1303,12 +1383,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 
                     else -> { /* Other screens not implemented yet */ }
                 }
-            },
+            } },  // end run buttonA@
 
 // ───────────────────────────────────────────────────────────────
 // BUTTON B - Secondary action
 // ───────────────────────────────────────────────────────────────
-            onButtonB = {
+            onButtonB = { run buttonB@{
+                // Resample dialog: B = cancel (NO)
+                if (showResampleDialog) {
+                    showResampleDialog = false
+                    return@buttonB
+                }
+
                 // Check if in selection mode first - B = COPY
                 if (trackerController.inputController.isSelectionModeActive()) {
                     val bounds = trackerController.inputController.getSelectionBounds()
@@ -1353,7 +1439,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         }
                         trackerController.inputController.exitSelectionMode()
                     }
-                    return@ButtonHandlers
+                    return@buttonB
                 }
 
                 when (trackerController.currentScreen) {
@@ -1406,7 +1492,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 
                     else -> { }
                 }
-            },
+            } },  // end run buttonB@
 
 // ───────────────────────────────────────────────────────────────
 // SELECT BUTTON - Clear/Delete or quick navigation
@@ -2363,7 +2449,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 modCursorPair = trackerController.modCursorPair,
                 modCursorSide = trackerController.modCursorSide,
                 isRendering = isRendering,
-                renderProgress = renderProgress
+                renderProgress = renderProgress,
+                showResampleDialog = showResampleDialog,
+                resampleDialogCursor = resampleDialogCursor
             )
         } else {
             // PORTRAIT: Buttons below screen
@@ -2409,7 +2497,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 modCursorPair = trackerController.modCursorPair,
                 modCursorSide = trackerController.modCursorSide,
                 isRendering = isRendering,
-                renderProgress = renderProgress
+                renderProgress = renderProgress,
+                showResampleDialog = showResampleDialog,
+                resampleDialogCursor = resampleDialogCursor
             )
         }
     } else {
@@ -2456,7 +2546,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             modCursorPair = trackerController.modCursorPair,
             modCursorSide = trackerController.modCursorSide,
             isRendering = isRendering,
-            renderProgress = renderProgress
+            renderProgress = renderProgress,
+            showResampleDialog = showResampleDialog,
+            resampleDialogCursor = resampleDialogCursor
         )
     }
 }

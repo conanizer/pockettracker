@@ -115,6 +115,13 @@ interface IFileSystem {
     fun getRendersDirectory(): String
 
     /**
+     * Get the resampled samples directory path (for selection resampling).
+     * Creates the directory if it doesn't exist.
+     * @return Absolute path to resampled directory
+     */
+    fun getResampledDirectory(): String
+
+    /**
      * Write binary data to file (overwrites if exists).
      * @param path Absolute path to file
      * @param data Byte array to write

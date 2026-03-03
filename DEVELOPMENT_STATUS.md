@@ -1,10 +1,10 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-02-21
+2026-03-03
 
 ## Current Phase
-**MVP Extension Pack 2 COMPLETE!** → **MVP Extension Pack 3 (Modulation, Groove, Effects & Polish)** → Testing → MVP Release
+**MVP Extension Pack 3 COMPLETE!** → **Testing & Polish** → Documentation → MVP Release
 
 **See:** `MVP_EXTENSION_PACK_3.md` for detailed implementation plan
 
@@ -12,8 +12,9 @@
 - ✅ Phase 1: Fixes & UX Updates (table vol range, FX cycling, key repeat, selection increment) - COMPLETE
 - ✅ Phase 2: New Effects - COMPLETE (8/8)
 - ✅ Phase 3: Groove Screen - COMPLETE (2026-02-21)
-- ⏳ Phase 4: Modulation Screen & Engine - NOT STARTED
-- ⏳ Phase 5: Selection Resampling - NOT STARTED
+- ✅ Phase 4: Modulation Screen & Engine - COMPLETE (2026-03-03)
+- ✅ Phase 5: Selection Resampling - COMPLETE (2026-03-03)
+- ✅ Audio Bug Fixes: OscilloscopeModule crash, instrument unification, AHD crackling, voice-steal click - COMPLETE (2026-03-03)
 
 ### Extension Pack 2 Overview
 - ✅ Phase 1: Bug fixes (meter decay, volume immediate, L+A cut) - COMPLETE
@@ -450,7 +451,7 @@
 
 **See:** `MVP_EXTENSION_PACK_2.md` for detailed implementation plan
 
-## MVP Extension Pack 3 🚧 IN PROGRESS (Started 2026-02-18)
+## MVP Extension Pack 3 ✅ COMPLETE (2026-03-03)
 
 **Phase 1 - Fixes & UX Updates:** ✅ COMPLETE
 - [x] Table volume range: -1 for empty (was 0xFF), full 00-FF range usable
@@ -458,15 +459,15 @@
 - [x] Key repeat: hold D-PAD / A+DPAD / B+DPAD for continuous input
 - [x] Selection increment: A+DPAD applies to all selected rows in active column
 
-**Phase 2 - New Effects:** 🚧 IN PROGRESS (7/8 complete)
+**Phase 2 - New Effects:** ✅ COMPLETE
 - [x] REP XY rework: Y=0 single retrig, Y!=0 volume ramp mode
 - [x] DEL XX: delay note/table by XX ticks
 - [x] CHA XY: probability gate (X=left chance, Y=right chance)
 - [x] RND XY: randomize previously active FX value
 - [x] RNL XY: randomize FX to the left (FX1 = randomize note)
 - [x] TBL XX: override table ID for current note (phrase effect)
-- [x] THO XX: table hop to row - fixed (FX_THO case added to C++ table tick loop)
-- [x] GRV XX: groove assign - wired via Phase 3 playback integration
+- [x] THO XX: table hop to row (FX_THO case in C++ table tick loop)
+- [x] GRV XX: groove assign, wired to per-track groove in playback
 
 **Phase 3 - Groove Screen:** ✅ COMPLETE (2026-02-21)
 - [x] Groove data class: steps IntArray (-1=empty, 01-FF=ticks), activeLength(), getTicksForStep()
@@ -475,8 +476,25 @@
 - [x] Playback: groove 00 is default for all tracks, GRV effect switches per-track groove
 - [x] Exact timing preserved when groove is all-empty (no integer rounding)
 
-**Phase 4 - Modulation Screen & Engine:** 🚧 IN PROGRESS (4.1–4.4 done)
-**Phase 5 - Selection Resampling:** ⏳ NOT STARTED
+**Phase 4 - Modulation Screen & Engine:** ✅ COMPLETE (2026-03-03)
+- [x] ModType/ModDest enums, ModSlot data class, modSlots[4] on Instrument
+- [x] ModulationModule.kt: 4-slot editor, paired display, full getCursorContext + handleInput
+- [x] C++ engine: AHD, ADSR, LFO, DRUM, TRIG on all destinations (VOL, PAN, PITCH, FINE, CUTOFF, RES, STA)
+- [x] Mod-to-mod routing (MOD_AMT/RATE/BOTH, N→N+1 circular)
+- [x] ADSR release: scheduleNoteOff via softKill queue; auto-stop looping voices on stage 5
+- [x] Offline render: pushInstrumentModulation per instrument, per-frame mod update in renderOffline
+
+**Phase 5 - Selection Resampling:** ✅ COMPLETE (2026-03-03)
+- [x] Double-tap A in SONG selection → pixel-art YES/NO dialog
+- [x] scheduleSelectionForRender(): track-filtered playback scheduling
+- [x] renderSelectionToWav(): offline render → Samples/Resampled/Resample_XXXX.wav
+- [x] createResampledInstrument(): first free slot (sampleFilePath==null), auto-loads WAV
+
+**Audio Bug Fixes (2026-03-03):** ✅ COMPLETE
+- [x] OscilloscopeModule SIGSEGV on Android 11: replaced 619 drawLine calls with single drawPath
+- [x] Instrument unification: all 256 slots use name="INSTXX", sampleId=index; `sampleFilePath==null` is the "empty" signal
+- [x] AHD envelope crackling: per-sample interpolation of `envValue` on decay transitions (prevEnvValue stored before block advance)
+- [x] Voice-steal click: `startFadeOut()` keeps `isActive=true`; inline fade multiplier in main mix loop; separate drain loop removed; `trackVolumes[-1]` UB fixed
 
 **See:** `MVP_EXTENSION_PACK_3.md` for detailed implementation plan
 

@@ -480,4 +480,15 @@ interface IAudioBackend {
      * @param trackId Which track to trigger note-off on (0-7)
      */
     fun scheduleNoteOff(frame: Long, trackId: Int)
+
+    /**
+     * Enable or disable offline rendering mode.
+     *
+     * When true, onAudioReady outputs silence so the live stream cannot consume
+     * the note queue while renderFrames() processes it offline (WAV export).
+     * Always call setOfflineRendering(false) in a finally block after export.
+     *
+     * @param rendering true = WAV export in progress, false = normal live playback
+     */
+    fun setOfflineRendering(rendering: Boolean)
 }

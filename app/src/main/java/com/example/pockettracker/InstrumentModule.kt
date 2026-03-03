@@ -593,19 +593,12 @@ class InstrumentModule : TrackerModule {
             fontScale = FONT_SCALE
         )
 
-        // COLUMN 2: Show loaded sample filename
+        // COLUMN 2: Show loaded sample filename, or "empty" if nothing is loaded
         val sampleName = if (instrumentState.instrument.sampleFilePath != null) {
-            // Extract filename from full path
             val file = java.io.File(instrumentState.instrument.sampleFilePath!!)
             file.name
-        } else if (instrumentState.instrument.name.isEmpty()) {
-            // Empty/uninitialized instrument
-            "empty"
         } else {
-            // Show default sample name based on sampleId (12 hardcoded samples)
-            when (instrumentState.instrument.sampleId) {
-                else -> "[no sample]"
-            }
+            "empty"
         }
 
         drawBitmapText(
