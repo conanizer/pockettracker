@@ -32,6 +32,13 @@ import com.example.pockettracker.core.data.ScreenType
 
 // Design constants
 const val DESIGN_WIDTH_PX = 640
+
+/**
+ * CompositionLocal that carries the current LayoutMode down the composition tree.
+ * Set via CompositionLocalProvider in PocketTrackerApp; read in PixelPerfectTracker
+ * so it reaches drawLayout without threading through every intermediate composable.
+ */
+val LocalLayoutMode = compositionLocalOf { DeviceAdapter.LayoutMode.FULL }
 const val DESIGN_HEIGHT_PX = 480
 const val SCREEN_SPACER = 6      // Space between modules
 const val SIDE_SPACER = 10       // Space on sides
@@ -141,6 +148,7 @@ fun PixelPerfectTracker(
     // The draw lambda re-runs 60fps due to oscilloscopeTicker; allocating 12 module
     // objects per frame causes GC pressure that can crash the RenderThread on Android 11
     // (Snapdragon GPU drivers can't safely be paused mid-frame by the JVM GC).
+    val layoutMode = LocalLayoutMode.current
     val layout = remember { TrackerLayout() }
     Canvas(
         modifier = Modifier
@@ -204,7 +212,8 @@ fun PixelPerfectTracker(
                         isRendering = isRendering,
                         renderProgress = renderProgress,
                         showResampleDialog = showResampleDialog,
-                        resampleDialogCursor = resampleDialogCursor
+                        resampleDialogCursor = resampleDialogCursor,
+                        layoutMode = layoutMode
                     )
                 }
             }
@@ -288,7 +297,9 @@ class TrackerLayout {
         renderProgress: Float = 0f,
         // Resample dialog state
         showResampleDialog: Boolean = false,
-        resampleDialogCursor: Int = 0  // 0 = YES, 1 = NO
+        resampleDialogCursor: Int = 0,  // 0 = YES, 1 = NO
+        // Layout mode (from CompositionLocal, for display in project screen)
+        layoutMode: DeviceAdapter.LayoutMode = DeviceAdapter.LayoutMode.FULL
     ) {
         // ===================================
         // DRAW BACKGROUND
@@ -372,12 +383,13 @@ class TrackerLayout {
                         scale = scale,
                         state = ProjectState(
                             project = project,
-                            cursorRow = projectCursorRow,  // Pass cursor state
+                            cursorRow = projectCursorRow,
                             cursorColumn = projectCursorColumn,
                             statusMessage = projectStatusMessage,
                             isSuccess = projectStatusSuccess,
                             isRendering = isRendering,
-                            renderProgress = renderProgress
+                            renderProgress = renderProgress,
+                            layoutMode = layoutMode
                         )
                     )
                 }

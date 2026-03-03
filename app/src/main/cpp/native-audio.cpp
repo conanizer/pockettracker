@@ -598,14 +598,16 @@ struct Voice {
 
     // Begin a smooth fade-out instead of a hard stop (used by voice stealing).
     // Keeps isActive=true so the slot remains reserved during the fade — the new
-    // note is allocated to a different free slot.  The main mix loop applies the
-    // fade multiplier and sets isActive=false when fadeOutRemaining reaches 0.
+    // note is normally allocated to a different free slot.
+    // trackId is preserved (NOT cleared) so that Step-1 in the voice allocator
+    // can recycle this fading slot directly when the same track fires again,
+    // preventing voice-count explosion during simultaneous multi-track triggers.
     void startFadeOut() {
         if (isFadingOut) return;  // Already fading — don't restart
         // isActive stays true: slot stays reserved for the duration of the fade
         isFadingOut = true;
         fadeOutRemaining = DECLICK_SAMPLES;
-        trackId = -1;  // Disown from track; new note gets its own slot
+        // trackId intentionally NOT cleared — see allocator Step 1
     }
 
     // Returns a [0..1] fade multiplier and advances fadeInRemaining.
@@ -849,7 +851,7 @@ public:
                 int savedTableRow = 0;
                 bool wasTIC00Mode = false;
                 for (int v = 0; v < MAX_VOICES; v++) {
-                    if (voices[v].trackId == note.trackId && voices[v].isActive) {
+                    if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut) {
                         if (voices[v].tableTicRate == 0x00 && voices[v].tableId >= 0) {
                             wasTIC00Mode = true;
                             savedTableRow = (voices[v].tableRow + 1) % 16;
@@ -858,151 +860,184 @@ public:
                     }
                 }
 
-                // Voice stealing: smooth fade-out instead of hard-stopping.
-                // startFadeOut() keeps isActive=true (slot stays reserved) so the
-                // new note is allocated to a genuinely free (!isActive) slot.
+                // ---------------------------------------------------------------
+                // VOICE ALLOCATION — 3-step priority
+                //
+                // Problem: "steal old + allocate new" temporarily consumes two
+                // slots per track.  When N tracks all trigger at the same frame
+                // (phrase boundaries) this exhausts the 8-slot pool even with
+                // only 5 active tracks.
+                //
+                // Step 1 — recycle fading same-track voice (0 extra slots used).
+                //           trackId is preserved through startFadeOut() so we can
+                //           find and reuse the slot immediately.
+                // Step 2 — normal steal: fade old same-track voice, find free slot.
+                // Step 3 — last resort: preempt any fading voice (other track).
+                //           Produces at most a ~1ms click but prevents silence.
+                // ---------------------------------------------------------------
+
+                // Step 1: same-track fading voice → recycle directly
+                int targetSlot = -1;
                 for (int v = 0; v < MAX_VOICES; v++) {
-                    if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut) {
-                        voices[v].startFadeOut();
-                    }
-                }
-
-                // Find free voice slot
-                bool foundInactiveVoice = false;
-                for (int v = 0; v < MAX_VOICES; v++) {
-                    if (!voices[v].isActive) {
-                        foundInactiveVoice = true;
-                        if (note.sampleId >= 0 && note.sampleId < 256 && samples[note.sampleId]) {
-                            float rate = note.frequency / note.baseFrequency;
-
-                            // M8-style: Check if table's last row has TIC effect
-                            int effectiveTicRate = note.tableTicRate;
-                            if (note.tableId >= 0 && note.tableId < 256) {
-                                std::lock_guard<std::mutex> lock(tableMutex);
-                                if (tables[note.tableId].loaded) {
-                                    TableRow& lastRow = tables[note.tableId].rows[15];
-                                    auto checkTic = [](uint8_t fxType, uint8_t fxValue) -> int {
-                                        if (fxType == FX_TIC) return fxValue;
-                                        return -1;
-                                    };
-                                    int tic1 = checkTic(lastRow.fx1Type, lastRow.fx1Value);
-                                    int tic2 = checkTic(lastRow.fx2Type, lastRow.fx2Value);
-                                    int tic3 = checkTic(lastRow.fx3Type, lastRow.fx3Value);
-                                    if (tic1 >= 0) {
-                                        effectiveTicRate = tic1;
-                                        LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
-                                    } else if (tic2 >= 0) {
-                                        effectiveTicRate = tic2;
-                                        LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
-                                    } else if (tic3 >= 0) {
-                                        effectiveTicRate = tic3;
-                                        LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
-                                    }
-                                }
-                            }
-
-                            // Determine table start row
-                            int startRow;
-                            if (note.tableStartRow >= 0) {
-                                startRow = note.tableStartRow % 16;
-                            } else if (wasTIC00Mode && effectiveTicRate == 0x00) {
-                                startRow = savedTableRow;
-                            } else {
-                                startRow = 0;
-                            }
-
-                            voices[v].trigger(samples[note.sampleId], sampleLengths[note.sampleId],
-                                              note.trackId, rate, note.volume, note.pan, instrumentParams[note.sampleId],
-                                              sampleRate, note.startPointOverride,
-                                              note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
-
-                            // PSL: Set initial pitch offset and start slide to note pitch
-                            if (fabsf(note.pslInitialOffset) > 0.001f && note.pslDuration > 0.0f) {
-                                voices[v].pitchOffset = note.pslInitialOffset;
-                                float beatsPerSecond = 120.0f / 60.0f;
-                                float stepsPerBeat = 4.0f;
-                                float ticsPerStep = 12.0f;
-                                float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
-                                float framesPerTic = sampleRate / ticsPerSecond;
-                                float totalFrames = framesPerTic * note.pslDuration;
-                                if (totalFrames < 1.0f) totalFrames = 1.0f;
-                                voices[v].pitchSlideTarget = 0.0f;
-                                voices[v].pitchSlideRate = -note.pslInitialOffset / totalFrames;
-                                voices[v].pitchSliding = true;
-                                LOGD("🎵 PSL applied: offset=%.2f, duration=%.0f ticks, rate=%.6f",
-                                     note.pslInitialOffset, note.pslDuration, voices[v].pitchSlideRate);
-                            }
-                            // PBN: Set continuous pitch bend rate
-                            if (fabsf(note.pbnRate) > 0.0001f) {
-                                float beatsPerSecond = 120.0f / 60.0f;
-                                float stepsPerBeat = 4.0f;
-                                float ticsPerStep = 12.0f;
-                                float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
-                                float framesPerTic = sampleRate / ticsPerSecond;
-                                voices[v].pitchSlideRate = note.pbnRate / framesPerTic;
-                                voices[v].pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
-                                voices[v].pitchSliding = true;
-                                LOGD("🎵 PBN applied: rate=%.4f semitones/tick", note.pbnRate);
-                            }
-                            // PVB/PVX: Set vibrato
-                            if (note.vibratoDepth > 0.01f) {
-                                voices[v].vibratoSpeed = note.vibratoSpeed;
-                                voices[v].vibratoDepth = note.vibratoDepth;
-                                voices[v].vibratoActive = true;
-                                LOGD("🎵 Vibrato applied: speed=%.1fHz, depth=%.2f semitones",
-                                     note.vibratoSpeed, note.vibratoDepth);
-                            }
-
-                            // Initialize modulation state from instrument mod slots
-                            voices[v].baseVolume = note.volume;
-                            voices[v].modPitchOffset = 0.0f;
-                            for (int m = 0; m < 4; m++) {
-                                const InstrumentModSlot& src = instrumentModSlots[note.sampleId][m];
-                                Voice::VoiceModSlot& dst = voices[v].voiceMods[m];
-                                dst.type = src.type;
-                                dst.dest = src.dest;
-                                dst.amount = src.amount;
-                                dst.attackSamples = src.attackSamples;
-                                dst.holdSamples = src.holdSamples;
-                                dst.decaySamples = src.decaySamples;
-                                dst.sustainLevel = src.sustainLevel;
-                                dst.lfoHz = src.lfoHz;
-                                dst.oscShape = src.oscShape;
-                                dst.lfoPhase = 0.0f;
-                                dst.releaseSamples = src.releaseSamples;
-                                dst.effectiveAmt = src.amount;
-                                dst.effectiveRateMult = 1.0f;
-                                dst.prevEnvValue = 0.0f;
-                                if (src.type != 0) {
-                                    dst.stage = 1;
-                                    dst.envValue = 0.0f;
-                                    dst.stageCounter = 0;
-                                } else {
-                                    dst.stage = 0;
-                                    dst.envValue = 0.0f;
-                                    dst.stageCounter = 0;
-                                }
-                            }
-
-                            voiceFound = true;
-                            LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, vol=%.4f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
-                                 (long long)currentFrame, note.sampleId, note.trackId, rate, note.volume, note.pan, note.startPointOverride,
-                                 note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
-                        } else {
-                            if (note.sampleId < 0 || note.sampleId >= 256) {
-                                LOGD("❌ Invalid sampleId=%d for note at frame %lld", note.sampleId, (long long)currentFrame);
-                            } else {
-                                LOGD("❌ Sample %d not loaded! Note at frame %lld cannot play", note.sampleId, (long long)currentFrame);
-                            }
-                        }
+                    if (voices[v].trackId == note.trackId && voices[v].isFadingOut) {
+                        targetSlot = v;
                         break;
                     }
                 }
 
-                if (!voiceFound) {
-                    if (!foundInactiveVoice) {
-                        LOGD("⚠️ No free voice (all 8 active) for note at frame %lld, sample=%d", (long long)currentFrame, note.sampleId);
+                // Step 2: steal non-fading same-track voice, then find free slot
+                if (targetSlot == -1) {
+                    for (int v = 0; v < MAX_VOICES; v++) {
+                        if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut) {
+                            voices[v].startFadeOut();
+                        }
                     }
+                    for (int v = 0; v < MAX_VOICES; v++) {
+                        if (!voices[v].isActive) {
+                            targetSlot = v;
+                            break;
+                        }
+                    }
+                }
+
+                // Step 3: preempt any fading voice (last resort)
+                if (targetSlot == -1) {
+                    for (int v = 0; v < MAX_VOICES; v++) {
+                        if (voices[v].isFadingOut) {
+                            targetSlot = v;
+                            LOGD("⚠️ Voice pool tight: preempting fading slot %d for track %d", v, note.trackId);
+                            break;
+                        }
+                    }
+                }
+
+                if (targetSlot != -1) {
+                    int v = targetSlot;
+                    if (note.sampleId >= 0 && note.sampleId < 256 && samples[note.sampleId]) {
+                        float rate = note.frequency / note.baseFrequency;
+
+                        // M8-style: Check if table's last row has TIC effect
+                        int effectiveTicRate = note.tableTicRate;
+                        if (note.tableId >= 0 && note.tableId < 256) {
+                            std::lock_guard<std::mutex> lock(tableMutex);
+                            if (tables[note.tableId].loaded) {
+                                TableRow& lastRow = tables[note.tableId].rows[15];
+                                auto checkTic = [](uint8_t fxType, uint8_t fxValue) -> int {
+                                    if (fxType == FX_TIC) return fxValue;
+                                    return -1;
+                                };
+                                int tic1 = checkTic(lastRow.fx1Type, lastRow.fx1Value);
+                                int tic2 = checkTic(lastRow.fx2Type, lastRow.fx2Value);
+                                int tic3 = checkTic(lastRow.fx3Type, lastRow.fx3Value);
+                                if (tic1 >= 0) {
+                                    effectiveTicRate = tic1;
+                                    LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
+                                } else if (tic2 >= 0) {
+                                    effectiveTicRate = tic2;
+                                    LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
+                                } else if (tic3 >= 0) {
+                                    effectiveTicRate = tic3;
+                                    LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
+                                }
+                            }
+                        }
+
+                        // Determine table start row
+                        int startRow;
+                        if (note.tableStartRow >= 0) {
+                            startRow = note.tableStartRow % 16;
+                        } else if (wasTIC00Mode && effectiveTicRate == 0x00) {
+                            startRow = savedTableRow;
+                        } else {
+                            startRow = 0;
+                        }
+
+                        voices[v].trigger(samples[note.sampleId], sampleLengths[note.sampleId],
+                                          note.trackId, rate, note.volume, note.pan, instrumentParams[note.sampleId],
+                                          sampleRate, note.startPointOverride,
+                                          note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
+
+                        // PSL: Set initial pitch offset and start slide to note pitch
+                        if (fabsf(note.pslInitialOffset) > 0.001f && note.pslDuration > 0.0f) {
+                            voices[v].pitchOffset = note.pslInitialOffset;
+                            float beatsPerSecond = 120.0f / 60.0f;
+                            float stepsPerBeat = 4.0f;
+                            float ticsPerStep = 12.0f;
+                            float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
+                            float framesPerTic = sampleRate / ticsPerSecond;
+                            float totalFrames = framesPerTic * note.pslDuration;
+                            if (totalFrames < 1.0f) totalFrames = 1.0f;
+                            voices[v].pitchSlideTarget = 0.0f;
+                            voices[v].pitchSlideRate = -note.pslInitialOffset / totalFrames;
+                            voices[v].pitchSliding = true;
+                            LOGD("🎵 PSL applied: offset=%.2f, duration=%.0f ticks, rate=%.6f",
+                                 note.pslInitialOffset, note.pslDuration, voices[v].pitchSlideRate);
+                        }
+                        // PBN: Set continuous pitch bend rate
+                        if (fabsf(note.pbnRate) > 0.0001f) {
+                            float beatsPerSecond = 120.0f / 60.0f;
+                            float stepsPerBeat = 4.0f;
+                            float ticsPerStep = 12.0f;
+                            float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
+                            float framesPerTic = sampleRate / ticsPerSecond;
+                            voices[v].pitchSlideRate = note.pbnRate / framesPerTic;
+                            voices[v].pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
+                            voices[v].pitchSliding = true;
+                            LOGD("🎵 PBN applied: rate=%.4f semitones/tick", note.pbnRate);
+                        }
+                        // PVB/PVX: Set vibrato
+                        if (note.vibratoDepth > 0.01f) {
+                            voices[v].vibratoSpeed = note.vibratoSpeed;
+                            voices[v].vibratoDepth = note.vibratoDepth;
+                            voices[v].vibratoActive = true;
+                            LOGD("🎵 Vibrato applied: speed=%.1fHz, depth=%.2f semitones",
+                                 note.vibratoSpeed, note.vibratoDepth);
+                        }
+
+                        // Initialize modulation state from instrument mod slots
+                        voices[v].baseVolume = note.volume;
+                        voices[v].modPitchOffset = 0.0f;
+                        for (int m = 0; m < 4; m++) {
+                            const InstrumentModSlot& src = instrumentModSlots[note.sampleId][m];
+                            Voice::VoiceModSlot& dst = voices[v].voiceMods[m];
+                            dst.type = src.type;
+                            dst.dest = src.dest;
+                            dst.amount = src.amount;
+                            dst.attackSamples = src.attackSamples;
+                            dst.holdSamples = src.holdSamples;
+                            dst.decaySamples = src.decaySamples;
+                            dst.sustainLevel = src.sustainLevel;
+                            dst.lfoHz = src.lfoHz;
+                            dst.oscShape = src.oscShape;
+                            dst.lfoPhase = 0.0f;
+                            dst.releaseSamples = src.releaseSamples;
+                            dst.effectiveAmt = src.amount;
+                            dst.effectiveRateMult = 1.0f;
+                            dst.prevEnvValue = 0.0f;
+                            if (src.type != 0) {
+                                dst.stage = 1;
+                                dst.envValue = 0.0f;
+                                dst.stageCounter = 0;
+                            } else {
+                                dst.stage = 0;
+                                dst.envValue = 0.0f;
+                                dst.stageCounter = 0;
+                            }
+                        }
+
+                        voiceFound = true;
+                        LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, vol=%.4f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
+                             (long long)currentFrame, note.sampleId, note.trackId, rate, note.volume, note.pan, note.startPointOverride,
+                             note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
+                    } else {
+                        if (note.sampleId < 0 || note.sampleId >= 256) {
+                            LOGD("❌ Invalid sampleId=%d for note at frame %lld", note.sampleId, (long long)currentFrame);
+                        } else {
+                            LOGD("❌ Sample %d not loaded! Note at frame %lld cannot play", note.sampleId, (long long)currentFrame);
+                        }
+                    }
+                } else {
+                    LOGD("⚠️ No free voice (all 8 fully active) for note at frame %lld, sample=%d", (long long)currentFrame, note.sampleId);
                 }
             }
         }
@@ -1408,8 +1443,8 @@ public:
                 float sample = processedSample * finalVol * voice.tableVolume;
 
                 // STEP 7: Apply real-time track and master volume
-                // This allows volume changes to take effect immediately without rescheduling
-                // Guard: fading voices have trackId=-1 (disowned from track), use neutral vol
+                // trackId is preserved through fade-out so fading voices still
+                // use the correct track volume (more accurate than neutral 1.0).
                 float trackVol, masterVol;
                 {
                     std::lock_guard<std::mutex> lock(volumeMutex);
@@ -1437,8 +1472,9 @@ public:
                 output[i * channelCount] += sampleL;
                 output[i * channelCount + 1] += sampleR;
 
-                // Track peak for metering (max of L/R per track)
-                if (voice.trackId >= 0 && voice.trackId < 8) {
+                // Track peak for metering — exclude fading voices to avoid ghost
+                // meters after a note is stolen (trackId is now preserved through fade).
+                if (!voice.isFadingOut && voice.trackId >= 0 && voice.trackId < 8) {
                     float peakLevel = fmaxf(fabsf(sampleL), fabsf(sampleR));
                     framePeaksPerTrack[voice.trackId] = fmaxf(framePeaksPerTrack[voice.trackId], peakLevel);
                 }

@@ -277,6 +277,15 @@ class InputMapper(
     fun isBothLRHeld() = isLPressed && isRPressed
 
     /**
+     * Entry point for virtual touchscreen buttons.
+     * Routes touch press/release through the same combo detection as physical buttons,
+     * so L+A, A+DPAD, R+DPAD, etc. work identically on touch and hardware.
+     */
+    fun onVirtualButton(button: VirtualButton, action: ButtonAction) {
+        handleButtonAction(button, action)
+    }
+
+    /**
      * Handles a keyboard event from Compose
      *
      * This is called automatically by Compose whenever a key is pressed/released

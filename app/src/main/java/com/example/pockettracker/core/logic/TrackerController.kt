@@ -700,7 +700,7 @@ class TrackerController(
                 projectCursorRow = if (projectCursorRow > 0) {
                     projectCursorRow - 1
                 } else {
-                    6  // Wrap to bottom
+                    7  // Wrap to bottom (rows 0-7)
                 }
                 projectCursorColumn = 1  // Reset to first value column
             }
@@ -759,8 +759,8 @@ class TrackerController(
     fun moveCursorDown() {
         when (currentScreen) {
             ScreenType.PROJECT -> {
-                // Project has 7 rows (0-6) with wrapping
-                projectCursorRow = if (projectCursorRow < 6) {
+                // Project has 8 rows (0-7) with wrapping
+                projectCursorRow = if (projectCursorRow < 7) {
                     projectCursorRow + 1
                 } else {
                     0  // Wrap to top

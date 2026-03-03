@@ -23,6 +23,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import android.content.res.Configuration
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import com.example.pockettracker.ui.theme.PockettrackerTheme
@@ -107,7 +109,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = Color.Black
                 ) {
-                    PocketTrackerApp(layoutConfig = layout)
+                    PocketTrackerApp(layoutConfig = layout, deviceAdapter = deviceAdapter)
                 }
             }
         }
@@ -133,7 +135,7 @@ class MainActivity : ComponentActivity() {
  * 3. Chooses which layout to show based on layoutConfig
  */
 @Composable
-fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
+fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: DeviceAdapter) {
     // Get Android context (needed for file access, audio, etc.)
     val context = LocalContext.current
 
@@ -375,6 +377,41 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // Peak level buffers for mixer meters (updated periodically)
     val trackPeakBuffer = remember { FloatArray(8) }
     val masterPeakBuffer = remember { FloatArray(2) }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // LAYOUT MODE — user-selectable, overrides DeviceAdapter auto-detection
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Derive initial mode from the auto-detected layoutConfig
+    val initialLayoutMode = when {
+        !layoutConfig.needsVirtualButtons -> DeviceAdapter.LayoutMode.FULL
+        layoutConfig.isLandscape          -> DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
+        else                              -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT
+    }
+    var layoutMode by remember { mutableStateOf(initialLayoutMode) }
+
+    // Track orientation so layout recalculates when device flips (Activity survives
+    // rotation thanks to android:configChanges in the manifest, but device dimensions
+    // swap so we need a fresh LayoutConfig).
+    val configuration = LocalConfiguration.current
+
+    // Recompute layout config whenever the user changes the mode OR device flips
+    val effectiveLayoutConfig = remember(layoutMode, configuration.orientation) {
+        deviceAdapter.calculateLayout(layoutMode)
+    }
+
+    // Auto-switch between portrait/landscape virtual-button modes on device flip
+    LaunchedEffect(configuration.orientation) {
+        when {
+            layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT &&
+                    configuration.orientation == Configuration.ORIENTATION_LANDSCAPE ->
+                layoutMode = DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
+
+            layoutMode == DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE &&
+                    configuration.orientation == Configuration.ORIENTATION_PORTRAIT ->
+                layoutMode = DeviceAdapter.LayoutMode.TOUCH_PORTRAIT
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     // STATE ALIASES (read from TrackerController, triggered by stateVersion)
@@ -645,7 +682,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     statusMessage = trackerController.statusMessage,
                     isSuccess = trackerController.statusSuccess,
                     isRendering = isRendering,
-                    renderProgress = renderProgress
+                    renderProgress = renderProgress,
+                    layoutMode = layoutMode
                 )
                 val context = projectModule.getCursorContext(projectState)
                 val action = handlerFunction(context)
@@ -1285,7 +1323,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                     }
                                 }
                             }
-                            // Rows 5-6 (CLEAN, SYSTEM) - placeholder for now
+                            // Rows 5-6 (CLEAN, SYSTEM) - placeholder
+                            // ROW 7: LAYOUT — cycle through layout modes
+                            7 -> {
+                                layoutMode = when (layoutMode) {
+                                    DeviceAdapter.LayoutMode.FULL           -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT
+                                    DeviceAdapter.LayoutMode.TOUCH_PORTRAIT  -> DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
+                                    DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE -> DeviceAdapter.LayoutMode.FULL
+                                }
+                                Log.d("ProjectScreen", "Layout mode changed to: $layoutMode")
+                            }
                         }
                     }
 
@@ -2402,13 +2449,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
         trackerController.inputController.isCellSelected(row, col)
     }
 
-    if (layoutConfig.needsVirtualButtons) {
+    CompositionLocalProvider(LocalLayoutMode provides layoutMode) {
+    if (effectiveLayoutConfig.needsVirtualButtons) {
         // SCENARIOS 2/3: Touchscreen devices need virtual buttons
 
-        if (layoutConfig.isLandscape) {
+        if (effectiveLayoutConfig.isLandscape) {
             // LANDSCAPE: Buttons on left and right sides
             LandscapeLayoutWithVirtualButtons(
-                layoutConfig = layoutConfig,
+                layoutConfig = effectiveLayoutConfig,
                 currentScreen = currentScreen,
                 project = project,
                 audioEngine = audioEngine,
@@ -2456,7 +2504,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
         } else {
             // PORTRAIT: Buttons below screen
             PortraitLayoutWithVirtualButtons(
-                layoutConfig = layoutConfig,
+                layoutConfig = effectiveLayoutConfig,
                 currentScreen = currentScreen,
                 project = project,
                 audioEngine = audioEngine,
@@ -2503,10 +2551,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             )
         }
     } else {
-        // SCENARIO 1: Gaming handheld with physical buttons
-        // Full screen, NO virtual buttons!
+        // SCENARIO 1: Full screen (physical buttons or user-selected FULL mode)
         FullScreenLayout(
-            layoutConfig = layoutConfig,
+            layoutConfig = effectiveLayoutConfig,
             currentScreen = currentScreen,
             project = project,
             audioEngine = audioEngine,
@@ -2551,6 +2598,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             resampleDialogCursor = resampleDialogCursor
         )
     }
+    } // CompositionLocalProvider
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -192,12 +192,12 @@ fun PortraitLayoutWithVirtualButtons(
     showResampleDialog: Boolean = false,
     resampleDialogCursor: Int = 0
 ) {
-    // FIXED SPACER HEIGHT
-    val spacerHeight = 200
+    // Spacer above the screen — keep in sync with DeviceAdapter.PORTRAIT_SPACER_HEIGHT
+    val spacerHeight = DeviceAdapter.PORTRAIT_SPACER_HEIGHT
 
     // Get density for PX → DP conversion
     val density = androidx.compose.ui.platform.LocalDensity.current.density
-    val spacerHeightDp = (spacerHeight / density).dp  // ← Convert pixels to DP!
+    val spacerHeightDp = (spacerHeight / density).dp
 
     // Calculate available space for buttons
     // Formula: deviceHeight - spacerHeight - scaledScreenHeight
@@ -214,7 +214,7 @@ fun PortraitLayoutWithVirtualButtons(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Top  // ← Add this to align to top!
     ) {
-        // 1. SPACER at top (200px converted to DP)
+        // 1. SPACER at top (DeviceAdapter.PORTRAIT_SPACER_HEIGHT px)
         Spacer(modifier = Modifier.height(spacerHeightDp))
 
         // 2. SCREEN (scaled) - aligned to top
@@ -286,17 +286,7 @@ fun PortraitLayoutWithVirtualButtons(
                 .height((availableButtonHeight / density).dp)  // ← Convert to DP!
         ) {
             VirtualControls(
-                onDPadUp = buttonHandlers.onDPadUp,
-                onDPadDown = buttonHandlers.onDPadDown,
-                onDPadLeft = buttonHandlers.onDPadLeft,
-                onDPadRight = buttonHandlers.onDPadRight,
-                onButtonA = buttonHandlers.onButtonA,
-                onButtonB = buttonHandlers.onButtonB,
-                onSelect = buttonHandlers.onSelect,
-                onStart = buttonHandlers.onStart,
-                onL = buttonHandlers.onL,
-                onR = buttonHandlers.onR,
-                // Pass the CALCULATED available space
+                inputMapper = inputMapper,
                 availableWidth = availableButtonWidth,
                 availableHeight = availableButtonHeight
             )
@@ -369,7 +359,8 @@ fun LandscapeLayoutWithVirtualButtons(
 
     // Get density for PX → DP conversion
     val density = androidx.compose.ui.platform.LocalDensity.current.density
-    val buttonWidthDp = (availableButtonWidth / density).dp
+    // Clamp to non-negative — safety guard against stale/unexpected config values
+    val buttonWidthDp = maxOf(0f, availableButtonWidth / density).dp
     val screenWidthDp = ((layoutConfig.scaledScreenWidth - 3) / density).dp  // ← Subtract 3px to avoid exact fit!
 
     // DEBUG LOGGING
@@ -392,6 +383,9 @@ fun LandscapeLayoutWithVirtualButtons(
             .focusable()
     ) {
         // Put screen in center FIRST
+        // PixelPerfectTracker uses fillMaxSize() + auto-computes integer scale from
+        // DrawScope.size — no graphicsLayer needed. The padding reserves button space and
+        // the canvas will receive exactly (scaledScreenWidth × deviceHeight) pixels.
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -399,58 +393,48 @@ fun LandscapeLayoutWithVirtualButtons(
             contentAlignment = Alignment.Center
         ) {
             android.util.Log.d("LandscapeLayout", "CENTER BOX composing: ${screenWidthDp}")
-            Box(
-                modifier = Modifier
-                    .size(width = 640.dp, height = 480.dp)
-                    .graphicsLayer {
-                        val scale = layoutConfig.screenScale.toFloat()
-                        scaleX = scale
-                        scaleY = scale
-                    }
-            ) {
-                PixelPerfectTracker(
-                    currentScreen = currentScreen,
-                    project = project,
-                    audioEngine = audioEngine,
-                    playbackController = playbackController,
-                    cursorRow = cursorRow,
-                    cursorColumn = cursorColumn,
-                    isPlaying = isPlaying,
-                    previousColumn = previousColumn,
-                    currentChain = currentChain,
-                    currentPhrase = currentPhrase,
-                    projectCursorRow = projectCursorRow,
-                    projectCursorColumn = projectCursorColumn,
-                    projectStatusMessage = projectStatusMessage,
-                    projectStatusSuccess = projectStatusSuccess,
-                    projectVersion = projectVersion,
-                    currentInstrument = currentInstrument,
-                    instrumentCursorRow = instrumentCursorRow,
-                    instrumentCursorColumn = instrumentCursorColumn,
-                    instrumentStatusMessage = instrumentStatusMessage,
-                    instrumentStatusSuccess = instrumentStatusSuccess,
-                    fileBrowserState = fileBrowserState,
-                    selectionInfo = selectionInfo,
-                    clipboardInfo = clipboardInfo,
-                    selectionMode = selectionMode,
-                    isCellSelected = isCellSelected,
-                    mixerCursorColumn = mixerCursorColumn,
-                    trackPeaks = trackPeaks,
-                    masterPeaks = masterPeaks,
-                    currentTable = currentTable,
-                    tableCursorRow = tableCursorRow,
-                    tableCursorColumn = tableCursorColumn,
-                    currentGroove = currentGroove,
-                    grooveCursorRow = grooveCursorRow,
-                    modCursorRow = modCursorRow,
-                    modCursorPair = modCursorPair,
-                    modCursorSide = modCursorSide,
-                    isRendering = isRendering,
-                    renderProgress = renderProgress,
-                    showResampleDialog = showResampleDialog,
-                    resampleDialogCursor = resampleDialogCursor
-                )
-            }
+            PixelPerfectTracker(
+                currentScreen = currentScreen,
+                project = project,
+                audioEngine = audioEngine,
+                playbackController = playbackController,
+                cursorRow = cursorRow,
+                cursorColumn = cursorColumn,
+                isPlaying = isPlaying,
+                previousColumn = previousColumn,
+                currentChain = currentChain,
+                currentPhrase = currentPhrase,
+                projectCursorRow = projectCursorRow,
+                projectCursorColumn = projectCursorColumn,
+                projectStatusMessage = projectStatusMessage,
+                projectStatusSuccess = projectStatusSuccess,
+                projectVersion = projectVersion,
+                currentInstrument = currentInstrument,
+                instrumentCursorRow = instrumentCursorRow,
+                instrumentCursorColumn = instrumentCursorColumn,
+                instrumentStatusMessage = instrumentStatusMessage,
+                instrumentStatusSuccess = instrumentStatusSuccess,
+                fileBrowserState = fileBrowserState,
+                selectionInfo = selectionInfo,
+                clipboardInfo = clipboardInfo,
+                selectionMode = selectionMode,
+                isCellSelected = isCellSelected,
+                mixerCursorColumn = mixerCursorColumn,
+                trackPeaks = trackPeaks,
+                masterPeaks = masterPeaks,
+                currentTable = currentTable,
+                tableCursorRow = tableCursorRow,
+                tableCursorColumn = tableCursorColumn,
+                currentGroove = currentGroove,
+                grooveCursorRow = grooveCursorRow,
+                modCursorRow = modCursorRow,
+                modCursorPair = modCursorPair,
+                modCursorSide = modCursorSide,
+                isRendering = isRendering,
+                renderProgress = renderProgress,
+                showResampleDialog = showResampleDialog,
+                resampleDialogCursor = resampleDialogCursor
+            )
         }
 
         // LEFT BUTTONS - Overlay on left using Alignment
@@ -463,12 +447,7 @@ fun LandscapeLayoutWithVirtualButtons(
         ) {
             android.util.Log.d("LandscapeLayout", "LEFT BOX composing: ${buttonWidthDp}")
             VirtualControlsLeft(
-                onDPadUp = buttonHandlers.onDPadUp,
-                onDPadDown = buttonHandlers.onDPadDown,
-                onDPadLeft = buttonHandlers.onDPadLeft,
-                onDPadRight = buttonHandlers.onDPadRight,
-                onL = buttonHandlers.onL,
-                onSelect = buttonHandlers.onSelect,
+                inputMapper = inputMapper,
                 availableWidth = availableButtonWidth,
                 availableHeight = availableButtonHeight
             )
@@ -484,13 +463,9 @@ fun LandscapeLayoutWithVirtualButtons(
         ) {
             android.util.Log.d("LandscapeLayout", "RIGHT BOX composing: ${buttonWidthDp}")
             VirtualControlsRight(
-                onButtonA = buttonHandlers.onButtonA,
-                onButtonB = buttonHandlers.onButtonB,
-                onR = buttonHandlers.onR,
-                onStart = buttonHandlers.onStart,
-                // Pass the CALCULATED available space
+                inputMapper = inputMapper,
                 availableWidth = availableButtonWidth,
-                availableHeight = availableButtonHeight  // FULL device height!
+                availableHeight = availableButtonHeight
             )
         }
     }
@@ -503,7 +478,7 @@ fun LandscapeLayoutWithVirtualButtons(
 // PORTRAIT (1080×2337, scale 1x):
 // - Spacer: 200px
 // - Screen: 640×480 (scaled to 1x = 480px tall)
-// - Available for buttons: 2337 - 200 - 480 = 1657px tall × 1080px wide
+// - Available for buttons: 2337 - 0 - 480 = 1857px tall × 1080px wide (spacer=0)
 // - Box ratio: 1080/1657 = 0.652
 // - Pattern ratio: 6.8/5.1 = 1.333
 // - 0.652 < 1.333 → WIDTH limits
