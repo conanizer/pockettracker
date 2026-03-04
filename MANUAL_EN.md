@@ -56,7 +56,7 @@ PocketTracker stores everything in a single project file (`.ptp`). Sounds are lo
 
 ### Sample files
 
-Default samples (kick, snare, hihat, bass, etc.) are bundled with the app. To use your own `.wav` files, copy them to your device storage. You can then load them from the **INSTRUMENT** screen using the file browser.
+PocketTracker has no bundled default samples — all instrument slots start empty. Copy your own `.wav` files to device storage and load them from the **INSTRUMENT** screen using the file browser.
 
 ### Project files
 
@@ -1073,20 +1073,11 @@ Full range: `C-0` (lowest) to `B-9` (highest).
 
 ---
 
-## Appendix C: Default Instruments (00–0B)
+## Appendix C: Instrument Slots
 
-The first 12 instrument slots (00–0B) are loaded from bundled samples:
+All 256 instrument slots (00–FF) start empty in a new project. There are no bundled default samples — load your own `.wav` files via the INSTRUMENT screen.
 
-| Slot | Sample |
-|---|---|
-| 00 | Kick |
-| 01 | Snare |
-| 02 | Hihat (closed) |
-| 03 | Hihat (open) |
-| 04 | Bass |
-| 05–0B | Additional default samples |
-
-Slots `0C`–`FF` are user-loadable.
+Slot names are auto-generated as `INST00`–`INSTFF` and can be changed. An instrument with no loaded sample plays silence.
 
 ---
 
