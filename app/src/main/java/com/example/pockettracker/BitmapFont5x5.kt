@@ -1,9 +1,5 @@
 package com.example.pockettracker
 
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
-
 /**
  * 5×5 PIXEL BITMAP FONT
  *
@@ -99,66 +95,9 @@ internal val FONT_5X5 = mapOf(
     '=' to byteArrayOf(0b00000, 0b11111, 0b00000, 0b11111, 0b00000),
     '[' to byteArrayOf(0b00110, 0b00100, 0b00100, 0b00100, 0b00110),
     ']' to byteArrayOf(0b01100, 0b00100, 0b00100, 0b00100, 0b01100),
+    '%' to byteArrayOf(0b10001, 0b00010, 0b00100, 0b01000, 0b10001),
+    '?' to byteArrayOf(0b01110, 0b00010, 0b00100, 0b00000, 0b00100),
+    '!' to byteArrayOf(0b00100, 0b00100, 0b00100, 0b00000, 0b00100),
     ' ' to byteArrayOf(0b00000, 0b00000, 0b00000, 0b00000, 0b00000), // EMPTY
 
 )
-
-/**
- * Draw a single character at exact pixel coordinates
- */
-fun DrawScope.drawBitmapChar(
-    char: Char,
-    x: Int,
-    y: Int,
-    scale: Int,
-    color: Color
-) {
-    // Try the character as-is first, then fall back to uppercase for letters
-    val charData = FONT_5X5[char] ?: FONT_5X5[char.uppercaseChar()]
-
-    if (charData == null) {
-        // Missing character - draw outline square
-        drawRect(
-            color = color,
-            topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
-            size = androidx.compose.ui.geometry.Size((5 * scale).toFloat(), (5 * scale).toFloat()),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
-        )
-        return
-    }
-
-    for (row in 0..4) {
-        val rowData = charData[row].toInt()
-        for (col in 0..4) {
-            val isSet = (rowData and (1 shl (4 - col))) != 0
-            if (isSet) {
-                drawRect(
-                    color = color,
-                    topLeft = Offset(
-                        ((x + col) * scale).toFloat(),
-                        ((y + row) * scale).toFloat()
-                    ),
-                    size = androidx.compose.ui.geometry.Size(scale.toFloat(), scale.toFloat())
-                )
-            }
-        }
-    }
-}
-
-/**
- * Draw a string of text at exact pixel coordinates
- */
-fun DrawScope.drawBitmapText(
-    text: String,
-    x: Int,
-    y: Int,
-    scale: Int,
-    color: Color,
-    spacing: Int = 1
-) {
-    var currentX = x
-    for (char in text) {
-        drawBitmapChar(char, currentX, y, scale, color)
-        currentX += 5 + spacing
-    }
-}

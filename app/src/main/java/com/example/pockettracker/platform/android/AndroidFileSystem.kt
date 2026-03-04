@@ -313,6 +313,31 @@ class AndroidFileSystem(
     }
 
     /**
+     * Get the resampled samples directory.
+     * Creates it if it doesn't exist.
+     *
+     * Location: Documents/PocketTracker/Samples/Resampled/
+     */
+    override fun getResampledDirectory(): String {
+        val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+        val resampledDir = File(documentsDir, "PocketTracker/Samples/Resampled")
+
+        if (!resampledDir.exists()) {
+            val created = resampledDir.mkdirs()
+            if (created) {
+                Log.d(TAG, "Created resampled directory: ${resampledDir.absolutePath}")
+            } else {
+                Log.e(TAG, "Failed to create resampled directory")
+                val fallback = File(context.filesDir, "Samples/Resampled")
+                fallback.mkdirs()
+                return fallback.absolutePath
+            }
+        }
+
+        return resampledDir.absolutePath
+    }
+
+    /**
      * Write binary data to file (overwrites if exists).
      */
     override fun writeBytes(path: String, data: ByteArray): Boolean {

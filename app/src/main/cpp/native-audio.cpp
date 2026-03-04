@@ -4,6 +4,7 @@
 #include <vector>
 #include <queue>
 #include <mutex>
+#include <atomic>
 #include <cmath>
 
 #define LOG_TAG "NativeAudio"
@@ -11,18 +12,20 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 const int MAX_VOICES = 8;  // Reduced for testing
+const int DECLICK_SAMPLES = 64;  // ~1.45ms anti-click fade at 44100Hz
 
 // ===================================
 // EFFECT TYPE CONSTANTS (must match EffectProcessor.kt)
 // ===================================
 const int FX_NONE = 0x00;
 const int FX_ARC = 0x03;       // Cxx - Arpeggio Config
-const int FX_HOP = 0x08;       // Hxx - Table hop (jump to row, FF = stop table)
+const int FX_HOP = 0x08;       // Hxx - Table hop (repeat-count jump, FF = stop table)
 const int FX_TIC = 0x09;       // Txx - Table tick rate (01-FB = tics/row, FC-FF = special modes)
 const int FX_ARPEGGIO = 0x0A;  // Axx - Arpeggio
 const int FX_KILL = 0x0B;      // K00 - Kill voice
 const int FX_OFFSET = 0x0F;    // Oxx - Sample offset
 const int FX_REPEAT = 0x12;    // Rxx - Retrigger
+const int FX_THO = 0x15;       // THO 0X - Table hop to row X (simple unconditional jump)
 const int FX_VOLUME = 0x16;    // Vxx - Volume
 
 // ===================================
@@ -136,16 +139,20 @@ struct ScheduledNote {
     float vibratoSpeed;      // PVB/PVX: LFO speed in Hz (0 = no vibrato)
     float vibratoDepth;      // PVB/PVX: Depth in semitones (0 = no vibrato)
 
+    // Table start row override (Phase 8 - THO effect from phrase)
+    int tableStartRow;       // -1 = default (0 or TIC00 continuity), 0-15 = forced start row
+
     // For priority queue sorting (earliest frame first)
     bool operator>(const ScheduledNote& other) const {
         return targetFrame > other.targetFrame;
     }
 };
 
-// Scheduled kill event (for Kill effect K00)
+// Scheduled kill event (for Kill effect K00, and soft note-off for ADSR release)
 struct ScheduledKill {
     int64_t targetFrame;     // Exact audio frame to trigger kill
     int trackId;             // Which track to kill (0-7)
+    bool softKill = false;   // false = hard stop, true = soft note-off (triggers ADSR release)
 
     // For priority queue sorting (earliest frame first)
     bool operator>(const ScheduledKill& other) const {
@@ -270,6 +277,28 @@ struct InstrumentParams {
 };
 
 // ===================================
+// INSTRUMENT MODULATION PARAMS (Phase 4)
+// ===================================
+// Per-slot modulation configuration set from Kotlin.
+// Copied to VoiceModSlot when a note triggers on that instrument.
+struct InstrumentModSlot {
+    int type;          // 0=NONE, 1=AHD, 2=ADSR, 3=LFO
+    int dest;          // 0=NONE, 1=VOL, 2=PAN, 3=PITCH, 4=FINE_PITCH, 5=CUT, 6=RES, 7=STA, 8=MOD_AMT, 9=MOD_RATE, 10=MOD_BOTH
+    float amount;      // Modulation depth 0.0-1.0 (normalised from 00-FF)
+    int attackSamples; // Attack duration in audio samples
+    int holdSamples;   // Hold duration in audio samples (AHD hold; unused in ADSR)
+    int decaySamples;  // Decay duration in audio samples
+    float sustainLevel; // ADSR: sustain level 0.0-1.0
+    float lfoHz;        // LFO: frequency in Hz
+    int oscShape;       // LFO: 0=TRI,1=SIN,2=RMP+,3=RMP-,4=EXP+,5=EXP-,6=SQU+,7=SQU-,8=RND,9=DRNK
+    int releaseSamples; // ADSR/TRIG: release duration in audio samples (0 = instant)
+
+    InstrumentModSlot() : type(0), dest(0), amount(0.5f),
+                          attackSamples(0), holdSamples(0), decaySamples(0),
+                          sustainLevel(0.5f), lfoHz(4.0f), oscShape(0), releaseSamples(0) {}
+};
+
+// ===================================
 // TABLE DATA STRUCTURES (Phase 3.5)
 // ===================================
 // Tables are mini-sequencers that run alongside playing voices
@@ -311,6 +340,7 @@ inline int transposeToSemitones(uint8_t transpose) {
 
 struct Voice {
     bool isActive;
+    int fadeInRemaining;     // Anti-click: counts down from DECLICK_SAMPLES to 0 at note start
     float* sampleData;
     int sampleLength;
     float position;
@@ -381,7 +411,53 @@ struct Voice {
     float vibratoDepth;          // Modulation depth in semitones (0-2 typical, up to 8 for PVX)
     bool vibratoActive;          // Whether vibrato is active
 
-    Voice() : isActive(false), sampleData(nullptr), sampleLength(0),
+    // ===================================
+    // MODULATION STATE (Phase 4)
+    // ===================================
+    struct VoiceModSlot {
+        int type;          // 0=NONE, 1=AHD, 2=ADSR, 3=LFO
+        int dest;          // 0=NONE, 1=VOL, 3=PITCH
+        float amount;      // Depth 0.0-1.0
+        // AHD/ADSR stage: 0=idle, 1=attack, 2=hold(AHD)/decay(ADSR), 3=decay(AHD)/sustain(ADSR), 4=done
+        // LFO stage: 1=running
+        int stage;
+        float envValue;    // AHD/ADSR: 0.0-1.0; LFO: -1.0 to +1.0
+        int stageCounter;  // Samples elapsed in current stage
+        int attackSamples;
+        int holdSamples;
+        int decaySamples;
+        float sustainLevel;  // ADSR: sustain level 0.0-1.0
+        float lfoHz;         // LFO: frequency in Hz
+        float lfoPhase;      // LFO: current phase (0 to 2π)
+        int oscShape;        // LFO: oscillator shape (0=TRI, 1=SIN, ...)
+        int releaseSamples;  // ADSR/TRIG: release duration in audio samples
+        // dest values: 0=NONE, 1=VOL, 2=PAN, 3=PITCH, 4=FINE_PITCH, 5=CUT, 6=RES, 7=STA, 8=MOD_AMT, 9=MOD_RATE, 10=MOD_BOTH
+
+        // Mod-to-mod: computed each audio callback by updateVoiceModulation
+        float effectiveAmt;      // amount × incoming MOD_AMT/BOTH scaling
+        float effectiveRateMult; // time/freq multiplier from incoming MOD_RATE/BOTH
+
+        // Per-sample interpolation: snapshot envValue before block advance, interpolate in mix loop
+        float prevEnvValue;  // envValue at start of this block (= end of previous block)
+
+        VoiceModSlot() : type(0), dest(0), amount(0.5f), effectiveAmt(0.5f), effectiveRateMult(1.0f),
+                         stage(0), envValue(0.0f), prevEnvValue(0.0f), stageCounter(0),
+                         attackSamples(0), holdSamples(0), decaySamples(0), releaseSamples(0),
+                         sustainLevel(0.5f), lfoHz(4.0f), lfoPhase(0.0f), oscShape(0) {}
+    };
+    VoiceModSlot voiceMods[4]; // 4 mod slots per voice
+    float baseVolume;          // Voice volume before modulation
+    float modPitchOffset;      // Accumulated pitch offset from PITCH/FINE_PITCH-destination mods (semitones)
+    float basePan;             // Pan position at trigger time (0.0=left, 0.5=center, 1.0=right)
+    float modPanOffset;        // Accumulated pan offset from PAN-destination mods (±0.5)
+    float modCutOffset;        // Accumulated filter cutoff offset from FILTER_CUTOFF mods (±255)
+    float modResOffset;        // Accumulated filter resonance offset from FILTER_RES mods (±255)
+
+    // Voice-steal fade-out: instead of a hard cut, fade over DECLICK_SAMPLES frames
+    int fadeOutRemaining;  // Counts down from DECLICK_SAMPLES to 0 during fade-out
+    bool isFadingOut;      // true while the voice-steal fade-out is active
+
+    Voice() : isActive(false), fadeInRemaining(0), sampleData(nullptr), sampleLength(0),
               position(0), trackId(-1), playbackRate(1.0f), basePlaybackRate(1.0f), volume(1.0f),
               panLeft(0.707f), panRight(0.707f),  // Default to center
               actualStart(0), actualEnd(0), actualLoopStart(0),
@@ -395,7 +471,10 @@ struct Voice {
               triggerOctave(4), triggerPitch(0), tic200HzAccum(0.0f),
               hopRepeatCount(0), hopTargetRow(-1),
               pitchOffset(0.0f), pitchSlideTarget(0.0f), pitchSlideRate(0.0f), pitchSliding(false),
-              vibratoPhase(0.0f), vibratoSpeed(0.0f), vibratoDepth(0.0f), vibratoActive(false) {}
+              vibratoPhase(0.0f), vibratoSpeed(0.0f), vibratoDepth(0.0f), vibratoActive(false),
+              baseVolume(1.0f), modPitchOffset(0.0f),
+              basePan(0.5f), modPanOffset(0.0f), modCutOffset(0.0f), modResOffset(0.0f),
+              fadeOutRemaining(0), isFadingOut(false) {}
 
     void trigger(float* sample, int length, int track, float rate, float vol, float pan,
                  const InstrumentParams& params, float sampleRate, int startPointOverride = -1,
@@ -475,6 +554,11 @@ struct Voice {
         vibratoSpeed = 0.0f;
         vibratoDepth = 0.0f;
         vibratoActive = false;
+        modPitchOffset = 0.0f;
+        basePan = pan;
+        modPanOffset = 0.0f;
+        modCutOffset = 0.0f;
+        modResOffset = 0.0f;
 
         // Store note info for special TIC modes (Phase 4)
         triggerOctave = std::max(0, std::min(octave, 9));   // Clamp to 0-9
@@ -500,11 +584,48 @@ struct Voice {
             position = (float)actualStart;
         }
 
+        fadeInRemaining = DECLICK_SAMPLES;  // Anti-click fade-in on every new note
+        isFadingOut = false;               // Clear any stale fade state from previous use
+        fadeOutRemaining = 0;
         isActive = true;
     }
 
     void stop() {
         isActive = false;
+        isFadingOut = false;
+        fadeOutRemaining = 0;
+    }
+
+    // Begin a smooth fade-out instead of a hard stop (used by voice stealing).
+    // Keeps isActive=true so the slot remains reserved during the fade — the new
+    // note is normally allocated to a different free slot.
+    // trackId is preserved (NOT cleared) so that Step-1 in the voice allocator
+    // can recycle this fading slot directly when the same track fires again,
+    // preventing voice-count explosion during simultaneous multi-track triggers.
+    void startFadeOut() {
+        if (isFadingOut) return;  // Already fading — don't restart
+        // isActive stays true: slot stays reserved for the duration of the fade
+        isFadingOut = true;
+        fadeOutRemaining = DECLICK_SAMPLES;
+        // trackId intentionally NOT cleared — see allocator Step 1
+    }
+
+    // Returns a [0..1] fade multiplier and advances fadeInRemaining.
+    // Call once per output sample in the mix loop to eliminate clicks.
+    float antiClickFade() {
+        float fade = 1.0f;
+        if (fadeInRemaining > 0) {
+            fade = 1.0f - (float)fadeInRemaining / (float)DECLICK_SAMPLES;
+            fadeInRemaining--;
+        }
+        if (loopMode == 0) {
+            float remaining = reverse
+                ? (position - (float)actualStart)
+                : ((float)actualEnd - position);
+            if (remaining >= 0.0f && remaining < (float)DECLICK_SAMPLES)
+                fade *= remaining / (float)DECLICK_SAMPLES;
+        }
+        return fade;
     }
 };
 
@@ -691,32 +812,31 @@ public:
         }
     }
 
-    oboe::DataCallbackResult onAudioReady(
-            oboe::AudioStream *audioStream,
-            void *audioData,
-            int32_t numFrames) override {
-
-        float *output = static_cast<float*>(audioData);
-        int channelCount = audioStream->getChannelCount();
-
-        // Clear
-        for (int i = 0; i < numFrames * channelCount; i++) {
-            output[i] = 0.0f;
-        }
+    // ===================================
+    // CORE AUDIO PROCESSING BLOCK
+    // ===================================
+    // ALL audio DSP lives here. onAudioReady and renderOffline are thin wrappers.
+    // Rule: NEVER add audio processing logic directly to onAudioReady or renderOffline.
+    void processAudioBlock(float* output, int numFrames, int channelCount, float sampleRate) {
+        // Zero per-track peak accumulators for this block
+        for (int t = 0; t < 8; t++) framePeaksPerTrack[t] = 0.0f;
 
         // PHASE 1: Process note queue at sample-accurate timing
-        // Check each frame for scheduled notes
         for (int32_t frame = 0; frame < numFrames; frame++) {
             int64_t currentFrame = globalFrameCounter + frame;
 
             // Process all scheduled kill events for this exact frame (BEFORE notes)
             while (killQueue.hasKillAt(currentFrame)) {
                 ScheduledKill kill = killQueue.pop();
-                // Stop all voices on this track
-                for (int v = 0; v < MAX_VOICES; v++) {
-                    if (voices[v].trackId == kill.trackId && voices[v].isActive) {
-                        voices[v].stop();
-                        LOGD("🔪 Killed track %d at frame %lld", kill.trackId, (long long)currentFrame);
+                if (kill.softKill) {
+                    triggerNoteOff(kill.trackId);
+                    LOGD("🎵 Note-off: track %d at frame %lld", kill.trackId, (long long)currentFrame);
+                } else {
+                    for (int v = 0; v < MAX_VOICES; v++) {
+                        if (voices[v].trackId == kill.trackId && voices[v].isActive) {
+                            voices[v].stop();
+                            LOGD("🔪 Killed track %d at frame %lld", kill.trackId, (long long)currentFrame);
+                        }
                     }
                 }
             }
@@ -725,146 +845,202 @@ public:
             while (noteQueue.hasNoteAt(currentFrame)) {
                 ScheduledNote note = noteQueue.pop();
 
-                // Find free voice (same logic as triggerNote)
                 bool voiceFound = false;
 
                 // TIC00 support: Check if previous voice on this track was using trigger mode
-                // If so, save its table row so we can advance it on the new voice
                 int savedTableRow = 0;
                 bool wasTIC00Mode = false;
                 for (int v = 0; v < MAX_VOICES; v++) {
-                    if (voices[v].trackId == note.trackId && voices[v].isActive) {
+                    if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut) {
                         if (voices[v].tableTicRate == 0x00 && voices[v].tableId >= 0) {
                             wasTIC00Mode = true;
-                            savedTableRow = (voices[v].tableRow + 1) % 16;  // Advance and wrap
+                            savedTableRow = (voices[v].tableRow + 1) % 16;
                             LOGD("📋 TIC00: Saving table row %d for track %d retrigger", savedTableRow, note.trackId);
                         }
                     }
                 }
 
-                // First, stop any voice on this track (voice stealing)
+                // ---------------------------------------------------------------
+                // VOICE ALLOCATION — 3-step priority
+                //
+                // Problem: "steal old + allocate new" temporarily consumes two
+                // slots per track.  When N tracks all trigger at the same frame
+                // (phrase boundaries) this exhausts the 8-slot pool even with
+                // only 5 active tracks.
+                //
+                // Step 1 — recycle fading same-track voice (0 extra slots used).
+                //           trackId is preserved through startFadeOut() so we can
+                //           find and reuse the slot immediately.
+                // Step 2 — normal steal: fade old same-track voice, find free slot.
+                // Step 3 — last resort: preempt any fading voice (other track).
+                //           Produces at most a ~1ms click but prevents silence.
+                // ---------------------------------------------------------------
+
+                // Step 1: same-track fading voice → recycle directly
+                int targetSlot = -1;
                 for (int v = 0; v < MAX_VOICES; v++) {
-                    if (voices[v].trackId == note.trackId) {
-                        voices[v].stop();
-                    }
-                }
-
-                // Find free voice slot
-                bool foundInactiveVoice = false;
-                for (int v = 0; v < MAX_VOICES; v++) {
-                    if (!voices[v].isActive) {
-                        foundInactiveVoice = true;
-                        if (note.sampleId >= 0 && note.sampleId < 256 && samples[note.sampleId]) {
-                            float rate = note.frequency / note.baseFrequency;
-                            float sampleRate = (float)audioStream->getSampleRate();
-
-                            // M8-style: Check if table's last row (row 15) has TIC effect
-                            // If so, use that TIC value for the whole table from the start
-                            // This saves the first row for other FX commands while still setting global table speed
-                            int effectiveTicRate = note.tableTicRate;
-                            if (note.tableId >= 0 && note.tableId < 256) {
-                                std::lock_guard<std::mutex> lock(tableMutex);
-                                if (tables[note.tableId].loaded) {
-                                    TableRow& lastRow = tables[note.tableId].rows[15];
-                                    // Check all 3 FX slots for TIC effect
-                                    // Accept all valid TIC values: 00 (trigger), 01-FB (standard), FC-FF (special)
-                                    auto checkTic = [](uint8_t fxType, uint8_t fxValue) -> int {
-                                        if (fxType == FX_TIC) {
-                                            // All TIC values are valid: 00, 01-FB, FC, FD, FE, FF
-                                            return fxValue;
-                                        }
-                                        return -1;
-                                    };
-                                    int tic1 = checkTic(lastRow.fx1Type, lastRow.fx1Value);
-                                    int tic2 = checkTic(lastRow.fx2Type, lastRow.fx2Value);
-                                    int tic3 = checkTic(lastRow.fx3Type, lastRow.fx3Value);
-                                    if (tic1 >= 0) {
-                                        effectiveTicRate = tic1;
-                                        LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
-                                    } else if (tic2 >= 0) {
-                                        effectiveTicRate = tic2;
-                                        LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
-                                    } else if (tic3 >= 0) {
-                                        effectiveTicRate = tic3;
-                                        LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
-                                    }
-                                }
-                            }
-
-                            // For TIC00 mode, use saved row from previous voice; otherwise start at row 0
-                            int startRow = (wasTIC00Mode && effectiveTicRate == 0x00) ? savedTableRow : 0;
-
-                            voices[v].trigger(samples[note.sampleId], sampleLengths[note.sampleId],
-                                              note.trackId, rate, note.volume, note.pan, instrumentParams[note.sampleId],
-                                              sampleRate, note.startPointOverride,
-                                              note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
-
-                            // Apply pitch modulation from scheduled note (Phase 7)
-                            // PSL: Set initial offset and start slide to 0
-                            if (fabsf(note.pslInitialOffset) > 0.001f && note.pslDuration > 0.0f) {
-                                voices[v].pitchOffset = note.pslInitialOffset;
-                                // Calculate slide rate based on tempo (assume 120 BPM if not specified)
-                                float beatsPerSecond = 120.0f / 60.0f;  // Default tempo
-                                float stepsPerBeat = 4.0f;
-                                float ticsPerStep = 12.0f;
-                                float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
-                                float framesPerTic = sampleRate / ticsPerSecond;
-                                float totalFrames = framesPerTic * note.pslDuration;
-                                if (totalFrames < 1.0f) totalFrames = 1.0f;
-                                voices[v].pitchSlideTarget = 0.0f;  // Slide to the actual note pitch
-                                voices[v].pitchSlideRate = -note.pslInitialOffset / totalFrames;
-                                voices[v].pitchSliding = true;
-                                LOGD("🎵 PSL applied: offset=%.2f, duration=%.0f ticks, rate=%.6f",
-                                     note.pslInitialOffset, note.pslDuration, voices[v].pitchSlideRate);
-                            }
-                            // PBN: Set continuous pitch bend rate
-                            if (fabsf(note.pbnRate) > 0.0001f) {
-                                float beatsPerSecond = 120.0f / 60.0f;
-                                float stepsPerBeat = 4.0f;
-                                float ticsPerStep = 12.0f;
-                                float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
-                                float framesPerTic = sampleRate / ticsPerSecond;
-                                voices[v].pitchSlideRate = note.pbnRate / framesPerTic;
-                                voices[v].pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
-                                voices[v].pitchSliding = true;
-                                LOGD("🎵 PBN applied: rate=%.4f semitones/tick", note.pbnRate);
-                            }
-                            // PVB/PVX: Set vibrato
-                            if (note.vibratoDepth > 0.01f) {
-                                voices[v].vibratoSpeed = note.vibratoSpeed;
-                                voices[v].vibratoDepth = note.vibratoDepth;
-                                voices[v].vibratoActive = true;
-                                LOGD("🎵 Vibrato applied: speed=%.1fHz, depth=%.2f semitones",
-                                     note.vibratoSpeed, note.vibratoDepth);
-                            }
-
-                            voiceFound = true;
-                            LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
-                                 (long long)currentFrame, note.sampleId, note.trackId, rate, note.pan, note.startPointOverride,
-                                 note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
-                        } else {
-                            // Sample not loaded - log specific reason
-                            if (note.sampleId < 0 || note.sampleId >= 256) {
-                                LOGD("❌ Invalid sampleId=%d for note at frame %lld", note.sampleId, (long long)currentFrame);
-                            } else {
-                                LOGD("❌ Sample %d not loaded! Note at frame %lld cannot play", note.sampleId, (long long)currentFrame);
-                            }
-                        }
+                    if (voices[v].trackId == note.trackId && voices[v].isFadingOut) {
+                        targetSlot = v;
                         break;
                     }
                 }
 
-                if (!voiceFound) {
-                    if (!foundInactiveVoice) {
-                        LOGD("⚠️ No free voice (all 8 active) for note at frame %lld, sample=%d", (long long)currentFrame, note.sampleId);
+                // Step 2: steal non-fading same-track voice, then find free slot
+                if (targetSlot == -1) {
+                    for (int v = 0; v < MAX_VOICES; v++) {
+                        if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut) {
+                            voices[v].startFadeOut();
+                        }
                     }
-                    // If foundInactiveVoice but !voiceFound, it means sample wasn't loaded (already logged above)
+                    for (int v = 0; v < MAX_VOICES; v++) {
+                        if (!voices[v].isActive) {
+                            targetSlot = v;
+                            break;
+                        }
+                    }
+                }
+
+                // Step 3: preempt any fading voice (last resort)
+                if (targetSlot == -1) {
+                    for (int v = 0; v < MAX_VOICES; v++) {
+                        if (voices[v].isFadingOut) {
+                            targetSlot = v;
+                            LOGD("⚠️ Voice pool tight: preempting fading slot %d for track %d", v, note.trackId);
+                            break;
+                        }
+                    }
+                }
+
+                if (targetSlot != -1) {
+                    int v = targetSlot;
+                    if (note.sampleId >= 0 && note.sampleId < 256 && samples[note.sampleId]) {
+                        float rate = note.frequency / note.baseFrequency;
+
+                        // M8-style: Check if table's last row has TIC effect
+                        int effectiveTicRate = note.tableTicRate;
+                        if (note.tableId >= 0 && note.tableId < 256) {
+                            std::lock_guard<std::mutex> lock(tableMutex);
+                            if (tables[note.tableId].loaded) {
+                                TableRow& lastRow = tables[note.tableId].rows[15];
+                                auto checkTic = [](uint8_t fxType, uint8_t fxValue) -> int {
+                                    if (fxType == FX_TIC) return fxValue;
+                                    return -1;
+                                };
+                                int tic1 = checkTic(lastRow.fx1Type, lastRow.fx1Value);
+                                int tic2 = checkTic(lastRow.fx2Type, lastRow.fx2Value);
+                                int tic3 = checkTic(lastRow.fx3Type, lastRow.fx3Value);
+                                if (tic1 >= 0) {
+                                    effectiveTicRate = tic1;
+                                    LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
+                                } else if (tic2 >= 0) {
+                                    effectiveTicRate = tic2;
+                                    LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
+                                } else if (tic3 >= 0) {
+                                    effectiveTicRate = tic3;
+                                    LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
+                                }
+                            }
+                        }
+
+                        // Determine table start row
+                        int startRow;
+                        if (note.tableStartRow >= 0) {
+                            startRow = note.tableStartRow % 16;
+                        } else if (wasTIC00Mode && effectiveTicRate == 0x00) {
+                            startRow = savedTableRow;
+                        } else {
+                            startRow = 0;
+                        }
+
+                        voices[v].trigger(samples[note.sampleId], sampleLengths[note.sampleId],
+                                          note.trackId, rate, note.volume, note.pan, instrumentParams[note.sampleId],
+                                          sampleRate, note.startPointOverride,
+                                          note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
+
+                        // PSL: Set initial pitch offset and start slide to note pitch
+                        if (fabsf(note.pslInitialOffset) > 0.001f && note.pslDuration > 0.0f) {
+                            voices[v].pitchOffset = note.pslInitialOffset;
+                            float beatsPerSecond = 120.0f / 60.0f;
+                            float stepsPerBeat = 4.0f;
+                            float ticsPerStep = 12.0f;
+                            float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
+                            float framesPerTic = sampleRate / ticsPerSecond;
+                            float totalFrames = framesPerTic * note.pslDuration;
+                            if (totalFrames < 1.0f) totalFrames = 1.0f;
+                            voices[v].pitchSlideTarget = 0.0f;
+                            voices[v].pitchSlideRate = -note.pslInitialOffset / totalFrames;
+                            voices[v].pitchSliding = true;
+                            LOGD("🎵 PSL applied: offset=%.2f, duration=%.0f ticks, rate=%.6f",
+                                 note.pslInitialOffset, note.pslDuration, voices[v].pitchSlideRate);
+                        }
+                        // PBN: Set continuous pitch bend rate
+                        if (fabsf(note.pbnRate) > 0.0001f) {
+                            float beatsPerSecond = 120.0f / 60.0f;
+                            float stepsPerBeat = 4.0f;
+                            float ticsPerStep = 12.0f;
+                            float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
+                            float framesPerTic = sampleRate / ticsPerSecond;
+                            voices[v].pitchSlideRate = note.pbnRate / framesPerTic;
+                            voices[v].pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
+                            voices[v].pitchSliding = true;
+                            LOGD("🎵 PBN applied: rate=%.4f semitones/tick", note.pbnRate);
+                        }
+                        // PVB/PVX: Set vibrato
+                        if (note.vibratoDepth > 0.01f) {
+                            voices[v].vibratoSpeed = note.vibratoSpeed;
+                            voices[v].vibratoDepth = note.vibratoDepth;
+                            voices[v].vibratoActive = true;
+                            LOGD("🎵 Vibrato applied: speed=%.1fHz, depth=%.2f semitones",
+                                 note.vibratoSpeed, note.vibratoDepth);
+                        }
+
+                        // Initialize modulation state from instrument mod slots
+                        voices[v].baseVolume = note.volume;
+                        voices[v].modPitchOffset = 0.0f;
+                        for (int m = 0; m < 4; m++) {
+                            const InstrumentModSlot& src = instrumentModSlots[note.sampleId][m];
+                            Voice::VoiceModSlot& dst = voices[v].voiceMods[m];
+                            dst.type = src.type;
+                            dst.dest = src.dest;
+                            dst.amount = src.amount;
+                            dst.attackSamples = src.attackSamples;
+                            dst.holdSamples = src.holdSamples;
+                            dst.decaySamples = src.decaySamples;
+                            dst.sustainLevel = src.sustainLevel;
+                            dst.lfoHz = src.lfoHz;
+                            dst.oscShape = src.oscShape;
+                            dst.lfoPhase = 0.0f;
+                            dst.releaseSamples = src.releaseSamples;
+                            dst.effectiveAmt = src.amount;
+                            dst.effectiveRateMult = 1.0f;
+                            dst.prevEnvValue = 0.0f;
+                            if (src.type != 0) {
+                                dst.stage = 1;
+                                dst.envValue = 0.0f;
+                                dst.stageCounter = 0;
+                            } else {
+                                dst.stage = 0;
+                                dst.envValue = 0.0f;
+                                dst.stageCounter = 0;
+                            }
+                        }
+
+                        voiceFound = true;
+                        LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, vol=%.4f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
+                             (long long)currentFrame, note.sampleId, note.trackId, rate, note.volume, note.pan, note.startPointOverride,
+                             note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
+                    } else {
+                        if (note.sampleId < 0 || note.sampleId >= 256) {
+                            LOGD("❌ Invalid sampleId=%d for note at frame %lld", note.sampleId, (long long)currentFrame);
+                        } else {
+                            LOGD("❌ Sample %d not loaded! Note at frame %lld cannot play", note.sampleId, (long long)currentFrame);
+                        }
+                    }
+                } else {
+                    LOGD("⚠️ No free voice (all 8 fully active) for note at frame %lld, sample=%d", (long long)currentFrame, note.sampleId);
                 }
             }
         }
-
-        // Per-track peak accumulators for this callback (for accurate metering)
-        float framePeaksPerTrack[8] = {0};
 
         // ===================================
         // TABLE PROCESSING (Phase 3.5 + Phase 4 special modes)
@@ -1036,6 +1212,14 @@ public:
                             // where table advances only when the note is triggered
                             break;
 
+                        case FX_THO:
+                            // THO 0X - Table hop to row X (simple unconditional jump)
+                            // Unlike HOP, no repeat count — always jumps
+                            hopExecuted = true;
+                            hopTarget = fxValue & 0x0F;
+                            LOGD("📋 Table THO %02X: hop to row %d, voice %d", fxValue, hopTarget, v);
+                            break;
+
                         default:
                             // Unknown or unimplemented effect - ignore
                             break;
@@ -1074,13 +1258,62 @@ public:
         // ===================================
         // PITCH MODULATION PROCESSING (Phase 6)
         // ===================================
-        // Process pitch slide and vibrato for each active voice once per callback
+        for (int v = 0; v < MAX_VOICES; v++) {
+            Voice& voice = voices[v];
+            if (!voice.isActive) continue;
+            updateVoicePitchMod(voice, numFrames);
+        }
+
+        // ===================================
+        // MODULATION PROCESSING (Phase 4 — AHD/ADSR/LFO)
+        // ===================================
+        // Snapshot envValues before advancing so the mix loop can interpolate
+        // per-sample (eliminates block-rate staircase artifacts on short envelopes).
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (!voices[v].isActive) continue;
+            for (int m = 0; m < 4; m++)
+                voices[v].voiceMods[m].prevEnvValue = voices[v].voiceMods[m].envValue;
+        }
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (!voices[v].isActive) continue;
+            updateVoiceModulation(voices[v], numFrames, sampleRate);
+        }
+
+        // Apply per-voice PAN and FILTER modulation (once per block)
         for (int v = 0; v < MAX_VOICES; v++) {
             Voice& voice = voices[v];
             if (!voice.isActive) continue;
 
-            // Update pitch slide and vibrato state
-            updateVoicePitchMod(voice, numFrames);
+            // PAN modulation: recalculate stereo gains from basePan + mod offset
+            if (fabsf(voice.modPanOffset) > 0.001f) {
+                float modPan = fmaxf(0.0f, fminf(1.0f, voice.basePan + voice.modPanOffset));
+                float panAngle = modPan * (float)M_PI * 0.5f;
+                voice.panLeft = cosf(panAngle);
+                voice.panRight = sinf(panAngle);
+            }
+
+            // FILTER modulation: recalculate biquad coefficients
+            if (voice.filterType != 0 && (fabsf(voice.modCutOffset) > 0.5f || fabsf(voice.modResOffset) > 0.5f)) {
+                int modCut = std::max(0, std::min(255, voice.filterCut + (int)voice.modCutOffset));
+                int modRes = std::max(0, std::min(255, voice.filterRes + (int)voice.modResOffset));
+                calculateBiquadCoeffs(voice.filterType, modCut, modRes, sampleRate,
+                                      voice.b0, voice.b1, voice.b2, voice.a1, voice.a2);
+            }
+
+            // Auto-stop looping voice when volume envelope completes
+            // AHD/DRUM done at stage 4; ADSR/TRIG done at stage 5
+            if (voice.loopMode != 0) {
+                bool hasVolMod = false, allDone = true;
+                for (int m = 0; m < 4; m++) {
+                    const Voice::VoiceModSlot& mod = voice.voiceMods[m];
+                    if (mod.dest == 1 && (mod.type == 1 || mod.type == 2 || mod.type == 4 || mod.type == 5)) {
+                        hasVolMod = true;
+                        int doneStage = (mod.type == 2 || mod.type == 5) ? 5 : 4;
+                        if (mod.stage < doneStage) allDone = false;
+                    }
+                }
+                if (hasVolMod && allDone) voice.isActive = false;
+            }
         }
 
         // Mix voices
@@ -1175,31 +1408,79 @@ public:
                     processedSample = y0;
                 }
 
-                // STEP 6: Apply volume after effects (no artificial headroom)
-                // Include table volume modifier (Phase 3.5)
-                float sample = processedSample * voice.volume * voice.tableVolume;
+                // STEP 6: Apply volume after effects, with modulation (Phase 4)
+                // AHD/ADSR: (envValue-1)*effectiveAmt — fade-in from -depth at start to 0 at peak
+                // LFO:  tremolo — multiply by (1 + envValue*effectiveAmt), envValue in [-1,+1]
+                // effectiveAmt already incorporates mod-to-mod scaling (Phase 4.4)
+                //
+                // Per-sample interpolation (decay only):
+                // updateVoiceModulation() advances envValue once per block, which causes a
+                // discrete amplitude step at each callback boundary — audible as crackling on
+                // short envelopes.  We fix this by linearly interpolating envValue from its
+                // previous-block value (prevEnvValue) to its current-block value (envValue)
+                // but ONLY when the envelope is falling (decay/release).  Rising transitions
+                // (attack) use envValue directly so ATK=00 stays instant.
+                float t = (numFrames > 1) ? (float)(i + 1) / (float)numFrames : 1.0f;
+                float finalVol = voice.volume;
+                for (int m = 0; m < 4; m++) {
+                    const Voice::VoiceModSlot& mod = voice.voiceMods[m];
+                    if (mod.type == 0 || mod.stage == 0) continue;
+                    if (mod.dest == 1) { // VOL destination
+                        if (mod.type == 3) {
+                            // LFO: bipolar tremolo — interpolate for smooth low-rate modulation
+                            float envAtI = mod.prevEnvValue + (mod.envValue - mod.prevEnvValue) * t;
+                            finalVol = fmaxf(0.0f, finalVol * (1.0f + envAtI * mod.effectiveAmt));
+                        } else {
+                            // AHD/DRUM/ADSR/TRIG: only interpolate on decay (falling envelope)
+                            float envAtI = (mod.envValue < mod.prevEnvValue)
+                                ? mod.prevEnvValue + (mod.envValue - mod.prevEnvValue) * t
+                                : mod.envValue;
+                            finalVol = fmaxf(0.0f, finalVol + (envAtI - 1.0f) * mod.effectiveAmt);
+                        }
+                    }
+                    // PITCH dest: already accumulated into voice.modPitchOffset by updateVoiceModulation
+                }
+                float sample = processedSample * finalVol * voice.tableVolume;
 
                 // STEP 7: Apply real-time track and master volume
-                // This allows volume changes to take effect immediately without rescheduling
+                // trackId is preserved through fade-out so fading voices still
+                // use the correct track volume (more accurate than neutral 1.0).
                 float trackVol, masterVol;
                 {
                     std::lock_guard<std::mutex> lock(volumeMutex);
-                    trackVol = trackVolumes[voice.trackId];
+                    trackVol = (voice.trackId >= 0 && voice.trackId < 8) ? trackVolumes[voice.trackId] : 1.0f;
                     masterVol = masterVolume;
                 }
                 sample = sample * trackVol * masterVol;
 
+                // STEP 8: Anti-click fades (fade-in + end-of-sample fade-out)
+                sample *= voice.antiClickFade();
+
+                // STEP 8b: Voice-steal fade-out multiplier (inline — slot stays reserved while fading)
+                // The main mix loop handles this so there is no separate drain loop needed.
+                if (voice.isFadingOut) {
+                    sample *= (float)voice.fadeOutRemaining / (float)DECLICK_SAMPLES;
+                    if (--voice.fadeOutRemaining <= 0) {
+                        voice.isFadingOut = false;
+                        voice.isActive = false;
+                    }
+                }
+
                 // Apply pan and write to stereo channels
                 float sampleL = sample * voice.panLeft;
                 float sampleR = sample * voice.panRight;
-                output[i * channelCount] += sampleL;       // Left
-                output[i * channelCount + 1] += sampleR;   // Right
+                output[i * channelCount] += sampleL;
+                output[i * channelCount + 1] += sampleR;
 
-                // Track actual audio level for this track's meter (max of L/R)
-                if (voice.trackId >= 0 && voice.trackId < 8) {
+                // Track peak for metering — exclude fading voices to avoid ghost
+                // meters after a note is stolen (trackId is now preserved through fade).
+                if (!voice.isFadingOut && voice.trackId >= 0 && voice.trackId < 8) {
                     float peakLevel = fmaxf(fabsf(sampleL), fabsf(sampleR));
                     framePeaksPerTrack[voice.trackId] = fmaxf(framePeaksPerTrack[voice.trackId], peakLevel);
                 }
+
+                // Exit loop immediately if voice became inactive (fade complete or sample end)
+                if (!voice.isActive) break;
 
                 // Update position based on playback mode
                 // Use modulatedRate which includes pitch slide + vibrato modulation
@@ -1248,37 +1529,72 @@ public:
             }
         }
 
+        // Brickwall limiter at -0.1 dBFS — hard clip both channels.
+        // Threshold = 10^(-0.1/20) ≈ 0.9886. Prevents inter-sample clipping on DAC.
+        {
+            constexpr float LIMITER_THRESHOLD = 0.98855f;
+            for (int i = 0; i < numFrames; i++) {
+                output[i * channelCount]     = fmaxf(-LIMITER_THRESHOLD, fminf(LIMITER_THRESHOLD, output[i * channelCount]));
+                output[i * channelCount + 1] = fmaxf(-LIMITER_THRESHOLD, fminf(LIMITER_THRESHOLD, output[i * channelCount + 1]));
+            }
+        }
+
+        globalFrameCounter += numFrames;
+    }
+
+    // ===================================
+    // LIVE AUDIO CALLBACK (thin wrapper — no DSP here!)
+    // ===================================
+    oboe::DataCallbackResult onAudioReady(
+            oboe::AudioStream *audioStream,
+            void *audioData,
+            int32_t numFrames) override {
+
+        float *output = static_cast<float*>(audioData);
+        int channelCount = audioStream->getChannelCount();
+
+        // Silence output
+        for (int i = 0; i < numFrames * channelCount; i++) {
+            output[i] = 0.0f;
+        }
+
+        // During offline WAV render: output silence and let renderOffline process the queue.
+        if (isOfflineRendering.load()) {
+            return oboe::DataCallbackResult::Continue;
+        }
+
+        float sampleRate = (float)audioStream->getSampleRate();
+        processAudioBlock(output, numFrames, channelCount, sampleRate);
+
         // Capture waveform for oscilloscope (left channel only, with downsampling)
         {
             std::lock_guard<std::mutex> lock(waveformMutex);
             for (int i = 0; i < numFrames; i++) {
-                // Downsample: only capture every Nth sample
                 waveformDownsampleCounter++;
                 if (waveformDownsampleCounter >= WAVEFORM_DOWNSAMPLE) {
-                    waveformBuffer[waveformIndex] = output[i * channelCount];  // Left channel
+                    waveformBuffer[waveformIndex] = output[i * channelCount];
                     waveformIndex = (waveformIndex + 1) % WAVEFORM_SIZE;
                     waveformDownsampleCounter = 0;
                 }
             }
         }
 
-        // Update peak levels for mixer meters
+        // Update peak levels for mixer meters (live-only — not needed during WAV export)
         {
             std::lock_guard<std::mutex> lock(peakMutex);
 
-            // Apply decay to all peaks first
             for (int t = 0; t < 8; t++) {
                 trackPeaks[t] *= PEAK_DECAY;
             }
             masterPeakL *= PEAK_DECAY;
             masterPeakR *= PEAK_DECAY;
 
-            // Use actual measured per-track peaks from this callback
+            // Per-track peaks accumulated by processAudioBlock in this callback
             for (int t = 0; t < 8; t++) {
                 trackPeaks[t] = fmaxf(trackPeaks[t], framePeaksPerTrack[t]);
             }
 
-            // Calculate master peaks from actual output
+            // Master peaks from output buffer
             float maxL = 0.0f, maxR = 0.0f;
             for (int i = 0; i < numFrames; i++) {
                 float absL = fabsf(output[i * channelCount]);
@@ -1289,9 +1605,6 @@ public:
             masterPeakL = fmaxf(masterPeakL, maxL);
             masterPeakR = fmaxf(masterPeakR, maxR);
         }
-
-        // Update global frame counter for next callback
-        globalFrameCounter += numFrames;
 
         return oboe::DataCallbackResult::Continue;
     }
@@ -1307,7 +1620,8 @@ public:
                       int startPointOverride = -1, int tableId = -1, int tableTicRate = 6,
                       int noteOctave = 4, int notePitch = 0,
                       float pslInitialOffset = 0.0f, float pslDuration = 0.0f,
-                      float pbnRate = 0.0f, float vibratoSpeed = 0.0f, float vibratoDepth = 0.0f) {
+                      float pbnRate = 0.0f, float vibratoSpeed = 0.0f, float vibratoDepth = 0.0f,
+                      int tableStartRow = -1) {
         ScheduledNote note = {
                 .targetFrame = targetFrame,
                 .sampleId = sampleId,
@@ -1325,7 +1639,8 @@ public:
                 .pslDuration = pslDuration,
                 .pbnRate = pbnRate,
                 .vibratoSpeed = vibratoSpeed,
-                .vibratoDepth = vibratoDepth
+                .vibratoDepth = vibratoDepth,
+                .tableStartRow = tableStartRow
         };
         noteQueue.schedule(note);
     }
@@ -1335,6 +1650,16 @@ public:
         ScheduledKill kill = {
                 .targetFrame = targetFrame,
                 .trackId = trackId
+        };
+        killQueue.schedule(kill);
+    }
+
+    // Schedule a soft note-off (triggers ADSR release instead of hard stop)
+    void scheduleNoteOff(int64_t targetFrame, int trackId) {
+        ScheduledKill kill = {
+                .targetFrame = targetFrame,
+                .trackId = trackId,
+                .softKill = true
         };
         killQueue.schedule(kill);
     }
@@ -1399,6 +1724,19 @@ public:
             }
         }
         return -1;  // No active voice on this track
+    }
+
+    // Set table row for a voice (THO effect from phrase on empty step)
+    void setVoiceTableRow(int trackId, int row) {
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (voices[v].isActive && voices[v].trackId == trackId) {
+                voices[v].tableRow = row % 16;
+                voices[v].lastProcessedRow = -1;  // Force re-processing of new row
+                LOGD("📋 THO: Set voice %d (track %d) table row to %d", v, trackId, voices[v].tableRow);
+                return;
+            }
+        }
+        LOGD("📋 THO: No active voice on track %d, ignoring", trackId);
     }
 
     // Get waveform data for oscilloscope display
@@ -1600,6 +1938,273 @@ public:
         }
     }
 
+    // ===================================
+    // MODULATION METHODS (Phase 4 — AHD)
+    // ===================================
+
+    // Set per-instrument modulation slot (called from Kotlin before scheduling each note)
+    // attackSamples/holdSamples/decaySamples/releaseSamples are converted from ticks by Kotlin.
+    // sustainLevel: ADSR sustain level 0.0-1.0
+    // lfoHz: LFO frequency in Hz; oscShape: LFO shape index (0=TRI,1=SIN,...)
+    // releaseSamples: ADSR/TRIG release duration (0 = instant cut on triggerNoteOff)
+    void setInstrumentModulation(int sampleId, int slotIndex,
+                                 int type, int dest, float amount,
+                                 int attackSamples, int holdSamples, int decaySamples,
+                                 float sustainLevel, float lfoHz, int oscShape,
+                                 int releaseSamples = 0) {
+        if (sampleId < 0 || sampleId >= 256 || slotIndex < 0 || slotIndex >= 4) return;
+        InstrumentModSlot& slot = instrumentModSlots[sampleId][slotIndex];
+        slot.type = type;
+        slot.dest = dest;
+        slot.amount = amount;
+        slot.attackSamples = attackSamples;
+        slot.holdSamples = holdSamples;
+        slot.decaySamples = decaySamples;
+        slot.sustainLevel = sustainLevel;
+        slot.lfoHz = lfoHz;
+        slot.oscShape = oscShape;
+        slot.releaseSamples = releaseSamples;
+    }
+
+    // Smart note-off: trigger ADSR/TRIG release if available, otherwise hard-stop.
+    // Called at the K00 kill frame (via scheduleNoteOff softKill) or at step end.
+    // - ADSR/TRIG with releaseSamples > 0 and active (stage 1-3): transitions to Release.
+    // - ADSR/TRIG already in Release (stage 4): left to play out.
+    // - AHD, DRUM, LFO, or no vol mod: hard-stops the voice immediately.
+    void triggerNoteOff(int trackId) {
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (!voices[v].isActive || voices[v].trackId != trackId) continue;
+            bool hasRelease = false;
+            for (int m = 0; m < 4; m++) {
+                Voice::VoiceModSlot& mod = voices[v].voiceMods[m];
+                if (mod.dest == 1 && (mod.type == 2 || mod.type == 5)) {
+                    if (mod.stage >= 1 && mod.stage <= 3 && mod.releaseSamples > 0) {
+                        // Transition Attack / Decay / Sustain → Release
+                        mod.stage = 4;
+                        mod.stageCounter = 0;
+                        // envValue stays at current level; release ramps it to 0
+                        hasRelease = true;
+                    } else if (mod.stage == 4) {
+                        // Already in Release — let it play out naturally
+                        hasRelease = true;
+                    }
+                }
+            }
+            if (!hasRelease) {
+                // No ADSR release available (AHD / DRUM / LFO / no-mod / release=0)
+                // → hard-stop so looping samples don't play forever
+                voices[v].stop();
+            }
+        }
+    }
+
+    // Clear all modulation slots for an instrument
+    void clearInstrumentModulation(int sampleId) {
+        if (sampleId < 0 || sampleId >= 256) return;
+        for (int m = 0; m < 4; m++) {
+            instrumentModSlots[sampleId][m] = InstrumentModSlot();
+        }
+    }
+
+    // Advance modulation stages for one voice (called once per audio callback).
+    // Handles AHD (type=1), ADSR (type=2), LFO (type=3), DRUM (type=4), TRIG (type=5).
+    // Phase 4.4: Mod-to-mod routing: dest=8 (MOD_AMT), 9 (MOD_RATE), 10 (MOD_BOTH).
+    // Accumulates modPitchOffset from PITCH-destination (dest=3) slots.
+    void updateVoiceModulation(Voice& voice, int numFrames, float sampleRate = 44100.0f) {
+        voice.modPitchOffset = 0.0f;  // Reset accumulators each callback
+        voice.modPanOffset = 0.0f;
+        voice.modCutOffset = 0.0f;
+        voice.modResOffset = 0.0f;
+
+        float sr = sampleRate;
+
+        // ── Phase 4.4: Mod-to-mod routing ──────────────────────────────────────
+        // Each slot routes its output to the NEXT slot (0→1, 1→2, 2→3, 3→0).
+        // Uses previous frame's envValue to avoid circular-dependency issues.
+        // amtScale[N] multiplies slot N's effective amount.
+        // rateMult[N] multiplies slot N's effective time/freq (higher = faster).
+        {
+            float amtScale[4]  = {1.0f, 1.0f, 1.0f, 1.0f};
+            float rateMult[4]  = {1.0f, 1.0f, 1.0f, 1.0f};
+            for (int m = 0; m < 4; m++) {
+                const Voice::VoiceModSlot& src = voice.voiceMods[m];
+                if (src.type == 0 || src.stage == 0) continue;
+                if (src.dest != 8 && src.dest != 9 && src.dest != 10) continue;
+                int target = (m + 1) % 4;
+                // Normalize envValue to 0-1: envelopes are 0-1, LFOs are -1 to +1
+                float norm = (src.type == 3) ? (src.envValue * 0.5f + 0.5f)
+                                              : fmaxf(0.0f, src.envValue);
+                // src.amount (depth of routing): 0.5 → 1.0x scaling at full signal
+                float scale = fminf(2.0f, norm * src.amount * 2.0f);
+                if (src.dest == 8 || src.dest == 10) amtScale[target] *= scale;
+                if (src.dest == 9 || src.dest == 10) rateMult[target] *= fmaxf(0.05f, scale);
+            }
+            for (int m = 0; m < 4; m++) {
+                voice.voiceMods[m].effectiveAmt      = voice.voiceMods[m].amount * amtScale[m];
+                voice.voiceMods[m].effectiveRateMult = rateMult[m];
+            }
+        }
+        // ───────────────────────────────────────────────────────────────────────
+
+        for (int m = 0; m < 4; m++) {
+            Voice::VoiceModSlot& mod = voice.voiceMods[m];
+            if (mod.type == 0 || mod.stage == 0) continue;
+
+            if (mod.type == 1 || mod.type == 4) {
+                // ── AHD / DRUM: Attack → Hold → Decay ──
+                if (mod.stage == 4) continue;
+                mod.stageCounter += numFrames;
+                // Effective stage durations: higher rateMult → shorter stages (faster)
+                float rMult = fmaxf(0.01f, mod.effectiveRateMult);
+                int effAttack = mod.attackSamples > 0 ? (int)fmaxf(1.0f, mod.attackSamples / rMult) : 0;
+                int effHold   = mod.holdSamples   > 0 ? (int)fmaxf(1.0f, mod.holdSamples   / rMult) : 0;
+                int effDecay  = mod.decaySamples  > 0 ? (int)fmaxf(1.0f, mod.decaySamples  / rMult) : 0;
+                switch (mod.stage) {
+                    case 1: // Attack: ramp 0 → 1
+                        if (effAttack > 0) {
+                            mod.envValue = fminf(1.0f, (float)mod.stageCounter / effAttack);
+                            if (mod.stageCounter >= effAttack) {
+                                mod.envValue = 1.0f;
+                                mod.stage = 2; mod.stageCounter = 0;
+                            }
+                        } else {
+                            mod.envValue = 1.0f;
+                            mod.stage = 2; mod.stageCounter = 0;
+                        }
+                        break;
+                    case 2: // Hold: stay at 1
+                        mod.envValue = 1.0f;
+                        if (effHold == 0 || mod.stageCounter >= effHold) {
+                            mod.stage = 3; mod.stageCounter = 0;
+                        }
+                        break;
+                    case 3: // Decay: ramp 1 → 0
+                        if (effDecay > 0) {
+                            mod.envValue = fmaxf(0.0f, 1.0f - (float)mod.stageCounter / effDecay);
+                            if (mod.stageCounter >= effDecay) {
+                                mod.envValue = 0.0f;
+                                mod.stage = 4;
+                            }
+                        } else {
+                            mod.envValue = 0.0f;
+                            mod.stage = 4;
+                        }
+                        break;
+                }
+
+            } else if (mod.type == 2 || mod.type == 5) {
+                // ── ADSR / TRIG: Attack → Decay → Sustain → Release ──
+                // Stage 5 = done (unlike AHD where stage 4 = done)
+                if (mod.stage == 5) continue;
+                mod.stageCounter += numFrames;
+                float rMult    = fmaxf(0.01f, mod.effectiveRateMult);
+                int effAttack  = mod.attackSamples  > 0 ? (int)fmaxf(1.0f, mod.attackSamples  / rMult) : 0;
+                int effDecay   = mod.decaySamples   > 0 ? (int)fmaxf(1.0f, mod.decaySamples   / rMult) : 0;
+                int effRelease = mod.releaseSamples > 0 ? (int)fmaxf(1.0f, mod.releaseSamples / rMult) : 0;
+                switch (mod.stage) {
+                    case 1: // Attack: ramp 0 → 1
+                        if (effAttack > 0) {
+                            mod.envValue = fminf(1.0f, (float)mod.stageCounter / effAttack);
+                            if (mod.stageCounter >= effAttack) {
+                                mod.envValue = 1.0f;
+                                mod.stage = 2; mod.stageCounter = 0;
+                            }
+                        } else {
+                            mod.envValue = 1.0f;
+                            mod.stage = 2; mod.stageCounter = 0;
+                        }
+                        break;
+                    case 2: // Decay: ramp 1 → sustainLevel
+                        if (effDecay > 0) {
+                            float t = fminf(1.0f, (float)mod.stageCounter / effDecay);
+                            mod.envValue = 1.0f - t * (1.0f - mod.sustainLevel);
+                            if (mod.stageCounter >= effDecay) {
+                                mod.envValue = mod.sustainLevel;
+                                mod.stage = 3; mod.stageCounter = 0;
+                            }
+                        } else {
+                            mod.envValue = mod.sustainLevel;
+                            mod.stage = 3; mod.stageCounter = 0;
+                        }
+                        break;
+                    case 3: // Sustain: hold at sustainLevel (until triggerNoteOff)
+                        mod.envValue = mod.sustainLevel;
+                        break;
+                    case 4: // Release: ramp sustainLevel → 0 (triggered by triggerNoteOff)
+                        if (effRelease > 0) {
+                            mod.envValue = fmaxf(0.0f,
+                                mod.sustainLevel * (1.0f - (float)mod.stageCounter / effRelease));
+                            if (mod.stageCounter >= effRelease) {
+                                mod.envValue = 0.0f;
+                                mod.stage = 5;
+                            }
+                        } else {
+                            mod.envValue = 0.0f;
+                            mod.stage = 5;
+                        }
+                        break;
+                }
+
+            } else if (mod.type == 3) {
+                // ── LFO: phase-based oscillator ──
+                // effectiveRateMult speeds up LFO frequency (2.0 = 2× faster)
+                float effHz       = mod.lfoHz * mod.effectiveRateMult;
+                float phaseAdvance = 2.0f * (float)M_PI * effHz / sr * numFrames;
+                mod.lfoPhase += phaseAdvance;
+                while (mod.lfoPhase >= 2.0f * (float)M_PI) mod.lfoPhase -= 2.0f * (float)M_PI;
+
+                float norm = mod.lfoPhase / (2.0f * (float)M_PI);  // 0.0 to 1.0
+                switch (mod.oscShape) {
+                    case 0: // TRI: triangle wave (-1 to +1)
+                        if      (norm < 0.25f) mod.envValue = norm * 4.0f;
+                        else if (norm < 0.75f) mod.envValue = 1.0f - (norm - 0.25f) * 4.0f;
+                        else                   mod.envValue = (norm - 1.0f) * 4.0f;
+                        break;
+                    case 1: // SIN
+                        mod.envValue = sinf(mod.lfoPhase);
+                        break;
+                    case 2: // RMP+ (sawtooth rising: -1 to +1)
+                        mod.envValue = norm * 2.0f - 1.0f;
+                        break;
+                    case 3: // RMP- (sawtooth falling: +1 to -1)
+                        mod.envValue = 1.0f - norm * 2.0f;
+                        break;
+                    case 6: // SQU+ (square, starts high)
+                        mod.envValue = (norm < 0.5f) ? 1.0f : -1.0f;
+                        break;
+                    case 7: // SQU- (square, starts low)
+                        mod.envValue = (norm < 0.5f) ? -1.0f : 1.0f;
+                        break;
+                    default: // EXP+/EXP-/RND/DRNK — fall back to SIN
+                        mod.envValue = sinf(mod.lfoPhase);
+                        break;
+                }
+            }
+
+            // Accumulate modulation to destinations
+            // Done stages (AHD=4, ADSR=5) have envValue=0 so contribute nothing
+            switch (mod.dest) {
+                case 2: // PAN: ±0.5 range (shifts centre ±0.5)
+                    voice.modPanOffset += mod.envValue * mod.effectiveAmt * 0.5f;
+                    break;
+                case 3: // PITCH: up to ±12 semitones (1 octave)
+                    voice.modPitchOffset += mod.envValue * mod.effectiveAmt * 12.0f;
+                    break;
+                case 4: // FINE_PITCH: up to ±1 semitone (fine detune / subtle vibrato)
+                    voice.modPitchOffset += mod.envValue * mod.effectiveAmt * 1.0f;
+                    break;
+                case 5: // FILTER_CUTOFF: up to ±255 cutoff param units
+                    voice.modCutOffset += mod.envValue * mod.effectiveAmt * 255.0f;
+                    break;
+                case 6: // FILTER_RES: up to ±255 resonance param units
+                    voice.modResOffset += mod.envValue * mod.effectiveAmt * 255.0f;
+                    break;
+                default:
+                    break; // VOL(1) handled in mix loop, STA(7)/MOD_*(8-10) handled elsewhere
+            }
+        }
+    }
+
     // Update pitch modulation for a single voice (called per frame in audio callback)
     void updateVoicePitchMod(Voice& voice, int numFrames) {
         // Process pitch slide
@@ -1636,9 +2241,9 @@ public:
         }
     }
 
-    // Get modulated playback rate including pitch offset and vibrato
+    // Get modulated playback rate including pitch offset, vibrato, and mod-slot pitch
     float getModulatedPlaybackRate(Voice& voice) {
-        float pitchMod = voice.pitchOffset;
+        float pitchMod = voice.pitchOffset + voice.modPitchOffset;
 
         // Add vibrato modulation (sine wave)
         if (voice.vibratoActive) {
@@ -1653,190 +2258,21 @@ public:
     }
 
     // ===================================
-    // OFFLINE RENDER (for WAV export)
+    // OFFLINE RENDER (for WAV export — thin wrapper)
     // ===================================
-    // Renders audio frames without the Oboe stream.
-    // Processes note queue and voices sample-by-sample, returns interleaved stereo output.
+    // Delegates entirely to processAudioBlock for identical behavior to live playback.
+    // Tables, modulation, anti-click, limiter — all work automatically.
     void renderOffline(int numFrames, float* output, int sampleRate) {
-        // Clear output buffer
-        for (int i = 0; i < numFrames * 2; i++) {
-            output[i] = 0.0f;
+        for (int i = 0; i < numFrames * 2; i++) output[i] = 0.0f;
+
+        const int BLOCK_SIZE = 256;  // Match live callback granularity for identical behavior
+        int rendered = 0;
+        while (rendered < numFrames) {
+            int chunk = std::min(BLOCK_SIZE, numFrames - rendered);
+            processAudioBlock(output + rendered * 2, chunk, 2, (float)sampleRate);
+            rendered += chunk;
         }
-
-        // Process sample-by-sample (note triggering + voice mixing together)
-        for (int32_t frame = 0; frame < numFrames; frame++) {
-            int64_t currentFrame = globalFrameCounter + frame;
-
-            // Process kill events at this frame
-            while (killQueue.hasKillAt(currentFrame)) {
-                ScheduledKill kill = killQueue.pop();
-                for (int v = 0; v < MAX_VOICES; v++) {
-                    if (voices[v].trackId == kill.trackId && voices[v].isActive) {
-                        voices[v].stop();
-                    }
-                }
-            }
-
-            // Trigger scheduled notes at this frame
-            while (noteQueue.hasNoteAt(currentFrame)) {
-                ScheduledNote note = noteQueue.pop();
-
-                // Voice stealing: stop any voice on this track
-                for (int v = 0; v < MAX_VOICES; v++) {
-                    if (voices[v].trackId == note.trackId) {
-                        voices[v].stop();
-                    }
-                }
-
-                // Find free voice slot
-                for (int v = 0; v < MAX_VOICES; v++) {
-                    if (!voices[v].isActive) {
-                        if (note.sampleId >= 0 && note.sampleId < 256 && samples[note.sampleId]) {
-                            float rate = note.frequency / note.baseFrequency;
-                            voices[v].trigger(samples[note.sampleId], sampleLengths[note.sampleId],
-                                              note.trackId, rate, note.volume, note.pan,
-                                              instrumentParams[note.sampleId],
-                                              (float)sampleRate, note.startPointOverride);
-
-                            // Apply pitch modulation from scheduled note (Phase 7)
-                            // PSL: Set initial offset and start slide to 0
-                            if (fabsf(note.pslInitialOffset) > 0.001f && note.pslDuration > 0.0f) {
-                                voices[v].pitchOffset = note.pslInitialOffset;
-                                float beatsPerSecond = 120.0f / 60.0f;
-                                float stepsPerBeat = 4.0f;
-                                float ticsPerStep = 12.0f;
-                                float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
-                                float framesPerTic = (float)sampleRate / ticsPerSecond;
-                                float totalFrames = framesPerTic * note.pslDuration;
-                                if (totalFrames < 1.0f) totalFrames = 1.0f;
-                                voices[v].pitchSlideTarget = 0.0f;
-                                voices[v].pitchSlideRate = -note.pslInitialOffset / totalFrames;
-                                voices[v].pitchSliding = true;
-                            }
-                            // PBN: Set continuous pitch bend rate
-                            if (fabsf(note.pbnRate) > 0.0001f) {
-                                float beatsPerSecond = 120.0f / 60.0f;
-                                float stepsPerBeat = 4.0f;
-                                float ticsPerStep = 12.0f;
-                                float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
-                                float framesPerTic = (float)sampleRate / ticsPerSecond;
-                                voices[v].pitchSlideRate = note.pbnRate / framesPerTic;
-                                voices[v].pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
-                                voices[v].pitchSliding = true;
-                            }
-                            // PVB/PVX: Set vibrato
-                            if (note.vibratoDepth > 0.01f) {
-                                voices[v].vibratoSpeed = note.vibratoSpeed;
-                                voices[v].vibratoDepth = note.vibratoDepth;
-                                voices[v].vibratoActive = true;
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-
-            // Mix all active voices for this frame
-            float leftSample = 0.0f;
-            float rightSample = 0.0f;
-
-            for (int v = 0; v < MAX_VOICES; v++) {
-                Voice& voice = voices[v];
-                if (!voice.isActive || !voice.sampleData) continue;
-
-                int idx = (int)voice.position;
-                float frac = voice.position - (float)idx;
-
-                // Bounds check
-                if (idx < 0 || idx >= voice.sampleLength - 1) {
-                    if (idx == voice.sampleLength - 1 && frac == 0.0f) {
-                        float sample = voice.sampleData[idx] * voice.volume;
-                        leftSample += sample * voice.panLeft;
-                        rightSample += sample * voice.panRight;
-                    }
-                    voice.isActive = false;
-                    continue;
-                }
-
-                // Read samples for interpolation
-                float sample1 = voice.sampleData[idx];
-                float sample2 = voice.sampleData[idx + 1];
-
-                // Apply downsample effect
-                if (voice.downsample > 0) {
-                    int dsAmount = voice.downsample;
-                    int quantizedIdx = (idx / dsAmount) * dsAmount;
-                    sample1 = voice.sampleData[std::min(quantizedIdx, voice.sampleLength - 1)];
-                    sample2 = sample1;
-                }
-
-                // Apply bit crush effect
-                if (voice.crush > 0) {
-                    int bits = 16 - voice.crush;
-                    if (bits < 1) bits = 1;
-                    float levels = (float)(1 << bits);
-                    sample1 = floorf(sample1 * levels) / levels;
-                    sample2 = floorf(sample2 * levels) / levels;
-                }
-
-                // Linear interpolation
-                float sample = sample1 + frac * (sample2 - sample1);
-
-                // Apply drive (soft clipping)
-                if (voice.drive > 0) {
-                    float driveAmount = 1.0f + (voice.drive / 32.0f);
-                    sample = sample * driveAmount;
-                    sample = tanhf(sample);
-                }
-
-                // Apply biquad filter
-                if (voice.filterType > 0) {
-                    float filtered = voice.b0 * sample +
-                                     voice.b1 * voice.x1 +
-                                     voice.b2 * voice.x2 -
-                                     voice.a1 * voice.y1 -
-                                     voice.a2 * voice.y2;
-                    voice.x2 = voice.x1;
-                    voice.x1 = sample;
-                    voice.y2 = voice.y1;
-                    voice.y1 = filtered;
-                    sample = filtered;
-                }
-
-                // Apply volume and pan (no artificial headroom)
-                sample = sample * voice.volume;
-                leftSample += sample * voice.panLeft;
-                rightSample += sample * voice.panRight;
-
-                // Advance position
-                voice.position += voice.playbackRate;
-
-                // Handle looping
-                if (voice.loopMode > 0) {
-                    float loopStart = (float)voice.actualLoopStart;
-                    float loopEnd = (float)voice.actualEnd;
-
-                    if (voice.position >= loopEnd) {
-                        if (voice.loopMode == 1) {
-                            voice.position = loopStart + fmodf(voice.position - loopEnd, loopEnd - loopStart);
-                        } else if (voice.loopMode == 2) {
-                            voice.playbackRate = -voice.playbackRate;
-                            voice.position = loopEnd - 1;
-                        }
-                    } else if (voice.loopMode == 2 && voice.position < loopStart) {
-                        voice.playbackRate = -voice.playbackRate;
-                        voice.position = loopStart;
-                    }
-                }
-            }
-
-            // Write mixed output for this frame
-            output[frame * 2] = leftSample;
-            output[frame * 2 + 1] = rightSample;
-        }
-
-        // Update global frame counter
-        globalFrameCounter += numFrames;
+        // globalFrameCounter already updated by processAudioBlock each chunk
     }
 
     // Reset frame counter (for starting a new render)
@@ -1849,12 +2285,20 @@ public:
         return globalFrameCounter;
     }
 
+    // Offline rendering flag: when true, onAudioReady outputs silence instead of audio.
+    // Prevents the live stream from consuming note queue entries during WAV export.
+    void setOfflineRendering(bool offline) {
+        isOfflineRendering.store(offline);
+        LOGD("🎬 Offline rendering: %s", offline ? "ON" : "OFF");
+    }
+
 private:
     std::shared_ptr<oboe::AudioStream> stream;
     Voice voices[MAX_VOICES];
     float* samples[256];
     int sampleLengths[256];
     InstrumentParams instrumentParams[256];
+    InstrumentModSlot instrumentModSlots[256][4]; // [sampleId][slotIndex]
 
     // Table data (Phase 3.5)
     Table tables[256];             // 256 tables, each with 16 rows
@@ -1864,12 +2308,16 @@ private:
     NoteQueue noteQueue;           // Thread-safe queue of scheduled notes
     KillQueue killQueue;           // Thread-safe queue of scheduled kill events
     int64_t globalFrameCounter;    // Total frames processed since start
+    std::atomic<bool> isOfflineRendering{false};  // True during WAV export → onAudioReady outputs silence
 
     // Oscilloscope waveform buffer (circular buffer for recent output)
     static const int WAVEFORM_SIZE = 620;
     float waveformBuffer[WAVEFORM_SIZE];
     int waveformIndex = 0;
     std::mutex waveformMutex;
+
+    // Per-block per-track peaks: written by processAudioBlock, read by onAudioReady for meters
+    float framePeaksPerTrack[8] = {0};
 
     // Peak level tracking for mixer meters
     float trackPeaks[8] = {0};      // Per-track peak levels (0.0 - 1.0)
@@ -2274,12 +2722,22 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1schedul
         jint startPointOverride, jint tableId, jint tableTicRate,
         jint noteOctave, jint notePitch,
         jfloat pslInitialOffset, jfloat pslDuration,
-        jfloat pbnRate, jfloat vibratoSpeed, jfloat vibratoDepth) {
+        jfloat pbnRate, jfloat vibratoSpeed, jfloat vibratoDepth,
+        jint tableStartRow) {
     if (engine) {
         engine->scheduleNote(targetFrame, sampleId, trackId, frequency, baseFrequency,
                              volume, pan, startPointOverride, tableId, tableTicRate,
                              noteOctave, notePitch,
-                             pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth);
+                             pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
+                             tableStartRow);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setVoiceTableRow(
+        JNIEnv *env, jobject thiz, jint trackId, jint row) {
+    if (engine) {
+        engine->setVoiceTableRow(trackId, row);
     }
 }
 
@@ -2343,6 +2801,49 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setInit
     if (engine) {
         engine->setInitialPitchOffset(trackId, semitones);
     }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setInstrumentModulation(
+        JNIEnv *env, jobject thiz,
+        jint sampleId, jint slotIndex, jint type, jint dest, jfloat amount,
+        jint attackSamples, jint holdSamples, jint decaySamples,
+        jfloat sustainLevel, jfloat lfoHz, jint oscShape, jint releaseSamples) {
+    if (engine) {
+        engine->setInstrumentModulation(sampleId, slotIndex, type, dest, amount,
+                                        attackSamples, holdSamples, decaySamples,
+                                        sustainLevel, lfoHz, oscShape, releaseSamples);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1clearInstrumentModulation(
+        JNIEnv *env, jobject thiz, jint sampleId) {
+    if (engine) {
+        engine->clearInstrumentModulation(sampleId);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1triggerNoteOff(
+        JNIEnv *env, jobject thiz, jint trackId) {
+    if (engine) {
+        engine->triggerNoteOff(trackId);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1scheduleNoteOff(
+        JNIEnv *env, jobject thiz, jlong targetFrame, jint trackId) {
+    if (engine) {
+        engine->scheduleNoteOff(targetFrame, trackId);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setOfflineRendering(
+        JNIEnv *env, jobject thiz, jboolean rendering) {
+    if (engine) engine->setOfflineRendering(rendering == JNI_TRUE);
 }
 
 }

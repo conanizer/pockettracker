@@ -321,7 +321,8 @@ interface IAudioBackend {
         pslDuration: Float = 0f,
         pbnRate: Float = 0f,
         vibratoSpeed: Float = 0f,
-        vibratoDepth: Float = 0f
+        vibratoDepth: Float = 0f,
+        tableStartRow: Int = -1
     )
 
     /**
@@ -341,6 +342,17 @@ interface IAudioBackend {
      * @return Table ID (0-255), or -1 if no active voice or no table
      */
     fun getVoiceTableId(trackId: Int): Int
+
+    /**
+     * Set the table row for a voice on a specific track.
+     *
+     * Used for THO (Table Hop) effect from phrase on empty steps -
+     * jumps the currently playing voice's table to a specific row.
+     *
+     * @param trackId Which track to modify (0-7)
+     * @param row Target table row (0-15)
+     */
+    fun setVoiceTableRow(trackId: Int, row: Int)
 
     // ===================================
     // PITCH MODULATION METHODS (Phase 6)
@@ -404,4 +416,79 @@ interface IAudioBackend {
      * @param semitones Pitch offset in semitones (can be negative)
      */
     fun setInitialPitchOffset(trackId: Int, semitones: Float)
+
+    // ===================================
+    // MODULATION METHODS (Phase 4 — AHD)
+    // ===================================
+
+    /**
+     * Set a modulation slot for an instrument.
+     *
+     * Call this before scheduling a note. The engine copies these params to the voice
+     * at note-trigger time. attackSamples/holdSamples/decaySamples are already
+     * converted from ticks by the caller (AudioEngine.kt).
+     *
+     * @param sampleId     Instrument's sample slot (0-255)
+     * @param slotIndex    Mod slot (0-3)
+     * @param type         0=NONE, 1=AHD, 2=ADSR, 3=LFO
+     * @param dest         0=NONE, 1=VOL, 3=PITCH
+     * @param amount       Modulation depth 0.0-1.0
+     * @param attackSamples  Attack duration in audio samples
+     * @param holdSamples    Hold duration in audio samples (AHD hold; unused in ADSR)
+     * @param decaySamples   Decay duration in audio samples
+     * @param sustainLevel   ADSR sustain level 0.0-1.0
+     * @param lfoHz          LFO frequency in Hz
+     * @param oscShape       LFO shape: 0=TRI,1=SIN,2=RMP+,3=RMP-,6=SQU+,7=SQU-
+     */
+    fun setInstrumentModulation(
+        sampleId: Int,
+        slotIndex: Int,
+        type: Int,
+        dest: Int,
+        amount: Float,
+        attackSamples: Int,
+        holdSamples: Int,
+        decaySamples: Int,
+        sustainLevel: Float = 0.5f,
+        lfoHz: Float = 4.0f,
+        oscShape: Int = 0,
+        releaseSamples: Int = 0  // ADSR/TRIG: release duration; 0 = instant on note-off
+    )
+
+    /**
+     * Clear all modulation slots for an instrument.
+     * Call this when an instrument has no active modulation.
+     *
+     * @param sampleId Instrument's sample slot (0-255)
+     */
+    fun clearInstrumentModulation(sampleId: Int)
+
+    /**
+     * Trigger note-off for ADSR/TRIG modulators on a track.
+     * Transitions any ADSR/TRIG mod in Sustain (stage 3) → Release (stage 4).
+     * Used by KILL effect to allow smooth fade-out via the release envelope.
+     *
+     * @param trackId Track to trigger note-off on (0-7)
+     */
+    fun triggerNoteOff(trackId: Int)
+
+    /**
+     * Schedule a note-off event at a specific audio frame.
+     * Triggers ADSR release at sample-accurate timing (used for automatic step-end release).
+     *
+     * @param frame Absolute audio frame number when to trigger note-off
+     * @param trackId Which track to trigger note-off on (0-7)
+     */
+    fun scheduleNoteOff(frame: Long, trackId: Int)
+
+    /**
+     * Enable or disable offline rendering mode.
+     *
+     * When true, onAudioReady outputs silence so the live stream cannot consume
+     * the note queue while renderFrames() processes it offline (WAV export).
+     * Always call setOfflineRendering(false) in a finally block after export.
+     *
+     * @param rendering true = WAV export in progress, false = normal live playback
+     */
+    fun setOfflineRendering(rendering: Boolean)
 }

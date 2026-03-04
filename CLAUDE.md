@@ -11,11 +11,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. **DEVELOPMENT_STATUS.md** - What's done, what's remaining
 2. **MVP_ROADMAP.md** - Overall path to MVP
 3. **MVP_EXPANSION_PLAN.md** - Mixer, Volume/Pan, WAV Export (COMPLETE!)
-4. **MVP_EXTENSION_PACK_2.md** - Tables, HOP/TIC, Pitch Effects (CURRENT!)
+4. **MVP_EXTENSION_PACK_2.md** - Tables, HOP/TIC, Pitch Effects (COMPLETE!)
+5. **MVP_EXTENSION_PACK_2.md** - Fixes & UX Updates, New Effects, Groove Screen, Modulation Screen, Resampling (CURRENT!)
 
-**Current Phase:** MVP Extension Pack 2 (Tables + Pitch Effects)
+**Current Phase:** MVP Extension Pack 3
 
-**Current Task:** Implement Table screen, HOP/TIC effects, pitch automation
+**Current Task:** Implement Groove screen
 
 ---
 
@@ -23,7 +24,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Current Project State (February 2026)
 
-**Status:** MVP Expansion #1 COMPLETE! Now working on Extension Pack #2.
+**Status:** MVP Expansion #1-2 COMPLETE! Now working on Extension Pack #3.
 
 **Completed:**
 - ✅ Audio engine (professional-grade, sample-accurate)
@@ -47,9 +48,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. ~~Finish effects system~~ ✅ DONE
 3. ~~Implement copy/paste~~ ✅ DONE
 4. ~~Implement Mixer + WAV Export~~ ✅ DONE
-5. **Extension Pack 2** ← CURRENT
-6. Testing & polish
-7. MVP release (Late February/March 2026)
+5. ~~Extension Pack 2~~  ✅ DONE
+6. **Extension Pack 3** ← CURRENT
+7. Testing & polish
+8. MVP release (Late February/March 2026)
 
 ---
 
@@ -665,14 +667,14 @@ project.phrases[0] = project.phrases[0].copy(
 
 ## 📚 Key Documents Reference
 
-| Document | Purpose | When to Read |
-|----------|---------|--------------|
-| **DEVELOPMENT_STATUS.md** | Current progress | Every session start |
-| **MVP_EXPANSION_PLAN.md** | Mixer/Export implementation | **Current work!** |
-| **MVP_ROADMAP.md** | Original feature roadmap | Reference |
-| **TECHNICAL_ARCHITECTURE.md** | System design | Understanding architecture |
-| **INPUT_COMBINATIONS.md** | Controls reference | Adding input handling |
-| **REFACTORING_ROADMAP.md** | Step-by-step refactoring | Reference (completed) |
+| Document                      | Purpose                     | When to Read |
+|-------------------------------|-----------------------------|--------------|
+| **DEVELOPMENT_STATUS.md**     | Current progress            | Every session start |
+| **MVP_EXPANSION_PACK_3.md**   | Current work                | Till it done |
+| **MVP_ROADMAP.md**            | Original feature roadmap    | Reference |
+| **TECHNICAL_ARCHITECTURE.md** | System design               | Understanding architecture |
+| **INPUT_COMBINATIONS.md**     | Controls reference          | Adding input handling |
+| **REFACTORING_ROADMAP.md**    | Step-by-step refactoring    | Reference (completed) |
 
 ---
 
@@ -696,12 +698,12 @@ project.phrases[0] = project.phrases[0].copy(
 - [x] Copy/paste working (M8-style)
 
 **MVP Expansion (IN PROGRESS):**
-- [ ] Instrument VOL/PAN editable in UI
-- [ ] Stereo pan working in audio engine
-- [ ] Volume chain: instrument × phrase × track × master
-- [ ] Mixer screen with 8 tracks + master
-- [ ] Peak meters updating during playback
-- [ ] WAV Export ("WAV MIX" button renders song)
+- [x] Instrument VOL/PAN editable in UI
+- [x] Stereo pan working in audio engine
+- [x] Volume chain: instrument × phrase × track × master
+- [x] Mixer screen with 8 tracks + master
+- [x] Peak meters updating during playback
+- [x] WAV Export ("WAV MIX" button renders song)
 
 **Final Steps:**
 - [ ] Tested on Miyoo Flip and Ayaneo

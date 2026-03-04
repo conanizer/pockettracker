@@ -178,8 +178,8 @@ class TableModule : TrackerModule {
             fontScale = FONT_SCALE
         )
 
-        // COLUMN 2: VOLUME (00-FF or -- if FF)
-        val volStr = if (row.volume == 0xFF) "--" else row.volume.toString(16).padStart(2, '0').uppercase()
+        // COLUMN 2: VOLUME (00-FF or -- if empty)
+        val volStr = if (row.volume == -1) "--" else row.volume.toString(16).padStart(2, '0').uppercase()
         drawBitmapText(
             text = volStr,
             x = volX,
@@ -188,7 +188,7 @@ class TableModule : TrackerModule {
             color = when {
                 index == state.cursorRow && state.cursorColumn == 2 -> Color.Yellow
                 state.selectionMode && state.isCellSelected(index, 2) -> Color(0xFF00DD00)  // Selection green
-                row.volume == 0xFF -> Color(0xFF444444)  // Dim if no volume change
+                row.volume == -1 -> Color(0xFF444444)  // Dim if no volume change
                 else -> Color(0xFFaaaaaa)
             },
             spacing = CHAR_SPACING,
@@ -290,10 +290,10 @@ class TableModule : TrackerModule {
                 canDelete = state.table.rows[state.cursorRow].transpose != 0x00  // Can delete if not already 00
             )
             2 -> CursorContextFactory.hexByte(    // Volume
-                currentValue = state.table.rows[state.cursorRow].volume,
-                min = 0,
-                max = 255,
-                canDelete = state.table.rows[state.cursorRow].volume != 0xFF  // Can delete if not already FF
+                currentValue = if (state.table.rows[state.cursorRow].volume == -1) 0 else state.table.rows[state.cursorRow].volume,
+                emptyValue = -1,
+                canDelete = state.table.rows[state.cursorRow].volume != -1,  // Can delete if not already empty
+                canInsert = true  // A on empty cell inserts a value
             )
             3 -> {  // FX1 Type
                 val row = state.table.rows[state.cursorRow]
@@ -354,7 +354,7 @@ class TableModule : TrackerModule {
                         row.volume = action.value.coerceIn(0, 255)
                     }
                     is com.example.pockettracker.core.logic.InputAction.DELETE -> {
-                        row.volume = 0xFF  // Reset to no volume change
+                        row.volume = -1  // Reset to no volume change (empty)
                     }
                     else -> {}
                 }

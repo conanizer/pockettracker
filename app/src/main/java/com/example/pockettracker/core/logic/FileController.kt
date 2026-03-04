@@ -58,6 +58,7 @@ class FileController(
             val project = fileManager.loadProject(filename)
 
             if (project != null) {
+                migrateProject(project)
                 logger.d(TAG, "✅ Project loaded: $filename")
                 LoadResult.Success(project)
             } else {
@@ -81,6 +82,7 @@ class FileController(
             val project = fileManager.loadProject(fileInfo)
 
             if (project != null) {
+                migrateProject(project)
                 logger.d(TAG, "✅ Project loaded: ${fileInfo.name}")
                 LoadResult.Success(project)
             } else {
@@ -110,6 +112,32 @@ class FileController(
      */
     fun deleteProject(filename: String): Boolean {
         return fileManager.deleteProject(filename)
+    }
+
+    // ========================================
+    // PROJECT MIGRATION
+    // ========================================
+
+    /**
+     * Migrate old project data to current format.
+     * Called after deserialization to handle format changes.
+     */
+    private fun migrateProject(project: Project) {
+        // Migration: Table volume 0xFF → -1 (Extension Pack 3)
+        // Old format used 0xFF as "no change" sentinel, new format uses -1
+        // This allows 0xFF to be used as a valid volume value (full volume)
+        var migrated = 0
+        for (table in project.tables) {
+            for (row in table.rows) {
+                if (row.volume == 0xFF) {
+                    row.volume = -1
+                    migrated++
+                }
+            }
+        }
+        if (migrated > 0) {
+            logger.d(TAG, "📦 Migrated $migrated table volume values (0xFF → -1)")
+        }
     }
 
     // ========================================

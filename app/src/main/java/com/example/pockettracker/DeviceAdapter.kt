@@ -21,9 +21,17 @@ class DeviceAdapter(private val context: Context) {
         const val PORTRAIT_PATTERN_WIDTH = 6.8f
         const val PORTRAIT_PATTERN_HEIGHT = 5.1f
 
-        // Portrait spacer height (fixed)
-        const val PORTRAIT_SPACER_HEIGHT = 200
+        // Portrait spacer height — 0 means screen starts at the very top,
+        // maximising the button panel area below.
+        const val PORTRAIT_SPACER_HEIGHT = 0
+
+        // Minimum pixels per landscape button panel. If the chosen scale leaves less
+        // than this on each side, drop to the next lower scale so buttons are usable.
+        const val MIN_BUTTON_PANEL_PX = 150
     }
+
+    /** User-selectable layout modes. Persisted as UI state in PocketTrackerApp. */
+    enum class LayoutMode { FULL, TOUCH_PORTRAIT, TOUCH_LANDSCAPE }
 
     data class LayoutConfig(
         val needsVirtualButtons: Boolean,
@@ -136,6 +144,35 @@ class DeviceAdapter(private val context: Context) {
         }
     }
 
+    /** Calculate layout for a forced mode (used when user overrides auto-detection). */
+    fun calculateLayout(mode: LayoutMode): LayoutConfig {
+        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val display = windowManager.defaultDisplay
+        val realSize = Point()
+        display.getRealSize(realSize)
+        val deviceWidth = realSize.x
+        val deviceHeight = realSize.y
+
+        return when (mode) {
+            LayoutMode.FULL -> {
+                val scaleByWidth = deviceWidth / SCREEN_WIDTH
+                val scaleByHeight = deviceHeight / SCREEN_HEIGHT
+                val finalScale = maxOf(1, minOf(scaleByWidth, scaleByHeight))
+                LayoutConfig(
+                    needsVirtualButtons = false,
+                    isLandscape = true,
+                    screenScale = finalScale,
+                    scaledScreenWidth = SCREEN_WIDTH * finalScale,
+                    scaledScreenHeight = SCREEN_HEIGHT * finalScale,
+                    deviceWidth = deviceWidth,
+                    deviceHeight = deviceHeight
+                )
+            }
+            LayoutMode.TOUCH_PORTRAIT  -> calculatePortraitLayout(deviceWidth, deviceHeight)
+            LayoutMode.TOUCH_LANDSCAPE -> calculateLandscapeLayout(deviceWidth, deviceHeight)
+        }
+    }
+
     private fun calculateLandscapeLayout(deviceWidth: Int, deviceHeight: Int): LayoutConfig {
         android.util.Log.d("DeviceAdapter", "=== LANDSCAPE CALCULATION ===")
 
@@ -147,14 +184,19 @@ class DeviceAdapter(private val context: Context) {
             android.util.Log.d("DeviceAdapter", "Testing scale ${scale}x:")
             android.util.Log.d("DeviceAdapter", "  Scaled screen: ${scaledScreenWidth}×${scaledScreenHeight}")
 
-            if (scaledScreenHeight > deviceHeight) {
-                android.util.Log.d("DeviceAdapter", "  ✗ Screen too tall")
+            if (scaledScreenHeight > deviceHeight || scaledScreenWidth > deviceWidth) {
+                android.util.Log.d("DeviceAdapter", "  ✗ Screen too tall/wide")
                 continue
             }
 
             // Available space for EACH button panel
             // Formula: (deviceWidth - scaledScreenWidth) / 2
             val availableButtonWidth = (deviceWidth - scaledScreenWidth) / 2
+
+            if (availableButtonWidth < MIN_BUTTON_PANEL_PX) {
+                android.util.Log.d("DeviceAdapter", "  ✗ Button panel too narrow (${availableButtonWidth}px < ${MIN_BUTTON_PANEL_PX}px)")
+                continue
+            }
             val availableButtonHeight = deviceHeight  // FULL device height
 
             android.util.Log.d("DeviceAdapter", "  Remaining width: ${deviceWidth - scaledScreenWidth}px")

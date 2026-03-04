@@ -1,6 +1,8 @@
 package com.example.pockettracker.core.audio
 
 import com.example.pockettracker.core.data.Instrument
+import com.example.pockettracker.core.data.ModDest
+import com.example.pockettracker.core.data.ModType
 import com.example.pockettracker.core.data.Note
 import com.example.pockettracker.core.data.Project
 import com.example.pockettracker.core.data.Table
@@ -27,7 +29,7 @@ import java.nio.ByteOrder
  * @param logger Platform-specific logger (e.g., AndroidLogger on Android)
  */
 class AudioEngine(
-    private val backend: IAudioBackend,
+    internal val backend: IAudioBackend,
     private val resourceLoader: IResourceLoader,
     private val logger: ILogger
 ) {
@@ -253,6 +255,10 @@ class AudioEngine(
             forceReloadTable(project.tables[tableId])
         }
 
+        // Push current modulation params so preview reflects latest UI edits
+        val tempo = project?.tempo ?: 120
+        pushInstrumentModulation(instrument, tempo)
+
         backend.scheduleNoteWithTable(
             frame = targetFrame,
             sampleId = sampleId,
@@ -414,7 +420,9 @@ class AudioEngine(
         pslDuration: Float = 0f,
         pbnRate: Float = 0f,
         vibratoSpeed: Float = 0f,
-        vibratoDepth: Float = 0f
+        vibratoDepth: Float = 0f,
+        tableIdOverride: Int = -1,  // TBL effect: override table ID (-1 = use instrument default)
+        tableStartRow: Int = -1     // THO effect: force table start row (-1 = default)
     ) {
         if (note == Note.EMPTY) return
 
@@ -427,8 +435,8 @@ class AudioEngine(
 
         val sampleId = instrument.sampleId
 
-        // Each instrument uses the table with the same ID (instrument 03 → table 03)
-        val tableId = instrumentId
+        // Use TBL override if provided, otherwise use instrument ID as table ID
+        val tableId = if (tableIdOverride >= 0) tableIdOverride else instrumentId
         val tableTicRate = instrument.tableTicRate
 
         // Ensure table is loaded
@@ -437,10 +445,15 @@ class AudioEngine(
         }
 
         // Debug: Log what we're scheduling
-        android.util.Log.d("AudioEngine", "📋 scheduleNote: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, pan=$pan, tableId=$tableId")
+        android.util.Log.d("AudioEngine", "📋 scheduleNote: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, vol=${"%.4f".format(volume)}, pan=$pan, tableId=$tableId")
 
         val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
         val frequency = note.toFrequency()
+
+        // Push modulation params to C++ engine (Phase 4 — AHD)
+        // Must be done before scheduleNoteWithTable so the engine has correct params at trigger time
+        val tempo = project.tempo
+        pushInstrumentModulation(instrument, tempo)
 
         // Resume stream so audio callback can process the queue
         backend.resumeStream()
@@ -449,7 +462,8 @@ class AudioEngine(
         backend.scheduleNoteWithTable(
             targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan,
             startPointOverride, tableId, tableTicRate, note.octave, note.pitch,
-            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth
+            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
+            tableStartRow
         )
     }
 
@@ -640,7 +654,8 @@ class AudioEngine(
         pslDuration: Float = 0f,
         pbnRate: Float = 0f,
         vibratoSpeed: Float = 0f,
-        vibratoDepth: Float = 0f
+        vibratoDepth: Float = 0f,
+        tableStartRow: Int = -1
     ) {
         if (note == Note.EMPTY) return
 
@@ -673,7 +688,8 @@ class AudioEngine(
         backend.scheduleNoteWithTable(
             targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan,
             startPointOverride, tableId, tableTicRate, note.octave, note.pitch,
-            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth
+            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
+            tableStartRow
         )
     }
 
@@ -696,6 +712,14 @@ class AudioEngine(
      */
     fun getVoiceTableId(trackId: Int): Int {
         return backend.getVoiceTableId(trackId)
+    }
+
+    /**
+     * Set table row for a voice (THO effect from phrase on empty step).
+     * Jumps the currently playing voice's table to the specified row.
+     */
+    fun setVoiceTableRow(trackId: Int, row: Int) {
+        backend.setVoiceTableRow(trackId, row)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -753,6 +777,132 @@ class AudioEngine(
      */
     fun setInitialPitchOffset(trackId: Int, semitones: Float) {
         backend.setInitialPitchOffset(trackId, semitones)
+    }
+
+    /**
+     * Trigger note-off for ADSR/TRIG modulators on a track.
+     * Transitions sustain (stage 3) → release (stage 4), allowing a smooth fade-out.
+     * Called on KILL effect so looped samples with ADSR mod fade rather than cut hard.
+     *
+     * @param trackId Which track (0-7)
+     */
+    fun triggerNoteOff(trackId: Int) {
+        backend.triggerNoteOff(trackId)
+    }
+
+    /**
+     * Schedule a note-off event at a specific audio frame.
+     * Triggers ADSR release (sustain → release) at sample-accurate timing.
+     * Used to implement step-end note-off for ADSR envelopes.
+     *
+     * @param frame When to trigger note-off (absolute audio frame)
+     * @param trackId Which track (0-7)
+     */
+    fun scheduleNoteOff(frame: Long, trackId: Int) {
+        backend.scheduleNoteOff(frame, trackId)
+    }
+
+    /**
+     * Push instrument modulation slots to the C++ engine before scheduling a note.
+     *
+     * Converts AHD tick values → audio samples using current tempo + sample rate,
+     * then calls setInstrumentModulation for each active slot.
+     */
+    fun pushInstrumentModulation(instrument: Instrument, tempo: Int) {
+        val sampleId = instrument.sampleId
+        val sampleRate = getDeviceSampleRate().toFloat()
+
+        // Frames per tic: at 120 BPM, 4 steps/beat, 12 tics/step → ~230 samples/tic
+        val beatsPerSecond = tempo / 60.0f
+        val stepsPerBeat = 4.0f
+        val ticsPerStep = 12.0f
+        val framesPerTic = sampleRate / (beatsPerSecond * stepsPerBeat * ticsPerStep)
+
+        var anyActive = false
+        for (slotIndex in 0..3) {
+            val slot = instrument.modSlots[slotIndex]
+
+            val dest = when (slot.dest) {
+                ModDest.VOLUME        -> 1
+                ModDest.PAN           -> 2
+                ModDest.PITCH         -> 3
+                ModDest.FINE_PITCH    -> 4
+                ModDest.FILTER_CUTOFF -> 5
+                ModDest.FILTER_RES    -> 6
+                ModDest.SAMPLE_START  -> 7
+                ModDest.MOD_AMT       -> 8   // Routes this slot's output to scale next slot's amount
+                ModDest.MOD_RATE      -> 9   // Routes this slot's output to scale next slot's time/freq
+                ModDest.MOD_BOTH      -> 10  // Routes to both amount and rate of next slot
+                else                  -> 0
+            }
+
+            when (slot.type) {
+                ModType.AHD -> {
+                    if (dest == 0) { backend.setInstrumentModulation(sampleId, slotIndex, 0,0,0f,0,0,0); continue }
+                    val amount       = slot.amount / 255.0f
+                    val attackSamples  = (slot.attack * framesPerTic).toInt().coerceAtLeast(0)
+                    val holdSamples    = (slot.hold   * framesPerTic).toInt().coerceAtLeast(0)
+                    val decaySamples   = (slot.decay  * framesPerTic).toInt().coerceAtLeast(0)
+                    backend.setInstrumentModulation(sampleId, slotIndex, 1, dest, amount,
+                        attackSamples, holdSamples, decaySamples)
+                    anyActive = true
+                }
+                ModType.ADSR -> {
+                    if (dest == 0) { backend.setInstrumentModulation(sampleId, slotIndex, 0,0,0f,0,0,0); continue }
+                    val amount         = slot.amount  / 255.0f
+                    val sustainLevel   = slot.sustain / 255.0f
+                    val attackSamples  = (slot.attack   * framesPerTic).toInt().coerceAtLeast(0)
+                    val decaySamples   = (slot.decay    * framesPerTic).toInt().coerceAtLeast(0)
+                    val releaseSamples = (slot.release  * framesPerTic).toInt().coerceAtLeast(0)
+                    backend.setInstrumentModulation(sampleId, slotIndex, 2, dest, amount,
+                        attackSamples, 0, decaySamples, sustainLevel,
+                        releaseSamples = releaseSamples)
+                    anyActive = true
+                }
+                ModType.LFO -> {
+                    if (dest == 0) { backend.setInstrumentModulation(sampleId, slotIndex, 0,0,0f,0,0,0); continue }
+                    val amount   = slot.amount / 255.0f
+                    // lfoFreq 0x00-0xFF → 0.1 to 20 Hz (linear)
+                    val lfoHz    = (slot.lfoFreq + 1) * 20.0f / 256.0f
+                    val oscShape = slot.oscShape
+                    backend.setInstrumentModulation(sampleId, slotIndex, 3, dest, amount,
+                        0, 0, 0, 0.5f, lfoHz, oscShape)
+                    anyActive = true
+                }
+                ModType.DRUM -> {
+                    // DRUM = AHD semantics: ATK=spike attack, HOLD=body, DEC=tail
+                    // Passes type=4 so C++ can distinguish for future per-type behaviour
+                    if (dest == 0) { backend.setInstrumentModulation(sampleId, slotIndex, 0,0,0f,0,0,0); continue }
+                    val amount        = slot.amount / 255.0f
+                    val attackSamples = (slot.attack * framesPerTic).toInt().coerceAtLeast(0)
+                    val holdSamples   = (slot.hold   * framesPerTic).toInt().coerceAtLeast(0)
+                    val decaySamples  = (slot.decay  * framesPerTic).toInt().coerceAtLeast(0)
+                    backend.setInstrumentModulation(sampleId, slotIndex, 4, dest, amount,
+                        attackSamples, holdSamples, decaySamples)
+                    anyActive = true
+                }
+                ModType.TRIG -> {
+                    // TRIG = ADSR semantics (future: externally triggered); passes type=5
+                    if (dest == 0) { backend.setInstrumentModulation(sampleId, slotIndex, 0,0,0f,0,0,0); continue }
+                    val amount         = slot.amount  / 255.0f
+                    val sustainLevel   = slot.sustain / 255.0f
+                    val attackSamples  = (slot.attack   * framesPerTic).toInt().coerceAtLeast(0)
+                    val decaySamples   = (slot.decay    * framesPerTic).toInt().coerceAtLeast(0)
+                    val releaseSamples = (slot.release  * framesPerTic).toInt().coerceAtLeast(0)
+                    backend.setInstrumentModulation(sampleId, slotIndex, 5, dest, amount,
+                        attackSamples, 0, decaySamples, sustainLevel,
+                        releaseSamples = releaseSamples)
+                    anyActive = true
+                }
+                else -> {
+                    // NONE or future types — clear this slot
+                    backend.setInstrumentModulation(sampleId, slotIndex, 0, 0, 0f, 0, 0, 0)
+                }
+            }
+        }
+        if (!anyActive) {
+            backend.clearInstrumentModulation(sampleId)
+        }
     }
 
     /**

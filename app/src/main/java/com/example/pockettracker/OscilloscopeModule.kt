@@ -3,7 +3,9 @@ package com.example.pockettracker
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 
 /**
  * OSCILLOSCOPE MODULE
@@ -45,25 +47,22 @@ class OscilloscopeModule(
             strokeWidth = scale.toFloat()
         )
 
-        // Draw waveform as connected line segments
+        // Draw waveform as a single path — one draw call instead of 619.
+        // 619 individual drawLine calls caused RenderThread stack overflow on Android 11
+        // (Adreno GPU driver consumes more native stack per draw command than Android 13).
         val maxAmplitude = (height / 2) - 8  // 8px margin top/bottom
 
-        for (i in 0 until width - 1) {
-            // Get two consecutive samples and apply gain
-            val sample1 = (waveformData[i % waveformData.size] * WAVEFORM_GAIN).coerceIn(-1f, 1f)
-            val sample2 = (waveformData[(i + 1) % waveformData.size] * WAVEFORM_GAIN).coerceIn(-1f, 1f)
-
-            // Convert to screen coordinates
-            val y1 = centerY + (sample1 * maxAmplitude).toInt()
-            val y2 = centerY + (sample2 * maxAmplitude).toInt()
-
-            // Draw line between points (classic oscilloscope look)
-            drawLine(
-                color = Color(0xFF00ff00),  // Bright green
-                start = Offset(((x + i) * scale).toFloat(), (y1 * scale).toFloat()),
-                end = Offset(((x + i + 1) * scale).toFloat(), (y2 * scale).toFloat()),
-                strokeWidth = scale.toFloat()
-            )
+        val path = Path()
+        for (i in 0 until width) {
+            val sample = (waveformData[i % waveformData.size] * WAVEFORM_GAIN).coerceIn(-1f, 1f)
+            val px = ((x + i) * scale).toFloat()
+            val py = ((centerY + sample * maxAmplitude) * scale).toFloat()
+            if (i == 0) path.moveTo(px, py) else path.lineTo(px, py)
         }
+        drawPath(
+            path = path,
+            color = Color(0xFF00ff00),  // Bright green
+            style = Stroke(width = scale.toFloat())
+        )
     }
 }

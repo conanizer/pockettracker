@@ -673,7 +673,7 @@ class ClipboardManager(
             for (col in minCol..maxCol) {
                 when (col) {
                     1 -> { tableRow.transpose = 0x00; itemsCut++ }
-                    2 -> { tableRow.volume = 0xFF; itemsCut++ }
+                    2 -> { tableRow.volume = -1; itemsCut++ }
                     3 -> { tableRow.fx1Type = 0; itemsCut++ }
                     4 -> { tableRow.fx1Value = 0; itemsCut++ }
                     5 -> { tableRow.fx2Type = 0; itemsCut++ }
@@ -822,7 +822,7 @@ class ClipboardManager(
             for (col in minCol..maxCol) {
                 when (col) {
                     1 -> { tableRow.transpose = 0x00; itemsDeleted++ }
-                    2 -> { tableRow.volume = 0xFF; itemsDeleted++ }
+                    2 -> { tableRow.volume = -1; itemsDeleted++ }
                     3 -> { tableRow.fx1Type = 0; itemsDeleted++ }
                     4 -> { tableRow.fx1Value = 0; itemsDeleted++ }
                     5 -> { tableRow.fx2Type = 0; itemsDeleted++ }

@@ -195,6 +195,28 @@ class ProjectModule : TrackerModule {
             isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
             isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
         )
+        rowY += ROW_HEIGHT
+        currentRow++
+
+        // ─────────────────────────────────────
+        // ROW 7: LAYOUT (cycle: FULL / T.PORT / T.LAND)
+        // ─────────────────────────────────────
+        val layoutText = when (projectState.layoutMode) {
+            DeviceAdapter.LayoutMode.FULL           -> "FULL"
+            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT  -> "T.PORT"
+            DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE -> "T.LAND"
+        }
+        drawParameterRow(
+            x = x,
+            y = rowY,
+            scale = scale,
+            nameColumnX = nameColumnX,
+            valueColumnX = valueColumnX,
+            parameterName = "LAYOUT",
+            parameterValue = layoutText,
+            isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
+            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
+        )
 
         // ===================================
         // STEP 5: Draw status message at bottom (if any)
@@ -552,6 +574,10 @@ class ProjectModule : TrackerModule {
                 // WAV MIX button - can be activated with A button
                 return CursorContextFactory.readOnly()  // Action handled in MainActivity
             }
+            7 -> {
+                // LAYOUT row - A button cycles the mode (handled in MainActivity)
+                return CursorContextFactory.readOnly()
+            }
             else -> return CursorContextFactory.none()
         }
     }
@@ -641,5 +667,6 @@ data class ProjectState(
     val statusMessage: String = "",
     val isSuccess: Boolean = true,
     val isRendering: Boolean = false,
-    val renderProgress: Float = 0f
+    val renderProgress: Float = 0f,
+    val layoutMode: DeviceAdapter.LayoutMode = DeviceAdapter.LayoutMode.FULL
 )

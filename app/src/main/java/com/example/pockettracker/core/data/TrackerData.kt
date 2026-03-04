@@ -169,7 +169,7 @@ data class Table(
 @Serializable
 data class TableRow(
     var transpose: Int = 0x00,      // Note transpose: 00-7F = +semitones, 80-FF = -semitones (signed)
-    var volume: Int = 0xFF,         // Volume multiplier: 00-FF (FF = no change)
+    var volume: Int = -1,            // Volume multiplier: 00-FF, -1 = no change (empty)
     var fx1Type: Int = 0x00,        // Effect 1 type
     var fx1Value: Int = 0x00,       // Effect 1 value
     var fx2Type: Int = 0x00,        // Effect 2 type
@@ -196,10 +196,108 @@ data class TableRow(
      */
     fun isEmpty(): Boolean {
         return transpose == 0x00 &&
-               volume == 0xFF &&
+               volume == -1 &&
                fx1Type == 0x00 &&
                fx2Type == 0x00 &&
                fx3Type == 0x00
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODULATION SYSTEM
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Serializable
+enum class ModType(val displayName: String) {
+    NONE("---"),
+    AHD("AHD"),
+    ADSR("ADSR"),
+    LFO("LFO"),
+    DRUM("DRUM"),     // future
+    TRIG("TRIG"),     // future
+    TRACKING("TRK")   // future
+}
+
+@Serializable
+enum class ModDest(val displayName: String) {
+    NONE("---"),
+    VOLUME("VOL"),
+    PAN("PAN"),
+    PITCH("PITCH"),
+    FINE_PITCH("FINE"),
+    FILTER_CUTOFF("CUT"),
+    FILTER_RES("RES"),
+    SAMPLE_START("STA"),
+    MOD_AMT("MOD A"),
+    MOD_RATE("MOD R"),
+    MOD_BOTH("MOD B")
+}
+
+@Serializable
+data class ModSlot(
+    var type: ModType = ModType.NONE,
+    var dest: ModDest = ModDest.NONE,
+    var amount: Int = 0x80,      // 00-FF
+
+    // Envelope: AHD, ADSR
+    var attack: Int = 0x00,      // 00-FF ticks
+    var hold: Int = 0x00,        // 00-FF ticks (AHD only)
+    var decay: Int = 0x00,       // 00-FF ticks
+    var sustain: Int = 0x80,     // 00-FF (ADSR sustain level)
+    var release: Int = 0x00,     // 00-FF ticks (ADSR only)
+
+    // LFO
+    var oscShape: Int = 0x00,    // 0-9: TRI/SIN/RMP+/RMP-/EXP+/EXP-/SQU+/SQU-/RND/DRNK
+    var lfoTrigMode: Int = 0x00, // 0=FREE, 1=RETRIG, 2=HOLD, 3=ONCE
+    var lfoFreq: Int = 0x40      // 00-FF
+) {
+    /** Number of param rows this slot occupies in the UI (including TYPE row) */
+    fun rowCount(): Int = when (type) {
+        ModType.NONE     -> 1
+        ModType.AHD      -> 6   // TYPE,DEST,AMT,ATK,HOLD,DEC
+        ModType.ADSR     -> 7   // TYPE,DEST,AMT,ATK,DEC,SUS,REL
+        ModType.LFO      -> 6   // TYPE,DEST,AMT,OSC,TRIG,FREQ
+        ModType.DRUM     -> 6   // same as AHD for now
+        ModType.TRIG     -> 7   // same as ADSR for now
+        ModType.TRACKING -> 5   // future
+    }
+}
+
+/**
+ * Groove - A pattern of tick values that replaces uniform step timing.
+ *
+ * Instead of every step being TICS_PER_STEP (12) ticks,
+ * a groove cycles through a list of tick values.
+ * Example: [8, 4] creates a swing feel (long-short pattern).
+ *
+ * Default groove (id=0) means uniform timing (all steps = 12 ticks).
+ */
+@Serializable
+data class Groove(
+    val id: Int,  // 00-FF
+    val steps: IntArray = IntArray(16) { -1 }  // -1 = end marker (loop), 00 = skip step, 01-FF = ticks for this step
+) {
+    /** Number of active steps (steps before the first -1 end marker) */
+    fun activeLength(): Int = steps.indexOfFirst { it == -1 }.let { if (it < 0) steps.size else it }
+
+    /** Get the tick duration for a groove position (wraps around active steps) */
+    fun getTicksForStep(grooveStep: Int): Int {
+        val len = activeLength()
+        if (len == 0) return 12  // All empty — fall back to standard TICS_PER_STEP
+        return steps[grooveStep % len]
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+        other as Groove
+        return id == other.id && steps.contentEquals(other.steps)
+    }
+
+    override fun hashCode(): Int {
+        var result = id
+        result = 31 * result + steps.contentHashCode()
+        return result
     }
 }
 
@@ -244,7 +342,10 @@ data class Instrument(
 
     // Table parameters
     var tableId: Int = -1,          // -1 = no table, 0-255 = table ID
-    var tableTicRate: Int = 0x06    // Default: 6 tics per row (2 rows per phrase step at 12 tics/step)
+    var tableTicRate: Int = 0x06,   // Default: 6 tics per row (2 rows per phrase step at 12 tics/step)
+
+    // Modulation slots (4 per instrument)
+    var modSlots: Array<ModSlot> = Array(4) { ModSlot() }
 )
 
 /**
@@ -342,27 +443,21 @@ data class Project(
 
     // Instruments (256 slots, but only first 12 initialized with resource samples)
     val instruments: Array<Instrument> = Array(256) { index ->
-        if (index < 12) {
-            // First 12 instruments (00-0B) map directly to the 12 resource samples
-            // 00=kick, 01=snare, 02=hihat, 03=bass, 04=shimmer, 05=tambo,
-            // 06=lofi, 07=choirstring, 08=apache162, 09=copta162, 0A=funky162, 0B=eightoeight
-            Instrument(
-                id = index,
-                name = "INST${index.toString(16).padStart(2,'0').uppercase()}",
-                sampleId = index  // Direct 1:1 mapping
-            )
-        } else {
-            // Rest are empty instruments with no sample
-            Instrument(
-                id = index,
-                name = "",
-                sampleId = 0  // Default to kick, but name is empty so it's "uninitialized"
-            )
-        }
+        // All 256 instrument slots use the same layout:
+        // name = "INSTXX", sampleId = index (slot ID), sampleFilePath = null (nothing loaded yet)
+        // "empty" state is determined by sampleFilePath == null
+        Instrument(
+            id = index,
+            name = "INST${index.toString(16).padStart(2, '0').uppercase()}",
+            sampleId = index
+        )
     },
 
     // Tables (256 slots, like phrases)
-    val tables: Array<Table> = Array(256) { Table(it) }
+    val tables: Array<Table> = Array(256) { Table(it) },
+
+    // Grooves (256 slots)
+    val grooves: Array<Groove> = Array(256) { Groove(it) }
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

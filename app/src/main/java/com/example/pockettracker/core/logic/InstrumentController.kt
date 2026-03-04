@@ -198,6 +198,12 @@ class InstrumentController(
     fun previewInstrument(project: Project) {
         val instrument = project.instruments[currentInstrument]
 
+        // Don't play if no sample is loaded
+        if (instrument.sampleFilePath == null) {
+            logger.d(TAG, "⏭️ Skipping preview for instrument ${formatHex(currentInstrument)}: no sample loaded")
+            return
+        }
+
         // Each instrument uses the table with the same ID (instrument 03 → table 03)
         logger.d(TAG, "🎵 Previewing instrument ${formatHex(currentInstrument)} (uses table ${formatHex(currentInstrument)}): root=${instrument.root}, detune=0x${formatHex(instrument.detune)}")
 
@@ -391,6 +397,47 @@ class InstrumentController(
     fun updateTableTicRate(instrument: Instrument, ticRate: Int) {
         instrument.tableTicRate = ticRate.coerceIn(0, 255)
         logger.d(TAG, "🎛️ Updated TBL TIC: 0x${formatHex(instrument.tableTicRate)}")
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Resampling
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Load a rendered WAV file into the first empty instrument slot and set defaults.
+     *
+     * @param project  Project to add the instrument to
+     * @param wavPath  Absolute path to the rendered WAV file
+     * @return Instrument ID of the new instrument, or -1 if no empty slot / load failed
+     */
+    fun createResampledInstrument(project: Project, wavPath: String): Int {
+        // Find first empty slot (no sample file loaded)
+        val slotId = project.instruments.indexOfFirst { it.sampleFilePath == null }
+        if (slotId < 0) {
+            setStatus("No empty instrument slot", success = false)
+            logger.e(TAG, "❌ Resample: no empty instrument slot")
+            return -1
+        }
+
+        val success = audioEngine.loadSampleFromFile(slotId, wavPath)
+        if (!success) {
+            setStatus("Failed to load resample", success = false)
+            logger.e(TAG, "❌ Resample: could not load $wavPath")
+            return -1
+        }
+
+        val instrument = project.instruments[slotId]
+        instrument.sampleFilePath = wavPath
+        instrument.sampleId = slotId
+        instrument.root = Note.fromString("C-4")
+        instrument.volume = 0xFF
+        instrument.pan = 0x80
+
+        audioEngine.updateInstrumentBaseFrequency(instrument)
+        audioEngine.updateInstrumentPlaybackParams(instrument)
+
+        logger.d(TAG, "✅ Resampled instrument created: slot=${formatHex(slotId)}, path=$wavPath")
+        return slotId
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

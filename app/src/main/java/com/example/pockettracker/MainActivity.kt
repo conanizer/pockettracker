@@ -23,6 +23,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import android.content.res.Configuration
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import com.example.pockettracker.ui.theme.PockettrackerTheme
@@ -107,7 +109,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = Color.Black
                 ) {
-                    PocketTrackerApp(layoutConfig = layout)
+                    PocketTrackerApp(layoutConfig = layout, deviceAdapter = deviceAdapter)
                 }
             }
         }
@@ -133,7 +135,7 @@ class MainActivity : ComponentActivity() {
  * 3. Chooses which layout to show based on layoutConfig
  */
 @Composable
-fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
+fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: DeviceAdapter) {
     // Get Android context (needed for file access, audio, etc.)
     val context = LocalContext.current
 
@@ -284,12 +286,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // RenderController: Handles offline rendering to WAV files
     // MVP EXPANSION Phase 6: WAV Export functionality
     val renderController = remember {
-        RenderController(audioBackend, fileSystem)
+        RenderController(audioEngine, playbackController, fileSystem)
     }
 
     // Render state for WAV export
     var isRendering by remember { mutableStateOf(false) }
     var renderProgress by remember { mutableFloatStateOf(0f) }
+
+    // Resample dialog state (triggered by double-tap A in SONG selection mode)
+    var showResampleDialog by remember { mutableStateOf(false) }
+    var resampleDialogCursor by remember { mutableIntStateOf(0) }  // 0=YES, 1=NO
+    var lastSongATapTime by remember { mutableLongStateOf(0L) }
 
     // InputController: Handles button input
     // PHASE 4: Extracted from MainActivity to separate business logic
@@ -361,9 +368,50 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     // TableModule: Used for table editing screen
     val tableModule = remember { TableModule() }
 
+    // GrooveModule: Used for groove pattern editing screen
+    val grooveModule = remember { GrooveModule() }
+
+    // ModulationModule: Used for modulation editing screen
+    val modulationModule = remember { ModulationModule() }
+
     // Peak level buffers for mixer meters (updated periodically)
     val trackPeakBuffer = remember { FloatArray(8) }
     val masterPeakBuffer = remember { FloatArray(2) }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // LAYOUT MODE — user-selectable, overrides DeviceAdapter auto-detection
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Derive initial mode from the auto-detected layoutConfig
+    val initialLayoutMode = when {
+        !layoutConfig.needsVirtualButtons -> DeviceAdapter.LayoutMode.FULL
+        layoutConfig.isLandscape          -> DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
+        else                              -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT
+    }
+    var layoutMode by remember { mutableStateOf(initialLayoutMode) }
+
+    // Track orientation so layout recalculates when device flips (Activity survives
+    // rotation thanks to android:configChanges in the manifest, but device dimensions
+    // swap so we need a fresh LayoutConfig).
+    val configuration = LocalConfiguration.current
+
+    // Recompute layout config whenever the user changes the mode OR device flips
+    val effectiveLayoutConfig = remember(layoutMode, configuration.orientation) {
+        deviceAdapter.calculateLayout(layoutMode)
+    }
+
+    // Auto-switch between portrait/landscape virtual-button modes on device flip
+    LaunchedEffect(configuration.orientation) {
+        when {
+            layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT &&
+                    configuration.orientation == Configuration.ORIENTATION_LANDSCAPE ->
+                layoutMode = DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
+
+            layoutMode == DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE &&
+                    configuration.orientation == Configuration.ORIENTATION_PORTRAIT ->
+                layoutMode = DeviceAdapter.LayoutMode.TOUCH_PORTRAIT
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     // STATE ALIASES (read from TrackerController, triggered by stateVersion)
@@ -634,7 +682,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     statusMessage = trackerController.statusMessage,
                     isSuccess = trackerController.statusSuccess,
                     isRendering = isRendering,
-                    renderProgress = renderProgress
+                    renderProgress = renderProgress,
+                    layoutMode = layoutMode
                 )
                 val context = projectModule.getCursorContext(projectState)
                 val action = handlerFunction(context)
@@ -712,7 +761,70 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                     audioEngine.invalidateTable(trackerController.currentTable)
                 }
             }
+            ScreenType.GROOVE -> {
+                val grooveState = GrooveState(
+                    groove = trackerController.project.grooves[trackerController.currentGroove],
+                    cursorRow = trackerController.grooveCursorRow,
+                    cursorColumn = 1
+                )
+                val context = grooveModule.getCursorContext(grooveState)
+                val action = handlerFunction(context)
+                val result = grooveModule.handleInput(grooveState, action)
+                if (result.modified) {
+                    trackerController.projectVersion++
+                }
+            }
+            ScreenType.MODS -> {
+                val modState = ModulationState(
+                    instrument = trackerController.project.instruments[trackerController.currentInstrument],
+                    cursorRow = trackerController.modCursorRow,
+                    cursorPair = trackerController.modCursorPair,
+                    cursorSide = trackerController.modCursorSide
+                )
+                val context = modulationModule.getCursorContext(modState)
+                val action = handlerFunction(context)
+                val result = modulationModule.handleInput(modState, action)
+                if (result.modified) {
+                    trackerController.projectVersion++
+                }
+            }
             else -> { /* Other screens not yet implemented */ }
+        }
+    }
+
+    /**
+     * Handle A+DPAD with selection awareness.
+     *
+     * When selection is active, applies increment/decrement to ALL selected rows
+     * in the cursor's column. When no selection, delegates to handleGenericInput.
+     */
+    fun handleSelectionOrSingleIncrement(handlerFunction: (CursorContext) -> InputAction) {
+        if (!trackerController.inputController.isSelectionModeActive()) {
+            handleGenericInput(handlerFunction)
+            return
+        }
+
+        val bounds = trackerController.inputController.getSelectionBounds() ?: return
+
+        // Determine which cursor row property to use based on current screen
+        when (trackerController.currentScreen) {
+            ScreenType.PHRASE, ScreenType.CHAIN, ScreenType.SONG -> {
+                val savedRow = trackerController.cursorRow
+                for (row in bounds.topLeftRow..bounds.bottomRightRow) {
+                    trackerController.cursorRow = row
+                    handleGenericInput(handlerFunction)
+                }
+                trackerController.cursorRow = savedRow
+            }
+            ScreenType.TABLE -> {
+                val savedRow = trackerController.tableCursorRow
+                for (row in bounds.topLeftRow..bounds.bottomRightRow) {
+                    trackerController.tableCursorRow = row
+                    handleGenericInput(handlerFunction)
+                }
+                trackerController.tableCursorRow = savedRow
+            }
+            else -> handleGenericInput(handlerFunction)
         }
     }
 
@@ -880,14 +992,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
     val buttonHandlers = remember {
         ButtonHandlers(
             onDPadUp = {
-                handleDPadNavigation { trackerController.inputController.handleDPadUp() }
+                if (showResampleDialog) { resampleDialogCursor = 0 }
+                else handleDPadNavigation { trackerController.inputController.handleDPadUp() }
             },
 
             // ───────────────────────────────────────────────────────────────
             // D-PAD DOWN
             // ───────────────────────────────────────────────────────────────
             onDPadDown = {
-                handleDPadNavigation { trackerController.inputController.handleDPadDown() }
+                if (showResampleDialog) { resampleDialogCursor = 1 }
+                else handleDPadNavigation { trackerController.inputController.handleDPadDown() }
             },
 
             // ───────────────────────────────────────────────────────────────
@@ -907,7 +1021,80 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 // ───────────────────────────────────────────────────────────────
 // BUTTON A - Primary action (insert/increment)
 // ───────────────────────────────────────────────────────────────
-            onButtonA = {
+            onButtonA = { run buttonA@{
+                // ── Resample dialog takes priority ──────────────────────────
+                if (showResampleDialog) {
+                    if (resampleDialogCursor == 0) {
+                        // YES: Execute resampling
+                        showResampleDialog = false
+                        val bounds = trackerController.inputController.getSelectionBounds()
+                        if (bounds != null && !isRendering) {
+                            // Convert selection columns (1-8) to track IDs (0-7)
+                            val selectedTracks = (bounds.topLeftColumn - 1..bounds.bottomRightColumn - 1)
+                                .filter { it in 0..7 }.toSet()
+                            isRendering = true
+                            renderProgress = 0f
+                            trackerController.stopPlayback()
+
+                            CoroutineScope(Dispatchers.Default).launch {
+                                val result = renderController.renderSelectionToWav(
+                                    project = trackerController.project,
+                                    startRow = bounds.topLeftRow,
+                                    endRow = bounds.bottomRightRow,
+                                    selectedTrackIds = selectedTracks,
+                                    progressCallback = object : RenderController.ProgressCallback {
+                                        override fun onProgress(progress: Float, message: String) {
+                                            renderProgress = progress
+                                        }
+                                    }
+                                )
+
+                                withContext(Dispatchers.Main) {
+                                    isRendering = false
+                                    renderProgress = 0f
+                                    when (result) {
+                                        is RenderController.RenderResult.Success -> {
+                                            val instId = instrumentController.createResampledInstrument(
+                                                trackerController.project, result.filename
+                                            )
+                                            if (instId >= 0) {
+                                                trackerController.statusMessage =
+                                                    "RESAMPLED → INST ${instId.toString(16).padStart(2,'0').uppercase()}"
+                                                trackerController.statusSuccess = true
+                                                trackerController.projectVersion++
+                                            }
+                                        }
+                                        is RenderController.RenderResult.Error -> {
+                                            trackerController.statusMessage = "RESAMPLE FAILED"
+                                            trackerController.statusSuccess = false
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // NO: dismiss dialog
+                        showResampleDialog = false
+                    }
+                    return@buttonA
+                }
+
+                // ── Double-tap A on SONG+selection → show resample dialog ──
+                if (trackerController.currentScreen == ScreenType.SONG
+                    && trackerController.inputController.isSelectionModeActive()
+                ) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastSongATapTime < 500L) {
+                        // Double tap confirmed
+                        showResampleDialog = true
+                        resampleDialogCursor = 0
+                        lastSongATapTime = 0L
+                        return@buttonA
+                    }
+                    lastSongATapTime = now
+                    // Fall through to normal SONG A handling (first tap = no-op or insert)
+                }
+
                 // Read directly from trackerController to avoid stale captured values
                 when (trackerController.currentScreen) {
                     // FILE BROWSER: Open folder, load file, or confirm actions
@@ -1136,7 +1323,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                                     }
                                 }
                             }
-                            // Rows 5-6 (CLEAN, SYSTEM) - placeholder for now
+                            // Rows 5-6 (CLEAN, SYSTEM) - placeholder
+                            // ROW 7: LAYOUT — cycle through layout modes
+                            7 -> {
+                                layoutMode = when (layoutMode) {
+                                    DeviceAdapter.LayoutMode.FULL           -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT
+                                    DeviceAdapter.LayoutMode.TOUCH_PORTRAIT  -> DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
+                                    DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE -> DeviceAdapter.LayoutMode.FULL
+                                }
+                                Log.d("ProjectScreen", "Layout mode changed to: $layoutMode")
+                            }
                         }
                     }
 
@@ -1234,12 +1430,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 
                     else -> { /* Other screens not implemented yet */ }
                 }
-            },
+            } },  // end run buttonA@
 
 // ───────────────────────────────────────────────────────────────
 // BUTTON B - Secondary action
 // ───────────────────────────────────────────────────────────────
-            onButtonB = {
+            onButtonB = { run buttonB@{
+                // Resample dialog: B = cancel (NO)
+                if (showResampleDialog) {
+                    showResampleDialog = false
+                    return@buttonB
+                }
+
                 // Check if in selection mode first - B = COPY
                 if (trackerController.inputController.isSelectionModeActive()) {
                     val bounds = trackerController.inputController.getSelectionBounds()
@@ -1284,7 +1486,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         }
                         trackerController.inputController.exitSelectionMode()
                     }
-                    return@ButtonHandlers
+                    return@buttonB
                 }
 
                 when (trackerController.currentScreen) {
@@ -1337,7 +1539,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 
                     else -> { }
                 }
-            },
+            } },  // end run buttonB@
 
 // ───────────────────────────────────────────────────────────────
 // SELECT BUTTON - Clear/Delete or quick navigation
@@ -1477,6 +1679,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         trackerController.previewInstrumentWithTable(instrumentId, trackerController.currentTable)
                     }
 
+                    // MODS screen: Preview current instrument (same as INSTRUMENT screen)
+                    ScreenType.MODS -> {
+                        trackerController.previewInstrument()
+                    }
+
                     // Other screens: Toggle playback USING TrackerController
                     else -> {
                         Log.d("Playback", "▶️ START pressed on ${trackerController.currentScreen}, isPlaying=${trackerController.isPlaying()}")
@@ -1540,23 +1747,23 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
 // A + DIRECTION COMBINATIONS (M8-style value editing)
 // ───────────────────────────────────────────────────────────────
             onAUp = {
-                // A+UP: Small increment (uses InputController)
-                handleGenericInput { context -> trackerController.inputController.handleAButton(context) }
+                // A+UP: Small increment (selection-aware)
+                handleSelectionOrSingleIncrement { context -> trackerController.inputController.handleAButton(context) }
             },
 
             onADown = {
-                // A+DOWN: Small decrement (uses InputController)
-                handleGenericInput { context -> trackerController.inputController.handleBButton(context) }
+                // A+DOWN: Small decrement (selection-aware)
+                handleSelectionOrSingleIncrement { context -> trackerController.inputController.handleBButton(context) }
             },
 
             onALeft = {
-                // A+LEFT: Large decrement (uses InputController)
-                handleGenericInput { context -> trackerController.inputController.handleALeft(context) }
+                // A+LEFT: Large decrement (selection-aware)
+                handleSelectionOrSingleIncrement { context -> trackerController.inputController.handleALeft(context) }
             },
 
             onARight = {
-                // A+RIGHT: Large increment (uses InputController)
-                handleGenericInput { context -> trackerController.inputController.handleARight(context) }
+                // A+RIGHT: Large increment (selection-aware)
+                handleSelectionOrSingleIncrement { context -> trackerController.inputController.handleARight(context) }
             },
 
 // ───────────────────────────────────────────────────────────────
@@ -1650,6 +1857,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         instrumentController.currentInstrument = newInst  // Keep in sync!
                         Log.d("Navigation", "  -> Changed to instrument $newInst")
                     }
+                    ScreenType.MODS -> {
+                        val newInst = if (trackerController.currentInstrument > 0)
+                            trackerController.currentInstrument - 1 else 255
+                        trackerController.currentInstrument = newInst
+                        trackerController.lastEditedInstrument = newInst
+                        instrumentController.currentInstrument = newInst
+                        Log.d("Navigation", "  -> MODS changed to instrument $newInst")
+                    }
                     ScreenType.TABLE -> {
                         // Previous table (wrap around)
                         val newTable = if (trackerController.currentTable > 0)
@@ -1657,6 +1872,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         trackerController.currentTable = newTable
                         trackerController.lastEditedTable = newTable
                         Log.d("Navigation", "  -> Changed to table $newTable")
+                    }
+                    ScreenType.GROOVE -> {
+                        // Previous groove (wrap around)
+                        trackerController.currentGroove = if (trackerController.currentGroove > 0)
+                            trackerController.currentGroove - 1 else 255
+                        Log.d("Navigation", "  -> Changed to groove ${trackerController.currentGroove}")
                     }
                     else -> { Log.d("Navigation", "  -> No action for screen ${trackerController.currentScreen}") }
                 }
@@ -1687,6 +1908,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         instrumentController.currentInstrument = newInst  // Keep in sync!
                         Log.d("Navigation", "  -> Changed to instrument $newInst")
                     }
+                    ScreenType.MODS -> {
+                        val newInst = if (trackerController.currentInstrument < 255)
+                            trackerController.currentInstrument + 1 else 0
+                        trackerController.currentInstrument = newInst
+                        trackerController.lastEditedInstrument = newInst
+                        instrumentController.currentInstrument = newInst
+                        Log.d("Navigation", "  -> MODS changed to instrument $newInst")
+                    }
                     ScreenType.TABLE -> {
                         // Next table (wrap around)
                         val newTable = if (trackerController.currentTable < 255)
@@ -1694,6 +1923,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                         trackerController.currentTable = newTable
                         trackerController.lastEditedTable = newTable
                         Log.d("Navigation", "  -> Changed to table $newTable")
+                    }
+                    ScreenType.GROOVE -> {
+                        // Next groove (wrap around)
+                        trackerController.currentGroove = if (trackerController.currentGroove < 255)
+                            trackerController.currentGroove + 1 else 0
+                        Log.d("Navigation", "  -> Changed to groove ${trackerController.currentGroove}")
                     }
                     else -> { Log.d("Navigation", "  -> No action for screen ${trackerController.currentScreen}") }
                 }
@@ -2214,13 +2449,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
         trackerController.inputController.isCellSelected(row, col)
     }
 
-    if (layoutConfig.needsVirtualButtons) {
+    CompositionLocalProvider(LocalLayoutMode provides layoutMode) {
+    if (effectiveLayoutConfig.needsVirtualButtons) {
         // SCENARIOS 2/3: Touchscreen devices need virtual buttons
 
-        if (layoutConfig.isLandscape) {
+        if (effectiveLayoutConfig.isLandscape) {
             // LANDSCAPE: Buttons on left and right sides
             LandscapeLayoutWithVirtualButtons(
-                layoutConfig = layoutConfig,
+                layoutConfig = effectiveLayoutConfig,
                 currentScreen = currentScreen,
                 project = project,
                 audioEngine = audioEngine,
@@ -2255,13 +2491,20 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 currentTable = trackerController.currentTable,
                 tableCursorRow = trackerController.tableCursorRow,
                 tableCursorColumn = trackerController.tableCursorColumn,
+                currentGroove = trackerController.currentGroove,
+                grooveCursorRow = trackerController.grooveCursorRow,
+                modCursorRow = trackerController.modCursorRow,
+                modCursorPair = trackerController.modCursorPair,
+                modCursorSide = trackerController.modCursorSide,
                 isRendering = isRendering,
-                renderProgress = renderProgress
+                renderProgress = renderProgress,
+                showResampleDialog = showResampleDialog,
+                resampleDialogCursor = resampleDialogCursor
             )
         } else {
             // PORTRAIT: Buttons below screen
             PortraitLayoutWithVirtualButtons(
-                layoutConfig = layoutConfig,
+                layoutConfig = effectiveLayoutConfig,
                 currentScreen = currentScreen,
                 project = project,
                 audioEngine = audioEngine,
@@ -2296,15 +2539,21 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
                 currentTable = trackerController.currentTable,
                 tableCursorRow = trackerController.tableCursorRow,
                 tableCursorColumn = trackerController.tableCursorColumn,
+                currentGroove = trackerController.currentGroove,
+                grooveCursorRow = trackerController.grooveCursorRow,
+                modCursorRow = trackerController.modCursorRow,
+                modCursorPair = trackerController.modCursorPair,
+                modCursorSide = trackerController.modCursorSide,
                 isRendering = isRendering,
-                renderProgress = renderProgress
+                renderProgress = renderProgress,
+                showResampleDialog = showResampleDialog,
+                resampleDialogCursor = resampleDialogCursor
             )
         }
     } else {
-        // SCENARIO 1: Gaming handheld with physical buttons
-        // Full screen, NO virtual buttons!
+        // SCENARIO 1: Full screen (physical buttons or user-selected FULL mode)
         FullScreenLayout(
-            layoutConfig = layoutConfig,
+            layoutConfig = effectiveLayoutConfig,
             currentScreen = currentScreen,
             project = project,
             audioEngine = audioEngine,
@@ -2338,10 +2587,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig) {
             currentTable = trackerController.currentTable,
             tableCursorRow = trackerController.tableCursorRow,
             tableCursorColumn = trackerController.tableCursorColumn,
+            currentGroove = trackerController.currentGroove,
+            grooveCursorRow = trackerController.grooveCursorRow,
+            modCursorRow = trackerController.modCursorRow,
+            modCursorPair = trackerController.modCursorPair,
+            modCursorSide = trackerController.modCursorSide,
             isRendering = isRendering,
-            renderProgress = renderProgress
+            renderProgress = renderProgress,
+            showResampleDialog = showResampleDialog,
+            resampleDialogCursor = resampleDialogCursor
         )
     }
+    } // CompositionLocalProvider
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

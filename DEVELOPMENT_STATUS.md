@@ -1,12 +1,21 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-02-05
+2026-03-04
 
 ## Current Phase
-**MVP Expansion #1 COMPLETE!** → **MVP Extension Pack 2 (Tables + Pitch Effects)** → Testing → MVP Release
+**MVP Extension Pack 3 COMPLETE!** → **Testing & Polish** → Documentation → MVP Release
 
-**See:** `MVP_EXTENSION_PACK_2.md` for detailed implementation plan
+**See:** `MVP_EXTENSION_PACK_3.md` for detailed implementation plan
+
+### Extension Pack 3 Overview
+- ✅ Phase 1: Fixes & UX Updates (table vol range, FX cycling, key repeat, selection increment) - COMPLETE
+- ✅ Phase 2: New Effects - COMPLETE (8/8)
+- ✅ Phase 3: Groove Screen - COMPLETE (2026-02-21)
+- ✅ Phase 4: Modulation Screen & Engine - COMPLETE (2026-03-03)
+- ✅ Phase 5: Selection Resampling - COMPLETE (2026-03-03)
+- ✅ Audio Bug Fixes: OscilloscopeModule crash, instrument unification, AHD crackling, voice-steal click - COMPLETE (2026-03-03)
+- ✅ Layout System: touchscreen layout modes, orientation auto-switch, voice exhaustion fix - COMPLETE (2026-03-04)
 
 ### Extension Pack 2 Overview
 - ✅ Phase 1: Bug fixes (meter decay, volume immediate, L+A cut) - COMPLETE
@@ -193,6 +202,36 @@
 - ⚠️ Generic input warning spam after device restart (harmless, goes away after reboot)
 
 ## Recent Fixes
+
+### Layout System & Voice Exhaustion Fix (2026-03-04) ✅
+
+#### Touchscreen Layout Modes
+**Problem:** No way to switch layouts on touchscreen devices; orientation change restarted Activity losing all state; landscape layout crashed with "Padding must be non-negative"; landscape scale filled the full screen leaving zero button panel space.
+
+**Solutions:**
+- `AndroidManifest.xml`: Added `configChanges="orientation|screenSize|keyboardHidden|screenLayout"` — Activity survives rotation, all `remember` state preserved.
+- `MainActivity.kt`: Added `LocalConfiguration.current` tracking + `LaunchedEffect` that auto-switches T.PORT↔T.LAND on flip.
+- `DeviceAdapter.kt`: Added `MIN_BUTTON_PANEL_PX = 150` — landscape loop drops to lower scale if button panels would be < 150px wide. Reduced `PORTRAIT_SPACER_HEIGHT` from 200 → 0 (screen at top, max button area). Added `|| scaledScreenWidth > deviceWidth` to landscape scale skip condition.
+- `ScreenLayouts.kt`: Removed broken `graphicsLayer{scale}` wrapper in landscape (caused 4× visual inflation at density 2.0); replaced with direct `PixelPerfectTracker` inside `fillMaxSize` container (auto-computes correct scale). Clamped `buttonWidthDp = maxOf(0f, ...)` to prevent negative padding crash.
+- `VirtualControls.kt`: Changed `Arrangement.Top` → `Arrangement.Center` in both side-panel Columns — buttons now vertically centered.
+
+**Result:** App survives rotation intact; landscape correctly scales + shows virtual buttons; portrait uses full height for buttons; buttons centered in panels.
+
+#### Voice Exhaustion Fix (3-Step Allocator)
+**Problem:** "⚠️ No free voice (all 8 active)" with only 5 tracks active. At phrase boundaries all tracks fire simultaneously; old steal+allocate used 2 slots per track (fading old + new free), so 5 tracks needed 10 slots, exceeding the 8-voice limit.
+
+**Root cause:** `startFadeOut()` cleared `trackId = -1`, making same-track fading voices invisible to the allocator. Each triggered track consumed 2 slots.
+
+**Solution** (`native-audio.cpp`):
+- `startFadeOut()`: Removed `trackId = -1` — trackId preserved through fade.
+- Voice allocator restructured into 3-step priority:
+  1. **Recycle same-track fading voice** — 0 extra slots used (best case)
+  2. **Steal non-fading same-track + find free slot** — normal path
+  3. **Preempt any fading voice** — last resort, logs warning
+- TIC00 guard: Added `!voices[v].isFadingOut` to exclude fading voices from table state reads.
+- Metering guard: `!voice.isFadingOut && voice.trackId >= 0` (trackId preserved, need explicit fade check).
+
+**Result:** 5 simultaneous tracks use only 5 slots (Step 1 recycles). Effectively doubles real-world polyphony headroom.
 
 ### Phrase/Chain Reference Fix (2026-01-27) ✅
 **Problem:** Phrase references in Chain screen had different cycling behavior than chain references in Song screen:
@@ -442,6 +481,53 @@
   - For dramatic pitch wobble effects
 
 **See:** `MVP_EXTENSION_PACK_2.md` for detailed implementation plan
+
+## MVP Extension Pack 3 ✅ COMPLETE (2026-03-03)
+
+**Phase 1 - Fixes & UX Updates:** ✅ COMPLETE
+- [x] Table volume range: -1 for empty (was 0xFF), full 00-FF range usable
+- [x] FX type bidirectional cycling (A+DOWN from NONE wraps to last, A+UP from last wraps to NONE)
+- [x] Key repeat: hold D-PAD / A+DPAD / B+DPAD for continuous input
+- [x] Selection increment: A+DPAD applies to all selected rows in active column
+
+**Phase 2 - New Effects:** ✅ COMPLETE
+- [x] REP XY rework: Y=0 single retrig, Y!=0 volume ramp mode
+- [x] DEL XX: delay note/table by XX ticks
+- [x] CHA XY: probability gate (X=left chance, Y=right chance)
+- [x] RND XY: randomize previously active FX value
+- [x] RNL XY: randomize FX to the left (FX1 = randomize note)
+- [x] TBL XX: override table ID for current note (phrase effect)
+- [x] THO XX: table hop to row (FX_THO case in C++ table tick loop)
+- [x] GRV XX: groove assign, wired to per-track groove in playback
+
+**Phase 3 - Groove Screen:** ✅ COMPLETE (2026-02-21)
+- [x] Groove data class: steps IntArray (-1=empty, 01-FF=ticks), activeLength(), getTicksForStep()
+- [x] GrooveModule.kt: 16-row editor, GROOVE XX header, TIC column, cursor navigation
+- [x] B+LEFT/RIGHT: navigate between grooves 00-FF
+- [x] Playback: groove 00 is default for all tracks, GRV effect switches per-track groove
+- [x] Exact timing preserved when groove is all-empty (no integer rounding)
+
+**Phase 4 - Modulation Screen & Engine:** ✅ COMPLETE (2026-03-03)
+- [x] ModType/ModDest enums, ModSlot data class, modSlots[4] on Instrument
+- [x] ModulationModule.kt: 4-slot editor, paired display, full getCursorContext + handleInput
+- [x] C++ engine: AHD, ADSR, LFO, DRUM, TRIG on all destinations (VOL, PAN, PITCH, FINE, CUTOFF, RES, STA)
+- [x] Mod-to-mod routing (MOD_AMT/RATE/BOTH, N→N+1 circular)
+- [x] ADSR release: scheduleNoteOff via softKill queue; auto-stop looping voices on stage 5
+- [x] Offline render: pushInstrumentModulation per instrument, per-frame mod update in renderOffline
+
+**Phase 5 - Selection Resampling:** ✅ COMPLETE (2026-03-03)
+- [x] Double-tap A in SONG selection → pixel-art YES/NO dialog
+- [x] scheduleSelectionForRender(): track-filtered playback scheduling
+- [x] renderSelectionToWav(): offline render → Samples/Resampled/Resample_XXXX.wav
+- [x] createResampledInstrument(): first free slot (sampleFilePath==null), auto-loads WAV
+
+**Audio Bug Fixes (2026-03-03):** ✅ COMPLETE
+- [x] OscilloscopeModule SIGSEGV on Android 11: replaced 619 drawLine calls with single drawPath
+- [x] Instrument unification: all 256 slots use name="INSTXX", sampleId=index; `sampleFilePath==null` is the "empty" signal
+- [x] AHD envelope crackling: per-sample interpolation of `envValue` on decay transitions (prevEnvValue stored before block advance)
+- [x] Voice-steal click: `startFadeOut()` keeps `isActive=true`; inline fade multiplier in main mix loop; separate drain loop removed; `trackVolumes[-1]` UB fixed
+
+**See:** `MVP_EXTENSION_PACK_3.md` for detailed implementation plan
 
 ## Post-MVP Features (Future Ideas)
 

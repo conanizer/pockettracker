@@ -19,6 +19,7 @@ This document defines **HOW** PocketTracker is built technically. It covers curr
 7. [Navigation System](#navigation-system)
 8. [File Management](#file-management)
 9. [Build System](#build-system)
+10. [Modulation Engine](#modulation-engine)
 10. [Technology Stack](#technology-stack)
 
 ---
@@ -231,6 +232,31 @@ PocketTracker/
     ├── effects.h
     └── CMakeLists.txt
 ```
+
+---
+
+## Audio Processing Chain Rule
+
+**ALL audio processing lives in `processAudioBlock()` in `native-audio.cpp`.**
+
+`onAudioReady()` and `renderOffline()` are thin wrappers — they call `processAudioBlock()`
+and add only output-destination-specific work on top:
+
+| Step | processAudioBlock | onAudioReady only | renderOffline only |
+|------|-------------------|-------------------|--------------------|
+| Kill/note queue | ✅ | | |
+| Table ticks | ✅ | | |
+| Pitch/ADSR/LFO mod | ✅ | | |
+| DSP chain + mix | ✅ | | |
+| Brickwall limiter | ✅ | | |
+| Waveform capture | | ✅ | |
+| Peak meter tracking | | ✅ | |
+| Offline silence gate | | ✅ (isOfflineRendering) | |
+| Chunk loop | | | ✅ (BLOCK_SIZE=256) |
+
+**Rule: If you add a new audio processing feature (new effect, new modulation destination, etc.)
+add it to `processAudioBlock()`. NEVER add processing logic directly to `onAudioReady` or
+`renderOffline` — it will be missing from one of the two outputs.**
 
 ---
 
@@ -856,5 +882,180 @@ core/logic/
 - No merge conflicts!
 
 ### Implementation
+
+See `REFACTORING_ROADMAP.md` Phase 4 for step-by-step implementation guide.
+
+---
+
+## Modulation Engine
+
+**Implemented in:** Phase 4 of MVP Extension Pack 3
+**Files:** `native-audio.cpp` (C++), `AudioEngine.kt`, `IAudioBackend.kt`, `TrackerData.kt`
+
+### Overview
+
+Each instrument has 4 modulation slots (`modSlots: Array<ModSlot>` on `Instrument`). When a note is scheduled, the Kotlin layer pushes the current mod params to the C++ engine (`pushInstrumentModulation`), which copies them onto the triggered voice. The C++ engine then updates each slot once per audio callback (`updateVoiceModulation`), computing an `envValue` that is applied to the destination parameter in the mix loop.
+
+---
+
+### Data Model (Kotlin — `TrackerData.kt`)
+
+```kotlin
+data class ModSlot(
+    var type: ModType = ModType.NONE,   // envelope/LFO type
+    var dest: ModDest = ModDest.NONE,   // target parameter
+    var amount: Int = 0x80,             // modulation depth, 0x00-0xFF
+
+    // Envelope params (AHD, ADSR)
+    var attack: Int  = 0x00,   // ticks
+    var hold: Int    = 0x00,   // ticks (AHD only)
+    var decay: Int   = 0x00,   // ticks
+    var sustain: Int = 0x80,   // 0x00-0xFF sustain level (ADSR only)
+    var release: Int = 0x00,   // ticks (ADSR, future)
+
+    // LFO params
+    var oscShape:    Int = 0,  // 0=TRI 1=SIN 2=RMP+ 3=RMP- 4=EXP+ 5=EXP- 6=SQU+ 7=SQU- 8=RND 9=DRNK
+    var lfoTrigMode: Int = 0,  // 0=FREE 1=RETRIG (phase always resets on new note for now)
+    var lfoFreq:     Int = 0x40  // 0x00-0xFF → 0.1 to 20 Hz
+)
+```
+
+**ModType ordinals:** NONE=0, AHD=1, ADSR=2, LFO=3, DRUM=4, TRIG=5, TRACKING=6
+**ModDest ordinals:** NONE=0, VOLUME=1, PAN=2, PITCH=3, FINE_PITCH=4, FILTER_CUTOFF=5, FILTER_RES=6, SAMPLE_START=7, MOD_AMT=8, MOD_RATE=9, MOD_BOTH=10
+
+---
+
+### Kotlin → C++ pipeline (`AudioEngine.pushInstrumentModulation`)
+
+Called once per `scheduleNote()` call, immediately before the note is queued. Converts tick-based timing to audio samples using:
+
+```
+framesPerTic = sampleRate / (BPM/60 × 4 steps/beat × 12 tics/step)
+```
+
+At 120 BPM, 44100 Hz: `framesPerTic ≈ 229 samples`
+
+**LFO frequency mapping:**
+`lfoFreq (0x00–0xFF)` → `lfoHz = (lfoFreq + 1) × 20.0 / 256`
+Range: ~0.08 Hz (0x00) → ~20 Hz (0xFF). At default 0x40: ~5 Hz.
+
+**JNI call:**
+```kotlin
+backend.setInstrumentModulation(sampleId, slotIndex, type, dest, amount,
+    attackSamples, holdSamples, decaySamples, sustainLevel, lfoHz, oscShape)
+```
+
+---
+
+### C++ engine (per-voice, per-callback)
+
+#### InstrumentModSlot vs VoiceModSlot
+
+- `InstrumentModSlot[256][4]` — static store, updated from Kotlin before each note
+- `VoiceModSlot[4]` on each `Voice` — copied from instrument store at note-trigger time; holds runtime state (`stage`, `envValue`, `lfoPhase`, `stageCounter`)
+
+#### Type=1 — AHD
+
+Stages: **1=Attack** (0→1), **2=Hold** (stay at 1), **3=Decay** (1→0), **4=done**
+All durations in audio samples. One-shot: runs once, then stays at `envValue=0`.
+
+#### Type=2 — ADSR
+
+Stages: **1=Attack** (0→1), **2=Decay** (1→sustainLevel), **3=Sustain** (hold at sustainLevel until voice ends), **4=done (future release)**
+`sustainLevel` = `slot.sustain / 255.0f`
+Release stage not yet implemented (no note-off system).
+
+#### Type=4 — DRUM
+
+Identical stage machine to AHD (Attack→Hold→Decay). Semantic difference only:
+- **ATK** = spike/transient attack time (typically 0 for instant hit)
+- **HOLD** = body duration (the "thud")
+- **DEC** = tail decay time
+
+Use on VOL destination for percussive envelope shaping. Future: may diverge with a dedicated peak-shape curve.
+
+#### Type=5 — TRIG
+
+Identical stage machine to ADSR (Attack→Decay→Sustain). Future: will be externally triggered by a source instrument/track ID rather than the note trigger itself.
+
+#### Type=3 — LFO
+
+Always in stage=1 (running). Phase advances each callback:
+```
+phaseAdvance = 2π × lfoHz / sampleRate × numFrames
+```
+Phase resets to 0 on every new note trigger (RETRIG behavior by default).
+
+**Oscillator shapes:**
+
+| oscShape | Name | Output range | Formula |
+|----------|------|-------------|---------|
+| 0 | TRI | -1 to +1 | Triangle, 0 at start, peak at 25%, zero at 50%, trough at 75% |
+| 1 | SIN | -1 to +1 | `sinf(phase)` |
+| 2 | RMP+ | -1 to +1 | Rising sawtooth: `norm × 2 - 1` |
+| 3 | RMP- | -1 to +1 | Falling sawtooth: `1 - norm × 2` |
+| 6 | SQU+ | ±1 | Square, starts high: `norm < 0.5 ? +1 : -1` |
+| 7 | SQU- | ±1 | Square, starts low: `norm < 0.5 ? -1 : +1` |
+| 4,5,8,9 | EXP+/EXP-/RND/DRNK | -1 to +1 | Falls back to SIN (future) |
+
+---
+
+### Destinations
+
+#### dest=1 — VOLUME
+
+Applied per-sample in the mix loop after all DSP effects:
+
+**AHD/ADSR** (`envValue` 0→1→0):
+```
+finalVol = max(0, finalVol + (envValue - 1) × amount)
+```
+- `envValue=0`: volume reduced by `amount` (silence if `amount=1.0`)
+- `envValue=1`: no change (full volume)
+- Creates a fade-in during attack, full during hold, fade-out during decay
+
+**LFO** (`envValue` -1 to +1):
+```
+finalVol = max(0, finalVol × (1 + envValue × amount))
+```
+- Tremolo effect; `amount=1.0` → swings between 0× and 2× volume
+
+#### dest=3 — PITCH
+
+Accumulated once per audio callback in `updateVoiceModulation`, applied via `getModulatedPlaybackRate`:
+
+```
+modPitchOffset += envValue × amount × 12  (semitones)
+pitchMod = pitchOffset + modPitchOffset   (+ vibrato)
+rateMod  = 2^(pitchMod / 12)
+finalRate = basePlaybackRate × rateMod
+```
+
+**Amount → semitone depth table:**
+
+| amount (hex) | normalized | peak swing |
+|---|---|---|
+| 0x10 (16) | 0.063 | ±0.75 st |
+| 0x2B (43) | 0.169 | ±2.0 st |
+| 0x55 (85) | 0.333 | ±4.0 st |
+| 0x80 (128) | 0.502 | ±6.0 st |
+| 0xFF (255) | 1.0 | ±12.0 st (1 octave) |
+
+For AHD/ADSR on PITCH: `envValue` (0→1) means pitch sweeps from 0 up to `+amount×12` semitones.
+For LFO on PITCH: `envValue` (±1) means vibrato swings ±`amount×12` semitones around centre.
+
+The scale factor `×12.0` maps full amount to ±1 octave. Typical vibrato: `amount 0x10–0x20`.
+
+---
+
+### What is NOT yet implemented
+
+- **Release stage** (ADSR): requires note-off system in `PlaybackController`
+- **PAN destination**: `dest=2` — needs per-sample pan update in mix loop
+- **FILTER destinations**: `dest=5,6` — need real-time biquad recalculation
+- **SAMPLE_START destination**: `dest=7`
+- **Mod-to-mod routing**: `dest=8,9,10`
+- **EXP+/EXP-/RND/DRNK LFO shapes**
+- **Offline render (WAV export)**: modulation not applied during `renderOffline()`
 
 See `REFACTORING_ROADMAP.md` Phase 4 for step-by-step implementation guide.

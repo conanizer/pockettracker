@@ -216,11 +216,13 @@ class OboeAudioBackend : IAudioBackend {
         pslDuration: Float,
         pbnRate: Float,
         vibratoSpeed: Float,
-        vibratoDepth: Float
+        vibratoDepth: Float,
+        tableStartRow: Int
     ) {
         native_scheduleNoteWithTable(frame, sampleId, trackId, freq, baseFreq, vol, pan,
             startPointOverride, tableId, tableTicRate, noteOctave, notePitch,
-            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth)
+            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
+            tableStartRow)
     }
 
     override fun getVoiceTableRow(trackId: Int): Int {
@@ -229,6 +231,10 @@ class OboeAudioBackend : IAudioBackend {
 
     override fun getVoiceTableId(trackId: Int): Int {
         return native_getVoiceTableId(trackId)
+    }
+
+    override fun setVoiceTableRow(trackId: Int, row: Int) {
+        native_setVoiceTableRow(trackId, row)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -266,6 +272,44 @@ class OboeAudioBackend : IAudioBackend {
     override fun setInitialPitchOffset(trackId: Int, semitones: Float) {
         native_setInitialPitchOffset(trackId, semitones)
         Log.d(TAG, "🎵 Pitch offset set: track=$trackId, offset=$semitones semitones")
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MODULATION METHODS (Phase 4 — AHD)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    override fun setInstrumentModulation(
+        sampleId: Int,
+        slotIndex: Int,
+        type: Int,
+        dest: Int,
+        amount: Float,
+        attackSamples: Int,
+        holdSamples: Int,
+        decaySamples: Int,
+        sustainLevel: Float,
+        lfoHz: Float,
+        oscShape: Int,
+        releaseSamples: Int
+    ) {
+        native_setInstrumentModulation(sampleId, slotIndex, type, dest, amount,
+            attackSamples, holdSamples, decaySamples, sustainLevel, lfoHz, oscShape, releaseSamples)
+    }
+
+    override fun clearInstrumentModulation(sampleId: Int) {
+        native_clearInstrumentModulation(sampleId)
+    }
+
+    override fun triggerNoteOff(trackId: Int) {
+        native_triggerNoteOff(trackId)
+    }
+
+    override fun scheduleNoteOff(frame: Long, trackId: Int) {
+        native_scheduleNoteOff(frame, trackId)
+    }
+
+    override fun setOfflineRendering(rendering: Boolean) {
+        native_setOfflineRendering(rendering)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -338,10 +382,12 @@ class OboeAudioBackend : IAudioBackend {
         pslDuration: Float,
         pbnRate: Float,
         vibratoSpeed: Float,
-        vibratoDepth: Float
+        vibratoDepth: Float,
+        tableStartRow: Int
     )
     private external fun native_getVoiceTableRow(trackId: Int): Int
     private external fun native_getVoiceTableId(trackId: Int): Int
+    private external fun native_setVoiceTableRow(trackId: Int, row: Int)
 
     // Phase 6 pitch modulation methods
     private external fun native_setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int)
@@ -349,4 +395,15 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_setVibrato(trackId: Int, speed: Float, depth: Float)
     private external fun native_clearPitchMod(trackId: Int)
     private external fun native_setInitialPitchOffset(trackId: Int, semitones: Float)
+
+    // Phase 4 modulation methods
+    private external fun native_setInstrumentModulation(
+        sampleId: Int, slotIndex: Int, type: Int, dest: Int, amount: Float,
+        attackSamples: Int, holdSamples: Int, decaySamples: Int,
+        sustainLevel: Float, lfoHz: Float, oscShape: Int, releaseSamples: Int
+    )
+    private external fun native_clearInstrumentModulation(sampleId: Int)
+    private external fun native_triggerNoteOff(trackId: Int)
+    private external fun native_scheduleNoteOff(frame: Long, trackId: Int)
+    private external fun native_setOfflineRendering(rendering: Boolean)
 }

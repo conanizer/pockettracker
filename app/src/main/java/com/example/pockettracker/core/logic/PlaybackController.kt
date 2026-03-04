@@ -7,15 +7,17 @@ import com.example.pockettracker.core.data.ScreenType
 import com.example.pockettracker.core.data.VolumeUtils
 import com.example.pockettracker.core.audio.AudioEngine
 import com.example.pockettracker.core.data.Chain
+import com.example.pockettracker.core.data.ModType
 import com.example.pockettracker.core.data.Phrase
 import com.example.pockettracker.core.logging.ILogger
+import com.example.pockettracker.getEffectTypeName
 
 /**
  * Per-track state for persistent effects and note memory.
  *
  * Used to implement M8/LGPT-style persistent effects where an effect
  * continues until cancelled by specific conditions:
- * - REPEAT (Rxx) persists until:
+ * - REPEAT (RXY) persists until:
  *   1. A new note is triggered on this track
  *   2. Any effect in the same FX column where REPEAT was set
  *   3. KILL effect (K00) in any FX column
@@ -35,10 +37,16 @@ data class TrackState(
     // Persistent REPEAT state
     /** Which FX column (1, 2, or 3) the REPEAT was set in, or 0 if not active */
     var repeatActiveColumn: Int = 0,
-    /** Repeat tic interval (Rxx value) - can be sub-step (<12) or multi-step (>=12) */
+    /** Repeat tic interval (parsed from RXY) - max 15 ticks */
     var repeatTicInterval: Int = 0,
+    /** Repeat volume ramp (0-F): 0,8=none, 1-7=decrease, 9-F=increase */
+    var repeatVolRamp: Int = 0,
     /** Audio frame where REPEAT was started (for cross-phrase persistence) */
     var repeatStartFrame: Long = 0,
+    /** Cumulative retrig count since repeat started (for cross-step volume ramp) */
+    var repeatRetrigCount: Int = 0,
+    /** Base volume when repeat started (for additive ramp across steps) */
+    var repeatBaseVolume: Float = 1.0f,
 
     // Persistent ARPEGGIO state (ARP Axx and ARC Cxx)
     /** Which FX column (1, 2, or 3) the ARPEGGIO (Axx) was set in, or 0 if not active */
@@ -64,7 +72,25 @@ data class TrackState(
     /** Whether vibrato (PVB/PVX) is active */
     var vibratoActive: Boolean = false,
     /** Last note MIDI for PSL (pitch slide) calculation */
-    var lastNoteMidi: Int = -1
+    var lastNoteMidi: Int = -1,
+
+    // Table override state (TBL/THO effects)
+    /** Last table ID override from TBL effect (-1 = use instrument default) */
+    var lastTableOverride: Int = -1,
+    /** Last table start row from THO effect (-1 = default) */
+    var lastTableStartRow: Int = -1,
+
+    // Groove state (GRV effect)
+    /** Active groove ID (0 = default uniform timing, 1-255 = groove table) */
+    var grooveId: Int = 0,
+    /** Current position within groove pattern (0-based) */
+    var grooveStep: Int = 0,
+
+    // Per-column FX memory (for RND "previously active" command)
+    /** Last non-RND/RNL/CHA FX type per column (1-indexed: [0]=unused, [1]=FX1, [2]=FX2, [3]=FX3) */
+    var lastColFxType: IntArray = IntArray(4),
+    /** Last non-RND/RNL/CHA FX value per column */
+    var lastColFxValue: IntArray = IntArray(4)
 ) {
     /** Check if persistent REPEAT is active */
     fun hasActiveRepeat(): Boolean = repeatActiveColumn > 0 && repeatTicInterval > 0
@@ -73,7 +99,10 @@ data class TrackState(
     fun clearRepeat() {
         repeatActiveColumn = 0
         repeatTicInterval = 0
+        repeatVolRamp = 0
         repeatStartFrame = 0
+        repeatRetrigCount = 0
+        repeatBaseVolume = 1.0f
     }
 
     /** Check if persistent ARPEGGIO is active */
@@ -330,11 +359,13 @@ class PlaybackController(
         chainRowStartFrames.clear()
         songPositionStartFrames.clear()
         nextSongChainRowToSchedule = 0
-        // Clear all track states (persistent effects, note memory, HOP)
+        // Clear all track states (persistent effects, note memory, HOP, groove)
         trackStates.forEach {
             it.clearRepeat()
             it.clearAllArpeggioState()
             it.clearHopState()
+            it.grooveId = 0
+            it.grooveStep = 0
         }
         logger.d(TAG, "⏹️ Playback stopped")
     }
@@ -384,7 +415,7 @@ class PlaybackController(
                     val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
 
                     val result = schedulePhrase(phrase, nextFrameToSchedule, 0, 0, project, framesPerStep, effectiveStartRow)
-                    nextFrameToSchedule += framesPerStep * result.rowsScheduled
+                    nextFrameToSchedule += result.framesScheduled
                 }
 
                 PlaybackMode.CHAIN -> {
@@ -414,8 +445,8 @@ class PlaybackController(
                         val result = schedulePhrase(project.phrases[phraseId], nextFrameToSchedule, 0, transposeSemitones, project, framesPerStep, effectiveStartRow)
                         chainRowStartFrames[nextRow] = nextFrameToSchedule  // Track start frame for cursor
 
-                        // Advance frame by actual rows scheduled (HOP may cut phrase short)
-                        nextFrameToSchedule += framesPerStep * result.rowsScheduled
+                        // Advance frame by actual frames scheduled (accounts for groove timing + HOP)
+                        nextFrameToSchedule += result.framesScheduled
 
                         nextChainRowToSchedule = (nextRow + 1) % 16
                     } else {
@@ -462,7 +493,7 @@ class PlaybackController(
                         } else if (nextSongChainRowToSchedule < maxChainLength) {
                             // Schedule this chain row for all 8 tracks
                             var scheduledAny = false
-                            var maxRowsScheduled = 0  // Track max rows for frame advancement
+                            var maxFramesScheduled = 0L  // Track max frames for frame advancement (groove-accurate)
                             for (trackId in 0..7) {
                                 val trackState = trackStates[trackId]
 
@@ -488,9 +519,9 @@ class PlaybackController(
                                             songPositionStartFrames[Pair(nextSongRowToSchedule, nextSongChainRowToSchedule)] = nextFrameToSchedule
                                             scheduledAny = true
 
-                                            // Track max rows scheduled across all tracks
-                                            if (result.rowsScheduled > maxRowsScheduled) {
-                                                maxRowsScheduled = result.rowsScheduled
+                                            // Track max frames scheduled across all tracks (groove-accurate)
+                                            if (result.framesScheduled > maxFramesScheduled) {
+                                                maxFramesScheduled = result.framesScheduled
                                             }
                                         }
                                     }
@@ -498,9 +529,9 @@ class PlaybackController(
                             }
 
                             if (scheduledAny) {
-                                // Advance by max rows scheduled (so all tracks stay in sync)
+                                // Advance by max frames scheduled (so all tracks stay in sync)
                                 // Tracks with HOP will have empty time before their next phrase
-                                nextFrameToSchedule += framesPerStep * maxRowsScheduled
+                                nextFrameToSchedule += maxFramesScheduled
                                 nextSongChainRowToSchedule++
                             } else {
                                 // No phrases in this chain row, skip to next
@@ -570,7 +601,7 @@ class PlaybackController(
 
         // Schedule first phrase immediately
         val result = schedulePhrase(phrase, playbackStartFrame, 0, 0, project, framesPerStep)
-        nextFrameToSchedule += framesPerStep * result.rowsScheduled
+        nextFrameToSchedule += result.framesScheduled
 
         logger.d(TAG, "✅ Phrase playback initialized")
     }
@@ -591,7 +622,8 @@ class PlaybackController(
     data class SchedulePhraseResult(
         val rowsScheduled: Int,      // How many rows were actually scheduled (may be < 16 due to HOP)
         val hopTriggered: Boolean,   // Whether HOP effect ended phrase early
-        val trackStopped: Boolean    // Whether HOPFF stopped the track
+        val trackStopped: Boolean,   // Whether HOPFF stopped the track
+        val framesScheduled: Long = 0L  // Actual frames used (accounts for groove timing)
     )
 
     /**
@@ -622,28 +654,72 @@ class PlaybackController(
         // If track is stopped by HOPFF, don't schedule anything
         if (trackState.trackStopped) {
             logger.d(TAG, "  Track $trackId stopped by HOP FF, skipping phrase")
-            return SchedulePhraseResult(0, hopTriggered = false, trackStopped = true)
+            return SchedulePhraseResult(0, hopTriggered = false, trackStopped = true, framesScheduled = 0L)
         }
+
+        // framesPerTic = base frame duration per tic (constant at any tempo).
+        // Step durations are groove-controlled: each step may have a different tic count.
+        val framesPerTic = framesPerStep / TICS_PER_STEP
+        var localGrooveStep = trackState.grooveStep
+        var anyGrooveActive = false  // Becomes true if any step uses a groove (for post-loop persistence)
 
         // Schedule steps starting from startRow
         val effectiveStartRow = startRow.coerceIn(0, 15)
+        var frameOffset = 0L  // Accumulates actual frame count (may differ from stepIndex * framesPerStep with groove)
+
         for (stepIndex in effectiveStartRow until 16) {
             val step = phrase.steps[stepIndex]
-            // Calculate frame relative to phrase start, accounting for skipped rows
-            val targetFrame = startFrame + ((stepIndex - effectiveStartRow) * framesPerStep)
+
+            // Pre-scan for GRV effect BEFORE computing step duration so the new groove
+            // takes effect immediately on the step that triggers it, not on the next phrase.
+            // scheduleStepWithEffects will also process GRV (idempotent — same values).
+            for (fxSlot in 1..3) {
+                val fxType = when (fxSlot) { 1 -> step.fx1Type; 2 -> step.fx2Type; else -> step.fx3Type }
+                val fxValue = when (fxSlot) { 1 -> step.fx1Value; 2 -> step.fx2Value; else -> step.fx3Value }
+                if (fxType == EffectProcessor.FX_GRV) {
+                    trackState.grooveId = fxValue
+                    localGrooveStep = 0  // New groove always starts at slot 0
+                    break
+                }
+            }
+
+            // Look up current groove per-step (grooveId may have changed via GRV above).
+            // Fall back to exact framesPerStep when groove has no active steps to avoid
+            // integer rounding drift in the common case.
+            val currentGroove = project.grooves[trackState.grooveId.coerceIn(0, 255)]
+            val currentGrooveActive = currentGroove.activeLength() > 0
+
+            val stepDuration = if (currentGrooveActive) {
+                anyGrooveActive = true
+                val stepTics = currentGroove.getTicksForStep(localGrooveStep)
+                framesPerTic * stepTics  // 0 tics = skip step
+            } else {
+                framesPerStep
+            }
+
+            // Groove value 00: skip this phrase step entirely (no note, no effects, no time advance)
+            if (stepDuration == 0L) {
+                rowsScheduled++
+                localGrooveStep++
+                continue
+            }
+
+            val targetFrame = startFrame + frameOffset
 
             val stepResult = scheduleStepWithEffects(
                 step = step,
                 targetFrame = targetFrame,
-                stepDuration = framesPerStep,
+                stepDuration = stepDuration,
                 trackId = trackId,
                 transposeSemitones = transposeSemitones,
                 project = project,
                 trackState = trackState,
-                stepIndex = stepIndex  // Pass step index for multi-step REPEAT
+                stepIndex = stepIndex
             )
 
             rowsScheduled++
+            frameOffset += stepDuration
+            if (currentGrooveActive) localGrooveStep++
 
             if (stepResult.noteScheduled) {
                 scheduledNotes++
@@ -651,14 +727,19 @@ class PlaybackController(
 
             // Check if HOP was triggered - stop scheduling remaining rows
             if (stepResult.hopTriggered) {
+                // Persist groove position for the next phrase (if groove was active at any point)
+                if (anyGrooveActive) trackState.grooveStep = localGrooveStep
                 if (trackState.trackStopped) {
                     logger.d(TAG, "  HOP FF at row $stepIndex: track $trackId stopped, scheduled $rowsScheduled rows")
                 } else {
                     logger.d(TAG, "  HOP at row $stepIndex: jumping to row ${trackState.hopTargetRow}, scheduled $rowsScheduled rows")
                 }
-                return SchedulePhraseResult(rowsScheduled, hopTriggered = true, trackStopped = trackState.trackStopped)
+                return SchedulePhraseResult(rowsScheduled, hopTriggered = true, trackStopped = trackState.trackStopped, framesScheduled = frameOffset)
             }
         }
+
+        // Persist groove position for the next phrase (if groove was active at any point this phrase)
+        if (anyGrooveActive) trackState.grooveStep = localGrooveStep
 
         if (scheduledNotes > 0) {
             if (effectiveStartRow > 0) {
@@ -668,7 +749,7 @@ class PlaybackController(
             }
         }
 
-        return SchedulePhraseResult(rowsScheduled, hopTriggered = false, trackStopped = false)
+        return SchedulePhraseResult(rowsScheduled, hopTriggered = false, trackStopped = false, framesScheduled = frameOffset)
     }
 
     /**
@@ -719,7 +800,7 @@ class PlaybackController(
             val transposeSemitones = chain.getTransposeSemitones(firstRow)
             val result = schedulePhrase(project.phrases[phraseId], playbackStartFrame, 0, transposeSemitones, project, framesPerStep)
             chainRowStartFrames[firstRow] = playbackStartFrame  // Track start frame for cursor
-            nextFrameToSchedule += framesPerStep * result.rowsScheduled
+            nextFrameToSchedule += result.framesScheduled
             nextChainRowToSchedule = firstRow + 1
         }
 
@@ -773,6 +854,177 @@ class PlaybackController(
         songPositionStartFrames.clear()
 
         logger.d(TAG, "✅ Song playback initialized")
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // OFFLINE RENDER SCHEDULING
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Schedule the entire song synchronously for offline WAV rendering.
+     *
+     * Uses the exact same [schedulePhrase] logic as live song playback, so groove,
+     * DEL, arpeggio, HOP, pitch effects — everything — behaves identically.
+     *
+     * Call order:
+     *   1. audioBackend.resetFrameCounter()
+     *   2. audioBackend.clearScheduledNotes()
+     *   3. scheduleSongForRender(project, startRow, endRow)  ← fills note queue at frames 0..N
+     *   4. audioBackend.renderFrames(totalFrames, sampleRate)
+     *
+     * @param project  Project to render
+     * @param startRow First song row to render (inclusive)
+     * @param endRow   Last song row to render (inclusive)
+     * @return Total audio frames scheduled (pass directly to renderFrames)
+     */
+    fun scheduleSongForRender(project: Project, startRow: Int, endRow: Int): Long {
+        // Fresh track state — no carry-over from live playback
+        for (i in trackStates.indices) trackStates[i] = TrackState()
+
+        val sampleRate = audioEngine.getDeviceSampleRate()
+        val msPerStep  = 60000.0 / project.tempo / 4.0
+        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+
+        var currentFrame = 0L
+
+        for (songRow in startRow..endRow) {
+            // Clear per-row stop flags (mirrors updatePlaybackBuffer SONG logic)
+            trackStates.forEach { it.trackStopped = false }
+
+            // Max non-empty chain slots across all tracks determines phrase count for this row
+            var maxChainLength = 0
+            for (trackId in 0..7) {
+                val track = project.tracks[trackId]
+                if (track.mute) continue
+                if (songRow >= track.chainRefs.size) continue
+                val chainId = track.chainRefs[songRow]
+                if (chainId < 0 || chainId >= 256) continue
+                val length = (0..15).count { !project.chains[chainId].isEmpty(it) }
+                if (length > maxChainLength) maxChainLength = length
+            }
+
+            for (chainRow in 0 until maxChainLength) {
+                var maxFramesScheduled = 0L
+                var scheduledAny = false
+
+                for (trackId in 0..7) {
+                    val trackState = trackStates[trackId]
+                    if (trackState.trackStopped) continue
+
+                    val track = project.tracks[trackId]
+                    if (track.mute) continue
+                    if (songRow >= track.chainRefs.size) continue
+
+                    val chainId = track.chainRefs[songRow]
+                    if (chainId < 0 || chainId >= 256) continue
+
+                    val chain = project.chains[chainId]
+                    if (chain.isEmpty(chainRow)) continue
+
+                    val phraseId = chain.phraseRefs[chainRow]
+                    if (phraseId < 0 || phraseId >= 256) continue
+
+                    val transposeSemitones = chain.getTransposeSemitones(chainRow)
+                    val hopStartRow = trackState.consumeHopTarget()
+                    val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
+
+                    val result = schedulePhrase(
+                        project.phrases[phraseId], currentFrame, trackId,
+                        transposeSemitones, project, framesPerStep, effectiveStartRow
+                    )
+                    scheduledAny = true
+                    if (result.framesScheduled > maxFramesScheduled)
+                        maxFramesScheduled = result.framesScheduled
+                }
+
+                if (scheduledAny) currentFrame += maxFramesScheduled
+            }
+        }
+
+        return currentFrame
+    }
+
+    /**
+     * Schedule only the selected tracks in a song row range for offline rendering.
+     *
+     * Identical to [scheduleSongForRender] but skips tracks not in [selectedTrackIds].
+     * This allows rendering just the selected tracks from a song selection to a WAV.
+     *
+     * @param project  Project to render
+     * @param startRow First song row (inclusive)
+     * @param endRow   Last song row (inclusive)
+     * @param selectedTrackIds  0-indexed track IDs to include (0-7)
+     * @return Total audio frames scheduled
+     */
+    fun scheduleSelectionForRender(
+        project: Project,
+        startRow: Int,
+        endRow: Int,
+        selectedTrackIds: Set<Int>
+    ): Long {
+        for (i in trackStates.indices) trackStates[i] = TrackState()
+
+        val sampleRate = audioEngine.getDeviceSampleRate()
+        val msPerStep  = 60000.0 / project.tempo / 4.0
+        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+
+        var currentFrame = 0L
+
+        for (songRow in startRow..endRow) {
+            trackStates.forEach { it.trackStopped = false }
+
+            var maxChainLength = 0
+            for (trackId in 0..7) {
+                if (trackId !in selectedTrackIds) continue
+                val track = project.tracks[trackId]
+                if (track.mute) continue
+                if (songRow >= track.chainRefs.size) continue
+                val chainId = track.chainRefs[songRow]
+                if (chainId < 0 || chainId >= 256) continue
+                val length = (0..15).count { !project.chains[chainId].isEmpty(it) }
+                if (length > maxChainLength) maxChainLength = length
+            }
+
+            for (chainRow in 0 until maxChainLength) {
+                var maxFramesScheduled = 0L
+                var scheduledAny = false
+
+                for (trackId in 0..7) {
+                    if (trackId !in selectedTrackIds) continue
+                    val trackState = trackStates[trackId]
+                    if (trackState.trackStopped) continue
+
+                    val track = project.tracks[trackId]
+                    if (track.mute) continue
+                    if (songRow >= track.chainRefs.size) continue
+
+                    val chainId = track.chainRefs[songRow]
+                    if (chainId < 0 || chainId >= 256) continue
+
+                    val chain = project.chains[chainId]
+                    if (chain.isEmpty(chainRow)) continue
+
+                    val phraseId = chain.phraseRefs[chainRow]
+                    if (phraseId < 0 || phraseId >= 256) continue
+
+                    val transposeSemitones = chain.getTransposeSemitones(chainRow)
+                    val hopStartRow = trackState.consumeHopTarget()
+                    val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
+
+                    val result = schedulePhrase(
+                        project.phrases[phraseId], currentFrame, trackId,
+                        transposeSemitones, project, framesPerStep, effectiveStartRow
+                    )
+                    scheduledAny = true
+                    if (result.framesScheduled > maxFramesScheduled)
+                        maxFramesScheduled = result.framesScheduled
+                }
+
+                if (scheduledAny) currentFrame += maxFramesScheduled
+            }
+        }
+
+        return currentFrame
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -850,22 +1102,20 @@ class PlaybackController(
      * - OFFSET effect (Oxx) - modifies sample start point
      * - VOLUME effect (Vxx) - overrides step volume
      * - KILL effect (K00) - stops sample and clears persistent REPEAT
-     * - REPEAT effect (Rxx) - retrigger with PERSISTENCE (LGPT/M8 style)
+     * - REPEAT effect (RXY) - M8-style retrigger with volume ramping
      *
-     * ## Persistent REPEAT (Rxx)
+     * ## REPEAT (RXY) - M8-style format:
+     * - R00 = cancel persistent REPEAT
+     * - RX0 (Y=0): retrig every X ticks, no vol ramp
+     * - RXY (Y!=0): retrig every Y ticks, vol ramp X
+     *   - X=0,8: no volume change
+     *   - X=1-7: decrease volume per retrig
+     *   - X=9-F: increase volume per retrig
+     *
      * REPEAT persists until cancelled by:
      * 1. A new note on this track
      * 2. Any effect in the same FX column where REPEAT was set
      * 3. KILL effect (K00) in any FX column
-     *
-     * ## Sub-step vs Multi-step REPEAT
-     * - R01-R0B: Sub-step intervals (multiple triggers within one step)
-     * - R0C+: Multi-step intervals (one trigger every N steps)
-     *   - R0C (12) = every 1 step
-     *   - R18 (24) = every 2 steps
-     *   - R24 (36) = every 3 steps
-     *   - R30 (48) = every 4 steps (4 kicks in 16-step phrase!)
-     *   - R12 (18) = every 1.5 steps (dotted notes)
      *
      * When persistent REPEAT is active and step has no note, the last played
      * note/instrument is retriggered at the REPEAT interval.
@@ -921,6 +1171,17 @@ class PlaybackController(
             // Note: We don't log here because new effects might be set below
         }
 
+        // Save current ramp volume before potential clearRepeat() (for RPT-to-RPT transitions)
+        val savedRampVolume = if (trackState.hasActiveRepeat() && trackState.repeatRetrigCount > 0) {
+            // Inline delta lookup to calculate last accumulated volume
+            val rampDeltas = floatArrayOf(0f, -0.02f, -0.04f, -0.06f, -0.10f, -0.15f, -0.20f, -0.30f,
+                                          0f, 0.02f, 0.04f, 0.06f, 0.10f, 0.15f, 0.20f, 0.30f)
+            val oldDelta = rampDeltas[trackState.repeatVolRamp.coerceIn(0, 15)]
+            (trackState.repeatBaseVolume + trackState.repeatRetrigCount * oldDelta).coerceIn(0f, 1f)
+        } else {
+            -1f // No active ramp to preserve
+        }
+
         // Check if persistent REPEAT's column has any effect → clears REPEAT
         // (Any effect in the same column overrides the persistent REPEAT)
         if (trackState.hasActiveRepeat()) {
@@ -952,16 +1213,158 @@ class PlaybackController(
         }
 
         // ═══════════════════════════════════════════════════════════════════════════
-        // STEP 2: Resolve effects and schedule note if present
+        // STEP 2: Handle CHA (Chance), resolve effects, and schedule note
         // ═══════════════════════════════════════════════════════════════════════════
 
-        val defaultVolume = step.volume / 255.0f
-        val params = effectProcessor.resolveStepParams(step, targetFrame, defaultVolume)
+        // CHA xy: probability gate (evaluated BEFORE effect resolution)
+        // x = probability (0=never, F=always), y = target (0=note, 1-3=FX slot)
+        var skipNote = false
+        var effectiveStep = step
+        for (slot in 1..3) {
+            val (fxType, fxValue) = when (slot) {
+                1 -> step.fx1Type to step.fx1Value
+                2 -> step.fx2Type to step.fx2Value
+                3 -> step.fx3Type to step.fx3Value
+                else -> continue
+            }
+            if (fxType == EffectProcessor.FX_CHA && fxValue > 0) {
+                val probability = (fxValue shr 4) and 0x0F
+                val target = fxValue and 0x0F
+                val roll = kotlin.random.Random.nextInt(15)  // 0-14
+                val passed = roll < probability  // probability F (15) always passes, 0 never passes
+
+                if (!passed) {
+                    val targetName = if (target == 0) "note" else "FX$target"
+                    logger.d(TAG, "🎲 CHA: probability=$probability/15, roll=$roll → BLOCKED $targetName")
+                    if (target == 0) {
+                        skipNote = true
+                    } else if (target in 1..3) {
+                        // Zero out the targeted FX slot before resolution
+                        effectiveStep = effectiveStep.copy().also { s ->
+                            when (target) {
+                                1 -> { s.fx1Type = 0x00; s.fx1Value = 0x00 }
+                                2 -> { s.fx2Type = 0x00; s.fx2Value = 0x00 }
+                                3 -> { s.fx3Type = 0x00; s.fx3Value = 0x00 }
+                            }
+                        }
+                    }
+                } else {
+                    val targetName = if (target == 0) "note" else "FX$target"
+                    logger.d(TAG, "🎲 CHA: probability=$probability/15, roll=$roll → PASSED $targetName")
+                }
+            }
+        }
+
+        // RND/RNL xy: randomize FX values (evaluated BEFORE effect resolution)
+        // x = min high nibble, y = max high nibble → random value in range [x0, yF]
+        //
+        // RND: Randomizes the PREVIOUSLY ACTIVE FX in the same column (temporal).
+        //   Replaces itself with the last FX type+randomized value from this column.
+        //   If no previous FX exists, does nothing.
+        //
+        // RNL: Randomizes the FX to the LEFT in the same row (spatial).
+        //   FX2 → randomizes FX1 value, FX3 → randomizes FX2 value.
+        //   In FX1: randomizes note (X range) and instrument (Y range).
+        for (slot in 1..3) {
+            val (fxType, fxValue) = when (slot) {
+                1 -> effectiveStep.fx1Type to effectiveStep.fx1Value
+                2 -> effectiveStep.fx2Type to effectiveStep.fx2Value
+                3 -> effectiveStep.fx3Type to effectiveStep.fx3Value
+                else -> continue
+            }
+
+            val minNibble = (fxValue shr 4) and 0x0F
+            val maxNibble = fxValue and 0x0F
+
+            if (fxType == EffectProcessor.FX_RND) {
+                // RND: temporal — recall previously active FX in this column
+                val prevType = trackState.lastColFxType[slot]
+                val prevValue = trackState.lastColFxValue[slot]
+                if (prevType == 0x00) continue  // No previous FX to randomize
+
+                val minVal = minNibble shl 4
+                val maxVal = (maxNibble shl 4) or 0x0F
+                val randomValue = if (minVal <= maxVal) {
+                    kotlin.random.Random.nextInt(minVal, maxVal + 1)
+                } else {
+                    kotlin.random.Random.nextInt(maxVal, minVal + 1)
+                }
+
+                // Replace this column with the previous FX type + random value
+                effectiveStep = effectiveStep.copy().also { s ->
+                    when (slot) {
+                        1 -> { s.fx1Type = prevType; s.fx1Value = randomValue }
+                        2 -> { s.fx2Type = prevType; s.fx2Value = randomValue }
+                        3 -> { s.fx3Type = prevType; s.fx3Value = randomValue }
+                    }
+                }
+                logger.d(TAG, "🎲 RND: FX$slot recalled ${getEffectTypeName(prevType)} → " +
+                        "0x${randomValue.toString(16).uppercase().padStart(2, '0')} " +
+                        "(was 0x${prevValue.toString(16).uppercase().padStart(2, '0')}, " +
+                        "range ${minNibble.toString(16).uppercase()}0-${maxNibble.toString(16).uppercase()}F)")
+
+            } else if (fxType == EffectProcessor.FX_RNL) {
+                // RNL: spatial — randomize the column to the left
+                if (slot == 1) {
+                    // Special case: FX1 → randomize note and instrument
+                    if (hasNote) {
+                        val noteMidi = step.note.toMidi()
+                        if (noteMidi >= 0) {
+                            // X = note range (semitones ±), Y = instrument range (±)
+                            val noteRange = minNibble  // 0=no change, F=±15 semitones
+                            val instRange = maxNibble  // 0=no change, F=±15 instruments
+                            val noteOffset = if (noteRange > 0) {
+                                kotlin.random.Random.nextInt(-noteRange, noteRange + 1)
+                            } else 0
+                            val instOffset = if (instRange > 0) {
+                                kotlin.random.Random.nextInt(-instRange, instRange + 1)
+                            } else 0
+
+                            effectiveStep = effectiveStep.copy(
+                                note = Note.fromMidi((noteMidi + noteOffset).coerceIn(0, 119)),
+                                instrument = (step.instrument + instOffset).coerceIn(0, 255)
+                            )
+                            logger.d(TAG, "🎲 RNL FX1: note ${step.note}→${effectiveStep.note} " +
+                                    "(±$noteRange), inst ${step.instrument.toString(16).uppercase().padStart(2, '0')}" +
+                                    "→${effectiveStep.instrument.toString(16).uppercase().padStart(2, '0')} (±$instRange)")
+                        }
+                    }
+                } else {
+                    // FX2→FX1, FX3→FX2: randomize the left column's value
+                    val targetSlot = slot - 1
+                    val minVal = minNibble shl 4
+                    val maxVal = (maxNibble shl 4) or 0x0F
+                    val randomValue = if (minVal <= maxVal) {
+                        kotlin.random.Random.nextInt(minVal, maxVal + 1)
+                    } else {
+                        kotlin.random.Random.nextInt(maxVal, minVal + 1)
+                    }
+
+                    effectiveStep = effectiveStep.copy().also { s ->
+                        when (targetSlot) {
+                            1 -> s.fx1Value = randomValue
+                            2 -> s.fx2Value = randomValue
+                        }
+                    }
+                    val targetType = when (targetSlot) {
+                        1 -> getEffectTypeName(effectiveStep.fx1Type)
+                        2 -> getEffectTypeName(effectiveStep.fx2Type)
+                        else -> "???"
+                    }
+                    logger.d(TAG, "🎲 RNL: FX$targetSlot ($targetType) value → " +
+                            "0x${randomValue.toString(16).uppercase().padStart(2, '0')} " +
+                            "(range ${minNibble.toString(16).uppercase()}0-${maxNibble.toString(16).uppercase()}F)")
+                }
+            }
+        }
+
+        val defaultVolume = effectiveStep.volume / 255.0f
+        val params = effectProcessor.resolveStepParams(effectiveStep, targetFrame, defaultVolume)
 
         // Apply volume chain: instrument × phrase only
         // NOTE: Track × master are applied in C++ in real-time, allowing mixer changes
         // to take effect immediately without rescheduling notes
-        val instrument = project.instruments[step.instrument]
+        val instrument = project.instruments[effectiveStep.instrument]
         val finalVolume = VolumeUtils.calculateNoteVolume(
             instrumentVol = instrument.volume,
             phraseVol = (params.volume * 255).toInt().coerceIn(0, 255)  // Convert back to hex
@@ -970,19 +1373,79 @@ class PlaybackController(
         // Get instrument pan (hex 0x00-0xFF → float 0.0-1.0)
         val instrumentPan = VolumeUtils.hexToFloat(instrument.pan)
 
+        // ═══════════════════════════════════════════════════════════════════════════
+        // STEP 2.1: Apply DEL (Delay) effect - offset the target frame
+        // ═══════════════════════════════════════════════════════════════════════════
+        val delayTicks = params.delayTicks ?: 0
+        val effectiveTargetFrame = if (delayTicks > 0) {
+            val framesPerTic = stepDuration / TICS_PER_STEP
+            val delayFrames = delayTicks * framesPerTic
+            logger.d(TAG, "⏳ DEL: delaying note by $delayTicks ticks ($delayFrames frames)")
+            targetFrame + delayFrames
+        } else {
+            targetFrame
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // STEP 2.2: Handle TBL (Table Override) and THO (Table Hop) effects
+        // ═══════════════════════════════════════════════════════════════════════════
+
+        // TBL XX: Override table ID for this note (and subsequent retrigs)
+        val tableIdOverride = if (params.tableOverride != null && params.tableOverride >= 0) {
+            trackState.lastTableOverride = params.tableOverride
+            logger.d(TAG, "📋 TBL: Override table to ${params.tableOverride.toString(16).uppercase().padStart(2, '0')}")
+            params.tableOverride
+        } else if (hasNote) {
+            // New note without TBL: reset to instrument default
+            trackState.lastTableOverride = -1
+            -1
+        } else {
+            // Empty step: use last override for retrig/arp continuity
+            trackState.lastTableOverride
+        }
+
+        // THO XX: Table hop (jump table to row Y)
+        // With note: sets table start row for the new voice
+        // Without note: jumps the active voice's table to target row
+        val tableStartRow = if (params.tableHopTarget != null) {
+            val targetRow = params.tableHopTarget % 16  // 0-15
+            trackState.lastTableStartRow = targetRow
+            if (!hasNote) {
+                // No note: jump the active voice's table row directly
+                audioEngine.setVoiceTableRow(trackId, targetRow)
+                logger.d(TAG, "📋 THO: Jumped active voice table to row $targetRow (no note)")
+            } else {
+                logger.d(TAG, "📋 THO: Will start table at row $targetRow (with note)")
+            }
+            targetRow
+        } else {
+            -1  // No THO, use default
+        }
+
+        // GRV XX: Groove assignment (stored for timing in phrase scheduler)
+        if (params.grooveId != null) {
+            trackState.grooveId = params.grooveId
+            trackState.grooveStep = 0  // Reset groove position
+            if (params.grooveId == 0) {
+                logger.d(TAG, "🥁 GRV 00: Disabled groove (default timing)")
+            } else {
+                logger.d(TAG, "🥁 GRV: Assigned groove ${params.grooveId.toString(16).uppercase().padStart(2, '0')}")
+            }
+        }
+
         var noteScheduled = false
-        if (hasNote) {
-            // Apply transposition if needed
+        if (hasNote && !skipNote) {
+            // Apply transposition if needed (use effectiveStep for RNL note randomization)
             val note = if (transposeSemitones != 0) {
-                val originalMidi = step.note.toMidi()
+                val originalMidi = effectiveStep.note.toMidi()
                 if (originalMidi >= 0) {
                     val transposedMidi = (originalMidi + transposeSemitones).coerceIn(0, 127)
                     Note.fromMidi(transposedMidi)
                 } else {
-                    step.note
+                    effectiveStep.note
                 }
             } else {
-                step.note
+                effectiveStep.note
             }
 
             // Save previous MIDI for PSL calculation BEFORE updating track state
@@ -1043,11 +1506,18 @@ class PlaybackController(
                         "EXTREME vibrato speed=${vibratoSpeed}Hz, depth=$vibratoDepth semitones")
             }
 
+            // Debug: Log the full volume chain so we can verify what reaches the audio engine
+            logger.d(TAG, "🔊 Volume chain: instVol=0x${instrument.volume.toString(16).uppercase()} " +
+                    "(${instrument.volume}/255=${"%.4f".format(instrument.volume / 255f)}), " +
+                    "phraseVol=0x${step.volume.toString(16).uppercase()} " +
+                    "(${step.volume}/255=${"%.4f".format(step.volume / 255f)}), " +
+                    "finalVolume=${"%.4f".format(finalVolume)}")
+
             // Schedule the note with all pitch mod params (applied when note triggers in C++)
             audioEngine.scheduleNote(
-                targetFrame = targetFrame,
+                targetFrame = effectiveTargetFrame,
                 note = note,
-                instrumentId = step.instrument,
+                instrumentId = effectiveStep.instrument,
                 trackId = trackId,
                 volume = finalVolume,
                 pan = instrumentPan,
@@ -1057,13 +1527,15 @@ class PlaybackController(
                 pslDuration = pslDuration,
                 pbnRate = pbnRate,
                 vibratoSpeed = vibratoSpeed,
-                vibratoDepth = vibratoDepth
+                vibratoDepth = vibratoDepth,
+                tableIdOverride = tableIdOverride,
+                tableStartRow = tableStartRow
             )
             noteScheduled = true
 
             // Update track state with this note (for persistent REPEAT retrigger)
             trackState.lastNote = note
-            trackState.lastInstrument = step.instrument
+            trackState.lastInstrument = effectiveStep.instrument
             trackState.lastVolume = finalVolume
             trackState.lastStartPoint = params.startPoint
             trackState.lastPan = instrumentPan
@@ -1075,9 +1547,19 @@ class PlaybackController(
             }
         }
 
-        // Handle KILL effect - schedule kill at the specified frame and clear pitch mods
+
+        // Handle KILL effect - schedule kill at the specified frame (offset by DEL if present)
         if (params.killAtFrame != null) {
-            audioEngine.scheduleKill(params.killAtFrame, trackId)
+            val killFrame = if (delayTicks > 0) {
+                val framesPerTic = stepDuration / TICS_PER_STEP
+                params.killAtFrame + delayTicks * framesPerTic
+            } else {
+                params.killAtFrame
+            }
+            // scheduleNoteOff (soft kill) at the sample-accurate kill frame.
+            // triggerNoteOff transitions ADSR to Release so the release tail plays after K00.
+            // For AHD / DRUM / no-mod voices it hard-stops the voice (no release to play).
+            audioEngine.scheduleNoteOff(killFrame, trackId)
             trackState.clearPitchMod()
         }
 
@@ -1175,41 +1657,83 @@ class PlaybackController(
 
         // ═══════════════════════════════════════════════════════════════════════════
         // STEP 3: Handle REPEAT effect (new or persistent)
+        // M8-style RXY format:
+        //   R00 = cancel repeat
+        //   RX0 (Y=0): retrig every X ticks, no vol ramp
+        //   RXY (Y!=0): retrig every Y ticks, vol ramp X
         // ═══════════════════════════════════════════════════════════════════════════
 
-        // Find which column has REPEAT effect (if any) and its value
+        // Find which column has REPEAT effect (if any)
+        // XY parsing is done centrally by EffectProcessor.resolveStepParams()
         var newRepeatColumn = 0
-        var newRepeatValue = 0
-        if (step.fx1Type == EffectProcessor.FX_REPEAT && step.fx1Value > 0) {
+        if (effectiveStep.fx1Type == EffectProcessor.FX_REPEAT && effectiveStep.fx1Value > 0) {
             newRepeatColumn = 1
-            newRepeatValue = step.fx1Value
-        } else if (step.fx2Type == EffectProcessor.FX_REPEAT && step.fx2Value > 0) {
+        } else if (effectiveStep.fx2Type == EffectProcessor.FX_REPEAT && effectiveStep.fx2Value > 0) {
             newRepeatColumn = 2
-            newRepeatValue = step.fx2Value
-        } else if (step.fx3Type == EffectProcessor.FX_REPEAT && step.fx3Value > 0) {
+        } else if (effectiveStep.fx3Type == EffectProcessor.FX_REPEAT && effectiveStep.fx3Value > 0) {
             newRepeatColumn = 3
-            newRepeatValue = step.fx3Value
         }
+        // Use centralized XY parsing from EffectProcessor
+        val newRepeatTicInterval = params.repeatCount ?: 0
+        val newRepeatVolRamp = params.repeatVolRamp ?: 0
 
         // If new REPEAT is set, update persistent state
         if (newRepeatColumn > 0) {
             trackState.repeatActiveColumn = newRepeatColumn
-            trackState.repeatTicInterval = newRepeatValue
-            trackState.repeatStartFrame = targetFrame  // Remember absolute frame where REPEAT started
-            val intervalType = if (newRepeatValue < TICS_PER_STEP) "sub-step" else "multi-step"
-            logger.d(TAG, "🔁 REPEAT R${newRepeatValue.toString(16).uppercase().padStart(2, '0')} " +
-                    "($intervalType) set in column $newRepeatColumn at frame $targetFrame → now PERSISTENT (cross-phrase)")
+            trackState.repeatTicInterval = newRepeatTicInterval
+            trackState.repeatVolRamp = newRepeatVolRamp
+            trackState.repeatStartFrame = targetFrame
+            trackState.repeatRetrigCount = 0  // Reset counter for new ramp parameters
+
+            // Set base volume for the new ramp
+            trackState.repeatBaseVolume = when {
+                hasNote -> finalVolume  // New note: fresh start at note volume
+                savedRampVolume >= 0f -> savedRampVolume  // RPT-to-RPT on empty step: continue from last ramp position
+                else -> trackState.lastVolume  // Fallback: use last played note volume
+            }
+
+            val rampDesc = when {
+                newRepeatVolRamp == 0 || newRepeatVolRamp == 8 -> ""
+                newRepeatVolRamp in 1..7 -> ", vol decrease $newRepeatVolRamp"
+                else -> ", vol increase ${newRepeatVolRamp - 8}"
+            }
+            logger.d(TAG, "🔁 REPEAT: retrig every $newRepeatTicInterval ticks$rampDesc " +
+                    "set in column $newRepeatColumn, baseVol=${"%.4f".format(trackState.repeatBaseVolume)} → PERSISTENT")
         }
 
         // Determine which REPEAT to apply (new from this step, or persistent)
         val activeRepeatInterval = when {
-            // If this step has a new REPEAT, use it
-            newRepeatValue > 0 -> newRepeatValue
-            // If persistent REPEAT is active, use it
+            newRepeatTicInterval > 0 -> newRepeatTicInterval
             trackState.hasActiveRepeat() -> trackState.repeatTicInterval
-            // No REPEAT active
             else -> 0
         }
+        val activeVolRamp = when {
+            newRepeatTicInterval > 0 -> newRepeatVolRamp
+            trackState.hasActiveRepeat() -> trackState.repeatVolRamp
+            else -> 0
+        }
+
+        // Volume ramp: ADDITIVE delta per retrigger (accumulates across steps)
+        // 0,8 = no change; 1-7 = decrease; 9-F = increase
+        // Values are subtracted/added to the base volume per retrig
+        val volRampDeltas = floatArrayOf(
+            0.00f,   // 0: no change
+            -0.02f,  // 1: very subtle decrease (~50 retrigs to silence)
+            -0.04f,  // 2: subtle decrease (~25 retrigs)
+            -0.06f,  // 3: gentle decrease (~17 retrigs)
+            -0.10f,  // 4: moderate decrease (~10 retrigs)
+            -0.15f,  // 5: noticeable decrease (~7 retrigs)
+            -0.20f,  // 6: heavy decrease (~5 retrigs)
+            -0.30f,  // 7: rapid decrease (~3 retrigs)
+            0.00f,   // 8: no change
+            0.02f,   // 9: very subtle increase
+            0.04f,   // A: subtle increase
+            0.06f,   // B: gentle increase
+            0.10f,   // C: moderate increase
+            0.15f,   // D: noticeable increase
+            0.20f,   // E: heavy increase
+            0.30f    // F: rapid increase
+        )
 
         // Apply REPEAT if active
         if (activeRepeatInterval > 0 && trackState.lastNote != Note.EMPTY) {
@@ -1218,21 +1742,21 @@ class PlaybackController(
             // Determine note/instrument to retrigger
             val retrigNote = if (hasNote) {
                 if (transposeSemitones != 0) {
-                    val originalMidi = step.note.toMidi()
+                    val originalMidi = effectiveStep.note.toMidi()
                     if (originalMidi >= 0) Note.fromMidi((originalMidi + transposeSemitones).coerceIn(0, 127))
-                    else step.note
-                } else step.note
+                    else effectiveStep.note
+                } else effectiveStep.note
             } else {
                 trackState.lastNote
             }
-            val retrigInstrument = if (hasNote) step.instrument else trackState.lastInstrument
-            val retrigVolume = if (hasNote) finalVolume else trackState.lastVolume  // Track × master in C++
+            val retrigInstrument = if (hasNote) effectiveStep.instrument else trackState.lastInstrument
             val retrigPan = if (hasNote) instrumentPan else trackState.lastPan
             val retrigStartPoint = if (hasNote) params.startPoint else trackState.lastStartPoint
+            val rampDelta = volRampDeltas[activeVolRamp.coerceIn(0, 15)]
 
             if (activeRepeatInterval < TICS_PER_STEP) {
                 // ═══════════════════════════════════════════════════════════════════
-                // SUB-STEP REPEAT (R01-R0B): Multiple triggers within this step
+                // SUB-STEP REPEAT: Multiple triggers within this step
                 // ═══════════════════════════════════════════════════════════════════
                 val triggersCount = TICS_PER_STEP / activeRepeatInterval
 
@@ -1244,6 +1768,11 @@ class PlaybackController(
                     val ticPosition = i * activeRepeatInterval
                     val retrigFrame = targetFrame + (ticPosition * framesPerTic)
 
+                    // Increment global retrig counter and calculate additive volume ramp
+                    trackState.repeatRetrigCount++
+                    val retrigVolume = (trackState.repeatBaseVolume + trackState.repeatRetrigCount * rampDelta)
+                        .coerceIn(0.0f, 1.0f)
+
                     audioEngine.scheduleNote(
                         targetFrame = retrigFrame,
                         note = retrigNote,
@@ -1252,44 +1781,39 @@ class PlaybackController(
                         volume = retrigVolume,
                         pan = retrigPan,
                         project = project,
-                        startPointOverride = retrigStartPoint
+                        startPointOverride = retrigStartPoint,
+                        tableIdOverride = trackState.lastTableOverride
                     )
+                    logger.d(TAG, "🔁 retrig[${trackState.repeatRetrigCount}] vol=${"%.4f".format(retrigVolume)} " +
+                            "(base=${"%.4f".format(trackState.repeatBaseVolume)}, delta=$rampDelta)")
                 }
 
                 val isPersistent = !hasNote && trackState.hasActiveRepeat()
                 val modeLabel = if (isPersistent) "PERSISTENT" else "step"
-                logger.d(TAG, "🔁 REPEAT R${activeRepeatInterval.toString(16).uppercase().padStart(2, '0')} ($modeLabel): " +
-                        "$triggersCount triggers within step")
+                logger.d(TAG, "🔁 REPEAT ($modeLabel): ${triggersCount} triggers, interval=$activeRepeatInterval ticks, delta=$rampDelta")
             } else {
                 // ═══════════════════════════════════════════════════════════════════
-                // MULTI-STEP REPEAT (R0C+): One trigger every N steps
+                // MULTI-STEP REPEAT (interval > 12 ticks): Sparse triggers
                 // ═══════════════════════════════════════════════════════════════════
-                // Uses FRAME-BASED calculation for cross-phrase persistence!
-                // Triggers occur at frames: repeatStartFrame + k * triggerIntervalFrames
-                // where k = 1, 2, 3, ... (k=0 was the original note)
-
                 val triggerIntervalFrames = activeRepeatInterval * framesPerTic
                 val stepEndFrame = targetFrame + stepDuration
 
-                // For the step where REPEAT starts (with note), the note is already scheduled
-                if (hasNote && newRepeatValue > 0) {
-                    // Note already scheduled above, nothing more to do for this step
-                    // (First trigger is the note itself at repeatStartFrame)
-                    logger.d(TAG, "🔁 REPEAT R${activeRepeatInterval.toString(16).uppercase().padStart(2, '0')} (multi-step): " +
-                            "started at frame $targetFrame, interval = ${activeRepeatInterval / TICS_PER_STEP.toFloat()} steps")
+                if (hasNote && newRepeatTicInterval > 0) {
+                    logger.d(TAG, "🔁 REPEAT (multi-step): started, interval=$activeRepeatInterval ticks")
                 } else {
-                    // Calculate trigger points using absolute frames (works across phrases!)
-                    // Find the first trigger index k where repeatStartFrame + k*interval >= targetFrame
                     val framesSinceStart = targetFrame - trackState.repeatStartFrame
                     if (framesSinceStart >= 0) {
-                        // Find first trigger at or after targetFrame
                         val firstTriggerIndex = ((framesSinceStart + triggerIntervalFrames - 1) / triggerIntervalFrames).toInt()
                         var triggerFrame = trackState.repeatStartFrame + (firstTriggerIndex * triggerIntervalFrames)
 
-                        // Schedule all triggers that fall within this step's frame range
                         var triggersInStep = 0
                         while (triggerFrame < stepEndFrame) {
                             if (triggerFrame >= targetFrame) {
+                                // Increment global retrig counter and calculate additive volume ramp
+                                trackState.repeatRetrigCount++
+                                val retrigVolume = (trackState.repeatBaseVolume + trackState.repeatRetrigCount * rampDelta)
+                                    .coerceIn(0.0f, 1.0f)
+
                                 audioEngine.scheduleNote(
                                     targetFrame = triggerFrame,
                                     note = retrigNote,
@@ -1298,7 +1822,8 @@ class PlaybackController(
                                     volume = retrigVolume,
                                     pan = retrigPan,
                                     project = project,
-                                    startPointOverride = retrigStartPoint
+                                    startPointOverride = retrigStartPoint,
+                                    tableIdOverride = trackState.lastTableOverride
                                 )
                                 triggersInStep++
                             }
@@ -1306,9 +1831,7 @@ class PlaybackController(
                         }
 
                         if (triggersInStep > 0) {
-                            val phraseInfo = if (framesSinceStart > stepDuration * 16) " (cross-phrase!)" else ""
-                            logger.d(TAG, "🔁 REPEAT R${activeRepeatInterval.toString(16).uppercase().padStart(2, '0')} (PERSISTENT multi-step)$phraseInfo: " +
-                                    "$triggersInStep trigger(s)")
+                            logger.d(TAG, "🔁 REPEAT (PERSISTENT multi-step): $triggersInStep trigger(s)")
                         }
                     }
                 }
@@ -1337,15 +1860,15 @@ class PlaybackController(
         // Find which column has ARPEGGIO effect (if any) and its value
         var newArpColumn = 0
         var newArpValue = 0
-        if (step.fx1Type == EffectProcessor.FX_ARPEGGIO) {
+        if (effectiveStep.fx1Type == EffectProcessor.FX_ARPEGGIO) {
             newArpColumn = 1
-            newArpValue = step.fx1Value
-        } else if (step.fx2Type == EffectProcessor.FX_ARPEGGIO) {
+            newArpValue = effectiveStep.fx1Value
+        } else if (effectiveStep.fx2Type == EffectProcessor.FX_ARPEGGIO) {
             newArpColumn = 2
-            newArpValue = step.fx2Value
-        } else if (step.fx3Type == EffectProcessor.FX_ARPEGGIO) {
+            newArpValue = effectiveStep.fx2Value
+        } else if (effectiveStep.fx3Type == EffectProcessor.FX_ARPEGGIO) {
             newArpColumn = 3
-            newArpValue = step.fx3Value
+            newArpValue = effectiveStep.fx3Value
         }
 
         // ARP00 cancels arpeggio (explicit cancellation)
@@ -1382,12 +1905,28 @@ class PlaybackController(
                 trackState = trackState,
                 project = project,
                 hasNote = hasNote,
-                step = step,
+                step = effectiveStep,
                 params = params,
                 transposeSemitones = transposeSemitones,
                 finalVolume = finalVolume,
                 finalPan = instrumentPan
             )
+        }
+
+        // Update per-column FX memory for RND (stores "previously active" FX per column)
+        // Only store real effects, not meta-effects (RND, RNL, CHA, NONE)
+        val metaEffects = setOf(EffectProcessor.FX_NONE, EffectProcessor.FX_RND, EffectProcessor.FX_RNL, EffectProcessor.FX_CHA)
+        for (col in 1..3) {
+            val (fxType, fxValue) = when (col) {
+                1 -> step.fx1Type to step.fx1Value
+                2 -> step.fx2Type to step.fx2Value
+                3 -> step.fx3Type to step.fx3Value
+                else -> continue
+            }
+            if (fxType !in metaEffects) {
+                trackState.lastColFxType[col] = fxType
+                trackState.lastColFxValue[col] = fxValue
+            }
         }
 
         return ScheduleStepResult(noteScheduled = noteScheduled, hopTriggered = hopTriggered)
@@ -1500,7 +2039,8 @@ class PlaybackController(
                         volume = arpVolume,
                         pan = arpPan,
                         project = project,
-                        startPointOverride = startPoint
+                        startPointOverride = startPoint,
+                        tableIdOverride = trackState.lastTableOverride
                     )
                     notesScheduled++
                 }
