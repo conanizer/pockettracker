@@ -317,20 +317,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             clipboardManager = clipboardManager,
             inputController = inputController,
             stateObserver = stateObserver
-        ).apply {
-            // Initialize with test project data
-            project = Project().apply {
-                // Add some test notes to phrase 0
-                phrases[0].steps[0].note = Note.fromString("C-4")
-                phrases[0].steps[0].instrument = 3
-                phrases[0].steps[4].note = Note.fromString("E-4")
-                phrases[0].steps[4].instrument = 3
-                phrases[0].steps[8].note = Note.fromString("G-4")
-                phrases[0].steps[8].instrument = 3
-                phrases[0].steps[12].note = Note.fromString("C-5")
-                phrases[0].steps[12].instrument = 3
-            }
-        }
+        )
     }
 
     // NOTE: GenericInputHandler has been migrated to InputController (Phase 4)
