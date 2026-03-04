@@ -69,6 +69,10 @@ android {
 dependencies {
     //noinspection UseTomlInstead
     implementation("com.google.oboe:oboe:1.10.0")
+
+    val acraVersion = "5.11.3"
+    implementation("ch.acra:acra-mail:$acraVersion")
+    implementation("ch.acra:acra-dialog:$acraVersion")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
