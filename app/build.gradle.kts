@@ -29,12 +29,21 @@ android {
     val gitCommitCount = "git rev-list --count HEAD".runCommand()?.trim()?.toIntOrNull() ?: 1
     val gitShortHash = "git rev-parse --short HEAD".runCommand()?.trim() ?: "unknown"
 
+    val localProps = java.util.Properties()
+    val localPropsFile = rootProject.file("local.properties")
+    if (localPropsFile.exists()) localProps.load(localPropsFile.inputStream())
+    val githubToken: String = localProps.getProperty("github.token", "")
+
     defaultConfig {
         applicationId = "com.example.pockettracker"
         minSdk = 24
         targetSdk = 34
         versionCode = gitCommitCount
         versionName = "0.9.$gitCommitCount ($gitShortHash)"
+
+        buildConfigField("String", "GITHUB_TOKEN", "\"$githubToken\"")
+        buildConfigField("String", "GITHUB_REPO_OWNER", "\"conanizer\"")
+        buildConfigField("String", "GITHUB_REPO_NAME", "\"pockettracker.\"")
 
         ndk {
             // Only build for 64-bit architectures (Oboe prefab doesn't support 32-bit well)
@@ -78,6 +87,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -86,8 +96,7 @@ dependencies {
     implementation("com.google.oboe:oboe:1.10.0")
 
     val acraVersion = "5.11.3"
-    implementation("ch.acra:acra-mail:$acraVersion")
-    implementation("ch.acra:acra-dialog:$acraVersion")
+    implementation("ch.acra:acra-core:$acraVersion")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
