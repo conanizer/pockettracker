@@ -1,4 +1,5 @@
 import java.io.File
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -29,10 +30,10 @@ android {
     val gitCommitCount = "git rev-list --count HEAD".runCommand()?.trim()?.toIntOrNull() ?: 1
     val gitShortHash = "git rev-parse --short HEAD".runCommand()?.trim() ?: "unknown"
 
-    val localProps = java.util.Properties()
+    val localProps = Properties()
     val localPropsFile = rootProject.file("local.properties")
     if (localPropsFile.exists()) localProps.load(localPropsFile.inputStream())
-    val githubToken: String = localProps.getProperty("github.token", "")
+    val githubToken: String = localProps.getProperty("github.token=", "")
 
     defaultConfig {
         applicationId = "com.example.pockettracker"
