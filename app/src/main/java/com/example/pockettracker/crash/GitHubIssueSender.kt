@@ -1,6 +1,7 @@
 package com.example.pockettracker.crash
 
 import android.content.Context
+import org.acra.ReportField
 import org.acra.data.CrashReportData
 import org.acra.sender.ReportSender
 import java.net.HttpURLConnection
@@ -15,14 +16,14 @@ class GitHubIssueSender(
     override fun send(context: Context, report: CrashReportData) {
         if (token.isBlank()) return  // No token configured (e.g. dev build without local.properties)
 
-        val stackTrace = report.getString("STACK_TRACE") ?: "No stack trace"
-        val appVersion = report.getString("APP_VERSION_NAME") ?: "unknown"
-        val androidVersion = report.getString("ANDROID_VERSION") ?: "unknown"
-        val phoneModel = report.getString("PHONE_MODEL") ?: "unknown"
-        val brand = report.getString("BRAND") ?: "unknown"
-        val totalMem = report.getString("TOTAL_MEM_SIZE") ?: "unknown"
-        val availMem = report.getString("AVAILABLE_MEM_SIZE") ?: "unknown"
-        val customData = report.getString("CUSTOM_DATA") ?: ""
+        val stackTrace = report.getString(ReportField.STACK_TRACE) ?: "No stack trace"
+        val appVersion = report.getString(ReportField.APP_VERSION_NAME) ?: "unknown"
+        val androidVersion = report.getString(ReportField.ANDROID_VERSION) ?: "unknown"
+        val phoneModel = report.getString(ReportField.PHONE_MODEL) ?: "unknown"
+        val brand = report.getString(ReportField.BRAND) ?: "unknown"
+        val totalMem = report.getString(ReportField.TOTAL_MEM_SIZE) ?: "unknown"
+        val availMem = report.getString(ReportField.AVAILABLE_MEM_SIZE) ?: "unknown"
+        val customData = report.getString(ReportField.CUSTOM_DATA) ?: ""
 
         val title = buildIssueTitle(stackTrace)
         val body = buildIssueBody(
