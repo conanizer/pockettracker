@@ -1,9 +1,22 @@
+import java.io.File
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("org.jetbrains.kotlin.plugin.serialization") version "1.9.0"
 }
+
+fun String.runCommand(workingDir: File = rootDir): String? =
+    ProcessBuilder(split(" "))
+        .directory(workingDir)
+        .redirectErrorStream(true)
+        .start()
+        .inputStream
+        .bufferedReader()
+        .readText()
+        .takeIf { it.isNotBlank() }
 
 android {
     namespace = "com.example.pockettracker"
@@ -14,12 +27,24 @@ android {
         prefab = true
     }
 
+    val gitCommitCount = "git rev-list --count HEAD".runCommand()?.trim()?.toIntOrNull() ?: 1
+    val gitShortHash = "git rev-parse --short HEAD".runCommand()?.trim() ?: "unknown"
+
+    val localProps = Properties()
+    val localPropsFile = rootProject.file("local.properties")
+    if (localPropsFile.exists()) localProps.load(localPropsFile.inputStream())
+    val githubToken: String = localProps.getProperty("github.token=", "")
+
     defaultConfig {
         applicationId = "com.example.pockettracker"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = gitCommitCount
+        versionName = "0.9.$gitCommitCount ($gitShortHash)"
+
+        buildConfigField("String", "GITHUB_TOKEN", "\"$githubToken\"")
+        buildConfigField("String", "GITHUB_REPO_OWNER", "\"conanizer\"")
+        buildConfigField("String", "GITHUB_REPO_NAME", "\"pockettracker.\"")
 
         ndk {
             // Only build for 64-bit architectures (Oboe prefab doesn't support 32-bit well)
@@ -63,12 +88,16 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
 dependencies {
     //noinspection UseTomlInstead
     implementation("com.google.oboe:oboe:1.10.0")
+
+    val acraVersion = "5.11.3"
+    implementation("ch.acra:acra-core:$acraVersion")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)

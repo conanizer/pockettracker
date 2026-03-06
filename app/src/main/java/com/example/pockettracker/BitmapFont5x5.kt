@@ -11,7 +11,7 @@ package com.example.pockettracker
 
 internal val FONT_5X5 = mapOf(
     // NUMBERS 0-9
-    '0' to byteArrayOf(0b11111, 0b10001, 0b10001, 0b10001, 0b11111),
+    '0' to byteArrayOf(0b11111, 0b10001, 0b10101, 0b10001, 0b11111),
     '1' to byteArrayOf(0b01100, 0b10100, 0b00100, 0b00100, 0b11111),
     '2' to byteArrayOf(0b11110, 0b00001, 0b00110, 0b01000, 0b11111),
     '3' to byteArrayOf(0b11111, 0b00001, 0b01111, 0b00001, 0b11111),
@@ -85,6 +85,7 @@ internal val FONT_5X5 = mapOf(
     '.' to byteArrayOf(0b00000, 0b00000, 0b00000, 0b00000, 0b00100),
     ':' to byteArrayOf(0b00000, 0b00100, 0b00000, 0b00100, 0b00000),
     '/' to byteArrayOf(0b00001, 0b00010, 0b00100, 0b01000, 0b10000),
+    '%' to byteArrayOf(0b10001, 0b00010, 0b00100, 0b01000, 0b10001),
     '+' to byteArrayOf(0b00100, 0b00100, 0b11111, 0b00100, 0b00100),
     '↑' to byteArrayOf(0b00000, 0b00100, 0b01110, 0b11111, 0b00000),
     '↓' to byteArrayOf(0b00000, 0b11111, 0b01110, 0b00100, 0b00000),
@@ -94,10 +95,12 @@ internal val FONT_5X5 = mapOf(
     '>' to byteArrayOf(0b01000, 0b00100, 0b00010, 0b00100, 0b01000),
     '=' to byteArrayOf(0b00000, 0b11111, 0b00000, 0b11111, 0b00000),
     '[' to byteArrayOf(0b00110, 0b00100, 0b00100, 0b00100, 0b00110),
-    ']' to byteArrayOf(0b01100, 0b00100, 0b00100, 0b00100, 0b01100),
-    '%' to byteArrayOf(0b10001, 0b00010, 0b00100, 0b01000, 0b10001),
-    '?' to byteArrayOf(0b01110, 0b00010, 0b00100, 0b00000, 0b00100),
+    '(' to byteArrayOf(0b00010, 0b00100, 0b00100, 0b00100, 0b00010),
     '!' to byteArrayOf(0b00100, 0b00100, 0b00100, 0b00000, 0b00100),
+    '?' to byteArrayOf(0b01110, 0b00010, 0b00100, 0b00000, 0b00100),
+    ']' to byteArrayOf(0b01100, 0b00100, 0b00100, 0b00100, 0b01100),
+    ')' to byteArrayOf(0b01000, 0b00100, 0b00100, 0b00100, 0b01000),
+    '|' to byteArrayOf(0b00100, 0b00100, 0b00100, 0b00100, 0b00100),
+    '"' to byteArrayOf(0b01010, 0b00000, 0b00000, 0b00000, 0b00000),
     ' ' to byteArrayOf(0b00000, 0b00000, 0b00000, 0b00000, 0b00000), // EMPTY
-
 )
