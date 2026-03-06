@@ -84,16 +84,41 @@ fun File.toFileInfo(): FileInfo = FileInfo(
  * 4. Passes the layout configuration to PocketTrackerApp
  */
 class MainActivity : ComponentActivity() {
+
+    /** Hide status bar + navigation bar (immersive sticky). Called on create and focus regain.
+     *  Must be called AFTER setContent so the DecorView is attached (API 30+ requirement). */
+    private fun hideSystemBars() {
+        // API 30+ path: insetsController requires DecorView to be attached
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.decorView.post {
+                window.insetsController?.apply {
+                    hide(WindowInsets.Type.systemBars())
+                    systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = (
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                or View.SYSTEM_UI_FLAG_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            )
+        }
+    }
+
+    /** Re-apply immersive mode whenever the window regains focus (e.g. after a dialog). */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideSystemBars()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // SIMPLE: Just set the window to fullscreen
-        // This should work on most Android gaming devices
         requestWindowFeature(Window.FEATURE_NO_TITLE)
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_FULLSCREEN,
-            WindowManager.LayoutParams.FLAG_FULLSCREEN
-        )
 
         // Your existing code...
         val deviceAdapter = DeviceAdapter(this)
@@ -113,6 +138,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        // DecorView is now attached — safe to call on all API levels
+        hideSystemBars()
     }
 }
 

@@ -155,16 +155,19 @@ fun PixelPerfectTracker(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // Compute integer scale from DrawScope.size (available in draw phase, no BoxWithConstraints needed)
+        // Compute integer scale from DrawScope.size (available in draw phase, no BoxWithConstraints needed).
+        // Add 1px tolerance before dividing: dp↔px float conversion can lose up to 1px
+        // (e.g. 1280px → 487.619dp → 1279.999px → 1279), which would drop scale by one level.
         val screenWidthPx = size.width.toInt()
         val screenHeightPx = size.height.toInt()
-        val scaleX = screenWidthPx / DESIGN_WIDTH_PX
-        val scaleY = screenHeightPx / DESIGN_HEIGHT_PX
+        val scaleX = (screenWidthPx + 1) / DESIGN_WIDTH_PX
+        val scaleY = (screenHeightPx + 1) / DESIGN_HEIGHT_PX
         val scale = min(scaleX, scaleY).coerceAtLeast(1)
         val renderWidth = DESIGN_WIDTH_PX * scale
         val renderHeight = DESIGN_HEIGHT_PX * scale
-        val offsetX = (screenWidthPx - renderWidth) / 2f
-        val offsetY = (screenHeightPx - renderHeight) / 2f
+        // Clamp to 0: if canvas is 1px narrower than renderWidth (due to rounding), avoid negative offset
+        val offsetX = maxOf(0f, (screenWidthPx - renderWidth) / 2f)
+        val offsetY = maxOf(0f, (screenHeightPx - renderHeight) / 2f)
 
         translate(offsetX, offsetY) {
             with(layout) {
