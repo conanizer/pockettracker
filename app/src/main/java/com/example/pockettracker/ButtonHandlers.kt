@@ -87,7 +87,13 @@ data class ButtonHandlers(
     val onSelectR: () -> Unit,      // SELECT+R: Create new folder
 
     // L+R combination for exiting selection mode
-    val onLR: () -> Unit            // L+R: Exit selection mode (fixes L+A cut combo)
+    val onLR: () -> Unit,           // L+R: Exit selection mode (fixes L+A cut combo)
+
+    // Double-tap A (A,A): insert next unused chain/phrase/note
+    val onAA: () -> Unit,           // A,A: Insert next unused item
+
+    // L+B+A: Clone current item to next unused slot
+    val onLBA: () -> Unit           // L+B+A: Clone chain/phrase to next unused ID
 )
 
 /**
@@ -492,6 +498,14 @@ class InputMapper(
             }
         }
 
+        // L+B+A: Clone (A pressed while both L and B are held)
+        // Must be checked BEFORE the L+button block to avoid firing onLA (paste) instead
+        if (isLPressed && isBPressed && !isRPressed && button == VirtualButton.A) {
+            if (logInput) Log.d(TAG, "L+B+A (clone)")
+            buttonHandlers.onLBA()
+            return
+        }
+
         // L + button combinations
         if (isLPressed && !isRPressed) {
             if (logInput) Log.d(TAG, "L is held, checking L+button combo for button=$button")
@@ -611,7 +625,7 @@ class InputMapper(
                 // Double-tap detected!
                 if (logInput) Log.d(TAG, "A,A (insert next unused)")
                 lastAPress = 0  // Reset to prevent triple-tap
-                // TODO: Add handler for A,A (insert next unused)
+                buttonHandlers.onAA()
                 return
             }
             lastAPress = now

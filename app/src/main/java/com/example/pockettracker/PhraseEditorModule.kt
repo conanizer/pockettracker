@@ -145,13 +145,17 @@ class PhraseEditorModule : TrackerModule {
         val textY = dataRowY + TEXT_PADDING
 
         // COLUMN 0: STEP NUMBER
+        // Rows 0, 4, 8, 12 (quarter notes) are drawn brighter for visual accent
         drawBitmapText(
             text = index.toString(16).uppercase(),
             x = stepX,
             y = textY,
             scale = scale,
-            color = if (index == state.cursorRow && state.cursorColumn == 0)
-                Color.Yellow else Color(0xFF666666),
+            color = when {
+                index == state.cursorRow && state.cursorColumn == 0 -> Color.Yellow
+                index % 4 == 0 -> Color(0xFFAAAAAA)  // Bright accent on beat 1 of each bar
+                else -> Color(0xFF666666)
+            },
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
@@ -383,6 +387,7 @@ class PhraseEditorModule : TrackerModule {
         val step = state.phrase.steps[state.cursorRow]
         var lastEditedNote: Note? = null
         var lastEditedVolume: Int? = null
+        var lastEditedInstrument: Int? = null
 
         when (action) {
             is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
@@ -401,6 +406,7 @@ class PhraseEditorModule : TrackerModule {
                         // Instrument column
                         step.instrument = action.value
                         instrumentController.lastEditedInstrument = action.value
+                        lastEditedInstrument = action.value
                     }
                     4 -> {
                         // FX1 Type: Convert index to effect code
@@ -459,7 +465,8 @@ class PhraseEditorModule : TrackerModule {
         return InputResult(
             modified = action !is com.example.pockettracker.core.logic.InputAction.NONE,
             lastEditedNote = lastEditedNote,
-            lastEditedVolume = lastEditedVolume
+            lastEditedVolume = lastEditedVolume,
+            lastEditedInstrument = lastEditedInstrument
         )
     }
 
@@ -469,7 +476,8 @@ class PhraseEditorModule : TrackerModule {
     data class InputResult(
         val modified: Boolean,
         val lastEditedNote: Note? = null,
-        val lastEditedVolume: Int? = null
+        val lastEditedVolume: Int? = null,
+        val lastEditedInstrument: Int? = null
     )
 }
 

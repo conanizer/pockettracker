@@ -83,6 +83,10 @@ fun File.toFileInfo(): FileInfo = FileInfo(
  * 3. Logs the detection results so we can see them in Logcat
  * 4. Passes the layout configuration to PocketTrackerApp
  */
+/** Tracks where a single A-press inserted into an empty cell (screen, row, col).
+ *  Used by A+A to allow "next unused" only on the same cell the first A just filled. */
+private data class InsertPosition(val screen: ScreenType, val row: Int, val col: Int)
+
 class MainActivity : ComponentActivity() {
 
     /** Hide status bar + navigation bar (immersive sticky). Called on create and focus regain.
@@ -324,8 +328,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // Resample dialog state (triggered by double-tap A in SONG selection mode)
     var showResampleDialog by remember { mutableStateOf(false) }
     var resampleDialogCursor by remember { mutableIntStateOf(0) }  // 0=YES, 1=NO
-    var lastSongATapTime by remember { mutableLongStateOf(0L) }
 
+    // Tracks where the last single A-press inserted into an empty cell (screen, row, col)
+    // Used by A+A to decide whether to insert next-unused (only allowed on same cell)
+    var lastAInsertPosition by remember { mutableStateOf<InsertPosition?>(null) }
     // InputController: Handles button input
     // PHASE 4: Extracted from MainActivity to separate business logic
     // PHASE 5: Uses StateObserver for UI reactivity
@@ -487,6 +493,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     }
     var previousScreen by remember { mutableStateOf(ScreenType.PROJECT) }
 
+    // Reset note/volume combo when leaving PHRASE screen
+    // (instrument is kept so quick-insert uses the last instrument you worked with)
+    var wasPhraseScreen by remember { mutableStateOf(false) }
+    LaunchedEffect(trackerController.currentScreen) {
+        val isPhrase = trackerController.currentScreen == ScreenType.PHRASE
+        if (wasPhraseScreen && !isPhrase) {
+            trackerController.lastEditedNote = com.example.pockettracker.core.data.Note.fromMidi(60) // C-4
+            trackerController.lastEditedVolume = 0xFF
+        }
+        wasPhraseScreen = isPhrase
+    }
 
     // Initialize file browser item list when directory changes
     LaunchedEffect(fileBrowserState.currentDirectory, fileBrowserState.sortMode) {
@@ -670,8 +687,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 val action = handlerFunction(context)
                 val result = phraseEditorModule.handleInput(phraseState, action, instrumentController)
                 if (result.modified) {
-                    result.lastEditedNote?.let { trackerController.lastEditedNote = it }
-                    result.lastEditedVolume?.let { trackerController.lastEditedVolume = it }
+                    // When any of note/vol/inst changes, capture the whole step combo
+                    // so quick-insert always reflects what was actually on that step
+                    if (result.lastEditedNote != null || result.lastEditedVolume != null || result.lastEditedInstrument != null) {
+                        val step = trackerController.project.phrases[trackerController.currentPhrase].steps[trackerController.cursorRow]
+                        if (step.note != com.example.pockettracker.core.data.Note.EMPTY) {
+                            trackerController.lastEditedNote = step.note
+                            trackerController.lastEditedVolume = step.volume
+                            trackerController.lastEditedInstrument = step.instrument
+                        }
+                    }
                     trackerController.projectVersion++
                 }
             }
@@ -1094,22 +1119,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     return@buttonA
                 }
 
-                // ── Double-tap A on SONG+selection → show resample dialog ──
-                if (trackerController.currentScreen == ScreenType.SONG
-                    && trackerController.inputController.isSelectionModeActive()
-                ) {
-                    val now = System.currentTimeMillis()
-                    if (now - lastSongATapTime < 500L) {
-                        // Double tap confirmed
-                        showResampleDialog = true
-                        resampleDialogCursor = 0
-                        lastSongATapTime = 0L
-                        return@buttonA
-                    }
-                    lastSongATapTime = now
-                    // Fall through to normal SONG A handling (first tap = no-op or insert)
-                }
-
                 // Read directly from trackerController to avoid stale captured values
                 when (trackerController.currentScreen) {
                     // FILE BROWSER: Open folder, load file, or confirm actions
@@ -1424,7 +1433,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             chain.phraseRefs[trackerController.cursorRow] = trackerController.lastEditedPhrase
                             chain.transposeValues[trackerController.cursorRow] = trackerController.lastEditedTranspose
                             trackerController.projectVersion++
+                            lastAInsertPosition = InsertPosition(ScreenType.CHAIN, trackerController.cursorRow, trackerController.cursorColumn)
                             Log.d("QuickInsert", "Inserted chain row: phrase=${trackerController.lastEditedPhrase}, transpose=${trackerController.lastEditedTranspose}")
+                        } else {
+                            lastAInsertPosition = null
                         }
                     }
 
@@ -1439,7 +1451,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             // Insert last-used chain
                             track.chainRefs[trackerController.cursorRow] = trackerController.lastEditedChain
                             trackerController.projectVersion++
+                            lastAInsertPosition = InsertPosition(ScreenType.SONG, trackerController.cursorRow, trackerController.cursorColumn)
                             Log.d("QuickInsert", "Inserted song chain: chain=${trackerController.lastEditedChain} at track=${trackerController.cursorColumn-1}, row=${trackerController.cursorRow}")
+                        } else {
+                            lastAInsertPosition = null
                         }
                     }
 
@@ -2401,6 +2416,126 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                         statusMessage = "",
                         statusSuccess = true
                     )
+                }
+            },
+
+// ─────────────────────────────────────────────────────────────────────
+// A,A: Insert next unused chain/phrase/note
+// ─────────────────────────────────────────────────────────────────────
+            onAA = { run aaHandler@{
+                val currentScreen = trackerController.currentScreen
+
+                // Song + selection mode → show resample dialog (no position check needed)
+                if (currentScreen == ScreenType.SONG && trackerController.inputController.isSelectionModeActive()) {
+                    showResampleDialog = true
+                    resampleDialogCursor = 0
+                    return@aaHandler
+                }
+
+                // For SONG/CHAIN/PHRASE: only act if the previous single-A press
+                // inserted into an empty cell at the current position
+                val currentPos = InsertPosition(currentScreen, trackerController.cursorRow, trackerController.cursorColumn)
+                if (lastAInsertPosition != currentPos) return@aaHandler
+                lastAInsertPosition = null  // consume the position
+
+                when (currentScreen) {
+                    ScreenType.SONG -> {
+                        val track = trackerController.project.tracks[trackerController.cursorColumn - 1]
+                        // The first-A value is already in the cell; find next unused (won't include it
+                        // since it's already referenced in the song)
+                        val usedChains = trackerController.project.tracks
+                            .flatMap { it.chainRefs }
+                            .filter { it != -1 }
+                            .toSet()
+                        val nextUnused = (0..255).firstOrNull { it !in usedChains }
+                        if (nextUnused != null) {
+                            track.chainRefs[trackerController.cursorRow] = nextUnused
+                            trackerController.lastEditedChain = nextUnused
+                            trackerController.projectVersion++
+                            Log.d("AA", "Inserted next unused chain $nextUnused")
+                        }
+                    }
+                    ScreenType.CHAIN -> {
+                        val chain = trackerController.project.chains[trackerController.currentChain]
+                        // First-A already filled the slot; find next phrase not in chain
+                        val usedPhrases = chain.phraseRefs.filter { it != -1 }.toSet()
+                        val nextUnused = (0..255).firstOrNull { it !in usedPhrases }
+                        if (nextUnused != null) {
+                            chain.phraseRefs[trackerController.cursorRow] = nextUnused
+                            chain.transposeValues[trackerController.cursorRow] = trackerController.lastEditedTranspose
+                            trackerController.lastEditedPhrase = nextUnused
+                            trackerController.projectVersion++
+                            Log.d("AA", "Inserted next unused phrase $nextUnused")
+                        }
+                    }
+                    else -> {}
+                }
+            } },
+
+// ─────────────────────────────────────────────────────────────────────
+// L+B+A: Clone current item to next unused slot
+// ─────────────────────────────────────────────────────────────────────
+            onLBA = {
+                when (trackerController.currentScreen) {
+                    ScreenType.SONG -> {
+                        val track = trackerController.project.tracks[trackerController.cursorColumn - 1]
+                        val currentChainId = track.chainRefs.getOrNull(trackerController.cursorRow) ?: -1
+                        if (currentChainId != -1) {
+                            val usedChains = trackerController.project.tracks
+                                .flatMap { it.chainRefs }
+                                .filter { it != -1 }
+                                .toSet()
+                            val nextUnused = (0..255).firstOrNull { it !in usedChains }
+                            if (nextUnused != null) {
+                                val src = trackerController.project.chains[currentChainId]
+                                val dst = trackerController.project.chains[nextUnused]
+                                src.phraseRefs.copyInto(dst.phraseRefs)
+                                src.transposeValues.copyInto(dst.transposeValues)
+                                track.chainRefs[trackerController.cursorRow] = nextUnused
+                                trackerController.lastEditedChain = nextUnused
+                                trackerController.projectVersion++
+                                Log.d("LBA", "Cloned chain $currentChainId → $nextUnused")
+                            }
+                        }
+                    }
+                    ScreenType.CHAIN -> {
+                        val chain = trackerController.project.chains[trackerController.currentChain]
+                        val currentPhraseId = chain.phraseRefs[trackerController.cursorRow]
+                        if (currentPhraseId != -1) {
+                            val usedPhrases = chain.phraseRefs.filter { it != -1 }.toSet()
+                            val nextUnused = (0..255).firstOrNull { it !in usedPhrases }
+                            if (nextUnused != null) {
+                                val src = trackerController.project.phrases[currentPhraseId]
+                                val dst = trackerController.project.phrases[nextUnused]
+                                src.steps.forEachIndexed { i, step -> dst.steps[i] = step.copy() }
+                                chain.phraseRefs[trackerController.cursorRow] = nextUnused
+                                trackerController.lastEditedPhrase = nextUnused
+                                trackerController.projectVersion++
+                                Log.d("LBA", "Cloned phrase $currentPhraseId → $nextUnused")
+                            }
+                        }
+                    }
+                    ScreenType.PHRASE -> {
+                        val srcPhraseId = trackerController.currentPhrase
+                        val usedPhrases = trackerController.project.chains
+                            .flatMap { it.phraseRefs.toList() }
+                            .filter { it != -1 }
+                            .toSet()
+                        val nextUnused = (0..255).firstOrNull { it !in usedPhrases }
+                        if (nextUnused != null) {
+                            val src = trackerController.project.phrases[srcPhraseId]
+                            val dst = trackerController.project.phrases[nextUnused]
+                            src.steps.forEachIndexed { i, step -> dst.steps[i] = step.copy() }
+                            trackerController.currentPhrase = nextUnused
+                            trackerController.projectVersion++
+                            Log.d("LBA", "Cloned phrase $srcPhraseId → $nextUnused, navigating there")
+                        }
+                    }
+                    else -> {}
+                }
+                // Always exit selection mode after cloning
+                if (trackerController.inputController.isSelectionModeActive()) {
+                    trackerController.inputController.exitSelectionMode()
                 }
             },
 

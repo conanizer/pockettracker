@@ -228,7 +228,7 @@ class SongEditorModule : TrackerModule {
             x = stepX,
             y = textY,
             scale = scale,
-            color = Color(0xFF666666),  // Always gray (read-only, never highlighted)
+            color = if (absoluteRow % 4 == 0) Color(0xFFAAAAAA) else Color(0xFF666666),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )

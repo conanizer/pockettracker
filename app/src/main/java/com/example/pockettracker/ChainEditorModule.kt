@@ -207,11 +207,11 @@ class ChainEditorModule : TrackerModule {
             x = stepX,
             y = textY,
             scale = scale,
-            // Highlight if cursor is on this row and STEP column
-            color = if (index == state.cursorRow && state.cursorColumn == 0)
-                Color.Yellow
-            else
-                Color(0xFF666666),  // Gray
+            color = when {
+                index == state.cursorRow && state.cursorColumn == 0 -> Color.Yellow
+                index % 4 == 0 -> Color(0xFFAAAAAA)  // Bright accent on quarter rows
+                else -> Color(0xFF666666)
+            },
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
