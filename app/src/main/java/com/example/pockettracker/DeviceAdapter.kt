@@ -6,6 +6,7 @@ package com.example.pockettracker
 
 import android.content.Context
 import android.content.res.Configuration
+import android.os.Build
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.graphics.Point
@@ -44,6 +45,26 @@ class DeviceAdapter(private val context: Context) {
         val deviceWidth: Int = 0,
         val deviceHeight: Int = 0
     )
+
+    /**
+     * Returns (width, height) for the current window/screen in the current orientation.
+     * Uses the modern WindowMetrics API on API 30+ to avoid the deprecated
+     * Display.getRealSize() which can return stale or incorrect values on Android 15.
+     */
+    private fun getDeviceDimensions(): Pair<Int, Int> {
+        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val bounds = windowManager.currentWindowMetrics.bounds
+            Pair(bounds.width(), bounds.height())
+        } else {
+            @Suppress("DEPRECATION")
+            val display = windowManager.defaultDisplay
+            val realSize = Point()
+            @Suppress("DEPRECATION")
+            display.getRealSize(realSize)
+            Pair(realSize.x, realSize.y)
+        }
+    }
 
     private fun hasPhysicalGameButtons(): Boolean {
         val deviceIds = InputDevice.getDeviceIds()
@@ -93,20 +114,7 @@ class DeviceAdapter(private val context: Context) {
     fun calculateLayout(): LayoutConfig {
         val hasButtons = hasPhysicalGameButtons()
 
-        // Get the real display size (not affected by system UI)
-        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val display = windowManager.defaultDisplay
-        val realSize = Point()
-        display.getRealSize(realSize)
-
-        val deviceWidth = realSize.x
-        val deviceHeight = realSize.y
-
-        // Alternative: Use DisplayMetrics with a different method
-        // val displayMetrics = DisplayMetrics()
-        // display.getRealMetrics(displayMetrics)
-        // val deviceWidth = displayMetrics.widthPixels
-        // val deviceHeight = displayMetrics.heightPixels
+        val (deviceWidth, deviceHeight) = getDeviceDimensions()
 
         android.util.Log.d("DeviceAdapter", "Device PHYSICAL screen: ${deviceWidth}×${deviceHeight}")
 
@@ -146,12 +154,7 @@ class DeviceAdapter(private val context: Context) {
 
     /** Calculate layout for a forced mode (used when user overrides auto-detection). */
     fun calculateLayout(mode: LayoutMode): LayoutConfig {
-        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val display = windowManager.defaultDisplay
-        val realSize = Point()
-        display.getRealSize(realSize)
-        val deviceWidth = realSize.x
-        val deviceHeight = realSize.y
+        val (deviceWidth, deviceHeight) = getDeviceDimensions()
 
         return when (mode) {
             LayoutMode.FULL -> {
