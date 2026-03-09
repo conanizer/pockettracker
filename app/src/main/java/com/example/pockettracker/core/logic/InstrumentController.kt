@@ -5,6 +5,9 @@ import com.example.pockettracker.core.data.Note
 import com.example.pockettracker.core.data.Project
 import com.example.pockettracker.core.audio.AudioEngine
 import com.example.pockettracker.core.logging.ILogger
+import com.example.pockettracker.core.media.IVideoAudioExtractor
+import com.example.pockettracker.core.storage.IFileSystem
+import com.example.pockettracker.core.storage.WavWriter
 
 /**
  * InstrumentController
@@ -161,6 +164,55 @@ class InstrumentController(
             logger.e(TAG, "❌ Sample loading failed")
             LoadResult.Error("Failed to load WAV file")
         }
+    }
+
+    /**
+     * Extract audio from a video file, save as WAV in the Samples directory,
+     * then load it into the current instrument — reusing the existing WAV pipeline.
+     *
+     * @param project      Project containing the instrument data
+     * @param videoPath    Absolute path to the video/audio container file
+     * @param extractor    Platform-specific audio extractor
+     * @param fileSystem   Platform file system for writing the WAV
+     * @return LoadResult indicating success or failure
+     */
+    fun loadSampleFromVideo(
+        project: Project,
+        videoPath: String,
+        extractor: IVideoAudioExtractor,
+        fileSystem: IFileSystem
+    ): LoadResult {
+        setStatus("Extracting audio...", success = true)
+        logger.d(TAG, "🎬 Extracting audio from video: $videoPath")
+
+        val result = extractor.extractAudio(videoPath)
+        if (result.isFailure) {
+            val msg = result.exceptionOrNull()?.message ?: "Unknown error"
+            setStatus("Extract failed: $msg", success = false)
+            logger.e(TAG, "❌ Video extraction failed: $msg")
+            return LoadResult.Error(msg)
+        }
+
+        val audio = result.getOrThrow()
+        logger.d(TAG, "✅ Extracted ${audio.samples.size} samples at ${audio.sampleRate}Hz (${audio.sourceFormat})")
+
+        // Save extracted audio as WAV in Samples/ so the existing load pipeline handles it
+        val baseName = videoPath.substringAfterLast('/').substringBeforeLast('.')
+        val wavFilename = "${baseName}_audio.wav"
+        val wavPath = "${fileSystem.getSamplesDirectory()}/$wavFilename"
+
+        setStatus("Saving WAV...", success = true)
+        val written = WavWriter.writeWavMono(fileSystem, wavPath, audio.samples, audio.sampleRate)
+        if (!written) {
+            setStatus("Failed to save WAV", success = false)
+            logger.e(TAG, "❌ Failed to write WAV: $wavPath")
+            return LoadResult.Error("Failed to write WAV file")
+        }
+
+        logger.d(TAG, "💾 WAV saved: $wavPath")
+
+        // Load the saved WAV through the normal pipeline (handles sample-rate compensation etc.)
+        return loadSampleFromFile(project, wavPath)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -49,8 +49,12 @@ class FileBrowserModule : TrackerModule {
         val COLOR_CURSOR = Color.Yellow
         val COLOR_FOLDER = Color(0xFF88CCFF)  // Light blue for folders
         val COLOR_FILE = Color(0xFFCCCCCC)    // Light gray for files
+        val COLOR_VIDEO = Color(0xFFFFBB55)   // Amber for video/audio container files
         val COLOR_PARENT = Color(0xFFFFAA88)  // Orange for ".."
         val COLOR_INACTIVE = Color(0xFF666666)
+
+        // Video/audio container extensions shown alongside WAV in instrument browser
+        val VIDEO_EXTENSIONS = listOf("mp4", "mkv", "webm", "3gp", "m4a", "mov")
         val COLOR_BACKGROUND = Color(0xFF0a0a0a)
     }
 
@@ -113,8 +117,17 @@ class FileBrowserModule : TrackerModule {
         val renameCursor: Int = 0,          // Character position in rename buffer
         val statusMessage: String = "",
         val statusSuccess: Boolean = true,
-        val fileExtension: String? = null   // Filter by extension (null = all files)
-    )
+        val fileExtension: String? = null,          // Single-extension filter (legacy)
+        val fileExtensions: List<String>? = null    // Multi-extension filter (null = all files)
+    ) {
+        /** Effective extension set: fileExtensions wins over fileExtension */
+        val activeExtensions: Set<String>?
+            get() = when {
+                fileExtensions != null -> fileExtensions.map { it.lowercase() }.toSet()
+                fileExtension != null  -> setOf(fileExtension.lowercase())
+                else                   -> null
+            }
+    }
 
     /**
      * Build item list from directory
@@ -122,9 +135,16 @@ class FileBrowserModule : TrackerModule {
      */
     fun buildItemList(
         directory: File,
-        fileExtension: String? = null,  // null = show all files
+        fileExtension: String? = null,          // null = show all files (single-ext legacy)
+        fileExtensions: List<String>? = null,   // multi-ext filter (wins over fileExtension)
         showHidden: Boolean = false
     ): List<BrowserItem> {
+        // Resolve effective extension set
+        val effectiveExtensions: Set<String>? = when {
+            fileExtensions != null -> fileExtensions.map { it.lowercase() }.toSet()
+            fileExtension != null  -> setOf(fileExtension.lowercase())
+            else                   -> null
+        }
         val items = mutableListOf<BrowserItem>()
 
         android.util.Log.d("FileBrowser", "=== Building item list ===")
@@ -159,8 +179,8 @@ class FileBrowserModule : TrackerModule {
             .filter { showHidden || !it.name.startsWith(".") }
             .also { android.util.Log.d("FileBrowser", "After hidden filter: ${it.size}") }
             .filter {
-                val match = fileExtension == null || it.extension.equals(fileExtension, ignoreCase = true)
-                android.util.Log.d("FileBrowser", "  File: ${it.name}, ext='${it.extension}', filter='$fileExtension', match=$match")
+                val match = effectiveExtensions == null || it.extension.lowercase() in effectiveExtensions
+                android.util.Log.d("FileBrowser", "  File: ${it.name}, ext='${it.extension}', filter='$effectiveExtensions', match=$match")
                 match
             }
             .sortedBy { it.name.lowercase() }
@@ -213,8 +233,8 @@ class FileBrowserModule : TrackerModule {
      */
     fun navigateToFolder(state: State, folder: File): State {
         android.util.Log.d("FileBrowser", ">>> NAVIGATING TO FOLDER: ${folder.absolutePath}")
-        android.util.Log.d("FileBrowser", ">>> Extension filter: ${state.fileExtension}")
-        val newItems = buildItemList(folder, state.fileExtension)
+        android.util.Log.d("FileBrowser", ">>> Extension filter: ${state.activeExtensions}")
+        val newItems = buildItemList(folder, state.fileExtension, state.fileExtensions)
         android.util.Log.d("FileBrowser", ">>> New items count: ${newItems.size}")
         return state.copy(
             currentDirectory = folder,
@@ -376,6 +396,8 @@ class FileBrowserModule : TrackerModule {
                 isCursor -> COLOR_CURSOR
                 item is BrowserItem.Parent -> COLOR_PARENT
                 item is BrowserItem.Folder -> COLOR_FOLDER
+                item is BrowserItem.FileItem &&
+                    item.extension.lowercase() in VIDEO_EXTENSIONS -> COLOR_VIDEO
                 item is BrowserItem.FileItem -> COLOR_FILE
                 else -> COLOR_INACTIVE
             }
