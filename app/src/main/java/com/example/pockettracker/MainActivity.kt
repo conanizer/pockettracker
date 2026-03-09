@@ -48,6 +48,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.example.pockettracker.platform.android.AndroidResourceLoader
 import com.example.pockettracker.platform.android.AndroidFileSystem
+import com.example.pockettracker.platform.android.AndroidVideoAudioExtractor
 import com.example.pockettracker.core.storage.FileInfo
 import com.example.pockettracker.core.storage.FileSortMode
 import java.io.File
@@ -258,6 +259,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // Step 2: Create platform-agnostic FileManager
     // ✅ No more Context dependency - fully portable!
     val fileManager = remember { FileManager(fileSystem) }
+
+    // Video audio extractor — Android implementation (MediaExtractor + MediaCodec)
+    val videoExtractor = remember { AndroidVideoAudioExtractor() }
 
     // ═══════════════════════════════════════════════════════════════════════
     // PLATFORM BACKENDS (Phase 5: Complete Portability)
@@ -524,7 +528,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     LaunchedEffect(fileBrowserState.currentDirectory, fileBrowserState.sortMode) {
         val items = fileBrowserModule.buildItemList(
             fileBrowserState.currentDirectory,
-            fileBrowserState.fileExtension
+            fileBrowserState.fileExtension,
+            fileBrowserState.fileExtensions
         )
         fileBrowserState = fileBrowserState.copy(
             items = fileBrowserModule.sortItems(items, fileBrowserState.sortMode)
@@ -1181,11 +1186,24 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                                 }
                                             }
                                             ScreenType.INSTRUMENT -> {
-                                                // Load WAV sample file using InstrumentController
-                                                val result = instrumentController.loadSampleFromFile(
-                                                    trackerController.project,
-                                                    item.file.absolutePath
-                                                )
+                                                val ext = item.file.extension.lowercase()
+                                                val result = if (ext == "wav") {
+                                                    // Direct WAV load
+                                                    instrumentController.loadSampleFromFile(
+                                                        trackerController.project,
+                                                        item.file.absolutePath
+                                                    )
+                                                } else if (videoExtractor.isSupportedVideo(item.file.absolutePath)) {
+                                                    // Extract audio from video → save as WAV → load
+                                                    instrumentController.loadSampleFromVideo(
+                                                        trackerController.project,
+                                                        item.file.absolutePath,
+                                                        videoExtractor,
+                                                        fileSystem
+                                                    )
+                                                } else {
+                                                    com.example.pockettracker.core.logic.LoadResult.Error("Unsupported format")
+                                                }
                                                 if (result is com.example.pockettracker.core.logic.LoadResult.Success) {
                                                     trackerController.projectVersion++
                                                     trackerController.currentScreen = previousScreen
@@ -1231,7 +1249,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                         // Refresh list
                                         val newItems = fileBrowserModule.buildItemList(
                                             fileBrowserState.currentDirectory,
-                                            fileBrowserState.fileExtension
+                                            fileBrowserState.fileExtension,
+                                            fileBrowserState.fileExtensions
                                         )
                                         val sortedItems = fileBrowserModule.sortItems(newItems, fileBrowserState.sortMode)
 
@@ -1395,17 +1414,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
 
                                     previousScreen = trackerController.currentScreen
                                     trackerController.currentScreen = ScreenType.FILE_BROWSER
-                                    // Reset file browser state with correct directory and extension for WAV files
+                                    // Show WAV files and video/audio container files
+                                    val sampleExtensions = listOf("wav") + FileBrowserModule.VIDEO_EXTENSIONS
                                     fileBrowserState = FileBrowserModule.State(
                                         currentDirectory = samplesDir,
-                                        items = fileBrowserModule.buildItemList(samplesDir, fileExtension = "wav"),
+                                        items = fileBrowserModule.buildItemList(samplesDir, fileExtensions = sampleExtensions),
                                         cursor = 0,
                                         scroll = 0,
                                         mode = FileBrowserModule.BrowserMode.NORMAL,
-                                        fileExtension = "wav",  // Only show WAV files
+                                        fileExtensions = sampleExtensions,
                                         statusMessage = ""
                                     )
-                                    Log.d("InstrumentScreen", "File browser opened for .wav files, items: ${fileBrowserState.items.size}")
+                                    Log.d("InstrumentScreen", "File browser opened for wav+video, items: ${fileBrowserState.items.size}")
                                 }
                             }
                             // Other rows use A+direction combos for value editing
