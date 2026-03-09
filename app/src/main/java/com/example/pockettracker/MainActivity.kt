@@ -15,6 +15,7 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.View
 import androidx.activity.ComponentActivity
+import androidx.core.view.WindowCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -124,6 +125,20 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         requestWindowFeature(Window.FEATURE_NO_TITLE)
+
+        // Edge-to-edge: let Compose fill the entire display, behind system bars.
+        // Without this, Android reserves inset padding for nav/status bars and the
+        // Canvas only sees the reduced area — which can drop scale from 2× to 1× in
+        // landscape on phones with a non-gesture navigation bar (e.g. Realme UI 6).
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
+        // Allow content to extend into display-cutout areas (punch-hole camera, notch).
+        // In landscape, the camera hole is on a short edge; SHORT_EDGES lets us draw
+        // behind it so the Canvas gets the full 1080px height rather than a reduced area.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
 
         // Your existing code...
         val deviceAdapter = DeviceAdapter(this)
