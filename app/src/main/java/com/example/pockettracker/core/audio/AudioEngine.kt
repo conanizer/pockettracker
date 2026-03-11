@@ -130,73 +130,86 @@ class AudioEngine(
      * Non-44-byte headers: scans for "data" chunk instead of assuming fixed offset.
      */
     private fun parseWavBuffer(buffer: ByteArray): Pair<FloatArray, Float> {
-        if (buffer.size < 44) throw IllegalArgumentException("WAV buffer too small: ${buffer.size}")
+        if (buffer.size < 12) throw IllegalArgumentException("WAV buffer too small: ${buffer.size}")
 
         fun readShortAt(pos: Int) = ByteBuffer.wrap(buffer, pos, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt()
         fun readIntAt(pos: Int)   = ByteBuffer.wrap(buffer, pos, 4).order(ByteOrder.LITTLE_ENDIAN).int
 
-        // fmt chunk fields (always at fixed positions inside the fmt chunk starting at byte 12)
-        val audioFormat  = readShortAt(20) and 0xFFFF  // 1=PCM, 3=IEEE float, 65534=extensible
-        val channels     = readShortAt(22)
-        val sampleRate   = readIntAt(24)
-        val bitsPerSample = readShortAt(34)
-
-        logger.d(TAG, "WAV: format=$audioFormat channels=$channels sampleRate=$sampleRate bits=$bitsPerSample")
-
-        // Scan for "data" chunk (handles extended headers, LIST chunks, fact chunks, etc.)
-        var scanPos = 12  // Skip RIFF+WAVE header
+        // Scan all chunks from the start — do NOT assume fmt is at a fixed offset.
+        // Some files have a JUNK/bext/RF64 chunk before "fmt ", which shifts all byte positions.
+        var scanPos = 12  // Skip RIFF + WAVE header (12 bytes)
+        var fmtStart  = -1
         var dataStart = -1
         var dataSize  = -1
         while (scanPos + 8 <= buffer.size) {
             val chunkId   = String(buffer, scanPos, 4, Charsets.US_ASCII)
             val chunkSize = readIntAt(scanPos + 4)
-            if (chunkId == "data") {
-                dataStart = scanPos + 8
-                dataSize  = chunkSize.coerceAtMost(buffer.size - dataStart)
-                break
+            when (chunkId) {
+                "fmt " -> fmtStart = scanPos + 8  // record fmt data position
+                "data" -> {
+                    dataStart = scanPos + 8
+                    dataSize  = chunkSize.coerceAtMost(buffer.size - dataStart)
+                }
             }
-            // Advance to next chunk (pad to even boundary per WAV spec)
-            scanPos += 8 + chunkSize + (chunkSize and 1)
+            if (fmtStart >= 0 && dataStart >= 0) break
+            scanPos += 8 + chunkSize + (chunkSize and 1)  // pad to even boundary per WAV spec
         }
+        if (fmtStart  < 0) throw IllegalArgumentException("No 'fmt ' chunk found in WAV file")
         if (dataStart < 0) throw IllegalArgumentException("No 'data' chunk found in WAV file")
 
+        // Read fmt fields at their correct relative offsets inside the fmt chunk data
+        val audioFormat   = readShortAt(fmtStart + 0) and 0xFFFF  // 1=PCM, 3=IEEE float, 65534=extensible
+        val channels      = readShortAt(fmtStart + 2)
+        val sampleRate    = readIntAt  (fmtStart + 4)
+        val bitsPerSample = readShortAt(fmtStart + 14)
+
+        // WAVE_FORMAT_EXTENSIBLE (0xFFFE=65534): actual encoding is in the sub-format GUID.
+        // The GUID starts 24 bytes into the fmt data; its first 2 bytes are the real format code
+        // (1=PCM, 3=IEEE float) — identical to the standard audioFormat field.
+        val effectiveFormat = if (audioFormat == 65534 && fmtStart + 26 <= buffer.size) {
+            readShortAt(fmtStart + 24) and 0xFFFF
+        } else {
+            audioFormat
+        }
+
+        logger.d(TAG, "WAV: format=$audioFormat effective=$effectiveFormat channels=$channels sampleRate=$sampleRate bits=$bitsPerSample")
+
+        if (bitsPerSample == 0) throw IllegalArgumentException("WAV bitsPerSample is 0 — corrupt header?")
+        if (sampleRate    == 0) throw IllegalArgumentException("WAV sampleRate is 0 — corrupt header?")
+
         val bytesPerSample = bitsPerSample / 8
-        val totalSamples = dataSize / bytesPerSample
-        val rawSamples = FloatArray(totalSamples)
+        val totalSamples   = dataSize / bytesPerSample
+        val rawSamples     = FloatArray(totalSamples)
 
         when {
-            audioFormat == 3 && bitsPerSample == 32 -> {
+            effectiveFormat == 3 && bitsPerSample == 32 -> {
                 // IEEE 32-bit float — read directly
                 val fb = ByteBuffer.wrap(buffer, dataStart, totalSamples * 4)
-                    .order(ByteOrder.LITTLE_ENDIAN)
-                    .asFloatBuffer()
+                    .order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
                 for (i in rawSamples.indices) rawSamples[i] = fb.get(i)
             }
-            audioFormat == 1 && bitsPerSample == 16 -> {
+            effectiveFormat == 1 && bitsPerSample == 16 -> {
                 val sb = ByteBuffer.wrap(buffer, dataStart, totalSamples * 2)
-                    .order(ByteOrder.LITTLE_ENDIAN)
-                    .asShortBuffer()
+                    .order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
                 for (i in rawSamples.indices) rawSamples[i] = sb.get(i) / 32768f
             }
-            audioFormat == 1 && bitsPerSample == 24 -> {
+            effectiveFormat == 1 && bitsPerSample == 24 -> {
                 // 24-bit PCM: 3 bytes per sample, little-endian signed
                 for (i in rawSamples.indices) {
                     val bytePos = dataStart + i * 3
                     val b0 = buffer[bytePos].toInt() and 0xFF
                     val b1 = buffer[bytePos + 1].toInt() and 0xFF
-                    val b2 = buffer[bytePos + 2].toInt()  // signed high byte
-                    val s24 = (b2 shl 16) or (b1 shl 8) or b0
-                    rawSamples[i] = s24 / 8388608f  // 2^23
+                    val b2 = buffer[bytePos + 2].toInt()  // signed — sign-extends into 32 bits
+                    rawSamples[i] = ((b2 shl 16) or (b1 shl 8) or b0) / 8388608f  // 2^23
                 }
             }
-            audioFormat == 1 && bitsPerSample == 32 -> {
+            effectiveFormat == 1 && bitsPerSample == 32 -> {
                 // 32-bit PCM integer
                 val ib = ByteBuffer.wrap(buffer, dataStart, totalSamples * 4)
-                    .order(ByteOrder.LITTLE_ENDIAN)
-                    .asIntBuffer()
+                    .order(ByteOrder.LITTLE_ENDIAN).asIntBuffer()
                 for (i in rawSamples.indices) rawSamples[i] = ib.get(i) / 2147483648f  // 2^31
             }
-            else -> throw IllegalArgumentException("Unsupported WAV format=$audioFormat bits=$bitsPerSample")
+            else -> throw IllegalArgumentException("Unsupported WAV format=$audioFormat (effective=$effectiveFormat) bits=$bitsPerSample")
         }
 
         // Stereo → mono: average L+R channels
@@ -210,8 +223,7 @@ class AudioEngine(
 
         // Sample rate compensation: adjust base frequency so the engine plays at correct pitch
         val deviceSampleRate = getDeviceSampleRate()
-        val sampleRateRatio = deviceSampleRate.toFloat() / sampleRate.toFloat()
-        val adjustedBaseFreq = 261.63f * sampleRateRatio
+        val adjustedBaseFreq = 261.63f * (deviceSampleRate.toFloat() / sampleRate.toFloat())
 
         return Pair(samples, adjustedBaseFreq)
     }
