@@ -1361,6 +1361,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                             scroll = 0,
                                             mode = FileBrowserModule.BrowserMode.NORMAL,
                                             fileExtension = "ptp",  // Filter for project files
+                                            fileExtensions = null,  // Clear wav/video filter left by instrument browser
                                             statusMessage = ""
                                         )
                                         Log.d("ProjectScreen", "File browser opened for .ptp files")
