@@ -4,7 +4,7 @@
 
 > "M8-level tracker not tied to specific hardware"
 
-**Status:** MVP ~95% complete | **Target:** Late February 2025 public beta
+**Status:** Feature-complete v1.0 candidate | **Target:** April 2026 public release
 
 ---
 
@@ -28,7 +28,7 @@ A **music tracker** is a sequencer where you compose music in a grid, entering n
 - Miyoo Flip (1GB RAM, Android 13, GammaCoreOS)
 
 **Secondary:**
-- Ayaneo Pocket Air Mini (3GB RAM, Android 11) - arriving soon
+- Ayaneo Pocket Air Mini (3GB RAM, Android 11)
 
 **Minimum Requirements:**
 - Android 8.0+ (API 26)
@@ -40,66 +40,66 @@ A **music tracker** is a sequencer where you compose music in a grid, entering n
 
 ## ✨ Features
 
-### Working Now ✅
-
-**Audio Engine:**
+### Audio Engine
 - ✅ Professional sample-accurate playback (<0.02ms jitter)
 - ✅ 8-voice polyphony with per-track voice stealing
 - ✅ 256 sample slots with automatic pitch correction
-- ✅ Advanced sample playback (start/end points, reverse, looping)
+- ✅ Advanced sample playback (start/end points, reverse, loop modes: off/fwd/ping-pong)
 - ✅ Real-time waveform visualization (oscilloscope)
+- ✅ True stereo output with constant-power pan law
+- ✅ Resonant biquad filters (LP/HP/BP) per instrument
+- ✅ Modulation engine (4 slots per instrument: AHD, ADSR, LFO, DRUM, TRIG)
+- ✅ Groove quantization (256 grooves, per-track assignment)
 
-**Composition:**
-- ✅ Phrase editor (16 steps with N/V/I/FX columns)
-- ✅ Chain editor (16 phrase refs with transpose)
-- ✅ Song editor (8-track arrangement)
-- ✅ Instrument editor (sample loading, ROOT, DETUNE, filters)
-- ✅ Sample-accurate playback at any tempo (20-999 BPM)
+### Composition
+- ✅ **Phrase editor** — 16 steps with N/V/I/FX1/FX2/FX3 columns
+- ✅ **Chain editor** — 16 phrase references with per-slot transpose
+- ✅ **Song editor** — 8-track arrangement, 256 rows, page navigation
+- ✅ **Instrument editor** — Full parameter set (sample, ROOT, DETUNE, VOL, PAN, filters, loop, start/end)
+- ✅ **Table screen** — 16-row mini-sequencer per instrument (transpose, volume, 3 FX columns)
+- ✅ **Groove screen** — Step-timing patterns for swing/shuffle (256 grooves)
+- ✅ **Modulation screen** — 4-slot envelope/LFO editor per instrument
+- ✅ **Mixer screen** — 8 track volumes + master with true dBFS meters
+- ✅ Sample-accurate playback at any tempo (20–999 BPM)
 
-**Workflow:**
-- ✅ Project save/load (.ptp files)
+### Effects (Phrase Screen)
+- ✅ **ARP/ARC** — Arpeggio with UP/DOWN/PINGPONG/RANDOM modes and speed control
+- ✅ **OFF** — Sample start point offset (O00–OFF)
+- ✅ **VOL** — Volume automation (V00–VFF)
+- ✅ **KIL** — Kill voice immediately (K00)
+- ✅ **REP** — Retrigger (single shot or volume-ramp mode)
+- ✅ **PSL** — Pitch slide / portamento
+- ✅ **PBN** — Pitch bend (continuous up or down)
+- ✅ **PVB/PVX** — Vibrato (standard and extreme)
+- ✅ **DEL** — Delay note by N ticks
+- ✅ **CHA** — Probability gate (chance left / chance right)
+- ✅ **RND/RNL** — Randomize FX values
+- ✅ **TBL** — Override table ID for current note
+- ✅ **GRV** — Assign groove pattern to track
+
+### Table Effects
+- ✅ **TIC** — Table tick rate + special modes (TIC00/FC/FE/FF)
+- ✅ **HOP** — Phrase/table jump (odd time signatures: 3/4, 5/4, 7/8, etc.)
+- ✅ **THO** — Table hop to row
+
+### Workflow
+- ✅ Project save/load (.ptp files, JSON format)
 - ✅ File browser with WAV preview
+- ✅ WAV Export — render full song to stereo WAV file
+- ✅ Selection Resampling — render song selection to new instrument slot
+- ✅ M8-style copy/paste (CELL / ROW / SCREEN selection modes)
+- ✅ CLEAN — remove unused sequences or instruments (with confirmation)
 - ✅ Smart cursor memory (remembers context between screens)
 - ✅ Quick insert (A button on empty rows)
-- ✅ Generic input system (buttons OR touchscreen)
+- ✅ Cross-device project transfer (MANAGE_EXTERNAL_STORAGE)
 
-### In Progress (MVP) 🚧
-
-**Effects System:**
-- 🚧 TOP-5 effects in phrase screen:
-  - Arpeggio (Axx) - Note patterns
-  - Offset (Oxx) - Sample start point
-  - Volume (Vxx) - Volume automation
-  - Kill (K00) - Stop immediately
-  - Repeat (Rxx) - Retrigger
-
-**Copy/Paste System:**
-- 🚧 M8-style selection mode
-- 🚧 Copy/paste phrase steps
-- 🚧 Copy/paste between phrases
-- 🚧 Clipboard indicator
-- 🚧 Cut/delete selections
-
-**Architecture:**
-- 🚧 Refactoring for Linux port
-- 🚧 Separate controllers (portable code)
-- 🚧 Platform abstraction layers
-
-### Planned (Post-MVP) 📋
-
-**Early Post-MVP:**
-- Table screen (effects for instruments)
-- Advanced copy/paste (instrument settings)
-- Linux port (desktop/laptop use)
-- Braids synthesizers (Mutable Instruments)
-- Remaining effects (pitch, pan, filter automation)
-
-**Later:**
-- Undo/redo
-- WAV export
-- Mixer screen
-- Themes/color schemes
-- MIDI export
+### Display & Input
+- ✅ Pixel-perfect rendering at 640×480 (crisp font, zero sub-pixel gaps)
+- ✅ 4 layout modes: FULL, TOUCH PORTRAIT, TOUCH LANDSCAPE, TOUCH PORTRAIT2
+- ✅ Layout and scaling mode persisted across app restarts
+- ✅ Auto-switch portrait ↔ landscape on device rotation
+- ✅ Virtual controls with multi-touch combo support
+- ✅ Physical gamepad/handheld button support (auto-detected)
 
 ---
 
@@ -108,31 +108,55 @@ A **music tracker** is a sequencer where you compose music in a grid, entering n
 ### Physical Buttons (Gaming Handhelds)
 
 **Navigation:**
-- **D-PAD** - Move cursor
-- **A** - Confirm, enter edit mode
-- **B** - Cancel, exit mode
-- **START** - Play/stop
-- **SELECT** - Context actions
-- **L/R** - Navigate screens (SHIFT+DPAD for navigation map)
+- **D-PAD** — Move cursor
+- **A** — Confirm, enter edit mode, quick insert
+- **B** — Cancel, exit mode
+- **START** — Play/stop
+- **SELECT** — Context actions
+- **L/R** — Navigate screens (SHIFT+DPAD for navigation map)
 
 **Value Editing:**
-- **A + UP/DOWN** - Increment/decrement value
-- **A + LEFT/RIGHT** - Change octave (notes) or cycle options
+- **A + UP/DOWN** — Increment/decrement value
+- **A + LEFT/RIGHT** — Change octave (notes) or cycle options
+- **B + LEFT/RIGHT** — Navigate tables/instruments/grooves
 
 **Copy/Paste (M8-style):**
-- **SELECT+B** - Enter selection mode
-- **D-PAD (in selection)** - Expand/contract selection
-- **B (in selection)** - Copy and exit
-- **SELECT+A** - Paste at cursor
-- **A+B** - Cut selection
+- **L+B** — Enter/cycle selection mode (CELL → ROW → SCREEN)
+- **D-PAD (in selection)** — Expand/contract selection
+- **B (in selection)** — Copy and exit
+- **L+A (in selection)** — Cut (copy + delete) and exit
+- **L+A (outside selection)** — Paste at cursor
+- **A+B (in selection)** — Delete (no clipboard) and exit
+- **L alone** — Cancel selection
+
+**Key Repeat:**
+- Hold D-PAD, A+DPAD, or B+DPAD for continuous input (400ms delay, 100ms interval)
 
 ### Touchscreen (Smartphones/Tablets)
 
-Virtual controls automatically appear on touchscreen-only devices:
-- D-pad (left side)
-- A/B buttons (right side)
-- START/SELECT buttons (top)
-- L/R buttons (top corners)
+Virtual controls automatically appear on touchscreen-only devices. Multi-touch combos (hold L + tap DPAD, hold A + tap DPAD, etc.) all work naturally.
+
+Layout modes available:
+- **TOUCH PORTRAIT** — screen above, full-width button panel below
+- **TOUCH LANDSCAPE** — screen centered, button panels on left and right
+- **TOUCH PORTRAIT2** — compact 4×4 grid layout
+
+---
+
+## 🧭 Screen Navigation
+
+```
+      0         1         2         3         4
+┌─────────────────────────────────────────────────┐
+│  ----     ----     SCALE    INST_POOL   ----   │ 0
+│  PROJ     PROJ     GROOVE     MODS      ----   │ 1
+│  SONG     CHAIN    PHRASE     INST     TABLE   │ 2  ← Main editing row
+│  MIXER    MIXER    MIXER      MIXER    MIXER   │ 3
+│ EFFECTS  EFFECTS  EFFECTS   EFFECTS  EFFECTS  │ 4
+└─────────────────────────────────────────────────┘
+```
+
+Navigate with **L/R + DPAD** (hold L or R, move DPAD, release to jump).
 
 ---
 
@@ -140,12 +164,12 @@ Virtual controls automatically appear on touchscreen-only devices:
 
 ### For End Users (Coming Soon)
 
-**APK download will be available at MVP release (Late February 2025)**
+**APK download available at release (April 2026)**
 
 1. Download `PocketTracker-v1.0.apk`
 2. Enable "Install from unknown sources" on your device
 3. Install APK
-4. Grant storage permissions
+4. Grant storage permissions (including "All Files Access" on Android 11+)
 5. Launch and create music!
 
 ### For Developers (Build from Source)
@@ -162,14 +186,8 @@ Virtual controls automatically appear on touchscreen-only devices:
 git clone https://github.com/yourusername/PocketTracker.git
 cd PocketTracker
 
-# Open in Android Studio
-# Or build via command line:
-
 # Debug build
 ./gradlew assembleDebug
-
-# Release build
-./gradlew assembleRelease
 
 # Install to connected device
 ./gradlew installDebug
@@ -181,18 +199,18 @@ cd PocketTracker
 
 ## 📖 Quick Start Guide
 
-**Coming with MVP release!**
+**Full guide coming with release!**
 
 Will include:
 - Example project walkthrough
-- Video tutorial (5-10 min)
+- Video tutorial (5–10 min)
 - Controls reference card
 - "Hello world" song in <5 minutes
 
 For now, see:
-- `DEVELOPMENT_STATUS.md` - Current progress
-- `MVP_ROADMAP.md` - Feature roadmap
-- `INPUT_COMBINATIONS.md` - Complete controls reference
+- `DEVELOPMENT_STATUS.md` — Current progress
+- `MVP_ROADMAP.md` — Feature roadmap
+- `INPUT_COMBINATIONS.md` — Complete controls reference
 
 ---
 
@@ -201,26 +219,27 @@ For now, see:
 ```
 PocketTracker/
 ├── app/src/main/
-│   ├── kotlin/
-│   │   ├── TrackerData.kt           # Data models (portable!)
-│   │   ├── TrackerAudioEngine.kt    # JNI bridge
-│   │   ├── MainActivity.kt          # Main activity
-│   │   ├── FileManager.kt           # File I/O
-│   │   ├── *Module.kt              # Screen modules
-│   │   └── PixelPerfectRenderer.kt  # Custom rendering
+│   ├── java/com/example/pockettracker/
+│   │   ├── core/
+│   │   │   ├── audio/           # IAudioBackend, AudioEngine
+│   │   │   ├── logic/           # TrackerController, PlaybackController, etc.
+│   │   │   ├── resources/       # IResourceLoader
+│   │   │   └── storage/         # IFileSystem, FileInfo
+│   │   ├── platform/android/    # OboeAudioBackend, AndroidFileSystem, etc.
+│   │   ├── *Module.kt           # Screen modules (phrase, chain, song, etc.)
+│   │   ├── PixelPerfectRenderer.kt
+│   │   ├── MainActivity.kt
+│   │   ├── DeviceAdapter.kt
+│   │   └── VirtualControls.kt
 │   │
 │   └── cpp/
-│       ├── native-audio.cpp         # C++ audio engine
+│       ├── native-audio.cpp     # C++ audio engine (Oboe)
 │       └── CMakeLists.txt
 │
-├── docs/
-│   ├── DEVELOPMENT_STATUS.md       # Current progress
-│   ├── MVP_ROADMAP.md              # Feature roadmap
-│   ├── REFACTORING_ROADMAP.md      # Architecture plan
-│   ├── TECHNICAL_ARCHITECTURE.md   # System design
-│   └── CLAUDE.md                   # AI assistant guide
-│
-└── README.md                       # This file
+├── DEVELOPMENT_STATUS.md        # Detailed current progress
+├── MVP_ROADMAP.md               # Feature roadmap
+├── TECHNICAL_ARCHITECTURE.md   # System design
+└── README.md                   # This file
 ```
 
 ---
@@ -228,16 +247,16 @@ PocketTracker/
 ## 🎵 Philosophy & Inspiration
 
 **Inspired by:**
-- **Dirtywave M8** - Professional portable tracker ($500)
-- **LSDJ** - Game Boy classic tracker
-- **Little Sound DJ (LGPT)** - PSP tracker
+- **Dirtywave M8** — Professional portable tracker ($500)
+- **LSDJ** — Game Boy classic tracker
+- **LGPT (Picotracker)** — PSP/handheld tracker
 
 **Our approach:**
 - Hardware-agnostic (not tied to specific device)
 - Open source (community-driven development)
 - Affordable (run on budget handhelds)
 - Professional audio quality (sample-accurate engine)
-- Eventually multi-platform (Linux port planned)
+- Architecture ready for Linux port (clean interface abstractions)
 
 ---
 
@@ -256,13 +275,13 @@ PocketTracker/
 ## 🙏 Credits
 
 **Development:**
-- Solo developer: Conan (learning as I go!)
-- Mentor: [Name] (joining post-MVP for advanced features)
+- Solo developer: Conan
+- Mentor: joining post-MVP for advanced features
 
 **Libraries & Tools:**
-- [Oboe](https://github.com/google/oboe) - Low-latency audio (Apache 2.0)
-- [Jetpack Compose](https://developer.android.com/jetpack/compose) - Modern UI toolkit
-- [Kotlinx Serialization](https://github.com/Kotlin/kotlinx.serialization) - JSON save/load
+- [Oboe](https://github.com/google/oboe) — Low-latency audio (Apache 2.0)
+- [Jetpack Compose](https://developer.android.com/jetpack/compose) — Modern UI toolkit
+- [Kotlinx Serialization](https://github.com/Kotlin/kotlinx.serialization) — JSON save/load
 
 **Inspiration:**
 - Dirtywave M8 Tracker
@@ -271,9 +290,8 @@ PocketTracker/
 - Picotracker
 
 **Special Thanks:**
-- Claude AI (Anthropic) - Development assistant
-- DeepSeek AI - Architecture review
-- M8/LSDJ/LGPT communities - Inspiration and guidance
+- Claude AI (Anthropic) — Development assistant
+- M8/LSDJ/LGPT communities — Inspiration and guidance
 
 ---
 
@@ -285,103 +303,52 @@ This program is free software: you can redistribute it and/or modify it under th
 
 See `LICENSE` file for full text.
 
-**Why GPL?**
-- Ensures project stays free forever
-- Derivative works must also be open source
-- Community benefits from improvements
-
 ---
 
 ## 📞 Contact & Community
 
 **GitHub:** [Repository link when public]
 **Discord:** [Server link after MVP]
-**Reddit:** r/MusicTrackers (discuss trackers in general)
-
-**Developer:**
-- Prefers Russian for communication
-- Available for questions after MVP release
-- Looking for beta testers (February 2025)
-
----
-
-## 🎯 Roadmap Summary
-
-**January 2025:**
-- ✅ Phase A complete (audio, UI, playback)
-- 🚧 Architecture refactoring (2 weeks)
-
-**February 2025:**
-- 🚧 Effects system (1-2 weeks)
-- 🚧 Copy/paste system (1 week)
-- 🚧 Testing & polish (1 week)
-- 🚧 Documentation & video
-- 🎉 **Public Beta Release** (Late Feb)
-
-**March 2025+:**
-- Mentor joins for advanced features
-- Table screen
-- Linux port begins
-- Braids synthesizers
-- Community feedback integration
+**Reddit:** r/MusicTrackers
 
 ---
 
 ## ❓ FAQ
 
 **Q: When will it be ready?**
-A: Public beta late February 2025 (8-10 weeks from now)
+A: Public release targeting April 2026.
 
 **Q: Will it work on my device?**
-A: Probably! If it runs Android 8.0+ and has 1GB+ RAM, give it a try.
+A: If it runs Android 8.0+ with ~512MB RAM, give it a try!
 
 **Q: How much will it cost?**
 A: FREE forever! Open source GPL v3.0.
 
 **Q: Can I use my own samples?**
-A: Yes! Load any WAV file from your device storage.
-
-**Q: Will there be a Linux version?**
-A: Yes! Planned for post-MVP (March-April 2025)
+A: Yes! Load any WAV file from device storage (8/16/24/32-bit PCM and float).
 
 **Q: Can I export my songs to WAV?**
-A: Not yet - planned for post-MVP.
+A: Yes! WAV export is implemented — renders the full song to stereo WAV.
+
+**Q: Will there be a Linux version?**
+A: Yes! Architecture is already prepared (IAudioBackend, IFileSystem interfaces). Planned post-MVP.
 
 **Q: How does it compare to M8?**
-A: MVP will have ~30% of M8 features, focusing on core workflow. Post-MVP will add more.
-
-**Q: Is this better than LGPT?**
-A: Different goals - we prioritize audio quality and modern architecture. LGPT is more feature-complete currently.
-
-**Q: Can I help test?**
-A: Beta testing starts late February! Join our Discord (link coming).
+A: Core workflow is similar (phrase → chain → song). Features like ADSR envelopes, LFO modulation, groove patterns, tables, and pitch effects are all working.
 
 ---
 
 ## 📊 Current Status
 
-**Completion:** ~95% to MVP
+**All core features:** ✅ Complete
 **Audio Engine:** ✅ Production-ready
-**UI Screens:** ✅ Complete
-**Remaining:** Effects, Copy/Paste, Polish
+**Testing & Polish:** 🚧 In progress
+**Documentation:** 🚧 In progress
 
 **See `DEVELOPMENT_STATUS.md` for detailed progress**
 
 ---
 
-## 🚀 Let's Make Music!
-
-PocketTracker is built by a musician frustrated with expensive hardware trackers. The goal is simple:
-
-> **Make professional tracker-style composition accessible to everyone with a budget Android handheld.**
-
-If you're excited about this project:
-- ⭐ Star the repo
-- 📢 Tell other musicians
-- 🎵 Get ready to create!
-
----
-
-**Version:** 0.9 (Pre-MVP)
-**Last Updated:** 2025-01-02
+**Version:** 1.0-rc
+**Last Updated:** 2026-03-13
 **License:** GPL v3.0

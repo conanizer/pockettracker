@@ -348,6 +348,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     var showResampleDialog by remember { mutableStateOf(false) }
     var resampleDialogCursor by remember { mutableIntStateOf(0) }  // 0=YES, 1=NO
 
+    // Clean dialog state (triggered by A on row 5 in PROJECT screen)
+    var showCleanDialog by remember { mutableStateOf(false) }
+    var cleanDialogTarget by remember { mutableStateOf("") }  // "SEQ" or "INST"
+    var cleanDialogCursor by remember { mutableIntStateOf(0) }  // 0=YES, 1=NO
+
     // Tracks where the last single A-press inserted into an empty cell (screen, row, col)
     // Used by A+A to decide whether to insert next-unused (only allowed on same cell)
     var lastAInsertPosition by remember { mutableStateOf<InsertPosition?>(null) }
@@ -422,13 +427,44 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // LAYOUT MODE — user-selectable, overrides DeviceAdapter auto-detection
     // ═══════════════════════════════════════════════════════════════════════
 
-    // Derive initial mode from the auto-detected layoutConfig
-    val initialLayoutMode = when {
+    // Derive initial mode from the auto-detected layoutConfig (fallback if no saved pref)
+    val autoLayoutMode = when {
         !layoutConfig.needsVirtualButtons -> DeviceAdapter.LayoutMode.FULL
         layoutConfig.isLandscape          -> DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
         else                              -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT
     }
-    var layoutMode by remember { mutableStateOf(initialLayoutMode) }
+
+    // Load saved preferences (SharedPreferences, persists across app restarts)
+    val prefs = remember { context.getSharedPreferences("pockettracker_ui", android.content.Context.MODE_PRIVATE) }
+
+    val savedLayoutName  = remember { prefs.getString("layout_mode", null) }
+    val savedScalingName = remember { prefs.getString("scaling_mode", null) }
+
+    val initialLayoutMode = remember {
+        if (savedLayoutName != null) {
+            DeviceAdapter.LayoutMode.entries.firstOrNull { it.name == savedLayoutName } ?: autoLayoutMode
+        } else {
+            autoLayoutMode
+        }
+    }
+    val initialScalingMode = remember {
+        if (savedScalingName != null) {
+            DeviceAdapter.ScalingMode.entries.firstOrNull { it.name == savedScalingName } ?: DeviceAdapter.ScalingMode.INTEGER
+        } else {
+            DeviceAdapter.ScalingMode.INTEGER
+        }
+    }
+
+    var layoutMode  by remember { mutableStateOf(initialLayoutMode) }
+    var scalingMode by remember { mutableStateOf(initialScalingMode) }
+
+    // Persist whenever either setting changes
+    LaunchedEffect(layoutMode) {
+        prefs.edit().putString("layout_mode", layoutMode.name).apply()
+    }
+    LaunchedEffect(scalingMode) {
+        prefs.edit().putString("scaling_mode", scalingMode.name).apply()
+    }
 
     // Track orientation so layout recalculates when device flips (Activity survives
     // rotation thanks to android:configChanges in the manifest, but device dimensions
@@ -724,7 +760,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 val songState = SongEditorState(
                     trackerController.project,
                     trackerController.cursorRow,
-                    cursorTrack = trackerController.cursorColumn
+                    cursorTrack = trackerController.cursorColumn,
+                    scrollPosition = trackerController.songScrollPosition
                 )
                 val context = songEditorModule.getCursorContext(songState)
                 val action = handlerFunction(context)
@@ -743,7 +780,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     isSuccess = trackerController.statusSuccess,
                     isRendering = isRendering,
                     renderProgress = renderProgress,
-                    layoutMode = layoutMode
+                    layoutMode = layoutMode,
+                    scalingMode = scalingMode
                 )
                 val context = projectModule.getCursorContext(projectState)
                 val action = handlerFunction(context)
@@ -1053,6 +1091,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         ButtonHandlers(
             onDPadUp = {
                 if (showResampleDialog) { resampleDialogCursor = 0 }
+                else if (showCleanDialog) { cleanDialogCursor = 0 }
                 else handleDPadNavigation { trackerController.inputController.handleDPadUp() }
             },
 
@@ -1061,6 +1100,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             // ───────────────────────────────────────────────────────────────
             onDPadDown = {
                 if (showResampleDialog) { resampleDialogCursor = 1 }
+                else if (showCleanDialog) { cleanDialogCursor = 1 }
                 else handleDPadNavigation { trackerController.inputController.handleDPadDown() }
             },
 
@@ -1135,6 +1175,21 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     } else {
                         // NO: dismiss dialog
                         showResampleDialog = false
+                    }
+                    return@buttonA
+                }
+
+                // ── Clean dialog takes priority ──────────────────────────
+                if (showCleanDialog) {
+                    if (cleanDialogCursor == 0) {
+                        // YES: Execute clean
+                        val target = cleanDialogTarget
+                        showCleanDialog = false
+                        if (target == "SEQ") trackerController.cleanUnusedSeq()
+                        else trackerController.cleanUnusedInst()
+                    } else {
+                        // NO: dismiss
+                        showCleanDialog = false
                     }
                     return@buttonA
                 }
@@ -1381,15 +1436,34 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     }
                                 }
                             }
-                            // Rows 5-6 (CLEAN, SYSTEM) - placeholder
+                            // ROW 5: CLEAN — SEQ (col 1) or INST (col 2) buttons
+                            5 -> {
+                                val col = trackerController.projectCursorColumn
+                                if (col == 1 || col == 2) {
+                                    cleanDialogTarget = if (col == 1) "SEQ" else "INST"
+                                    cleanDialogCursor = 0
+                                    showCleanDialog = true
+                                }
+                            }
+                            // ROW 6: SYSTEM — placeholder
                             // ROW 7: LAYOUT — cycle through layout modes
                             7 -> {
                                 layoutMode = when (layoutMode) {
-                                    DeviceAdapter.LayoutMode.FULL           -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT
+                                    DeviceAdapter.LayoutMode.FULL            -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT
                                     DeviceAdapter.LayoutMode.TOUCH_PORTRAIT  -> DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
-                                    DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE -> DeviceAdapter.LayoutMode.FULL
+                                    DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
+                                    DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 -> DeviceAdapter.LayoutMode.FULL
                                 }
                                 Log.d("ProjectScreen", "Layout mode changed to: $layoutMode")
+                            }
+                            // ROW 8: SCALING — cycle through scaling modes
+                            8 -> {
+                                scalingMode = when (scalingMode) {
+                                    DeviceAdapter.ScalingMode.INTEGER  -> DeviceAdapter.ScalingMode.BILINEAR
+                                    DeviceAdapter.ScalingMode.BILINEAR -> DeviceAdapter.ScalingMode.NEAREST
+                                    DeviceAdapter.ScalingMode.NEAREST  -> DeviceAdapter.ScalingMode.INTEGER
+                                }
+                                Log.d("ProjectScreen", "Scaling mode changed to: $scalingMode")
                             }
                         }
                     }
@@ -1504,6 +1578,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 // Resample dialog: B = cancel (NO)
                 if (showResampleDialog) {
                     showResampleDialog = false
+                    return@buttonB
+                }
+
+                // Clean dialog: B = cancel (NO)
+                if (showCleanDialog) {
+                    showCleanDialog = false
                     return@buttonB
                 }
 
@@ -1996,6 +2076,23 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                         Log.d("Navigation", "  -> Changed to groove ${trackerController.currentGroove}")
                     }
                     else -> { Log.d("Navigation", "  -> No action for screen ${trackerController.currentScreen}") }
+                }
+            },
+
+// ───────────────────────────────────────────────────────────────
+// B + UP/DOWN (Song screen page jump)
+// ───────────────────────────────────────────────────────────────
+            onBUp = {
+                // B+UP: Song screen — page up 16 rows
+                if (trackerController.currentScreen == ScreenType.SONG) {
+                    trackerController.moveSongBigUp()
+                }
+            },
+
+            onBDown = {
+                // B+DOWN: Song screen — page down 16 rows
+                if (trackerController.currentScreen == ScreenType.SONG) {
+                    trackerController.moveSongBigDown()
                 }
             },
 
@@ -2634,155 +2731,91 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         trackerController.inputController.isCellSelected(row, col)
     }
 
-    CompositionLocalProvider(LocalLayoutMode provides layoutMode) {
-    if (effectiveLayoutConfig.needsVirtualButtons) {
-        // SCENARIOS 2/3: Touchscreen devices need virtual buttons
+    // Build the shared tracker params bundle once — all layout modes use the same values.
+    val trackerParams = TrackerScreenParams(
+        currentScreen           = currentScreen,
+        project                 = project,
+        audioEngine             = audioEngine,
+        playbackController      = playbackController,
+        cursorRow               = cursorRow,
+        cursorColumn            = cursorColumn,
+        isPlaying               = isPlaying,
+        previousColumn          = previousColumn,
+        currentChain            = currentChain,
+        currentPhrase           = currentPhrase,
+        projectCursorRow        = projectCursorRow,
+        projectCursorColumn     = projectCursorColumn,
+        projectStatusMessage    = projectStatusMessage,
+        projectStatusSuccess    = projectStatusSuccess,
+        projectVersion          = projectVersion,
+        currentInstrument       = currentInstrument,
+        instrumentCursorRow     = instrumentCursorRow,
+        instrumentCursorColumn  = instrumentCursorColumn,
+        instrumentStatusMessage = instrumentStatusMessage,
+        instrumentStatusSuccess = instrumentStatusSuccess,
+        fileBrowserState        = fileBrowserState,
+        selectionInfo           = selectionInfo,
+        clipboardInfo           = clipboardInfo,
+        selectionMode           = selectionModeActive,
+        isCellSelected          = isCellSelectedFn,
+        mixerCursorColumn       = trackerController.mixerCursorColumn,
+        trackPeaks              = trackPeakBuffer,
+        masterPeaks             = masterPeakBuffer,
+        currentTable            = trackerController.currentTable,
+        tableCursorRow          = trackerController.tableCursorRow,
+        tableCursorColumn       = trackerController.tableCursorColumn,
+        currentGroove           = trackerController.currentGroove,
+        grooveCursorRow         = trackerController.grooveCursorRow,
+        modCursorRow            = trackerController.modCursorRow,
+        modCursorPair           = trackerController.modCursorPair,
+        modCursorSide           = trackerController.modCursorSide,
+        isRendering             = isRendering,
+        renderProgress          = renderProgress,
+        showResampleDialog      = showResampleDialog,
+        resampleDialogCursor    = resampleDialogCursor,
+        showCleanDialog         = showCleanDialog,
+        cleanDialogTarget       = cleanDialogTarget,
+        cleanDialogCursor       = cleanDialogCursor,
+        songScrollPosition      = stateVersion.let { trackerController.songScrollPosition },
+        scalingMode             = scalingMode
+    )
 
-        if (effectiveLayoutConfig.isLandscape) {
-            // LANDSCAPE: Buttons on left and right sides
-            LandscapeLayoutWithVirtualButtons(
-                layoutConfig = effectiveLayoutConfig,
-                currentScreen = currentScreen,
-                project = project,
-                audioEngine = audioEngine,
-                cursorRow = cursorRow,
-                cursorColumn = cursorColumn,
-                isPlaying = isPlaying,
-                previousColumn = previousColumn,
-                currentChain = currentChain,
-                currentPhrase = currentPhrase,
-                projectCursorRow = projectCursorRow,
-                projectCursorColumn = projectCursorColumn,
-                projectStatusMessage = projectStatusMessage,
-                projectStatusSuccess = projectStatusSuccess,
-                buttonHandlers = buttonHandlers,
-                inputMapper = inputMapper,
-                focusRequester = focusRequester,
-                projectVersion = projectVersion,
-                currentInstrument = currentInstrument,
-                instrumentCursorRow = instrumentCursorRow,
-                instrumentCursorColumn = instrumentCursorColumn,
-                instrumentStatusMessage = instrumentStatusMessage,
-                instrumentStatusSuccess = instrumentStatusSuccess,
-                fileBrowserState = fileBrowserState,
-                playbackController = playbackController,
-                selectionInfo = selectionInfo,
-                clipboardInfo = clipboardInfo,
-                selectionMode = selectionModeActive,
-                isCellSelected = isCellSelectedFn,
-                mixerCursorColumn = trackerController.mixerCursorColumn,
-                trackPeaks = trackPeakBuffer,
-                masterPeaks = masterPeakBuffer,
-                currentTable = trackerController.currentTable,
-                tableCursorRow = trackerController.tableCursorRow,
-                tableCursorColumn = trackerController.tableCursorColumn,
-                currentGroove = trackerController.currentGroove,
-                grooveCursorRow = trackerController.grooveCursorRow,
-                modCursorRow = trackerController.modCursorRow,
-                modCursorPair = trackerController.modCursorPair,
-                modCursorSide = trackerController.modCursorSide,
-                isRendering = isRendering,
-                renderProgress = renderProgress,
-                showResampleDialog = showResampleDialog,
-                resampleDialogCursor = resampleDialogCursor
+    CompositionLocalProvider(LocalLayoutMode provides layoutMode) {
+        if (!effectiveLayoutConfig.needsVirtualButtons) {
+            // FULL SCREEN — physical buttons or user-selected FULL mode
+            FullScreenLayout(
+                layoutConfig  = effectiveLayoutConfig,
+                scalingMode   = scalingMode,
+                params        = trackerParams,
+                inputMapper   = inputMapper,
+                focusRequester = focusRequester
             )
-        } else {
-            // PORTRAIT: Buttons below screen
-            PortraitLayoutWithVirtualButtons(
-                layoutConfig = effectiveLayoutConfig,
-                currentScreen = currentScreen,
-                project = project,
-                audioEngine = audioEngine,
-                cursorRow = cursorRow,
-                cursorColumn = cursorColumn,
-                isPlaying = isPlaying,
-                previousColumn = previousColumn,
-                currentChain = currentChain,
-                currentPhrase = currentPhrase,
-                projectCursorRow = projectCursorRow,
-                projectCursorColumn = projectCursorColumn,
-                projectStatusMessage = projectStatusMessage,
-                projectStatusSuccess = projectStatusSuccess,
-                buttonHandlers = buttonHandlers,
-                inputMapper = inputMapper,
-                focusRequester = focusRequester,
-                projectVersion = projectVersion,
-                currentInstrument = currentInstrument,
-                instrumentCursorRow = instrumentCursorRow,
-                instrumentCursorColumn = instrumentCursorColumn,
-                instrumentStatusMessage = instrumentStatusMessage,
-                instrumentStatusSuccess = instrumentStatusSuccess,
-                fileBrowserState = fileBrowserState,
-                playbackController = playbackController,
-                selectionInfo = selectionInfo,
-                clipboardInfo = clipboardInfo,
-                selectionMode = selectionModeActive,
-                isCellSelected = isCellSelectedFn,
-                mixerCursorColumn = trackerController.mixerCursorColumn,
-                trackPeaks = trackPeakBuffer,
-                masterPeaks = masterPeakBuffer,
-                currentTable = trackerController.currentTable,
-                tableCursorRow = trackerController.tableCursorRow,
-                tableCursorColumn = trackerController.tableCursorColumn,
-                currentGroove = trackerController.currentGroove,
-                grooveCursorRow = trackerController.grooveCursorRow,
-                modCursorRow = trackerController.modCursorRow,
-                modCursorPair = trackerController.modCursorPair,
-                modCursorSide = trackerController.modCursorSide,
-                isRendering = isRendering,
-                renderProgress = renderProgress,
-                showResampleDialog = showResampleDialog,
-                resampleDialogCursor = resampleDialogCursor
-            )
+        } else when (layoutMode) {
+            DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE ->
+                LandscapeLayoutWithVirtualButtons(
+                    layoutConfig  = effectiveLayoutConfig,
+                    scalingMode   = scalingMode,
+                    params        = trackerParams,
+                    inputMapper   = inputMapper,
+                    focusRequester = focusRequester
+                )
+            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 ->
+                PortraitLayout2WithVirtualButtons(
+                    layoutConfig  = effectiveLayoutConfig,
+                    scalingMode   = scalingMode,
+                    params        = trackerParams,
+                    inputMapper   = inputMapper,
+                    focusRequester = focusRequester
+                )
+            else -> // TOUCH_PORTRAIT (and FULL fallback — shouldn't normally reach here)
+                PortraitLayoutWithVirtualButtons(
+                    layoutConfig  = effectiveLayoutConfig,
+                    scalingMode   = scalingMode,
+                    params        = trackerParams,
+                    inputMapper   = inputMapper,
+                    focusRequester = focusRequester
+                )
         }
-    } else {
-        // SCENARIO 1: Full screen (physical buttons or user-selected FULL mode)
-        FullScreenLayout(
-            layoutConfig = effectiveLayoutConfig,
-            currentScreen = currentScreen,
-            project = project,
-            audioEngine = audioEngine,
-            cursorRow = cursorRow,
-            cursorColumn = cursorColumn,
-            isPlaying = isPlaying,
-            previousColumn = previousColumn,
-            currentChain = currentChain,
-            currentPhrase = currentPhrase,
-            projectCursorRow = projectCursorRow,
-            projectCursorColumn = projectCursorColumn,
-            projectStatusMessage = projectStatusMessage,
-            projectStatusSuccess = projectStatusSuccess,
-            inputMapper = inputMapper,
-            focusRequester = focusRequester,
-            projectVersion = projectVersion,
-            currentInstrument = currentInstrument,
-            instrumentCursorRow = instrumentCursorRow,
-            instrumentCursorColumn = instrumentCursorColumn,
-            instrumentStatusMessage = instrumentStatusMessage,
-            instrumentStatusSuccess = instrumentStatusSuccess,
-            fileBrowserState = fileBrowserState,
-            playbackController = playbackController,
-            selectionInfo = selectionInfo,
-            clipboardInfo = clipboardInfo,
-            selectionMode = selectionModeActive,
-            isCellSelected = isCellSelectedFn,
-            mixerCursorColumn = trackerController.mixerCursorColumn,
-            trackPeaks = trackPeakBuffer,
-            masterPeaks = masterPeakBuffer,
-            currentTable = trackerController.currentTable,
-            tableCursorRow = trackerController.tableCursorRow,
-            tableCursorColumn = trackerController.tableCursorColumn,
-            currentGroove = trackerController.currentGroove,
-            grooveCursorRow = trackerController.grooveCursorRow,
-            modCursorRow = trackerController.modCursorRow,
-            modCursorPair = trackerController.modCursorPair,
-            modCursorSide = trackerController.modCursorSide,
-            isRendering = isRendering,
-            renderProgress = renderProgress,
-            showResampleDialog = showResampleDialog,
-            resampleDialogCursor = resampleDialogCursor
-        )
-    }
     } // CompositionLocalProvider
 }
 

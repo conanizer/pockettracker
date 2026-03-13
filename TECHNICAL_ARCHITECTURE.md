@@ -3,8 +3,8 @@
 ## Document Purpose
 This document defines **HOW** PocketTracker is built technically. It covers current architecture, planned refactoring for portability, and technical decisions.
 
-**Last Updated:** 2025-01-01  
-**Version:** 1.0  
+**Last Updated:** 2026-03-13
+**Version:** 2.0
 **Audience:** Developers, Contributors, Claude Code AI
 
 ---
@@ -54,62 +54,53 @@ This document defines **HOW** PocketTracker is built technically. It covers curr
 
 ---
 
-## Current Architecture (Pre-Refactoring)
+## Current Architecture (Post-Refactoring — March 2026)
 
-### Current State (January 2025)
+### Current State (March 2026 — REFACTORING COMPLETE)
+
+The refactoring is **complete**. The codebase now matches the Target Architecture described below.
 
 ```
 PocketTracker/
-├── MainActivity.kt (2570 lines!)
-│   ├── App state (cursor, screen, project)
-│   ├── Button handlers (all logic mixed with UI)
-│   ├── Audio engine calls
-│   ├── File I/O
-│   └── Compose UI rendering
+├── core/
+│   ├── audio/
+│   │   ├── IAudioBackend.kt        ✅ Interface — portable
+│   │   └── AudioEngine.kt          ✅ Platform-agnostic coordinator
+│   ├── logic/
+│   │   ├── TrackerController.kt    ✅ Navigation, screen state
+│   │   ├── InputController.kt      ✅ Button handling, selection
+│   │   ├── PlaybackController.kt   ✅ Phrase/chain/song scheduling
+│   │   ├── EffectProcessor.kt      ✅ All effect calculations
+│   │   ├── InstrumentController.kt ✅ Sample management, resampling
+│   │   ├── FileController.kt       ✅ Save/load orchestration
+│   │   └── ClipboardManager.kt     ✅ Copy/paste
+│   ├── resources/
+│   │   └── IResourceLoader.kt      ✅ Sample/asset loading interface
+│   └── storage/
+│       ├── IFileSystem.kt          ✅ File I/O interface
+│       └── FileInfo.kt             ✅ Platform-agnostic file metadata
 │
-├── TrackerAudioEngine.kt
-│   ├── JNI bridge to C++
-│   ├── Android Context dependency
-│   └── Resources loading (R.raw.*)
+├── platform/android/
+│   ├── MainActivity.kt             Thin — creates backends + UI
+│   ├── OboeAudioBackend.kt         ✅ Oboe JNI implementation
+│   ├── AndroidResourceLoader.kt    ✅ R.raw.* loader
+│   ├── AndroidFileSystem.kt        ✅ Scoped storage implementation
+│   └── DeviceAdapter.kt            Android InputDevice API
 │
-├── TrackerData.kt ✅
-│   └── Pure data structures (ALREADY PORTABLE!)
+├── Modules/
+│   ├── PhraseEditorModule.kt       ✅ Portable rendering
+│   ├── ChainEditorModule.kt        ✅
+│   ├── SongEditorModule.kt         ✅
+│   ├── InstrumentModule.kt         ✅
+│   ├── TableModule.kt              ✅
+│   ├── GrooveModule.kt             ✅
+│   ├── ModulationModule.kt         ✅
+│   ├── MixerModule.kt              ✅
+│   └── ProjectModule.kt            ✅
 │
-├── Modules/*.kt ✅
-│   └── Rendering logic (MOSTLY PORTABLE!)
-│
-├── DeviceAdapter.kt
-│   └── Android InputDevice API
-│
-├── FileManager.kt
-│   └── Android File API (scoped storage)
-│
-└── native-audio.cpp ✅
-    └── C++ audio engine (ALREADY PORTABLE!)
-```
-
-### Problems with Current Architecture
-
-1. **MainActivity.kt is a God Object** (2570 lines doing everything)
-   - Business logic mixed with UI
-   - Hard to test
-   - Impossible to port to Linux without complete rewrite
-
-2. **Android APIs everywhere**
-   - `Context` passed around
-   - `R.raw.*` resource loading
-   - Android file system APIs
-   - Platform-specific input handling
-
-3. **No abstraction layers**
-   - Can't swap audio backend
-   - Can't swap resource loading
-   - Can't swap file system
-
-**Good News:**
-- ✅ Audio engine already in C++ (most complex part is portable!)
-- ✅ Data structures are pure Kotlin (easy to port to C++ structs)
-- ✅ Rendering modules are mostly draw-only (minimal Android dependencies)
+├── TrackerData.kt                  ✅ Pure data structures (PORTABLE)
+├── PixelPerfectRenderer.kt         Compose rendering + pixel font
+└── native-audio.cpp                ✅ C++ audio engine (PORTABLE)
 
 ---
 
@@ -834,6 +825,7 @@ See **REFACTORING_ROADMAP.md** for detailed step-by-step refactoring plan.
 ---
 
 **Version History:**
+- v2.0 (2026-03-13): Updated to reflect complete refactoring; all architecture goals achieved; modulation engine fully implemented
 - v1.0 (2025-01-01): Initial architecture document with refactoring plan
 
 ---
@@ -1048,14 +1040,18 @@ The scale factor `×12.0` maps full amount to ±1 octave. Typical vibrato: `amou
 
 ---
 
-### What is NOT yet implemented
+### What IS implemented (as of 2026-03-13)
 
-- **Release stage** (ADSR): requires note-off system in `PlaybackController`
-- **PAN destination**: `dest=2` — needs per-sample pan update in mix loop
-- **FILTER destinations**: `dest=5,6` — need real-time biquad recalculation
-- **SAMPLE_START destination**: `dest=7`
-- **Mod-to-mod routing**: `dest=8,9,10`
-- **EXP+/EXP-/RND/DRNK LFO shapes**
-- **Offline render (WAV export)**: modulation not applied during `renderOffline()`
+- ✅ **All destinations**: VOL, PAN, PITCH, FINE_PITCH, FILTER_CUTOFF, FILTER_RES, SAMPLE_START
+- ✅ **Mod-to-mod routing**: dest=8 (MOD_AMT), dest=9 (MOD_RATE), dest=10 (MOD_BOTH); N→N+1 circular
+- ✅ **ADSR release**: `scheduleNoteOff` in `PlaybackController` sends soft-kill at step end; ADSR/TRIG voices auto-stop when stage 5 reached on VOL mods
+- ✅ **PAN mod**: `Voice.basePan` + `modPanOffset` (±0.5); recalculates pan law per callback
+- ✅ **FILTER mod**: `modCutOffset/modResOffset` (±255); recalculates biquad per callback when active
+- ✅ **Offline render**: `pushInstrumentModulation` per instrument before `renderOffline`, per-frame mod update applied
+- ✅ **Envelope interpolation**: `prevEnvValue` snapshot + per-sample lerp on falling transitions (eliminates AHD crackling)
 
-See `REFACTORING_ROADMAP.md` Phase 4 for step-by-step implementation guide.
+### Known limitations (Post-MVP)
+
+- EXP+/EXP-/RND/DRNK LFO shapes (currently fall back to SIN)
+- TRACKING mod type not yet implemented
+- Free-running LFO mode (currently always retriggers on new note)

@@ -32,7 +32,10 @@ class DeviceAdapter(private val context: Context) {
     }
 
     /** User-selectable layout modes. Persisted as UI state in PocketTrackerApp. */
-    enum class LayoutMode { FULL, TOUCH_PORTRAIT, TOUCH_LANDSCAPE }
+    enum class LayoutMode { FULL, TOUCH_PORTRAIT, TOUCH_LANDSCAPE, TOUCH_PORTRAIT2 }
+
+    /** Scaling mode for the game screen. INTEGER = crisp pixel-perfect, others = fill more screen. */
+    enum class ScalingMode { INTEGER, BILINEAR, NEAREST }
 
     data class LayoutConfig(
         val needsVirtualButtons: Boolean,
@@ -173,6 +176,7 @@ class DeviceAdapter(private val context: Context) {
             }
             LayoutMode.TOUCH_PORTRAIT  -> calculatePortraitLayout(deviceWidth, deviceHeight)
             LayoutMode.TOUCH_LANDSCAPE -> calculateLandscapeLayout(deviceWidth, deviceHeight)
+            LayoutMode.TOUCH_PORTRAIT2 -> calculatePortrait2Layout(deviceWidth, deviceHeight)
         }
     }
 
@@ -330,6 +334,71 @@ class DeviceAdapter(private val context: Context) {
             scaledScreenHeight = SCREEN_HEIGHT,
             virtualButtonsHeight = maxOf(availableButtonHeight, 400),
             virtualButtonsWidth = 0,
+            deviceWidth = deviceWidth,
+            deviceHeight = deviceHeight
+        )
+    }
+
+    /**
+     * Portrait2 layout: compact 4×4 button grid with 1-unit spacer above.
+     * Grid is 4 units wide × 4 units tall, spacer is 1 unit tall → 5 units total height.
+     * Screen sits above the button area, centered horizontally.
+     */
+    private fun calculatePortrait2Layout(deviceWidth: Int, deviceHeight: Int): LayoutConfig {
+        android.util.Log.d("DeviceAdapter", "=== PORTRAIT2 CALCULATION ===")
+
+        for (scale in 4 downTo 1) {
+            val scaledScreenWidth = SCREEN_WIDTH * scale
+            val scaledScreenHeight = SCREEN_HEIGHT * scale
+
+            if (scaledScreenWidth > deviceWidth) {
+                android.util.Log.d("DeviceAdapter", "  ✗ Scale ${scale}x: screen too wide")
+                continue
+            }
+
+            // Button area with outer spacers:
+            // Width:  4.5X (2×0.1X outer + 4 cells + 3×0.1X inner col spacers)
+            // Height: 5.2X (0.8X spacer above + 4 cells + 3×0.1X row spacers + 0.1X bottom)
+            val remainingHeight = deviceHeight - scaledScreenHeight
+            if (remainingHeight <= 0) {
+                android.util.Log.d("DeviceAdapter", "  ✗ Scale ${scale}x: no space for buttons")
+                continue
+            }
+
+            val xByWidth  = (deviceWidth / 4.5f).toInt()
+            val xByHeight = (remainingHeight / 5.2f).toInt()
+            val X = minOf(xByWidth, xByHeight)
+
+            if (X <= 0) continue
+
+            val buttonAreaHeight = (X * 5.2f).toInt()  // 0.8X spacer + 4 button rows + 3×0.1X row spacers + 0.1X bottom
+            val buttonAreaWidth  = (X * 4.5f).toInt()  // 2×0.1X outer + 4 button cols + 3×0.1X col spacers
+
+            android.util.Log.d("DeviceAdapter", "  ✓ Scale ${scale}x: X=$X, btnArea=${buttonAreaWidth}×${buttonAreaHeight}")
+
+            return LayoutConfig(
+                needsVirtualButtons = true,
+                isLandscape = false,
+                screenScale = scale,
+                scaledScreenWidth = scaledScreenWidth,
+                scaledScreenHeight = scaledScreenHeight,
+                virtualButtonsHeight = buttonAreaHeight,
+                virtualButtonsWidth = buttonAreaWidth,
+                deviceWidth = deviceWidth,
+                deviceHeight = deviceHeight
+            )
+        }
+
+        // Fallback
+        val X = minOf((deviceWidth / 4.5f).toInt(), 80)
+        return LayoutConfig(
+            needsVirtualButtons = true,
+            isLandscape = false,
+            screenScale = 1,
+            scaledScreenWidth = SCREEN_WIDTH,
+            scaledScreenHeight = SCREEN_HEIGHT,
+            virtualButtonsHeight = (X * 5.2f).toInt(),
+            virtualButtonsWidth = (X * 4.5f).toInt(),
             deviceWidth = deviceWidth,
             deviceHeight = deviceHeight
         )

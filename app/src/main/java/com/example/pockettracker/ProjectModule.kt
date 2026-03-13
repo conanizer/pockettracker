@@ -165,18 +165,16 @@ class ProjectModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 5: CLEAN (placeholder)
+        // ROW 5: CLEAN (SEQ / INST buttons)
         // ─────────────────────────────────────
-        drawParameterRow(
+        drawCleanRow(
             x = x,
             y = rowY,
             scale = scale,
             nameColumnX = nameColumnX,
             valueColumnX = valueColumnX,
-            parameterName = "CLEAN",
-            parameterValue = "---",
-            isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
-            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
+            projectState = projectState,
+            currentRow = currentRow
         )
         rowY += ROW_HEIGHT
         currentRow++
@@ -199,12 +197,13 @@ class ProjectModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 7: LAYOUT (cycle: FULL / T.PORT / T.LAND)
+        // ROW 7: LAYOUT (cycle: FULL / T.PORT / T.LAND / T.PORT2)
         // ─────────────────────────────────────
         val layoutText = when (projectState.layoutMode) {
-            DeviceAdapter.LayoutMode.FULL           -> "FULL"
+            DeviceAdapter.LayoutMode.FULL            -> "FULL"
             DeviceAdapter.LayoutMode.TOUCH_PORTRAIT  -> "T.PORT"
             DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE -> "T.LAND"
+            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 -> "T.PORT2"
         }
         drawParameterRow(
             x = x,
@@ -214,6 +213,28 @@ class ProjectModule : TrackerModule {
             valueColumnX = valueColumnX,
             parameterName = "LAYOUT",
             parameterValue = layoutText,
+            isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
+            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
+        )
+        rowY += ROW_HEIGHT
+        currentRow++
+
+        // ─────────────────────────────────────
+        // ROW 8: SCALING (INT / BILINEAR / NEAREST)
+        // ─────────────────────────────────────
+        val scalingText = when (projectState.scalingMode) {
+            DeviceAdapter.ScalingMode.INTEGER  -> "INT"
+            DeviceAdapter.ScalingMode.BILINEAR -> "BILINEAR"
+            DeviceAdapter.ScalingMode.NEAREST  -> "NEAREST"
+        }
+        drawParameterRow(
+            x = x,
+            y = rowY,
+            scale = scale,
+            nameColumnX = nameColumnX,
+            valueColumnX = valueColumnX,
+            parameterName = "SCALING",
+            parameterValue = scalingText,
             isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
             isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
         )
@@ -498,6 +519,57 @@ class ProjectModule : TrackerModule {
     }
 
     /**
+     * Draw CLEAN row with SEQ / INST options
+     * Example: CLEAN    SEQ  INST
+     */
+    private fun DrawScope.drawCleanRow(
+        x: Int,
+        y: Int,
+        scale: Int,
+        nameColumnX: Int,
+        valueColumnX: Int,
+        projectState: ProjectState,
+        currentRow: Int
+    ) {
+        val textY = y + TEXT_PADDING
+        val isCursorOnThisRow = projectState.cursorRow == currentRow
+
+        if (isCursorOnThisRow) {
+            drawRect(
+                color = Color(0xFF333333),
+                topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
+                size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
+            )
+        }
+
+        drawBitmapText(
+            text = "CLEAN",
+            x = nameColumnX,
+            y = textY,
+            scale = scale,
+            color = if (isCursorOnThisRow) Color.Yellow else Color.Gray,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        val options = listOf("SEQ", "INST")
+        var optionX = valueColumnX
+        for (optionIndex in options.indices) {
+            val isCursorOnThis = isCursorOnThisRow && projectState.cursorColumn == optionIndex + 1
+            drawBitmapText(
+                text = options[optionIndex],
+                x = optionX,
+                y = textY,
+                scale = scale,
+                color = if (isCursorOnThis) Color.Yellow else Color.White,
+                spacing = CHAR_SPACING,
+                fontScale = FONT_SCALE
+            )
+            optionX += 80
+        }
+    }
+
+    /**
      * Get cursor context for current cursor position
      *
      * This tells the generic input system what kind of value we're on
@@ -574,8 +646,16 @@ class ProjectModule : TrackerModule {
                 // WAV MIX button - can be activated with A button
                 return CursorContextFactory.readOnly()  // Action handled in MainActivity
             }
+            5 -> {
+                // CLEAN row - press A to clean (read-only, action handled in MainActivity)
+                return CursorContextFactory.readOnly()
+            }
             7 -> {
                 // LAYOUT row - A button cycles the mode (handled in MainActivity)
+                return CursorContextFactory.readOnly()
+            }
+            8 -> {
+                // SCALING row - A button cycles scaling mode (handled in MainActivity)
                 return CursorContextFactory.readOnly()
             }
             else -> return CursorContextFactory.none()
@@ -668,5 +748,6 @@ data class ProjectState(
     val isSuccess: Boolean = true,
     val isRendering: Boolean = false,
     val renderProgress: Float = 0f,
-    val layoutMode: DeviceAdapter.LayoutMode = DeviceAdapter.LayoutMode.FULL
+    val layoutMode: DeviceAdapter.LayoutMode = DeviceAdapter.LayoutMode.FULL,
+    val scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER
 )

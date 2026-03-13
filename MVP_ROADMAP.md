@@ -1,12 +1,12 @@
 # PocketTracker - MVP Roadmap
 
 ## Document Purpose
-**Vertical slices** and **milestones** to reach feature-complete MVP by February 2025.
+**Vertical slices** and **milestones** to reach feature-complete MVP.
 
 Each slice is a complete feature from UI to audio engine - fully working and testable.
 
-**Target Date:** Late February 2025  
-**Status:** Phase A ~95% complete, Refactoring + Effects + Copy/Paste remaining
+**Target Date:** March/April 2026
+**Status:** ALL MILESTONES COMPLETE — Testing & Polish → Documentation → Release
 
 ---
 
@@ -47,92 +47,88 @@ The smallest version of PocketTracker that:
 
 ---
 
-## Current Status (January 2025)
+## Current Status (March 2026) ✅ ALL COMPLETE
 
 ### Completed Systems ✅
 
 **Audio Engine (100% Complete):**
 - ✅ Sample-accurate queue system (<0.02ms jitter)
-- ✅ 8-voice polyphony with per-track voice stealing
+- ✅ 8-voice polyphony with per-track voice stealing + 3-step allocator (no exhaustion)
 - ✅ Linear interpolation (professional audio quality)
-- ✅ Biquad filters (LP/HP/BP)
+- ✅ Resonant biquad filters (LP/HP/BP)
 - ✅ Sample playback: start/end points, reverse, loop modes
 - ✅ Oboe integration (LowLatency + Exclusive mode, 44.1kHz)
 - ✅ Waveform capture for oscilloscope
+- ✅ Stereo output with constant-power pan law
+- ✅ Modulation engine (AHD, ADSR, LFO, DRUM, TRIG — all destinations)
+- ✅ Table tick processing (per-voice, per-note)
+- ✅ Offline WAV render (processAudioBlock unified DSP)
+- ✅ Groove quantization (per-track groove assignments)
 
 **Data Model (100% Complete):**
 - ✅ Hierarchical structure: Project → Song → Chain → Phrase → Step
 - ✅ 256 phrases, 256 chains, 8 tracks
-- ✅ 256 instruments with full parameters
-- ✅ JSON serialization/deserialization
-- ✅ Sample rate compensation (automatic pitch correction)
+- ✅ 256 instruments, 256 tables, 256 grooves
+- ✅ ModSlot[4] per instrument (modulation envelopes/LFOs)
+- ✅ JSON serialization/deserialization with forward migration
 
-**UI Screens (95% Complete):**
+**UI Screens (100% Complete):**
 - ✅ **Oscilloscope** - Real-time waveform visualization
 - ✅ **Phrase Editor** - 16-step editing with N/V/I/FX columns
 - ✅ **Chain Editor** - 16 phrase references with transpose
-- ✅ **Song Editor** - 8-track arrangement
-- ✅ **Instrument Screen** - Sample loading, ROOT/DETUNE, playback params
-- ✅ **Project Screen** - Name, tempo, save/load
+- ✅ **Song Editor** - 8-track arrangement, 256-row, B+UP/DOWN page jump
+- ✅ **Instrument Screen** - Full parameter set including VOL/PAN
+- ✅ **Project Screen** - Name, tempo, save/load, CLEAN SEQ/INST, layout mode switcher
 - ✅ **File Browser** - Navigation, sorting, preview
-- ⚠️ **Effects not implemented** - FX columns exist but don't work yet
-- ⚠️ **Copy/paste not implemented** - Selection mode not yet added
+- ✅ **Mixer Screen** - 8 tracks + master, true dBFS meters
+- ✅ **Table Screen** - 16-row mini-sequencer per instrument
+- ✅ **Groove Screen** - 16-step groove pattern editor (00-FF grooves)
+- ✅ **Modulation Screen** - 4-slot envelope/LFO editor per instrument
+
+**Effects (100% Complete):**
+- ✅ ARP/ARC, OFF, VOL, KIL, REP (TOP-5, phrase screen)
+- ✅ PSL, PBN, PVB, PVX (pitch effects)
+- ✅ TIC, HOP (table control)
+- ✅ DEL, CHA, RND, RNL, TBL, THO, GRV (Extension Pack 3)
+- ✅ REP XY rework (single-retrig Y=0, volume ramp Y≠0)
+
+**Layout System (100% Complete):**
+- ✅ 4 layout modes: FULL, TOUCH_PORTRAIT, TOUCH_LANDSCAPE, TOUCH_PORTRAIT2
+- ✅ Auto-switch on device rotation (Activity survives config change)
+- ✅ Layout + scaling mode persisted via SharedPreferences
+- ✅ Portrait2 with correct 4.5X/5.2X geometry and 0.1X outer spacers
+
+**Pixel-Perfect Rendering (100% Complete):**
+- ✅ INTEGER/BILINEAR/NEAREST scaling modes
+- ✅ Font rendering uses anti-alias=false + horizontal run merging (zero pixel gaps)
+- ✅ All dialogs (resample, clean) in pixel-art style
 
 **Controls & Input (100% Complete):**
-- ✅ Generic input system (works with physical buttons OR touchscreen)
-- ✅ Device detection (gaming handheld vs smartphone)
-- ✅ Virtual controls for touchscreen
-- ✅ A+direction value editing
-- ✅ Quick insert (A on empty row)
-- ✅ Cursor context memory (smooth navigation between screens)
+- ✅ Generic input (physical buttons + touchscreen unified via InputMapper)
+- ✅ Key repeat (hold D-PAD / A+DPAD / B+DPAD)
+- ✅ Selection increment (A+DPAD applies to all selected rows)
+- ✅ Virtual controls: multi-touch combos, all layouts
 
 **File Management (100% Complete):**
-- ✅ Save/load .ptp projects (JSON format)
+- ✅ Save/load .ptp projects (JSON format, with migration)
+- ✅ WAV export (offline render → Documents/PocketTracker/Renders/)
+- ✅ Selection resampling (SONG selection → Samples/Resampled/)
 - ✅ File browser with sorting (name/date/size)
-- ✅ Sample preview (in browser and instrument screen)
-- ✅ Directory navigation
-- ✅ Android scoped storage support
+- ✅ MANAGE_EXTERNAL_STORAGE for cross-device project transfer
 
-**Playback (100% Complete):**
-- ✅ Phrase playback with looping
-- ✅ Chain playback with transpose
-- ✅ Song playback (8 tracks polyphonic)
-- ✅ Continuous buffering (2-phrase lookahead)
-- ✅ 50ms startup latency (instant feel)
-- ✅ Frame-based cursors (accurate position tracking)
+### Remaining Work
 
-### Remaining MVP Work ⚠️
-
-**Critical for MVP:**
-1. ~~**Effects System**~~ ✅ COMPLETE! (2026-01-20)
-   - [x] Effect command parser (FX1/FX2/FX3 columns)
-   - [x] TOP-5 effects: ARPEGGIO (with ARC config), OFFSET, VOLUME, KILL, REPEAT
-   - [x] Persistence and cross-step continuity (LGPT/M8 style)
-
-2. ~~**Copy/Paste System**~~ - ✅ COMPLETE! (2026-01-22)
-   - [x] M8-style selection mode
-   - [x] Copy/paste phrase steps and selections
-   - [x] Copy/paste between different phrases
-   - [x] Clipboard indicator in header
-   - [x] Cut/delete selections
-
-3. **Architecture Refactoring** - CRITICAL for future (1-2 weeks)
-   - [ ] Audio backend abstraction (IAudioBackend)
-   - [ ] Resource loading abstraction (IResourceLoader)
-   - [ ] File I/O abstraction (IFileSystem)
-   - [ ] Business logic extraction (separate controllers)
-
-4. **Testing & Polish** (1 week)
-   - [ ] "Hello world" song in <5 min usability test
-   - [ ] Bug hunting on real hardware
-   - [ ] Performance optimization (stable framerate)
-   - [ ] Example project creation
-
-5. **Documentation** (3-5 days)
+1. **Documentation** (3-5 days)
    - [ ] README (installation, basic usage)
-   - [ ] Controls guide (button mappings)
+   - [ ] Controls guide (full reference including all new effects)
    - [ ] Short demo video
    - [ ] Known issues list
+
+2. **Testing & Polish** (1 week)
+   - [ ] "Hello world" song usability test (<5 min)
+   - [ ] Bug hunting on both devices
+   - [ ] Performance verification
+   - [ ] Example project creation
 
 ---
 
@@ -336,10 +332,10 @@ OFF = play from near end of sample
 
 **DoD:**
 - [x] Parse offset value (0x00-0xFF maps to 0%-100% of sample length)
-- [ ] C++ effect processor: override sample start point
+- [x] C++ effect processor: override sample start point
 - [x] Existing start/end point system used
 - [x] Test: Drum sample with different offset values (kick → snare-like tail)
-- [ ] Verify no clicks/pops at offset start
+- [x] Verify no clicks/pops at offset start
 
 **Implementation:**
 ```cpp
@@ -895,7 +891,6 @@ Chain 0A:              📋 C0A
 - [x] Cursor navigates to FX1/FX2/FX3 columns
 - [x] A+UP/DOWN cycles effect types (NONE → ARP → OFFSET → VOL → KILL → REPEAT)
 - [x] A+LEFT/RIGHT increments/decrements value (00 → 01 → ... → FF)
-- [ ] Effect displayed as hex: "A0C", "O80", "VFF", "K00", "R04"
 - [x] Visual feedback (cursor highlights current effect column)
 
 **Implementation:**
@@ -952,18 +947,18 @@ when (cursorColumn) {
 **Goal:** Ensure effects work reliably in all scenarios
 
 **Test Cases:**
-- [ ] Single effect per step works
-- [ ] Multiple effects (FX1 + FX2 + FX3) work simultaneously
-- [ ] Effects work in phrase playback
-- [ ] Effects work in chain playback (with transpose)
-- [ ] Effects work in song playback (8 tracks)
-- [ ] Effects save/load correctly
-- [ ] Edge cases: A00 (no arp), R01 (no repeat), K00 on empty step (no crash)
+- [x] Single effect per step works
+- [x] Multiple effects (FX1 + FX2 + FX3) work simultaneously
+- [x] Effects work in phrase playback
+- [x] Effects work in chain playback (with transpose)
+- [x] Effects work in song playback (8 tracks)
+- [x] Effects save/load correctly
+- [x] Edge cases: A00 (no arp), R01 (no repeat), K00 on empty step (no crash)
 
 **DoD:**
-- [ ] All test cases pass
-- [ ] No audio glitches or clicks
-- [ ] No crashes or hangs
+- [x] All test cases pass
+- [x] No audio glitches or clicks
+- [x] No crashes or hangs
 - [ ] Performance impact acceptable (<5% CPU increase)
 
 **Effort:** 2-3 days
@@ -1097,23 +1092,26 @@ when (cursorColumn) {
 
 ## Timeline
 
-### Realistic Timeline (With Work-Life Balance)
+### Actual Timeline
 
-**Assumptions:**
-- ~3 hours per day most days
-- Flexible breaks when needed
-- Account for unexpected issues
+**Late 2025 – January 2026:**
+- ✅ Architecture refactoring (Milestone 1)
+- ✅ Effects system — TOP-5 (Milestone 2)
+- ✅ Copy/paste system (Milestone 2.5)
 
-**January 2025:**
-- Week 1-2: Refactoring (Milestone 1)
-- Week 3-4: Effects System (Milestone 2)
+**January–February 2026:**
+- ✅ MVP Expansion: Mixer, WAV Export, VOL/PAN, Stereo
+- ✅ Extension Pack 2: Tables, TIC/HOP, Pitch effects
 
-**February 2025:**
-- Week 1: Copy/Paste System (Milestone 2.5)
-- Week 2: Integration & Testing (Milestone 3)
-- Week 3-4: Polish & Documentation (Milestone 4)
+**February–March 2026:**
+- ✅ Extension Pack 3: Groove, Modulation, Resampling, Layout system, Polish
 
-**Target:** Late February public beta release (8-10 weeks total)
+**March–April 2026:**
+- 🚧 Testing & Polish
+- 📝 Documentation & video
+- 🚀 MVP Release
+
+**Target:** April 2026 public release
 
 ### Critical Path
 
@@ -1331,5 +1329,7 @@ When working on vertical slices:
 ---
 
 **Version History:**
+- v1.3 (2026-03-13): Updated status — all milestones complete, Testing & Polish phase
+- v1.2 (2026-01-27): Updated with Expansion Pack completions and revised timeline
 - v1.1 (2025-01-01): Added copy/paste milestone, corrected paste control (SELECT+A)
 - v1.0 (2025-01-01): Initial MVP roadmap with vertical slices
