@@ -14,11 +14,18 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.paint
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import com.example.pockettracker.core.ui.DeviceTheme
+import kotlin.math.floor
 import com.example.pockettracker.core.audio.AudioEngine
 import com.example.pockettracker.core.data.Project
 import com.example.pockettracker.core.data.ScreenType
@@ -329,8 +336,15 @@ fun LandscapeLayoutWithVirtualButtons(
 }
 
 // ============================================================================
-// PORTRAIT2 LAYOUT
-// Structure: [SCREEN top, centered] → [compact 4×4 button grid]
+// PORTRAIT2 LAYOUT — Retro device skin (20:9 phones)
+//
+// Structure (all heights in X-units, X = deviceWidth / 135):
+//   1. TOP PANEL     — ventilation grille, 39.75X tall
+//   2. SCREEN BEZEL  — frame + tracker screen inside, 102.75X tall
+//   3. BRANDING STRIP— logo + LEDs, 22.5X tall
+//   4. BUTTON CLUSTER— themed 4×4 grid, 135X tall
+//
+// Total: 300X = deviceWidth × (300/135) = deviceWidth × 20/9  (perfect 20:9)
 // ============================================================================
 @Composable
 fun PortraitLayout2WithVirtualButtons(
@@ -338,68 +352,110 @@ fun PortraitLayout2WithVirtualButtons(
     scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER,
     params: TrackerScreenParams,
     inputMapper: InputMapper,
-    focusRequester: FocusRequester
+    focusRequester: FocusRequester,
+    theme: DeviceTheme = DeviceTheme.DARK,
 ) {
-    val density = androidx.compose.ui.platform.LocalDensity.current.density
+    val density = LocalDensity.current.density
 
-    // Button grid height (includes 1X spacer above buttons)
-    val buttonAreaHeight = layoutConfig.virtualButtonsHeight
+    // X = base unit derived from device width (design: 135X = full width)
+    val X = layoutConfig.deviceWidth / 135f
 
-    val remainingHeight = (layoutConfig.deviceHeight - buttonAreaHeight).coerceAtLeast(1)
-    val floatScale = minOf(layoutConfig.deviceWidth / 640f, remainingHeight / 480f)
-    val effectiveScale = if (scalingMode == DeviceAdapter.ScalingMode.INTEGER) {
-        layoutConfig.screenScale.toFloat()
-    } else {
-        floatScale
-    }
-    val effectiveScreenHeight = (480 * effectiveScale).toInt()
+    val topPanelH   = (X * 39.75f).toInt()
+    val bezelH      = (X * 102.75f).toInt()
+    val brandingH   = (X * 22.5f).toInt()
+    val buttonAreaH = (X * 135f).toInt()
 
-    // Center [screen + buttons] block vertically on the device
-    val totalContentHeight = effectiveScreenHeight + buttonAreaHeight
-    val topPadding = ((layoutConfig.deviceHeight - totalContentHeight) / 2).coerceAtLeast(0)
+    val bezelThickDp = theme.screenBezelThicknessDp.dp
+
+    // Applies PNG paint or solid color background depending on availability
+    fun Modifier.themeBackground(image: ImageBitmap?, color: Color): Modifier =
+        if (image != null)
+            then(Modifier.paint(BitmapPainter(image), contentScale = ContentScale.FillBounds))
+        else
+            background(color)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
             .focusRequester(focusRequester)
             .inputHandler(inputMapper)
             .focusable(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Top
     ) {
-        // 0. TOP SPACER to center content vertically
-        Spacer(modifier = Modifier.height((topPadding / density).dp))
-
-        // 1. SCREEN (scaled, centred horizontally)
+        // 1. TOP PANEL — ventilation grille
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height((effectiveScreenHeight / density).dp),
-            contentAlignment = Alignment.TopCenter
+                .height((topPanelH / density).dp)
+                .themeBackground(theme.topPanelImage, theme.casingColor)
+        )
+
+        // 2. SCREEN BEZEL — the bezelThickDp padding creates the visible frame border.
+        // Inner area: (deviceWidth - 2*bezelThick) × (bezelH - 2*bezelThick) pixels.
+        // We follow the same integer-scale + fill-factor pattern as FullScreenLayout to
+        // avoid giving PixelPerfectTracker a canvas that's too large (which would cause
+        // it to pick an incorrect integer scale and overflow the bezel border).
+        val bezelThickPx = theme.screenBezelThicknessDp * density
+        val innerW = layoutConfig.deviceWidth - 2f * bezelThickPx
+        val innerH = bezelH - 2f * bezelThickPx
+        val intScale = floor(minOf(innerW / DESIGN_WIDTH_PX, innerH / DESIGN_HEIGHT_PX))
+            .toInt().coerceAtLeast(1)
+        val fillFactor = minOf(innerW / (DESIGN_WIDTH_PX * intScale),
+                               innerH / (DESIGN_HEIGHT_PX * intScale))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height((bezelH / density).dp)
+                .themeBackground(theme.screenBezelImage, theme.screenBezelColor)
+                .padding(bezelThickDp),
+            contentAlignment = Alignment.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .size(width = 640.dp, height = 480.dp)
-                    .graphicsLayer {
-                        scaleX = effectiveScale
-                        scaleY = effectiveScale
-                    }
-            ) {
-                TrackerScreen(params)
+            if (scalingMode == DeviceAdapter.ScalingMode.INTEGER) {
+                // INTEGER: constrain TrackerScreen to the inner area so it picks the
+                // correct integer scale itself (same as FullScreenLayout's integer path).
+                Box(modifier = Modifier
+                    .width((innerW / density).dp)
+                    .height((innerH / density).dp)
+                ) {
+                    TrackerScreen(params)
+                }
+            } else {
+                // BILINEAR / NEAREST: render at integer scale, then stretch via graphicsLayer
+                // to fill the inner bezel area exactly (same as FullScreenLayout's float path).
+                Box(
+                    modifier = Modifier
+                        .size(
+                            width  = (DESIGN_WIDTH_PX  * intScale / density).dp,
+                            height = (DESIGN_HEIGHT_PX * intScale / density).dp
+                        )
+                        .graphicsLayer { scaleX = fillFactor; scaleY = fillFactor }
+                ) {
+                    TrackerScreen(params)
+                }
             }
         }
 
-        // 2. BUTTON GRID (compact portrait2 layout, includes 1X spacer at top)
+        // 3. BRANDING STRIP — logo + LEDs
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height((buttonAreaHeight / density).dp)
+                .height((brandingH / density).dp)
+                .themeBackground(theme.brandingPanelImage, theme.casingColor)
+        )
+
+        // 4. BUTTON CLUSTER
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height((buttonAreaH / density).dp)
         ) {
             VirtualControlsPortrait2(
-                inputMapper = inputMapper,
-                availableWidth = layoutConfig.deviceWidth,
-                availableHeight = buttonAreaHeight.coerceAtLeast(100)
+                inputMapper     = inputMapper,
+                availableWidth  = layoutConfig.deviceWidth,
+                availableHeight = buttonAreaH.coerceAtLeast(100),
+                theme           = theme,
             )
         }
     }

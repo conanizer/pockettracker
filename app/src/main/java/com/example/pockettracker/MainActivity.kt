@@ -48,6 +48,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.example.pockettracker.platform.android.AndroidResourceLoader
 import com.example.pockettracker.platform.android.AndroidFileSystem
+import com.example.pockettracker.platform.android.ThemeLoader
+import com.example.pockettracker.core.ui.DeviceTheme
 import com.example.pockettracker.platform.android.AndroidVideoAudioExtractor
 import com.example.pockettracker.core.storage.FileInfo
 import com.example.pockettracker.core.storage.FileSortMode
@@ -464,6 +466,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     }
     LaunchedEffect(scalingMode) {
         prefs.edit().putString("scaling_mode", scalingMode.name).apply()
+    }
+
+    // Theme — starts as DARK (immediate), loads AMIGA PNGs in background
+    var theme by remember { mutableStateOf<DeviceTheme>(DeviceTheme.AMIGA) }
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            val loaded = ThemeLoader.loadAmigaTheme(context)
+            withContext(Dispatchers.Main) { theme = loaded }
+        }
     }
 
     // Track orientation so layout recalculates when device flips (Activity survives
@@ -2802,11 +2813,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 )
             DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 ->
                 PortraitLayout2WithVirtualButtons(
-                    layoutConfig  = effectiveLayoutConfig,
-                    scalingMode   = scalingMode,
-                    params        = trackerParams,
-                    inputMapper   = inputMapper,
-                    focusRequester = focusRequester
+                    layoutConfig   = effectiveLayoutConfig,
+                    scalingMode    = scalingMode,
+                    params         = trackerParams,
+                    inputMapper    = inputMapper,
+                    focusRequester = focusRequester,
+                    theme          = theme,
                 )
             else -> // TOUCH_PORTRAIT (and FULL fallback — shouldn't normally reach here)
                 PortraitLayoutWithVirtualButtons(

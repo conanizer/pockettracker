@@ -20,13 +20,18 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.paint
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.pockettracker.core.ui.DeviceTheme
 import kotlin.math.floor
 
 private val BTN_NORMAL  = Color(0xFF3D5A80)
@@ -287,166 +292,188 @@ fun VirtualControlsRight(
 }
 
 // ============================================================================
-// PORTRAIT2 MODE - Compact 4×4 button grid with 0.1X spacers between buttons
+// THEMED BUTTON — used exclusively by VirtualControlsPortrait2.
 //
-// Grid dimensions (with spacers):
-//   Total width:  4×X + 3×0.1X = 4.3X  (4 cols + 3 inter-col spacers)
-//   Total height: 1X spacer + 4×X + 3×0.1X = 5.3X
+// Draws PNG image if available, else solid color fallback.
+// Text positioned by explicit offsets (not centered) to match design spec.
+// Text shifts down by pressedOffsetDp when button is held.
+// ============================================================================
+@Composable
+private fun VirtualBtnThemed(
+    inputMapper: InputMapper,
+    button: VirtualButton,
+    label: String,
+    modifier: Modifier,
+    theme: DeviceTheme,
+    isWide: Boolean = false,
+    baseFontSizeSp: TextUnit,
+    textOffsetXDp: Float,
+    textOffsetYDp: Float,
+    pressedOffsetDp: Float,
+) {
+    var pressed by remember { mutableStateOf(false) }
+
+    val image = when {
+        isWide &&  pressed  -> theme.buttonWidePressed
+        isWide && !pressed  -> theme.buttonWideNormal
+        !isWide &&  pressed -> theme.buttonSquarePressed
+        else                -> theme.buttonSquareNormal
+    }
+
+    val topOffsetDp = textOffsetYDp + if (pressed) pressedOffsetDp else 0f
+
+    Box(
+        contentAlignment = Alignment.TopStart,
+        modifier = modifier
+            .then(
+                if (image != null)
+                    Modifier.paint(BitmapPainter(image), contentScale = ContentScale.FillBounds)
+                else
+                    Modifier.background(
+                        if (pressed) theme.buttonPressedColor else theme.buttonNormalColor,
+                        RoundedCornerShape(4.dp)
+                    )
+            )
+            .pointerInput(button) {
+                detectTapGestures(
+                    onPress = {
+                        pressed = true
+                        inputMapper.onVirtualButton(button, ButtonAction.PRESSED)
+                        tryAwaitRelease()
+                        pressed = false
+                        inputMapper.onVirtualButton(button, ButtonAction.RELEASED)
+                    }
+                )
+            }
+    ) {
+        Text(
+            text = label,
+            fontFamily = theme.buttonFont,
+            fontWeight = FontWeight.Normal,
+            fontSize = baseFontSizeSp,
+            color = theme.buttonLabelColor,
+            modifier = Modifier.padding(start = textOffsetXDp.dp, top = topOffsetDp.dp)
+        )
+    }
+}
+
+// ============================================================================
+// PORTRAIT2 MODE — Retro device skin with themed button cluster.
 //
-// Layout:
-//   Spacer: 1X tall (between screen and buttons)
-//   Row 1: [L 2.1X][sp 0.1X][R 2.1X]
-//   sp 0.1X
-//   Row 2: [empty X][sp 0.1X][UP X][sp 0.1X][B X][sp 0.1X][A X]
-//   sp 0.1X
-//   Row 3: [LEFT X][sp 0.1X][DOWN X][sp 0.1X][RIGHT X][sp 0.1X][empty X]
-//   sp 0.1X
-//   Row 4: [empty X][sp 0.1X][SEL X][sp 0.1X][START X][sp 0.1X][empty X]
+// Layout (all dimensions in X-units, X = availableWidth / 135):
+//   Outer box: 135X × 135X with button backing (PNG or color)
+//   Inner column (1.5X padding): 132X wide
+//   Row 1: [L Shift 66X][R Shift 66X]          — wide buttons
+//   Row 2: [empty 33X][↑ 33X][B 33X][A 33X]    — square buttons
+//   Row 3: [← 33X][↓ 33X][→ 33X][empty 33X]   — square buttons
+//   Row 4: [empty 33X][Sel 33X][Start 33X][empty 33X]
 // ============================================================================
 @Composable
 fun VirtualControlsPortrait2(
     inputMapper: InputMapper,
     availableWidth: Int,
-    availableHeight: Int
+    availableHeight: Int,
+    theme: DeviceTheme = DeviceTheme.DARK,
 ) {
     if (availableWidth <= 0 || availableHeight <= 0) return
 
     val density = LocalDensity.current.density
 
-    // 4.5X wide (2×0.1X outer + 4 buttons + 3×0.1X inner col spacers)
-    // 5.2X tall  (0.8X spacer above + 4 buttons + 3×0.1X row spacers + 0.1X bottom)
-    val xByWidth  = floor(availableWidth / 4.5f)
-    val xByHeight = floor(availableHeight / 5.2f)
+    // X = base unit. Cluster is 135X × 135X (square).
+    val xByWidth  = floor(availableWidth  / 135f)
+    val xByHeight = floor(availableHeight / 135f)
     val X = minOf(xByWidth, xByHeight).toInt().coerceAtLeast(1)
 
-    val cellDp      = (X / density).dp
-    val gapDp       = (X * 0.1f / density).dp   // 0.1X spacer between buttons and outer padding
-    val lrWidthDp   = (X * 2.1f / density).dp   // L/R buttons: (4.3X buttons + 0.1X inner) / 2 = 2.15X ≈ 2.1X
-    val spacerDp    = (X * 0.8f / density).dp   // 0.8X spacer between screen and buttons
+    fun px(units: Float) = (X * units / density).dp
 
-    val mainFontSize    = (X * 0.4f / density).sp
-    val triggerFontSize = (X * 0.35f / density).sp
-    val smallFontSize   = (X * 0.25f / density).sp
+    val cellDp    = px(33f)   // square button: 33X × 33X
+    val wideDp    = px(66f)   // wide button: 66X × 33X
+    val paddingDp = px(1.5f)  // 12px outer padding
 
-    Column(
+    val largeSp = (X * 13f / density).sp  // A, B, arrows
+    val smallSp = (X *  9f / density).sp  // Sel, Start, L/R Shift
+
+    val sqOffXDp   = X * 6f / density
+    val wideOffXDp = X * 7f / density
+    val offYDp     = X * 4f / density
+    val pressedDp  = X * 1f / density
+
+    // Outer box: button backing (PNG or rounded color rect)
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF1a1a1a))
-            .padding(horizontal = gapDp),  // 0.1X outer side padding
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+            .then(
+                if (theme.buttonBackingImage != null)
+                    Modifier.paint(BitmapPainter(theme.buttonBackingImage), contentScale = ContentScale.FillBounds)
+                else
+                    Modifier.background(theme.buttonBackingColor, RoundedCornerShape(theme.buttonBackingCornerDp.dp))
+            )
     ) {
-        // Spacer (0.8X) between screen and buttons
-        Spacer(modifier = Modifier.height(spacerDp))
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingDp),
+            horizontalAlignment = Alignment.Start,
+            verticalArrangement = Arrangement.Top
+        ) {
+            // Row 1: [L Shift][R Shift]
+            Row {
+                VirtualBtnThemed(inputMapper, VirtualButton.L_SHIFT, "L Shift",
+                    Modifier.size(width = wideDp, height = cellDp), theme, isWide = true,
+                    smallSp, wideOffXDp, offYDp, pressedDp)
+                VirtualBtnThemed(inputMapper, VirtualButton.R_SHIFT, "R Shift",
+                    Modifier.size(width = wideDp, height = cellDp), theme, isWide = true,
+                    smallSp, wideOffXDp, offYDp, pressedDp)
+            }
 
-        // Row 1: [L (2.1X)][gap 0.1X][R (2.1X)]
-        Row(horizontalArrangement = Arrangement.Center) {
-            VirtualBtn(
-                inputMapper = inputMapper,
-                button = VirtualButton.L_SHIFT,
-                label = "L",
-                modifier = Modifier.size(width = lrWidthDp, height = cellDp),
-                fontSize = triggerFontSize
-            )
-            Spacer(modifier = Modifier.width(gapDp))
-            VirtualBtn(
-                inputMapper = inputMapper,
-                button = VirtualButton.R_SHIFT,
-                label = "R",
-                modifier = Modifier.size(width = lrWidthDp, height = cellDp),
-                fontSize = triggerFontSize
-            )
+            // Row 2: [empty][↑][B][A]
+            Row {
+                Spacer(Modifier.size(cellDp))
+                VirtualBtnThemed(inputMapper, VirtualButton.DPAD_UP, "↑",
+                    Modifier.size(cellDp), theme,
+                    baseFontSizeSp = largeSp, textOffsetXDp = sqOffXDp,
+                    textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
+                VirtualBtnThemed(inputMapper, VirtualButton.B, "B",
+                    Modifier.size(cellDp), theme,
+                    baseFontSizeSp = largeSp, textOffsetXDp = sqOffXDp,
+                    textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
+                VirtualBtnThemed(inputMapper, VirtualButton.A, "A",
+                    Modifier.size(cellDp), theme,
+                    baseFontSizeSp = largeSp, textOffsetXDp = sqOffXDp,
+                    textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
+            }
+
+            // Row 3: [←][↓][→][empty]
+            Row {
+                VirtualBtnThemed(inputMapper, VirtualButton.DPAD_LEFT, "←",
+                    Modifier.size(cellDp), theme,
+                    baseFontSizeSp = largeSp, textOffsetXDp = sqOffXDp,
+                    textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
+                VirtualBtnThemed(inputMapper, VirtualButton.DPAD_DOWN, "↓",
+                    Modifier.size(cellDp), theme,
+                    baseFontSizeSp = largeSp, textOffsetXDp = sqOffXDp,
+                    textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
+                VirtualBtnThemed(inputMapper, VirtualButton.DPAD_RIGHT, "→",
+                    Modifier.size(cellDp), theme,
+                    baseFontSizeSp = largeSp, textOffsetXDp = sqOffXDp,
+                    textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
+                Spacer(Modifier.size(cellDp))
+            }
+
+            // Row 4: [empty][Sel][Start][empty]
+            Row {
+                Spacer(Modifier.size(cellDp))
+                VirtualBtnThemed(inputMapper, VirtualButton.SELECT, "Sel",
+                    Modifier.size(cellDp), theme,
+                    baseFontSizeSp = smallSp, textOffsetXDp = sqOffXDp,
+                    textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
+                VirtualBtnThemed(inputMapper, VirtualButton.START, "Start",
+                    Modifier.size(cellDp), theme,
+                    baseFontSizeSp = smallSp, textOffsetXDp = sqOffXDp,
+                    textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
+                Spacer(Modifier.size(cellDp))
+            }
         }
-
-        Spacer(modifier = Modifier.height(gapDp))
-
-        // Row 2: [empty][gap][UP][gap][B][gap][A]
-        Row(horizontalArrangement = Arrangement.Center) {
-            Spacer(modifier = Modifier.size(cellDp))
-            Spacer(modifier = Modifier.width(gapDp))
-            VirtualBtn(
-                inputMapper = inputMapper,
-                button = VirtualButton.DPAD_UP,
-                label = "↑",
-                modifier = Modifier.size(cellDp),
-                fontSize = mainFontSize
-            )
-            Spacer(modifier = Modifier.width(gapDp))
-            VirtualBtn(
-                inputMapper = inputMapper,
-                button = VirtualButton.B,
-                label = "B",
-                modifier = Modifier.size(cellDp),
-                fontSize = mainFontSize
-            )
-            Spacer(modifier = Modifier.width(gapDp))
-            VirtualBtn(
-                inputMapper = inputMapper,
-                button = VirtualButton.A,
-                label = "A",
-                modifier = Modifier.size(cellDp),
-                fontSize = mainFontSize
-            )
-        }
-
-        Spacer(modifier = Modifier.height(gapDp))
-
-        // Row 3: [LEFT][gap][DOWN][gap][RIGHT][gap][empty]
-        Row(horizontalArrangement = Arrangement.Center) {
-            VirtualBtn(
-                inputMapper = inputMapper,
-                button = VirtualButton.DPAD_LEFT,
-                label = "←",
-                modifier = Modifier.size(cellDp),
-                fontSize = mainFontSize
-            )
-            Spacer(modifier = Modifier.width(gapDp))
-            VirtualBtn(
-                inputMapper = inputMapper,
-                button = VirtualButton.DPAD_DOWN,
-                label = "↓",
-                modifier = Modifier.size(cellDp),
-                fontSize = mainFontSize
-            )
-            Spacer(modifier = Modifier.width(gapDp))
-            VirtualBtn(
-                inputMapper = inputMapper,
-                button = VirtualButton.DPAD_RIGHT,
-                label = "→",
-                modifier = Modifier.size(cellDp),
-                fontSize = mainFontSize
-            )
-            Spacer(modifier = Modifier.width(gapDp))
-            Spacer(modifier = Modifier.size(cellDp))
-        }
-
-        Spacer(modifier = Modifier.height(gapDp))
-
-        // Row 4: [empty][gap][SEL][gap][START][gap][empty]
-        Row(horizontalArrangement = Arrangement.Center) {
-            Spacer(modifier = Modifier.size(cellDp))
-            Spacer(modifier = Modifier.width(gapDp))
-            VirtualBtn(
-                inputMapper = inputMapper,
-                button = VirtualButton.SELECT,
-                label = "SEL",
-                modifier = Modifier.size(cellDp),
-                fontSize = smallFontSize
-            )
-            Spacer(modifier = Modifier.width(gapDp))
-            VirtualBtn(
-                inputMapper = inputMapper,
-                button = VirtualButton.START,
-                label = "STA",
-                modifier = Modifier.size(cellDp),
-                fontSize = smallFontSize
-            )
-            Spacer(modifier = Modifier.width(gapDp))
-            Spacer(modifier = Modifier.size(cellDp))
-        }
-
-        // 0.1X bottom outer spacer
-        Spacer(modifier = Modifier.height(gapDp))
     }
 }
 
