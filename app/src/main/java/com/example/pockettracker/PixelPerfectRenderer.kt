@@ -9,6 +9,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.translate
 import kotlin.math.min
 import kotlinx.coroutines.delay
@@ -91,7 +92,15 @@ fun PixelPerfectTracker(
     renderProgress: Float = 0f,
     // Resample dialog state
     showResampleDialog: Boolean = false,
-    resampleDialogCursor: Int = 0  // 0 = YES, 1 = NO
+    resampleDialogCursor: Int = 0,  // 0 = YES, 1 = NO
+    // Clean dialog state
+    showCleanDialog: Boolean = false,
+    cleanDialogTarget: String = "",  // "SEQ" or "INST"
+    cleanDialogCursor: Int = 0,      // 0 = YES, 1 = NO
+    // Song scroll position
+    songScrollPosition: Int = 0,
+    // Scaling mode (for project screen display)
+    scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER
 ) {
     if (currentScreen == ScreenType.FILE_BROWSER) {
         android.util.Log.d("PixelPerfectTracker", "FILE_BROWSER screen, fileBrowserState=${if (fileBrowserState != null) "not null (${fileBrowserState.items.size} items)" else "NULL"}")
@@ -216,7 +225,12 @@ fun PixelPerfectTracker(
                         renderProgress = renderProgress,
                         showResampleDialog = showResampleDialog,
                         resampleDialogCursor = resampleDialogCursor,
-                        layoutMode = layoutMode
+                        showCleanDialog = showCleanDialog,
+                        cleanDialogTarget = cleanDialogTarget,
+                        cleanDialogCursor = cleanDialogCursor,
+                        layoutMode = layoutMode,
+                        songScrollPosition = songScrollPosition,
+                        scalingMode = scalingMode
                     )
                 }
             }
@@ -301,8 +315,16 @@ class TrackerLayout {
         // Resample dialog state
         showResampleDialog: Boolean = false,
         resampleDialogCursor: Int = 0,  // 0 = YES, 1 = NO
+        // Clean dialog state
+        showCleanDialog: Boolean = false,
+        cleanDialogTarget: String = "",  // "SEQ" or "INST"
+        cleanDialogCursor: Int = 0,      // 0 = YES, 1 = NO
         // Layout mode (from CompositionLocal, for display in project screen)
-        layoutMode: DeviceAdapter.LayoutMode = DeviceAdapter.LayoutMode.FULL
+        layoutMode: DeviceAdapter.LayoutMode = DeviceAdapter.LayoutMode.FULL,
+        // Song scroll position (viewport start row for 256-row song)
+        songScrollPosition: Int = 0,
+        // Scaling mode (for project screen display)
+        scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER
     ) {
         // ===================================
         // DRAW BACKGROUND
@@ -392,7 +414,8 @@ class TrackerLayout {
                             isSuccess = projectStatusSuccess,
                             isRendering = isRendering,
                             renderProgress = renderProgress,
-                            layoutMode = layoutMode
+                            layoutMode = layoutMode,
+                            scalingMode = scalingMode
                         )
                     )
                 }
@@ -457,7 +480,8 @@ class TrackerLayout {
                             isPlaying = isPlaying && currentScreen == ScreenType.SONG,
                             playbackRow = playbackSongRow,
                             selectionMode = selectionMode,
-                            isCellSelected = isCellSelected
+                            isCellSelected = isCellSelected,
+                            scrollPosition = songScrollPosition
                         )
                     )
                 }
@@ -645,6 +669,14 @@ class TrackerLayout {
         }
 
         // ===================================
+        // CLEAN CONFIRMATION DIALOG
+        // Drawn on top of everything when active
+        // ===================================
+        if (showCleanDialog) {
+            drawCleanDialog(scale, cleanDialogTarget, cleanDialogCursor)
+        }
+
+        // ===================================
         // LAYOUT COMPLETE!
         // ===================================
         // Left column: Oscilloscope + Phrase Editor (or placeholder)
@@ -712,6 +744,76 @@ class TrackerLayout {
         )
 
         // NO option
+        val noPrefix = if (cursor == 1) ">" else " "
+        drawBitmapText(
+            text = "$noPrefix NO",
+            x = textX,
+            y = boxY + 48,
+            scale = scale,
+            color = if (cursor == 1) Color.Yellow else Color.White,
+            spacing = cs,
+            fontScale = fs
+        )
+    }
+
+    /**
+     * Draw the "CLEAN SEQ/INST?" confirmation dialog as a pixel-art overlay.
+     * Centered on the 640×480 canvas.
+     */
+    private fun DrawScope.drawCleanDialog(scale: Int, target: String, cursor: Int) {
+        val boxW = 200
+        val boxH = 70
+        val boxX = (DESIGN_WIDTH_PX - boxW) / 2
+        val boxY = (DESIGN_HEIGHT_PX - boxH) / 2
+
+        // Semi-transparent backdrop
+        drawRect(
+            color = Color(0xCC000000),
+            topLeft = Offset.Zero,
+            size = Size((DESIGN_WIDTH_PX * scale).toFloat(), (DESIGN_HEIGHT_PX * scale).toFloat())
+        )
+
+        // Dialog background
+        drawRect(
+            color = Color(0xFF1a1a1a),
+            topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
+            size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat())
+        )
+
+        // Border
+        drawRect(
+            color = Color(0xFF00CCCC),
+            topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
+            size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat()),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
+        )
+
+        val textX = boxX + 10
+        val fs = 3
+        val cs = 2
+
+        // Title: "CLEAN SEQ?" or "CLEAN INST?"
+        drawBitmapText(
+            text = "CLEAN $target?",
+            x = textX,
+            y = boxY + 6,
+            scale = scale,
+            color = Color.Cyan,
+            spacing = cs,
+            fontScale = fs
+        )
+
+        val yesPrefix = if (cursor == 0) ">" else " "
+        drawBitmapText(
+            text = "$yesPrefix YES",
+            x = textX,
+            y = boxY + 27,
+            scale = scale,
+            color = if (cursor == 0) Color.Yellow else Color.White,
+            spacing = cs,
+            fontScale = fs
+        )
+
         val noPrefix = if (cursor == 1) ">" else " "
         drawBitmapText(
             text = "$noPrefix NO",
@@ -797,6 +899,14 @@ fun DrawScope.drawBitmapText(
     }
 }
 
+/**
+ * Pixel-perfect paint for bitmap font rendering.
+ * isAntiAlias = false prevents sub-pixel blending between adjacent pixels.
+ */
+private val _bitmapPaint = androidx.compose.ui.graphics.Paint().apply {
+    isAntiAlias = false
+}
+
 fun DrawScope.drawBitmapChar(
     char: Char,
     x: Int,
@@ -805,7 +915,6 @@ fun DrawScope.drawBitmapChar(
     color: Color,
     fontScale: Int = 1
 ) {
-    // Try the character as-is first, then fall back to uppercase for letters
     val charData = FONT_5X5[char] ?: FONT_5X5[char.uppercaseChar()]
 
     if (charData == null) {
@@ -822,23 +931,25 @@ fun DrawScope.drawBitmapChar(
         return
     }
 
-    // Draw each pixel of the 5×5 bitmap
-    for (row in 0..4) {
-        val rowData = charData[row].toInt()
-        for (col in 0..4) {
-            val isSet = (rowData and (1 shl (4 - col))) != 0
-            if (isSet) {
-                drawRect(
-                    color = color,
-                    topLeft = Offset(
-                        ((x + col * fontScale) * scale).toFloat(),
-                        ((y + row * fontScale) * scale).toFloat()
-                    ),
-                    size = Size(
-                        (scale * fontScale).toFloat(),
-                        (scale * fontScale).toFloat()
-                    )
-                )
+    drawIntoCanvas { canvas ->
+        val paint = _bitmapPaint
+        paint.color = color
+        // Each row: merge consecutive set pixels into a single rect to eliminate internal edges
+        for (row in 0..4) {
+            val rowData = charData[row].toInt()
+            val rowY = ((y + row * fontScale) * scale).toFloat()
+            val rowBottom = rowY + (fontScale * scale).toFloat()
+            var col = 0
+            while (col <= 4) {
+                if ((rowData and (1 shl (4 - col))) != 0) {
+                    val runStart = col
+                    while (col <= 4 && (rowData and (1 shl (4 - col))) != 0) col++
+                    val left  = ((x + runStart * fontScale) * scale).toFloat()
+                    val right = left + ((col - runStart) * fontScale * scale).toFloat()
+                    canvas.drawRect(left, rowY, right, rowBottom, paint)
+                } else {
+                    col++
+                }
             }
         }
     }

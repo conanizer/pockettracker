@@ -64,6 +64,8 @@ data class ButtonHandlers(
     // B+direction combinations for item cycling (chain/phrase/instrument)
     val onBLeft: () -> Unit,        // B+LEFT: Previous chain/phrase/instrument
     val onBRight: () -> Unit,       // B+RIGHT: Next chain/phrase/instrument
+    val onBUp: () -> Unit,          // B+UP: Page up (song screen)
+    val onBDown: () -> Unit,        // B+DOWN: Page down (song screen)
 
     // R+direction combinations for screen navigation
     val onRUp: () -> Unit,          // R+UP: Navigate screen up
@@ -462,6 +464,18 @@ class InputMapper(
                     if (logInput) Log.d(TAG, "B+RIGHT (next item)")
                     buttonHandlers.onBRight()
                     startKeyRepeat { buttonHandlers.onBRight() }
+                    return
+                }
+                VirtualButton.DPAD_UP -> {
+                    if (logInput) Log.d(TAG, "B+UP (page up)")
+                    buttonHandlers.onBUp()
+                    startKeyRepeat { buttonHandlers.onBUp() }
+                    return
+                }
+                VirtualButton.DPAD_DOWN -> {
+                    if (logInput) Log.d(TAG, "B+DOWN (page down)")
+                    buttonHandlers.onBDown()
+                    startKeyRepeat { buttonHandlers.onBDown() }
                     return
                 }
                 else -> { }

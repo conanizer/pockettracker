@@ -1,10 +1,10 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-03-04
+2026-03-13
 
 ## Current Phase
-**MVP Extension Pack 3 COMPLETE!** → **Testing & Polish** → Documentation → MVP Release
+**All Extension Packs COMPLETE!** → **Testing & Polish** → Documentation → MVP Release
 
 **See:** `MVP_EXTENSION_PACK_3.md` for detailed implementation plan
 
@@ -16,6 +16,7 @@
 - ✅ Phase 5: Selection Resampling - COMPLETE (2026-03-03)
 - ✅ Audio Bug Fixes: OscilloscopeModule crash, instrument unification, AHD crackling, voice-steal click - COMPLETE (2026-03-03)
 - ✅ Layout System: touchscreen layout modes, orientation auto-switch, voice exhaustion fix - COMPLETE (2026-03-04)
+- ✅ Polish & UX: CLEAN dialog (SEQ/INST split), pixel-perfect font rendering, Portrait2 spacers, instrument clean fix, SharedPreferences persistence - COMPLETE (2026-03-13)
 
 ### Extension Pack 2 Overview
 - ✅ Phase 1: Bug fixes (meter decay, volume immediate, L+A cut) - COMPLETE
@@ -201,6 +202,34 @@
 ## Known Issues
 - ⚠️ Generic input warning spam after device restart (harmless, goes away after reboot)
 
+## Recent Polish & UX Improvements (2026-03-13) ✅
+
+### CLEAN Button Redesign
+**Before:** Single row with "PRESS A" that cleaned everything at once.
+**After:** Two selectable buttons — **SEQ** (chains + phrases) and **INST** (instruments, mods, tables) — each with an "ARE YOU SURE? YES / NO" confirmation dialog (same visual style as the resample dialog).
+
+**Also fixed:** `cleanUnusedInst()` previously skipped instrument slots 0–11 due to an `i >= 12` guard, leaving custom samples loaded into those slots behind even after clean. Guard removed — all unused slots are now cleared regardless of index.
+
+### Pixel-Perfect Font Rendering
+**Problem:** Even in INTEGER scaling mode, faint sub-pixel gaps appeared between adjacent pixels within the same character. Compose's `drawRect` anti-aliases each rectangle independently, causing tiny edge artifacts where same-character pixels meet.
+
+**Fix:** `drawBitmapChar` now uses `androidx.compose.ui.graphics.Paint(isAntiAlias = false)` via `drawIntoCanvas`, and merges consecutive set pixels in each character row into a single rectangle (eliminating all internal edges). Result: completely crisp pixel font at all scales.
+
+### Portrait2 Layout Spacers
+Updated both `DeviceAdapter.calculatePortrait2Layout` and `VirtualControlsPortrait2` to use the corrected geometry:
+- **Width:** 4.5X (2×0.1X outer + 4 buttons + 3×0.1X inner gaps)
+- **Height:** 5.2X (0.8X top spacer + 4 buttons + 3×0.1X row gaps + 0.1X bottom)
+
+Buttons now have equal 0.1X padding on all sides, with a compact 0.8X spacer above.
+
+### Layout & Scaling Mode Persistence
+Layout mode (FULL / T.PORT / T.LAND / T.PORT2) and scaling mode (INTEGER / BILINEAR / NEAREST) are now persisted via `SharedPreferences` (`pockettracker_ui` store). App remembers your preferred display settings across restarts.
+
+### Song Screen 256-Row Support
+Song editor correctly handles all 256 rows. B+UP / B+DOWN jump by 16 rows for fast navigation across long arrangements.
+
+---
+
 ## Recent Fixes
 
 ### Layout System & Voice Exhaustion Fix (2026-03-04) ✅
@@ -379,7 +408,7 @@
 
 **See:** `MVP_ROADMAP.md` Milestone 2.5 for implementation details
 
-### 4. Testing & Polish (1 week)
+### 4. Testing & Polish ✅ IN PROGRESS
 - [ ] "Hello world" song usability test (<5 min)
 - [ ] Bug hunting on both devices
 - [ ] Performance verification (stable 30-60fps)
@@ -387,7 +416,7 @@
 
 ### 5. Documentation (3-5 days)
 - [ ] README finalization
-- [ ] Controls guide (including copy/paste)
+- [ ] Controls guide (full reference including all new effects)
 - [ ] Short demo video
 - [ ] Known issues list
 
@@ -656,21 +685,21 @@ Planned global settings:
 
 ## Timeline to MVP
 
-**Updated Timeline:** Late February 2026
+**Updated Timeline:** March/April 2026
 
 ```
 ✅ Weeks 1-2:   Refactoring - COMPLETE!
 ✅ Weeks 3-4:   Effects system - COMPLETE!
 ✅ Week 5:      Copy/paste system - COMPLETE!
-🚧 Weeks 6-7:   MVP Expansion (Mixer + WAV Export) ← CURRENT
-   Week 8:      Integration & testing
-   Week 9:      Documentation & video
-   Week 10:     MVP Release!
+✅ Weeks 6-7:   MVP Expansion (Mixer + WAV Export) - COMPLETE!
+✅ Weeks 8-10:  Extension Pack 2 (Tables, HOP/TIC, Pitch Effects) - COMPLETE!
+✅ Weeks 11-13: Extension Pack 3 (Groove, Modulation, Resampling, Layout, Polish) - COMPLETE!
+🚧 Week 14:     Testing & Polish ← CURRENT
+   Week 15:     Documentation & video
+   Week 16:     MVP Release!
 ```
 
-**Status:** ~1 month ahead of original schedule! Adding Mixer + Export to MVP.
-
-**See:** `MVP_EXPANSION_PLAN.md` for expansion implementation details
+**Status:** Far beyond original MVP scope — this is a feature-rich v1.0!
 
 ## Technical Notes
 

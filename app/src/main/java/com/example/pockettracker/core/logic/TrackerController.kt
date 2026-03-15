@@ -3,6 +3,11 @@ package com.example.pockettracker.core.logic
 import com.example.pockettracker.core.data.MAIN_ROW_SCREENS
 import com.example.pockettracker.core.data.Note
 import com.example.pockettracker.core.data.Project
+import com.example.pockettracker.core.data.Chain
+import com.example.pockettracker.core.data.Phrase
+import com.example.pockettracker.core.data.Table
+import com.example.pockettracker.core.data.Groove
+import com.example.pockettracker.core.data.Instrument
 import com.example.pockettracker.core.data.ScreenType
 import com.example.pockettracker.core.storage.FileInfo
 
@@ -105,6 +110,13 @@ class TrackerController(
     var cursorRow = 0
         set(value) {
             field = value
+            stateObserver.onStateChanged()
+        }
+
+    // Scroll position for SONG screen (0-255 range cursor with 16-row viewport)
+    var songScrollPosition = 0
+        set(value) {
+            field = value.coerceIn(0, 240)
             stateObserver.onStateChanged()
         }
 
@@ -700,7 +712,7 @@ class TrackerController(
                 projectCursorRow = if (projectCursorRow > 0) {
                     projectCursorRow - 1
                 } else {
-                    7  // Wrap to bottom (rows 0-7)
+                    8  // Wrap to bottom (rows 0-8)
                 }
                 projectCursorColumn = 1  // Reset to first value column
             }
@@ -746,6 +758,15 @@ class TrackerController(
                 }
                 // At pair 0, row 0 — stay at top (no wrap)
             }
+            ScreenType.SONG -> {
+                // SONG screen: 256 rows (0-255), clamp at 0, scroll to keep cursor visible
+                if (cursorRow > 0) {
+                    cursorRow--
+                    if (cursorRow < songScrollPosition) {
+                        songScrollPosition = cursorRow
+                    }
+                }
+            }
             else -> {
                 // All other screens: simple cursor movement with wrapping (rows 0-15)
                 cursorRow = if (cursorRow > 0) cursorRow - 1 else 15
@@ -759,8 +780,8 @@ class TrackerController(
     fun moveCursorDown() {
         when (currentScreen) {
             ScreenType.PROJECT -> {
-                // Project has 8 rows (0-7) with wrapping
-                projectCursorRow = if (projectCursorRow < 7) {
+                // Project has 9 rows (0-8) with wrapping
+                projectCursorRow = if (projectCursorRow < 8) {
                     projectCursorRow + 1
                 } else {
                     0  // Wrap to top
@@ -806,6 +827,15 @@ class TrackerController(
                     modCursorRow = 0
                 }
                 // At pair 1, last row — stay at bottom (no wrap)
+            }
+            ScreenType.SONG -> {
+                // SONG screen: 256 rows (0-255), clamp at 255, scroll to keep cursor visible
+                if (cursorRow < 255) {
+                    cursorRow++
+                    if (cursorRow >= songScrollPosition + 16) {
+                        songScrollPosition = cursorRow - 15
+                    }
+                }
             }
             else -> {
                 // Most screens have 16 rows (0-15) with wrapping
@@ -907,6 +937,110 @@ class TrackerController(
     }
 
     /**
+     * Move SONG cursor up by 16 rows (page up), clamped at 0.
+     */
+    fun moveSongBigUp() {
+        val newRow = (cursorRow - 16).coerceAtLeast(0)
+        cursorRow = newRow
+        songScrollPosition = newRow
+    }
+
+    /**
+     * Move SONG cursor down by 16 rows (page down), clamped at 255.
+     */
+    fun moveSongBigDown() {
+        val newRow = (cursorRow + 16).coerceAtMost(255)
+        cursorRow = newRow
+        songScrollPosition = (newRow - 15).coerceAtLeast(0)
+    }
+
+    /** Collect used chain/phrase sets from the song (shared by both clean methods). */
+    private fun collectUsedRefs(): Triple<Set<Int>, Set<Int>, Set<Int>> {
+        val usedChainIds = mutableSetOf<Int>()
+        for (track in project.tracks) {
+            for (ref in track.chainRefs) { if (ref >= 0) usedChainIds.add(ref) }
+        }
+        val usedPhraseIds = mutableSetOf<Int>()
+        for (chainId in usedChainIds) {
+            for (ref in project.chains[chainId].phraseRefs) { if (ref >= 0) usedPhraseIds.add(ref) }
+        }
+        val usedInstrumentIds = mutableSetOf<Int>()
+        for (phraseId in usedPhraseIds) {
+            for (step in project.phrases[phraseId].steps) {
+                if (step.note != Note.EMPTY) usedInstrumentIds.add(step.instrument)
+            }
+        }
+        return Triple(usedChainIds, usedPhraseIds, usedInstrumentIds)
+    }
+
+    /**
+     * Clean unused chains and phrases only (SEQ clean).
+     */
+    fun cleanUnusedSeq() {
+        val (usedChainIds, usedPhraseIds, _) = collectUsedRefs()
+        for (i in project.chains.indices) {
+            if (i !in usedChainIds) project.chains[i] = Chain(id = i)
+        }
+        for (i in project.phrases.indices) {
+            if (i !in usedPhraseIds) project.phrases[i] = Phrase(id = i)
+        }
+        projectVersion++
+        statusMessage = "SEQ CLEANED"
+        statusSuccess = true
+    }
+
+    /**
+     * Clean unused instruments, tables, and grooves (INST clean).
+     */
+    fun cleanUnusedInst() {
+        val (usedChainIds, usedPhraseIds, usedInstrumentIds) = collectUsedRefs()
+
+        val usedTableIds = mutableSetOf<Int>()
+        val usedGrooveIds = mutableSetOf<Int>()
+        usedGrooveIds.add(0) // Groove 0 always kept
+
+        for (phraseId in usedPhraseIds) {
+            for (step in project.phrases[phraseId].steps) {
+                val fxPairs = listOf(
+                    step.fx1Type to step.fx1Value,
+                    step.fx2Type to step.fx2Value,
+                    step.fx3Type to step.fx3Value
+                )
+                for ((fxType, fxValue) in fxPairs) {
+                    if (fxType == EffectProcessor.FX_TBL) usedTableIds.add(fxValue and 0xFF)
+                    if (fxType == EffectProcessor.FX_GRV) usedGrooveIds.add(fxValue and 0xFF)
+                }
+            }
+        }
+
+        // Implicit table mapping (instrument i → table i) + explicit tableId override
+        for (instId in usedInstrumentIds) {
+            usedTableIds.add(instId)
+            val inst = project.instruments[instId]
+            if (inst.tableId >= 0) usedTableIds.add(inst.tableId)
+        }
+
+        // Clear all unused instruments (any slot that isn't referenced by the active song)
+        for (i in project.instruments.indices) {
+            if (i !in usedInstrumentIds) {
+                project.instruments[i] = Instrument(id = i)
+            }
+        }
+
+        for (i in project.tables.indices) {
+            if (i !in usedTableIds) project.tables[i] = Table(id = i)
+        }
+
+        for (i in project.grooves.indices) {
+            if (i !in usedGrooveIds) project.grooves[i] = Groove(id = i)
+        }
+
+        projectVersion++
+        statusMessage = "INST CLEANED"
+        statusSuccess = true
+    }
+
+    /**
      * Helper to get next column left for PROJECT screen
      * Column 0 is always unreachable (label column)
      */
@@ -934,9 +1068,10 @@ class TrackerController(
         // Row 4-6: no extra columns - column 1 only
         
         val maxColumn = when (row) {
-            2 -> 12  // TEMPO/TRANSPOSE/NAME: up to column 3 (includes name letters)
-            3 -> 3        // LOAD/SAVE/NEW buttons: up to column 3
-            else -> 1     // Other rows: column 1 only
+            2 -> 12  // NAME: up to column 12 (one per character)
+            3 -> 3   // LOAD/SAVE/NEW buttons: up to column 3
+            5 -> 2   // CLEAN SEQ/INST buttons: up to column 2
+            else -> 1
         }
         return (currentColumn + 1).coerceAtMost(maxColumn)
     }

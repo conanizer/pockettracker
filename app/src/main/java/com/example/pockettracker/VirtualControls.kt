@@ -287,6 +287,170 @@ fun VirtualControlsRight(
 }
 
 // ============================================================================
+// PORTRAIT2 MODE - Compact 4×4 button grid with 0.1X spacers between buttons
+//
+// Grid dimensions (with spacers):
+//   Total width:  4×X + 3×0.1X = 4.3X  (4 cols + 3 inter-col spacers)
+//   Total height: 1X spacer + 4×X + 3×0.1X = 5.3X
+//
+// Layout:
+//   Spacer: 1X tall (between screen and buttons)
+//   Row 1: [L 2.1X][sp 0.1X][R 2.1X]
+//   sp 0.1X
+//   Row 2: [empty X][sp 0.1X][UP X][sp 0.1X][B X][sp 0.1X][A X]
+//   sp 0.1X
+//   Row 3: [LEFT X][sp 0.1X][DOWN X][sp 0.1X][RIGHT X][sp 0.1X][empty X]
+//   sp 0.1X
+//   Row 4: [empty X][sp 0.1X][SEL X][sp 0.1X][START X][sp 0.1X][empty X]
+// ============================================================================
+@Composable
+fun VirtualControlsPortrait2(
+    inputMapper: InputMapper,
+    availableWidth: Int,
+    availableHeight: Int
+) {
+    if (availableWidth <= 0 || availableHeight <= 0) return
+
+    val density = LocalDensity.current.density
+
+    // 4.5X wide (2×0.1X outer + 4 buttons + 3×0.1X inner col spacers)
+    // 5.2X tall  (0.8X spacer above + 4 buttons + 3×0.1X row spacers + 0.1X bottom)
+    val xByWidth  = floor(availableWidth / 4.5f)
+    val xByHeight = floor(availableHeight / 5.2f)
+    val X = minOf(xByWidth, xByHeight).toInt().coerceAtLeast(1)
+
+    val cellDp      = (X / density).dp
+    val gapDp       = (X * 0.1f / density).dp   // 0.1X spacer between buttons and outer padding
+    val lrWidthDp   = (X * 2.1f / density).dp   // L/R buttons: (4.3X buttons + 0.1X inner) / 2 = 2.15X ≈ 2.1X
+    val spacerDp    = (X * 0.8f / density).dp   // 0.8X spacer between screen and buttons
+
+    val mainFontSize    = (X * 0.4f / density).sp
+    val triggerFontSize = (X * 0.35f / density).sp
+    val smallFontSize   = (X * 0.25f / density).sp
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF1a1a1a))
+            .padding(horizontal = gapDp),  // 0.1X outer side padding
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        // Spacer (0.8X) between screen and buttons
+        Spacer(modifier = Modifier.height(spacerDp))
+
+        // Row 1: [L (2.1X)][gap 0.1X][R (2.1X)]
+        Row(horizontalArrangement = Arrangement.Center) {
+            VirtualBtn(
+                inputMapper = inputMapper,
+                button = VirtualButton.L_SHIFT,
+                label = "L",
+                modifier = Modifier.size(width = lrWidthDp, height = cellDp),
+                fontSize = triggerFontSize
+            )
+            Spacer(modifier = Modifier.width(gapDp))
+            VirtualBtn(
+                inputMapper = inputMapper,
+                button = VirtualButton.R_SHIFT,
+                label = "R",
+                modifier = Modifier.size(width = lrWidthDp, height = cellDp),
+                fontSize = triggerFontSize
+            )
+        }
+
+        Spacer(modifier = Modifier.height(gapDp))
+
+        // Row 2: [empty][gap][UP][gap][B][gap][A]
+        Row(horizontalArrangement = Arrangement.Center) {
+            Spacer(modifier = Modifier.size(cellDp))
+            Spacer(modifier = Modifier.width(gapDp))
+            VirtualBtn(
+                inputMapper = inputMapper,
+                button = VirtualButton.DPAD_UP,
+                label = "↑",
+                modifier = Modifier.size(cellDp),
+                fontSize = mainFontSize
+            )
+            Spacer(modifier = Modifier.width(gapDp))
+            VirtualBtn(
+                inputMapper = inputMapper,
+                button = VirtualButton.B,
+                label = "B",
+                modifier = Modifier.size(cellDp),
+                fontSize = mainFontSize
+            )
+            Spacer(modifier = Modifier.width(gapDp))
+            VirtualBtn(
+                inputMapper = inputMapper,
+                button = VirtualButton.A,
+                label = "A",
+                modifier = Modifier.size(cellDp),
+                fontSize = mainFontSize
+            )
+        }
+
+        Spacer(modifier = Modifier.height(gapDp))
+
+        // Row 3: [LEFT][gap][DOWN][gap][RIGHT][gap][empty]
+        Row(horizontalArrangement = Arrangement.Center) {
+            VirtualBtn(
+                inputMapper = inputMapper,
+                button = VirtualButton.DPAD_LEFT,
+                label = "←",
+                modifier = Modifier.size(cellDp),
+                fontSize = mainFontSize
+            )
+            Spacer(modifier = Modifier.width(gapDp))
+            VirtualBtn(
+                inputMapper = inputMapper,
+                button = VirtualButton.DPAD_DOWN,
+                label = "↓",
+                modifier = Modifier.size(cellDp),
+                fontSize = mainFontSize
+            )
+            Spacer(modifier = Modifier.width(gapDp))
+            VirtualBtn(
+                inputMapper = inputMapper,
+                button = VirtualButton.DPAD_RIGHT,
+                label = "→",
+                modifier = Modifier.size(cellDp),
+                fontSize = mainFontSize
+            )
+            Spacer(modifier = Modifier.width(gapDp))
+            Spacer(modifier = Modifier.size(cellDp))
+        }
+
+        Spacer(modifier = Modifier.height(gapDp))
+
+        // Row 4: [empty][gap][SEL][gap][START][gap][empty]
+        Row(horizontalArrangement = Arrangement.Center) {
+            Spacer(modifier = Modifier.size(cellDp))
+            Spacer(modifier = Modifier.width(gapDp))
+            VirtualBtn(
+                inputMapper = inputMapper,
+                button = VirtualButton.SELECT,
+                label = "SEL",
+                modifier = Modifier.size(cellDp),
+                fontSize = smallFontSize
+            )
+            Spacer(modifier = Modifier.width(gapDp))
+            VirtualBtn(
+                inputMapper = inputMapper,
+                button = VirtualButton.START,
+                label = "STA",
+                modifier = Modifier.size(cellDp),
+                fontSize = smallFontSize
+            )
+            Spacer(modifier = Modifier.width(gapDp))
+            Spacer(modifier = Modifier.size(cellDp))
+        }
+
+        // 0.1X bottom outer spacer
+        Spacer(modifier = Modifier.height(gapDp))
+    }
+}
+
+// ============================================================================
 // PORTRAIT MODE - Pattern: 6.8w × 5.1h (two 3.4w boxes side by side)
 // ============================================================================
 @Composable
