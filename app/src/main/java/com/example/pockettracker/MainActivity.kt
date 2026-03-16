@@ -51,6 +51,8 @@ import com.example.pockettracker.platform.android.AndroidFileSystem
 import com.example.pockettracker.platform.android.ThemeLoader
 import com.example.pockettracker.core.ui.DeviceTheme
 import com.example.pockettracker.platform.android.AndroidVideoAudioExtractor
+import com.example.pockettracker.platform.android.ButtonSoundManager
+import com.example.pockettracker.platform.android.ButtonHapticManager
 import com.example.pockettracker.core.storage.FileInfo
 import com.example.pockettracker.core.storage.FileSortMode
 import java.io.File
@@ -468,6 +470,31 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         prefs.edit().putString("scaling_mode", scalingMode.name).apply()
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // BUTTON SOUND & VIBRO — app-level settings persisted in SharedPreferences
+    // ═══════════════════════════════════════════════════════════════════════
+
+    var buttonSoundEnabled by remember { mutableStateOf(prefs.getBoolean("button_sound", false)) }
+    var buttonVibroEnabled by remember { mutableStateOf(prefs.getBoolean("button_vibro", false)) }
+
+    val buttonSoundManager = remember { ButtonSoundManager(context) }
+    val buttonHapticManager = remember { ButtonHapticManager(context) }
+
+    // Sync enabled flags into managers whenever they change
+    LaunchedEffect(buttonSoundEnabled) {
+        buttonSoundManager.enabled = buttonSoundEnabled
+        prefs.edit().putBoolean("button_sound", buttonSoundEnabled).apply()
+    }
+    LaunchedEffect(buttonVibroEnabled) {
+        buttonHapticManager.enabled = buttonVibroEnabled
+        prefs.edit().putBoolean("button_vibro", buttonVibroEnabled).apply()
+    }
+
+    // Release SoundPool when the composable leaves composition
+    DisposableEffect(Unit) {
+        onDispose { buttonSoundManager.release() }
+    }
+
     // Theme — starts as DARK (immediate), loads AMIGA PNGs in background
     var theme by remember { mutableStateOf<DeviceTheme>(DeviceTheme.AMIGA) }
     LaunchedEffect(Unit) {
@@ -787,6 +814,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     project = trackerController.project,
                     cursorRow = trackerController.projectCursorRow,
                     cursorColumn = trackerController.projectCursorColumn,
+                    buttonSoundEnabled = buttonSoundEnabled,
+                    buttonVibroEnabled = buttonVibroEnabled,
                     statusMessage = trackerController.statusMessage,
                     isSuccess = trackerController.statusSuccess,
                     isRendering = isRendering,
@@ -798,6 +827,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 val action = handlerFunction(context)
                 val result = projectModule.handleInput(projectState, action)
                 if (result.modified) {
+                    result.buttonSoundEnabled?.let { buttonSoundEnabled = it }
+                    result.buttonVibroEnabled?.let { buttonVibroEnabled = it }
                     trackerController.projectVersion++
                 }
             }
@@ -2792,7 +2823,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         scalingMode             = scalingMode
     )
 
-    CompositionLocalProvider(LocalLayoutMode provides layoutMode) {
+    CompositionLocalProvider(
+        LocalLayoutMode provides layoutMode,
+        LocalButtonEventCallback provides { button, isPress ->
+            if (isPress) {
+                buttonSoundManager.onPress(button)
+                buttonHapticManager.onPress()
+            } else {
+                buttonSoundManager.onRelease(button)
+                buttonHapticManager.onRelease()
+            }
+        }
+    ) {
         if (!effectiveLayoutConfig.needsVirtualButtons) {
             // FULL SCREEN — physical buttons or user-selected FULL mode
             FullScreenLayout(

@@ -34,6 +34,19 @@ import androidx.compose.ui.unit.sp
 import com.example.pockettracker.core.ui.DeviceTheme
 import kotlin.math.floor
 
+/**
+ * Callback fired on every virtual button press and release.
+ * Provided via CompositionLocal so ScreenLayouts.kt needs no changes.
+ *
+ * (button, isPress) — isPress=true on touch-down, false on touch-up/cancel.
+ *
+ * Set this in MainActivity via CompositionLocalProvider before the layout
+ * composables so all VirtualBtn/VirtualBtnThemed instances pick it up
+ * automatically.
+ */
+val LocalButtonEventCallback =
+    staticCompositionLocalOf<((button: VirtualButton, isPress: Boolean) -> Unit)?> { null }
+
 private val BTN_NORMAL  = Color(0xFF3D5A80)
 private val BTN_PRESSED = Color(0xFF98C1D9)
 
@@ -50,6 +63,7 @@ private fun VirtualBtn(
     fontSize: TextUnit
 ) {
     var pressed by remember { mutableStateOf(false) }
+    val buttonEvent = LocalButtonEventCallback.current
 
     Box(
         contentAlignment = Alignment.Center,
@@ -62,9 +76,11 @@ private fun VirtualBtn(
                 detectTapGestures(
                     onPress = {
                         pressed = true
+                        buttonEvent?.invoke(button, true)
                         inputMapper.onVirtualButton(button, ButtonAction.PRESSED)
                         tryAwaitRelease()
                         pressed = false
+                        buttonEvent?.invoke(button, false)
                         inputMapper.onVirtualButton(button, ButtonAction.RELEASED)
                     }
                 )
@@ -312,6 +328,7 @@ private fun VirtualBtnThemed(
     pressedOffsetDp: Float,
 ) {
     var pressed by remember { mutableStateOf(false) }
+    val buttonEvent = LocalButtonEventCallback.current
 
     val image = when {
         isWide &&  pressed  -> theme.buttonWidePressed
@@ -338,9 +355,11 @@ private fun VirtualBtnThemed(
                 detectTapGestures(
                     onPress = {
                         pressed = true
+                        buttonEvent?.invoke(button, true)
                         inputMapper.onVirtualButton(button, ButtonAction.PRESSED)
                         tryAwaitRelease()
                         pressed = false
+                        buttonEvent?.invoke(button, false)
                         inputMapper.onVirtualButton(button, ButtonAction.RELEASED)
                     }
                 )

@@ -238,6 +238,40 @@ class ProjectModule : TrackerModule {
             isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
             isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
         )
+        rowY += ROW_HEIGHT
+        currentRow++
+
+        // ─────────────────────────────────────
+        // ROW 9: BUTTON SOUND (ON / OFF)
+        // ─────────────────────────────────────
+        drawParameterRow(
+            x = x,
+            y = rowY,
+            scale = scale,
+            nameColumnX = nameColumnX,
+            valueColumnX = valueColumnX,
+            parameterName = "BTN SOUND",
+            parameterValue = if (projectState.buttonSoundEnabled) "ON" else "OFF",
+            isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
+            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
+        )
+        rowY += ROW_HEIGHT
+        currentRow++
+
+        // ─────────────────────────────────────
+        // ROW 10: BUTTON VIBRO (ON / OFF)
+        // ─────────────────────────────────────
+        drawParameterRow(
+            x = x,
+            y = rowY,
+            scale = scale,
+            nameColumnX = nameColumnX,
+            valueColumnX = valueColumnX,
+            parameterName = "BTN VIBRO",
+            parameterValue = if (projectState.buttonVibroEnabled) "ON" else "OFF",
+            isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
+            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
+        )
 
         // ===================================
         // STEP 5: Draw status message at bottom (if any)
@@ -658,6 +692,44 @@ class ProjectModule : TrackerModule {
                 // SCALING row - A button cycles scaling mode (handled in MainActivity)
                 return CursorContextFactory.readOnly()
             }
+            9 -> {
+                // BUTTON SOUND row - A+UP = ON, A+DOWN = OFF
+                if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
+                return CursorContext(
+                    valueType = CursorValueType.HEX_BYTE,
+                    capabilities = CursorCapabilities(
+                        canIncrement = true,
+                        canDecrement = true,
+                        canIncrementFast = false,
+                        canDecrementFast = false
+                    ),
+                    currentValue = if (state.buttonSoundEnabled) 1 else 0,
+                    minValue = 0,
+                    maxValue = 1,
+                    smallStep = 1,
+                    largeStep = 1,
+                    emptyValue = -1
+                )
+            }
+            10 -> {
+                // BUTTON VIBRO row - A+UP = ON, A+DOWN = OFF
+                if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
+                return CursorContext(
+                    valueType = CursorValueType.HEX_BYTE,
+                    capabilities = CursorCapabilities(
+                        canIncrement = true,
+                        canDecrement = true,
+                        canIncrementFast = false,
+                        canDecrementFast = false
+                    ),
+                    currentValue = if (state.buttonVibroEnabled) 1 else 0,
+                    minValue = 0,
+                    maxValue = 1,
+                    smallStep = 1,
+                    largeStep = 1,
+                    emptyValue = -1
+                )
+            }
             else -> return CursorContextFactory.none()
         }
     }
@@ -715,6 +787,30 @@ class ProjectModule : TrackerModule {
             3 -> {
                 // PROJECT row (LOAD/SAVE/NEW) - handled elsewhere
             }
+            9 -> {
+                // BUTTON SOUND — carry new boolean back to MainActivity via InputResult
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        return InputResult(
+                            modified = true,
+                            buttonSoundEnabled = action.value > 0
+                        )
+                    }
+                    else -> {}
+                }
+            }
+            10 -> {
+                // BUTTON VIBRO — carry new boolean back to MainActivity via InputResult
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        return InputResult(
+                            modified = true,
+                            buttonVibroEnabled = action.value > 0
+                        )
+                    }
+                    else -> {}
+                }
+            }
         }
 
         return InputResult(
@@ -722,8 +818,15 @@ class ProjectModule : TrackerModule {
         )
     }
 
+    /**
+     * @param modified      True when something was changed (triggers projectVersion increment)
+     * @param buttonSoundEnabled  Non-null when the user toggled BTN SOUND (row 9)
+     * @param buttonVibroEnabled  Non-null when the user toggled BTN VIBRO (row 10)
+     */
     data class InputResult(
-        val modified: Boolean
+        val modified: Boolean,
+        val buttonSoundEnabled: Boolean? = null,
+        val buttonVibroEnabled: Boolean? = null
     )
 }
 
@@ -749,5 +852,7 @@ data class ProjectState(
     val isRendering: Boolean = false,
     val renderProgress: Float = 0f,
     val layoutMode: DeviceAdapter.LayoutMode = DeviceAdapter.LayoutMode.FULL,
-    val scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER
+    val scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER,
+    val buttonSoundEnabled: Boolean = false,
+    val buttonVibroEnabled: Boolean = false
 )
