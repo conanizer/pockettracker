@@ -26,6 +26,7 @@ import com.example.pockettracker.VirtualButton
 class ButtonSoundManager(context: Context) {
 
     var enabled: Boolean = false
+    var volume: Float = 1f  // 0f–1f, maps from 00–FF setting
 
     private val soundPool: SoundPool
 
@@ -40,7 +41,7 @@ class ButtonSoundManager(context: Context) {
 
     init {
         val attrs = AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+            .setUsage(AudioAttributes.USAGE_GAME)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
 
@@ -79,7 +80,7 @@ class ButtonSoundManager(context: Context) {
         if (!enabled) return
         val sounds = if (button.isLong()) longPressSounds else sqPressSounds
         if (sounds.isEmpty()) return
-        val streamId = soundPool.play(sounds.random(), 1f, 1f, 1, 0, 1f)
+        val streamId = soundPool.play(sounds.random(), volume, volume, 1, 0, 1f)
         activeStreams[button] = streamId
     }
 
@@ -90,7 +91,7 @@ class ButtonSoundManager(context: Context) {
         // Play release sound
         val sounds = if (button.isLong()) longReleaseSounds else sqReleaseSounds
         if (sounds.isEmpty()) return
-        soundPool.play(sounds.random(), 1f, 1f, 1, 0, 1f)
+        soundPool.play(sounds.random(), volume, volume, 1, 0, 1f)
     }
 
     fun release() {

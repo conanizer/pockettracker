@@ -475,7 +475,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // ═══════════════════════════════════════════════════════════════════════
 
     var buttonSoundEnabled by remember { mutableStateOf(prefs.getBoolean("button_sound", false)) }
+    var buttonSoundVolume  by remember { mutableStateOf(prefs.getInt("button_sound_volume", 255)) }
     var buttonVibroEnabled by remember { mutableStateOf(prefs.getBoolean("button_vibro", false)) }
+    var vibroPower         by remember { mutableStateOf(prefs.getInt("vibro_power", 255)) }
 
     val buttonSoundManager = remember { ButtonSoundManager(context) }
     val buttonHapticManager = remember { ButtonHapticManager(context) }
@@ -485,9 +487,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         buttonSoundManager.enabled = buttonSoundEnabled
         prefs.edit().putBoolean("button_sound", buttonSoundEnabled).apply()
     }
+    LaunchedEffect(buttonSoundVolume) {
+        buttonSoundManager.volume = buttonSoundVolume / 255f
+        prefs.edit().putInt("button_sound_volume", buttonSoundVolume).apply()
+    }
     LaunchedEffect(buttonVibroEnabled) {
         buttonHapticManager.enabled = buttonVibroEnabled
         prefs.edit().putBoolean("button_vibro", buttonVibroEnabled).apply()
+    }
+    LaunchedEffect(vibroPower) {
+        buttonHapticManager.power = vibroPower
+        prefs.edit().putInt("vibro_power", vibroPower).apply()
     }
 
     // Release SoundPool when the composable leaves composition
@@ -815,7 +825,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     cursorRow = trackerController.projectCursorRow,
                     cursorColumn = trackerController.projectCursorColumn,
                     buttonSoundEnabled = buttonSoundEnabled,
+                    buttonSoundVolume = buttonSoundVolume,
                     buttonVibroEnabled = buttonVibroEnabled,
+                    vibroPower = vibroPower,
                     statusMessage = trackerController.statusMessage,
                     isSuccess = trackerController.statusSuccess,
                     isRendering = isRendering,
@@ -828,7 +840,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 val result = projectModule.handleInput(projectState, action)
                 if (result.modified) {
                     result.buttonSoundEnabled?.let { buttonSoundEnabled = it }
+                    result.buttonSoundVolume?.let  { buttonSoundVolume  = it }
                     result.buttonVibroEnabled?.let { buttonVibroEnabled = it }
+                    result.vibroPower?.let         { vibroPower         = it }
                     trackerController.projectVersion++
                 }
             }
@@ -2820,7 +2834,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         cleanDialogTarget       = cleanDialogTarget,
         cleanDialogCursor       = cleanDialogCursor,
         songScrollPosition      = stateVersion.let { trackerController.songScrollPosition },
-        scalingMode             = scalingMode
+        scalingMode             = scalingMode,
+        buttonSoundEnabled      = buttonSoundEnabled,
+        buttonSoundVolume       = buttonSoundVolume,
+        buttonVibroEnabled      = buttonVibroEnabled,
+        vibroPower              = vibroPower
     )
 
     CompositionLocalProvider(

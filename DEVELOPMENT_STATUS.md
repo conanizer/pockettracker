@@ -1,7 +1,7 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-03-13
+2026-03-16
 
 ## Current Phase
 **All Extension Packs COMPLETE!** → **Testing & Polish** → Documentation → MVP Release
@@ -221,6 +221,14 @@ Updated both `DeviceAdapter.calculatePortrait2Layout` and `VirtualControlsPortra
 - **Height:** 5.2X (0.8X top spacer + 4 buttons + 3×0.1X row gaps + 0.1X bottom)
 
 Buttons now have equal 0.1X padding on all sides, with a compact 0.8X spacer above.
+
+### Button Sound & Haptic Improvements (2026-03-16)
+- **BTN SOUND / BTN VIBRO rows now reachable** — project screen cursor down limit was capped at row 8, raised to 12
+- **UI now reflects live values** — `buttonSoundEnabled`, `buttonSoundVolume`, `buttonVibroEnabled`, `vibroPower` were missing from the `ProjectState` built in `handleGenericInput`, so cursor context always read stale defaults; fixed throughout the pipeline (`PixelPerfectRenderer`, `TrackerScreenParams`, both `ProjectState` constructions)
+- **BTN VOL row** (row 10, 00–FF) — controls SoundPool playback volume; persisted in SharedPreferences
+- **VIBRO POW row** (row 12, 00–FF) — controls vibration amplitude; uses `DEFAULT_AMPLITUDE` at FF; persisted in SharedPreferences
+- **Gaming handheld audio fix** — changed SoundPool from `USAGE_ASSISTANCE_SONIFICATION` (notification stream, muted on handhelds) to `USAGE_GAME` (media stream); sound now works on AYANEO
+- **Gaming handheld haptic fix** — pulse durations increased from 20ms/10ms to 40ms/20ms so large rumble motors produce a perceptible buzz; `DEFAULT_AMPLITUDE` used for compatibility with custom Android builds that ignore explicit amplitudes; TODO: re-tune on a standard Android phone
 
 ### Layout & Scaling Mode Persistence
 Layout mode (FULL / T.PORT / T.LAND / T.PORT2) and scaling mode (INTEGER / BILINEAR / NEAREST) are now persisted via `SharedPreferences` (`pockettracker_ui` store). App remembers your preferred display settings across restarts.

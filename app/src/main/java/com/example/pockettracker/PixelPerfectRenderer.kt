@@ -100,7 +100,11 @@ fun PixelPerfectTracker(
     // Song scroll position
     songScrollPosition: Int = 0,
     // Scaling mode (for project screen display)
-    scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER
+    scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER,
+    buttonSoundEnabled: Boolean = false,
+    buttonSoundVolume: Int = 255,
+    buttonVibroEnabled: Boolean = false,
+    vibroPower: Int = 255
 ) {
     if (currentScreen == ScreenType.FILE_BROWSER) {
         android.util.Log.d("PixelPerfectTracker", "FILE_BROWSER screen, fileBrowserState=${if (fileBrowserState != null) "not null (${fileBrowserState.items.size} items)" else "NULL"}")
@@ -230,7 +234,11 @@ fun PixelPerfectTracker(
                         cleanDialogCursor = cleanDialogCursor,
                         layoutMode = layoutMode,
                         songScrollPosition = songScrollPosition,
-                        scalingMode = scalingMode
+                        scalingMode = scalingMode,
+                        buttonSoundEnabled = buttonSoundEnabled,
+                        buttonSoundVolume = buttonSoundVolume,
+                        buttonVibroEnabled = buttonVibroEnabled,
+                        vibroPower = vibroPower
                     )
                 }
             }
@@ -324,7 +332,11 @@ class TrackerLayout {
         // Song scroll position (viewport start row for 256-row song)
         songScrollPosition: Int = 0,
         // Scaling mode (for project screen display)
-        scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER
+        scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER,
+        buttonSoundEnabled: Boolean = false,
+        buttonSoundVolume: Int = 255,
+        buttonVibroEnabled: Boolean = false,
+        vibroPower: Int = 255
     ) {
         // ===================================
         // DRAW BACKGROUND
@@ -415,7 +427,11 @@ class TrackerLayout {
                             isRendering = isRendering,
                             renderProgress = renderProgress,
                             layoutMode = layoutMode,
-                            scalingMode = scalingMode
+                            scalingMode = scalingMode,
+                            buttonSoundEnabled = buttonSoundEnabled,
+                            buttonSoundVolume = buttonSoundVolume,
+                            buttonVibroEnabled = buttonVibroEnabled,
+                            vibroPower = vibroPower
                         )
                     )
                 }

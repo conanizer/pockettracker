@@ -80,7 +80,11 @@ data class TrackerScreenParams(
     val cleanDialogTarget: String = "",  // "SEQ" or "INST"
     val cleanDialogCursor: Int = 0,      // 0 = YES, 1 = NO
     val songScrollPosition: Int = 0,
-    val scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER
+    val scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER,
+    val buttonSoundEnabled: Boolean = false,
+    val buttonSoundVolume: Int = 255,
+    val buttonVibroEnabled: Boolean = false,
+    val vibroPower: Int = 255
 )
 
 /** Thin wrapper — forwards every field of [params] to [PixelPerfectTracker]. */
@@ -131,7 +135,11 @@ private fun TrackerScreen(params: TrackerScreenParams, modifier: Modifier = Modi
         cleanDialogTarget    = params.cleanDialogTarget,
         cleanDialogCursor    = params.cleanDialogCursor,
         songScrollPosition   = params.songScrollPosition,
-        scalingMode          = params.scalingMode
+        scalingMode          = params.scalingMode,
+        buttonSoundEnabled   = params.buttonSoundEnabled,
+        buttonSoundVolume    = params.buttonSoundVolume,
+        buttonVibroEnabled   = params.buttonVibroEnabled,
+        vibroPower           = params.vibroPower
     )
 }
 

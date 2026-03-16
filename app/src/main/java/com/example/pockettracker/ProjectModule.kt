@@ -259,7 +259,28 @@ class ProjectModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 10: BUTTON VIBRO (ON / OFF)
+        // ROW 10: BUTTON VOLUME (00-FF)
+        // ─────────────────────────────────────
+        val btnVolHex = projectState.buttonSoundVolume
+            .toString(16)
+            .padStart(2, '0')
+            .uppercase()
+        drawParameterRow(
+            x = x,
+            y = rowY,
+            scale = scale,
+            nameColumnX = nameColumnX,
+            valueColumnX = valueColumnX,
+            parameterName = "BTN VOL",
+            parameterValue = btnVolHex,
+            isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
+            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
+        )
+        rowY += ROW_HEIGHT
+        currentRow++
+
+        // ─────────────────────────────────────
+        // ROW 11: BUTTON VIBRO (ON / OFF)
         // ─────────────────────────────────────
         drawParameterRow(
             x = x,
@@ -269,6 +290,27 @@ class ProjectModule : TrackerModule {
             valueColumnX = valueColumnX,
             parameterName = "BTN VIBRO",
             parameterValue = if (projectState.buttonVibroEnabled) "ON" else "OFF",
+            isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
+            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
+        )
+        rowY += ROW_HEIGHT
+        currentRow++
+
+        // ─────────────────────────────────────
+        // ROW 12: VIBRO POWER (00-FF)
+        // ─────────────────────────────────────
+        val vibroPowHex = projectState.vibroPower
+            .toString(16)
+            .padStart(2, '0')
+            .uppercase()
+        drawParameterRow(
+            x = x,
+            y = rowY,
+            scale = scale,
+            nameColumnX = nameColumnX,
+            valueColumnX = valueColumnX,
+            parameterName = "VIBRO POW",
+            parameterValue = vibroPowHex,
             isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
             isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
         )
@@ -712,6 +754,15 @@ class ProjectModule : TrackerModule {
                 )
             }
             10 -> {
+                // BUTTON VOLUME row - 00-FF
+                if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
+                return CursorContextFactory.hexByte(
+                    currentValue = state.buttonSoundVolume,
+                    min = 0,
+                    max = 255
+                )
+            }
+            11 -> {
                 // BUTTON VIBRO row - A+UP = ON, A+DOWN = OFF
                 if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
                 return CursorContext(
@@ -728,6 +779,15 @@ class ProjectModule : TrackerModule {
                     smallStep = 1,
                     largeStep = 1,
                     emptyValue = -1
+                )
+            }
+            12 -> {
+                // VIBRO POWER row - 00-FF
+                if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
+                return CursorContextFactory.hexByte(
+                    currentValue = state.vibroPower,
+                    min = 0,
+                    max = 255
                 )
             }
             else -> return CursorContextFactory.none()
@@ -800,12 +860,36 @@ class ProjectModule : TrackerModule {
                 }
             }
             10 -> {
+                // BUTTON VOLUME — carry new value back to MainActivity via InputResult
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        return InputResult(
+                            modified = true,
+                            buttonSoundVolume = action.value.coerceIn(0, 255)
+                        )
+                    }
+                    else -> {}
+                }
+            }
+            11 -> {
                 // BUTTON VIBRO — carry new boolean back to MainActivity via InputResult
                 when (action) {
                     is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
                         return InputResult(
                             modified = true,
                             buttonVibroEnabled = action.value > 0
+                        )
+                    }
+                    else -> {}
+                }
+            }
+            12 -> {
+                // VIBRO POWER — carry new value back to MainActivity via InputResult
+                when (action) {
+                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        return InputResult(
+                            modified = true,
+                            vibroPower = action.value.coerceIn(0, 255)
                         )
                     }
                     else -> {}
@@ -826,7 +910,9 @@ class ProjectModule : TrackerModule {
     data class InputResult(
         val modified: Boolean,
         val buttonSoundEnabled: Boolean? = null,
-        val buttonVibroEnabled: Boolean? = null
+        val buttonSoundVolume: Int? = null,
+        val buttonVibroEnabled: Boolean? = null,
+        val vibroPower: Int? = null
     )
 }
 
@@ -854,5 +940,7 @@ data class ProjectState(
     val layoutMode: DeviceAdapter.LayoutMode = DeviceAdapter.LayoutMode.FULL,
     val scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER,
     val buttonSoundEnabled: Boolean = false,
-    val buttonVibroEnabled: Boolean = false
+    val buttonSoundVolume: Int = 255,
+    val buttonVibroEnabled: Boolean = false,
+    val vibroPower: Int = 255
 )
