@@ -197,13 +197,13 @@ class ProjectModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 7: LAYOUT (cycle: FULL / T.PORT / T.LAND / T.PORT2)
+        // ROW 7: LAYOUT (cycle: FULLSCREEN / TOUCH LANDSCAPE / AMIGA PORTRAIT)
         // ─────────────────────────────────────
         val layoutText = when (projectState.layoutMode) {
-            DeviceAdapter.LayoutMode.FULL            -> "FULL"
-            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT  -> "T.PORT"
-            DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE -> "T.LAND"
-            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 -> "T.PORT2"
+            DeviceAdapter.LayoutMode.FULL            -> "FULLSCREEN"
+            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT  -> "T.PORT"       // legacy, not shown in cycle
+            DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE -> "TOUCH LANDSCAPE"
+            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 -> "AMIGA PORTRAIT"
         }
         drawParameterRow(
             x = x,

@@ -712,7 +712,7 @@ class TrackerController(
                 projectCursorRow = if (projectCursorRow > 0) {
                     projectCursorRow - 1
                 } else {
-                    8  // Wrap to bottom (rows 0-8)
+                    12  // Wrap to bottom (rows 0-12)
                 }
                 projectCursorColumn = 1  // Reset to first value column
             }

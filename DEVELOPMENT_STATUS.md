@@ -1,7 +1,7 @@
 # PocketTracker Development Status
 
 ## Last Updated
-2026-03-16
+2026-03-17
 
 ## Current Phase
 **All Extension Packs COMPLETE!** → **Testing & Polish** → Documentation → MVP Release
@@ -221,6 +221,15 @@ Updated both `DeviceAdapter.calculatePortrait2Layout` and `VirtualControlsPortra
 - **Height:** 5.2X (0.8X top spacer + 4 buttons + 3×0.1X row gaps + 0.1X bottom)
 
 Buttons now have equal 0.1X padding on all sides, with a compact 0.8X spacer above.
+
+### Layout & Polish Fixes (2026-03-17)
+- **Layout trap fix** — touch-only devices can no longer get stuck in FULLSCREEN (no virtual buttons). Startup migration: saved FULLSCREEN pref on a touch device is silently overridden to the auto-detected touch mode. Cycle for touch-only devices now wraps T.PORT2→FULLSCREEN back to T.LAND, skipping FULLSCREEN entirely.
+- **T.PORT retired from cycle** — TOUCH_PORTRAIT code kept for future use but excluded from UI. Legacy saved pref migrated to TOUCH_PORTRAIT2 on load. Orientation auto-switch updated: both T.PORT and T.PORT2 → T.LAND on rotate, T.LAND → T.PORT2 on rotate back.
+- **Layout option renames** — FULL → FULLSCREEN, T.LAND → TOUCH LANDSCAPE, T.PORT2 → AMIGA PORTRAIT (display names only; enum values unchanged).
+- **Default portrait touch layout** — auto-detected default changed from T.PORT → T.PORT2 (AMIGA PORTRAIT).
+- **Project screen cursor wrap fix** — DPAD UP from row 0 was wrapping to row 8; corrected to row 12. Rows 9–12 (BTN SOUND, BTN VOL, BTN VIBRO, VIBRO POW) are now reachable by wrapping from the top.
+- **SELECT/START button sounds** — now use square (sq) samples matching DPAD/A/B; previously used long samples. Only L/R shoulder buttons keep long samples.
+- **Removed testNoteQueue() test code** — deleted `PlaybackController.testNoteQueue()` and its call site in the START handler on the PROJECT screen. START on PROJECT now behaves like other sequencer screens (play/stop song).
 
 ### Button Sound & Haptic Improvements (2026-03-16)
 - **BTN SOUND / BTN VIBRO rows now reachable** — project screen cursor down limit was capped at row 8, raised to 12

@@ -69,7 +69,7 @@ class DeviceAdapter(private val context: Context) {
         }
     }
 
-    private fun hasPhysicalGameButtons(): Boolean {
+    fun hasPhysicalGameButtons(): Boolean {
         val deviceIds = InputDevice.getDeviceIds()
         for (deviceId in deviceIds) {
             val device = InputDevice.getDevice(deviceId) ?: continue

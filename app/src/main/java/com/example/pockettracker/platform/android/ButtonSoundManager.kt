@@ -102,8 +102,6 @@ class ButtonSoundManager(context: Context) {
 /** Buttons classified as "long/wide" get the ui_long_* samples; others get ui_sq_*. */
 fun VirtualButton.isLong(): Boolean = when (this) {
     VirtualButton.L_SHIFT,
-    VirtualButton.R_SHIFT,
-    VirtualButton.SELECT,
-    VirtualButton.START  -> true
-    else                 -> false
+    VirtualButton.R_SHIFT -> true
+    else                  -> false
 }

@@ -1028,68 +1028,6 @@ class PlaybackController(
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // TEST / DEMO PLAYBACK
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * Test note queue infrastructure
-     *
-     * Schedules 8 metronome clicks (1 beat apart) to verify sample-accurate timing.
-     * This demonstrates the audio engine's queue system works correctly.
-     *
-     * Used for: Testing, debugging, development verification
-     *
-     * @param project Project (for tempo and instrument access)
-     */
-    fun testNoteQueue(project: Project) {
-        logger.d(TAG, "═══════════════════════════════════════════")
-        logger.d(TAG, "🧪 PHASE 1 TEST: Sample-Accurate Note Queue")
-        logger.d(TAG, "═══════════════════════════════════════════")
-
-        val currentFrame = audioEngine.getCurrentFrame()
-        val tempo = project.tempo
-        val sampleRate = audioEngine.getDeviceSampleRate()
-
-        // Calculate frames per beat (quarter note) at current tempo
-        // 60000ms per minute ÷ BPM = ms per beat
-        // ms per beat × sampleRate / 1000 = frames per beat
-        val msPerBeat = (60000.0 / tempo)
-        val framesPerBeat = (msPerBeat * sampleRate / 1000.0).toLong()
-
-        logger.d(TAG, "Tempo: $tempo BPM")
-        logger.d(TAG, "Sample Rate: $sampleRate Hz")
-        logger.d(TAG, "Frames per beat: $framesPerBeat")
-        logger.d(TAG, "Current frame: $currentFrame")
-        logger.d(TAG, "-------------------------------------------")
-
-        // Schedule 8 metronome clicks (C-4 note, kick drum, 1 beat apart)
-        val metronomeNote = Note.fromString("C-4")
-        val kickInstrument = 0  // Instrument 00 = kick drum
-
-        for (beat in 0..7) {
-            val targetFrame = currentFrame + (beat * framesPerBeat)
-            audioEngine.scheduleNote(
-                targetFrame = targetFrame,
-                note = metronomeNote,
-                instrumentId = kickInstrument,
-                trackId = 0,
-                volume = 0.8f,
-                pan = 0.5f,  // Center
-                project = project
-            )
-
-            val targetTimeMs = (beat * msPerBeat).toLong()
-            logger.d(TAG, "📅 Beat $beat scheduled: frame=$targetFrame (${targetTimeMs}ms from now)")
-        }
-
-        logger.d(TAG, "-------------------------------------------")
-        logger.d(TAG, "✅ Scheduled 8 beats. Watch for 🎵 trigger logs!")
-        logger.d(TAG, "Expected: Notes trigger at exact scheduled frames")
-        logger.d(TAG, "Precision: <0.02ms jitter (sample-accurate)")
-        logger.d(TAG, "═══════════════════════════════════════════")
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
     // STEP SCHEDULING HELPER
     // ═══════════════════════════════════════════════════════════════════════════
 

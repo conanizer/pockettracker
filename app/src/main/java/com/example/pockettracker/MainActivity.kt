@@ -435,7 +435,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val autoLayoutMode = when {
         !layoutConfig.needsVirtualButtons -> DeviceAdapter.LayoutMode.FULL
         layoutConfig.isLandscape          -> DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
-        else                              -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT
+        else                              -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
     }
 
     // Load saved preferences (SharedPreferences, persists across app restarts)
@@ -445,10 +445,19 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val savedScalingName = remember { prefs.getString("scaling_mode", null) }
 
     val initialLayoutMode = remember {
-        if (savedLayoutName != null) {
+        val saved = if (savedLayoutName != null) {
             DeviceAdapter.LayoutMode.entries.firstOrNull { it.name == savedLayoutName } ?: autoLayoutMode
         } else {
             autoLayoutMode
+        }
+        when {
+            // TOUCH_PORTRAIT is retired from the active cycle — migrate to AMIGA PORTRAIT
+            saved == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT ->
+                DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
+            // FULLSCREEN on a touch-only device would trap the user with no virtual buttons
+            saved == DeviceAdapter.LayoutMode.FULL && layoutConfig.needsVirtualButtons ->
+                autoLayoutMode
+            else -> saved
         }
     }
     val initialScalingMode = remember {
@@ -527,13 +536,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // Auto-switch between portrait/landscape virtual-button modes on device flip
     LaunchedEffect(configuration.orientation) {
         when {
-            layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT &&
+            (layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT ||
+             layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2) &&
                     configuration.orientation == Configuration.ORIENTATION_LANDSCAPE ->
                 layoutMode = DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
 
             layoutMode == DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE &&
                     configuration.orientation == Configuration.ORIENTATION_PORTRAIT ->
-                layoutMode = DeviceAdapter.LayoutMode.TOUCH_PORTRAIT
+                layoutMode = DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
         }
     }
 
@@ -1505,11 +1515,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             // ROW 6: SYSTEM — placeholder
                             // ROW 7: LAYOUT — cycle through layout modes
                             7 -> {
+                                val hasPhysical = deviceAdapter.hasPhysicalGameButtons()
                                 layoutMode = when (layoutMode) {
-                                    DeviceAdapter.LayoutMode.FULL            -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT
-                                    DeviceAdapter.LayoutMode.TOUCH_PORTRAIT  -> DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
+                                    // Active cycle: FULLSCREEN → TOUCH LANDSCAPE → AMIGA PORTRAIT → (loop)
+                                    // FULLSCREEN only appears in the cycle on physical-button devices
+                                    DeviceAdapter.LayoutMode.FULL            -> DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
                                     DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
-                                    DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 -> DeviceAdapter.LayoutMode.FULL
+                                    DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 -> if (hasPhysical) DeviceAdapter.LayoutMode.FULL else DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
+                                    // T.PORT is retired — advance it forward so users aren't stuck
+                                    DeviceAdapter.LayoutMode.TOUCH_PORTRAIT  -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
                                 }
                                 Log.d("ProjectScreen", "Layout mode changed to: $layoutMode")
                             }
@@ -1849,12 +1863,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             onStart = {
                 // Read directly from trackerController to avoid stale captured values
                 when (trackerController.currentScreen) {
-                    // PHASE 1 TEST: START on PROJECT screen triggers note queue test
-                    ScreenType.PROJECT -> {
-                        Log.d("NoteQueueTest", "🧪 START on PROJECT - Running note queue test...")
-                        playbackController.testNoteQueue(trackerController.project)
-                    }
-
                     // File browser: Preview selected WAV file
                     ScreenType.FILE_BROWSER -> {
                         Log.d("FileBrowser", "START pressed - previousScreen=$previousScreen, items=${fileBrowserState.items.size}")
