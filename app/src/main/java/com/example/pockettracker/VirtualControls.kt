@@ -409,11 +409,11 @@ fun VirtualControlsPortrait2(
     val wideDp    = px(66f)   // wide button: 66X × 33X
     val paddingDp = px(1.5f)  // 12px outer padding
 
-    val largeSp = (X * 13f / density).sp  // A, B, arrows
-    val smallSp = (X *  9f / density).sp  // Sel, Start, L/R Shift
+    val largeSp = (X * 11f / density).sp  // A, B, arrows
+    val smallSp = (X *  7f / density).sp  // Sel, Start, L/R Shift
 
-    val sqOffXDp   = X * 6f / density
-    val wideOffXDp = X * 7f / density
+    val sqOffXDp   = X * 7f / density
+    val wideOffXDp = X * 8f / density
     val offYDp     = X * 4f / density
     val pressedDp  = X * 1f / density
 
