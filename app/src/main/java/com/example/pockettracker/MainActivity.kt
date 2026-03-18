@@ -1881,25 +1881,24 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             trackerController.projectVersion++
                         }
                         QwertyContext.FILE_RENAME -> {
-                            val oldFile = java.io.File(qwertyKeyboardState.contextExtra)
-                            val newName = typedText.ifEmpty { oldFile.nameWithoutExtension }
-                            val safeName = newName.replace(Regex("[/\\\\:*?\"<>|]"), "_")
-                            val ext = if (oldFile.extension.isNotEmpty()) ".${oldFile.extension}" else ""
-                            val newFile = java.io.File(oldFile.parentFile, safeName + ext)
-                            if (!newFile.exists() && oldFile.renameTo(newFile)) {
-                                // Refresh by re-navigating to current directory
+                            val oldPath = qwertyKeyboardState.contextExtra
+                            val newBaseName = typedText.ifEmpty {
+                                java.io.File(oldPath).nameWithoutExtension
+                            }
+                            // fileSystem.renameFile handles sanitization and preserves extension
+                            val renamed = fileSystem.renameFile(oldPath, newBaseName)
+                            if (renamed) {
                                 fileBrowserState = fileBrowserModule.navigateToFolder(
                                     fileBrowserState, fileBrowserState.currentDirectory
                                 )
                             }
                         }
                         QwertyContext.FOLDER_CREATE -> {
-                            val parentDir = java.io.File(qwertyKeyboardState.contextExtra)
+                            val parentPath = qwertyKeyboardState.contextExtra
                             val folderName = typedText.ifEmpty { "NewFolder" }
-                            val safeName = folderName.replace(Regex("[/\\\\:*?\"<>|]"), "_")
-                            val newDir = java.io.File(parentDir, safeName)
-                            if (!newDir.exists()) {
-                                newDir.mkdirs()
+                            // fileSystem.createFolder handles sanitization and mkdirs
+                            val created = fileSystem.createFolder(parentPath, folderName)
+                            if (created != null) {
                                 fileBrowserState = fileBrowserModule.navigateToFolder(
                                     fileBrowserState, fileBrowserState.currentDirectory
                                 )

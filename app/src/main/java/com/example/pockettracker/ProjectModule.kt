@@ -317,10 +317,10 @@ class ProjectModule : TrackerModule {
             val isCursorOnThisChar = isCursorOnThisRow &&
                     projectState.cursorColumn == charIndex + 1
 
-            // Draw cursor highlight even on empty slots so the cursor position is visible
+            // Draw cursor highlight (visible even on empty slots)
             if (isCursorOnThisChar) {
                 drawRect(
-                    color = Color(0xFF333300),
+                    color = Color(0xFF555500),  // Visible yellow-green, clearly different from row bg
                     topLeft = Offset((charX * scale).toFloat(), (y * scale).toFloat()),
                     size = Size(((5 * FONT_SCALE) * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
                 )

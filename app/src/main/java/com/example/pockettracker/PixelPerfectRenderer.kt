@@ -800,39 +800,31 @@ class TrackerLayout {
     /**
      * Draw the QWERTY keyboard overlay.
      *
-     * Layout (box = 450×172px, centered at 320,240):
+     * Layout (box = 470×195px, centered at 320,240):
      *   y=  5  Header label (fieldLabel, grey, centered) — fontScale=4 (20px chars)
-     *   y= 30  Text input row — 20 chars × 22px wide, centered
-     *   y= 60  Key row 0  (Q-P  or  1-0)   — cellH=26px
-     *   y= 90  Key row 1  (A-L  or  !-_)
-     *   y=120  Key row 2  (Z-M  or  <>-])
-     *   y=150  Space bar
-     *   y=176  → boxH = 176
+     *   y= 35  Text input row — dynamic centering, cursor=26px high
+     *   y= 71  Key row 0  (Q-P  or  1-0)   — cellH=26px, gap=4px
+     *   y=101  Key row 1  (A-L  or  !-_)
+     *   y=131  Key row 2  (Z-M  or  <>-])
+     *   y=161  Space bar
+     *   y=195  → boxH = 195
      *
-     * Box: 450×176, top-left at (95, 152), bottom-right at (545, 328)
+     * Box: 470×195, top-left at (85, 142)
      */
     private fun DrawScope.drawQwertyKeyboard(state: QwertyKeyboardState, scale: Int) {
         val fs = 4          // font scale for keys (20×20px chars)
-        val cs = 2          // char spacing
-        val charW = 5 * fs + cs  // 22px per char slot
+        val cs = 3          // char spacing (slightly wider than before)
+        val charW = 5 * fs + cs  // 23px per char slot
 
         // ── Box geometry ──────────────────────────────────────────────────────
-        // Layout (top-to-bottom, coords relative to boxY):
-        //   +5   header label row      (h=20 chars + 5 padding = 25)
-        //   +30  text input row        (h=26)
-        //   +60  key row 0 Q-P / 1-0   (cellH=26, gap=4 → row spacing=30)
-        //   +90  key row 1 A-L / !-_
-        //   +120 key row 2 Z-M / <>-]
-        //   +150 space bar             (h=26)
-        //   +176 → boxH = 176
-        val boxW = 450
-        val boxH = 176
-        val boxX = (DESIGN_WIDTH_PX - boxW) / 2    // 95
-        val boxY = (DESIGN_HEIGHT_PX - boxH) / 2   // 152
+        val boxW = 470
+        val boxH = 195
+        val boxX = (DESIGN_WIDTH_PX - boxW) / 2    // 85
+        val boxY = (DESIGN_HEIGHT_PX - boxH) / 2   // 142
 
         // Inner usable area (5px padding each side)
         val innerX = boxX + 5
-        val innerW = boxW - 10   // 440px = 20 chars × 22px
+        val innerW = boxW - 10   // 460px = 20 chars × 23px
 
         // ── Semi-transparent backdrop ─────────────────────────────────────────
         drawRect(
@@ -867,32 +859,38 @@ class TrackerLayout {
             fontScale = fs
         )
 
-        // ── Text input row (centered in inner area) ───────────────────────────
-        val textRowY = boxY + 30
+        // ── Text input row (dynamically centered on current text) ─────────────
+        val textRowY = boxY + 35
+        val cellH = 26     // unified cell height for both text cursor and key cells
+        val boxCenterX = boxX + boxW / 2  // 85 + 235 = 320
 
-        // Draw text characters with cursor highlight.
-        // textCursor can be 0..text.length (inclusive).
-        // No dash placeholder for empty slots — only cursor highlight is shown.
-        for (i in 0 until state.maxLength) {
-            val charPixelX = innerX + i * charW
+        // Center text around the box's horizontal midpoint.
+        // When text is empty, cursor sits at centre; as chars are added the group stays centred.
+        val textLen = state.text.length
+        val textDisplayW = textLen * charW
+        val textStartX = (boxCenterX - textDisplayW / 2).coerceAtLeast(innerX)
+
+        // Draw each text character and the cursor highlight
+        // Iterate through current text length + 1 to cover the end-of-text cursor position
+        for (i in 0..textLen) {
+            val charPixelX = textStartX + i * charW
             val isCursor = (i == state.textCursor)
-            val hasChar = i < state.text.length
 
-            // Cursor highlight box
+            // Cursor highlight box: full cellH tall, charWidth wide, aligned with character
             if (isCursor) {
                 drawRect(
                     color = Color(0xFF444400),
                     topLeft = Offset((charPixelX * scale).toFloat(), (textRowY * scale).toFloat()),
-                    size = Size(((5 * fs) * scale).toFloat(), (20 * scale).toFloat())
+                    size = Size(((5 * fs) * scale).toFloat(), (cellH * scale).toFloat())
                 )
             }
 
-            // Only draw the character if there's actual text here
-            if (hasChar) {
+            // Draw actual character (skip the end-of-text phantom position)
+            if (i < textLen) {
                 drawBitmapText(
                     text = state.text[i].toString(),
                     x = charPixelX,
-                    y = textRowY + 3,
+                    y = textRowY + 3,  // baseline padding inside cell
                     scale = scale,
                     color = if (isCursor) Color.Yellow else Color.White,
                     spacing = cs,
@@ -903,9 +901,8 @@ class TrackerLayout {
 
         // ── Key rows ──────────────────────────────────────────────────────────
         val rows = qwertyRowsForLayout(state.layout)
-        val cellW = 44     // key cell width (innerW=440 / 10 keys = 44px)
-        val cellH = 26     // key cell height (20px char + 6px padding)
-        val rowBaseY = boxY + 60
+        val cellW = 46     // key cell width (innerW=460 / 10 keys = 46px)
+        val rowBaseY = boxY + 71
         val rowGap = 4     // gap between rows
 
         for (rowIdx in rows.indices) {
@@ -914,7 +911,7 @@ class TrackerLayout {
 
             if (rowIdx == 3) {
                 // Space bar: single wide key, centered
-                val spaceW = 7 * cellW   // 308px wide
+                val spaceW = 7 * cellW   // 322px wide
                 val spaceX = boxX + (boxW - spaceW) / 2
                 val isSpaceCursor = (state.keyCursorRow == rowIdx)
 
