@@ -104,7 +104,9 @@ fun PixelPerfectTracker(
     buttonSoundEnabled: Boolean = false,
     buttonSoundVolume: Int = 255,
     buttonVibroEnabled: Boolean = false,
-    vibroPower: Int = 255
+    vibroPower: Int = 255,
+    // QWERTY keyboard overlay state
+    qwertyKeyboardState: QwertyKeyboardState = QwertyKeyboardState()
 ) {
     if (currentScreen == ScreenType.FILE_BROWSER) {
         android.util.Log.d("PixelPerfectTracker", "FILE_BROWSER screen, fileBrowserState=${if (fileBrowserState != null) "not null (${fileBrowserState.items.size} items)" else "NULL"}")
@@ -238,7 +240,8 @@ fun PixelPerfectTracker(
                         buttonSoundEnabled = buttonSoundEnabled,
                         buttonSoundVolume = buttonSoundVolume,
                         buttonVibroEnabled = buttonVibroEnabled,
-                        vibroPower = vibroPower
+                        vibroPower = vibroPower,
+                        qwertyKeyboardState = qwertyKeyboardState
                     )
                 }
             }
@@ -336,7 +339,9 @@ class TrackerLayout {
         buttonSoundEnabled: Boolean = false,
         buttonSoundVolume: Int = 255,
         buttonVibroEnabled: Boolean = false,
-        vibroPower: Int = 255
+        vibroPower: Int = 255,
+        // QWERTY keyboard overlay state
+        qwertyKeyboardState: QwertyKeyboardState = QwertyKeyboardState()
     ) {
         // ===================================
         // DRAW BACKGROUND
@@ -693,6 +698,14 @@ class TrackerLayout {
         }
 
         // ===================================
+        // QWERTY KEYBOARD OVERLAY
+        // Drawn on top of everything when active
+        // ===================================
+        if (qwertyKeyboardState.isOpen) {
+            drawQwertyKeyboard(qwertyKeyboardState, scale)
+        }
+
+        // ===================================
         // LAYOUT COMPLETE!
         // ===================================
         // Left column: Oscilloscope + Phrase Editor (or placeholder)
@@ -840,6 +853,201 @@ class TrackerLayout {
             spacing = cs,
             fontScale = fs
         )
+    }
+
+    // ============================================================================
+    // QWERTY KEYBOARD OVERLAY
+    // ============================================================================
+
+    /**
+     * Draw the QWERTY keyboard overlay.
+     *
+     * Layout (box = 320×150px, centered at 320,240):
+     *   y=  5  Layout indicator ("ABC" / "123") — fontScale=2 (10px chars)
+     *   y= 20  Text input row — shows current text with cursor highlight
+     *   y= 45  Key row 0  (Q-P  or  1-0)
+     *   y= 68  Key row 1  (A-L  or  !-_)
+     *   y= 91  Key row 2  (Z-M  or  <>-])
+     *   y=114  Space bar
+     *   y=135  bottom pad  → total height = 140px
+     *
+     * Box: 320×140, top-left at (160,170), bottom-right at (480,310)
+     */
+    private fun DrawScope.drawQwertyKeyboard(state: QwertyKeyboardState, scale: Int) {
+        val fs = 3          // font scale for keys (15×15px chars)
+        val cs = 2          // char spacing
+        val charW = 5 * fs + cs  // 17px per char slot
+
+        // ── Box geometry ──────────────────────────────────────────────────────
+        val boxW = 320
+        val boxH = 140
+        val boxX = (DESIGN_WIDTH_PX - boxW) / 2    // 160
+        val boxY = (DESIGN_HEIGHT_PX - boxH) / 2   // 170
+
+        // Inner usable area (5px padding each side)
+        val innerX = boxX + 5
+        val innerW = boxW - 10   // 310px
+
+        // ── Semi-transparent backdrop ─────────────────────────────────────────
+        drawRect(
+            color = Color(0xCC000000),
+            topLeft = Offset.Zero,
+            size = Size((DESIGN_WIDTH_PX * scale).toFloat(), (DESIGN_HEIGHT_PX * scale).toFloat())
+        )
+
+        // ── Dialog box ────────────────────────────────────────────────────────
+        drawRect(
+            color = Color(0xFF1a1a1a),
+            topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
+            size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat())
+        )
+        drawRect(
+            color = Color(0xFF00CCCC),
+            topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
+            size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat()),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
+        )
+
+        // ── Layout indicator (tiny "ABC" or "123", fontScale=2 = 10px chars) ─
+        val indicatorLabel = "< ${qwertyLayoutLabel(state.layout)} >"
+        drawBitmapText(
+            text = indicatorLabel,
+            x = innerX,
+            y = boxY + 5,
+            scale = scale,
+            color = Color(0xFF888888),
+            spacing = 1,
+            fontScale = 2
+        )
+
+        // ── Text input row ────────────────────────────────────────────────────
+        val textRowY = boxY + 20
+        val textStartX = innerX + 68  // leave room for field label (4 chars × 17px = 68px)
+
+        // Field label
+        drawBitmapText(
+            text = state.fieldName,
+            x = innerX,
+            y = textRowY + 3,
+            scale = scale,
+            color = Color(0xFF888888),
+            spacing = cs,
+            fontScale = fs
+        )
+
+        // Draw text characters with cursor highlight.
+        // textCursor can be 0..text.length (inclusive), so we render maxLength slots
+        // plus a possible cursor indicator at position text.length if at end.
+        val displaySlots = state.maxLength
+        for (i in 0 until displaySlots) {
+            val ch = if (i < state.text.length) state.text[i] else '-'
+            val charPixelX = textStartX + i * charW
+            val isCursor = (i == state.textCursor)
+
+            // Cursor highlight box
+            if (isCursor) {
+                drawRect(
+                    color = Color(0xFF444400),
+                    topLeft = Offset((charPixelX * scale).toFloat(), (textRowY * scale).toFloat()),
+                    size = Size(((5 * fs) * scale).toFloat(), (15 * scale).toFloat())
+                )
+            }
+
+            drawBitmapText(
+                text = ch.toString(),
+                x = charPixelX,
+                y = textRowY + 3,
+                scale = scale,
+                color = when {
+                    isCursor -> Color.Yellow
+                    i < state.text.length -> Color.White
+                    else -> Color(0xFF555555)
+                },
+                spacing = cs,
+                fontScale = fs
+            )
+        }
+
+        // ── Key rows ──────────────────────────────────────────────────────────
+        val rows = qwertyRowsForLayout(state.layout)
+        val cellW = 31     // key cell width (innerW=310 / 10 keys = 31px)
+        val cellH = 21     // key cell height (= ROW_HEIGHT)
+        val rowBaseY = boxY + 45
+
+        for (rowIdx in rows.indices) {
+            val row = rows[rowIdx]
+            val rowY = rowBaseY + rowIdx * (cellH + 2)
+
+            if (rowIdx == 3) {
+                // Space bar: single wide key, centered
+                val spaceW = 7 * cellW   // ~217px wide
+                val spaceX = boxX + (boxW - spaceW) / 2
+                val isSpaceCursor = (state.keyCursorRow == rowIdx)
+
+                drawRect(
+                    color = if (isSpaceCursor) Color(0xFF444400) else Color(0xFF2a2a2a),
+                    topLeft = Offset((spaceX * scale).toFloat(), (rowY * scale).toFloat()),
+                    size = Size((spaceW * scale).toFloat(), (cellH * scale).toFloat())
+                )
+                if (isSpaceCursor) {
+                    drawRect(
+                        color = Color.Yellow,
+                        topLeft = Offset((spaceX * scale).toFloat(), (rowY * scale).toFloat()),
+                        size = Size((spaceW * scale).toFloat(), (cellH * scale).toFloat()),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
+                    )
+                }
+                drawBitmapText(
+                    text = "SPACE",
+                    x = spaceX + (spaceW - 5 * charW) / 2,
+                    y = rowY + 3,
+                    scale = scale,
+                    color = if (isSpaceCursor) Color.Yellow else Color(0xFF888888),
+                    spacing = cs,
+                    fontScale = fs
+                )
+            } else {
+                // Normal key row: offset to center shorter rows
+                val rowTotalW = row.size * cellW
+                val rowOffsetX = (innerW - rowTotalW) / 2
+                val rowStartX = innerX + rowOffsetX
+
+                for (colIdx in row.indices) {
+                    val keyChar = row[colIdx]
+                    val cellX = rowStartX + colIdx * cellW
+                    val isCursor = (state.keyCursorRow == rowIdx && state.keyCursorCol == colIdx)
+
+                    // Key background
+                    drawRect(
+                        color = if (isCursor) Color(0xFF444400) else Color(0xFF2a2a2a),
+                        topLeft = Offset((cellX * scale).toFloat(), (rowY * scale).toFloat()),
+                        size = Size(((cellW - 1) * scale).toFloat(), (cellH * scale).toFloat())
+                    )
+
+                    // Cursor border
+                    if (isCursor) {
+                        drawRect(
+                            color = Color.Yellow,
+                            topLeft = Offset((cellX * scale).toFloat(), (rowY * scale).toFloat()),
+                            size = Size(((cellW - 1) * scale).toFloat(), (cellH * scale).toFloat()),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
+                        )
+                    }
+
+                    // Key character (centered in cell)
+                    val charX = cellX + (cellW - 1 - 5 * fs) / 2
+                    drawBitmapText(
+                        text = keyChar.toString(),
+                        x = charX,
+                        y = rowY + 3,
+                        scale = scale,
+                        color = if (isCursor) Color.Yellow else Color.White,
+                        spacing = cs,
+                        fontScale = fs
+                    )
+                }
+            }
+        }
     }
 
     /**

@@ -488,6 +488,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     var buttonVibroEnabled by remember { mutableStateOf(prefs.getBoolean("button_vibro", false)) }
     var vibroPower         by remember { mutableStateOf(prefs.getInt("vibro_power", 255)) }
 
+    // QWERTY keyboard insert mode (persisted in SharedPreferences)
+    var insertBefore by remember { mutableStateOf(prefs.getBoolean("kb_insert_before", true)) }
+
+    // QWERTY keyboard overlay state (transient — not persisted)
+    var qwertyKeyboardState by remember { mutableStateOf(QwertyKeyboardState()) }
+
     val buttonSoundManager = remember { ButtonSoundManager(context) }
     val buttonHapticManager = remember { ButtonHapticManager(context) }
 
@@ -507,6 +513,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     LaunchedEffect(vibroPower) {
         buttonHapticManager.power = vibroPower
         prefs.edit().putInt("vibro_power", vibroPower).apply()
+    }
+    LaunchedEffect(insertBefore) {
+        prefs.edit().putBoolean("kb_insert_before", insertBefore).apply()
     }
 
     // Release SoundPool when the composable leaves composition
@@ -838,6 +847,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     buttonSoundVolume = buttonSoundVolume,
                     buttonVibroEnabled = buttonVibroEnabled,
                     vibroPower = vibroPower,
+                    insertBefore = insertBefore,
                     statusMessage = trackerController.statusMessage,
                     isSuccess = trackerController.statusSuccess,
                     isRendering = isRendering,
@@ -853,6 +863,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     result.buttonSoundVolume?.let  { buttonSoundVolume  = it }
                     result.buttonVibroEnabled?.let { buttonVibroEnabled = it }
                     result.vibroPower?.let         { vibroPower         = it }
+                    result.insertBefore?.let       { insertBefore       = it }
                     trackerController.projectVersion++
                 }
             }
@@ -1156,7 +1167,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val buttonHandlers = remember {
         ButtonHandlers(
             onDPadUp = {
-                if (showResampleDialog) { resampleDialogCursor = 0 }
+                if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorUp() }
+                else if (showResampleDialog) { resampleDialogCursor = 0 }
                 else if (showCleanDialog) { cleanDialogCursor = 0 }
                 else handleDPadNavigation { trackerController.inputController.handleDPadUp() }
             },
@@ -1165,7 +1177,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             // D-PAD DOWN
             // ───────────────────────────────────────────────────────────────
             onDPadDown = {
-                if (showResampleDialog) { resampleDialogCursor = 1 }
+                if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorDown() }
+                else if (showResampleDialog) { resampleDialogCursor = 1 }
                 else if (showCleanDialog) { cleanDialogCursor = 1 }
                 else handleDPadNavigation { trackerController.inputController.handleDPadDown() }
             },
@@ -1174,20 +1187,28 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             // D-PAD LEFT
             // ───────────────────────────────────────────────────────────────
             onDPadLeft = {
-                handleDPadNavigation { trackerController.inputController.handleDPadLeft() }
+                if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorLeft() }
+                else handleDPadNavigation { trackerController.inputController.handleDPadLeft() }
             },
 
             // ───────────────────────────────────────────────────────────────
             // D-PAD RIGHT
             // ───────────────────────────────────────────────────────────────
             onDPadRight = {
-                handleDPadNavigation { trackerController.inputController.handleDPadRight() }
+                if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorRight() }
+                else handleDPadNavigation { trackerController.inputController.handleDPadRight() }
             },
 
 // ───────────────────────────────────────────────────────────────
 // BUTTON A - Primary action (insert/increment)
 // ───────────────────────────────────────────────────────────────
             onButtonA = { run buttonA@{
+                // ── QWERTY keyboard takes priority ──────────────────────────
+                if (qwertyKeyboardState.isOpen) {
+                    qwertyKeyboardState = qwertyKeyboardState.insertCurrentKey()
+                    return@buttonA
+                }
+
                 // ── Resample dialog takes priority ──────────────────────────
                 if (showResampleDialog) {
                     if (resampleDialogCursor == 0) {
@@ -1536,6 +1557,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                 }
                                 Log.d("ProjectScreen", "Scaling mode changed to: $scalingMode")
                             }
+                            // ROW 13: KB INSERT — toggle insert mode (BEFORE / AFTER)
+                            13 -> {
+                                val col = trackerController.projectCursorColumn
+                                when (col) {
+                                    1 -> insertBefore = true   // BEFORE
+                                    2 -> insertBefore = false  // AFTER
+                                    else -> insertBefore = !insertBefore  // toggle
+                                }
+                            }
                         }
                     }
 
@@ -1646,6 +1676,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
 // BUTTON B - Secondary action
 // ───────────────────────────────────────────────────────────────
             onButtonB = { run buttonB@{
+                // ── QWERTY keyboard: B = delete ──────────────────────────────
+                if (qwertyKeyboardState.isOpen) {
+                    qwertyKeyboardState = qwertyKeyboardState.deleteChar()
+                    return@buttonB
+                }
+
                 // Resample dialog: B = cancel (NO)
                 if (showResampleDialog) {
                     showResampleDialog = false
@@ -1760,7 +1796,13 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
 // ───────────────────────────────────────────────────────────────
 // SELECT BUTTON - Clear/Delete or quick navigation
 // ───────────────────────────────────────────────────────────────
-            onSelect = {
+            onSelect = { run selectHandler@{
+                // ── QWERTY keyboard: SELECT = cancel (discard changes) ────────
+                if (qwertyKeyboardState.isOpen) {
+                    qwertyKeyboardState = QwertyKeyboardState()  // close without saving
+                    return@selectHandler
+                }
+
                 // Read directly from trackerController to avoid stale captured values
                 when (trackerController.currentScreen) {
                     // SONG SCREEN: Clear chain reference
@@ -1836,6 +1878,28 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                         }
                     }
 
+                    // PROJECT SCREEN: SELECT on NAME row (row 2) opens QWERTY keyboard
+                    ScreenType.PROJECT -> {
+                        val row = trackerController.projectCursorRow
+                        val col = trackerController.projectCursorColumn
+                        if (row == 2 && col >= 1) {
+                            // Open QWERTY keyboard for project name editing
+                            val currentName = trackerController.project.name.trimEnd()
+                            qwertyKeyboardState = QwertyKeyboardState(
+                                isOpen = true,
+                                text = currentName,
+                                maxLength = 12,
+                                textCursor = currentName.length,
+                                keyCursorRow = 0,
+                                keyCursorCol = 0,
+                                layout = 0,
+                                fieldName = "NAME",
+                                originalText = currentName,
+                                insertBefore = insertBefore
+                            )
+                        }
+                    }
+
                     // FILE_BROWSER: SELECT button does nothing (combos handled separately)
                     ScreenType.FILE_BROWSER -> {
                         // Do nothing - SELECT combos (SELECT+A, SELECT+B, etc.) are handled in InputMapper
@@ -1855,12 +1919,21 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                         }
                     }
                 }
-            },
+            } },  // end run selectHandler@
 
 // ───────────────────────────────────────────────────────────────
 // START BUTTON - Preview sample or toggle playback
 // ───────────────────────────────────────────────────────────────
-            onStart = {
+            onStart = { run startHandler@{
+                // ── QWERTY keyboard: START = apply and close ─────────────────
+                if (qwertyKeyboardState.isOpen) {
+                    val newName = qwertyKeyboardState.text.trimEnd()
+                    trackerController.project.name = newName
+                    trackerController.projectVersion++
+                    qwertyKeyboardState = QwertyKeyboardState()  // close keyboard
+                    return@startHandler
+                }
+
                 // Read directly from trackerController to avoid stale captured values
                 when (trackerController.currentScreen) {
                     // File browser: Preview selected WAV file
@@ -1933,7 +2006,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                         }
                     }
                 }
-            },
+            } },  // end run startHandler@
 
 // ───────────────────────────────────────────────────────────────
 // L BUTTON - Now only a hold modifier (L+R exits selection mode)
@@ -2165,6 +2238,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
 // R + DIRECTION COMBINATIONS (Screen navigation)
 // ───────────────────────────────────────────────────────────────
             onRUp = {
+                // R+UP: QWERTY keyboard — switch to letters layout
+                if (qwertyKeyboardState.isOpen) {
+                    qwertyKeyboardState = qwertyKeyboardState.copy(layout = 0).withClampedCol()
+                } else
                 // R+UP: Navigate to screen above in 5×5 grid OR cycle sort mode up in FILE_BROWSER
                 if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
                     // File browser: cycle sort mode up
@@ -2188,6 +2265,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             },
 
             onRDown = {
+                // R+DOWN: QWERTY keyboard — switch to numbers/symbols layout
+                if (qwertyKeyboardState.isOpen) {
+                    qwertyKeyboardState = qwertyKeyboardState.copy(layout = 1).withClampedCol()
+                } else
                 // R+DOWN: Navigate to screen below in 5×5 grid OR cycle sort mode down in FILE_BROWSER
                 if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
                     // File browser: cycle sort mode down
@@ -2211,6 +2292,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             },
 
             onRLeft = {
+                // R+LEFT: QWERTY keyboard — move text cursor left
+                if (qwertyKeyboardState.isOpen) {
+                    qwertyKeyboardState = qwertyKeyboardState.moveTextCursorLeft()
+                } else
                 // R+LEFT: Navigate to screen on left OR go to parent folder in FILE_BROWSER
                 if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
                     // File browser: navigate to parent folder
@@ -2282,6 +2367,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             },
 
             onRRight = {
+                // R+RIGHT: QWERTY keyboard — move text cursor right
+                if (qwertyKeyboardState.isOpen) {
+                    qwertyKeyboardState = qwertyKeyboardState.moveTextCursorRight()
+                } else {
                 // R+RIGHT: Navigate to screen on right in main row (disabled in FILE_BROWSER)
                 // Read directly from trackerController to avoid stale captured values
                 if (trackerController.currentScreen != ScreenType.FILE_BROWSER) {
@@ -2347,6 +2436,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     trackerController.currentScreen = newScreen
                     trackerController.previousColumn = newCol
                 }
+                }  // end else (non-keyboard R+RIGHT)
             },
 
 // ───────────────────────────────────────────────────────────────
@@ -2846,7 +2936,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         buttonSoundEnabled      = buttonSoundEnabled,
         buttonSoundVolume       = buttonSoundVolume,
         buttonVibroEnabled      = buttonVibroEnabled,
-        vibroPower              = vibroPower
+        vibroPower              = vibroPower,
+        qwertyKeyboardState     = qwertyKeyboardState.copy(insertBefore = insertBefore)
     )
 
     CompositionLocalProvider(

@@ -314,6 +314,51 @@ class ProjectModule : TrackerModule {
             isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
             isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
         )
+        rowY += ROW_HEIGHT
+        currentRow++
+
+        // ─────────────────────────────────────
+        // ROW 13: KEYBOARD INSERT MODE (BEFORE / AFTER)
+        // Controls whether A inserts before or after the text cursor
+        // ─────────────────────────────────────
+        val isCursorOnInsertRow = projectState.cursorRow == currentRow
+
+        if (isCursorOnInsertRow) {
+            drawRect(
+                color = Color(0xFF333333),
+                topLeft = Offset((x * scale).toFloat(), (rowY * scale).toFloat()),
+                size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
+            )
+        }
+        drawBitmapText(
+            text = "KB INSERT",
+            x = nameColumnX,
+            y = rowY + TEXT_PADDING,
+            scale = scale,
+            color = if (isCursorOnInsertRow) Color.Yellow else Color.Gray,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+        val insertOptions = listOf("BEFORE", "AFTER")
+        var insertOptX = valueColumnX
+        for (optIdx in insertOptions.indices) {
+            val isSelected = if (optIdx == 0) projectState.insertBefore else !projectState.insertBefore
+            val isCursorHere = isCursorOnInsertRow && projectState.cursorColumn == optIdx + 1
+            drawBitmapText(
+                text = insertOptions[optIdx],
+                x = insertOptX,
+                y = rowY + TEXT_PADDING,
+                scale = scale,
+                color = when {
+                    isCursorHere -> Color.Yellow
+                    isSelected   -> Color.Cyan
+                    else         -> Color.White
+                },
+                spacing = CHAR_SPACING,
+                fontScale = FONT_SCALE
+            )
+            insertOptX += 100
+        }
 
         // ===================================
         // STEP 5: Draw status message at bottom (if any)
@@ -790,6 +835,11 @@ class ProjectModule : TrackerModule {
                     max = 255
                 )
             }
+            13 -> {
+                // KEYBOARD INSERT MODE row - BEFORE (0) / AFTER (1)
+                if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
+                return CursorContextFactory.readOnly()  // Action handled in MainActivity (A button)
+            }
             else -> return CursorContextFactory.none()
         }
     }
@@ -912,7 +962,8 @@ class ProjectModule : TrackerModule {
         val buttonSoundEnabled: Boolean? = null,
         val buttonSoundVolume: Int? = null,
         val buttonVibroEnabled: Boolean? = null,
-        val vibroPower: Int? = null
+        val vibroPower: Int? = null,
+        val insertBefore: Boolean? = null   // Non-null when user toggled KB INSERT row
     )
 }
 
@@ -942,5 +993,6 @@ data class ProjectState(
     val buttonSoundEnabled: Boolean = false,
     val buttonSoundVolume: Int = 255,
     val buttonVibroEnabled: Boolean = false,
-    val vibroPower: Int = 255
+    val vibroPower: Int = 255,
+    val insertBefore: Boolean = true   // Keyboard insert mode: true=BEFORE cursor, false=AFTER
 )
