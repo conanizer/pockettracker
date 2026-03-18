@@ -348,10 +348,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     var isRendering by remember { mutableStateOf(false) }
     var renderProgress by remember { mutableFloatStateOf(0f) }
 
-    // Resample dialog state (triggered by double-tap A in SONG selection mode)
-    var showResampleDialog by remember { mutableStateOf(false) }
-    var resampleDialogCursor by remember { mutableIntStateOf(0) }  // 0=YES, 1=NO
-
     // Clean dialog state (triggered by A on row 5 in PROJECT screen)
     var showCleanDialog by remember { mutableStateOf(false) }
     var cleanDialogTarget by remember { mutableStateOf("") }  // "SEQ" or "INST"
@@ -1183,7 +1179,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         ButtonHandlers(
             onDPadUp = {
                 if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorUp() }
-                else if (showResampleDialog) { resampleDialogCursor = 0 }
                 else if (showCleanDialog) { cleanDialogCursor = 0 }
                 else handleDPadNavigation { trackerController.inputController.handleDPadUp() }
             },
@@ -1193,7 +1188,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             // ───────────────────────────────────────────────────────────────
             onDPadDown = {
                 if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorDown() }
-                else if (showResampleDialog) { resampleDialogCursor = 1 }
                 else if (showCleanDialog) { cleanDialogCursor = 1 }
                 else handleDPadNavigation { trackerController.inputController.handleDPadDown() }
             },
@@ -1221,63 +1215,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 // ── QWERTY keyboard takes priority ──────────────────────────
                 if (qwertyKeyboardState.isOpen) {
                     qwertyKeyboardState = qwertyKeyboardState.insertCurrentKey()
-                    return@buttonA
-                }
-
-                // ── Resample dialog takes priority ──────────────────────────
-                if (showResampleDialog) {
-                    if (resampleDialogCursor == 0) {
-                        // YES: Execute resampling
-                        showResampleDialog = false
-                        val bounds = trackerController.inputController.getSelectionBounds()
-                        if (bounds != null && !isRendering) {
-                            // Convert selection columns (1-8) to track IDs (0-7)
-                            val selectedTracks = (bounds.topLeftColumn - 1..bounds.bottomRightColumn - 1)
-                                .filter { it in 0..7 }.toSet()
-                            isRendering = true
-                            renderProgress = 0f
-                            trackerController.stopPlayback()
-
-                            CoroutineScope(Dispatchers.Default).launch {
-                                val result = renderController.renderSelectionToWav(
-                                    project = trackerController.project,
-                                    startRow = bounds.topLeftRow,
-                                    endRow = bounds.bottomRightRow,
-                                    selectedTrackIds = selectedTracks,
-                                    progressCallback = object : RenderController.ProgressCallback {
-                                        override fun onProgress(progress: Float, message: String) {
-                                            renderProgress = progress
-                                        }
-                                    }
-                                )
-
-                                withContext(Dispatchers.Main) {
-                                    isRendering = false
-                                    renderProgress = 0f
-                                    when (result) {
-                                        is RenderController.RenderResult.Success -> {
-                                            val instId = instrumentController.createResampledInstrument(
-                                                trackerController.project, result.filename
-                                            )
-                                            if (instId >= 0) {
-                                                trackerController.statusMessage =
-                                                    "RESAMPLED → INST ${instId.toString(16).padStart(2,'0').uppercase()}"
-                                                trackerController.statusSuccess = true
-                                                trackerController.projectVersion++
-                                            }
-                                        }
-                                        is RenderController.RenderResult.Error -> {
-                                            trackerController.statusMessage = "RESAMPLE FAILED"
-                                            trackerController.statusSuccess = false
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        // NO: dismiss dialog
-                        showResampleDialog = false
-                    }
                     return@buttonA
                 }
 
@@ -1692,12 +1629,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     return@buttonB
                 }
 
-                // Resample dialog: B = cancel (NO)
-                if (showResampleDialog) {
-                    showResampleDialog = false
-                    return@buttonB
-                }
-
                 // Clean dialog: B = cancel (NO)
                 if (showCleanDialog) {
                     showCleanDialog = false
@@ -1903,14 +1834,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             qwertyKeyboardState = QwertyKeyboardState(
                                 isOpen = true,
                                 text = currentName,
-                                maxLength = 12,
-                                textCursor = currentName.length,
+                                maxLength = 20,
+                                textCursor = currentName.length.coerceAtMost(20),
                                 keyCursorRow = 0,
                                 keyCursorCol = 0,
                                 layout = 0,
-                                fieldName = "NAME",
+                                fieldLabel = "PROJECT NAME:",
                                 originalText = currentName,
-                                insertBefore = insertBefore
+                                insertBefore = insertBefore,
+                                context = QwertyContext.PROJECT_NAME
                             )
                         }
                     }
@@ -1942,9 +1874,86 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             onStart = { run startHandler@{
                 // ── QWERTY keyboard: START = apply and close ─────────────────
                 if (qwertyKeyboardState.isOpen) {
-                    val newName = qwertyKeyboardState.text.trimEnd()
-                    trackerController.project.name = newName
-                    trackerController.projectVersion++
+                    val typedText = qwertyKeyboardState.text.trimEnd()
+                    when (qwertyKeyboardState.context) {
+                        QwertyContext.PROJECT_NAME -> {
+                            trackerController.project.name = typedText
+                            trackerController.projectVersion++
+                        }
+                        QwertyContext.FILE_RENAME -> {
+                            val oldFile = java.io.File(qwertyKeyboardState.contextExtra)
+                            val newName = typedText.ifEmpty { oldFile.nameWithoutExtension }
+                            val safeName = newName.replace(Regex("[/\\\\:*?\"<>|]"), "_")
+                            val ext = if (oldFile.extension.isNotEmpty()) ".${oldFile.extension}" else ""
+                            val newFile = java.io.File(oldFile.parentFile, safeName + ext)
+                            if (!newFile.exists() && oldFile.renameTo(newFile)) {
+                                // Refresh by re-navigating to current directory
+                                fileBrowserState = fileBrowserModule.navigateToFolder(
+                                    fileBrowserState, fileBrowserState.currentDirectory
+                                )
+                            }
+                        }
+                        QwertyContext.FOLDER_CREATE -> {
+                            val parentDir = java.io.File(qwertyKeyboardState.contextExtra)
+                            val folderName = typedText.ifEmpty { "NewFolder" }
+                            val safeName = folderName.replace(Regex("[/\\\\:*?\"<>|]"), "_")
+                            val newDir = java.io.File(parentDir, safeName)
+                            if (!newDir.exists()) {
+                                newDir.mkdirs()
+                                fileBrowserState = fileBrowserModule.navigateToFolder(
+                                    fileBrowserState, fileBrowserState.currentDirectory
+                                )
+                            }
+                        }
+                        QwertyContext.RESAMPLE -> {
+                            val customName = typedText.ifEmpty { null }
+                            val bounds = trackerController.inputController.getSelectionBounds()
+                            if (bounds != null && !isRendering) {
+                                val selectedTracks = (bounds.topLeftColumn - 1..bounds.bottomRightColumn - 1)
+                                    .filter { it in 0..7 }.toSet()
+                                isRendering = true
+                                renderProgress = 0f
+                                trackerController.stopPlayback()
+
+                                CoroutineScope(Dispatchers.Default).launch {
+                                    val result = renderController.renderSelectionToWav(
+                                        project = trackerController.project,
+                                        startRow = bounds.topLeftRow,
+                                        endRow = bounds.bottomRightRow,
+                                        selectedTrackIds = selectedTracks,
+                                        progressCallback = object : RenderController.ProgressCallback {
+                                            override fun onProgress(progress: Float, message: String) {
+                                                renderProgress = progress
+                                            }
+                                        },
+                                        customBaseName = customName
+                                    )
+
+                                    withContext(Dispatchers.Main) {
+                                        isRendering = false
+                                        renderProgress = 0f
+                                        when (result) {
+                                            is RenderController.RenderResult.Success -> {
+                                                val instId = instrumentController.createResampledInstrument(
+                                                    trackerController.project, result.filename
+                                                )
+                                                if (instId >= 0) {
+                                                    trackerController.statusMessage =
+                                                        "RESAMPLED → INST ${instId.toString(16).padStart(2,'0').uppercase()}"
+                                                    trackerController.statusSuccess = true
+                                                    trackerController.projectVersion++
+                                                }
+                                            }
+                                            is RenderController.RenderResult.Error -> {
+                                                trackerController.statusMessage = "RESAMPLE FAILED"
+                                                trackerController.statusSuccess = false
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     qwertyKeyboardState = QwertyKeyboardState()  // close keyboard
                     return@startHandler
                 }
@@ -2677,12 +2686,25 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     fileBrowserState.mode == FileBrowserModule.BrowserMode.NORMAL) {
                     val item = fileBrowserState.items.getOrNull(fileBrowserState.cursor)
                     if (item != null && item !is FileBrowserModule.BrowserItem.Parent) {
-                        fileBrowserState = fileBrowserState.copy(
-                            mode = FileBrowserModule.BrowserMode.RENAME,
-                            renameBuffer = item.file.nameWithoutExtension,
-                            renameCursor = 0,
-                            statusMessage = "",
-                            statusSuccess = true
+                        val file = item.file
+                        val isWav = file.extension.lowercase() == "wav"
+                        val isPtp = file.extension.lowercase() == "ptp"
+                        val fieldLabel = when {
+                            file.isDirectory -> "FOLDER NAME:"
+                            isWav -> "SAMPLE NAME:"
+                            isPtp -> "PROJECT NAME:"
+                            else -> "FILE NAME:"
+                        }
+                        val baseName = file.nameWithoutExtension
+                        qwertyKeyboardState = QwertyKeyboardState(
+                            isOpen = true,
+                            text = baseName,
+                            textCursor = baseName.length.coerceAtMost(20),
+                            fieldLabel = fieldLabel,
+                            originalText = baseName,
+                            insertBefore = insertBefore,
+                            context = QwertyContext.FILE_RENAME,
+                            contextExtra = file.absolutePath
                         )
                     }
                 }
@@ -2711,12 +2733,17 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             onSelectR = {
                 if (trackerController.currentScreen == ScreenType.FILE_BROWSER &&
                     fileBrowserState.mode == FileBrowserModule.BrowserMode.NORMAL) {
-                    fileBrowserState = fileBrowserState.copy(
-                        mode = FileBrowserModule.BrowserMode.CREATE,
-                        renameBuffer = "NEWFOLDER",
-                        renameCursor = 0,
-                        statusMessage = "",
-                        statusSuccess = true
+                    val currentDir = fileBrowserState.currentDirectory
+                    val initialText = "NEW FOLDER"
+                    qwertyKeyboardState = QwertyKeyboardState(
+                        isOpen = true,
+                        text = initialText,
+                        textCursor = initialText.length.coerceAtMost(20),
+                        fieldLabel = "FOLDER NAME:",
+                        originalText = initialText,
+                        insertBefore = insertBefore,
+                        context = QwertyContext.FOLDER_CREATE,
+                        contextExtra = currentDir.absolutePath
                     )
                 }
             },
@@ -2727,10 +2754,19 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             onAA = { run aaHandler@{
                 val currentScreen = trackerController.currentScreen
 
-                // Song + selection mode → show resample dialog (no position check needed)
+                // Song + selection mode → open QWERTY for resample name
                 if (currentScreen == ScreenType.SONG && trackerController.inputController.isSelectionModeActive()) {
-                    showResampleDialog = true
-                    resampleDialogCursor = 0
+                    val suggestedName = renderController.generateResampledBaseName()
+                    qwertyKeyboardState = QwertyKeyboardState(
+                        isOpen = true,
+                        text = suggestedName,
+                        textCursor = suggestedName.length.coerceAtMost(20),
+                        fieldLabel = "SAMPLE NAME:",
+                        originalText = suggestedName,
+                        insertBefore = insertBefore,
+                        clearOnFirstB = true,
+                        context = QwertyContext.RESAMPLE
+                    )
                     return@aaHandler
                 }
 
@@ -2941,8 +2977,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         modCursorSide           = trackerController.modCursorSide,
         isRendering             = isRendering,
         renderProgress          = renderProgress,
-        showResampleDialog      = showResampleDialog,
-        resampleDialogCursor    = resampleDialogCursor,
         showCleanDialog         = showCleanDialog,
         cleanDialogTarget       = cleanDialogTarget,
         cleanDialogCursor       = cleanDialogCursor,

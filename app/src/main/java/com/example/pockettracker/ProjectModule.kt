@@ -304,42 +304,40 @@ class ProjectModule : TrackerModule {
         )
 
         // COLUMN 2: Name characters (12 characters max)
-        // Show actual name characters, then "-" for empty slots
+        // Show actual name characters only; no placeholder for empty slots.
         val projectName = projectState.project.name.take(12)
 
         // Draw each character separately
         var charX = valueColumnX
         for (charIndex in 0..11) {
-            // Get character to display:
-            // - If within name length: show actual character
-            // - If beyond name length: show "-" for empty slot
-            val char = if (charIndex < projectName.length) {
-                projectName[charIndex]
-            } else {
-                '-'  // Empty slot indicator
-            }
+            val hasChar = charIndex < projectName.length
 
             // Is cursor on THIS specific character?
             // cursorColumn: 0=name label, 1=first char, 2=second char, etc.
             val isCursorOnThisChar = isCursorOnThisRow &&
                     projectState.cursorColumn == charIndex + 1
 
-            // Choose color: yellow for cursor, gray for empty slots, white for content
-            val charColor = when {
-                isCursorOnThisChar -> Color.Yellow
-                charIndex >= projectName.length -> Color.Gray  // Gray for empty slots
-                else -> Color.White  // White for name content
+            // Draw cursor highlight even on empty slots so the cursor position is visible
+            if (isCursorOnThisChar) {
+                drawRect(
+                    color = Color(0xFF333300),
+                    topLeft = Offset((charX * scale).toFloat(), (y * scale).toFloat()),
+                    size = Size(((5 * FONT_SCALE) * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
+                )
             }
 
-            drawBitmapText(
-                text = char.toString(),
-                x = charX,
-                y = textY,
-                scale = scale,
-                color = charColor,
-                spacing = CHAR_SPACING,
-                fontScale = FONT_SCALE
-            )
+            // Only draw actual characters — no dash for empty slots
+            if (hasChar) {
+                drawBitmapText(
+                    text = projectName[charIndex].toString(),
+                    x = charX,
+                    y = textY,
+                    scale = scale,
+                    color = if (isCursorOnThisChar) Color.Yellow else Color.White,
+                    spacing = CHAR_SPACING,
+                    fontScale = FONT_SCALE
+                )
+            }
 
             // Move to next character position
             // Each char is 5px * 3 (scale) + 2px spacing = 17px

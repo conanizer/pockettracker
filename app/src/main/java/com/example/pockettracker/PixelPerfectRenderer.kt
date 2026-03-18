@@ -90,9 +90,6 @@ fun PixelPerfectTracker(
     // Render state (WAV export)
     isRendering: Boolean = false,
     renderProgress: Float = 0f,
-    // Resample dialog state
-    showResampleDialog: Boolean = false,
-    resampleDialogCursor: Int = 0,  // 0 = YES, 1 = NO
     // Clean dialog state
     showCleanDialog: Boolean = false,
     cleanDialogTarget: String = "",  // "SEQ" or "INST"
@@ -232,8 +229,6 @@ fun PixelPerfectTracker(
                         modCursorSide = modCursorSide,
                         isRendering = isRendering,
                         renderProgress = renderProgress,
-                        showResampleDialog = showResampleDialog,
-                        resampleDialogCursor = resampleDialogCursor,
                         showCleanDialog = showCleanDialog,
                         cleanDialogTarget = cleanDialogTarget,
                         cleanDialogCursor = cleanDialogCursor,
@@ -329,9 +324,6 @@ class TrackerLayout {
         // Render state (WAV export)
         isRendering: Boolean = false,
         renderProgress: Float = 0f,
-        // Resample dialog state
-        showResampleDialog: Boolean = false,
-        resampleDialogCursor: Int = 0,  // 0 = YES, 1 = NO
         // Clean dialog state
         showCleanDialog: Boolean = false,
         cleanDialogTarget: String = "",  // "SEQ" or "INST"
@@ -709,14 +701,6 @@ class TrackerLayout {
         }
 
         // ===================================
-        // RESAMPLE CONFIRMATION DIALOG
-        // Drawn on top of everything when active
-        // ===================================
-        if (showResampleDialog) {
-            drawResampleDialog(scale, resampleDialogCursor)
-        }
-
-        // ===================================
         // CLEAN CONFIRMATION DIALOG
         // Drawn on top of everything when active
         // ===================================
@@ -737,79 +721,6 @@ class TrackerLayout {
         // ===================================
         // Left column: Oscilloscope + Phrase Editor (or placeholder)
         // Right corner: Navigation Map
-    }
-
-    /**
-     * Draw the "RESAMPLE SELECTION?" confirmation dialog as a pixel-art overlay.
-     * Centered on the 640×480 canvas.
-     */
-    private fun DrawScope.drawResampleDialog(scale: Int, cursor: Int) {
-        // Dialog box: 200×70 pixels, centered at (320, 240)
-        val boxW = 200
-        val boxH = 70
-        val boxX = (DESIGN_WIDTH_PX - boxW) / 2   // 220
-        val boxY = (DESIGN_HEIGHT_PX - boxH) / 2  // 205
-
-        // Semi-transparent dark backdrop (full screen)
-        drawRect(
-            color = Color(0xCC000000),
-            topLeft = Offset.Zero,
-            size = Size((DESIGN_WIDTH_PX * scale).toFloat(), (DESIGN_HEIGHT_PX * scale).toFloat())
-        )
-
-        // Dialog background
-        drawRect(
-            color = Color(0xFF1a1a1a),
-            topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
-            size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat())
-        )
-
-        // Border (1px draw as scale px)
-        drawRect(
-            color = Color(0xFF00CCCC),  // Cyan border
-            topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
-            size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat()),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
-        )
-
-        val textX = boxX + 10
-        val fs = 3  // Font scale (15px chars)
-        val cs = 2  // Char spacing
-
-        // Title: "RESAMPLE?"
-        drawBitmapText(
-            text = "RESAMPLE?",
-            x = textX,
-            y = boxY + 6,
-            scale = scale,
-            color = Color.Cyan,
-            spacing = cs,
-            fontScale = fs
-        )
-
-        // YES option
-        val yesPrefix = if (cursor == 0) ">" else " "
-        drawBitmapText(
-            text = "$yesPrefix YES",
-            x = textX,
-            y = boxY + 27,
-            scale = scale,
-            color = if (cursor == 0) Color.Yellow else Color.White,
-            spacing = cs,
-            fontScale = fs
-        )
-
-        // NO option
-        val noPrefix = if (cursor == 1) ">" else " "
-        drawBitmapText(
-            text = "$noPrefix NO",
-            x = textX,
-            y = boxY + 48,
-            scale = scale,
-            color = if (cursor == 1) Color.Yellow else Color.White,
-            spacing = cs,
-            fontScale = fs
-        )
     }
 
     /**
@@ -889,39 +800,39 @@ class TrackerLayout {
     /**
      * Draw the QWERTY keyboard overlay.
      *
-     * Layout (box = 320×150px, centered at 320,240):
-     *   y=  5  Layout indicator ("ABC" / "123") — fontScale=2 (10px chars)
-     *   y= 20  Text input row — shows current text with cursor highlight
-     *   y= 45  Key row 0  (Q-P  or  1-0)
-     *   y= 68  Key row 1  (A-L  or  !-_)
-     *   y= 91  Key row 2  (Z-M  or  <>-])
-     *   y=114  Space bar
-     *   y=135  bottom pad  → total height = 140px
+     * Layout (box = 450×172px, centered at 320,240):
+     *   y=  5  Header label (fieldLabel, grey, centered) — fontScale=4 (20px chars)
+     *   y= 30  Text input row — 20 chars × 22px wide, centered
+     *   y= 60  Key row 0  (Q-P  or  1-0)   — cellH=26px
+     *   y= 90  Key row 1  (A-L  or  !-_)
+     *   y=120  Key row 2  (Z-M  or  <>-])
+     *   y=150  Space bar
+     *   y=176  → boxH = 176
      *
-     * Box: 320×140, top-left at (160,170), bottom-right at (480,310)
+     * Box: 450×176, top-left at (95, 152), bottom-right at (545, 328)
      */
     private fun DrawScope.drawQwertyKeyboard(state: QwertyKeyboardState, scale: Int) {
-        val fs = 3          // font scale for keys (15×15px chars)
+        val fs = 4          // font scale for keys (20×20px chars)
         val cs = 2          // char spacing
-        val charW = 5 * fs + cs  // 17px per char slot
+        val charW = 5 * fs + cs  // 22px per char slot
 
         // ── Box geometry ──────────────────────────────────────────────────────
         // Layout (top-to-bottom, coords relative to boxY):
-        //   +5   layout indicator row  (h=21)
-        //   +30  text input row        (h=21)
-        //   +55  key row 0 Q-P / 1-0   (h=21)
-        //   +80  key row 1 A-L / !-_   (h=21)
-        //   +105 key row 2 Z-M / <>-]  (h=21)
-        //   +130 space bar              (h=21)
-        //   +151 bottom pad (5px)       → boxH = 156
-        val boxW = 320
-        val boxH = 156
-        val boxX = (DESIGN_WIDTH_PX - boxW) / 2    // 160
-        val boxY = (DESIGN_HEIGHT_PX - boxH) / 2   // 162
+        //   +5   header label row      (h=20 chars + 5 padding = 25)
+        //   +30  text input row        (h=26)
+        //   +60  key row 0 Q-P / 1-0   (cellH=26, gap=4 → row spacing=30)
+        //   +90  key row 1 A-L / !-_
+        //   +120 key row 2 Z-M / <>-]
+        //   +150 space bar             (h=26)
+        //   +176 → boxH = 176
+        val boxW = 450
+        val boxH = 176
+        val boxX = (DESIGN_WIDTH_PX - boxW) / 2    // 95
+        val boxY = (DESIGN_HEIGHT_PX - boxH) / 2   // 152
 
         // Inner usable area (5px padding each side)
         val innerX = boxX + 5
-        val innerW = boxW - 10   // 310px
+        val innerW = boxW - 10   // 440px = 20 chars × 22px
 
         // ── Semi-transparent backdrop ─────────────────────────────────────────
         drawRect(
@@ -943,11 +854,12 @@ class TrackerLayout {
             style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
         )
 
-        // ── Layout indicator ("< ABC >" or "< 123 >") ────────────────────────
-        val indicatorLabel = "< ${qwertyLayoutLabel(state.layout)} >"
+        // ── Context-sensitive header (centered, grey) ─────────────────────────
+        val labelW = state.fieldLabel.length * charW
+        val labelX = boxX + (boxW - labelW) / 2
         drawBitmapText(
-            text = indicatorLabel,
-            x = innerX,
+            text = state.fieldLabel,
+            x = labelX,
             y = boxY + 5 + 3,  // +3 for text baseline padding
             scale = scale,
             color = Color(0xFF888888),
@@ -955,53 +867,54 @@ class TrackerLayout {
             fontScale = fs
         )
 
-        // ── Text input row ────────────────────────────────────────────────────
+        // ── Text input row (centered in inner area) ───────────────────────────
         val textRowY = boxY + 30
 
         // Draw text characters with cursor highlight.
         // textCursor can be 0..text.length (inclusive).
+        // No dash placeholder for empty slots — only cursor highlight is shown.
         for (i in 0 until state.maxLength) {
-            val ch = if (i < state.text.length) state.text[i] else '-'
             val charPixelX = innerX + i * charW
             val isCursor = (i == state.textCursor)
+            val hasChar = i < state.text.length
 
             // Cursor highlight box
             if (isCursor) {
                 drawRect(
                     color = Color(0xFF444400),
                     topLeft = Offset((charPixelX * scale).toFloat(), (textRowY * scale).toFloat()),
-                    size = Size(((5 * fs) * scale).toFloat(), (15 * scale).toFloat())
+                    size = Size(((5 * fs) * scale).toFloat(), (20 * scale).toFloat())
                 )
             }
 
-            drawBitmapText(
-                text = ch.toString(),
-                x = charPixelX,
-                y = textRowY + 3,
-                scale = scale,
-                color = when {
-                    isCursor -> Color.Yellow
-                    i < state.text.length -> Color.White
-                    else -> Color(0xFF555555)
-                },
-                spacing = cs,
-                fontScale = fs
-            )
+            // Only draw the character if there's actual text here
+            if (hasChar) {
+                drawBitmapText(
+                    text = state.text[i].toString(),
+                    x = charPixelX,
+                    y = textRowY + 3,
+                    scale = scale,
+                    color = if (isCursor) Color.Yellow else Color.White,
+                    spacing = cs,
+                    fontScale = fs
+                )
+            }
         }
 
         // ── Key rows ──────────────────────────────────────────────────────────
         val rows = qwertyRowsForLayout(state.layout)
-        val cellW = 31     // key cell width (innerW=310 / 10 keys = 31px)
-        val cellH = 21     // key cell height (= ROW_HEIGHT)
-        val rowBaseY = boxY + 55
+        val cellW = 44     // key cell width (innerW=440 / 10 keys = 44px)
+        val cellH = 26     // key cell height (20px char + 6px padding)
+        val rowBaseY = boxY + 60
+        val rowGap = 4     // gap between rows
 
         for (rowIdx in rows.indices) {
             val row = rows[rowIdx]
-            val rowY = rowBaseY + rowIdx * (cellH + 4)
+            val rowY = rowBaseY + rowIdx * (cellH + rowGap)
 
             if (rowIdx == 3) {
                 // Space bar: single wide key, centered
-                val spaceW = 7 * cellW   // ~217px wide
+                val spaceW = 7 * cellW   // 308px wide
                 val spaceX = boxX + (boxW - spaceW) / 2
                 val isSpaceCursor = (state.keyCursorRow == rowIdx)
 

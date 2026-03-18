@@ -126,7 +126,8 @@ class RenderController(
         startRow: Int,
         endRow: Int,
         selectedTrackIds: Set<Int>,
-        progressCallback: ProgressCallback? = null
+        progressCallback: ProgressCallback? = null,
+        customBaseName: String? = null
     ): RenderResult {
         audioBackend.setOfflineRendering(true)
         try {
@@ -160,7 +161,7 @@ class RenderController(
             val rightChannel = FloatArray(n) { audio[it * 2 + 1] }
 
             val outputDir = fileSystem.getResampledDirectory()
-            val filename  = generateResampledFilename(outputDir)
+            val filename  = generateResampledFilename(outputDir, customBaseName)
 
             val success = WavWriter.writeWav(
                 fileSystem   = fileSystem,
@@ -267,7 +268,26 @@ class RenderController(
         return filename
     }
 
-    private fun generateResampledFilename(outputDir: String): String {
+    /**
+     * Generate the auto-suggested base name for a resampled file (e.g. "Resample_0001").
+     * Call this before opening the QWERTY keyboard so the user sees the suggested name.
+     */
+    fun generateResampledBaseName(): String {
+        val outputDir = fileSystem.getResampledDirectory()
+        var index = 1
+        var baseName: String
+        do {
+            baseName = "Resample_${index.toString().padStart(4, '0')}"
+            index++
+        } while (fileSystem.fileExists("$outputDir/$baseName.wav") && index < 10000)
+        return baseName
+    }
+
+    private fun generateResampledFilename(outputDir: String, customBaseName: String? = null): String {
+        if (customBaseName != null) {
+            val safe = customBaseName.replace(Regex("[^a-zA-Z0-9_\\-]"), "_").take(32)
+            return "$outputDir/$safe.wav"
+        }
         var index = 1
         var filename: String
         do {

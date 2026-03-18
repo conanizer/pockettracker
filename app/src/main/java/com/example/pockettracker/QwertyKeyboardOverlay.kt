@@ -48,6 +48,20 @@ fun qwertyRowsForLayout(layout: Int): List<List<Char>> =
 fun qwertyLayoutLabel(layout: Int): String = if (layout == 0) "ABC" else "123"
 
 // ============================================================================
+// CONTEXT
+// ============================================================================
+
+/**
+ * Determines what action START performs when the keyboard is confirmed.
+ */
+enum class QwertyContext {
+    PROJECT_NAME,   // Apply text as project name
+    FILE_RENAME,    // Rename file at contextExtra path (keep original extension)
+    FOLDER_CREATE,  // Create folder in contextExtra directory with typed name
+    RESAMPLE        // Render selection to WAV with typed name as base name
+}
+
+// ============================================================================
 // STATE
 // ============================================================================
 
@@ -61,22 +75,28 @@ fun qwertyLayoutLabel(layout: Int): String = if (layout == 0) "ABC" else "123"
  * @param keyCursorRow    Which keyboard row the keyboard cursor is on (0-3)
  * @param keyCursorCol    Which key column the keyboard cursor is on
  * @param layout          0 = letters (QWERTY), 1 = numbers/symbols
- * @param fieldName       Label shown above the text row (e.g. "NAME")
+ * @param fieldLabel      Context-sensitive label shown as header (e.g. "PROJECT NAME:", "FOLDER NAME:")
  * @param originalText    Snapshot of the text when the keyboard was opened — used for cancel
  * @param insertBefore    If true: A inserts BEFORE textCursor (terminal-style, cursor advances).
  *                        If false: A inserts AFTER textCursor (typewriter-style, cursor advances).
+ * @param clearOnFirstB   If true: first B press clears all text instead of deleting one char
+ * @param context         What action START performs (see [QwertyContext])
+ * @param contextExtra    Extra data for context (file path for RENAME, directory for FOLDER_CREATE)
  */
 data class QwertyKeyboardState(
     val isOpen: Boolean = false,
     val text: String = "",
-    val maxLength: Int = 12,
+    val maxLength: Int = 20,
     val textCursor: Int = 0,
     val keyCursorRow: Int = 0,
     val keyCursorCol: Int = 0,
     val layout: Int = 0,
-    val fieldName: String = "NAME",
+    val fieldLabel: String = "PROJECT NAME:",
     val originalText: String = "",
-    val insertBefore: Boolean = true
+    val insertBefore: Boolean = true,
+    val clearOnFirstB: Boolean = false,
+    val context: QwertyContext = QwertyContext.PROJECT_NAME,
+    val contextExtra: String = ""
 )
 
 // ============================================================================
@@ -161,12 +181,16 @@ fun QwertyKeyboardState.insertCurrentKey(): QwertyKeyboardState {
 /**
  * Delete a character from [text].
  *
+ * If [clearOnFirstB] is true: clears all text and resets the flag.
  * If [insertBefore] is true: deletes the char before [textCursor] (backspace),
  * text cursor decreases by 1.
  * If [insertBefore] is false: deletes the char at [textCursor] (forward-delete),
  * text cursor stays (or clamps to new length).
  */
 fun QwertyKeyboardState.deleteChar(): QwertyKeyboardState {
+    if (clearOnFirstB) {
+        return copy(text = "", textCursor = 0, clearOnFirstB = false)
+    }
     return if (insertBefore) {
         // Backspace: remove char before cursor
         if (textCursor <= 0 || text.isEmpty()) return this
