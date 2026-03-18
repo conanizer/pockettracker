@@ -19,7 +19,8 @@ enum class ScreenType(val label: String, val shortLabel: String) {
     EFFECTS("EFFECTS", "X"),     // Row 5, all columns
 
     // Popup screens - replace main view temporarily
-    FILE_BROWSER("FILE BROWSER", "FB")  // File selection popup
+    FILE_BROWSER("FILE BROWSER", "FB"),  // File selection popup
+    SETTINGS("SETTINGS", "SE")           // Settings side menu (opened from PROJECT screen)
 }
 
 // Navigation grid: 5 columns × 5 rows

@@ -180,7 +180,7 @@ class ProjectModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 6: SYSTEM (placeholder)
+        // ROW 6: SETTINGS (side menu button)
         // ─────────────────────────────────────
         drawParameterRow(
             x = x,
@@ -189,177 +189,10 @@ class ProjectModule : TrackerModule {
             nameColumnX = nameColumnX,
             valueColumnX = valueColumnX,
             parameterName = "SYSTEM",
-            parameterValue = "---",
+            parameterValue = "SETTINGS",
             isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
             isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
         )
-        rowY += ROW_HEIGHT
-        currentRow++
-
-        // ─────────────────────────────────────
-        // ROW 7: LAYOUT (cycle: FULLSCREEN / TOUCH LANDSCAPE / AMIGA PORTRAIT)
-        // ─────────────────────────────────────
-        val layoutText = when (projectState.layoutMode) {
-            DeviceAdapter.LayoutMode.FULL            -> "FULLSCREEN"
-            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT  -> "T.PORT"       // legacy, not shown in cycle
-            DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE -> "TOUCH LANDSCAPE"
-            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 -> "AMIGA PORTRAIT"
-        }
-        drawParameterRow(
-            x = x,
-            y = rowY,
-            scale = scale,
-            nameColumnX = nameColumnX,
-            valueColumnX = valueColumnX,
-            parameterName = "LAYOUT",
-            parameterValue = layoutText,
-            isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
-            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
-        )
-        rowY += ROW_HEIGHT
-        currentRow++
-
-        // ─────────────────────────────────────
-        // ROW 8: SCALING (INT / BILINEAR / NEAREST)
-        // ─────────────────────────────────────
-        val scalingText = when (projectState.scalingMode) {
-            DeviceAdapter.ScalingMode.INTEGER  -> "INT"
-            DeviceAdapter.ScalingMode.BILINEAR -> "BILINEAR"
-            DeviceAdapter.ScalingMode.NEAREST  -> "NEAREST"
-        }
-        drawParameterRow(
-            x = x,
-            y = rowY,
-            scale = scale,
-            nameColumnX = nameColumnX,
-            valueColumnX = valueColumnX,
-            parameterName = "SCALING",
-            parameterValue = scalingText,
-            isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
-            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
-        )
-        rowY += ROW_HEIGHT
-        currentRow++
-
-        // ─────────────────────────────────────
-        // ROW 9: BUTTON SOUND (ON / OFF)
-        // ─────────────────────────────────────
-        drawParameterRow(
-            x = x,
-            y = rowY,
-            scale = scale,
-            nameColumnX = nameColumnX,
-            valueColumnX = valueColumnX,
-            parameterName = "BTN SOUND",
-            parameterValue = if (projectState.buttonSoundEnabled) "ON" else "OFF",
-            isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
-            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
-        )
-        rowY += ROW_HEIGHT
-        currentRow++
-
-        // ─────────────────────────────────────
-        // ROW 10: BUTTON VOLUME (00-FF)
-        // ─────────────────────────────────────
-        val btnVolHex = projectState.buttonSoundVolume
-            .toString(16)
-            .padStart(2, '0')
-            .uppercase()
-        drawParameterRow(
-            x = x,
-            y = rowY,
-            scale = scale,
-            nameColumnX = nameColumnX,
-            valueColumnX = valueColumnX,
-            parameterName = "BTN VOL",
-            parameterValue = btnVolHex,
-            isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
-            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
-        )
-        rowY += ROW_HEIGHT
-        currentRow++
-
-        // ─────────────────────────────────────
-        // ROW 11: BUTTON VIBRO (ON / OFF)
-        // ─────────────────────────────────────
-        drawParameterRow(
-            x = x,
-            y = rowY,
-            scale = scale,
-            nameColumnX = nameColumnX,
-            valueColumnX = valueColumnX,
-            parameterName = "BTN VIBRO",
-            parameterValue = if (projectState.buttonVibroEnabled) "ON" else "OFF",
-            isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
-            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
-        )
-        rowY += ROW_HEIGHT
-        currentRow++
-
-        // ─────────────────────────────────────
-        // ROW 12: VIBRO POWER (00-FF)
-        // ─────────────────────────────────────
-        val vibroPowHex = projectState.vibroPower
-            .toString(16)
-            .padStart(2, '0')
-            .uppercase()
-        drawParameterRow(
-            x = x,
-            y = rowY,
-            scale = scale,
-            nameColumnX = nameColumnX,
-            valueColumnX = valueColumnX,
-            parameterName = "VIBRO POW",
-            parameterValue = vibroPowHex,
-            isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
-            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
-        )
-        rowY += ROW_HEIGHT
-        currentRow++
-
-        // ─────────────────────────────────────
-        // ROW 13: KEYBOARD INSERT MODE (BEFORE / AFTER)
-        // Controls whether A inserts before or after the text cursor
-        // ─────────────────────────────────────
-        val isCursorOnInsertRow = projectState.cursorRow == currentRow
-
-        if (isCursorOnInsertRow) {
-            drawRect(
-                color = Color(0xFF333333),
-                topLeft = Offset((x * scale).toFloat(), (rowY * scale).toFloat()),
-                size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
-            )
-        }
-        drawBitmapText(
-            text = "KB INSERT",
-            x = nameColumnX,
-            y = rowY + TEXT_PADDING,
-            scale = scale,
-            color = if (isCursorOnInsertRow) Color.Yellow else Color.Gray,
-            spacing = CHAR_SPACING,
-            fontScale = FONT_SCALE
-        )
-        val insertOptions = listOf("BEFORE", "AFTER")
-        var insertOptX = valueColumnX
-        for (optIdx in insertOptions.indices) {
-            val isSelected = if (optIdx == 0) projectState.insertBefore else !projectState.insertBefore
-            val isCursorHere = isCursorOnInsertRow && projectState.cursorColumn == optIdx + 1
-            drawBitmapText(
-                text = insertOptions[optIdx],
-                x = insertOptX,
-                y = rowY + TEXT_PADDING,
-                scale = scale,
-                color = when {
-                    isCursorHere -> Color.Yellow
-                    isSelected   -> Color.Cyan
-                    else         -> Color.White
-                },
-                spacing = CHAR_SPACING,
-                fontScale = FONT_SCALE
-            )
-            insertOptX += 100
-        }
-
         // ===================================
         // STEP 5: Draw status message at bottom (if any)
         // ===================================
@@ -771,74 +604,9 @@ class ProjectModule : TrackerModule {
                 // CLEAN row - press A to clean (read-only, action handled in MainActivity)
                 return CursorContextFactory.readOnly()
             }
-            7 -> {
-                // LAYOUT row - A button cycles the mode (handled in MainActivity)
+            6 -> {
+                // SETTINGS button — A key navigates to SETTINGS screen (handled in MainActivity)
                 return CursorContextFactory.readOnly()
-            }
-            8 -> {
-                // SCALING row - A button cycles scaling mode (handled in MainActivity)
-                return CursorContextFactory.readOnly()
-            }
-            9 -> {
-                // BUTTON SOUND row - A+UP = ON, A+DOWN = OFF
-                if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
-                return CursorContext(
-                    valueType = CursorValueType.HEX_BYTE,
-                    capabilities = CursorCapabilities(
-                        canIncrement = true,
-                        canDecrement = true,
-                        canIncrementFast = false,
-                        canDecrementFast = false
-                    ),
-                    currentValue = if (state.buttonSoundEnabled) 1 else 0,
-                    minValue = 0,
-                    maxValue = 1,
-                    smallStep = 1,
-                    largeStep = 1,
-                    emptyValue = -1
-                )
-            }
-            10 -> {
-                // BUTTON VOLUME row - 00-FF
-                if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
-                return CursorContextFactory.hexByte(
-                    currentValue = state.buttonSoundVolume,
-                    min = 0,
-                    max = 255
-                )
-            }
-            11 -> {
-                // BUTTON VIBRO row - A+UP = ON, A+DOWN = OFF
-                if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
-                return CursorContext(
-                    valueType = CursorValueType.HEX_BYTE,
-                    capabilities = CursorCapabilities(
-                        canIncrement = true,
-                        canDecrement = true,
-                        canIncrementFast = false,
-                        canDecrementFast = false
-                    ),
-                    currentValue = if (state.buttonVibroEnabled) 1 else 0,
-                    minValue = 0,
-                    maxValue = 1,
-                    smallStep = 1,
-                    largeStep = 1,
-                    emptyValue = -1
-                )
-            }
-            12 -> {
-                // VIBRO POWER row - 00-FF
-                if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
-                return CursorContextFactory.hexByte(
-                    currentValue = state.vibroPower,
-                    min = 0,
-                    max = 255
-                )
-            }
-            13 -> {
-                // KEYBOARD INSERT MODE row - BEFORE (0) / AFTER (1)
-                if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
-                return CursorContextFactory.readOnly()  // Action handled in MainActivity (A button)
             }
             else -> return CursorContextFactory.none()
         }
@@ -897,54 +665,6 @@ class ProjectModule : TrackerModule {
             3 -> {
                 // PROJECT row (LOAD/SAVE/NEW) - handled elsewhere
             }
-            9 -> {
-                // BUTTON SOUND — carry new boolean back to MainActivity via InputResult
-                when (action) {
-                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        return InputResult(
-                            modified = true,
-                            buttonSoundEnabled = action.value > 0
-                        )
-                    }
-                    else -> {}
-                }
-            }
-            10 -> {
-                // BUTTON VOLUME — carry new value back to MainActivity via InputResult
-                when (action) {
-                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        return InputResult(
-                            modified = true,
-                            buttonSoundVolume = action.value.coerceIn(0, 255)
-                        )
-                    }
-                    else -> {}
-                }
-            }
-            11 -> {
-                // BUTTON VIBRO — carry new boolean back to MainActivity via InputResult
-                when (action) {
-                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        return InputResult(
-                            modified = true,
-                            buttonVibroEnabled = action.value > 0
-                        )
-                    }
-                    else -> {}
-                }
-            }
-            12 -> {
-                // VIBRO POWER — carry new value back to MainActivity via InputResult
-                when (action) {
-                    is com.example.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        return InputResult(
-                            modified = true,
-                            vibroPower = action.value.coerceIn(0, 255)
-                        )
-                    }
-                    else -> {}
-                }
-            }
         }
 
         return InputResult(
@@ -952,18 +672,8 @@ class ProjectModule : TrackerModule {
         )
     }
 
-    /**
-     * @param modified      True when something was changed (triggers projectVersion increment)
-     * @param buttonSoundEnabled  Non-null when the user toggled BTN SOUND (row 9)
-     * @param buttonVibroEnabled  Non-null when the user toggled BTN VIBRO (row 10)
-     */
     data class InputResult(
-        val modified: Boolean,
-        val buttonSoundEnabled: Boolean? = null,
-        val buttonSoundVolume: Int? = null,
-        val buttonVibroEnabled: Boolean? = null,
-        val vibroPower: Int? = null,
-        val insertBefore: Boolean? = null   // Non-null when user toggled KB INSERT row
+        val modified: Boolean
     )
 }
 
@@ -971,7 +681,7 @@ class ProjectModule : TrackerModule {
  * STATE DATA FOR PROJECT SCREEN
  *
  * @param project The project being edited
- * @param cursorRow Which row (0=TEMPO, 1=TRANSPOSE, 2=NAME, 3=PROJECT, etc.)
+ * @param cursorRow Which row (0=TEMPO, 1=TRANSPOSE, 2=NAME, 3=PROJECT, 4=EXPORT, 5=CLEAN, 6=SETTINGS)
  * @param cursorColumn Which column:
  *   - 0 = Parameter name (left column)
  *   - 1+ = Value columns (specific to each row)
@@ -987,12 +697,5 @@ data class ProjectState(
     val statusMessage: String = "",
     val isSuccess: Boolean = true,
     val isRendering: Boolean = false,
-    val renderProgress: Float = 0f,
-    val layoutMode: DeviceAdapter.LayoutMode = DeviceAdapter.LayoutMode.FULL,
-    val scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER,
-    val buttonSoundEnabled: Boolean = false,
-    val buttonSoundVolume: Int = 255,
-    val buttonVibroEnabled: Boolean = false,
-    val vibroPower: Int = 255,
-    val insertBefore: Boolean = true   // Keyboard insert mode: true=BEFORE cursor, false=AFTER
+    val renderProgress: Float = 0f
 )

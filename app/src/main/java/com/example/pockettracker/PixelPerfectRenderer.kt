@@ -106,7 +106,10 @@ fun PixelPerfectTracker(
     buttonVibroEnabled: Boolean = false,
     vibroPower: Int = 255,
     // QWERTY keyboard overlay state
-    qwertyKeyboardState: QwertyKeyboardState = QwertyKeyboardState()
+    qwertyKeyboardState: QwertyKeyboardState = QwertyKeyboardState(),
+    // Settings screen cursor
+    settingsCursorRow: Int = 0,
+    settingsCursorColumn: Int = 1
 ) {
     if (currentScreen == ScreenType.FILE_BROWSER) {
         android.util.Log.d("PixelPerfectTracker", "FILE_BROWSER screen, fileBrowserState=${if (fileBrowserState != null) "not null (${fileBrowserState.items.size} items)" else "NULL"}")
@@ -241,7 +244,9 @@ fun PixelPerfectTracker(
                         buttonSoundVolume = buttonSoundVolume,
                         buttonVibroEnabled = buttonVibroEnabled,
                         vibroPower = vibroPower,
-                        qwertyKeyboardState = qwertyKeyboardState
+                        qwertyKeyboardState = qwertyKeyboardState,
+                        settingsCursorRow = settingsCursorRow,
+                        settingsCursorColumn = settingsCursorColumn
                     )
                 }
             }
@@ -270,6 +275,7 @@ class TrackerLayout {
     private val tableModule = TableModule()
     private val grooveModule = GrooveModule()
     private val modulationModule = ModulationModule()
+    private val settingsModule = SettingsModule()
     /**
      * Main layout drawing function
      * This arranges all modules on the 640×480 screen
@@ -341,7 +347,10 @@ class TrackerLayout {
         buttonVibroEnabled: Boolean = false,
         vibroPower: Int = 255,
         // QWERTY keyboard overlay state
-        qwertyKeyboardState: QwertyKeyboardState = QwertyKeyboardState()
+        qwertyKeyboardState: QwertyKeyboardState = QwertyKeyboardState(),
+        // Settings screen cursor
+        settingsCursorRow: Int = 0,
+        settingsCursorColumn: Int = 1
     ) {
         // ===================================
         // DRAW BACKGROUND
@@ -430,13 +439,7 @@ class TrackerLayout {
                             statusMessage = projectStatusMessage,
                             isSuccess = projectStatusSuccess,
                             isRendering = isRendering,
-                            renderProgress = renderProgress,
-                            layoutMode = layoutMode,
-                            scalingMode = scalingMode,
-                            buttonSoundEnabled = buttonSoundEnabled,
-                            buttonSoundVolume = buttonSoundVolume,
-                            buttonVibroEnabled = buttonVibroEnabled,
-                            vibroPower = vibroPower
+                            renderProgress = renderProgress
                         )
                     )
                 }
@@ -600,6 +603,30 @@ class TrackerLayout {
             }
 
             // ===================================
+            // SETTINGS SCREEN: Show settings side menu
+            // ===================================
+            ScreenType.SETTINGS -> {
+                with(settingsModule) {
+                    draw(
+                        x = moduleX,
+                        y = currentY,
+                        scale = scale,
+                        state = SettingsState(
+                            cursorRow = settingsCursorRow,
+                            cursorColumn = settingsCursorColumn,
+                            layoutMode = layoutMode,
+                            scalingMode = scalingMode,
+                            buttonSoundEnabled = buttonSoundEnabled,
+                            buttonSoundVolume = buttonSoundVolume,
+                            buttonVibroEnabled = buttonVibroEnabled,
+                            vibroPower = vibroPower,
+                            insertBefore = qwertyKeyboardState.insertBefore
+                        )
+                    )
+                }
+            }
+
+            // ===================================
             // MIXER SCREEN: Show mixer with 8 tracks + master
             // ===================================
             ScreenType.MIXER -> {
@@ -657,7 +684,7 @@ class TrackerLayout {
         // ===================================
         // Note: Hidden when FILE_BROWSER is active to give full screen space
 
-        if (currentScreen != ScreenType.FILE_BROWSER) {
+        if (currentScreen != ScreenType.FILE_BROWSER && currentScreen != ScreenType.SETTINGS) {
             // Calculate position for bottom-right corner
             // X position: 640 (screen width) - 80 (module width) - 10 (right margin) = 550px
             val navMapX = DESIGN_WIDTH_PX - navigationMap.width - SIDE_SPACER
@@ -879,10 +906,18 @@ class TrackerLayout {
         val charW = 5 * fs + cs  // 17px per char slot
 
         // ── Box geometry ──────────────────────────────────────────────────────
+        // Layout (top-to-bottom, coords relative to boxY):
+        //   +5   layout indicator row  (h=21)
+        //   +30  text input row        (h=21)
+        //   +55  key row 0 Q-P / 1-0   (h=21)
+        //   +80  key row 1 A-L / !-_   (h=21)
+        //   +105 key row 2 Z-M / <>-]  (h=21)
+        //   +130 space bar              (h=21)
+        //   +151 bottom pad (5px)       → boxH = 156
         val boxW = 320
-        val boxH = 140
+        val boxH = 156
         val boxX = (DESIGN_WIDTH_PX - boxW) / 2    // 160
-        val boxY = (DESIGN_HEIGHT_PX - boxH) / 2   // 170
+        val boxY = (DESIGN_HEIGHT_PX - boxH) / 2   // 162
 
         // Inner usable area (5px padding each side)
         val innerX = boxX + 5
@@ -908,40 +943,26 @@ class TrackerLayout {
             style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
         )
 
-        // ── Layout indicator (tiny "ABC" or "123", fontScale=2 = 10px chars) ─
+        // ── Layout indicator ("< ABC >" or "< 123 >") ────────────────────────
         val indicatorLabel = "< ${qwertyLayoutLabel(state.layout)} >"
         drawBitmapText(
             text = indicatorLabel,
             x = innerX,
-            y = boxY + 5,
-            scale = scale,
-            color = Color(0xFF888888),
-            spacing = 1,
-            fontScale = 2
-        )
-
-        // ── Text input row ────────────────────────────────────────────────────
-        val textRowY = boxY + 20
-        val textStartX = innerX + 68  // leave room for field label (4 chars × 17px = 68px)
-
-        // Field label
-        drawBitmapText(
-            text = state.fieldName,
-            x = innerX,
-            y = textRowY + 3,
+            y = boxY + 5 + 3,  // +3 for text baseline padding
             scale = scale,
             color = Color(0xFF888888),
             spacing = cs,
             fontScale = fs
         )
 
+        // ── Text input row ────────────────────────────────────────────────────
+        val textRowY = boxY + 30
+
         // Draw text characters with cursor highlight.
-        // textCursor can be 0..text.length (inclusive), so we render maxLength slots
-        // plus a possible cursor indicator at position text.length if at end.
-        val displaySlots = state.maxLength
-        for (i in 0 until displaySlots) {
+        // textCursor can be 0..text.length (inclusive).
+        for (i in 0 until state.maxLength) {
             val ch = if (i < state.text.length) state.text[i] else '-'
-            val charPixelX = textStartX + i * charW
+            val charPixelX = innerX + i * charW
             val isCursor = (i == state.textCursor)
 
             // Cursor highlight box
@@ -972,11 +993,11 @@ class TrackerLayout {
         val rows = qwertyRowsForLayout(state.layout)
         val cellW = 31     // key cell width (innerW=310 / 10 keys = 31px)
         val cellH = 21     // key cell height (= ROW_HEIGHT)
-        val rowBaseY = boxY + 45
+        val rowBaseY = boxY + 55
 
         for (rowIdx in rows.indices) {
             val row = rows[rowIdx]
-            val rowY = rowBaseY + rowIdx * (cellH + 2)
+            val rowY = rowBaseY + rowIdx * (cellH + 4)
 
             if (rowIdx == 3) {
                 // Space bar: single wide key, centered

@@ -139,6 +139,19 @@ class TrackerController(
             stateObserver.onStateChanged()
         }
 
+    // Settings screen cursor (opened from PROJECT row 6)
+    var settingsCursorRow = 0
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
+
+    var settingsCursorColumn = 1
+        set(value) {
+            field = value
+            stateObserver.onStateChanged()
+        }
+
     // Instrument screen cursor
     var instrumentCursorRow = 0
         set(value) {
@@ -712,9 +725,13 @@ class TrackerController(
                 projectCursorRow = if (projectCursorRow > 0) {
                     projectCursorRow - 1
                 } else {
-                    12  // Wrap to bottom (rows 0-12)
+                    6  // Wrap to bottom (rows 0-6)
                 }
                 projectCursorColumn = 1  // Reset to first value column
+            }
+            ScreenType.SETTINGS -> {
+                settingsCursorRow = if (settingsCursorRow > 0) settingsCursorRow - 1 else 6
+                settingsCursorColumn = 1
             }
             ScreenType.INSTRUMENT -> {
                 val oldRow = instrumentCursorRow
@@ -780,13 +797,17 @@ class TrackerController(
     fun moveCursorDown() {
         when (currentScreen) {
             ScreenType.PROJECT -> {
-                // Project has 13 rows (0-12) with wrapping
-                projectCursorRow = if (projectCursorRow < 12) {
+                // Project has 7 rows (0-6) with wrapping
+                projectCursorRow = if (projectCursorRow < 6) {
                     projectCursorRow + 1
                 } else {
                     0  // Wrap to top
                 }
                 projectCursorColumn = 1  // Reset column
+            }
+            ScreenType.SETTINGS -> {
+                settingsCursorRow = if (settingsCursorRow < 6) settingsCursorRow + 1 else 0
+                settingsCursorColumn = 1
             }
             ScreenType.INSTRUMENT -> {
                 val oldRow = instrumentCursorRow
@@ -852,6 +873,10 @@ class TrackerController(
             ScreenType.PROJECT -> {
                 projectCursorColumn = getProjectCursorLeftColumn(projectCursorRow, projectCursorColumn)
             }
+            ScreenType.SETTINGS -> {
+                // All rows have only column 1 (no multi-column values)
+                settingsCursorColumn = 1
+            }
             ScreenType.INSTRUMENT -> {
                 // Instrument screen: handle left movement for screens with additional columns
                 // Most rows: column 1 only (locked)
@@ -897,6 +922,10 @@ class TrackerController(
         when (currentScreen) {
             ScreenType.PROJECT -> {
                 projectCursorColumn = getProjectCursorRightColumn(projectCursorRow, projectCursorColumn)
+            }
+            ScreenType.SETTINGS -> {
+                // All rows have only column 1 (no multi-column values)
+                settingsCursorColumn = 1
             }
             ScreenType.INSTRUMENT -> {
                 // Instrument screen: handle right movement for screens with additional columns

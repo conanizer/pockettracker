@@ -408,6 +408,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // ProjectModule: Used to get cursor context for project editing
     val projectModule = remember { ProjectModule() }
 
+    // SettingsModule: Used for SETTINGS side menu
+    val settingsModule = remember { SettingsModule() }
+
     // InstrumentModule: Used for instrument editing screen
     val instrumentModule = remember { InstrumentModule() }
 
@@ -843,21 +846,33 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     project = trackerController.project,
                     cursorRow = trackerController.projectCursorRow,
                     cursorColumn = trackerController.projectCursorColumn,
-                    buttonSoundEnabled = buttonSoundEnabled,
-                    buttonSoundVolume = buttonSoundVolume,
-                    buttonVibroEnabled = buttonVibroEnabled,
-                    vibroPower = vibroPower,
-                    insertBefore = insertBefore,
                     statusMessage = trackerController.statusMessage,
                     isSuccess = trackerController.statusSuccess,
                     isRendering = isRendering,
-                    renderProgress = renderProgress,
-                    layoutMode = layoutMode,
-                    scalingMode = scalingMode
+                    renderProgress = renderProgress
                 )
                 val context = projectModule.getCursorContext(projectState)
                 val action = handlerFunction(context)
                 val result = projectModule.handleInput(projectState, action)
+                if (result.modified) {
+                    trackerController.projectVersion++
+                }
+            }
+            ScreenType.SETTINGS -> {
+                val settingsState = SettingsState(
+                    cursorRow = trackerController.settingsCursorRow,
+                    cursorColumn = trackerController.settingsCursorColumn,
+                    layoutMode = layoutMode,
+                    scalingMode = scalingMode,
+                    buttonSoundEnabled = buttonSoundEnabled,
+                    buttonSoundVolume = buttonSoundVolume,
+                    buttonVibroEnabled = buttonVibroEnabled,
+                    vibroPower = vibroPower,
+                    insertBefore = insertBefore
+                )
+                val context = settingsModule.getCursorContext(settingsState)
+                val action = handlerFunction(context)
+                val result = settingsModule.handleInput(settingsState, action)
                 if (result.modified) {
                     result.buttonSoundEnabled?.let { buttonSoundEnabled = it }
                     result.buttonSoundVolume?.let  { buttonSoundVolume  = it }
@@ -1533,39 +1548,34 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     showCleanDialog = true
                                 }
                             }
-                            // ROW 6: SYSTEM — placeholder
-                            // ROW 7: LAYOUT — cycle through layout modes
-                            7 -> {
+                            // ROW 6: SETTINGS — navigate to SETTINGS side menu
+                            6 -> {
+                                previousScreen = trackerController.currentScreen
+                                trackerController.currentScreen = ScreenType.SETTINGS
+                            }
+                        }
+                    }
+
+                    // SETTINGS: Handle LAYOUT (row 0) and SCALING (row 1) cycle on A press
+                    ScreenType.SETTINGS -> {
+                        when (trackerController.settingsCursorRow) {
+                            0 -> {  // LAYOUT — cycle through layout modes
                                 val hasPhysical = deviceAdapter.hasPhysicalGameButtons()
                                 layoutMode = when (layoutMode) {
-                                    // Active cycle: FULLSCREEN → TOUCH LANDSCAPE → AMIGA PORTRAIT → (loop)
-                                    // FULLSCREEN only appears in the cycle on physical-button devices
                                     DeviceAdapter.LayoutMode.FULL            -> DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
                                     DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
                                     DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 -> if (hasPhysical) DeviceAdapter.LayoutMode.FULL else DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
-                                    // T.PORT is retired — advance it forward so users aren't stuck
                                     DeviceAdapter.LayoutMode.TOUCH_PORTRAIT  -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
                                 }
-                                Log.d("ProjectScreen", "Layout mode changed to: $layoutMode")
                             }
-                            // ROW 8: SCALING — cycle through scaling modes
-                            8 -> {
+                            1 -> {  // SCALING — cycle through scaling modes
                                 scalingMode = when (scalingMode) {
                                     DeviceAdapter.ScalingMode.INTEGER  -> DeviceAdapter.ScalingMode.BILINEAR
                                     DeviceAdapter.ScalingMode.BILINEAR -> DeviceAdapter.ScalingMode.NEAREST
                                     DeviceAdapter.ScalingMode.NEAREST  -> DeviceAdapter.ScalingMode.INTEGER
                                 }
-                                Log.d("ProjectScreen", "Scaling mode changed to: $scalingMode")
                             }
-                            // ROW 13: KB INSERT — toggle insert mode (BEFORE / AFTER)
-                            13 -> {
-                                val col = trackerController.projectCursorColumn
-                                when (col) {
-                                    1 -> insertBefore = true   // BEFORE
-                                    2 -> insertBefore = false  // AFTER
-                                    else -> insertBefore = !insertBefore  // toggle
-                                }
-                            }
+                            // Rows 2-6: value editing handled via A+direction combos (getCursorContext)
                         }
                     }
 
@@ -1742,6 +1752,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 }
 
                 when (trackerController.currentScreen) {
+                    // SETTINGS: B returns to previous screen (usually PROJECT)
+                    ScreenType.SETTINGS -> {
+                        trackerController.currentScreen = previousScreen
+                    }
+
                     // FILE BROWSER: Cancel operation or go back
                     ScreenType.FILE_BROWSER -> {
                         when (fileBrowserState.mode) {
@@ -2937,7 +2952,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         buttonSoundVolume       = buttonSoundVolume,
         buttonVibroEnabled      = buttonVibroEnabled,
         vibroPower              = vibroPower,
-        qwertyKeyboardState     = qwertyKeyboardState.copy(insertBefore = insertBefore)
+        qwertyKeyboardState     = qwertyKeyboardState.copy(insertBefore = insertBefore),
+        settingsCursorRow       = stateVersion.let { trackerController.settingsCursorRow },
+        settingsCursorColumn    = stateVersion.let { trackerController.settingsCursorColumn }
     )
 
     CompositionLocalProvider(

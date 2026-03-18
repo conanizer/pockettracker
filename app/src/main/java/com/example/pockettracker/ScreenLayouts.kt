@@ -85,7 +85,9 @@ data class TrackerScreenParams(
     val buttonSoundVolume: Int = 255,
     val buttonVibroEnabled: Boolean = false,
     val vibroPower: Int = 255,
-    val qwertyKeyboardState: QwertyKeyboardState = QwertyKeyboardState()
+    val qwertyKeyboardState: QwertyKeyboardState = QwertyKeyboardState(),
+    val settingsCursorRow: Int = 0,
+    val settingsCursorColumn: Int = 1
 )
 
 /** Thin wrapper — forwards every field of [params] to [PixelPerfectTracker]. */
@@ -141,7 +143,9 @@ private fun TrackerScreen(params: TrackerScreenParams, modifier: Modifier = Modi
         buttonSoundVolume    = params.buttonSoundVolume,
         buttonVibroEnabled   = params.buttonVibroEnabled,
         vibroPower           = params.vibroPower,
-        qwertyKeyboardState  = params.qwertyKeyboardState
+        qwertyKeyboardState  = params.qwertyKeyboardState,
+        settingsCursorRow    = params.settingsCursorRow,
+        settingsCursorColumn = params.settingsCursorColumn
     )
 }
 
