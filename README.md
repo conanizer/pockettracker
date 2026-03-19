@@ -210,6 +210,7 @@ Will include:
 For now, see:
 - `docs/development-status.md` — Current progress
 - `docs/input-system.md` — Complete controls reference
+- `docs/technical-architecture.md` — System design
 
 ---
 
@@ -235,12 +236,14 @@ PocketTracker/
 │       ├── native-audio.cpp     # C++ audio engine (Oboe)
 │       └── CMakeLists.txt
 │
-├── docs/                        # Documentation
-│   ├── development-status.md   # Detailed current progress
+├── docs/
+│   ├── development-status.md    # Detailed current progress
+│   ├── input-system.md          # Controls reference
 │   ├── technical-architecture.md # System design
-│   ├── input-system.md         # Controls reference
-│   └── ...
-└── README.md                   # This file
+│   ├── manual-en.md             # User manual (English)
+│   ├── manual-ru.md             # User manual (Russian)
+│   └── plan-*.md                # Post-MVP feature plans
+└── README.md                    # This file
 ```
 
 ---
