@@ -8,15 +8,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **ALWAYS read these files first:**
 
-1. **DEVELOPMENT_STATUS.md** - What's done, what's remaining
-2. **MVP_ROADMAP.md** - Overall path to MVP
-3. **MVP_EXPANSION_PLAN.md** - Mixer, Volume/Pan, WAV Export (COMPLETE!)
-4. **MVP_EXTENSION_PACK_2.md** - Tables, HOP/TIC, Pitch Effects (COMPLETE!)
-5. **MVP_EXTENSION_PACK_2.md** - Fixes & UX Updates, New Effects, Groove Screen, Modulation Screen, Resampling (CURRENT!)
+1. **docs/development-status.md** - What's done, what's remaining
+2. **MVP_EXPANSION_PLAN.md** - Mixer, Volume/Pan, WAV Export (COMPLETE!)
+3. **MVP_EXTENSION_PACK_2.md** - Tables, HOP/TIC, Pitch Effects (COMPLETE!)
+4. **MVP_EXPANSION_PACK_3.md** - Groove Screen, Modulation Screen, Resampling (COMPLETE!)
 
-**Current Phase:** MVP Extension Pack 3
-
-**Current Task:** Implement Groove screen
+**Current Phase:** Testing & Polish
 
 ---
 
@@ -76,7 +73,7 @@ core/logic/
 └── ClipboardManager.kt        # Copy/paste
 ```
 
-**See:** `TECHNICAL_ARCHITECTURE.md` for complete architecture
+**See:** `docs/technical-architecture.md` for complete architecture
 
 ---
 
@@ -364,7 +361,7 @@ Each module receives state objects and renders itself independently.
 - Automatically enabled on touchscreen-only devices
 - Disabled on devices with physical buttons (via DeviceAdapter)
 
-**See:** `INPUT_COMBINATIONS.md` for complete reference
+**See:** `docs/input-system.md` for complete reference
 
 ---
 
@@ -573,11 +570,9 @@ Categories:
 **Step 1: Understand Context**
 ```
 Read in this order:
-1. DEVELOPMENT_STATUS.md - What's done
-2. Current task document:
-   - If effects: MVP_ROADMAP.md Milestone 2
-   - If copy/paste: MVP_ROADMAP.md Milestone 2.5
-3. TECHNICAL_ARCHITECTURE.md - How it should work
+1. docs/development-status.md - What's done
+2. Current task document (MVP_EXPANSION_PACK_3.md or relevant plan doc)
+3. docs/technical-architecture.md - How it should work
 ```
 
 **Step 2: Ask Questions**
@@ -669,11 +664,10 @@ project.phrases[0] = project.phrases[0].copy(
 
 | Document                      | Purpose                     | When to Read |
 |-------------------------------|-----------------------------|--------------|
-| **DEVELOPMENT_STATUS.md**     | Current progress            | Every session start |
-| **MVP_EXPANSION_PACK_3.md**   | Current work                | Till it done |
-| **MVP_ROADMAP.md**            | Original feature roadmap    | Reference |
-| **TECHNICAL_ARCHITECTURE.md** | System design               | Understanding architecture |
-| **INPUT_COMBINATIONS.md**     | Controls reference          | Adding input handling |
+| **docs/development-status.md**     | Current progress            | Every session start |
+| **MVP_EXPANSION_PACK_3.md**        | Extension Pack 3 (COMPLETE) | Reference |
+| **docs/technical-architecture.md** | System design               | Understanding architecture |
+| **docs/input-system.md**           | Controls reference          | Adding input handling |
 | **REFACTORING_ROADMAP.md**    | Step-by-step refactoring    | Reference (completed) |
 
 ---

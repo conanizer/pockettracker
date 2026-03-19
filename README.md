@@ -208,9 +208,8 @@ Will include:
 - "Hello world" song in <5 minutes
 
 For now, see:
-- `DEVELOPMENT_STATUS.md` — Current progress
-- `MVP_ROADMAP.md` — Feature roadmap
-- `INPUT_COMBINATIONS.md` — Complete controls reference
+- `docs/development-status.md` — Current progress
+- `docs/input-system.md` — Complete controls reference
 
 ---
 
@@ -236,9 +235,11 @@ PocketTracker/
 │       ├── native-audio.cpp     # C++ audio engine (Oboe)
 │       └── CMakeLists.txt
 │
-├── DEVELOPMENT_STATUS.md        # Detailed current progress
-├── MVP_ROADMAP.md               # Feature roadmap
-├── TECHNICAL_ARCHITECTURE.md   # System design
+├── docs/                        # Documentation
+│   ├── development-status.md   # Detailed current progress
+│   ├── technical-architecture.md # System design
+│   ├── input-system.md         # Controls reference
+│   └── ...
 └── README.md                   # This file
 ```
 
@@ -345,7 +346,7 @@ A: Core workflow is similar (phrase → chain → song). Features like ADSR enve
 **Testing & Polish:** 🚧 In progress
 **Documentation:** 🚧 In progress
 
-**See `DEVELOPMENT_STATUS.md` for detailed progress**
+**See `docs/development-status.md` for detailed progress**
 
 ---
 
