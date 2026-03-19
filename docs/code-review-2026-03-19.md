@@ -329,19 +329,175 @@ garbage output if cutoff parameter is extreme). Low probability in practice.
 
 ---
 
+## Pass 2 — Screen Modules, File/Storage Layer
+
+### 22. Offline rendering has a race condition with live playback
+
+**Where:** `core/logic/RenderController.kt` (~lines 49-110)
+
+`audioBackend.setOfflineRendering(true)` is a global flag. If the user starts playback while
+a render is in progress, both paths try to use the same `audioBackend` state. Also, if an
+exception occurs between entering offline mode (line ~49) and the finally block (line ~110),
+offline mode can remain stuck ON — silently blocking live playback until app restart.
+
+**Suggestion:** Either mutex-protect the render path, or disable the play button while
+rendering.
+
+---
+
+### 23. MediaCodec leak in AndroidVideoAudioExtractor
+
+**Where:** `platform/android/AndroidVideoAudioExtractor.kt` (~lines 98-102)
+
+If `codec.configure()` throws, the codec object is never released:
+
+```kotlin
+val codec = MediaCodec.createDecoderByType(mime).also {
+    it.configure(format, null, null, 0)  // Can throw!
+    it.start()
+}
+```
+
+Should use try-finally to ensure `codec.release()` is called even on configuration failure.
+
+---
+
+### 24. Font constants duplicated 10 times across modules
+
+**Where:** Every `*Module.kt` file
+
+```kotlin
+private val FONT_SCALE = 3
+private val CHAR_SPACING = 2
+private val ROW_HEIGHT = 21
+private val TEXT_PADDING = 3
+```
+
+These identical 4 lines appear in PhraseEditorModule, ChainEditorModule, SongEditorModule,
+InstrumentModule, ProjectModule, FileBrowserModule, MixerModule, TableModule, GrooveModule,
+and ModulationModule.
+
+**Suggestion:** Extract to a shared `TrackerFontConstants` object or top-level constants.
+
+---
+
+### 25. Row background color logic duplicated in 4 grid modules
+
+**Where:** PhraseEditorModule, ChainEditorModule, SongEditorModule, TableModule
+
+The exact same `when` block determining row color (playback highlight, selection highlight,
+cursor row, alternating stripes) is copy-pasted across all four grid editors. A bug fix in
+one must be manually replicated in the other three.
+
+**Suggestion:** Extract to a shared function in `EditorHelpers.kt`.
+
+---
+
+### 26. Hex formatting pattern repeated 50+ times
+
+**Where:** All modules that display hex values
+
+The pattern `value.toString(16).padStart(2, '0').uppercase()` appears throughout. Should be
+an extension function: `fun Int.toHex2(): String`.
+
+---
+
+### 27. handleInput signatures are inconsistent across modules
+
+**Where:** All modules with `handleInput()`
+
+Three different patterns exist:
+- Most modules: `handleInput(state, action)` — 2 params
+- PhraseEditor, Instrument: `handleInput(state, action, instrumentController)` — 3 params
+- Mixer: `handleInput(state, action, onProjectModified)` — callback instead of controller
+
+**Question for Conan:** Is this intentional (each module gets only what it needs), or did it
+grow organically? Standardizing would make it easier for new contributors to add modules.
+
+---
+
+### 28. Silent fallback to internal storage
+
+**Where:** `platform/android/AndroidFileSystem.kt` (~lines 45-48, 72-74)
+
+If creating `Documents/PocketTracker/` on external storage fails, the code silently falls
+back to app-internal storage. The user thinks their files are in Documents (accessible,
+survives uninstall) but they're actually in app-private storage (lost on uninstall).
+
+**Suggestion:** At minimum, log a warning. Ideally, surface this to the user via a status
+message.
+
+---
+
+### 29. No disk space check before writing files
+
+**Where:** `platform/android/AndroidFileSystem.kt` — `writeFile()` and `writeBytes()`
+
+If the device runs out of space mid-write, the file will be corrupted (partial write). For
+project saves, this means data loss. A pre-check or atomic write (write to temp, then
+rename) would protect against this.
+
+---
+
+### 30. WavWriter integer overflow for large files
+
+**Where:** `core/storage/WavWriter.kt` (~line 47)
+
+```kotlin
+val dataSize = numSamples * blockAlign
+```
+
+If `numSamples` exceeds ~500M (a ~3-hour stereo render at 44.1kHz), this overflows `Int`.
+The WAV header will have a wrong size and the file will be unreadable.
+
+**Suggestion:** Either cap render length with a clear error, or use `Long` for the
+calculation.
+
+---
+
+### 31. GitHubIssueSender never validates HTTP response
+
+**Where:** `crash/GitHubIssueSender.kt` (~line 49)
+
+`conn.responseCode` is read but never checked. If the GitHub API returns 401, 422, or any
+error, the crash report silently disappears. No retry, no fallback.
+
+---
+
+### 32. Module interface pattern is clean and consistent
+
+**Positive finding.** All 12 modules correctly implement the `TrackerModule` interface:
+- `draw()` signatures are identical
+- `getCursorContext()` is present on all interactive modules (10/12)
+- Display-only modules (Oscilloscope, NavigationMap) correctly skip input handling
+- The module architecture makes adding new screens straightforward
+
+---
+
+### 33. InstrumentModule and ProjectModule size is justified
+
+Both are larger than other modules (1,050 and 752 lines respectively) because they have many
+editable parameters (15 and 8 rows). The extracted helper functions
+(`drawParameterRow()`, `drawDualParameterRow()`) are well-structured. Not a code smell —
+just genuinely complex screens.
+
+---
+
 ## Summary
 
 | Category | Count | Key items |
 |----------|-------|-----------|
 | **Critical** (must fix for release) | 4 | Package name, token security, ProGuard, minSdk |
-| **High** (architectural) | 5 | MainActivity size, PlaybackController duplication, no tests, no versioning |
-| **Medium** (code quality) | 6 | Cursor explosion, magic numbers, mutability, denormals |
-| **Low / Positive** | 6 | Good patterns confirmed (Canvas, CursorContext, input split, audio quality) |
+| **High** (architectural / bugs) | 7 | MainActivity size, PlaybackController duplication, no tests, no versioning, offline render race, MediaCodec leak, silent storage fallback |
+| **Medium** (code quality) | 10 | Cursor explosion, magic numbers, mutability, denormals, font constant duplication, row color duplication, hex formatting, handleInput inconsistency, disk space, WAV overflow |
+| **Low / Positive** | 8 | Good patterns confirmed (Canvas, CursorContext, input split, audio quality, module interface, platform portability, InstrumentModule structure) |
+
+**Total: 29 actionable findings + 8 positive observations = 37 items across 50 Kotlin + 1 C++ files.**
 
 **Overall assessment:** The core architecture is sound and the audio engine is impressive.
 The main risks are around release readiness (package name, ProGuard, token) and long-term
-maintainability (large files, no tests). The platform abstraction layer is genuinely
-portable — a Linux port would be realistic.
+maintainability (large files, no tests, scattered duplication). The platform abstraction
+layer is genuinely portable — a Linux port would be realistic.
 
 The codebase shows clear signs of iterative development by a solo developer who understands
 audio programming deeply. The suggested improvements are about making it sustainable for
