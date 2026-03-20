@@ -278,10 +278,10 @@ add it to `processAudioBlock()`. NEVER add processing logic directly to `onAudio
 > 2. Create ALSA/PulseAudio backend implementing same interface
 > 3. Rest of the audio code stays EXACTLY the same!
 
-### JNI Interface (Current)
+### JNI Interface (Before Refactoring — now wrapped behind IAudioBackend/OboeAudioBackend)
 
 ```kotlin
-// TrackerAudioEngine.kt
+// TrackerAudioEngine.kt (old approach — replaced by OboeAudioBackend.kt)
 external fun native_create(): Boolean
 external fun native_loadSample(id: Int, samples: FloatArray)
 external fun native_scheduleNote(frame: Long, sampleId: Int, trackId: Int, freq: Float, baseFreq: Float, vol: Float)
@@ -293,7 +293,7 @@ external fun native_getSampleRate(): Int
 external fun native_updateWaveform(buffer: FloatArray)
 ```
 
-### Target Architecture (After Refactoring)
+### Current Architecture (Post-Refactoring) ✅
 
 ```kotlin
 // core/audio/IAudioBackend.kt
@@ -529,7 +529,7 @@ Row 3:     MIXER     MIXER    MIXER      MIXER     MIXER
 Row 4:    EFFECTS   EFFECTS  EFFECTS    EFFECTS   EFFECTS
 ```
 
-**Navigation Logic (Currently in MainActivity.kt):**
+**Navigation Logic (Before Refactoring — was in MainActivity.kt):**
 ```kotlin
 fun navigateUp() {
     currentScreen = when (currentScreen) {
@@ -540,7 +540,7 @@ fun navigateUp() {
 }
 ```
 
-**After Refactoring (TrackerController.kt):**
+**Current Implementation (TrackerController.kt) ✅:**
 ```kotlin
 class TrackerController {
     var currentScreen by mutableStateOf(ScreenType.PHRASE)
@@ -563,10 +563,10 @@ object NavigationMap {
 
 ## File Management
 
-### Current State (Android-Specific)
+### Before Refactoring (Android-Specific)
 
 ```kotlin
-// FileManager.kt
+// FileManager.kt (old — replaced by IFileSystem + AndroidFileSystem)
 class FileManager(private val context: Context) {
     fun saveProject(project: Project, filename: String) {
         val dir = File(context.getExternalFilesDir(null), "Projects")
@@ -577,9 +577,9 @@ class FileManager(private val context: Context) {
 }
 ```
 
-**Problem:** Uses `Context.getExternalFilesDir()` - Android-specific!
+**Problem it had:** Uses `Context.getExternalFilesDir()` - Android-specific!
 
-### Target State (Platform-Agnostic)
+### Current State (Platform-Agnostic) ✅
 
 ```kotlin
 // core/storage/IFileSystem.kt

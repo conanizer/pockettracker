@@ -224,7 +224,7 @@ Each module receives state objects and renders itself independently.
 - Loaded via ResourceLoader (default samples) or FileSystem (custom samples)
 - Auto-conversion: Stereo → mono
 - Automatic sample rate detection and compensation
-- 256 instrument slots (00-0B = defaults, 0C-FF = custom)
+- 256 instrument slots (all identical, all user-loadable, no bundled defaults)
 
 **Current Implementation:**
 - `FileManager.kt` - Handles save/load operations

@@ -442,7 +442,7 @@ data class Project(
     // 8 tracks
     val tracks: Array<Track> = Array(8) { Track(it) },
 
-    // Instruments (256 slots, but only first 12 initialized with resource samples)
+    // Instruments (256 slots, all identical — sampleFilePath = null means empty)
     val instruments: Array<Instrument> = Array(256) { index ->
         // All 256 instrument slots use the same layout:
         // name = "INSTXX", sampleId = index (slot ID), sampleFilePath = null (nothing loaded yet)

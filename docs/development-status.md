@@ -214,8 +214,9 @@ Week 16:     MVP Release
 - Frequency: `440 * 2^((midi - 69) / 12)`
 
 ### Instrument Slots
-- 00-0B: Hardcoded resource samples (kick, snare, hihat, bass, etc.)
-- 0C-FF: User-loadable samples
+- All 256 slots (00-FF) are identical in structure
+- All start empty (`sampleFilePath = null`) — no bundled default samples
+- Users load samples into any slot via the file browser
 - Each instrument has independent ROOT+DETUNE tuning
 
 ---

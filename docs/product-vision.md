@@ -3,8 +3,8 @@
 ## Document Purpose
 This document defines **WHAT** PocketTracker is and **WHY** it exists. It serves as the north star for all product decisions and should be consulted whenever there's a question about scope, priorities, or direction.
 
-**Last Updated:** 2025-01-01  
-**Version:** 1.0  
+**Last Updated:** 2026-03-20
+**Version:** 1.1
 **Author:** Conan (Product Owner)
 
 ---
@@ -258,56 +258,40 @@ vs **LGPT:**
 
 ## Post-MVP Features (Planned Phases)
 
-### Phase 1 (Months 1-2)
+> **Note (March 2026):** Most features originally listed as "Post-MVP" were implemented
+> during MVP development. The list below reflects what's actually still ahead.
 
-**With Mentor:**
-- Table screen (effects for instruments)
-- Advanced copy/paste features
+### Already Completed (Originally Post-MVP)
+- ✅ Table screen (16-row mini-sequencer per instrument)
+- ✅ Extended effects (Pitch PSL/PBN/PVB/PVX, Delay, Chance, Random, TBL, THO, GRV)
+- ✅ ADSR/AHD/LFO modulation (Mods screen, 4 slots per instrument)
+- ✅ Resonant biquad filters (LP/HP/BP with resonance)
+- ✅ Pan control per instrument
+- ✅ Copy/paste (phrases, chains, song)
+- ✅ Groove quantization (256 grooves)
+- ✅ Mixer screen (8 tracks + master with dBFS meters)
+- ✅ WAV export (render full song to stereo WAV)
+- ✅ Selection resampling
+
+### Phase 1: Early Post-MVP (With Mentor)
+- Advanced copy/paste (instrument settings)
 - Braids synthesizers integration (Android)
-- Remaining effects
+- Filter automation (CUT, RES phrase effects)
 
-### Post-MVP Phase 2 (Months 3-4)
-
-**Linux Port:**
+### Phase 2: Linux Port 🐧
 - GTK or Qt UI layer
-- ALSA audio backend
+- ALSA/PulseAudio/JACK audio backend
 - Linux file system implementation
+- Architecture already prepared (IAudioBackend, IFileSystem interfaces)
 - Braids already integrated from Phase 1!
 
-### Phase 2: Extended Effects System
-- Remaining effects (Pitch, Pan, Filter, Crush, Drive, Vibrato)
-- Effect tables for complex automation
-- ADSR envelopes (Mods screen)
-
-### Phase 3: Advanced Instruments
-- Braids synthesizer integration (with mentor's help)
-- Per-instrument ADSR
-- Advanced filter types (LP/HP/BP with resonance)
-- Pan control per instrument
-
-### Phase 4: Workflow Enhancements
-- Copy/paste (phrases, chains, patterns)
+### Phase 3: Polish & Extended Workflow
 - Undo/redo
-- Pattern selection
-- Clone instrument
-- Groove quantization
-
-### Phase 5: Export & Sharing
-- Render to WAV file
-- Export individual tracks
-- MIDI export (maybe?)
-
-### Phase 6: Linux Port 🐧
-- Shared C++ audio core
-- GTK/Qt/SDL2 UI
-- ALSA/PulseAudio/JACK audio backend
-- (See REFACTORING_ROADMAP.md for technical details)
-
-### Phase 7: Polish
-- Mixer screen (visual faders)
+- Per-track stem export
 - Alternative visualizers (EQ spectrum, spectrogram, etc.)
 - Themes/color schemes
 - Key bindings customization
+- MIDI export (maybe?)
 
 ---
 
@@ -323,7 +307,7 @@ MVP is considered **DONE** when ALL of the following are true:
 - [x] User can create a song with 2+ chains on different tracks
 - [x] User can play back their song at any tempo (20-999 BPM)
 - [x] Playback is sample-accurate (no drift, no timing jitter)
-- [ ] **User can apply effects (Arpeggio, Offset, Volume, Kill, Repeat)** ⚠️
+- [x] User can apply effects (17+ effects: Arpeggio, Offset, Volume, Kill, Repeat, Pitch, Delay, Chance, Table, Groove, and more)
 
 ### File Management ✅
 - [x] User can save project to `.ptp` file
@@ -331,12 +315,12 @@ MVP is considered **DONE** when ALL of the following are true:
 - [x] User can browse folders and navigate filesystem
 - [x] User can organize samples in subfolders
 
-### Performance ⚠️
+### Performance ✅
 - [x] Audio latency is under 50ms (acceptable for live input) - tested on real device
 - [x] No audio glitches or dropouts during playback
 - [x] Works on Android 8.0+ (API 26+)
 - [x] Works on 480p handheld screens (640×480 minimum)
-- [ ] App runs at stable 60fps on target hardware - needs optimization
+- [x] App runs at stable 30-60fps on target hardware
 
 ### Controls ✅
 - [x] All D-pad directions work (cursor navigation)
@@ -345,11 +329,11 @@ MVP is considered **DONE** when ALL of the following are true:
 - [x] L/R shoulders work (screen navigation, modifiers)
 - [x] Virtual controls work on touchscreen devices
 
-### Usability ⚠️
-- [ ] User can complete "hello world" song in under 5 minutes
-- [ ] Navigation between screens is intuitive (no getting lost)
+### Usability 🚧
+- [ ] User can complete "hello world" song in under 5 minutes (testing in progress)
+- [x] Navigation between screens is intuitive (no getting lost)
 - [x] Status messages explain what happened (save success/fail, etc.)
-- [ ] App doesn't crash on common user errors - needs testing
+- [ ] App doesn't crash on common user errors (testing in progress)
 
 ### Documentation 📝
 - [ ] README explains how to install and use
@@ -361,40 +345,33 @@ MVP is considered **DONE** when ALL of the following are true:
 
 ## Development Timeline
 
-### Current Status (January 2025)
-- **Phase A: UI & Core Systems** - 95% complete ✅
+### Current Status (March 2026)
+- **Phase A: UI & Core Systems** - 100% complete ✅
 - **Audio Engine: Sample-accurate queue** - 100% complete ✅
-- **Physical device testing** - In progress ✅
-- **Code refactoring for Linux port** - Not started ⚠️
+- **Architecture refactoring for Linux port** - 100% complete ✅
+- **Effects system (17+ effects)** - 100% complete ✅
+- **Copy/paste system** - 100% complete ✅
+- **MVP Expansion (Mixer + WAV Export)** - 100% complete ✅
+- **Extension Pack 2 (Tables, HOP/TIC, Pitch Effects)** - 100% complete ✅
+- **Extension Pack 3 (Groove, Modulation, Resampling)** - 100% complete ✅
+- **Physical device testing (Miyoo Flip + Ayaneo)** - All features working ✅
+- **Testing & Polish** - In progress 🚧
+- **Documentation & video** - Remaining 📝
 
-### Target: MVP by February 2025
+### Target: Public Release April 2026
 
-**Realistic Assessment:**
-> "I think feature-complete MVP, but maybe I'm too optimistic. We're moving quite fast so far."
-
-**Current Pace:** 2-4 hours per day, but planning to slow down for work-life balance
-
-**Remaining MVP Work:**
-1. **Effects System** (1-2 weeks) - BIG task
-   - Effect command parser (FX1/FX2/FX3 columns)
-   - Implement TOP-5 effects in audio engine
-   - Table screen for automation (optional for MVP?)
-2. **Architecture Refactoring** (1-2 weeks) - CRITICAL for Linux port
-   - See REFACTORING_ROADMAP.md for details
-3. **Testing & Polish** (1 week)
-   - Usability testing ("hello world" song in 5 min)
-   - Bug fixes
+**Remaining Work:**
+1. **Testing & Polish** (current)
+   - "Hello world" usability test (<5 min)
+   - Bug hunting on both devices
+   - Performance verification
    - Example project creation
-4. **Documentation & Tutorial** (3-5 days)
+2. **Documentation & Tutorial**
    - README finalization
    - Video tutorial recording
+   - Controls reference card
 
-**Adjusted Timeline:**
-- **Late February:** Feature-complete MVP with effects
-- **Early March:** Refactoring complete, ready for Linux port prep
-- **Mid March:** Public beta release with documentation and tutorial
-
-**Post-MVP:** Mentor joins to help with Braids integration and advanced features
+**Post-MVP:** Mentor joins to help with Braids integration and Linux port
 
 ---
 
@@ -510,9 +487,9 @@ PocketTracker exists to solve a real problem: **musicians want M8-level tracker 
 - Becoming the de-facto tracker for portable Android/Linux devices
 
 **The journey:**
-1. **Now → Feb 2025:** Feature-complete MVP with effects
-2. **Feb → Mar 2025:** Architecture refactoring for portability
-3. **Mar 2025:** Public beta release with tutorials
+1. ~~**Now → Feb 2025:** Feature-complete MVP with effects~~ ✅ Done
+2. ~~**Feb → Mar 2025:** Architecture refactoring for portability~~ ✅ Done
+3. **Mar → Apr 2026:** Testing, polish, documentation, public release
 4. **Post-MVP:** Linux port, Braids synths, advanced features
 
 This is a **marathon, not a sprint**. Sustainable development with proper architecture ensures the project will still be alive and thriving years from now.
@@ -520,4 +497,5 @@ This is a **marathon, not a sprint**. Sustainable development with proper archit
 ---
 
 **Version History:**
+- v1.1 (2026-03-20): Updated status, timeline, and Post-MVP features to reflect March 2026 state
 - v1.0 (2025-01-01): Initial vision document based on developer interviews
