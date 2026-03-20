@@ -19,3 +19,12 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Keep JNI-accessible native methods (required when minification is enabled)
+-keep class com.conanizer.pockettracker.platform.android.OboeAudioBackend {
+    native <methods>;
+}
+
+# Keep crash reporting classes
+-keep class com.conanizer.pockettracker.crash.** { *; }
+-keep class org.acra.** { *; }

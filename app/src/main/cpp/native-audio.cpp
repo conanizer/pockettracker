@@ -1550,6 +1550,24 @@ public:
             void *audioData,
             int32_t numFrames) override {
 
+        // Set flush-to-zero mode once at audio thread start.
+        // Prevents denormal floats in biquad filter history from causing 100-1000x CPU slowdown
+        // on ARM Cortex-A53 during silence.
+        static std::once_flag ftzFlag;
+        std::call_once(ftzFlag, []() {
+#if defined(__aarch64__)
+            uint64_t fpcr;
+            asm volatile("mrs %0, fpcr" : "=r"(fpcr));
+            fpcr |= (1ULL << 24);  // FZ bit: flush denormals to zero
+            asm volatile("msr fpcr, %0" : : "r"(fpcr));
+#elif defined(__arm__)
+            uint32_t fpscr;
+            asm volatile("vmrs %0, fpscr" : "=r"(fpscr));
+            fpscr |= (1U << 24);  // FZ bit
+            asm volatile("vmsr fpscr, %0" : : "r"(fpscr));
+#endif
+        });
+
         float *output = static_cast<float*>(audioData);
         int channelCount = audioStream->getChannelCount();
 
@@ -2344,7 +2362,7 @@ static AudioEngine* engine = nullptr;
 extern "C" {
 
 JNIEXPORT jboolean JNICALL
-Java_com_example_pockettracker_TrackerAudioEngine_native_1create(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1create(JNIEnv *env, jobject thiz) {
     if (!engine) {
         engine = new AudioEngine();
         return engine->openStream() ? JNI_TRUE : JNI_FALSE;
@@ -2353,13 +2371,13 @@ Java_com_example_pockettracker_TrackerAudioEngine_native_1create(JNIEnv *env, jo
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_TrackerAudioEngine_native_1delete(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1delete(JNIEnv *env, jobject thiz) {
     delete engine;
     engine = nullptr;
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_TrackerAudioEngine_native_1loadSample(
+Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1loadSample(
         JNIEnv *env, jobject thiz, jint id, jfloatArray data) {
     if (!engine) return;
 
@@ -2372,7 +2390,7 @@ Java_com_example_pockettracker_TrackerAudioEngine_native_1loadSample(
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_TrackerAudioEngine_native_1triggerNote(
+Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1triggerNote(
         JNIEnv *env, jobject thiz, jint sid, jint tid, jfloat f, jfloat bf, jfloat v) {
     if (engine) {
         engine->triggerNote(sid, tid, f, bf, v);
@@ -2380,21 +2398,21 @@ Java_com_example_pockettracker_TrackerAudioEngine_native_1triggerNote(
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_TrackerAudioEngine_native_1stopTrack(JNIEnv *env, jobject thiz, jint tid) {
+Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1stopTrack(JNIEnv *env, jobject thiz, jint tid) {
     if (engine) {
         engine->stopTrack(tid);
     }
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_TrackerAudioEngine_native_1stopAll(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1stopAll(JNIEnv *env, jobject thiz) {
     if (engine) {
         engine->stopAll();
     }
 }
 
 JNIEXPORT jint JNICALL
-Java_com_example_pockettracker_TrackerAudioEngine_native_1getActiveVoiceCount(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1getActiveVoiceCount(JNIEnv *env, jobject thiz) {
     if (engine) {
         return engine->getActiveVoiceCount();
     }
@@ -2402,7 +2420,7 @@ Java_com_example_pockettracker_TrackerAudioEngine_native_1getActiveVoiceCount(JN
 }
 
 JNIEXPORT jint JNICALL
-Java_com_example_pockettracker_TrackerAudioEngine_native_1getSampleRate(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1getSampleRate(JNIEnv *env, jobject thiz) {
     if (engine) {
         return engine->getSampleRate();
     }
@@ -2410,7 +2428,7 @@ Java_com_example_pockettracker_TrackerAudioEngine_native_1getSampleRate(JNIEnv *
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_TrackerAudioEngine_native_1setInstrumentParams(
+Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1setInstrumentParams(
         JNIEnv *env, jobject thiz, jint instrumentId, jint start, jint end,
         jboolean reverse, jint loopMode, jint loopStart,
         jint drive, jint crush, jint downsample,
@@ -2426,7 +2444,7 @@ Java_com_example_pockettracker_TrackerAudioEngine_native_1setInstrumentParams(
 // ===================================
 
 JNIEXPORT jlong JNICALL
-Java_com_example_pockettracker_TrackerAudioEngine_native_1getCurrentFrame(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1getCurrentFrame(JNIEnv *env, jobject thiz) {
     if (engine) {
         return (jlong)engine->getCurrentFrame();
     }
@@ -2434,7 +2452,7 @@ Java_com_example_pockettracker_TrackerAudioEngine_native_1getCurrentFrame(JNIEnv
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_TrackerAudioEngine_native_1scheduleNote(
+Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1scheduleNote(
         JNIEnv *env, jobject thiz, jlong targetFrame, jint sampleId, jint trackId,
         jfloat frequency, jfloat baseFrequency, jfloat volume) {
     if (engine) {
@@ -2443,21 +2461,21 @@ Java_com_example_pockettracker_TrackerAudioEngine_native_1scheduleNote(
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_TrackerAudioEngine_native_1clearScheduledNotes(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1clearScheduledNotes(JNIEnv *env, jobject thiz) {
     if (engine) {
         engine->clearScheduledNotes();
     }
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_TrackerAudioEngine_native_1resumeStream(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1resumeStream(JNIEnv *env, jobject thiz) {
     if (engine) {
         engine->resumeStream();
     }
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_TrackerAudioEngine_native_1getWaveform(JNIEnv *env, jobject thiz, jfloatArray outArray) {
+Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1getWaveform(JNIEnv *env, jobject thiz, jfloatArray outArray) {
     if (engine && outArray != nullptr) {
         jsize length = env->GetArrayLength(outArray);
         float* buffer = new float[length];
@@ -2479,7 +2497,7 @@ Java_com_example_pockettracker_TrackerAudioEngine_native_1getWaveform(JNIEnv *en
 // in platform/android/OboeAudioBackend.kt
 
 JNIEXPORT jboolean JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1create(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1create(JNIEnv *env, jobject thiz) {
     if (!engine) {
         engine = new AudioEngine();
         return engine->openStream() ? JNI_TRUE : JNI_FALSE;
@@ -2488,7 +2506,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1create(
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1delete(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1delete(JNIEnv *env, jobject thiz) {
     if (engine) {
         delete engine;
         engine = nullptr;
@@ -2497,7 +2515,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1delete(
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1loadSample(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadSample(
         JNIEnv *env, jobject thiz, jint id, jfloatArray data) {
     if (!engine) return;
 
@@ -2510,7 +2528,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1loadSam
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1scheduleNote(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleNote(
         JNIEnv *env, jobject thiz, jlong targetFrame, jint sampleId, jint trackId,
         jfloat frequency, jfloat baseFrequency, jfloat volume, jfloat pan, jint startPointOverride) {
     if (engine) {
@@ -2519,7 +2537,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1schedul
 }
 
 JNIEXPORT jlong JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getCurrentFrame(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getCurrentFrame(JNIEnv *env, jobject thiz) {
     if (engine) {
         return (jlong)engine->getCurrentFrame();
     }
@@ -2527,42 +2545,42 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getCurr
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1clearScheduledNotes(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1clearScheduledNotes(JNIEnv *env, jobject thiz) {
     if (engine) {
         engine->clearScheduledNotes();
     }
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1resumeStream(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1resumeStream(JNIEnv *env, jobject thiz) {
     if (engine) {
         engine->resumeStream();
     }
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1stopAll(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1stopAll(JNIEnv *env, jobject thiz) {
     if (engine) {
         engine->stopAll();
     }
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1killTrack(JNIEnv *env, jobject thiz, jint trackId) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1killTrack(JNIEnv *env, jobject thiz, jint trackId) {
     if (engine) {
         engine->stopTrack(trackId);
     }
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1scheduleKill(JNIEnv *env, jobject thiz, jlong targetFrame, jint trackId) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleKill(JNIEnv *env, jobject thiz, jlong targetFrame, jint trackId) {
     if (engine) {
         engine->scheduleKill(targetFrame, trackId);
     }
 }
 
 JNIEXPORT jint JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getSampleRate(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSampleRate(JNIEnv *env, jobject thiz) {
     if (engine) {
         return engine->getSampleRate();
     }
@@ -2570,7 +2588,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getSamp
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getWaveform(JNIEnv *env, jobject thiz, jfloatArray outArray) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getWaveform(JNIEnv *env, jobject thiz, jfloatArray outArray) {
     if (engine && outArray != nullptr) {
         jsize length = env->GetArrayLength(outArray);
         float* buffer = new float[length];
@@ -2586,7 +2604,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getWave
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setInstrumentParams(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setInstrumentParams(
         JNIEnv *env, jobject thiz, jint instrumentId, jint start, jint end,
         jboolean reverse, jint loopMode, jint loopStart,
         jint drive, jint crush, jint downsample,
@@ -2602,7 +2620,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setInst
 // ===================================
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getTrackPeaks(JNIEnv *env, jobject thiz, jfloatArray outArray) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getTrackPeaks(JNIEnv *env, jobject thiz, jfloatArray outArray) {
     if (engine && outArray != nullptr) {
         float buffer[8];
         engine->getTrackPeaks(buffer);
@@ -2611,7 +2629,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getTrac
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getMasterPeaks(JNIEnv *env, jobject thiz, jfloatArray outArray) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getMasterPeaks(JNIEnv *env, jobject thiz, jfloatArray outArray) {
     if (engine && outArray != nullptr) {
         float buffer[2];
         engine->getMasterPeaks(buffer);
@@ -2624,7 +2642,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getMast
 // ===================================
 
 JNIEXPORT jfloatArray JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1renderFrames(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1renderFrames(
         JNIEnv *env, jobject thiz, jint numFrames, jint sampleRate) {
     if (!engine) {
         return nullptr;
@@ -2649,14 +2667,14 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1renderF
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1resetFrameCounter(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1resetFrameCounter(JNIEnv *env, jobject thiz) {
     if (engine) {
         engine->resetFrameCounter();
     }
 }
 
 JNIEXPORT jlong JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getFrameCounter(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getFrameCounter(JNIEnv *env, jobject thiz) {
     if (engine) {
         return engine->getFrameCounter();
     }
@@ -2668,28 +2686,28 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getFram
 // ===================================
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1decayPeaks(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1decayPeaks(JNIEnv *env, jobject thiz) {
     if (engine) {
         engine->decayPeaks();
     }
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1decayWaveform(JNIEnv *env, jobject thiz) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1decayWaveform(JNIEnv *env, jobject thiz) {
     if (engine) {
         engine->decayWaveform();
     }
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setTrackVolume(JNIEnv *env, jobject thiz, jint trackId, jfloat volume) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setTrackVolume(JNIEnv *env, jobject thiz, jint trackId, jfloat volume) {
     if (engine) {
         engine->setTrackVolume(trackId, volume);
     }
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setMasterVolume(JNIEnv *env, jobject thiz, jfloat volume) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setMasterVolume(JNIEnv *env, jobject thiz, jfloat volume) {
     if (engine) {
         engine->setMasterVolume(volume);
     }
@@ -2700,7 +2718,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setMast
 // ===================================
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1loadTable(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadTable(
         JNIEnv *env, jobject thiz, jint tableId, jbyteArray rowData) {
     if (!engine || rowData == nullptr) return;
 
@@ -2716,7 +2734,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1loadTab
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1scheduleNoteWithTable(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleNoteWithTable(
         JNIEnv *env, jobject thiz, jlong targetFrame, jint sampleId, jint trackId,
         jfloat frequency, jfloat baseFrequency, jfloat volume, jfloat pan,
         jint startPointOverride, jint tableId, jint tableTicRate,
@@ -2734,7 +2752,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1schedul
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setVoiceTableRow(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setVoiceTableRow(
         JNIEnv *env, jobject thiz, jint trackId, jint row) {
     if (engine) {
         engine->setVoiceTableRow(trackId, row);
@@ -2742,7 +2760,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setVoic
 }
 
 JNIEXPORT jint JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getVoiceTableRow(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getVoiceTableRow(
         JNIEnv *env, jobject thiz, jint trackId) {
     if (engine) {
         return engine->getVoiceTableRow(trackId);
@@ -2751,7 +2769,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getVoic
 }
 
 JNIEXPORT jint JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getVoiceTableId(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getVoiceTableId(
         JNIEnv *env, jobject thiz, jint trackId) {
     if (engine) {
         return engine->getVoiceTableId(trackId);
@@ -2764,7 +2782,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1getVoic
 // ===================================
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setPitchSlide(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setPitchSlide(
         JNIEnv *env, jobject thiz, jint trackId, jfloat targetSemitones, jfloat durationTicks, jint tempo) {
     if (engine) {
         engine->setPitchSlide(trackId, targetSemitones, durationTicks, tempo);
@@ -2772,7 +2790,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setPitc
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setPitchBend(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setPitchBend(
         JNIEnv *env, jobject thiz, jint trackId, jfloat semitonesPerTick, jint tempo) {
     if (engine) {
         engine->setPitchBend(trackId, semitonesPerTick, tempo);
@@ -2780,7 +2798,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setPitc
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setVibrato(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setVibrato(
         JNIEnv *env, jobject thiz, jint trackId, jfloat speed, jfloat depth) {
     if (engine) {
         engine->setVibrato(trackId, speed, depth);
@@ -2788,7 +2806,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setVibr
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1clearPitchMod(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1clearPitchMod(
         JNIEnv *env, jobject thiz, jint trackId) {
     if (engine) {
         engine->clearPitchMod(trackId);
@@ -2796,7 +2814,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1clearPi
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setInitialPitchOffset(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setInitialPitchOffset(
         JNIEnv *env, jobject thiz, jint trackId, jfloat semitones) {
     if (engine) {
         engine->setInitialPitchOffset(trackId, semitones);
@@ -2804,7 +2822,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setInit
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setInstrumentModulation(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setInstrumentModulation(
         JNIEnv *env, jobject thiz,
         jint sampleId, jint slotIndex, jint type, jint dest, jfloat amount,
         jint attackSamples, jint holdSamples, jint decaySamples,
@@ -2817,7 +2835,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setInst
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1clearInstrumentModulation(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1clearInstrumentModulation(
         JNIEnv *env, jobject thiz, jint sampleId) {
     if (engine) {
         engine->clearInstrumentModulation(sampleId);
@@ -2825,7 +2843,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1clearIn
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1triggerNoteOff(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1triggerNoteOff(
         JNIEnv *env, jobject thiz, jint trackId) {
     if (engine) {
         engine->triggerNoteOff(trackId);
@@ -2833,7 +2851,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1trigger
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1scheduleNoteOff(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleNoteOff(
         JNIEnv *env, jobject thiz, jlong targetFrame, jint trackId) {
     if (engine) {
         engine->scheduleNoteOff(targetFrame, trackId);
@@ -2841,7 +2859,7 @@ Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1schedul
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_pockettracker_platform_android_OboeAudioBackend_native_1setOfflineRendering(
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setOfflineRendering(
         JNIEnv *env, jobject thiz, jboolean rendering) {
     if (engine) engine->setOfflineRendering(rendering == JNI_TRUE);
 }

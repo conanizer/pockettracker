@@ -19,7 +19,7 @@ fun String.runCommand(workingDir: File = rootDir): String? =
         .takeIf { it.isNotBlank() }
 
 android {
-    namespace = "com.example.pockettracker"
+    namespace = "com.conanizer.pockettracker"
     compileSdk {
         version = release(36)
     }
@@ -36,13 +36,12 @@ android {
     val githubToken: String = localProps.getProperty("github.token=", "")
 
     defaultConfig {
-        applicationId = "com.example.pockettracker"
-        minSdk = 24
+        applicationId = "com.conanizer.pockettracker"
+        minSdk = 26
         targetSdk = 34
         versionCode = gitCommitCount
         versionName = "0.9.$gitCommitCount ($gitShortHash)"
 
-        buildConfigField("String", "GITHUB_TOKEN", "\"$githubToken\"")
         buildConfigField("String", "GITHUB_REPO_OWNER", "\"conanizer\"")
         buildConfigField("String", "GITHUB_REPO_NAME", "\"pockettracker.\"")
 
@@ -70,7 +69,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField("String", "GITHUB_TOKEN", "\"$githubToken\"")
+        }
         release {
+            buildConfigField("String", "GITHUB_TOKEN", "\"\"")  // No token in release builds
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
