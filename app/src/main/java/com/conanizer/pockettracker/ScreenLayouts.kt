@@ -366,49 +366,50 @@ fun PortraitLayout2WithVirtualButtons(
     theme: DeviceTheme = DeviceTheme.DARK,
 ) {
     val density = LocalDensity.current.density
+    val deviceW = layoutConfig.deviceWidth
+    val deviceH = layoutConfig.deviceHeight
 
-    // X = base unit derived from device width (design: 135X = full width, 300X = full 20:9 height)
-    val X = layoutConfig.deviceWidth / 135f
-
-    // Natural heights at the 20:9 design ratio
-    val naturalTopH      = X * 39.75f
-    val naturalBezelH    = X * 102.75f
-    val naturalBrandingH = X * 22.5f
-    val naturalButtonH   = X * 135f
-    // naturalTotal = X*300 = deviceWidth * (20/9)
-
-    // Height needed for everything except the top panel
-    val withoutTopH = naturalBezelH + naturalBrandingH + naturalButtonH  // X * 260.25
-
-    // Adaptive height assignment:
+    // The device skin is 135X wide × 300X tall (20:9 ratio).
+    // Derive X as the largest value that fits both screen dimensions:
     //
-    // Case A — device is at least as tall as screen+branding+buttons at full width-scale.
-    //   Top panel absorbs any remaining space up to its natural height; any leftover
-    //   (on extra-tall devices) becomes visible background color at the bottom.
+    //   Case A (≥20:9 ratio): X from width → full 300X skin fits in height.
+    //     Top panel may have a few units leftover on extra-tall screens.
     //
-    // Case B — even removing the top panel is not enough (e.g. 16:9).
-    //   Top panel = 0. Branding stays at its natural height (full-width proportion).
-    //   Screen bezel and button cluster scale together to fill the remaining height.
-    val topPanelH:   Int
-    val bezelH:      Int
-    val brandingH:   Int
-    val buttonAreaH: Int
+    //   Case B (18:9–19.5:9): X from width → top panel shrinks/disappears to absorb
+    //     the height deficit; bezel/branding/buttons remain full device width.
+    //
+    //   Case C (<260.25/135 ≈ 1.928 ratio, e.g. 16:9=1.778): height is the constraint.
+    //     X is derived from height so bezel+branding+buttons fill the screen height.
+    //     Skin width (135X) becomes narrower than the device — casingColor fills the sides.
+    val xFromWidth = deviceW / 135f
 
-    if (layoutConfig.deviceHeight >= withoutTopH) {
-        topPanelH   = (layoutConfig.deviceHeight - withoutTopH).toInt()
-                          .coerceAtMost(naturalTopH.toInt())   // don't stretch beyond design
-        bezelH      = naturalBezelH.toInt()
-        brandingH   = naturalBrandingH.toInt()
-        buttonAreaH = naturalButtonH.toInt()
-    } else {
-        // Scale bezel + buttons together so they fill the height left after branding
-        topPanelH   = 0
-        brandingH   = naturalBrandingH.toInt()
-        val availForScaled = layoutConfig.deviceHeight - brandingH
-        val scale   = availForScaled / (naturalBezelH + naturalButtonH)
-        bezelH      = (naturalBezelH  * scale).toInt().coerceAtLeast(1)
-        buttonAreaH = (naturalButtonH * scale).toInt().coerceAtLeast(100)
+    val X: Float
+    val topPanelH: Int
+
+    when {
+        xFromWidth * 300f <= deviceH -> {
+            // Case A: full skin fits vertically at width-derived X
+            X = xFromWidth
+            topPanelH = (deviceH - X * 260.25f).toInt().coerceAtMost((X * 39.75f).toInt())
+        }
+        xFromWidth * 260.25f <= deviceH -> {
+            // Case B: top panel shrinks (can reach 0) to absorb the height deficit
+            X = xFromWidth
+            topPanelH = (deviceH - X * 260.25f).toInt().coerceAtLeast(0)
+        }
+        else -> {
+            // Case C: skin is height-constrained; skin will be narrower than the screen
+            X = deviceH / 260.25f
+            topPanelH = 0
+        }
     }
+
+    // Skin width in pixels. Equals deviceW in cases A/B; less than deviceW in case C.
+    val contentW    = (X * 135f).toInt()
+    val contentWDp  = (contentW / density).dp
+    val bezelH      = (X * 102.75f).toInt()
+    val brandingH   = (X * 22.5f).toInt()
+    val buttonAreaH = (X * 135f).toInt()
 
     val bezelThickDp = theme.screenBezelThicknessDp.dp
 
@@ -422,29 +423,27 @@ fun PortraitLayout2WithVirtualButtons(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(theme.casingColor)   // fills any leftover space (tall devices, rounding)
+            .background(theme.casingColor)   // beige fills sides (case C) and any bottom gap
             .focusRequester(focusRequester)
             .inputHandler(inputMapper)
             .focusable(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Top
     ) {
-        // 1. TOP PANEL — ventilation grille (height shrinks on sub-20:9 screens, 0 on 16:9)
+        // 1. TOP PANEL — ventilation grille (absent in case C, shrunk in case B)
         if (topPanelH > 0) Box(
             modifier = Modifier
-                .fillMaxWidth()
+                .width(contentWDp)
                 .height((topPanelH / density).dp)
                 .themeBackground(theme.topPanelImage, theme.casingColor)
         )
 
-        // 2. SCREEN BEZEL — the bezelThickDp padding creates the visible frame border.
-        // Inner area: (deviceWidth - 2*bezelThick) × (bezelH - 2*bezelThick) pixels.
-        // We follow the same integer-scale + fill-factor pattern as FullScreenLayout to
-        // avoid giving PixelPerfectTracker a canvas that's too large (which would cause
-        // it to pick an incorrect integer scale and overflow the bezel border).
+        // 2. SCREEN BEZEL
+        // innerW uses contentW (not deviceW) so the bezel border is proportional
+        // to the skin width on all aspect ratios.
         val bezelThickPx = theme.screenBezelThicknessDp * density
-        val innerW = layoutConfig.deviceWidth - 2f * bezelThickPx
-        val innerH = bezelH - 2f * bezelThickPx
+        val innerW = contentW - 2f * bezelThickPx
+        val innerH = bezelH  - 2f * bezelThickPx
         val intScale = floor(minOf(innerW / DESIGN_WIDTH_PX, innerH / DESIGN_HEIGHT_PX))
             .toInt().coerceAtLeast(1)
         val fillFactor = minOf(innerW / (DESIGN_WIDTH_PX * intScale),
@@ -452,15 +451,13 @@ fun PortraitLayout2WithVirtualButtons(
 
         Box(
             modifier = Modifier
-                .fillMaxWidth()
+                .width(contentWDp)
                 .height((bezelH / density).dp)
                 .themeBackground(theme.screenBezelImage, theme.screenBezelColor)
                 .padding(bezelThickDp),
             contentAlignment = Alignment.Center
         ) {
             if (scalingMode == DeviceAdapter.ScalingMode.INTEGER) {
-                // INTEGER: constrain TrackerScreen to the inner area so it picks the
-                // correct integer scale itself (same as FullScreenLayout's integer path).
                 Box(modifier = Modifier
                     .width((innerW / density).dp)
                     .height((innerH / density).dp)
@@ -468,8 +465,6 @@ fun PortraitLayout2WithVirtualButtons(
                     TrackerScreen(params)
                 }
             } else {
-                // BILINEAR / NEAREST: render at integer scale, then stretch via graphicsLayer
-                // to fill the inner bezel area exactly (same as FullScreenLayout's float path).
                 Box(
                     modifier = Modifier
                         .size(
@@ -486,7 +481,7 @@ fun PortraitLayout2WithVirtualButtons(
         // 3. BRANDING STRIP — logo + LEDs
         Box(
             modifier = Modifier
-                .fillMaxWidth()
+                .width(contentWDp)
                 .height((brandingH / density).dp)
                 .themeBackground(theme.brandingPanelImage, theme.casingColor)
         )
@@ -494,12 +489,12 @@ fun PortraitLayout2WithVirtualButtons(
         // 4. BUTTON CLUSTER
         Box(
             modifier = Modifier
-                .fillMaxWidth()
+                .width(contentWDp)
                 .height((buttonAreaH / density).dp)
         ) {
             VirtualControlsPortrait2(
                 inputMapper     = inputMapper,
-                availableWidth  = layoutConfig.deviceWidth,
+                availableWidth  = contentW,
                 availableHeight = buttonAreaH.coerceAtLeast(100),
                 theme           = theme,
             )
