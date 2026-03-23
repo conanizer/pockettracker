@@ -367,13 +367,48 @@ fun PortraitLayout2WithVirtualButtons(
 ) {
     val density = LocalDensity.current.density
 
-    // X = base unit derived from device width (design: 135X = full width)
+    // X = base unit derived from device width (design: 135X = full width, 300X = full 20:9 height)
     val X = layoutConfig.deviceWidth / 135f
 
-    val topPanelH   = (X * 39.75f).toInt()
-    val bezelH      = (X * 102.75f).toInt()
-    val brandingH   = (X * 22.5f).toInt()
-    val buttonAreaH = (X * 135f).toInt()
+    // Natural heights at the 20:9 design ratio
+    val naturalTopH      = X * 39.75f
+    val naturalBezelH    = X * 102.75f
+    val naturalBrandingH = X * 22.5f
+    val naturalButtonH   = X * 135f
+    // naturalTotal = X*300 = deviceWidth * (20/9)
+
+    // Height needed for everything except the top panel
+    val withoutTopH = naturalBezelH + naturalBrandingH + naturalButtonH  // X * 260.25
+
+    // Adaptive height assignment:
+    //
+    // Case A — device is at least as tall as screen+branding+buttons at full width-scale.
+    //   Top panel absorbs any remaining space up to its natural height; any leftover
+    //   (on extra-tall devices) becomes visible background color at the bottom.
+    //
+    // Case B — even removing the top panel is not enough (e.g. 16:9).
+    //   Top panel = 0. Branding stays at its natural height (full-width proportion).
+    //   Screen bezel and button cluster scale together to fill the remaining height.
+    val topPanelH:   Int
+    val bezelH:      Int
+    val brandingH:   Int
+    val buttonAreaH: Int
+
+    if (layoutConfig.deviceHeight >= withoutTopH) {
+        topPanelH   = (layoutConfig.deviceHeight - withoutTopH).toInt()
+                          .coerceAtMost(naturalTopH.toInt())   // don't stretch beyond design
+        bezelH      = naturalBezelH.toInt()
+        brandingH   = naturalBrandingH.toInt()
+        buttonAreaH = naturalButtonH.toInt()
+    } else {
+        // Scale bezel + buttons together so they fill the height left after branding
+        topPanelH   = 0
+        brandingH   = naturalBrandingH.toInt()
+        val availForScaled = layoutConfig.deviceHeight - brandingH
+        val scale   = availForScaled / (naturalBezelH + naturalButtonH)
+        bezelH      = (naturalBezelH  * scale).toInt().coerceAtLeast(1)
+        buttonAreaH = (naturalButtonH * scale).toInt().coerceAtLeast(100)
+    }
 
     val bezelThickDp = theme.screenBezelThicknessDp.dp
 
@@ -387,14 +422,15 @@ fun PortraitLayout2WithVirtualButtons(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(theme.casingColor)   // fills any leftover space (tall devices, rounding)
             .focusRequester(focusRequester)
             .inputHandler(inputMapper)
             .focusable(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Top
     ) {
-        // 1. TOP PANEL — ventilation grille
-        Box(
+        // 1. TOP PANEL — ventilation grille (height shrinks on sub-20:9 screens, 0 on 16:9)
+        if (topPanelH > 0) Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height((topPanelH / density).dp)
