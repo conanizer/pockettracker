@@ -19,6 +19,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
@@ -459,20 +460,41 @@ fun PortraitLayout2WithVirtualButtons(
                 .height((bezelH / density).dp)
                 .themeBackground(theme.screenBezelImage, theme.screenBezelColor)
                 .padding(bezelThickDp),
-            contentAlignment = Alignment.Center
+            contentAlignment = Alignment.TopStart
         ) {
-            // Render at the integer-scaled size, then stretch by fillFactor so the screen
-            // fills the inner bezel area completely (no beige gaps at edges).
-            // TrackerScreen receives scalingMode via params and handles filtering internally.
-            Box(
-                modifier = Modifier
-                    .size(
-                        width  = (DESIGN_WIDTH_PX  * intScale / density).dp,
-                        height = (DESIGN_HEIGHT_PX * intScale / density).dp
-                    )
-                    .graphicsLayer { scaleX = fillFactor; scaleY = fillFactor }
-            ) {
-                TrackerScreen(params)
+            if (scalingMode == DeviceAdapter.ScalingMode.INTEGER) {
+                // INTEGER: give TrackerScreen the full inner area. PixelPerfectTracker picks
+                // the integer scale itself and its black Canvas background hides the letterbox.
+                Box(modifier = Modifier
+                    .width((innerW / density).dp)
+                    .height((innerH / density).dp)
+                ) {
+                    TrackerScreen(params)
+                }
+            } else {
+                // NEAREST / BILINEAR: render at integer-scale size, then stretch by fillFactor
+                // to fill the inner bezel area. Use TransformOrigin(0,0) + explicit pixel
+                // translation so there is no centering-rounding gap on left/top edges.
+                val scaledW = DESIGN_WIDTH_PX  * intScale * fillFactor  // ≈ innerW
+                val scaledH = DESIGN_HEIGHT_PX * intScale * fillFactor  // ≈ innerH
+                val transX  = (innerW - scaledW) / 2f
+                val transY  = (innerH - scaledH) / 2f
+                Box(
+                    modifier = Modifier
+                        .size(
+                            width  = (DESIGN_WIDTH_PX  * intScale / density).dp,
+                            height = (DESIGN_HEIGHT_PX * intScale / density).dp
+                        )
+                        .graphicsLayer {
+                            scaleX = fillFactor
+                            scaleY = fillFactor
+                            transformOrigin = TransformOrigin(0f, 0f)
+                            translationX = transX
+                            translationY = transY
+                        }
+                ) {
+                    TrackerScreen(params)
+                }
             }
         }
 

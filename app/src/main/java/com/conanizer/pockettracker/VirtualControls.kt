@@ -418,11 +418,12 @@ fun VirtualControlsPortrait2(
     val offYDp     = X * 4f / density
     val pressedDp  = X * 1f / density
 
-    // Cluster box fills the full available area. With float X, 135X == availableWidth
-    // so the backing PNG and button touch targets always coincide perfectly.
+    // Cluster box fills the full available area. clipToBounds() ensures per-dp rounding of
+    // individual button sizes never lets them visually overflow the backing image boundary.
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .clipToBounds()
             .then(
                 if (theme.buttonBackingImage != null)
                     Modifier.paint(BitmapPainter(theme.buttonBackingImage), contentScale = ContentScale.FillBounds)
