@@ -417,10 +417,17 @@ fun VirtualControlsPortrait2(
     val offYDp     = X * 4f / density
     val pressedDp  = X * 1f / density
 
-    // Outer box: button backing (PNG or rounded color rect)
+    // Outer wrapper: fills available space and centers the cluster so it is never
+    // left-shifted when the container is wider than 135X (due to floor rounding).
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+    // Cluster box: exactly 135X × 135X — backing PNG fills this precise area so
+    // the visual button shapes in the image align with the actual touch targets.
     Box(
         modifier = Modifier
-            .fillMaxSize()
+            .size(px(135f))
             .then(
                 if (theme.buttonBackingImage != null)
                     Modifier.paint(BitmapPainter(theme.buttonBackingImage), contentScale = ContentScale.FillBounds)
@@ -494,6 +501,7 @@ fun VirtualControlsPortrait2(
             }
         }
     }
+    } // end centering Box
 }
 
 // ============================================================================
