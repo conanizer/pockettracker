@@ -416,7 +416,14 @@ fun PortraitLayout2WithVirtualButtons(
     val bezelH      = (X * 102.75f).toInt()
     val buttonAreaH = (X * 135f).toInt()
 
-    val bezelThickDp = theme.screenBezelThicknessDp.dp
+    // When screenBezelThicknessX > 0 the border is expressed in X-units (proportional to skin
+    // scale) so it exactly matches the scaled PNG border on every device.  Fall back to the
+    // absolute dp value for solid-color bezels (DARK theme etc.).
+    val bezelThickPx = if (theme.screenBezelThicknessX > 0f)
+        X * theme.screenBezelThicknessX
+    else
+        theme.screenBezelThicknessDp * density
+    val bezelThickDp = (bezelThickPx / density).dp
 
     // Applies PNG paint or solid color background depending on availability
     fun Modifier.themeBackground(image: ImageBitmap?, color: Color): Modifier =
@@ -446,7 +453,6 @@ fun PortraitLayout2WithVirtualButtons(
         // 2. SCREEN BEZEL
         // innerW uses contentW (not deviceW) so the bezel border is proportional
         // to the skin width on all aspect ratios.
-        val bezelThickPx = theme.screenBezelThicknessDp * density
         val innerW = contentW - 2f * bezelThickPx
         val innerH = bezelH  - 2f * bezelThickPx
         val intScale = floor(minOf(innerW / DESIGN_WIDTH_PX, innerH / DESIGN_HEIGHT_PX))

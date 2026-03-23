@@ -21,8 +21,13 @@ data class DeviceTheme(
     val buttonPressedColor: Color,
     val buttonLabelColor:   Color,
 
-    // Bezel border thickness in dp (24px / ~2.67 density ≈ 9dp at 1080p)
-    val screenBezelThicknessDp: Float = 9f,
+    // Bezel border thickness.
+    // Use screenBezelThicknessX (in skin X-units) when a bezel PNG is present — this keeps
+    // the padding proportional to the scaled PNG border on every device/density.
+    // Fall back to screenBezelThicknessDp (absolute dp) for solid-color bezels.
+    // Amiga bezel PNG: 24px border on 1080px image = 24/1080 of width = X * (135 * 24/1080) = X * 3
+    val screenBezelThicknessX:  Float = 0f,   // >0 → use X-unit scaling; 0 → use dp below
+    val screenBezelThicknessDp: Float = 9f,   // used when screenBezelThicknessX == 0
 
     // Corner radius of the black button backing rectangle
     val buttonBackingCornerDp: Float = 12f,
@@ -52,7 +57,7 @@ data class DeviceTheme(
             buttonNormalColor      = Color(0xFFBFA882),
             buttonPressedColor     = Color(0xFF8A7A5A),
             buttonLabelColor       = Color(0xFF0D0D0D),   // near-black
-            screenBezelThicknessDp = 9f,
+            screenBezelThicknessX  = 3f,  // 24px border / 1080px PNG width * 135 X-units = 3X
             buttonBackingCornerDp  = 16f,
         )
 
