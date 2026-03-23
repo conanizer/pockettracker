@@ -407,9 +407,8 @@ fun VirtualControlsPortrait2(
 
     fun px(units: Float) = (X * units / density).dp
 
-    val cellDp    = px(33f)   // square button: 33X × 33X
-    val wideDp    = px(66f)   // wide button: 66X × 33X
-    val paddingDp = px(1.5f)  // 12px outer padding
+    val cellDp    = px(33f)   // square button cell height (and width unit); rows use weight() for width
+    val paddingDp = px(1.5f)  // outer padding
 
     val largeSp = (X * 11f / density).sp  // A, B, arrows
     val smallSp = (X *  7f / density).sp  // Sel, Start, L/R Shift
@@ -439,62 +438,65 @@ fun VirtualControlsPortrait2(
             horizontalAlignment = Alignment.Start,
             verticalArrangement = Arrangement.Top
         ) {
+            // Rows use fillMaxWidth() + weight(1f) per child so Compose distributes the available
+            // width exactly — no dp-rounding accumulation that could let cells overflow the backing.
+
             // Row 1: [L Shift][R Shift]
-            Row {
+            Row(modifier = Modifier.fillMaxWidth().height(cellDp)) {
                 VirtualBtnThemed(inputMapper, VirtualButton.L_SHIFT, "L Shift",
-                    Modifier.size(width = wideDp, height = cellDp), theme, isWide = true,
+                    Modifier.weight(1f).fillMaxHeight(), theme, isWide = true,
                     smallSp, wideOffXDp, offYDp, pressedDp)
                 VirtualBtnThemed(inputMapper, VirtualButton.R_SHIFT, "R Shift",
-                    Modifier.size(width = wideDp, height = cellDp), theme, isWide = true,
+                    Modifier.weight(1f).fillMaxHeight(), theme, isWide = true,
                     smallSp, wideOffXDp, offYDp, pressedDp)
             }
 
             // Row 2: [empty][↑][B][A]
-            Row {
-                Spacer(Modifier.size(cellDp))
+            Row(modifier = Modifier.fillMaxWidth().height(cellDp)) {
+                Spacer(Modifier.weight(1f))
                 VirtualBtnThemed(inputMapper, VirtualButton.DPAD_UP, "↑",
-                    Modifier.size(cellDp), theme,
+                    Modifier.weight(1f).fillMaxHeight(), theme,
                     baseFontSizeSp = largeSp, textOffsetXDp = sqOffXDp,
                     textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
                 VirtualBtnThemed(inputMapper, VirtualButton.B, "B",
-                    Modifier.size(cellDp), theme,
+                    Modifier.weight(1f).fillMaxHeight(), theme,
                     baseFontSizeSp = largeSp, textOffsetXDp = sqOffXDp,
                     textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
                 VirtualBtnThemed(inputMapper, VirtualButton.A, "A",
-                    Modifier.size(cellDp), theme,
+                    Modifier.weight(1f).fillMaxHeight(), theme,
                     baseFontSizeSp = largeSp, textOffsetXDp = sqOffXDp,
                     textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
             }
 
             // Row 3: [←][↓][→][empty]
-            Row {
+            Row(modifier = Modifier.fillMaxWidth().height(cellDp)) {
                 VirtualBtnThemed(inputMapper, VirtualButton.DPAD_LEFT, "←",
-                    Modifier.size(cellDp), theme,
+                    Modifier.weight(1f).fillMaxHeight(), theme,
                     baseFontSizeSp = largeSp, textOffsetXDp = sqOffXDp,
                     textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
                 VirtualBtnThemed(inputMapper, VirtualButton.DPAD_DOWN, "↓",
-                    Modifier.size(cellDp), theme,
+                    Modifier.weight(1f).fillMaxHeight(), theme,
                     baseFontSizeSp = largeSp, textOffsetXDp = sqOffXDp,
                     textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
                 VirtualBtnThemed(inputMapper, VirtualButton.DPAD_RIGHT, "→",
-                    Modifier.size(cellDp), theme,
+                    Modifier.weight(1f).fillMaxHeight(), theme,
                     baseFontSizeSp = largeSp, textOffsetXDp = sqOffXDp,
                     textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
-                Spacer(Modifier.size(cellDp))
+                Spacer(Modifier.weight(1f))
             }
 
             // Row 4: [empty][Sel][Start][empty]
-            Row {
-                Spacer(Modifier.size(cellDp))
+            Row(modifier = Modifier.fillMaxWidth().height(cellDp)) {
+                Spacer(Modifier.weight(1f))
                 VirtualBtnThemed(inputMapper, VirtualButton.SELECT, "Sel",
-                    Modifier.size(cellDp), theme,
+                    Modifier.weight(1f).fillMaxHeight(), theme,
                     baseFontSizeSp = smallSp, textOffsetXDp = sqOffXDp,
                     textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
                 VirtualBtnThemed(inputMapper, VirtualButton.START, "Start",
-                    Modifier.size(cellDp), theme,
+                    Modifier.weight(1f).fillMaxHeight(), theme,
                     baseFontSizeSp = smallSp, textOffsetXDp = sqOffXDp,
                     textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
-                Spacer(Modifier.size(cellDp))
+                Spacer(Modifier.weight(1f))
             }
         }
     }

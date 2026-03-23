@@ -459,7 +459,8 @@ fun PortraitLayout2WithVirtualButtons(
                 .width(contentWDp)
                 .height((bezelH / density).dp)
                 .themeBackground(theme.screenBezelImage, theme.screenBezelColor)
-                .padding(bezelThickDp),
+                .padding(bezelThickDp)
+                .background(Color.Black),  // inner area black — hides any letterbox gap
             contentAlignment = Alignment.TopStart
         ) {
             if (scalingMode == DeviceAdapter.ScalingMode.INTEGER) {
