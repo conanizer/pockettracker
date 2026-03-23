@@ -383,6 +383,11 @@ fun PortraitLayout2WithVirtualButtons(
     //     Skin width (135X) becomes narrower than the device — casingColor fills the sides.
     val xFromWidth = deviceW / 135f
 
+    // Branding always spans full device width, so its height is always proportional
+    // to device width (ratio 135:22.5 = 6:1). Using a scaled-down X here would make
+    // the PNG stretch horizontally when the box is fillMaxWidth().
+    val brandingH = (xFromWidth * 22.5f).toInt()
+
     val X: Float
     val topPanelH: Int
 
@@ -398,9 +403,9 @@ fun PortraitLayout2WithVirtualButtons(
             topPanelH = (deviceH - X * 260.25f).toInt().coerceAtLeast(0)
         }
         else -> {
-            // Case C: skin is height-constrained; skin will be narrower than the screen
-            X = deviceH / 260.25f
+            // Case C: skin is height-constrained; derive X from remaining height after branding
             topPanelH = 0
+            X = (deviceH - brandingH) / (102.75f + 135f)
         }
     }
 
@@ -408,7 +413,6 @@ fun PortraitLayout2WithVirtualButtons(
     val contentW    = (X * 135f).toInt()
     val contentWDp  = (contentW / density).dp
     val bezelH      = (X * 102.75f).toInt()
-    val brandingH   = (X * 22.5f).toInt()
     val buttonAreaH = (X * 135f).toInt()
 
     val bezelThickDp = theme.screenBezelThicknessDp.dp
@@ -423,7 +427,7 @@ fun PortraitLayout2WithVirtualButtons(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFCDAA7E))   // fills sides (case C) and any bottom gap
+            .background(Color(0xFFBF9971))   // fills sides (case C) and any bottom gap
             .focusRequester(focusRequester)
             .inputHandler(inputMapper)
             .focusable(),
