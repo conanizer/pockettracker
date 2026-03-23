@@ -398,10 +398,11 @@ fun VirtualControlsPortrait2(
 
     val density = LocalDensity.current.density
 
-    // X = base unit. Cluster is 135X × 135X (square).
-    val xByWidth  = floor(availableWidth  / 135f)
-    val xByHeight = floor(availableHeight / 135f)
-    val X = minOf(xByWidth, xByHeight).toInt().coerceAtLeast(1)
+    // X = base unit as a Float so that 135X fills the available space exactly.
+    // Using floor() here would leave sub-unit gaps at the edges on resolutions
+    // that are not a perfect multiple of 135 (e.g. 2800px → floor=20, 135×20=2700,
+    // 100px gap). Keeping it as a Float means 135X == availableWidth always.
+    val X = minOf(availableWidth / 135f, availableHeight / 135f).coerceAtLeast(1f)
 
     fun px(units: Float) = (X * units / density).dp
 
@@ -417,17 +418,11 @@ fun VirtualControlsPortrait2(
     val offYDp     = X * 4f / density
     val pressedDp  = X * 1f / density
 
-    // Outer wrapper: fills available space and centers the cluster so it is never
-    // left-shifted when the container is wider than 135X (due to floor rounding).
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-    // Cluster box: exactly 135X × 135X — backing PNG fills this precise area so
-    // the visual button shapes in the image align with the actual touch targets.
+    // Cluster box fills the full available area. With float X, 135X == availableWidth
+    // so the backing PNG and button touch targets always coincide perfectly.
     Box(
         modifier = Modifier
-            .size(px(135f))
+            .fillMaxSize()
             .then(
                 if (theme.buttonBackingImage != null)
                     Modifier.paint(BitmapPainter(theme.buttonBackingImage), contentScale = ContentScale.FillBounds)
@@ -501,7 +496,6 @@ fun VirtualControlsPortrait2(
             }
         }
     }
-    } // end centering Box
 }
 
 // ============================================================================
