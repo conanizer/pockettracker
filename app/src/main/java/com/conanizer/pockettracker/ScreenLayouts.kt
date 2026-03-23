@@ -461,24 +461,18 @@ fun PortraitLayout2WithVirtualButtons(
                 .padding(bezelThickDp),
             contentAlignment = Alignment.Center
         ) {
-            if (scalingMode == DeviceAdapter.ScalingMode.INTEGER) {
-                Box(modifier = Modifier
-                    .width((innerW / density).dp)
-                    .height((innerH / density).dp)
-                ) {
-                    TrackerScreen(params)
-                }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(
-                            width  = (DESIGN_WIDTH_PX  * intScale / density).dp,
-                            height = (DESIGN_HEIGHT_PX * intScale / density).dp
-                        )
-                        .graphicsLayer { scaleX = fillFactor; scaleY = fillFactor }
-                ) {
-                    TrackerScreen(params)
-                }
+            // Render at the integer-scaled size, then stretch by fillFactor so the screen
+            // fills the inner bezel area completely (no beige gaps at edges).
+            // TrackerScreen receives scalingMode via params and handles filtering internally.
+            Box(
+                modifier = Modifier
+                    .size(
+                        width  = (DESIGN_WIDTH_PX  * intScale / density).dp,
+                        height = (DESIGN_HEIGHT_PX * intScale / density).dp
+                    )
+                    .graphicsLayer { scaleX = fillFactor; scaleY = fillFactor }
+            ) {
+                TrackerScreen(params)
             }
         }
 

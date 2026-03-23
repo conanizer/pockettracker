@@ -462,9 +462,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     }
     val initialScalingMode = remember {
         if (savedScalingName != null) {
-            DeviceAdapter.ScalingMode.entries.firstOrNull { it.name == savedScalingName } ?: DeviceAdapter.ScalingMode.INTEGER
+            DeviceAdapter.ScalingMode.entries.firstOrNull { it.name == savedScalingName } ?: DeviceAdapter.ScalingMode.NEAREST
         } else {
-            DeviceAdapter.ScalingMode.INTEGER
+            DeviceAdapter.ScalingMode.NEAREST
         }
     }
 
@@ -483,9 +483,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // BUTTON SOUND & VIBRO — app-level settings persisted in SharedPreferences
     // ═══════════════════════════════════════════════════════════════════════
 
-    var buttonSoundEnabled by remember { mutableStateOf(prefs.getBoolean("button_sound", false)) }
+    var buttonSoundEnabled by remember { mutableStateOf(prefs.getBoolean("button_sound", true)) }
     var buttonSoundVolume  by remember { mutableStateOf(prefs.getInt("button_sound_volume", 255)) }
-    var buttonVibroEnabled by remember { mutableStateOf(prefs.getBoolean("button_vibro", false)) }
+    var buttonVibroEnabled by remember { mutableStateOf(prefs.getBoolean("button_vibro", true)) }
     var vibroPower         by remember { mutableStateOf(prefs.getInt("vibro_power", 255)) }
 
     // QWERTY keyboard insert mode (persisted in SharedPreferences)
