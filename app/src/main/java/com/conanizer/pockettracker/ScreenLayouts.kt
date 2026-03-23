@@ -423,7 +423,7 @@ fun PortraitLayout2WithVirtualButtons(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(theme.casingColor)   // beige fills sides (case C) and any bottom gap
+            .background(Color(0xFFCDAA7E))   // fills sides (case C) and any bottom gap
             .focusRequester(focusRequester)
             .inputHandler(inputMapper)
             .focusable(),
@@ -478,10 +478,10 @@ fun PortraitLayout2WithVirtualButtons(
             }
         }
 
-        // 3. BRANDING STRIP — logo + LEDs
+        // 3. BRANDING STRIP — logo + LEDs (always full screen width)
         Box(
             modifier = Modifier
-                .width(contentWDp)
+                .fillMaxWidth()
                 .height((brandingH / density).dp)
                 .themeBackground(theme.brandingPanelImage, theme.casingColor)
         )
