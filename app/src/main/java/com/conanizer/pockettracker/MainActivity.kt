@@ -1262,6 +1262,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                                 val result = trackerController.loadProject(item.file.toFileInfo())
                                                 when (result) {
                                                     is FileController.LoadResult.Success -> {
+                                                        // Sync project name from filename (handles renamed files)
+                                                        result.project.name = item.file.nameWithoutExtension.take(20)
                                                         trackerController.project = result.project
                                                         // Reload all custom samples from the loaded project
                                                         reloadProjectSamples()
@@ -1394,15 +1396,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                         Log.d("ProjectScreen", "LOAD button pressed - switching to FILE_BROWSER")
                                         previousScreen = trackerController.currentScreen
                                         trackerController.currentScreen = ScreenType.FILE_BROWSER
-                                        // Reset file browser state with correct directory and extension
-                                        fileBrowserState = fileBrowserState.copy(
-                                            currentDirectory = File(fileManager.getProjectsDirectory()),
-                                            cursor = 0,
-                                            scroll = 0,
-                                            mode = FileBrowserModule.BrowserMode.NORMAL,
-                                            fileExtension = "ptp",  // Filter for project files
-                                            fileExtensions = null,  // Clear wav/video filter left by instrument browser
-                                            statusMessage = ""
+                                        // Navigate to folder directly so items list is always rebuilt
+                                        val projectsDir = File(fileManager.getProjectsDirectory())
+                                        fileBrowserState = fileBrowserModule.navigateToFolder(
+                                            fileBrowserState.copy(
+                                                fileExtension = "ptp",
+                                                fileExtensions = null,
+                                                mode = FileBrowserModule.BrowserMode.NORMAL,
+                                                statusMessage = ""
+                                            ),
+                                            projectsDir
                                         )
                                         Log.d("ProjectScreen", "File browser opened for .ptp files")
                                     }
@@ -2019,6 +2022,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
 
                                 ScreenType.MIXER -> {
                                     Log.d("Playback", "  → Starting song (from mixer)")
+                                    trackerController.playSong()
+                                }
+
+                                ScreenType.PROJECT -> {
+                                    Log.d("Playback", "  → Starting song (from project)")
                                     trackerController.playSong()
                                 }
 

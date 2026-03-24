@@ -120,7 +120,7 @@ class ProjectModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 2: NAME (12 characters, editable per-character)
+        // ROW 2: NAME (20 characters, editable per-character)
         // ─────────────────────────────────────
         drawNameRow(
             x = x,
@@ -303,13 +303,13 @@ class ProjectModule : TrackerModule {
             fontScale = FONT_SCALE
         )
 
-        // COLUMN 2: Name characters (12 characters max)
+        // COLUMN 2: Name characters (20 characters max)
         // Show actual name characters only; no placeholder for empty slots.
-        val projectName = projectState.project.name.take(12)
+        val projectName = projectState.project.name.take(20)
 
         // Draw each character separately
         var charX = valueColumnX
-        for (charIndex in 0..11) {
+        for (charIndex in 0..19) {
             val hasChar = charIndex < projectName.length
 
             // Is cursor on THIS specific character?
@@ -571,7 +571,7 @@ class ProjectModule : TrackerModule {
                 }
                 // Get the character index (column 1 = char 0, column 2 = char 1, etc.)
                 val charIndex = state.cursorColumn - 1
-                if (charIndex >= 12) {
+                if (charIndex >= 20) {
                     return CursorContextFactory.none()
                 }
 
@@ -639,20 +639,20 @@ class ProjectModule : TrackerModule {
             2 -> {
                 // NAME row - per-character editing
                 val charIndex = state.cursorColumn - 1
-                if (charIndex < 0 || charIndex >= 12) return InputResult(modified = false)
+                if (charIndex < 0 || charIndex >= 20) return InputResult(modified = false)
 
                 when (action) {
                     is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
                         // Set character at position
                         val char = action.value.toChar()
-                        val sb = StringBuilder(state.project.name.padEnd(12, ' '))
+                        val sb = StringBuilder(state.project.name.padEnd(20, ' '))
                         sb.setCharAt(charIndex, char)
                         state.project.name = sb.toString().trimEnd()  // Remove trailing spaces
                     }
                     is com.conanizer.pockettracker.core.logic.InputAction.DELETE -> {
                         // Delete character (replace with space)
                         if (charIndex < state.project.name.length) {
-                            val sb = StringBuilder(state.project.name.padEnd(12, ' '))
+                            val sb = StringBuilder(state.project.name.padEnd(20, ' '))
                             sb.setCharAt(charIndex, ' ')
                             state.project.name = sb.toString().trimEnd()
                         }
@@ -683,7 +683,7 @@ class ProjectModule : TrackerModule {
  * @param cursorColumn Which column:
  *   - 0 = Parameter name (left column)
  *   - 1+ = Value columns (specific to each row)
- *   For NAME row: 1-12 = character position
+ *   For NAME row: 1-20 = character position
  *   For PROJECT row: 1=LOAD, 2=SAVE, 3=NEW
  * @param statusMessage Status message to show at bottom
  * @param isSuccess True if status is success, false if error

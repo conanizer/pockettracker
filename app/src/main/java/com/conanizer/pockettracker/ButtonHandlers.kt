@@ -566,7 +566,8 @@ class InputMapper(
         }
 
         // SELECT + button combinations (file operations)
-        if (isSelectPressed && !isLPressed && !isRPressed) {
+        // Note: !isRPressed is relaxed for R_SHIFT itself since isRPressed is set before this check
+        if (isSelectPressed && !isLPressed && (!isRPressed || button == VirtualButton.R_SHIFT)) {
             when (button) {
                 VirtualButton.A -> {
                     if (logInput) Log.d(TAG, "SELECT+A (rename)")
