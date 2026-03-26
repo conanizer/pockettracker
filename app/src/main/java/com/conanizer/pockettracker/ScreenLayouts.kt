@@ -85,6 +85,7 @@ data class TrackerScreenParams(
     val buttonVibroEnabled: Boolean = false,
     val vibroPower: Int = 255,
     val qwertyKeyboardState: QwertyKeyboardState = QwertyKeyboardState(),
+    val fxHelperState: FxHelperState = FxHelperState(),
     val settingsCursorRow: Int = 0,
     val settingsCursorColumn: Int = 1
 )
@@ -141,6 +142,7 @@ private fun TrackerScreen(params: TrackerScreenParams, modifier: Modifier = Modi
         buttonVibroEnabled   = params.buttonVibroEnabled,
         vibroPower           = params.vibroPower,
         qwertyKeyboardState  = params.qwertyKeyboardState,
+        fxHelperState        = params.fxHelperState,
         settingsCursorRow    = params.settingsCursorRow,
         settingsCursorColumn = params.settingsCursorColumn
     )

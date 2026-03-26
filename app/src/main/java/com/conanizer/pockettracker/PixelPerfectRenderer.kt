@@ -16,6 +16,7 @@ import kotlinx.coroutines.delay
 import com.conanizer.pockettracker.core.audio.AudioEngine
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.data.ScreenType
+import com.conanizer.pockettracker.core.logic.EffectProcessor
 
 /**
  * PIXEL-PERFECT TRACKER - MODULAR VERSION
@@ -104,6 +105,8 @@ fun PixelPerfectTracker(
     vibroPower: Int = 255,
     // QWERTY keyboard overlay state
     qwertyKeyboardState: QwertyKeyboardState = QwertyKeyboardState(),
+    // FX helper overlay state
+    fxHelperState: FxHelperState = FxHelperState(),
     // Settings screen cursor
     settingsCursorRow: Int = 0,
     settingsCursorColumn: Int = 1
@@ -240,6 +243,7 @@ fun PixelPerfectTracker(
                         buttonVibroEnabled = buttonVibroEnabled,
                         vibroPower = vibroPower,
                         qwertyKeyboardState = qwertyKeyboardState,
+                        fxHelperState = fxHelperState,
                         settingsCursorRow = settingsCursorRow,
                         settingsCursorColumn = settingsCursorColumn
                     )
@@ -340,6 +344,8 @@ class TrackerLayout {
         vibroPower: Int = 255,
         // QWERTY keyboard overlay state
         qwertyKeyboardState: QwertyKeyboardState = QwertyKeyboardState(),
+        // FX helper overlay state
+        fxHelperState: FxHelperState = FxHelperState(),
         // Settings screen cursor
         settingsCursorRow: Int = 0,
         settingsCursorColumn: Int = 1
@@ -717,6 +723,14 @@ class TrackerLayout {
         }
 
         // ===================================
+        // FX HELPER OVERLAY
+        // Drawn on top of everything when active
+        // ===================================
+        if (fxHelperState.isOpen) {
+            drawFxHelper(fxHelperState, scale)
+        }
+
+        // ===================================
         // LAYOUT COMPLETE!
         // ===================================
         // Left column: Oscilloscope + Phrase Editor (or placeholder)
@@ -978,6 +992,138 @@ class TrackerLayout {
                     )
                 }
             }
+        }
+    }
+
+    // ============================================================================
+    // FX HELPER OVERLAY
+    // ============================================================================
+
+    /**
+     * Draw the FX helper overlay.
+     *
+     * Layout (box = 580×222px, centered on 640×480 canvas):
+     *   Description area: up to 4 lines × ROW_HEIGHT (84px)
+     *   8px spacer
+     *   "EFFECT" header (21px), centered
+     *   8px spacer
+     *   4 rows × 5 cols effect grid (84px)
+     *
+     * Box: 580×222, top-left at (30, 129)
+     */
+    private fun DrawScope.drawFxHelper(state: FxHelperState, scale: Int) {
+        val fs = 3          // font scale (15px chars)
+        val cs = 2          // char spacing
+        val charW = 5 * fs + cs  // 17px per char slot
+        val rowH = 21       // row height
+
+        // ── Box geometry ─────────────────────────────────────────────────────
+        val boxW = 580
+        val boxH = 222
+        val boxX = (DESIGN_WIDTH_PX - boxW) / 2    // 30
+        val boxY = (DESIGN_HEIGHT_PX - boxH) / 2   // 129
+        val innerX = boxX + 10
+
+        // ── Semi-transparent backdrop ─────────────────────────────────────────
+        drawRect(
+            color = Color(0xCC000000),
+            topLeft = Offset.Zero,
+            size = Size((DESIGN_WIDTH_PX * scale).toFloat(), (DESIGN_HEIGHT_PX * scale).toFloat())
+        )
+
+        // ── Dialog box ────────────────────────────────────────────────────────
+        drawRect(
+            color = Color(0xFF1a1a1a),
+            topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
+            size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat())
+        )
+        drawRect(
+            color = Color(0xFF00CCCC),
+            topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
+            size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat()),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
+        )
+
+        // ── Description lines (up to 4) ───────────────────────────────────────
+        val descLines = state.descriptionLines()
+        var textY = boxY + 8
+        for (i in 0 until 4) {
+            val line = descLines.getOrNull(i) ?: break
+            drawBitmapText(
+                text = line,
+                x = innerX,
+                y = textY + 3,
+                scale = scale,
+                color = Color(0xFFCCCCCC),
+                spacing = cs,
+                fontScale = fs
+            )
+            textY += rowH
+        }
+
+        // ── "EFFECT" header (centered, cyan) ──────────────────────────────────
+        val headerY = boxY + 8 + 4 * rowH + 8   // 8 + 84 + 8 = 100px from top
+        val headerText = "EFFECT"
+        val headerW = headerText.length * charW
+        val headerX = boxX + (boxW - headerW) / 2
+        drawBitmapText(
+            text = headerText,
+            x = headerX,
+            y = headerY + 3,
+            scale = scale,
+            color = Color.Cyan,
+            spacing = cs,
+            fontScale = fs
+        )
+
+        // ── Effect grid (5 cols × 4 rows) ─────────────────────────────────────
+        val gridY = headerY + rowH + 8           // after header + spacer
+        val cellW = 96
+        val gridCols = 5
+        val gridW = gridCols * cellW             // 480px
+        val gridX = boxX + (boxW - gridW) / 2   // center in box
+
+        val effectTypes = EffectProcessor.EFFECT_TYPES
+        for (i in effectTypes.indices) {
+            val row = i / gridCols
+            val col = i % gridCols
+            val cellX = gridX + col * cellW
+            val cellY = gridY + row * rowH
+
+            val isCursor = (state.cursorRow == row && state.cursorCol == col)
+            val effectName = getEffectTypeName(effectTypes[i])
+
+            // Cursor highlight background
+            if (isCursor) {
+                drawRect(
+                    color = Color(0xFF444400),
+                    topLeft = Offset((cellX * scale).toFloat(), (cellY * scale).toFloat()),
+                    size = Size((cellW * scale).toFloat(), (rowH * scale).toFloat())
+                )
+                drawRect(
+                    color = Color.Yellow,
+                    topLeft = Offset((cellX * scale).toFloat(), (cellY * scale).toFloat()),
+                    size = Size((cellW * scale).toFloat(), (rowH * scale).toFloat()),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
+                )
+            }
+
+            // Effect name centered in cell
+            val nameW = 3 * charW
+            val nameX = cellX + (cellW - nameW) / 2
+            drawBitmapText(
+                text = effectName,
+                x = nameX,
+                y = cellY + 3,
+                scale = scale,
+                color = when {
+                    isCursor -> Color.Yellow
+                    effectTypes[i] == EffectProcessor.FX_NONE -> Color(0xFF666666)
+                    else -> Color(0xFFaaaaaa)
+                },
+                spacing = cs,
+                fontScale = fs
+            )
         }
     }
 

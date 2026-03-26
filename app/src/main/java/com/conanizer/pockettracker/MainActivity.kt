@@ -40,6 +40,7 @@ import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.data.ScreenType
 import com.conanizer.pockettracker.core.logic.ClipboardManager
+import com.conanizer.pockettracker.core.logic.EffectProcessor
 import com.conanizer.pockettracker.core.logic.RenderController
 import com.conanizer.pockettracker.platform.android.OboeAudioBackend
 import androidx.compose.runtime.rememberCoroutineScope
@@ -494,6 +495,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // QWERTY keyboard overlay state (transient — not persisted)
     var qwertyKeyboardState by remember { mutableStateOf(QwertyKeyboardState()) }
 
+    // FX helper overlay state (transient — not persisted)
+    var fxHelperState by remember { mutableStateOf(FxHelperState()) }
+
     val buttonSoundManager = remember { ButtonSoundManager(context) }
     val buttonHapticManager = remember { ButtonHapticManager(context) }
 
@@ -764,6 +768,78 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
 
         // Sync all track/master volumes to audio backend
         syncVolumesToAudioBackend()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FX HELPER OVERLAY HELPERS
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** True if cursor is currently on an FX type column in PHRASE or TABLE. */
+    fun isOnFxTypeColumn(): Boolean = when (trackerController.currentScreen) {
+        ScreenType.PHRASE -> trackerController.cursorColumn == 4 ||
+                             trackerController.cursorColumn == 6 ||
+                             trackerController.cursorColumn == 8
+        ScreenType.TABLE  -> trackerController.tableCursorColumn == 3 ||
+                             trackerController.tableCursorColumn == 5 ||
+                             trackerController.tableCursorColumn == 7
+        else -> false
+    }
+
+    /** Returns the EFFECT_TYPES index for the FX type currently under the cursor. */
+    fun getCurrentFxTypeIndex(): Int {
+        val code = when (trackerController.currentScreen) {
+            ScreenType.PHRASE -> {
+                val step = trackerController.project.phrases[trackerController.currentPhrase]
+                    .steps[trackerController.cursorRow]
+                when (trackerController.cursorColumn) {
+                    4 -> step.fx1Type
+                    6 -> step.fx2Type
+                    8 -> step.fx3Type
+                    else -> 0
+                }
+            }
+            ScreenType.TABLE -> {
+                val row = trackerController.project.tables[trackerController.currentTable]
+                    .rows[trackerController.tableCursorRow]
+                when (trackerController.tableCursorColumn) {
+                    3 -> row.fx1Type
+                    5 -> row.fx2Type
+                    7 -> row.fx3Type
+                    else -> 0
+                }
+            }
+            else -> 0
+        }
+        val idx = EffectProcessor.EFFECT_TYPES.indexOf(code)
+        return if (idx < 0) 0 else idx
+    }
+
+    /** Writes [effectCode] into the FX type column currently under cursor. */
+    fun applyFxTypeChange(effectCode: Int) {
+        when (trackerController.currentScreen) {
+            ScreenType.PHRASE -> {
+                val step = trackerController.project.phrases[trackerController.currentPhrase]
+                    .steps[trackerController.cursorRow]
+                when (trackerController.cursorColumn) {
+                    4 -> step.fx1Type = effectCode
+                    6 -> step.fx2Type = effectCode
+                    8 -> step.fx3Type = effectCode
+                }
+                trackerController.projectVersion++
+            }
+            ScreenType.TABLE -> {
+                val row = trackerController.project.tables[trackerController.currentTable]
+                    .rows[trackerController.tableCursorRow]
+                when (trackerController.tableCursorColumn) {
+                    3 -> row.fx1Type = effectCode
+                    5 -> row.fx2Type = effectCode
+                    7 -> row.fx3Type = effectCode
+                }
+                audioEngine.invalidateTable(trackerController.currentTable)
+                trackerController.projectVersion++
+            }
+            else -> {}
+        }
     }
 
     /**
@@ -2063,23 +2139,45 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
 // A + DIRECTION COMBINATIONS (M8-style value editing)
 // ───────────────────────────────────────────────────────────────
             onAUp = {
-                // A+UP: Small increment (selection-aware)
-                handleSelectionOrSingleIncrement { context -> trackerController.inputController.handleAButton(context) }
+                if (fxHelperState.isOpen) {
+                    fxHelperState = fxHelperState.fxMoveCursorUp()
+                } else if (isOnFxTypeColumn()) {
+                    val idx = getCurrentFxTypeIndex()
+                    fxHelperState = FxHelperState(isOpen = true, cursorRow = idx / 5, cursorCol = idx % 5)
+                } else {
+                    // A+UP: Small increment (selection-aware)
+                    handleSelectionOrSingleIncrement { context -> trackerController.inputController.handleAButton(context) }
+                }
             },
 
             onADown = {
-                // A+DOWN: Small decrement (selection-aware)
-                handleSelectionOrSingleIncrement { context -> trackerController.inputController.handleBButton(context) }
+                if (fxHelperState.isOpen) {
+                    fxHelperState = fxHelperState.fxMoveCursorDown()
+                } else if (isOnFxTypeColumn()) {
+                    val idx = getCurrentFxTypeIndex()
+                    fxHelperState = FxHelperState(isOpen = true, cursorRow = idx / 5, cursorCol = idx % 5)
+                } else {
+                    // A+DOWN: Small decrement (selection-aware)
+                    handleSelectionOrSingleIncrement { context -> trackerController.inputController.handleBButton(context) }
+                }
             },
 
             onALeft = {
-                // A+LEFT: Large decrement (selection-aware)
-                handleSelectionOrSingleIncrement { context -> trackerController.inputController.handleALeft(context) }
+                if (fxHelperState.isOpen) {
+                    fxHelperState = fxHelperState.fxMoveCursorLeft()
+                } else {
+                    // A+LEFT: Large decrement (selection-aware)
+                    handleSelectionOrSingleIncrement { context -> trackerController.inputController.handleALeft(context) }
+                }
             },
 
             onARight = {
-                // A+RIGHT: Large increment (selection-aware)
-                handleSelectionOrSingleIncrement { context -> trackerController.inputController.handleARight(context) }
+                if (fxHelperState.isOpen) {
+                    fxHelperState = fxHelperState.fxMoveCursorRight()
+                } else {
+                    // A+RIGHT: Large increment (selection-aware)
+                    handleSelectionOrSingleIncrement { context -> trackerController.inputController.handleARight(context) }
+                }
             },
 
 // ───────────────────────────────────────────────────────────────
@@ -2894,6 +2992,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     trackerController.inputController.exitSelectionMode()
                     Log.d("Selection", "L+R: Exited selection mode")
                 }
+            },
+
+// ─────────────────────────────────────────────────────────────────────
+// A RELEASED: close FX helper overlay and apply selected effect
+// ─────────────────────────────────────────────────────────────────────
+            onAReleased = {
+                if (fxHelperState.isOpen) {
+                    applyFxTypeChange(fxHelperState.selectedEffectCode())
+                    fxHelperState = FxHelperState()
+                }
             }
         )
     }
@@ -2996,6 +3104,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         buttonVibroEnabled      = buttonVibroEnabled,
         vibroPower              = vibroPower,
         qwertyKeyboardState     = qwertyKeyboardState.copy(insertBefore = insertBefore),
+        fxHelperState           = fxHelperState,
         settingsCursorRow       = stateVersion.let { trackerController.settingsCursorRow },
         settingsCursorColumn    = stateVersion.let { trackerController.settingsCursorColumn }
     )

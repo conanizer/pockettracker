@@ -95,7 +95,10 @@ data class ButtonHandlers(
     val onAA: () -> Unit,           // A,A: Insert next unused item
 
     // L+B+A: Clone current item to next unused slot
-    val onLBA: () -> Unit           // L+B+A: Clone chain/phrase to next unused ID
+    val onLBA: () -> Unit,          // L+B+A: Clone chain/phrase to next unused ID
+
+    // A button release (for modal overlays that close when A is released)
+    val onAReleased: () -> Unit = {}  // Called when A button is released
 )
 
 /**
@@ -391,6 +394,9 @@ class InputMapper(
 
         // Cancel key repeat on any key release (D-PAD, A, B)
         if (action == ButtonAction.RELEASED) {
+            if (button == VirtualButton.A) {
+                buttonHandlers.onAReleased()
+            }
             when (button) {
                 VirtualButton.DPAD_UP, VirtualButton.DPAD_DOWN,
                 VirtualButton.DPAD_LEFT, VirtualButton.DPAD_RIGHT,
