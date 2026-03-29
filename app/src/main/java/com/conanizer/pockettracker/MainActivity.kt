@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import android.content.res.Configuration
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.core.content.ContextCompat
 import com.conanizer.pockettracker.ui.theme.PockettrackerTheme
 import androidx.compose.ui.focus.FocusRequester
@@ -3109,15 +3110,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         settingsCursorColumn    = stateVersion.let { trackerController.settingsCursorColumn }
     )
 
+    val hapticView = LocalView.current
     CompositionLocalProvider(
         LocalLayoutMode provides layoutMode,
         LocalButtonEventCallback provides { button, isPress ->
             if (isPress) {
                 buttonSoundManager.onPress(button)
-                buttonHapticManager.onPress()
+                buttonHapticManager.onPress(hapticView)
             } else {
                 buttonSoundManager.onRelease(button)
-                buttonHapticManager.onRelease()
+                buttonHapticManager.onRelease(hapticView)
             }
         }
     ) {
