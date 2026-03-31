@@ -86,30 +86,16 @@ class SongEditorModule : TrackerModule {
         }
 
         // ===================================
-        // STEP 3: Draw header "SONG: NAME  BPM: 128"
+        // STEP 3: Draw header "SONG: NAME"
+        // (BPM is now shown in the right bar track note monitor)
         // ===================================
         var rowY = y + TEXT_PADDING
 
-        // Song name (left side)
+        // Song name
         val songName = songState.project.name.take(10)  // Max 10 chars
         drawBitmapText(
             text = "SONG: $songName",
             x = x + 10,
-            y = rowY,
-            scale = scale,
-            color = Color.Cyan,
-            spacing = CHAR_SPACING,
-            fontScale = FONT_SCALE
-        )
-
-        // BPM (right side of header)
-        val bpmText = "BPM: ${songState.project.tempo}"
-        val bpmWidth = (bpmText.length * (5 * FONT_SCALE)) + ((bpmText.length - 1) * CHAR_SPACING)
-        val bpmX = x + width - bpmWidth - 10
-
-        drawBitmapText(
-            text = bpmText,
-            x = bpmX,
             y = rowY,
             scale = scale,
             color = Color.Cyan,

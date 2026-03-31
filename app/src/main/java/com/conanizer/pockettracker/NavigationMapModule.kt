@@ -54,7 +54,7 @@ class NavigationMapModule : TrackerModule {
         // STEP 1: Draw background
         // ===================================
         drawRect(
-            color = Color(0xFF0f0f0f),
+            color = Color(0xFF0a0a0a),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size = Size((width * scale).toFloat(), (height * scale).toFloat())
         )

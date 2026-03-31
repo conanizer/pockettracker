@@ -316,6 +316,62 @@ class PlaybackController(
     fun getTrackNotes(): List<Note> = trackStates.map { it.lastNote }
 
     /**
+     * Returns the note currently playing on each track, derived from the actual playback
+     * position in the project data. This is accurate (not schedule-ahead like getTrackNotes).
+     *
+     * Looks backward from the current phrase step to find the last triggered note,
+     * so notes persist visually until a new note fires on that track.
+     */
+    fun getCurrentPlayingNotes(): List<Note> {
+        val project = currentProject ?: return List(8) { Note.EMPTY }
+        if (!isPlaying) return List(8) { Note.EMPTY }
+
+        val position = getPlaybackPosition()
+
+        return List(8) { trackIdx ->
+            when (playbackMode) {
+                PlaybackMode.SONG -> {
+                    val chainId = project.tracks.getOrNull(trackIdx)
+                        ?.chainRefs?.getOrNull(position.songRow) ?: -1
+                    if (chainId < 0) return@List Note.EMPTY
+                    val chain = project.chains.getOrNull(chainId) ?: return@List Note.EMPTY
+                    val phraseId = chain.phraseRefs.getOrNull(position.chainRow) ?: -1
+                    if (phraseId < 0) return@List Note.EMPTY
+                    val phrase = project.phrases.getOrNull(phraseId) ?: return@List Note.EMPTY
+                    // Scan back from current step: last triggered note persists until a new one fires
+                    for (step in position.row downTo 0) {
+                        val note = phrase.steps.getOrNull(step)?.note ?: continue
+                        if (note != Note.EMPTY) return@List note
+                    }
+                    Note.EMPTY
+                }
+                PlaybackMode.CHAIN -> {
+                    if (trackIdx != 0) return@List Note.EMPTY
+                    val chain = project.chains.getOrNull(currentChainId) ?: return@List Note.EMPTY
+                    val phraseId = chain.phraseRefs.getOrNull(position.chainRow) ?: -1
+                    if (phraseId < 0) return@List Note.EMPTY
+                    val phrase = project.phrases.getOrNull(phraseId) ?: return@List Note.EMPTY
+                    for (step in position.row downTo 0) {
+                        val note = phrase.steps.getOrNull(step)?.note ?: continue
+                        if (note != Note.EMPTY) return@List note
+                    }
+                    Note.EMPTY
+                }
+                PlaybackMode.PHRASE -> {
+                    if (trackIdx != 0) return@List Note.EMPTY
+                    val phrase = project.phrases.getOrNull(currentPhraseId) ?: return@List Note.EMPTY
+                    for (step in position.row downTo 0) {
+                        val note = phrase.steps.getOrNull(step)?.note ?: continue
+                        if (note != Note.EMPTY) return@List note
+                    }
+                    Note.EMPTY
+                }
+                else -> Note.EMPTY
+            }
+        }
+    }
+
+    /**
      * Playback position data class for UI rendering
      */
     data class PlaybackPosition(

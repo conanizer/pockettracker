@@ -137,7 +137,7 @@ fun PixelPerfectTracker(
     // This is SIMPLIFIED: all scheduling logic moved to PlaybackController.updatePlaybackBuffer()
     LaunchedEffect(isPlaying, currentScreen) {
         if (isPlaying) {
-            trackNotes = List(8) { Note.EMPTY }  // Reset at start of playback
+            trackNotes = List(8) { Note.EMPTY }  // Clear stale notes at start of new playback
             while (isPlaying) {
                 // Update lookahead buffer - PlaybackController handles all scheduling
                 playbackController.updatePlaybackBuffer()
@@ -148,12 +148,17 @@ fun PixelPerfectTracker(
                 playbackChainRow = position.chainRow
                 playbackPhraseStep = position.phraseStep
                 playbackSongRow = position.songRow
-                trackNotes = playbackController.getTrackNotes()
+                // Derive notes from actual playback position (not schedule-ahead trackStates)
+                trackNotes = playbackController.getCurrentPlayingNotes()
 
                 // Update UI at 60 Hz
                 delay(16L)
             }
-            trackNotes = List(8) { Note.EMPTY }  // Reset when stopped
+        } else {
+            // isPlaying just became false — clear monitor immediately
+            // (can't do this after the while loop because LaunchedEffect cancels the old
+            // coroutine when its keys change, so code after the loop never executes)
+            trackNotes = List(8) { Note.EMPTY }
         }
     }
 
@@ -692,29 +697,33 @@ class TrackerLayout {
 
         if (currentScreen != ScreenType.FILE_BROWSER && currentScreen != ScreenType.SETTINGS) {
             val rightBarX = DESIGN_WIDTH_PX - navigationMap.width - SIDE_SPACER  // 515
-            val rightBarTopY = SCREEN_SPACER + oscilloscope.height + SCREEN_SPACER  // 82
+
+            // BPM row aligns with column headers on all main editors:
+            // editors lay out: header row (21px) + 14px spacer → column headers at y+35
+            // Text within row is offset by TEXT_PADDING=3, so text at y+38 absolute = 82+35=117 row, 120 text
+            val editorHeaderRowY = SCREEN_SPACER + oscilloscope.height + SCREEN_SPACER  // 82
+            val bpmRowY = editorHeaderRowY + 21 + 14  // 117 — same as column header rows in editors
+            val bpmTextY = bpmRowY + 3                // 120
 
             // ===================================
-            // RIGHT BAR: BPM + Track Note Monitor
+            // RIGHT BAR: BPM row
             // ===================================
-            // Background rect covering BPM row + 8 track rows (9 rows × 21px = 189px)
-            drawRect(
-                color = Color(0xFF0f0f0f),
-                topLeft = Offset((rightBarX * scale).toFloat(), (rightBarTopY * scale).toFloat()),
-                size = Size((navigationMap.width * scale).toFloat(), (9 * 21 * scale).toFloat())
-            )
+            drawBitmapText("T>", rightBarX + 2, bpmTextY, scale, Color(0xFF666666), spacing = 2, fontScale = 3)
+            drawBitmapText(project.tempo.toString(), rightBarX + 2 + 34, bpmTextY, scale, Color.White, spacing = 2, fontScale = 3)
 
-            // BPM row: "T>" in gray, tempo value in white
-            drawBitmapText("T>", rightBarX + 2, rightBarTopY + 3, scale, Color(0xFF666666), spacing = 2, fontScale = 3)
-            drawBitmapText(project.tempo.toString(), rightBarX + 2 + 34, rightBarTopY + 3, scale, Color.White, spacing = 2, fontScale = 3)
-
-            // Track note rows: track number in gray, note in white (or dim if no note)
+            // ===================================
+            // RIGHT BAR: Track Note Monitor
+            // One spacer row (21px) below BPM, then 8 track rows
+            // Format: "1  C-4" — track num in gray, note in white/dim
+            // ===================================
+            val trackRowsStartY = bpmRowY + 21 + 21  // skip BPM row + one spacer row = 159
             for (i in 0..7) {
-                val rowY = rightBarTopY + 21 + (i * 21) + 3
+                val textY = trackRowsStartY + (i * 21) + 3
                 val note = trackNotes.getOrElse(i) { Note.EMPTY }
                 val noteColor = if (note == Note.EMPTY) Color(0xFF333333) else Color.White
-                drawBitmapText((i + 1).toString(), rightBarX + 2, rowY, scale, Color(0xFF666666), spacing = 2, fontScale = 3)
-                drawBitmapText(note.toString(), rightBarX + 2 + 17, rowY, scale, noteColor, spacing = 2, fontScale = 3)
+                // Track number + space + note: "1 " = 2 char-widths (34px) before note
+                drawBitmapText((i + 1).toString(), rightBarX + 2, textY, scale, Color(0xFF666666), spacing = 2, fontScale = 3)
+                drawBitmapText(note.toString(), rightBarX + 2 + 34, textY, scale, noteColor, spacing = 2, fontScale = 3)
             }
 
             // ===================================
