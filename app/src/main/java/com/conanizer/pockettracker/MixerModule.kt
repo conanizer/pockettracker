@@ -91,7 +91,7 @@ class MixerModule : TrackerModule {
             val peakLevel = if (trackIndex < mixerState.trackPeaks.size) mixerState.trackPeaks[trackIndex] else 0f
 
             // Draw track label (0-7, single digit, centered on meter)
-            val labelText = trackIndex.toString()
+            val labelText = (trackIndex + 1).toString()
             drawBitmapText(
                 text = labelText,
                 x = meterX + (METER_WIDTH - 5 * FONT_SCALE) / 2,  // center single char
