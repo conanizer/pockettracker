@@ -312,6 +312,9 @@ class PlaybackController(
         }
     }
 
+    /** Returns the last played note per track (Note.EMPTY = never triggered on this track) */
+    fun getTrackNotes(): List<Note> = trackStates.map { it.lastNote }
+
     /**
      * Playback position data class for UI rendering
      */

@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.drawscope.translate
 import kotlin.math.min
 import kotlinx.coroutines.delay
 import com.conanizer.pockettracker.core.audio.AudioEngine
+import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.data.ScreenType
 import com.conanizer.pockettracker.core.logic.EffectProcessor
@@ -119,6 +120,7 @@ fun PixelPerfectTracker(
     var playbackChainRow by remember { mutableStateOf(0) }
     var playbackPhraseStep by remember { mutableStateOf(0) }
     var playbackSongRow by remember { mutableStateOf(0) }
+    var trackNotes by remember { mutableStateOf(List(8) { Note.EMPTY }) }
 
     // Oscilloscope refresh ticker (force continuous Canvas redraws for smooth waveform)
     var oscilloscopeTicker by remember { mutableStateOf(0L) }
@@ -135,6 +137,7 @@ fun PixelPerfectTracker(
     // This is SIMPLIFIED: all scheduling logic moved to PlaybackController.updatePlaybackBuffer()
     LaunchedEffect(isPlaying, currentScreen) {
         if (isPlaying) {
+            trackNotes = List(8) { Note.EMPTY }  // Reset at start of playback
             while (isPlaying) {
                 // Update lookahead buffer - PlaybackController handles all scheduling
                 playbackController.updatePlaybackBuffer()
@@ -145,10 +148,12 @@ fun PixelPerfectTracker(
                 playbackChainRow = position.chainRow
                 playbackPhraseStep = position.phraseStep
                 playbackSongRow = position.songRow
+                trackNotes = playbackController.getTrackNotes()
 
                 // Update UI at 60 Hz
                 delay(16L)
             }
+            trackNotes = List(8) { Note.EMPTY }  // Reset when stopped
         }
     }
 
@@ -245,7 +250,8 @@ fun PixelPerfectTracker(
                         qwertyKeyboardState = qwertyKeyboardState,
                         fxHelperState = fxHelperState,
                         settingsCursorRow = settingsCursorRow,
-                        settingsCursorColumn = settingsCursorColumn
+                        settingsCursorColumn = settingsCursorColumn,
+                        trackNotes = trackNotes
                     )
                 }
             }
@@ -348,7 +354,9 @@ class TrackerLayout {
         fxHelperState: FxHelperState = FxHelperState(),
         // Settings screen cursor
         settingsCursorRow: Int = 0,
-        settingsCursorColumn: Int = 1
+        settingsCursorColumn: Int = 1,
+        // Track note monitor
+        trackNotes: List<Note> = List(8) { Note.EMPTY }
     ) {
         // ===================================
         // DRAW BACKGROUND
@@ -683,16 +691,38 @@ class TrackerLayout {
         // Note: Hidden when FILE_BROWSER is active to give full screen space
 
         if (currentScreen != ScreenType.FILE_BROWSER && currentScreen != ScreenType.SETTINGS) {
-            // Calculate position for bottom-right corner
-            // X position: 640 (screen width) - 80 (module width) - 10 (right margin) = 550px
-            val navMapX = DESIGN_WIDTH_PX - navigationMap.width - SIDE_SPACER
+            val rightBarX = DESIGN_WIDTH_PX - navigationMap.width - SIDE_SPACER  // 515
+            val rightBarTopY = SCREEN_SPACER + oscilloscope.height + SCREEN_SPACER  // 82
 
-            // Y position: 480 (screen height) - 105 (module height) - 6 (bottom margin) = 369px
+            // ===================================
+            // RIGHT BAR: BPM + Track Note Monitor
+            // ===================================
+            // Background rect covering BPM row + 8 track rows (9 rows × 21px = 189px)
+            drawRect(
+                color = Color(0xFF0f0f0f),
+                topLeft = Offset((rightBarX * scale).toFloat(), (rightBarTopY * scale).toFloat()),
+                size = Size((navigationMap.width * scale).toFloat(), (9 * 21 * scale).toFloat())
+            )
+
+            // BPM row: "T>" in gray, tempo value in white
+            drawBitmapText("T>", rightBarX + 2, rightBarTopY + 3, scale, Color(0xFF666666), spacing = 2, fontScale = 3)
+            drawBitmapText(project.tempo.toString(), rightBarX + 2 + 34, rightBarTopY + 3, scale, Color.White, spacing = 2, fontScale = 3)
+
+            // Track note rows: track number in gray, note in white (or dim if no note)
+            for (i in 0..7) {
+                val rowY = rightBarTopY + 21 + (i * 21) + 3
+                val note = trackNotes.getOrElse(i) { Note.EMPTY }
+                val noteColor = if (note == Note.EMPTY) Color(0xFF333333) else Color.White
+                drawBitmapText((i + 1).toString(), rightBarX + 2, rowY, scale, Color(0xFF666666), spacing = 2, fontScale = 3)
+                drawBitmapText(note.toString(), rightBarX + 2 + 17, rowY, scale, noteColor, spacing = 2, fontScale = 3)
+            }
+
+            // ===================================
+            // NAVIGATION MAP
+            // ===================================
+            val navMapX = rightBarX
             val navMapY = DESIGN_HEIGHT_PX - navigationMap.height - SCREEN_SPACER
 
-            // MODULE 3: NAVIGATION MAP (shows current position in screen hierarchy)
-            // Position: Bottom-right corner
-            // Size: 80×105
             with(navigationMap) {
                 draw(
                     x = navMapX,
@@ -700,7 +730,7 @@ class TrackerLayout {
                     scale = scale,
                     state = NavigationMapState(
                         currentScreen = currentScreen,
-                        sourceColumn = previousColumn  // ✨ Use the passed value
+                        sourceColumn = previousColumn
                     )
                 )
             }
