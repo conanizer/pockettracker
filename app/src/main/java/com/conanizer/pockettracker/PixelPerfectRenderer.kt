@@ -9,6 +9,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.translate
 import kotlin.math.min
@@ -435,258 +436,257 @@ class TrackerLayout {
         // Move down for next module
         currentY += oscilloscope.height + SCREEN_SPACER  // 70 + 6 = 76px
 
-        // MODULE 2: Switch between editors based on current screen
-        when (currentScreen) {
-            ScreenType.PROJECT -> {
-                with(projectModule) {
-                    draw(
-                        x = moduleX,
-                        y = currentY,
-                        scale = scale,
-                        state = ProjectState(
-                            project = project,
-                            cursorRow = projectCursorRow,
-                            cursorColumn = projectCursorColumn,
-                            statusMessage = projectStatusMessage,
-                            isSuccess = projectStatusSuccess,
-                            isRendering = isRendering,
-                            renderProgress = renderProgress
-                        )
-                    )
-                }
-            }
-            // ===================================
-            // PHRASE SCREEN: Show phrase editor
-            // ===================================
-            ScreenType.PHRASE -> {
-                with(phraseEditor) {
-                    draw(
-                        x = moduleX,
-                        y = currentY,
-                        scale = scale,
-                        state = PhraseEditorState(
-                            phrase = project.phrases[currentPhrase],
-                            cursorRow = cursorRow,
-                            cursorColumn = cursorColumn,
-                            playbackRow = playbackRow,
-                            isPlaying = isPlaying,
-                            selectionMode = selectionMode,
-                            isCellSelected = isCellSelected
-                        )
-                    )
-                }
-            }
+        // MODULE 2: Switch between editors based on current screen.
+        // FILE_BROWSER is full-screen and handled outside the clip region.
+        // All other editors are clipped to the left of the right bar so that
+        // row highlights / wide backgrounds don't bleed into the BPM display,
+        // track note monitor, or navigation map.
+        val editorClipRight = (DESIGN_WIDTH_PX - navigationMap.width - SIDE_SPACER - SCREEN_SPACER) * scale.toFloat()
 
-            // ===================================
-            // CHAIN SCREEN: Show chain editor
-            // ===================================
-            ScreenType.CHAIN -> {
-                with(chainEditor) {
-                    draw(
-                        x = moduleX,
-                        y = currentY,
-                        scale = scale,
-                        state = ChainEditorState(
-                            chain = project.chains[currentChain],
-                            cursorRow = cursorRow,
-                            cursorColumn = cursorColumn,
-                            playbackRow = playbackChainRow,
-                            isPlaying = isPlaying,
-                            selectionMode = selectionMode,
-                            isCellSelected = isCellSelected
-                        )
-                    )
+        if (currentScreen == ScreenType.FILE_BROWSER) {
+            if (fileBrowserState != null) {
+                with(fileBrowser) {
+                    draw(x = 0, y = 0, scale = scale, state = fileBrowserState)
                 }
+            } else {
+                android.util.Log.e("FileBrowser", "fileBrowserState is NULL - cannot render!")
             }
-
-            // ===================================
-            // SONG SCREEN: Show song editor
-            // ===================================
-            ScreenType.SONG -> {
-                with(songEditor) {
-                    draw(
-                        x = moduleX,
-                        y = currentY,
-                        scale = scale,
-                        state = SongEditorState(
-                            project = project,
-                            cursorRow = cursorRow,
-                            cursorTrack = cursorColumn,  // Use cursorColumn as track selector
-                            isPlaying = isPlaying && currentScreen == ScreenType.SONG,
-                            playbackRow = playbackSongRow,
-                            selectionMode = selectionMode,
-                            isCellSelected = isCellSelected,
-                            scrollPosition = songScrollPosition
-                        )
-                    )
-                }
-            }
-
-            // ===================================
-            // INSTRUMENT SCREEN: Show instrument editor
-            // ===================================
-            ScreenType.INSTRUMENT -> {
-                with(instrumentModule) {
-                    draw(
-                        x = moduleX,
-                        y = currentY,
-                        scale = scale,
-                        state = InstrumentState(
-                            instrument = project.instruments[currentInstrument],
-                            cursorRow = instrumentCursorRow,
-                            cursorColumn = instrumentCursorColumn,
-                            statusMessage = instrumentStatusMessage,
-                            isSuccess = instrumentStatusSuccess
-                        )
-                    )
-                }
-            }
-
-            // ===================================
-            // TABLE SCREEN: Show table editor
-            // ===================================
-            ScreenType.TABLE -> {
-                with(tableModule) {
-                    // Find which track is playing with this table (if any)
-                    var tablePlaybackRow: Int? = null
-                    for (trackId in 0 until 8) {
-                        if (audioEngine.getVoiceTableId(trackId) == currentTable) {
-                            val row = audioEngine.getVoiceTableRow(trackId)
-                            if (row >= 0) {
-                                tablePlaybackRow = row
-                                break
-                            }
+        } else {
+            clipRect(right = editorClipRight) {
+                when (currentScreen) {
+                    ScreenType.PROJECT -> {
+                        with(projectModule) {
+                            draw(
+                                x = moduleX,
+                                y = currentY,
+                                scale = scale,
+                                state = ProjectState(
+                                    project = project,
+                                    cursorRow = projectCursorRow,
+                                    cursorColumn = projectCursorColumn,
+                                    statusMessage = projectStatusMessage,
+                                    isSuccess = projectStatusSuccess,
+                                    isRendering = isRendering,
+                                    renderProgress = renderProgress
+                                )
+                            )
+                        }
+                    }
+                    // ===================================
+                    // PHRASE SCREEN: Show phrase editor
+                    // ===================================
+                    ScreenType.PHRASE -> {
+                        with(phraseEditor) {
+                            draw(
+                                x = moduleX,
+                                y = currentY,
+                                scale = scale,
+                                state = PhraseEditorState(
+                                    phrase = project.phrases[currentPhrase],
+                                    cursorRow = cursorRow,
+                                    cursorColumn = cursorColumn,
+                                    playbackRow = playbackRow,
+                                    isPlaying = isPlaying,
+                                    selectionMode = selectionMode,
+                                    isCellSelected = isCellSelected
+                                )
+                            )
                         }
                     }
 
-                    draw(
-                        x = moduleX,
-                        y = currentY,
-                        scale = scale,
-                        state = TableState(
-                            table = project.tables[currentTable],
-                            cursorRow = tableCursorRow,
-                            cursorColumn = tableCursorColumn,
-                            playbackRow = tablePlaybackRow,
-                            ticRate = project.instruments.getOrNull(currentInstrument)?.tableTicRate ?: 0x06,
-                            selectionMode = selectionMode,
-                            isCellSelected = isCellSelected
-                        )
-                    )
-                }
-            }
+                    // ===================================
+                    // CHAIN SCREEN: Show chain editor
+                    // ===================================
+                    ScreenType.CHAIN -> {
+                        with(chainEditor) {
+                            draw(
+                                x = moduleX,
+                                y = currentY,
+                                scale = scale,
+                                state = ChainEditorState(
+                                    chain = project.chains[currentChain],
+                                    cursorRow = cursorRow,
+                                    cursorColumn = cursorColumn,
+                                    playbackRow = playbackChainRow,
+                                    isPlaying = isPlaying,
+                                    selectionMode = selectionMode,
+                                    isCellSelected = isCellSelected
+                                )
+                            )
+                        }
+                    }
 
-            // ===================================
-            // GROOVE SCREEN: Show groove pattern editor
-            // ===================================
-            ScreenType.GROOVE -> {
-                with(grooveModule) {
-                    draw(
-                        x = moduleX,
-                        y = currentY,
-                        scale = scale,
-                        state = GrooveState(
-                            groove = project.grooves[currentGroove],
-                            cursorRow = grooveCursorRow,
-                            cursorColumn = 1
-                        )
-                    )
-                }
-            }
+                    // ===================================
+                    // SONG SCREEN: Show song editor
+                    // ===================================
+                    ScreenType.SONG -> {
+                        with(songEditor) {
+                            draw(
+                                x = moduleX,
+                                y = currentY,
+                                scale = scale,
+                                state = SongEditorState(
+                                    project = project,
+                                    cursorRow = cursorRow,
+                                    cursorTrack = cursorColumn,  // Use cursorColumn as track selector
+                                    isPlaying = isPlaying && currentScreen == ScreenType.SONG,
+                                    playbackRow = playbackSongRow,
+                                    selectionMode = selectionMode,
+                                    isCellSelected = isCellSelected,
+                                    scrollPosition = songScrollPosition
+                                )
+                            )
+                        }
+                    }
 
-            // ===================================
-            // MODS SCREEN: Show modulation editor
-            // ===================================
-            ScreenType.MODS -> {
-                with(modulationModule) {
-                    draw(
-                        x = moduleX,
-                        y = currentY,
-                        scale = scale,
-                        state = ModulationState(
-                            instrument = project.instruments[currentInstrument],
-                            cursorRow = modCursorRow,
-                            cursorPair = modCursorPair,
-                            cursorSide = modCursorSide
-                        )
-                    )
-                }
-            }
+                    // ===================================
+                    // INSTRUMENT SCREEN: Show instrument editor
+                    // ===================================
+                    ScreenType.INSTRUMENT -> {
+                        with(instrumentModule) {
+                            draw(
+                                x = moduleX,
+                                y = currentY,
+                                scale = scale,
+                                state = InstrumentState(
+                                    instrument = project.instruments[currentInstrument],
+                                    cursorRow = instrumentCursorRow,
+                                    cursorColumn = instrumentCursorColumn,
+                                    statusMessage = instrumentStatusMessage,
+                                    isSuccess = instrumentStatusSuccess
+                                )
+                            )
+                        }
+                    }
 
-            // ===================================
-            // SETTINGS SCREEN: Show settings side menu
-            // ===================================
-            ScreenType.SETTINGS -> {
-                with(settingsModule) {
-                    draw(
-                        x = moduleX,
-                        y = currentY,
-                        scale = scale,
-                        state = SettingsState(
-                            cursorRow = settingsCursorRow,
-                            cursorColumn = settingsCursorColumn,
-                            layoutMode = layoutMode,
-                            scalingMode = scalingMode,
-                            buttonSoundEnabled = buttonSoundEnabled,
-                            buttonSoundVolume = buttonSoundVolume,
-                            buttonVibroEnabled = buttonVibroEnabled,
-                            vibroPower = vibroPower,
-                            insertBefore = qwertyKeyboardState.insertBefore
-                        )
-                    )
-                }
-            }
+                    // ===================================
+                    // TABLE SCREEN: Show table editor
+                    // ===================================
+                    ScreenType.TABLE -> {
+                        with(tableModule) {
+                            // Find which track is playing with this table (if any)
+                            var tablePlaybackRow: Int? = null
+                            for (trackId in 0 until 8) {
+                                if (audioEngine.getVoiceTableId(trackId) == currentTable) {
+                                    val row = audioEngine.getVoiceTableRow(trackId)
+                                    if (row >= 0) {
+                                        tablePlaybackRow = row
+                                        break
+                                    }
+                                }
+                            }
 
-            // ===================================
-            // MIXER SCREEN: Show mixer with 8 tracks + master
-            // ===================================
-            ScreenType.MIXER -> {
-                with(mixerModule) {
-                    draw(
-                        x = moduleX,
-                        y = currentY,
-                        scale = scale,
-                        state = MixerState(
-                            project = project,
-                            cursorColumn = mixerCursorColumn,
-                            trackPeaks = trackPeaks,
-                            masterPeaks = masterPeaks
-                        )
-                    )
-                }
-            }
+                            draw(
+                                x = moduleX,
+                                y = currentY,
+                                scale = scale,
+                                state = TableState(
+                                    table = project.tables[currentTable],
+                                    cursorRow = tableCursorRow,
+                                    cursorColumn = tableCursorColumn,
+                                    playbackRow = tablePlaybackRow,
+                                    ticRate = project.instruments.getOrNull(currentInstrument)?.tableTicRate ?: 0x06,
+                                    selectionMode = selectionMode,
+                                    isCellSelected = isCellSelected
+                                )
+                            )
+                        }
+                    }
 
-            // ===================================
-            // FILE BROWSER: Full screen file selection
-            // ===================================
-            ScreenType.FILE_BROWSER -> {
-                // Debug log removed - was spamming logcat on every frame (60+ fps)
-                if (fileBrowserState != null) {
-                    with(fileBrowser) {
-                        draw(
-                            x = 0,  // Full screen: start at 0, 0
-                            y = 0,
+                    // ===================================
+                    // GROOVE SCREEN: Show groove pattern editor
+                    // ===================================
+                    ScreenType.GROOVE -> {
+                        with(grooveModule) {
+                            draw(
+                                x = moduleX,
+                                y = currentY,
+                                scale = scale,
+                                state = GrooveState(
+                                    groove = project.grooves[currentGroove],
+                                    cursorRow = grooveCursorRow,
+                                    cursorColumn = 1
+                                )
+                            )
+                        }
+                    }
+
+                    // ===================================
+                    // MODS SCREEN: Show modulation editor
+                    // ===================================
+                    ScreenType.MODS -> {
+                        with(modulationModule) {
+                            draw(
+                                x = moduleX,
+                                y = currentY,
+                                scale = scale,
+                                state = ModulationState(
+                                    instrument = project.instruments[currentInstrument],
+                                    cursorRow = modCursorRow,
+                                    cursorPair = modCursorPair,
+                                    cursorSide = modCursorSide
+                                )
+                            )
+                        }
+                    }
+
+                    // ===================================
+                    // SETTINGS SCREEN: Show settings side menu
+                    // ===================================
+                    ScreenType.SETTINGS -> {
+                        with(settingsModule) {
+                            draw(
+                                x = moduleX,
+                                y = currentY,
+                                scale = scale,
+                                state = SettingsState(
+                                    cursorRow = settingsCursorRow,
+                                    cursorColumn = settingsCursorColumn,
+                                    layoutMode = layoutMode,
+                                    scalingMode = scalingMode,
+                                    buttonSoundEnabled = buttonSoundEnabled,
+                                    buttonSoundVolume = buttonSoundVolume,
+                                    buttonVibroEnabled = buttonVibroEnabled,
+                                    vibroPower = vibroPower,
+                                    insertBefore = qwertyKeyboardState.insertBefore
+                                )
+                            )
+                        }
+                    }
+
+                    // ===================================
+                    // MIXER SCREEN: Show mixer with 8 tracks + master
+                    // ===================================
+                    ScreenType.MIXER -> {
+                        with(mixerModule) {
+                            draw(
+                                x = moduleX,
+                                y = currentY,
+                                scale = scale,
+                                state = MixerState(
+                                    project = project,
+                                    cursorColumn = mixerCursorColumn,
+                                    trackPeaks = trackPeaks,
+                                    masterPeaks = masterPeaks
+                                )
+                            )
+                        }
+                    }
+
+                    // ===================================
+                    // OTHER SCREENS: Show placeholder
+                    // ===================================
+                    else -> {
+                        drawPlaceholderScreen(
+                            x = moduleX,
+                            y = currentY,
                             scale = scale,
-                            state = fileBrowserState
+                            screenType = currentScreen
                         )
                     }
-                } else {
-                    android.util.Log.e("FileBrowser", "fileBrowserState is NULL - cannot render!")
                 }
-            }
-
-            // ===================================
-            // OTHER SCREENS: Show placeholder
-            // ===================================
-            else -> {
-                drawPlaceholderScreen(
-                    x = moduleX,
-                    y = currentY,
-                    scale = scale,
-                    screenType = currentScreen
-                )
-            }
-        }
+            } // end clipRect
+        } // end FILE_BROWSER if/else
 
         // Left side total: 6 + 70 + 6 + 392 + 6 = 480px ✓
 

@@ -335,25 +335,34 @@ class PlaybackController(
                         ?.chainRefs?.getOrNull(position.songRow) ?: -1
                     if (chainId < 0) return@List Note.EMPTY
                     val chain = project.chains.getOrNull(chainId) ?: return@List Note.EMPTY
-                    val phraseId = chain.phraseRefs.getOrNull(position.chainRow) ?: -1
-                    if (phraseId < 0) return@List Note.EMPTY
-                    val phrase = project.phrases.getOrNull(phraseId) ?: return@List Note.EMPTY
-                    // Scan back from current step: last triggered note persists until a new one fires
-                    for (step in position.row downTo 0) {
-                        val note = phrase.steps.getOrNull(step)?.note ?: continue
-                        if (note != Note.EMPTY) return@List note
+                    // Search current chain row first, then look back through previous rows.
+                    // This handles blank "sustain" phrases that extend a long note across phrases.
+                    for (searchChainRow in position.chainRow downTo 0) {
+                        val phraseId = chain.phraseRefs.getOrNull(searchChainRow) ?: break
+                        if (phraseId < 0) break
+                        val phrase = project.phrases.getOrNull(phraseId) ?: break
+                        // For the current chain row scan back from the current step;
+                        // for previous rows scan all 16 steps from the end.
+                        val startStep = if (searchChainRow == position.chainRow) position.row else 15
+                        for (step in startStep downTo 0) {
+                            val note = phrase.steps.getOrNull(step)?.note ?: continue
+                            if (note != Note.EMPTY) return@List note
+                        }
                     }
                     Note.EMPTY
                 }
                 PlaybackMode.CHAIN -> {
                     if (trackIdx != 0) return@List Note.EMPTY
                     val chain = project.chains.getOrNull(currentChainId) ?: return@List Note.EMPTY
-                    val phraseId = chain.phraseRefs.getOrNull(position.chainRow) ?: -1
-                    if (phraseId < 0) return@List Note.EMPTY
-                    val phrase = project.phrases.getOrNull(phraseId) ?: return@List Note.EMPTY
-                    for (step in position.row downTo 0) {
-                        val note = phrase.steps.getOrNull(step)?.note ?: continue
-                        if (note != Note.EMPTY) return@List note
+                    for (searchChainRow in position.chainRow downTo 0) {
+                        val phraseId = chain.phraseRefs.getOrNull(searchChainRow) ?: break
+                        if (phraseId < 0) break
+                        val phrase = project.phrases.getOrNull(phraseId) ?: break
+                        val startStep = if (searchChainRow == position.chainRow) position.row else 15
+                        for (step in startStep downTo 0) {
+                            val note = phrase.steps.getOrNull(step)?.note ?: continue
+                            if (note != Note.EMPTY) return@List note
+                        }
                     }
                     Note.EMPTY
                 }
