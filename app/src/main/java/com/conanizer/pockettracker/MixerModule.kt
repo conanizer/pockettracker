@@ -38,7 +38,7 @@ class MixerModule : TrackerModule {
     private val METER_WIDTH = 30           // Width of each track meter
     private val METER_HEIGHT = 200         // Height of meters
     private val MASTER_METER_WIDTH = 48    // Master meter is wider (stereo)
-    private val METER_SPACING = 55         // Space between meter centers
+    private val METER_SPACING = 33         // Space between meter starts (3px visual gap)
     private val FIRST_METER_X = 10         // X position of first meter
 
     // Colors
@@ -90,11 +90,11 @@ class MixerModule : TrackerModule {
             val track = mixerState.project.tracks[trackIndex]
             val peakLevel = if (trackIndex < mixerState.trackPeaks.size) mixerState.trackPeaks[trackIndex] else 0f
 
-            // Draw track label (01-08)
-            val labelText = (trackIndex + 1).toString().padStart(2, '0')
+            // Draw track label (0-7, single digit, centered on meter)
+            val labelText = trackIndex.toString()
             drawBitmapText(
                 text = labelText,
-                x = meterX + 2,
+                x = meterX + (METER_WIDTH - 5 * FONT_SCALE) / 2,  // center single char
                 y = meterY - 25,
                 scale = scale,
                 color = if (isSelected) Color.Yellow else Color.White,
@@ -146,10 +146,15 @@ class MixerModule : TrackerModule {
         val masterX = x + FIRST_METER_X + (8 * METER_SPACING)
         val isSelected = mixerState.cursorColumn == 8
 
-        // Draw master label
+        // Draw master label centered over the stereo meter pair.
+        // Right bar ends at masterX + (METER_WIDTH/2+8) + (METER_WIDTH/2+4) = masterX + METER_WIDTH + 12
+        // Pair center from masterX = (METER_WIDTH + 12) / 2 = 21
+        // "MSTR" label width = 4 chars * 15px + 3 gaps * 2px = 66px → start at masterX + 21 - 33 = masterX - 12
+        val mstrPairCenter = (METER_WIDTH + 12) / 2  // = 21
+        val mstrLabelWidth = 4 * 5 * FONT_SCALE + 3 * CHAR_SPACING  // = 66px
         drawBitmapText(
             text = "MSTR",
-            x = masterX - 3,
+            x = masterX + mstrPairCenter - mstrLabelWidth / 2,
             y = meterY - 25,
             scale = scale,
             color = if (isSelected) Color.Yellow else Color.White,

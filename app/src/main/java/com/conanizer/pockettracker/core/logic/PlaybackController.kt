@@ -346,7 +346,12 @@ class PlaybackController(
                         val startStep = if (searchChainRow == position.chainRow) position.row else 15
                         for (step in startStep downTo 0) {
                             val note = phrase.steps.getOrNull(step)?.note ?: continue
-                            if (note != Note.EMPTY) return@List note
+                            if (note != Note.EMPTY) {
+                                val semitones = chain.getTransposeSemitones(searchChainRow)
+                                if (semitones == 0) return@List note
+                                val midi = note.toMidi()
+                                return@List if (midi >= 0) Note.fromMidi((midi + semitones).coerceIn(0, 127)) else note
+                            }
                         }
                     }
                     Note.EMPTY
@@ -361,7 +366,12 @@ class PlaybackController(
                         val startStep = if (searchChainRow == position.chainRow) position.row else 15
                         for (step in startStep downTo 0) {
                             val note = phrase.steps.getOrNull(step)?.note ?: continue
-                            if (note != Note.EMPTY) return@List note
+                            if (note != Note.EMPTY) {
+                                val semitones = chain.getTransposeSemitones(searchChainRow)
+                                if (semitones == 0) return@List note
+                                val midi = note.toMidi()
+                                return@List if (midi >= 0) Note.fromMidi((midi + semitones).coerceIn(0, 127)) else note
+                            }
                         }
                     }
                     Note.EMPTY
