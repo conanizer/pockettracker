@@ -38,7 +38,7 @@ class MixerModule : TrackerModule {
     private val METER_WIDTH = 30           // Width of each track meter
     private val METER_HEIGHT = 200         // Height of meters
     private val MASTER_METER_WIDTH = 48    // Master meter is wider (stereo)
-    private val METER_SPACING = 33         // Space between meter starts (3px visual gap)
+    private val METER_SPACING = 53         // Space between meter starts (reduced by 2px from original 55)
     private val FIRST_METER_X = 10         // X position of first meter
 
     // Colors
