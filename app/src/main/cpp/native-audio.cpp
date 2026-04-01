@@ -721,7 +721,6 @@ public:
     }
 
     void clearAllSamples() {
-        std::lock_guard<std::mutex> lock(queueMutex);
         for (int i = 0; i < 256; i++) {
             if (samples[i]) {
                 delete[] samples[i];
