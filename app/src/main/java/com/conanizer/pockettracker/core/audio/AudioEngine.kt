@@ -541,6 +541,16 @@ class AudioEngine(
     }
 
     /**
+     * Unload all samples from all instrument slots.
+     * Call this when creating a new project to prevent stale samples from playing.
+     */
+    fun clearAllSamples() {
+        sampleBaseFrequencies.clear()
+        sampleRateRatios.clear()
+        backend.clearAllSamples()
+    }
+
+    /**
      * Calculate target frame for a note based on tempo and step number.
      */
     fun calculateTargetFrame(startFrame: Long, stepNumber: Int, tempo: Int): Long {

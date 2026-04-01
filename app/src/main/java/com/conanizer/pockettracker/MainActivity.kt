@@ -493,6 +493,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // QWERTY keyboard insert mode (persisted in SharedPreferences)
     var insertBefore by remember { mutableStateOf(prefs.getBoolean("kb_insert_before", true)) }
 
+    // Cursor remember mode: REMEMBER=true keeps cursor position between screen switches,
+    // REFRESH=false resets cursor to default on every screen switch (persisted)
+    var cursorRemember by remember { mutableStateOf(prefs.getBoolean("cursor_remember", false)) }
+
     // QWERTY keyboard overlay state (transient — not persisted)
     var qwertyKeyboardState by remember { mutableStateOf(QwertyKeyboardState()) }
 
@@ -521,6 +525,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     }
     LaunchedEffect(insertBefore) {
         prefs.edit().putBoolean("kb_insert_before", insertBefore).apply()
+    }
+    LaunchedEffect(cursorRemember) {
+        prefs.edit().putBoolean("cursor_remember", cursorRemember).apply()
     }
 
     // Release SoundPool when the composable leaves composition
@@ -942,7 +949,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     buttonSoundVolume = buttonSoundVolume,
                     buttonVibroEnabled = buttonVibroEnabled,
                     vibroPower = vibroPower,
-                    insertBefore = insertBefore
+                    insertBefore = insertBefore,
+                    cursorRemember = cursorRemember
                 )
                 val context = settingsModule.getCursorContext(settingsState)
                 val action = handlerFunction(context)
@@ -953,6 +961,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     result.buttonVibroEnabled?.let { buttonVibroEnabled = it }
                     result.vibroPower?.let         { vibroPower         = it }
                     result.insertBefore?.let       { insertBefore       = it }
+                    result.cursorRemember?.let     { cursorRemember     = it }
                     trackerController.projectVersion++
                 }
             }
@@ -1679,20 +1688,23 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     }
 
                     // SONG: Quick insert last-used chain on empty row
+                    // Disabled in selection mode to avoid accidentally inserting while incrementing selections
                     ScreenType.SONG -> {
-                        val track = trackerController.project.tracks[trackerController.cursorColumn - 1]
-                        // Ensure track has enough rows
-                        while (track.chainRefs.size <= trackerController.cursorRow) {
-                            track.chainRefs.add(-1)
-                        }
-                        if (track.chainRefs[trackerController.cursorRow] == -1) {
-                            // Insert last-used chain
-                            track.chainRefs[trackerController.cursorRow] = trackerController.lastEditedChain
-                            trackerController.projectVersion++
-                            lastAInsertPosition = InsertPosition(ScreenType.SONG, trackerController.cursorRow, trackerController.cursorColumn)
-                            Log.d("QuickInsert", "Inserted song chain: chain=${trackerController.lastEditedChain} at track=${trackerController.cursorColumn-1}, row=${trackerController.cursorRow}")
-                        } else {
-                            lastAInsertPosition = null
+                        if (!trackerController.inputController.isSelectionModeActive()) {
+                            val track = trackerController.project.tracks[trackerController.cursorColumn - 1]
+                            // Ensure track has enough rows
+                            while (track.chainRefs.size <= trackerController.cursorRow) {
+                                track.chainRefs.add(-1)
+                            }
+                            if (track.chainRefs[trackerController.cursorRow] == -1) {
+                                // Insert last-used chain
+                                track.chainRefs[trackerController.cursorRow] = trackerController.lastEditedChain
+                                trackerController.projectVersion++
+                                lastAInsertPosition = InsertPosition(ScreenType.SONG, trackerController.cursorRow, trackerController.cursorColumn)
+                                Log.d("QuickInsert", "Inserted song chain: chain=${trackerController.lastEditedChain} at track=${trackerController.cursorColumn-1}, row=${trackerController.cursorRow}")
+                            } else {
+                                lastAInsertPosition = null
+                            }
                         }
                     }
 
@@ -2385,10 +2397,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 } else {
                     val (newScreen, newCol) = trackerController.navigateUp(trackerController.currentScreen, trackerController.previousColumn)
                     if (newScreen != trackerController.currentScreen) {
-                        // Screen changed - reset cursor to default position and exit selection mode
-                        val (defaultRow, defaultCol) = trackerController.getDefaultCursorPosition(newScreen)
-                        trackerController.cursorRow = defaultRow
-                        trackerController.cursorColumn = defaultCol
+                        // Screen changed - save current cursor, restore/reset for new screen, exit selection mode
+                        trackerController.saveCursorForScreen(trackerController.currentScreen)
+                        trackerController.restoreCursorForScreen(newScreen, cursorRemember)
                         trackerController.inputController.exitSelectionMode()
                     }
                     trackerController.currentScreen = newScreen
@@ -2412,10 +2423,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 } else {
                     val (newScreen, newCol) = trackerController.navigateDown(trackerController.currentScreen, trackerController.previousColumn)
                     if (newScreen != trackerController.currentScreen) {
-                        // Screen changed - reset cursor to default position and exit selection mode
-                        val (defaultRow, defaultCol) = trackerController.getDefaultCursorPosition(newScreen)
-                        trackerController.cursorRow = defaultRow
-                        trackerController.cursorColumn = defaultCol
+                        // Screen changed - save current cursor, restore/reset for new screen, exit selection mode
+                        trackerController.saveCursorForScreen(trackerController.currentScreen)
+                        trackerController.restoreCursorForScreen(newScreen, cursorRemember)
                         trackerController.inputController.exitSelectionMode()
                     }
                     trackerController.currentScreen = newScreen
@@ -2487,10 +2497,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             else -> {}
                         }
 
-                        // Screen changed - reset cursor to default position and exit selection mode
-                        val (defaultRow, defaultCol) = trackerController.getDefaultCursorPosition(newScreen)
-                        trackerController.cursorRow = defaultRow
-                        trackerController.cursorColumn = defaultCol
+                        // Screen changed - save current cursor, restore/reset for new screen, exit selection mode
+                        trackerController.saveCursorForScreen(trackerController.currentScreen)
+                        trackerController.restoreCursorForScreen(newScreen, cursorRemember)
                         trackerController.inputController.exitSelectionMode()
                     }
                     trackerController.currentScreen = newScreen
@@ -2559,10 +2568,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             else -> {}
                         }
 
-                        // Screen changed - reset cursor to default position and exit selection mode
-                        val (defaultRow, defaultCol) = trackerController.getDefaultCursorPosition(newScreen)
-                        trackerController.cursorRow = defaultRow
-                        trackerController.cursorColumn = defaultCol
+                        // Screen changed - save current cursor, restore/reset for new screen, exit selection mode
+                        trackerController.saveCursorForScreen(trackerController.currentScreen)
+                        trackerController.restoreCursorForScreen(newScreen, cursorRemember)
                         trackerController.inputController.exitSelectionMode()
                     }
                     trackerController.currentScreen = newScreen
@@ -3107,7 +3115,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         qwertyKeyboardState     = qwertyKeyboardState.copy(insertBefore = insertBefore),
         fxHelperState           = fxHelperState,
         settingsCursorRow       = stateVersion.let { trackerController.settingsCursorRow },
-        settingsCursorColumn    = stateVersion.let { trackerController.settingsCursorColumn }
+        settingsCursorColumn    = stateVersion.let { trackerController.settingsCursorColumn },
+        cursorRemember          = cursorRemember
     )
 
     val hapticView = LocalView.current

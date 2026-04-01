@@ -720,6 +720,18 @@ public:
         LOGD("Sample %d: %d frames", id, length);
     }
 
+    void clearAllSamples() {
+        std::lock_guard<std::mutex> lock(queueMutex);
+        for (int i = 0; i < 256; i++) {
+            if (samples[i]) {
+                delete[] samples[i];
+                samples[i] = nullptr;
+            }
+            sampleLengths[i] = 0;
+        }
+        LOGD("All samples cleared");
+    }
+
     void setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt,
                              int drv, int crsh, int dwn, int fType, int fCut, int fRes) {
         if (instrumentId < 0 || instrumentId >= 256) return;
@@ -2525,6 +2537,14 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadS
     engine->loadSample(id, arr, len);
 
     env->ReleaseFloatArrayElements(data, arr, JNI_ABORT);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1clearAllSamples(
+        JNIEnv *env, jobject thiz) {
+    if (engine) {
+        engine->clearAllSamples();
+    }
 }
 
 JNIEXPORT void JNICALL

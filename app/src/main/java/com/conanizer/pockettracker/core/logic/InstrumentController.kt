@@ -133,6 +133,15 @@ class InstrumentController(
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
+     * Unload all samples from the audio engine.
+     * Called on new project to prevent stale samples from playing on empty instruments.
+     */
+    fun clearAllSamples() {
+        audioEngine.clearAllSamples()
+        logger.d(TAG, "🗑️ All samples unloaded for new project")
+    }
+
+    /**
      * Load sample from file into current instrument
      *
      * @param project Project containing instrument data

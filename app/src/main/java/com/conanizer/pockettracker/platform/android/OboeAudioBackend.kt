@@ -57,6 +57,11 @@ class OboeAudioBackend : IAudioBackend {
         Log.d(TAG, "📦 Loaded sample $id (${samples.size} samples)")
     }
 
+    override fun clearAllSamples() {
+        native_clearAllSamples()
+        Log.d(TAG, "🗑️ Cleared all loaded samples")
+    }
+
     override fun scheduleNote(
         frame: Long,
         sampleId: Int,
@@ -319,6 +324,7 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_create(): Boolean
     private external fun native_delete()
     private external fun native_loadSample(sampleId: Int, sampleData: FloatArray)
+    private external fun native_clearAllSamples()
     private external fun native_scheduleNote(
         targetFrame: Long,
         sampleId: Int,

@@ -331,19 +331,41 @@ class PlaybackController(
         return List(8) { trackIdx ->
             when (playbackMode) {
                 PlaybackMode.SONG -> {
-                    val chainId = project.tracks.getOrNull(trackIdx)
+                    val currentChainId = project.tracks.getOrNull(trackIdx)
                         ?.chainRefs?.getOrNull(position.songRow) ?: -1
-                    if (chainId < 0) return@List Note.EMPTY
+
+                    // If current song row is empty, search backward for the last active chain.
+                    // This keeps the note monitor showing while a long sample sustains across
+                    // an empty song row.
+                    val chainId: Int
+                    val useFullChainScan: Boolean
+                    if (currentChainId >= 0) {
+                        chainId = currentChainId
+                        useFullChainScan = false
+                    } else {
+                        var found = -1
+                        for (searchRow in (position.songRow - 1) downTo 0) {
+                            val prev = project.tracks.getOrNull(trackIdx)
+                                ?.chainRefs?.getOrNull(searchRow) ?: -1
+                            if (prev >= 0) { found = prev; break }
+                        }
+                        if (found < 0) return@List Note.EMPTY
+                        chainId = found
+                        useFullChainScan = true
+                    }
+
                     val chain = project.chains.getOrNull(chainId) ?: return@List Note.EMPTY
                     // Search current chain row first, then look back through previous rows.
                     // This handles blank "sustain" phrases that extend a long note across phrases.
-                    for (searchChainRow in position.chainRow downTo 0) {
+                    // When the whole chain already finished (useFullChainScan), start from row 15.
+                    val startChainRow = if (useFullChainScan) 15 else position.chainRow
+                    for (searchChainRow in startChainRow downTo 0) {
                         val phraseId = chain.phraseRefs.getOrNull(searchChainRow) ?: break
                         if (phraseId < 0) break
                         val phrase = project.phrases.getOrNull(phraseId) ?: break
                         // For the current chain row scan back from the current step;
                         // for previous rows scan all 16 steps from the end.
-                        val startStep = if (searchChainRow == position.chainRow) position.row else 15
+                        val startStep = if (!useFullChainScan && searchChainRow == position.chainRow) position.row else 15
                         for (step in startStep downTo 0) {
                             val note = phrase.steps.getOrNull(step)?.note ?: continue
                             if (note != Note.EMPTY) {
@@ -423,6 +445,21 @@ class PlaybackController(
     fun play() {
         isPlaying = true
         logger.d(TAG, "▶️ Playback started")
+    }
+
+    /**
+     * Notify that project data (phrase/instrument) was changed during playback.
+     *
+     * Clears the ahead-scheduled note queue and resets the scheduling pointer to the
+     * current audio frame so that the very next updatePlaybackBuffer() call reschedules
+     * fresh content from current position. There may be a brief gap of at most one step
+     * at the edit moment, which is acceptable.
+     */
+    fun notifyDataChanged() {
+        if (!isPlaying) return
+        audioEngine.clearScheduledNotes()
+        nextFrameToSchedule = audioEngine.getCurrentFrame()
+        logger.d(TAG, "🔄 Data changed during playback — rescheduling from current frame")
     }
 
     /**

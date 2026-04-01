@@ -40,6 +40,14 @@ interface IAudioBackend {
     fun loadSample(id: Int, samples: FloatArray)
 
     /**
+     * Unload all samples from all instrument slots (0-255).
+     *
+     * Called when creating a new project so that instruments that previously had
+     * samples loaded do not play audio with stale data.
+     */
+    fun clearAllSamples()
+
+    /**
      * Schedule a note to play at a specific audio frame.
      *
      * This is the core of sample-accurate playback. Notes are scheduled ahead of time
