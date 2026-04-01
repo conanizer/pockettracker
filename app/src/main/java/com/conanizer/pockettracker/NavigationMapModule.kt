@@ -174,9 +174,9 @@ class NavigationMapModule : TrackerModule {
 
         // Background color (darker if current position)
         val bgColor = if (isCurrentScreen) {
-            Color(0xFF1a1a1a)  // Darker = you are here
+            Color(0xFF0A0A0A)  // Darker = you are here
         } else {
-            Color(0xFF0f0f0f)  // Normal dark
+            Color(0xFF0A0A0A)  // Normal dark
         }
 
         drawRect(

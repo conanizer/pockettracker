@@ -63,7 +63,7 @@ class SongEditorModule : TrackerModule {
         // STEP 1: Draw background
         // ===================================
         drawRect(
-            color = Color(0xFF0a0a0a),
+            color = Color(0xFF0A0A0A),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
