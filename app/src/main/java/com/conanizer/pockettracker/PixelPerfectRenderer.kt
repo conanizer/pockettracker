@@ -271,6 +271,7 @@ fun PixelPerfectTracker(
                         fxHelperState = fxHelperState,
                         settingsCursorRow = settingsCursorRow,
                         settingsCursorColumn = settingsCursorColumn,
+                        cursorRemember = cursorRemember,
                         trackNotes = trackNotes
                     )
                 }
@@ -375,6 +376,8 @@ class TrackerLayout {
         // Settings screen cursor
         settingsCursorRow: Int = 0,
         settingsCursorColumn: Int = 1,
+        // Cursor remember setting (passed through to SettingsState for display)
+        cursorRemember: Boolean = false,
         // Track note monitor
         trackNotes: List<Note> = List(8) { Note.EMPTY }
     ) {

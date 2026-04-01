@@ -778,7 +778,7 @@ class TrackerController(
                 ScreenType.SONG   -> { cursorRow = songCursorRow;   cursorColumn = songCursorColumn }
                 ScreenType.CHAIN  -> { cursorRow = chainCursorRow;  cursorColumn = chainCursorColumn }
                 ScreenType.PHRASE -> { cursorRow = phraseCursorRow; cursorColumn = phraseCursorColumn }
-                // INSTRUMENT, MIXER, TABLE, GROOVE, MODULATION already have dedicated cursor vars
+                // INSTRUMENT, MIXER, TABLE, GROOVE, MODS already have dedicated cursor vars
                 // that persist naturally — nothing extra needed in REMEMBER mode.
                 else -> {}
             }
@@ -793,7 +793,7 @@ class TrackerController(
                 ScreenType.MIXER      -> { mixerCursorColumn = 0 }
                 ScreenType.TABLE      -> { tableCursorRow = 0; tableCursorColumn = 1 }
                 ScreenType.GROOVE     -> { grooveCursorRow = 0 }
-                ScreenType.MODULATION -> { modCursorRow = 0; modCursorPair = 0; modCursorSide = 0 }
+                ScreenType.MODS       -> { modCursorRow = 0; modCursorPair = 0; modCursorSide = 0 }
                 else -> {}
             }
         }
