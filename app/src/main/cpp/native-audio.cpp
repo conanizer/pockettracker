@@ -721,6 +721,15 @@ public:
     }
 
     void clearAllSamples() {
+        // Stop all active voices FIRST — they hold direct pointers to sample data.
+        // Deleting samples while voices are still reading them causes use-after-free.
+        for (int i = 0; i < MAX_VOICES; i++) {
+            voices[i].stop();
+        }
+        // Clear the scheduled note/kill queues so buffered notes don't re-trigger.
+        noteQueue.clear();
+        killQueue.clear();
+
         for (int i = 0; i < 256; i++) {
             if (samples[i]) {
                 delete[] samples[i];

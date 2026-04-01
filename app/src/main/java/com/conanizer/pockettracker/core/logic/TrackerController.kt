@@ -308,6 +308,7 @@ class TrackerController(
                 projectVersion++
                 statusMessage = "LOADED: $filename"
                 statusSuccess = true
+                resetCursorRememberPositions()
 
                 // TODO: Reload project samples if needed in future
             }
@@ -332,6 +333,7 @@ class TrackerController(
                 projectVersion++
                 statusMessage = "LOADED: ${fileInfo.nameWithoutExtension}"
                 statusSuccess = true
+                resetCursorRememberPositions()
 
                 // TODO: Reload project samples if needed in future
             }
@@ -385,6 +387,9 @@ class TrackerController(
         modCursorSide = 0
         projectCursorRow = 0
         projectCursorColumn = 1
+
+        // Reset per-screen saved cursor positions (used by CURSOR REMEMBER setting)
+        resetCursorRememberPositions()
     }
 
     /**
@@ -751,6 +756,16 @@ class TrackerController(
         val defaultRow = getMinEditableRow(screenType)
         val defaultColumn = getMinEditableColumn(screenType)
         return Pair(defaultRow, defaultColumn)
+    }
+
+    /**
+     * Reset the per-screen saved cursor positions back to their defaults.
+     * Called on NEW project and LOAD project so stale positions don't carry over.
+     */
+    fun resetCursorRememberPositions() {
+        songCursorRow = 0; songCursorColumn = 1
+        chainCursorRow = 0; chainCursorColumn = 1
+        phraseCursorRow = 0; phraseCursorColumn = 1
     }
 
     /**
