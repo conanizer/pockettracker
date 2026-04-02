@@ -48,6 +48,12 @@ interface IAudioBackend {
     fun clearAllSamples()
 
     /**
+     * Returns an IntArray[8] where each element is (octave * 12 + pitch) for the active voice
+     * on that track, or -1 if no voice is currently playing on that track.
+     */
+    fun getTrackActiveNotes(): IntArray
+
+    /**
      * Schedule a note to play at a specific audio frame.
      *
      * This is the core of sample-accurate playback. Notes are scheduled ahead of time

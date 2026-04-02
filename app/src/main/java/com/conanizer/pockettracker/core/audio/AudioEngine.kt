@@ -499,6 +499,10 @@ class AudioEngine(
             return
         }
 
+        // Skip if instrument has no sample loaded — sampleFilePath == null means empty slot.
+        // This prevents stale C++ sample data from playing when an instrument looks empty in the UI.
+        if (instrument.sampleFilePath == null) return
+
         val sampleId = instrument.sampleId
 
         // Use TBL override if provided, otherwise use instrument ID as table ID
@@ -548,6 +552,18 @@ class AudioEngine(
         sampleBaseFrequencies.clear()
         sampleRateRatios.clear()
         backend.clearAllSamples()
+    }
+
+    /**
+     * Returns per-track active note from the C++ voice pool.
+     * Each element is Note.EMPTY if no voice is playing on that track,
+     * or the actual Note being played (based on what was triggered).
+     */
+    fun getActiveTrackNotes(): List<Note> {
+        val encoded = backend.getTrackActiveNotes()  // int[8], -1 or octave*12+pitch
+        return encoded.map { enc ->
+            if (enc < 0) Note.EMPTY else Note(pitch = enc % 12, octave = enc / 12)
+        }
     }
 
     /**

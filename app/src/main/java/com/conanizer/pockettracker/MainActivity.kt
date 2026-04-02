@@ -1509,11 +1509,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                         }
                                     }
                                     3 -> {  // NEW
-                                        trackerController.project = Project(version = 1)
+                                        trackerController.newProject()
                                         // Clear table cache so old tables don't persist
                                         audioEngine.clearLoadedTables()
-                                        trackerController.statusMessage = "NEW PROJECT"
-                                        trackerController.statusSuccess = true
                                     }
                                 }
                             }

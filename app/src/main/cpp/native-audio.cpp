@@ -384,6 +384,10 @@ struct Voice {
     float tableTranspose;    // Current transpose from table (semitones)
     float tableVolume;       // Current volume multiplier from table (0.0-1.0)
 
+    // Note identity (used by note monitor to show playing note even across empty phrases)
+    int noteOctave;          // Octave of the triggered note (0-9), -1 = none
+    int notePitch;           // Pitch of the triggered note (0-11, C=0)
+
     // Special TIC mode support (Phase 4)
     int triggerOctave;       // Octave of triggered note (0-9) for TICFC mode
     int triggerPitch;        // Pitch of triggered note (0-11, C=0) for TICFE mode
@@ -468,6 +472,7 @@ struct Voice {
               x1(0.0f), x2(0.0f), y1(0.0f), y2(0.0f),
               tableId(-1), tableRow(0), lastProcessedRow(-1), tableTicRate(6), tableTicCounter(0),
               tableTranspose(0.0f), tableVolume(1.0f),
+              noteOctave(-1), notePitch(0),
               triggerOctave(4), triggerPitch(0), tic200HzAccum(0.0f),
               hopRepeatCount(0), hopTargetRow(-1),
               pitchOffset(0.0f), pitchSlideTarget(0.0f), pitchSlideRate(0.0f), pitchSliding(false),
@@ -560,9 +565,11 @@ struct Voice {
         modCutOffset = 0.0f;
         modResOffset = 0.0f;
 
-        // Store note info for special TIC modes (Phase 4)
-        triggerOctave = std::max(0, std::min(octave, 9));   // Clamp to 0-9
-        triggerPitch = std::max(0, std::min(pitch, 11));    // Clamp to 0-11
+        // Store note identity for note monitor display and special TIC modes
+        noteOctave = std::max(0, std::min(octave, 9));
+        notePitch  = std::max(0, std::min(pitch, 11));
+        triggerOctave = noteOctave;
+        triggerPitch  = notePitch;
         tic200HzAccum = 0.0f;
 
         // For special TIC modes, set initial table row based on mode
@@ -815,6 +822,21 @@ public:
             }
         }
         return count;
+    }
+
+    /**
+     * For each of the 8 tracks, encode the active note as (octave * 12 + pitch), or -1 if no
+     * voice is currently playing on that track. The caller passes a pre-allocated int[8] array.
+     */
+    void getTrackActiveNotes(int* out, int trackCount) {
+        for (int t = 0; t < trackCount; t++) out[t] = -1;
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (!voices[v].isActive) continue;
+            int t = voices[v].trackId;
+            if (t >= 0 && t < trackCount && out[t] == -1) {
+                out[t] = voices[v].noteOctave * 12 + voices[v].notePitch;
+            }
+        }
     }
 
     int getSampleRate() {
@@ -2553,6 +2575,19 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1clear
     if (engine) {
         engine->clearAllSamples();
     }
+}
+
+JNIEXPORT jintArray JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getTrackActiveNotes(
+        JNIEnv *env, jobject thiz) {
+    jintArray result = env->NewIntArray(8);
+    if (!result) return result;
+    int notes[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+    if (engine) {
+        engine->getTrackActiveNotes(notes, 8);
+    }
+    env->SetIntArrayRegion(result, 0, 8, notes);
+    return result;
 }
 
 JNIEXPORT void JNICALL

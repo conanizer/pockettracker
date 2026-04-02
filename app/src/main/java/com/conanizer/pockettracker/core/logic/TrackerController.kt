@@ -308,7 +308,7 @@ class TrackerController(
                 projectVersion++
                 statusMessage = "LOADED: $filename"
                 statusSuccess = true
-                resetCursorRememberPositions()
+                resetEditingContext()
 
                 // TODO: Reload project samples if needed in future
             }
@@ -333,7 +333,7 @@ class TrackerController(
                 projectVersion++
                 statusMessage = "LOADED: ${fileInfo.nameWithoutExtension}"
                 statusSuccess = true
-                resetCursorRememberPositions()
+                resetEditingContext()
 
                 // TODO: Reload project samples if needed in future
             }
@@ -350,6 +350,9 @@ class TrackerController(
      * Create new project.
      */
     fun newProject() {
+        // Stop playback so no voices are reading samples while we clear them
+        playbackController.stop()
+
         project = Project(version = 1)
         projectVersion++
         statusMessage = "NEW PROJECT"
@@ -358,6 +361,14 @@ class TrackerController(
         // Clear audio engine samples so empty instruments don't play stale audio
         instrumentController.clearAllSamples()
 
+        resetEditingContext()
+    }
+
+    /**
+     * Reset all editing context (lastEdited*, current*, cursors) to defaults.
+     * Called on NEW project and LOAD project.
+     */
+    private fun resetEditingContext() {
         // Reset all "remember last" editing context
         lastEditedChain = 0
         lastEditedPhrase = 0
