@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
  *   4 — BTN VIBRO (ON / OFF, cycling via A+DPAD up/down)
  *   5 — VIBRO POW (00-FF, hex byte via A+DPAD up/down)
  *   6 — KB INSERT (single cycling value: BEFORE=1 / AFTER=0)
+ *   7 — CURSOR    (REMEMBER=1 / REFRESH=0) — whether cursor position is preserved on screen navigation
  *
  * Size: 510×392 pixels (same as other screens)
  */
@@ -121,6 +122,14 @@ class SettingsModule : TrackerModule {
             "KB INSERT", kbInsertText,
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
             isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
+        rowY += ROW_HEIGHT; currentRow++
+
+        // ── ROW 7: CURSOR ──────────────────────────────────────────────
+        val cursorText = if (s.cursorRemember) "REMEMBER" else "REFRESH"
+        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
+            "CURSOR", cursorText,
+            isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
+            isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
     }
 
     private fun DrawScope.drawParameterRow(
@@ -203,6 +212,15 @@ class SettingsModule : TrackerModule {
                 currentValue = if (state.insertBefore) 1 else 0,
                 minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
             )
+            7 -> CursorContext(                   // CURSOR: REMEMBER(1) / REFRESH(0)
+                valueType = CursorValueType.HEX_BYTE,
+                capabilities = CursorCapabilities(
+                    canIncrement = true, canDecrement = true,
+                    canIncrementFast = false, canDecrementFast = false
+                ),
+                currentValue = if (state.cursorRemember) 1 else 0,
+                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
+            )
             else -> CursorContextFactory.none()
         }
     }
@@ -241,6 +259,11 @@ class SettingsModule : TrackerModule {
                     return InputResult(modified = true, insertBefore = action.value > 0)
                 }
             }
+            7 -> {  // CURSOR
+                if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
+                    return InputResult(modified = true, cursorRemember = action.value > 0)
+                }
+            }
         }
         return InputResult(modified = action !is com.conanizer.pockettracker.core.logic.InputAction.NONE)
     }
@@ -251,7 +274,8 @@ class SettingsModule : TrackerModule {
         val buttonSoundVolume: Int? = null,
         val buttonVibroEnabled: Boolean? = null,
         val vibroPower: Int? = null,
-        val insertBefore: Boolean? = null
+        val insertBefore: Boolean? = null,
+        val cursorRemember: Boolean? = null
     )
 }
 
@@ -268,5 +292,6 @@ data class SettingsState(
     val buttonSoundVolume: Int = 255,
     val buttonVibroEnabled: Boolean = false,
     val vibroPower: Int = 255,
-    val insertBefore: Boolean = true
+    val insertBefore: Boolean = true,
+    val cursorRemember: Boolean = false
 )

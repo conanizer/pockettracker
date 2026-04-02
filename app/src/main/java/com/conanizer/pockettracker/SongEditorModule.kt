@@ -92,7 +92,7 @@ class SongEditorModule : TrackerModule {
         var rowY = y + TEXT_PADDING
 
         // Song name
-        val songName = songState.project.name.take(10)  // Max 10 chars
+        val songName = songState.project.name.take(20)
         drawBitmapText(
             text = "SONG: $songName",
             x = x + 10,

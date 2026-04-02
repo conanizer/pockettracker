@@ -113,6 +113,14 @@ class TrackerController(
             stateObserver.onStateChanged()
         }
 
+    // Per-screen saved cursor positions for SONG/CHAIN/PHRASE (used by REMEMBER cursor mode)
+    var songCursorRow = 0
+    var songCursorColumn = 1
+    var chainCursorRow = 0
+    var chainCursorColumn = 1
+    var phraseCursorRow = 0
+    var phraseCursorColumn = 1
+
     // Scroll position for SONG screen (0-255 range cursor with 16-row viewport)
     var songScrollPosition = 0
         set(value) {
@@ -300,6 +308,7 @@ class TrackerController(
                 projectVersion++
                 statusMessage = "LOADED: $filename"
                 statusSuccess = true
+                resetEditingContext()
 
                 // TODO: Reload project samples if needed in future
             }
@@ -324,6 +333,7 @@ class TrackerController(
                 projectVersion++
                 statusMessage = "LOADED: ${fileInfo.nameWithoutExtension}"
                 statusSuccess = true
+                resetEditingContext()
 
                 // TODO: Reload project samples if needed in future
             }
@@ -340,10 +350,57 @@ class TrackerController(
      * Create new project.
      */
     fun newProject() {
+        // Stop playback so no voices are reading samples while we clear them
+        playbackController.stop()
+
         project = Project(version = 1)
         projectVersion++
         statusMessage = "NEW PROJECT"
         statusSuccess = true
+
+        // Clear audio engine samples so empty instruments don't play stale audio
+        instrumentController.clearAllSamples()
+
+        resetEditingContext()
+    }
+
+    /**
+     * Reset all editing context (lastEdited*, current*, cursors) to defaults.
+     * Called on NEW project and LOAD project.
+     */
+    private fun resetEditingContext() {
+        // Reset all "remember last" editing context
+        lastEditedChain = 0
+        lastEditedPhrase = 0
+        lastEditedNote = Note.fromString("C-4")
+        lastEditedVolume = 0xFF
+        lastEditedTranspose = 0
+        lastEditedInstrument = 0
+        lastEditedTable = 0
+        currentChain = 0
+        currentPhrase = 0
+        currentInstrument = 0
+        currentTable = 0
+        currentGroove = 0
+
+        // Reset all cursor positions
+        cursorRow = 0
+        cursorColumn = 1
+        songScrollPosition = 0
+        instrumentCursorRow = 0
+        instrumentCursorColumn = 1
+        mixerCursorColumn = 0
+        tableCursorRow = 0
+        tableCursorColumn = 1
+        grooveCursorRow = 0
+        modCursorRow = 0
+        modCursorPair = 0
+        modCursorSide = 0
+        projectCursorRow = 0
+        projectCursorColumn = 1
+
+        // Reset per-screen saved cursor positions (used by CURSOR REMEMBER setting)
+        resetCursorRememberPositions()
     }
 
     /**
@@ -712,6 +769,62 @@ class TrackerController(
         return Pair(defaultRow, defaultColumn)
     }
 
+    /**
+     * Reset the per-screen saved cursor positions back to their defaults.
+     * Called on NEW project and LOAD project so stale positions don't carry over.
+     */
+    fun resetCursorRememberPositions() {
+        songCursorRow = 0; songCursorColumn = 1
+        chainCursorRow = 0; chainCursorColumn = 1
+        phraseCursorRow = 0; phraseCursorColumn = 1
+    }
+
+    /**
+     * Save the current shared cursor (cursorRow/cursorColumn) for SONG/CHAIN/PHRASE screens.
+     * Other screens already use dedicated cursor variables and don't need saving here.
+     */
+    fun saveCursorForScreen(screen: ScreenType) {
+        when (screen) {
+            ScreenType.SONG   -> { songCursorRow  = cursorRow; songCursorColumn  = cursorColumn }
+            ScreenType.CHAIN  -> { chainCursorRow = cursorRow; chainCursorColumn = cursorColumn }
+            ScreenType.PHRASE -> { phraseCursorRow = cursorRow; phraseCursorColumn = cursorColumn }
+            else -> {}
+        }
+    }
+
+    /**
+     * Restore cursor for [screen] based on [remember] mode.
+     *
+     * REMEMBER = restore saved per-screen cursor position.
+     * REFRESH  = reset cursor to default (row 0, col 1) for all main editing screens.
+     */
+    fun restoreCursorForScreen(screen: ScreenType, remember: Boolean) {
+        if (remember) {
+            when (screen) {
+                ScreenType.SONG   -> { cursorRow = songCursorRow;   cursorColumn = songCursorColumn }
+                ScreenType.CHAIN  -> { cursorRow = chainCursorRow;  cursorColumn = chainCursorColumn }
+                ScreenType.PHRASE -> { cursorRow = phraseCursorRow; cursorColumn = phraseCursorColumn }
+                // INSTRUMENT, MIXER, TABLE, GROOVE, MODS already have dedicated cursor vars
+                // that persist naturally — nothing extra needed in REMEMBER mode.
+                else -> {}
+            }
+        } else {
+            // REFRESH — reset every main editing screen cursor to its default position
+            when (screen) {
+                ScreenType.SONG, ScreenType.CHAIN, ScreenType.PHRASE -> {
+                    val (r, c) = getDefaultCursorPosition(screen)
+                    cursorRow = r; cursorColumn = c
+                }
+                ScreenType.INSTRUMENT -> { instrumentCursorRow = 0; instrumentCursorColumn = 1 }
+                ScreenType.MIXER      -> { mixerCursorColumn = 0 }
+                ScreenType.TABLE      -> { tableCursorRow = 0; tableCursorColumn = 1 }
+                ScreenType.GROOVE     -> { grooveCursorRow = 0 }
+                ScreenType.MODS       -> { modCursorRow = 0; modCursorPair = 0; modCursorSide = 0 }
+                else -> {}
+            }
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // CURSOR NAVIGATION (extracted from MainActivity)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -730,7 +843,7 @@ class TrackerController(
                 projectCursorColumn = 1  // Reset to first value column
             }
             ScreenType.SETTINGS -> {
-                settingsCursorRow = if (settingsCursorRow > 0) settingsCursorRow - 1 else 6
+                settingsCursorRow = if (settingsCursorRow > 0) settingsCursorRow - 1 else 7
                 settingsCursorColumn = 1
             }
             ScreenType.INSTRUMENT -> {
@@ -806,7 +919,7 @@ class TrackerController(
                 projectCursorColumn = 1  // Reset column
             }
             ScreenType.SETTINGS -> {
-                settingsCursorRow = if (settingsCursorRow < 6) settingsCursorRow + 1 else 0
+                settingsCursorRow = if (settingsCursorRow < 7) settingsCursorRow + 1 else 0
                 settingsCursorColumn = 1
             }
             ScreenType.INSTRUMENT -> {

@@ -40,6 +40,20 @@ interface IAudioBackend {
     fun loadSample(id: Int, samples: FloatArray)
 
     /**
+     * Unload all samples from all instrument slots (0-255).
+     *
+     * Called when creating a new project so that instruments that previously had
+     * samples loaded do not play audio with stale data.
+     */
+    fun clearAllSamples()
+
+    /**
+     * Returns an IntArray[8] where each element is (octave * 12 + pitch) for the active voice
+     * on that track, or -1 if no voice is currently playing on that track.
+     */
+    fun getTrackActiveNotes(): IntArray
+
+    /**
      * Schedule a note to play at a specific audio frame.
      *
      * This is the core of sample-accurate playback. Notes are scheduled ahead of time
@@ -82,6 +96,12 @@ interface IAudioBackend {
      * Notes currently playing are NOT stopped (use stopAll() for that).
      */
     fun clearScheduledNotes()
+
+    /**
+     * Clear only notes/kills scheduled at or after [fromFrame].
+     * Notes before that frame (currently playing phrase) are preserved.
+     */
+    fun clearScheduledNotesFrom(fromFrame: Long)
 
     /**
      * Resume the audio stream after it was paused.

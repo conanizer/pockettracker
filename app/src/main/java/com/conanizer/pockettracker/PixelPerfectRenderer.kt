@@ -111,7 +111,9 @@ fun PixelPerfectTracker(
     fxHelperState: FxHelperState = FxHelperState(),
     // Settings screen cursor
     settingsCursorRow: Int = 0,
-    settingsCursorColumn: Int = 1
+    settingsCursorColumn: Int = 1,
+    // Cursor remember setting (for settings screen display)
+    cursorRemember: Boolean = false
 ) {
     if (currentScreen == ScreenType.FILE_BROWSER) {
         android.util.Log.d("PixelPerfectTracker", "FILE_BROWSER screen, fileBrowserState=${if (fileBrowserState != null) "not null (${fileBrowserState.items.size} items)" else "NULL"}")
@@ -131,6 +133,18 @@ fun PixelPerfectTracker(
         while (true) {
             oscilloscopeTicker++
             delay(16L)  // ~60 FPS refresh rate
+        }
+    }
+
+    // Playback position update loop
+    // This is SIMPLIFIED: all scheduling logic moved to PlaybackController.updatePlaybackBuffer()
+    // When project data changes during playback, reschedule immediately so edits are
+    // heard on the next phrase loop rather than 2-3 phrases later.
+    // LaunchedEffect(projectVersion) restarts every time the version changes, so we
+    // always read fresh values of isPlaying and projectVersion.
+    LaunchedEffect(projectVersion) {
+        if (isPlaying) {
+            playbackController.notifyDataChanged()
         }
     }
 
@@ -257,6 +271,7 @@ fun PixelPerfectTracker(
                         fxHelperState = fxHelperState,
                         settingsCursorRow = settingsCursorRow,
                         settingsCursorColumn = settingsCursorColumn,
+                        cursorRemember = cursorRemember,
                         trackNotes = trackNotes
                     )
                 }
@@ -361,6 +376,8 @@ class TrackerLayout {
         // Settings screen cursor
         settingsCursorRow: Int = 0,
         settingsCursorColumn: Int = 1,
+        // Cursor remember setting (passed through to SettingsState for display)
+        cursorRemember: Boolean = false,
         // Track note monitor
         trackNotes: List<Note> = List(8) { Note.EMPTY }
     ) {
@@ -648,7 +665,8 @@ class TrackerLayout {
                                     buttonSoundVolume = buttonSoundVolume,
                                     buttonVibroEnabled = buttonVibroEnabled,
                                     vibroPower = vibroPower,
-                                    insertBefore = qwertyKeyboardState.insertBefore
+                                    insertBefore = qwertyKeyboardState.insertBefore,
+                                    cursorRemember = cursorRemember
                                 )
                             )
                         }

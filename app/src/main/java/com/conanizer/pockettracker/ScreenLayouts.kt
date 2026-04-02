@@ -87,7 +87,8 @@ data class TrackerScreenParams(
     val qwertyKeyboardState: QwertyKeyboardState = QwertyKeyboardState(),
     val fxHelperState: FxHelperState = FxHelperState(),
     val settingsCursorRow: Int = 0,
-    val settingsCursorColumn: Int = 1
+    val settingsCursorColumn: Int = 1,
+    val cursorRemember: Boolean = false
 )
 
 /** Thin wrapper — forwards every field of [params] to [PixelPerfectTracker]. */
@@ -144,7 +145,8 @@ private fun TrackerScreen(params: TrackerScreenParams, modifier: Modifier = Modi
         qwertyKeyboardState  = params.qwertyKeyboardState,
         fxHelperState        = params.fxHelperState,
         settingsCursorRow    = params.settingsCursorRow,
-        settingsCursorColumn = params.settingsCursorColumn
+        settingsCursorColumn = params.settingsCursorColumn,
+        cursorRemember       = params.cursorRemember
     )
 }
 
