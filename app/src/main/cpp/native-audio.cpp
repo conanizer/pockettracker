@@ -201,6 +201,17 @@ public:
         LOGD("🗑️ Note queue cleared");
     }
 
+    // Clear only notes scheduled at or after fromFrame (keeps earlier notes intact)
+    void clearFrom(int64_t fromFrame) {
+        std::lock_guard<std::mutex> lock(mutex);
+        std::vector<ScheduledNote> keep;
+        while (!queue.empty()) {
+            ScheduledNote n = queue.top(); queue.pop();
+            if (n.targetFrame < fromFrame) keep.push_back(n);
+        }
+        for (auto& n : keep) queue.push(n);
+    }
+
     // Get queue size (for debugging)
     size_t size() {
         std::lock_guard<std::mutex> lock(mutex);
@@ -244,6 +255,17 @@ public:
             queue.pop();
         }
         LOGD("🗑️ Kill queue cleared");
+    }
+
+    // Clear only kills scheduled at or after fromFrame
+    void clearFrom(int64_t fromFrame) {
+        std::lock_guard<std::mutex> lock(mutex);
+        std::vector<ScheduledKill> keep;
+        while (!queue.empty()) {
+            ScheduledKill k = queue.top(); queue.pop();
+            if (k.targetFrame < fromFrame) keep.push_back(k);
+        }
+        for (auto& k : keep) queue.push(k);
     }
 
     // Get queue size (for debugging)
@@ -1730,6 +1752,12 @@ public:
         killQueue.clear();  // Also clear kill events
     }
 
+    // Clear only notes/kills at or after fromFrame (leaves the current phrase intact)
+    void clearScheduledNotesFrom(int64_t fromFrame) {
+        noteQueue.clearFrom(fromFrame);
+        killQueue.clearFrom(fromFrame);
+    }
+
     // ===================================
     // TABLE METHODS (Phase 3.5)
     // ===================================
@@ -2611,6 +2639,14 @@ JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1clearScheduledNotes(JNIEnv *env, jobject thiz) {
     if (engine) {
         engine->clearScheduledNotes();
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1clearScheduledNotesFrom(
+        JNIEnv *env, jobject thiz, jlong fromFrame) {
+    if (engine) {
+        engine->clearScheduledNotesFrom((int64_t)fromFrame);
     }
 }
 

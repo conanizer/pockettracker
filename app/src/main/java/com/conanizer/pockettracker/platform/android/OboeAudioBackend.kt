@@ -83,6 +83,10 @@ class OboeAudioBackend : IAudioBackend {
 
     override fun clearScheduledNotes() {
         native_clearScheduledNotes()
+    }
+
+    override fun clearScheduledNotesFrom(fromFrame: Long) {
+        native_clearScheduledNotesFrom(fromFrame)
         Log.d(TAG, "🗑️ Cleared scheduled notes")
     }
 
@@ -340,6 +344,7 @@ class OboeAudioBackend : IAudioBackend {
     )
     private external fun native_getCurrentFrame(): Long
     private external fun native_clearScheduledNotes()
+    private external fun native_clearScheduledNotesFrom(fromFrame: Long)
     private external fun native_resumeStream()
     private external fun native_stopAll()
     private external fun native_killTrack(trackId: Int)

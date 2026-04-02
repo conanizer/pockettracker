@@ -544,6 +544,10 @@ class AudioEngine(
         backend.clearScheduledNotes()
     }
 
+    fun clearScheduledNotesFrom(fromFrame: Long) {
+        backend.clearScheduledNotesFrom(fromFrame)
+    }
+
     /**
      * Unload all samples from all instrument slots.
      * Call this when creating a new project to prevent stale samples from playing.

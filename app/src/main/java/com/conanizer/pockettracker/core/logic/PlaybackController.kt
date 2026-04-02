@@ -223,6 +223,22 @@ class PlaybackController(
     /** Track current playing position for UI cursor (song mode) */
     private val songPositionStartFrames = mutableMapOf<Pair<Int,Int>, Long>()  // Map (songRow, chainRow) to start frame
 
+    /**
+     * Scheduling checkpoint: the state just BEFORE a phrase was added to the C++ queue.
+     * Used by notifyDataChanged() to surgically roll back the buffer to the earliest
+     * future phrase boundary when the user edits data during playback.
+     */
+    private data class SchedulingCheckpoint(
+        val frame: Long,               // Frame at which this phrase starts (= nextFrameToSchedule at save time)
+        val chainRow: Int = 0,         // nextChainRowToSchedule before advancing (CHAIN mode)
+        val songRow: Int = 0,          // nextSongRowToSchedule before advancing (SONG mode)
+        val songChainRow: Int = 0      // nextSongChainRowToSchedule before advancing (SONG mode)
+    )
+
+    // Bounded ring of checkpoints (1 per scheduled phrase, kept for up to 4 phrases ahead).
+    // The oldest entry corresponds to the earliest not-yet-played buffered phrase.
+    private val schedulingCheckpoints = ArrayDeque<SchedulingCheckpoint>()
+
     /** Per-track state for persistent effects (REPEAT, note memory) - 8 tracks */
     private val trackStates = Array(8) { TrackState() }
 
@@ -374,9 +390,37 @@ class PlaybackController(
      */
     fun notifyDataChanged() {
         if (!isPlaying) return
-        audioEngine.clearScheduledNotes()
-        nextFrameToSchedule = audioEngine.getCurrentFrame()
-        logger.d(TAG, "🔄 Data changed during playback — rescheduling from current frame")
+        val currentFrame = audioEngine.getCurrentFrame()
+
+        // Find the earliest checkpoint whose phrase hasn't started playing yet.
+        // That's the "next phrase boundary" — we'll clear only from there, keeping
+        // the currently-playing phrase intact and just refreshing what comes next.
+        val checkpoint = schedulingCheckpoints.firstOrNull { it.frame > currentFrame }
+            ?: return  // Nothing buffered yet; change will be picked up naturally
+
+        // Clear only future-scheduled notes (from the phrase boundary onward)
+        audioEngine.clearScheduledNotesFrom(checkpoint.frame)
+        nextFrameToSchedule = checkpoint.frame
+
+        // Restore scheduling indices to before that phrase was scheduled, so
+        // updatePlaybackBuffer() re-schedules it with fresh data on the next tick
+        when (playbackMode) {
+            PlaybackMode.CHAIN -> {
+                nextChainRowToSchedule = checkpoint.chainRow
+            }
+            PlaybackMode.SONG -> {
+                nextSongRowToSchedule = checkpoint.songRow
+                nextSongChainRowToSchedule = checkpoint.songChainRow
+            }
+            else -> { /* PHRASE: no index to restore, nextFrameToSchedule is enough */ }
+        }
+
+        // Drop all checkpoints at or after this one (they're now stale)
+        while (schedulingCheckpoints.isNotEmpty() && schedulingCheckpoints.last().frame >= checkpoint.frame) {
+            schedulingCheckpoints.removeLast()
+        }
+
+        logger.d(TAG, "🔄 Data changed — rolled back buffer to frame ${checkpoint.frame} (was at $currentFrame)")
     }
 
     /**
@@ -391,6 +435,7 @@ class PlaybackController(
         chainRowStartFrames.clear()
         songPositionStartFrames.clear()
         nextSongChainRowToSchedule = 0
+        schedulingCheckpoints.clear()
         // Clear all track states (persistent effects, note memory, HOP, groove)
         trackStates.forEach {
             it.clearRepeat()
@@ -400,6 +445,12 @@ class PlaybackController(
             it.grooveStep = 0
         }
         logger.d(TAG, "⏹️ Playback stopped")
+    }
+
+    /** Save a scheduling checkpoint, keeping at most 4 entries to bound memory. */
+    private fun saveCheckpoint(cp: SchedulingCheckpoint) {
+        schedulingCheckpoints.addLast(cp)
+        if (schedulingCheckpoints.size > 4) schedulingCheckpoints.removeFirst()
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -442,6 +493,9 @@ class PlaybackController(
                     val phrase = project.phrases[currentPhraseId]
                     val trackState = trackStates[0]
 
+                    // Save checkpoint BEFORE scheduling (frame = start of the next iteration)
+                    saveCheckpoint(SchedulingCheckpoint(frame = nextFrameToSchedule))
+
                     // Check if HOP target row is set from previous iteration
                     val hopStartRow = trackState.consumeHopTarget()
                     val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
@@ -468,6 +522,12 @@ class PlaybackController(
                     if (nextRow != null) {
                         val phraseId = chain.phraseRefs[nextRow]
                         val transposeSemitones = chain.getTransposeSemitones(nextRow)
+
+                        // Save checkpoint BEFORE scheduling (indices are still pointing at nextRow)
+                        saveCheckpoint(SchedulingCheckpoint(
+                            frame = nextFrameToSchedule,
+                            chainRow = nextRow  // = nextChainRowToSchedule resolved to actual row
+                        ))
 
                         // Check if HOP target row is set from previous phrase
                         val hopStartRow = trackState.consumeHopTarget()
@@ -523,6 +583,13 @@ class PlaybackController(
                                 nextSongRowToSchedule = 0  // Loop song
                             }
                         } else if (nextSongChainRowToSchedule < maxChainLength) {
+                            // Save checkpoint BEFORE scheduling this chain-row slot
+                            saveCheckpoint(SchedulingCheckpoint(
+                                frame = nextFrameToSchedule,
+                                songRow = nextSongRowToSchedule,
+                                songChainRow = nextSongChainRowToSchedule
+                            ))
+
                             // Schedule this chain row for all 8 tracks
                             var scheduledAny = false
                             var maxFramesScheduled = 0L  // Track max frames for frame advancement (groove-accurate)

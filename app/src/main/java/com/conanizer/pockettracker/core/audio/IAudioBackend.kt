@@ -98,6 +98,12 @@ interface IAudioBackend {
     fun clearScheduledNotes()
 
     /**
+     * Clear only notes/kills scheduled at or after [fromFrame].
+     * Notes before that frame (currently playing phrase) are preserved.
+     */
+    fun clearScheduledNotesFrom(fromFrame: Long)
+
+    /**
      * Resume the audio stream after it was paused.
      *
      * This is needed because some platforms pause the audio stream when inactive.
