@@ -3184,17 +3184,8 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSo
         return env->NewStringUTF("---");
     }
     std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
-    // tsf_get_presetname returns the name for the given preset index (not bank/program)
-    // We need to find the preset index by bank/program number
-    int count = tsf_get_presetcount(soundfonts[sfSlot].handle);
-    for (int i = 0; i < count; i++) {
-        if (tsf_get_presetbank(soundfonts[sfSlot].handle, i) == bank &&
-            tsf_get_presetnumber(soundfonts[sfSlot].handle, i) == preset) {
-            const char* name = tsf_get_presetname(soundfonts[sfSlot].handle, i);
-            return env->NewStringUTF(name ? name : "---");
-        }
-    }
-    return env->NewStringUTF("---");
+    const char* name = tsf_bank_get_presetname(soundfonts[sfSlot].handle, bank, preset);
+    return env->NewStringUTF(name ? name : "---");
 }
 
 }
