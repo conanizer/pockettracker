@@ -334,6 +334,34 @@ class AndroidFileSystem(
     }
 
     /**
+     * Get the instrument presets directory.
+     * Location: Documents/PocketTracker/Instruments/
+     */
+    override fun getInstrumentsDirectory(): String {
+        val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+        val dir = File(documentsDir, "PocketTracker/Instruments")
+        if (!dir.exists()) {
+            val created = dir.mkdirs()
+            if (!created) throw IOException("Cannot create instruments directory. Check storage permissions.")
+        }
+        return dir.absolutePath
+    }
+
+    /**
+     * Get the soundfonts directory.
+     * Location: Documents/PocketTracker/Soundfonts/
+     */
+    override fun getSoundfontsDirectory(): String {
+        val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+        val dir = File(documentsDir, "PocketTracker/Soundfonts")
+        if (!dir.exists()) {
+            val created = dir.mkdirs()
+            if (!created) throw IOException("Cannot create soundfonts directory. Check storage permissions.")
+        }
+        return dir.absolutePath
+    }
+
+    /**
      * Write binary data to file (overwrites if exists).
      */
     override fun writeBytes(path: String, data: ByteArray): Boolean {

@@ -1,6 +1,8 @@
 package com.conanizer.pockettracker.core.logic
 
 import com.conanizer.pockettracker.core.data.Instrument
+import com.conanizer.pockettracker.core.data.InstrumentPreset
+import com.conanizer.pockettracker.core.data.InstrumentType
 import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.audio.AudioEngine
@@ -26,9 +28,13 @@ import com.conanizer.pockettracker.core.storage.WavWriter
 class InstrumentController(
     private val audioEngine: AudioEngine,
     private val logger: ILogger,
-    private val stateObserver: StateObserver
+    private val stateObserver: StateObserver,
+    private val fileController: FileController? = null
 ) {
     private val TAG = "InstrumentController"
+
+    // SoundFont slot cache: maps soundfont file path → C++ slot index (0-3)
+    val sfSlotMap: MutableMap<String, Int> = mutableMapOf()
 
     // ═══════════════════════════════════════════════════════════════════════════
     // STATE
@@ -534,6 +540,187 @@ class InstrumentController(
         }
 
         lastEditedInstrument = instrument.id
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SOUNDFONT OPERATIONS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Load an SF2/SF3 file into the current instrument slot.
+     * Sets the instrument type to SOUNDFONT and stores the path.
+     */
+    fun loadSoundfont(project: Project, filePath: String) {
+        val instrument = project.instruments[currentInstrument]
+        val slot = audioEngine.backend.loadSoundfont(instrument.id, filePath)
+        if (slot < 0) {
+            setStatus("SF LOAD FAILED", success = false)
+            return
+        }
+        sfSlotMap[filePath] = slot
+        instrument.soundfontPath = filePath
+        instrument.instrumentType = InstrumentType.SOUNDFONT
+        val name = filePath.substringAfterLast('/').substringBeforeLast('.')
+        setStatus("SF LOADED: $name", success = true)
+    }
+
+    /**
+     * Update the SF2 bank and preset for the current instrument.
+     * Also refreshes the C++ slot preset so previews use the new sound.
+     */
+    fun updateSfBank(instrument: Instrument, bank: Int) {
+        instrument.sfBank = bank
+        val path = instrument.soundfontPath ?: return
+        val slot = sfSlotMap[path] ?: return
+        audioEngine.backend.setSoundfontPreset(slot, bank, instrument.sfPreset)
+    }
+
+    fun updateSfPreset(instrument: Instrument, preset: Int) {
+        instrument.sfPreset = preset
+        val path = instrument.soundfontPath ?: return
+        val slot = sfSlotMap[path] ?: return
+        audioEngine.backend.setSoundfontPreset(slot, instrument.sfBank, preset)
+    }
+
+    fun updateSoundfontPreset(project: Project, bank: Int, preset: Int) {
+        val instrument = project.instruments[currentInstrument]
+        instrument.sfBank = bank
+        instrument.sfPreset = preset
+        val path = instrument.soundfontPath ?: return
+        val slot = sfSlotMap[path] ?: return
+        audioEngine.backend.setSoundfontPreset(slot, bank, preset)
+    }
+
+    /**
+     * Return the preset display name for a soundfont instrument.
+     * Returns "---" if not loaded.
+     */
+    fun getSoundfontPresetName(project: Project): String {
+        val instrument = project.instruments[currentInstrument]
+        val path = instrument.soundfontPath ?: return "---"
+        val slot = sfSlotMap[path] ?: return "---"
+        return audioEngine.backend.getSoundfontPresetName(slot, instrument.sfBank, instrument.sfPreset)
+    }
+
+    /**
+     * Preview a soundfont note for the current instrument.
+     */
+    fun previewSoundfontNote(project: Project, midiNote: Int = 60) {
+        val instrument = project.instruments[currentInstrument]
+        val path = instrument.soundfontPath ?: return
+        val slot = sfSlotMap[path] ?: return
+        val frame = audioEngine.backend.getCurrentFrame() + 2
+        audioEngine.backend.scheduleSoundfontNote(
+            frame, 0, slot, midiNote, 100, 1.0f, 0.5f, instrument.sfPreset
+        )
+    }
+
+    /**
+     * Change the instrument type. Clears sound-source metadata for the old type.
+     */
+    fun setInstrumentType(project: Project, newType: InstrumentType) {
+        val instrument = project.instruments[currentInstrument]
+        instrument.instrumentType = newType
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // INSTRUMENT PRESET (.pti) OPERATIONS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Save the current instrument as a .pti preset file.
+     * Embeds table data if the instrument has a table assigned.
+     */
+    fun savePreset(project: Project, filePath: String) {
+        val fc = fileController ?: run { setStatus("NO FILE CTRL", false); return }
+        val instrument = project.instruments[currentInstrument]
+        val tableRows = if (instrument.tableId in 0..255)
+            project.tables[instrument.tableId].rows.copyOf()
+        else null
+        val ok = fc.saveInstrumentPreset(instrument, tableRows, filePath)
+        setStatus(if (ok) "SAVED: ${instrument.name}" else "SAVE FAILED", ok)
+    }
+
+    /**
+     * Load a .pti preset file into the current instrument slot.
+     * Auto-loads the source file (WAV or SF2) from the stored path.
+     * If the source is missing, loads parameters only and shows a warning.
+     */
+    fun loadPreset(project: Project, filePath: String) {
+        val fc = fileController ?: run { setStatus("NO FILE CTRL", false); return }
+        val preset = fc.loadInstrumentPreset(filePath) ?: run {
+            setStatus("LOAD FAILED", false)
+            return
+        }
+
+        val instrument = project.instruments[currentInstrument]
+        val src = preset.instrument
+
+        // Copy all parameters (preserve id)
+        instrument.name            = src.name
+        instrument.instrumentType  = src.instrumentType
+        instrument.volume          = src.volume
+        instrument.pan             = src.pan
+        instrument.root            = src.root
+        instrument.detune          = src.detune
+        instrument.drive           = src.drive
+        instrument.crush           = src.crush
+        instrument.downsample      = src.downsample
+        instrument.filterType      = src.filterType
+        instrument.filterCut       = src.filterCut
+        instrument.filterRes       = src.filterRes
+        instrument.sampleStart     = src.sampleStart
+        instrument.sampleEnd       = src.sampleEnd
+        instrument.reverse         = src.reverse
+        instrument.loopMode        = src.loopMode
+        instrument.loopStart       = src.loopStart
+        instrument.tableTicRate    = src.tableTicRate
+        instrument.sfBank          = src.sfBank
+        instrument.sfPreset        = src.sfPreset
+        instrument.modSlots        = src.modSlots.copyOf()
+
+        // Load table data if embedded
+        if (preset.tableRows != null) {
+            val tableId = if (instrument.tableId in 0..255) {
+                instrument.tableId
+            } else {
+                // Find a free table slot (rows all at default)
+                val freeSlot = project.tables.indexOfFirst { t ->
+                    t.rows.all { r -> r.transpose == 0 && r.volume == -1 && r.fx1Type == 0 }
+                }
+                if (freeSlot >= 0) { instrument.tableId = freeSlot; freeSlot } else -1
+            }
+            if (tableId >= 0) {
+                preset.tableRows.forEachIndexed { i, row -> project.tables[tableId].rows[i] = row }
+                audioEngine.loadTable(project.tables[tableId])
+            }
+        }
+
+        // Auto-load source file
+        when (instrument.instrumentType) {
+            InstrumentType.SAMPLER -> {
+                val path = src.sampleFilePath
+                if (path != null) {
+                    instrument.sampleFilePath = path
+                    val ok = audioEngine.loadSampleFromFile(instrument.id, path)
+                    if (!ok) setStatus("SRC MISSING: ${path.substringAfterLast('/')}", false)
+                    else { instrument.sampleId = currentInstrument; setStatus("LOADED: ${src.name}", true) }
+                } else {
+                    setStatus("LOADED: ${src.name}", true)
+                }
+            }
+            InstrumentType.SOUNDFONT -> {
+                val path = src.soundfontPath
+                if (path != null) {
+                    instrument.soundfontPath = path
+                    val slot = audioEngine.backend.loadSoundfont(instrument.id, path)
+                    if (slot < 0) setStatus("SRC MISSING: ${path.substringAfterLast('/')}", false)
+                    else { sfSlotMap[path] = slot; setStatus("LOADED: ${src.name}", true) }
+                } else {
+                    setStatus("LOADED: ${src.name}", true)
+                }
+            }
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

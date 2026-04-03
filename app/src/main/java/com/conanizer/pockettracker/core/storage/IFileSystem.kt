@@ -122,6 +122,20 @@ interface IFileSystem {
     fun getResampledDirectory(): String
 
     /**
+     * Get the instruments presets directory path (for .pti files).
+     * Creates the directory if it doesn't exist.
+     * @return Absolute path to Documents/PocketTracker/Instruments/
+     */
+    fun getInstrumentsDirectory(): String
+
+    /**
+     * Get the soundfonts directory path (for .sf2/.sf3 files).
+     * Creates the directory if it doesn't exist.
+     * @return Absolute path to Documents/PocketTracker/Soundfonts/
+     */
+    fun getSoundfontsDirectory(): String
+
+    /**
      * Write binary data to file (overwrites if exists).
      * @param path Absolute path to file
      * @param data Byte array to write

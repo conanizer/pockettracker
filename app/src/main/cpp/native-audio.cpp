@@ -6,6 +6,13 @@
 #include <mutex>
 #include <atomic>
 #include <cmath>
+#include <string>
+#include <cstring>
+
+// TinySoundFont — single-header SF2/SF3 renderer (MIT license)
+// NOTE: TSF_IMPLEMENTATION must be defined in exactly one .cpp file
+#define TSF_IMPLEMENTATION
+#include "tsf.h"
 
 #define LOG_TAG "NativeAudio"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
@@ -107,6 +114,27 @@ inline void calculateBiquadCoeffs(
 }
 
 // ===================================
+// SOUNDFONT INFRASTRUCTURE (TinySoundFont)
+// ===================================
+// Supports up to MAX_SOUNDFONTS simultaneously loaded SF2/SF3 files.
+// tsf is NOT thread-safe — each entry has its own mutex.
+
+static const int MAX_SOUNDFONTS = 4;
+
+struct SoundfontEntry {
+    tsf* handle = nullptr;
+    std::mutex mutex;       // Protects all note_on/note_off/render calls
+    int instrumentId = -1;  // Which Instrument slot owns this (-1 = free)
+    std::string filePath;
+};
+
+static SoundfontEntry soundfonts[MAX_SOUNDFONTS];
+
+// Per-track state for soundfont note-off support
+static int activeNotePerTrack[8]   = {-1,-1,-1,-1,-1,-1,-1,-1};
+static int activeSfSlotPerTrack[8] = {-1,-1,-1,-1,-1,-1,-1,-1};
+
+// ===================================
 // PHASE 1: NOTE QUEUE INFRASTRUCTURE
 // ===================================
 // Sample-accurate note scheduling system
@@ -141,6 +169,13 @@ struct ScheduledNote {
 
     // Table start row override (Phase 8 - THO effect from phrase)
     int tableStartRow;       // -1 = default (0 or TIC00 continuity), 0-15 = forced start row
+
+    // SoundFont fields (only used when isSoundfont == true)
+    bool isSoundfont = false;   // When true, use tsf path instead of voice pool
+    int  sfSlot      = -1;      // Index into soundfonts[] array
+    int  midiNote    = 60;      // MIDI note 0-127
+    int  midiVelocity = 100;    // MIDI velocity 0-127
+    int  sfPreset    = 0;       // SF2 preset number (bank always 0 for now)
 
     // For priority queue sorting (earliest frame first)
     bool operator>(const ScheduledNote& other) const {
@@ -817,17 +852,39 @@ public:
     }
 
     void stopTrack(int trackId) {
-        // Stop all voices on this track
+        // Stop all sampler voices on this track
         for (int i = 0; i < MAX_VOICES; i++) {
             if (voices[i].trackId == trackId && voices[i].isActive) {
                 voices[i].stop();
             }
+        }
+        // Stop any active soundfont note on this track
+        if (trackId >= 0 && trackId < 8 && activeSfSlotPerTrack[trackId] >= 0) {
+            int s = activeSfSlotPerTrack[trackId];
+            if (soundfonts[s].handle && activeNotePerTrack[trackId] >= 0) {
+                std::lock_guard<std::mutex> sfLock(soundfonts[s].mutex);
+                tsf_channel_note_off(soundfonts[s].handle, trackId, activeNotePerTrack[trackId]);
+            }
+            activeNotePerTrack[trackId]   = -1;
+            activeSfSlotPerTrack[trackId] = -1;
         }
     }
 
     void stopAll() {
         for (int i = 0; i < MAX_VOICES; i++) {
             voices[i].stop();
+        }
+        // Stop all soundfont notes on all tracks
+        for (int t = 0; t < 8; t++) {
+            if (activeSfSlotPerTrack[t] >= 0) {
+                int s = activeSfSlotPerTrack[t];
+                if (soundfonts[s].handle && activeNotePerTrack[t] >= 0) {
+                    std::lock_guard<std::mutex> sfLock(soundfonts[s].mutex);
+                    tsf_channel_note_off(soundfonts[s].handle, t, activeNotePerTrack[t]);
+                }
+                activeNotePerTrack[t]   = -1;
+                activeSfSlotPerTrack[t] = -1;
+            }
         }
         // Pause stream to prevent background noise when idle
         if (stream && stream->getState() == oboe::StreamState::Started) {
@@ -908,6 +965,27 @@ public:
             // Trigger all notes scheduled for this exact frame
             while (noteQueue.hasNoteAt(currentFrame)) {
                 ScheduledNote note = noteQueue.pop();
+
+                // ---- SOUNDFONT PATH ----
+                // Soundfonts bypass the voice pool — tsf manages its own polyphony.
+                if (note.isSoundfont) {
+                    if (note.sfSlot >= 0 && note.sfSlot < MAX_SOUNDFONTS && soundfonts[note.sfSlot].handle) {
+                        SoundfontEntry& sf = soundfonts[note.sfSlot];
+                        std::lock_guard<std::mutex> sfLock(sf.mutex);
+                        // Note-off any previous note on this track
+                        if (activeNotePerTrack[note.trackId] >= 0) {
+                            tsf_channel_note_off(sf.handle, note.trackId, activeNotePerTrack[note.trackId]);
+                        }
+                        tsf_channel_set_pan(sf.handle, note.trackId, note.pan);
+                        tsf_channel_set_volume(sf.handle, note.trackId, note.volume);
+                        tsf_channel_set_presetnumber(sf.handle, note.trackId, note.sfPreset, false);
+                        tsf_channel_note_on(sf.handle, note.trackId, note.midiNote, note.midiVelocity / 127.0f);
+                        activeNotePerTrack[note.trackId]   = note.midiNote;
+                        activeSfSlotPerTrack[note.trackId] = note.sfSlot;
+                    }
+                    continue;  // Skip voice pool processing
+                }
+                // ---- END SOUNDFONT PATH ----
 
                 bool voiceFound = false;
 
@@ -1593,6 +1671,23 @@ public:
             }
         }
 
+        // Mix soundfont output into the main output buffer
+        // Each loaded SF2 renders into a temp stereo buffer, then gets mixed in with master volume.
+        {
+            float tempSfBuf[2048];  // 1024 frames * 2 channels — safe for any Oboe buffer size
+            float masterVol;
+            { std::lock_guard<std::mutex> vlock(volumeMutex); masterVol = masterVolume; }
+            for (int s = 0; s < MAX_SOUNDFONTS; s++) {
+                if (!soundfonts[s].handle) continue;
+                std::lock_guard<std::mutex> sfLock(soundfonts[s].mutex);
+                memset(tempSfBuf, 0, sizeof(float) * numFrames * 2);
+                tsf_render_float(soundfonts[s].handle, tempSfBuf, numFrames, 0);
+                for (int i = 0; i < numFrames * 2; i++) {
+                    output[i] += tempSfBuf[i] * masterVol;
+                }
+            }
+        }
+
         // Brickwall limiter at -0.1 dBFS — hard clip both channels.
         // Threshold = 10^(-0.1/20) ≈ 0.9886. Prevents inter-sample clipping on DAC.
         {
@@ -1724,6 +1819,36 @@ public:
                 .vibratoDepth = vibratoDepth,
                 .tableStartRow = tableStartRow
         };
+        noteQueue.schedule(note);
+    }
+
+    // Schedule a soundfont note (public method — called from JNI)
+    void scheduleSoundfontNote(int64_t targetFrame, int trackId, int sfSlot,
+                               int midiNote, int midiVelocity, float vol, float pan, int preset) {
+        ScheduledNote note{};
+        note.targetFrame      = targetFrame;
+        note.trackId          = trackId;
+        note.isSoundfont      = true;
+        note.sfSlot           = sfSlot;
+        note.midiNote         = midiNote;
+        note.midiVelocity     = midiVelocity;
+        note.volume           = vol;
+        note.pan              = pan;
+        note.sfPreset         = preset;
+        note.sampleId         = -1;
+        note.frequency        = 440.0f;
+        note.baseFrequency    = 440.0f;
+        note.startPointOverride = -1;
+        note.tableId          = -1;
+        note.tableTicRate     = 6;
+        note.noteOctave       = 4;
+        note.notePitch        = 0;
+        note.pslInitialOffset = 0.0f;
+        note.pslDuration      = 0.0f;
+        note.pbnRate          = 0.0f;
+        note.vibratoSpeed     = 0.0f;
+        note.vibratoDepth     = 0.0f;
+        note.tableStartRow    = -1;
         noteQueue.schedule(note);
     }
 
@@ -2961,6 +3086,115 @@ JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setOfflineRendering(
         JNIEnv *env, jobject thiz, jboolean rendering) {
     if (engine) engine->setOfflineRendering(rendering == JNI_TRUE);
+}
+
+// ===================================
+// SOUNDFONT JNI FUNCTIONS
+// ===================================
+
+JNIEXPORT jint JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadSoundfont(
+        JNIEnv *env, jobject thiz, jint instrumentId, jstring path) {
+    const char* pathStr = env->GetStringUTFChars(path, nullptr);
+    if (!pathStr) return -1;
+
+    // Find a free slot; if none, evict the slot whose instrumentId is lowest (oldest heuristic)
+    int slot = -1;
+    for (int i = 0; i < MAX_SOUNDFONTS; i++) {
+        if (soundfonts[i].handle == nullptr) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == -1) {
+        // Evict slot with smallest instrumentId (oldest loaded)
+        int minId = INT_MAX;
+        for (int i = 0; i < MAX_SOUNDFONTS; i++) {
+            if (soundfonts[i].instrumentId < minId) {
+                minId = soundfonts[i].instrumentId;
+                slot = i;
+            }
+        }
+        // Free the evicted slot
+        std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
+        tsf_close(soundfonts[slot].handle);
+        soundfonts[slot].handle = nullptr;
+        soundfonts[slot].instrumentId = -1;
+        soundfonts[slot].filePath.clear();
+        LOGD("🎹 Evicted soundfont slot %d to make room for instrumentId %d", slot, (int)instrumentId);
+    }
+
+    // Load the soundfont
+    {
+        std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
+        soundfonts[slot].handle = tsf_load_filename(pathStr);
+        if (!soundfonts[slot].handle) {
+            LOGE("❌ Failed to load soundfont: %s", pathStr);
+            env->ReleaseStringUTFChars(path, pathStr);
+            return -1;
+        }
+        int sampleRate = engine ? engine->getSampleRate() : 44100;
+        tsf_set_output(soundfonts[slot].handle, TSF_STEREO_INTERLEAVED, sampleRate, 0.0f);
+        soundfonts[slot].instrumentId = (int)instrumentId;
+        soundfonts[slot].filePath = pathStr;
+    }
+
+    env->ReleaseStringUTFChars(path, pathStr);
+    LOGD("🎹 Loaded soundfont slot %d for instrumentId %d", slot, (int)instrumentId);
+    return slot;
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setSoundfontPreset(
+        JNIEnv *env, jobject thiz, jint sfSlot, jint bank, jint preset) {
+    if (sfSlot < 0 || sfSlot >= MAX_SOUNDFONTS || !soundfonts[sfSlot].handle) return;
+    // Preset is set per-note via tsf_channel_set_presetnumber; this is a no-op stored in Kotlin.
+    LOGD("🎹 setSoundfontPreset slot=%d bank=%d preset=%d (applied per-note)", (int)sfSlot, (int)bank, (int)preset);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleSoundfontNote(
+        JNIEnv *env, jobject thiz, jlong frame, jint trackId, jint sfSlot,
+        jint midiNote, jint velocity, jfloat vol, jfloat pan, jint preset) {
+    if (engine) {
+        engine->scheduleSoundfontNote((int64_t)frame, (int)trackId, (int)sfSlot,
+                                      (int)midiNote, (int)velocity,
+                                      (float)vol, (float)pan, (int)preset);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1unloadSoundfont(
+        JNIEnv *env, jobject thiz, jint sfSlot) {
+    if (sfSlot < 0 || sfSlot >= MAX_SOUNDFONTS) return;
+    std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
+    if (soundfonts[sfSlot].handle) {
+        tsf_close(soundfonts[sfSlot].handle);
+        soundfonts[sfSlot].handle = nullptr;
+    }
+    soundfonts[sfSlot].instrumentId = -1;
+    soundfonts[sfSlot].filePath.clear();
+    LOGD("🎹 Unloaded soundfont slot %d", (int)sfSlot);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSoundfontPresetName(
+        JNIEnv *env, jobject thiz, jint sfSlot, jint bank, jint preset) {
+    if (sfSlot < 0 || sfSlot >= MAX_SOUNDFONTS || !soundfonts[sfSlot].handle) {
+        return env->NewStringUTF("---");
+    }
+    std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
+    // tsf_get_presetname returns the name for the given preset index (not bank/program)
+    // We need to find the preset index by bank/program number
+    int count = tsf_get_presetcount(soundfonts[sfSlot].handle);
+    for (int i = 0; i < count; i++) {
+        if (tsf_get_presetbank(soundfonts[sfSlot].handle, i) == bank &&
+            tsf_get_presetnumber(soundfonts[sfSlot].handle, i) == preset) {
+            const char* name = tsf_get_presetname(soundfonts[sfSlot].handle, i);
+            return env->NewStringUTF(name ? name : "---");
+        }
+    }
+    return env->NewStringUTF("---");
 }
 
 }

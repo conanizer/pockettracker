@@ -5,6 +5,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.conanizer.pockettracker.core.data.Instrument
+import com.conanizer.pockettracker.core.data.InstrumentType
 import com.conanizer.pockettracker.core.data.Note
 
 /**
@@ -91,6 +92,7 @@ class InstrumentModule : TrackerModule {
             scale = scale,
             nameColumnX = nameColumnX,
             valueColumnX = valueColumnX,
+            instrument = instrument,
             cursorRow = instrumentState.cursorRow,
             cursorColumn = instrumentState.cursorColumn,
             currentRow = currentRow
@@ -99,7 +101,7 @@ class InstrumentModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 1: NAME (shows loaded sample filename)
+        // ROW 1: NAME (shows loaded source filename)
         // ─────────────────────────────────────
         drawNameRow(
             x = x,
@@ -114,7 +116,23 @@ class InstrumentModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 2: ROOT + VOL (dual parameter row)
+        // ROW 2: LOAD SOURCE button (new row)
+        // ─────────────────────────────────────
+        drawLoadSourceRow(
+            x = x,
+            y = rowY,
+            scale = scale,
+            nameColumnX = nameColumnX,
+            valueColumnX = valueColumnX,
+            instrument = instrument,
+            cursorRow = instrumentState.cursorRow,
+            currentRow = currentRow
+        )
+        rowY += ROW_HEIGHT
+        currentRow++
+
+        // ─────────────────────────────────────
+        // ROW 3: ROOT + VOL (dual parameter row)
         // ─────────────────────────────────────
         val volHex = instrument.volume.toString(16).padStart(2, '0').uppercase()
         drawDualParameterRow(
@@ -135,7 +153,7 @@ class InstrumentModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 3: DETUNE + PAN (dual parameter row)
+        // ROW 4: DETUNE + PAN (dual parameter row)
         // ─────────────────────────────────────
         val detuneHex = instrument.detune.toString(16).padStart(2, '0').uppercase()
         val panHex = instrument.pan.toString(16).padStart(2, '0').uppercase()
@@ -157,7 +175,7 @@ class InstrumentModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 4: TBL TIC (table tick rate)
+        // ROW 5: TBL TIC (table tick rate)
         // ─────────────────────────────────────
         val ticHex = instrument.tableTicRate.toString(16).padStart(2, '0').uppercase()
         drawParameterRow(
@@ -175,167 +193,203 @@ class InstrumentModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 5: SPACER (empty row)
+        // ROW 6: SPACER (empty row)
         // ─────────────────────────────────────
         rowY += ROW_HEIGHT
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 6: DRIVE + FILTER (dual parameter row)
+        // ROWS 7+: type-specific layout
         // ─────────────────────────────────────
-        val driveHex = instrument.drive.toString(16).padStart(2, '0').uppercase()
-        drawDualParameterRow(
-            x = x,
-            y = rowY,
-            scale = scale,
-            nameColumnX = nameColumnX,
-            valueColumnX = valueColumnX,
-            param1Name = "DRIVE",
-            param1Value = driveHex,
-            param2Name = "FILTER",
-            param2Value = instrument.filterType,
-            cursorRow = instrumentState.cursorRow,
-            cursorColumn = instrumentState.cursorColumn,
-            currentRow = currentRow
-        )
+        if (instrument.instrumentType == InstrumentType.SOUNDFONT) {
+            // SOUNDFONT: BANK + PRESET, then PRESET NAME
+            val bankHex = instrument.sfBank.toString(16).padStart(2, '0').uppercase()
+            val presetHex = instrument.sfPreset.toString(16).padStart(2, '0').uppercase()
+            drawDualParameterRow(
+                x = x,
+                y = rowY,
+                scale = scale,
+                nameColumnX = nameColumnX,
+                valueColumnX = valueColumnX,
+                param1Name = "BANK",
+                param1Value = bankHex,
+                param2Name = "PRESET",
+                param2Value = presetHex,
+                cursorRow = instrumentState.cursorRow,
+                cursorColumn = instrumentState.cursorColumn,
+                currentRow = currentRow
+            )
+            rowY += ROW_HEIGHT
+            currentRow++
+
+            // PRESET NAME row (read-only, from tsf)
+            val isCursorOnNameRow = instrumentState.cursorRow == currentRow
+            if (isCursorOnNameRow) {
+                drawRect(
+                    color = Color(0xFF333333),
+                    topLeft = Offset((x * scale).toFloat(), (rowY * scale).toFloat()),
+                    size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
+                )
+            }
+            drawBitmapText(
+                text = "NAME",
+                x = nameColumnX,
+                y = rowY + TEXT_PADDING,
+                scale = scale,
+                color = if (isCursorOnNameRow) Color.Yellow else Color.Gray,
+                spacing = CHAR_SPACING,
+                fontScale = FONT_SCALE
+            )
+            drawBitmapText(
+                text = instrumentState.soundfontPresetName.ifEmpty { "---" },
+                x = valueColumnX,
+                y = rowY + TEXT_PADDING,
+                scale = scale,
+                color = if (isCursorOnNameRow) Color.Yellow else Color.White,
+                spacing = CHAR_SPACING,
+                fontScale = FONT_SCALE
+            )
+        } else {
+            // SAMPLER: DRIVE+FILTER (row 7), CRUSH+CUT (row 8), DWNSMPL+RES (row 9), SPACER (row 10), then sample params
+            val driveHex = instrument.drive.toString(16).padStart(2, '0').uppercase()
+            drawDualParameterRow(
+                x = x,
+                y = rowY,
+                scale = scale,
+                nameColumnX = nameColumnX,
+                valueColumnX = valueColumnX,
+                param1Name = "DRIVE",
+                param1Value = driveHex,
+                param2Name = "FILTER",
+                param2Value = instrument.filterType,
+                cursorRow = instrumentState.cursorRow,
+                cursorColumn = instrumentState.cursorColumn,
+                currentRow = currentRow
+            )
+            rowY += ROW_HEIGHT
+            currentRow++
+
+            // ROW 8: CRUSH + CUT
+            val crushHex = instrument.crush.toString(16).uppercase()
+            val cutHex = instrument.filterCut.toString(16).padStart(2, '0').uppercase()
+            drawDualParameterRow(
+                x = x,
+                y = rowY,
+                scale = scale,
+                nameColumnX = nameColumnX,
+                valueColumnX = valueColumnX,
+                param1Name = "CRUSH",
+                param1Value = crushHex,
+                param2Name = "CUT",
+                param2Value = cutHex,
+                cursorRow = instrumentState.cursorRow,
+                cursorColumn = instrumentState.cursorColumn,
+                currentRow = currentRow
+            )
+            rowY += ROW_HEIGHT
+            currentRow++
+
+            // ROW 9: DWNSMPL + RES
+            val downsampleHex = instrument.downsample.toString(16).uppercase()
+            val resHex = instrument.filterRes.toString(16).padStart(2, '0').uppercase()
+            drawDualParameterRow(
+                x = x,
+                y = rowY,
+                scale = scale,
+                nameColumnX = nameColumnX,
+                valueColumnX = valueColumnX,
+                param1Name = "DWNSMPL",
+                param1Value = downsampleHex,
+                param2Name = "RES",
+                param2Value = resHex,
+                cursorRow = instrumentState.cursorRow,
+                cursorColumn = instrumentState.cursorColumn,
+                currentRow = currentRow
+            )
+            rowY += ROW_HEIGHT
+            currentRow++
+
+            // ROW 10: SPACER (empty row)
+        // ─────────────────────────────────────
         rowY += ROW_HEIGHT
         currentRow++
 
-        // ─────────────────────────────────────
-        // ROW 7: CRUSH + CUT (dual parameter row)
-        // ─────────────────────────────────────
-        val crushHex = instrument.crush.toString(16).uppercase()
-        val cutHex = instrument.filterCut.toString(16).padStart(2, '0').uppercase()
-        drawDualParameterRow(
-            x = x,
-            y = rowY,
-            scale = scale,
-            nameColumnX = nameColumnX,
-            valueColumnX = valueColumnX,
-            param1Name = "CRUSH",
-            param1Value = crushHex,
-            param2Name = "CUT",
-            param2Value = cutHex,
-            cursorRow = instrumentState.cursorRow,
-            cursorColumn = instrumentState.cursorColumn,
-            currentRow = currentRow
-        )
-        rowY += ROW_HEIGHT
-        currentRow++
+            // ROW 11: START (sample start point)
+            val startHex = instrument.sampleStart.toString(16).padStart(2, '0').uppercase()
+            drawParameterRow(
+                x = x,
+                y = rowY,
+                scale = scale,
+                nameColumnX = nameColumnX,
+                valueColumnX = valueColumnX,
+                parameterName = "START",
+                parameterValue = startHex,
+                isCursorOnName = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
+                isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1
+            )
+            rowY += ROW_HEIGHT
+            currentRow++
 
-        // ─────────────────────────────────────
-        // ROW 8: DWNSMPL + RES (dual parameter row)
-        // ─────────────────────────────────────
-        val downsampleHex = instrument.downsample.toString(16).uppercase()
-        val resHex = instrument.filterRes.toString(16).padStart(2, '0').uppercase()
-        drawDualParameterRow(
-            x = x,
-            y = rowY,
-            scale = scale,
-            nameColumnX = nameColumnX,
-            valueColumnX = valueColumnX,
-            param1Name = "DWNSMPL",
-            param1Value = downsampleHex,
-            param2Name = "RES",
-            param2Value = resHex,
-            cursorRow = instrumentState.cursorRow,
-            cursorColumn = instrumentState.cursorColumn,
-            currentRow = currentRow
-        )
-        rowY += ROW_HEIGHT
-        currentRow++
+            // ROW 12: END (sample end point)
+            val endHex = instrument.sampleEnd.toString(16).padStart(2, '0').uppercase()
+            drawParameterRow(
+                x = x,
+                y = rowY,
+                scale = scale,
+                nameColumnX = nameColumnX,
+                valueColumnX = valueColumnX,
+                parameterName = "END",
+                parameterValue = endHex,
+                isCursorOnName = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
+                isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1
+            )
+            rowY += ROW_HEIGHT
+            currentRow++
 
-        // ─────────────────────────────────────
-        // ROW 9: SPACER (empty row)
-        // ─────────────────────────────────────
-        rowY += ROW_HEIGHT
-        currentRow++
+            // ROW 13: REV (reverse: off/on)
+            drawParameterRow(
+                x = x,
+                y = rowY,
+                scale = scale,
+                nameColumnX = nameColumnX,
+                valueColumnX = valueColumnX,
+                parameterName = "REV",
+                parameterValue = if (instrument.reverse) "on" else "off",
+                isCursorOnName = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
+                isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1
+            )
+            rowY += ROW_HEIGHT
+            currentRow++
 
-        // ─────────────────────────────────────
-        // ROW 10: START (sample start point)
-        // ─────────────────────────────────────
-        val startHex = instrument.sampleStart.toString(16).padStart(2, '0').uppercase()
-        drawParameterRow(
-            x = x,
-            y = rowY,
-            scale = scale,
-            nameColumnX = nameColumnX,
-            valueColumnX = valueColumnX,
-            parameterName = "START",
-            parameterValue = startHex,
-            isCursorOnName = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
-            isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1
-        )
-        rowY += ROW_HEIGHT
-        currentRow++
+            // ROW 14: LOOP (loop mode: off/fwd/png)
+            drawParameterRow(
+                x = x,
+                y = rowY,
+                scale = scale,
+                nameColumnX = nameColumnX,
+                valueColumnX = valueColumnX,
+                parameterName = "LOOP",
+                parameterValue = instrument.loopMode,
+                isCursorOnName = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
+                isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1
+            )
+            rowY += ROW_HEIGHT
+            currentRow++
 
-        // ─────────────────────────────────────
-        // ROW 11: END (sample end point)
-        // ─────────────────────────────────────
-        val endHex = instrument.sampleEnd.toString(16).padStart(2, '0').uppercase()
-        drawParameterRow(
-            x = x,
-            y = rowY,
-            scale = scale,
-            nameColumnX = nameColumnX,
-            valueColumnX = valueColumnX,
-            parameterName = "END",
-            parameterValue = endHex,
-            isCursorOnName = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
-            isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1
-        )
-        rowY += ROW_HEIGHT
-        currentRow++
-
-        // ─────────────────────────────────────
-        // ROW 12: REV (reverse: off/on)
-        // ─────────────────────────────────────
-        drawParameterRow(
-            x = x,
-            y = rowY,
-            scale = scale,
-            nameColumnX = nameColumnX,
-            valueColumnX = valueColumnX,
-            parameterName = "REV",
-            parameterValue = if (instrument.reverse) "on" else "off",
-            isCursorOnName = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
-            isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1
-        )
-        rowY += ROW_HEIGHT
-        currentRow++
-
-        // ─────────────────────────────────────
-        // ROW 13: LOOP (loop mode: off/fwd/png)
-        // ─────────────────────────────────────
-        drawParameterRow(
-            x = x,
-            y = rowY,
-            scale = scale,
-            nameColumnX = nameColumnX,
-            valueColumnX = valueColumnX,
-            parameterName = "LOOP",
-            parameterValue = instrument.loopMode,
-            isCursorOnName = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
-            isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1
-        )
-        rowY += ROW_HEIGHT
-        currentRow++
-
-        // ─────────────────────────────────────
-        // ROW 14: LOOP ST (loop start point)
-        // ─────────────────────────────────────
-        val loopStartHex = instrument.loopStart.toString(16).padStart(2, '0').uppercase()
-        drawParameterRow(
-            x = x,
-            y = rowY,
-            scale = scale,
+            // ROW 15: LOOP ST (loop start point)
+            val loopStartHex = instrument.loopStart.toString(16).padStart(2, '0').uppercase()
+            drawParameterRow(
+                x = x,
+                y = rowY,
+                scale = scale,
             nameColumnX = nameColumnX,
             valueColumnX = valueColumnX,
             parameterName = "LOOP ST",
             parameterValue = loopStartHex,
             isCursorOnName = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
             isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1
-        )
+            )
+        } // end SAMPLER-specific rows
 
         // ===================================
         // STEP 5: Draw status message at bottom (if any)
@@ -494,9 +548,9 @@ class InstrumentModule : TrackerModule {
     }
 
     /**
-     * Draw TYPE + LOAD row
-     * TYPE at columns 0-1, LOAD button at column 3 (no parameter name in column 2)
-     * Columns: 0=TYPE name, 1=TYPE value, 2=empty, 3=LOAD button
+     * Draw TYPE + LOAD + SAVE row
+     * TYPE at columns 0-1, LOAD .pti at column 2, SAVE .pti at column 3
+     * Columns: 0=TYPE name, 1=TYPE value (editable), 2=LOAD button, 3=SAVE button
      */
     private fun DrawScope.drawTypeLoadRow(
         x: Int,
@@ -504,6 +558,7 @@ class InstrumentModule : TrackerModule {
         scale: Int,
         nameColumnX: Int,
         valueColumnX: Int,
+        instrument: Instrument,
         cursorRow: Int,
         cursorColumn: Int,
         currentRow: Int
@@ -531,9 +586,10 @@ class InstrumentModule : TrackerModule {
             fontScale = FONT_SCALE
         )
 
-        // COLUMN 1: "sample" value (read-only for now)
+        // COLUMN 1: type value (sampler/soundfont) — editable, handled in MainActivity
+        val typeText = if (instrument.instrumentType == InstrumentType.SOUNDFONT) "soundfont" else "sampler"
         drawBitmapText(
-            text = "sample",
+            text = typeText,
             x = valueColumnX,
             y = textY,
             scale = scale,
@@ -542,16 +598,64 @@ class InstrumentModule : TrackerModule {
             fontScale = FONT_SCALE
         )
 
-        // COLUMN 2: empty (no parameter name)
-
-        // COLUMN 3: LOAD button at value2ColumnX
-        val value2ColumnX = valueColumnX + 220
+        // COLUMN 2: LOAD .pti button
+        val name2ColumnX = nameColumnX + 230
         drawBitmapText(
             text = "LOAD",
+            x = name2ColumnX,
+            y = textY,
+            scale = scale,
+            color = if (isCursorOnThisRow && cursorColumn == 2) Color.Yellow else Color.White,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        // COLUMN 3: SAVE .pti button
+        val value2ColumnX = valueColumnX + 220
+        drawBitmapText(
+            text = "SAVE",
             x = value2ColumnX,
             y = textY,
             scale = scale,
             color = if (isCursorOnThisRow && cursorColumn == 3) Color.Yellow else Color.White,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+    }
+
+    /**
+     * Draw LOAD SOURCE row (row 2)
+     * Button label adapts: "LOAD WAV" for SAMPLER, "LOAD SF2" for SOUNDFONT
+     * Button is at column 1 (valueColumnX)
+     */
+    private fun DrawScope.drawLoadSourceRow(
+        x: Int,
+        y: Int,
+        scale: Int,
+        nameColumnX: Int,
+        valueColumnX: Int,
+        instrument: Instrument,
+        cursorRow: Int,
+        currentRow: Int
+    ) {
+        val textY = y + TEXT_PADDING
+        val isCursorOnThisRow = cursorRow == currentRow
+
+        if (isCursorOnThisRow) {
+            drawRect(
+                color = Color(0xFF333333),
+                topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
+                size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
+            )
+        }
+
+        val buttonText = if (instrument.instrumentType == InstrumentType.SOUNDFONT) "LOAD SF2" else "LOAD WAV"
+        drawBitmapText(
+            text = buttonText,
+            x = valueColumnX,
+            y = textY,
+            scale = scale,
+            color = if (isCursorOnThisRow) Color.Yellow else Color.White,
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
@@ -593,10 +697,13 @@ class InstrumentModule : TrackerModule {
             fontScale = FONT_SCALE
         )
 
-        // COLUMN 2: Show loaded sample filename, or "empty" if nothing is loaded
-        val sampleName = if (instrumentState.instrument.sampleFilePath != null) {
-            val file = java.io.File(instrumentState.instrument.sampleFilePath!!)
-            file.name
+        // COLUMN 2: Show loaded source filename, or "empty" if nothing loaded
+        val sourcePath = if (instrumentState.instrument.instrumentType == InstrumentType.SOUNDFONT)
+            instrumentState.instrument.soundfontPath
+        else
+            instrumentState.instrument.sampleFilePath
+        val sampleName = if (sourcePath != null) {
+            java.io.File(sourcePath).name
         } else {
             "empty"
         }
@@ -613,190 +720,134 @@ class InstrumentModule : TrackerModule {
     }
 
     /**
-     * Get cursor context for current cursor position
+     * Get cursor context for current cursor position.
      *
-     * This tells the generic input system what kind of value we're on
-     * and what actions are available.
-     *
-     * Row layout:
-     * - Row 0: TYPE (col 1) + LOAD (col 3)
-     * - Row 1: NAME (read-only)
-     * - Row 2: ROOT + VOL (dual: cols 0=name, 1=ROOT, 2=name, 3=VOL)
-     * - Row 3: DETUNE + PAN (dual: cols 0=name, 1=DETUNE, 2=name, 3=PAN)
-     * - Row 4: TBL TIC (col 1)
-     * - Row 5: SPACER
-     * - Row 6: DRIVE + FILTER (dual)
-     * - Row 7: CRUSH + CUT (dual)
-     * - Row 8: DWNSMPL + RES (dual)
-     * - Row 9: SPACER
-     * - Row 10: START
-     * - Row 11: END
-     * - Row 12: REV
-     * - Row 13: LOOP
-     * - Row 14: LOOP ST
+     * New row layout:
+     * - Row 0:  TYPE (col 1 editable) | LOAD .pti (col 2) | SAVE .pti (col 3)
+     * - Row 1:  NAME (read-only)
+     * - Row 2:  LOAD SOURCE button (col 1)
+     * - Row 3:  ROOT + VOL (dual: 1=ROOT, 3=VOL)
+     * - Row 4:  DETUNE + PAN (dual: 1=DETUNE, 3=PAN)
+     * - Row 5:  TBL TIC (col 1)
+     * - Row 6:  SPACER
+     * SAMPLER only (rows 7-15):
+     * - Row 7:  DRIVE + FILTER (dual)
+     * - Row 8:  CRUSH + CUT (dual)
+     * - Row 9:  DWNSMPL + RES (dual)
+     * - Row 10: SPACER
+     * - Row 11: START
+     * - Row 12: END
+     * - Row 13: REV
+     * - Row 14: LOOP
+     * - Row 15: LOOP ST
+     * SOUNDFONT only (rows 7-8):
+     * - Row 7:  BANK + PRESET (dual: 1=BANK, 3=PRESET)
+     * - Row 8:  PRESET NAME (read-only)
      */
     fun getCursorContext(state: InstrumentState): CursorContext {
+        val isSoundFont = state.instrument.instrumentType == InstrumentType.SOUNDFONT
         when (state.cursorRow) {
             0 -> {
-                // TYPE + LOAD row (columns: 0=name, 1=TYPE, 2=empty, 3=LOAD)
-                when (state.cursorColumn) {
-                    0, 2 -> return CursorContextFactory.readOnly()  // Parameter names / empty
-                    1 -> return CursorContextFactory.readOnly()  // TYPE value (read-only for now)
-                    3 -> return CursorContextFactory.readOnly()  // LOAD button (handled in MainActivity)
-                    else -> return CursorContextFactory.none()
-                }
-            }
-            1 -> {
-                // NAME row - read-only (shows loaded sample filename)
+                // TYPE | type value | LOAD | SAVE — cols 1,2,3 all handled in MainActivity
                 return CursorContextFactory.readOnly()
             }
-            2 -> {
-                // ROOT + VOL row (columns: 0=name, 1=ROOT, 2=name, 3=VOL)
+            1 -> return CursorContextFactory.readOnly()  // NAME
+            2 -> return CursorContextFactory.readOnly()  // LOAD SOURCE button
+            3 -> {
+                // ROOT + VOL
                 when (state.cursorColumn) {
-                    0, 2 -> return CursorContextFactory.readOnly()  // Parameter names
-                    1 -> {  // ROOT value
+                    0, 2 -> return CursorContextFactory.readOnly()
+                    1 -> {
                         val isEmpty = state.instrument.root == Note.EMPTY
                         val currentValue = if (isEmpty) 0 else state.instrument.root.toMidi()
                         return CursorContextFactory.note(currentValue, isEmpty)
                     }
-                    3 -> return CursorContextFactory.hexByte(  // VOL value
-                        currentValue = state.instrument.volume,
-                        min = 0,
-                        max = 255
-                    )
-                    else -> return CursorContextFactory.none()
-                }
-            }
-            3 -> {
-                // DETUNE + PAN row (columns: 0=name, 1=DETUNE, 2=name, 3=PAN)
-                when (state.cursorColumn) {
-                    0, 2 -> return CursorContextFactory.readOnly()  // Parameter names
-                    1 -> return CursorContextFactory.hexByte(  // DETUNE value
-                        currentValue = state.instrument.detune,
-                        min = 0,
-                        max = 255
-                    )
-                    3 -> return CursorContextFactory.hexByte(  // PAN value
-                        currentValue = state.instrument.pan,
-                        min = 0,
-                        max = 255
-                    )
+                    3 -> return CursorContextFactory.hexByte(state.instrument.volume, 0, 255)
                     else -> return CursorContextFactory.none()
                 }
             }
             4 -> {
-                // TBL TIC row - hex byte (00-FF)
-                if (state.cursorColumn == 0) {
-                    return CursorContextFactory.readOnly()
+                // DETUNE + PAN
+                when (state.cursorColumn) {
+                    0, 2 -> return CursorContextFactory.readOnly()
+                    1 -> return CursorContextFactory.hexByte(state.instrument.detune, 0, 255)
+                    3 -> return CursorContextFactory.hexByte(state.instrument.pan, 0, 255)
+                    else -> return CursorContextFactory.none()
                 }
-                return CursorContextFactory.hexByte(
-                    currentValue = state.instrument.tableTicRate,
-                    min = 0,
-                    max = 255
-                )
             }
             5 -> {
-                // SPACER row - no editing
-                return CursorContextFactory.none()
+                if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
+                return CursorContextFactory.hexByte(state.instrument.tableTicRate, 0, 255)
             }
-            6 -> {
-                // DRIVE + FILTER row (columns: 0=name, 1=drive, 2=name, 3=filter)
-                when (state.cursorColumn) {
-                    0, 2 -> return CursorContextFactory.readOnly()  // Parameter names
-                    1 -> return CursorContextFactory.hexByte(  // DRIVE value
-                        currentValue = state.instrument.drive,
-                        min = 0,
-                        max = 255
-                    )
-                    3 -> {  // FILTER type
-                        val filterTypes = listOf("off", "lp", "hp", "bp")
-                        return CursorContextFactory.toggleTernary(state.instrument.filterType, filterTypes)
-                    }
-                    else -> return CursorContextFactory.none()
-                }
-            }
+            6 -> return CursorContextFactory.none()  // SPACER
             7 -> {
-                // CRUSH + CUT row (columns: 0=name, 1=crush, 2=name, 3=cut)
-                when (state.cursorColumn) {
-                    0, 2 -> return CursorContextFactory.readOnly()  // Parameter names
-                    1 -> return CursorContextFactory.hexNibble(  // CRUSH value
-                        currentValue = state.instrument.crush,
-
-                    )
-                    3 -> return CursorContextFactory.hexByte(  // CUT value
-                        currentValue = state.instrument.filterCut,
-                        min = 0,
-                        max = 255
-                    )
-                    else -> return CursorContextFactory.none()
+                if (isSoundFont) {
+                    // BANK + PRESET
+                    when (state.cursorColumn) {
+                        0, 2 -> return CursorContextFactory.readOnly()
+                        1 -> return CursorContextFactory.hexByte(state.instrument.sfBank, 0, 127)
+                        3 -> return CursorContextFactory.hexByte(state.instrument.sfPreset, 0, 127)
+                        else -> return CursorContextFactory.none()
+                    }
+                } else {
+                    // DRIVE + FILTER
+                    when (state.cursorColumn) {
+                        0, 2 -> return CursorContextFactory.readOnly()
+                        1 -> return CursorContextFactory.hexByte(state.instrument.drive, 0, 255)
+                        3 -> {
+                            val filterTypes = listOf("off", "lp", "hp", "bp")
+                            return CursorContextFactory.toggleTernary(state.instrument.filterType, filterTypes)
+                        }
+                        else -> return CursorContextFactory.none()
+                    }
                 }
             }
             8 -> {
-                // DWNSMPL + RES row (columns: 0=name, 1=downsample, 2=name, 3=res)
+                if (isSoundFont) return CursorContextFactory.readOnly()  // PRESET NAME
+                // CRUSH + CUT
                 when (state.cursorColumn) {
-                    0, 2 -> return CursorContextFactory.readOnly()  // Parameter names
-                    1 -> return CursorContextFactory.hexNibble(  // DWNSMPL value
-                        currentValue = state.instrument.downsample,
-                    )
-                    3 -> return CursorContextFactory.hexByte(  // RES value
-                        currentValue = state.instrument.filterRes,
-                        min = 0,
-                        max = 255
-                    )
+                    0, 2 -> return CursorContextFactory.readOnly()
+                    1 -> return CursorContextFactory.hexNibble(state.instrument.crush)
+                    3 -> return CursorContextFactory.hexByte(state.instrument.filterCut, 0, 255)
                     else -> return CursorContextFactory.none()
                 }
             }
             9 -> {
-                // SPACER row - no editing
-                return CursorContextFactory.none()
-            }
-            10 -> {
-                // START row - hex byte (00-FF)
-                if (state.cursorColumn == 0) {
-                    return CursorContextFactory.readOnly()
+                if (isSoundFont) return CursorContextFactory.none()  // no row 9 for soundfont
+                // DWNSMPL + RES
+                when (state.cursorColumn) {
+                    0, 2 -> return CursorContextFactory.readOnly()
+                    1 -> return CursorContextFactory.hexNibble(state.instrument.downsample)
+                    3 -> return CursorContextFactory.hexByte(state.instrument.filterRes, 0, 255)
+                    else -> return CursorContextFactory.none()
                 }
-                return CursorContextFactory.hexByte(
-                    currentValue = state.instrument.sampleStart,
-                    min = 0,
-                    max = 255
-                )
             }
+            10 -> return CursorContextFactory.none()  // SPACER (SAMPLER) or unused
             11 -> {
-                // END row - hex byte (00-FF)
-                if (state.cursorColumn == 0) {
-                    return CursorContextFactory.readOnly()
-                }
-                return CursorContextFactory.hexByte(
-                    currentValue = state.instrument.sampleEnd,
-                    min = 0,
-                    max = 255
-                )
+                if (isSoundFont) return CursorContextFactory.none()
+                if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
+                return CursorContextFactory.hexByte(state.instrument.sampleStart, 0, 255)
             }
             12 -> {
-                // REV row - binary toggle (off/on)
-                if (state.cursorColumn == 0) {
-                    return CursorContextFactory.readOnly()
-                }
-                return CursorContextFactory.toggleBinary(state.instrument.reverse)
+                if (isSoundFont) return CursorContextFactory.none()
+                if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
+                return CursorContextFactory.hexByte(state.instrument.sampleEnd, 0, 255)
             }
             13 -> {
-                // LOOP row - ternary toggle (off/fwd/png)
-                if (state.cursorColumn == 0) {
-                    return CursorContextFactory.readOnly()
-                }
+                if (isSoundFont) return CursorContextFactory.none()
+                if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
+                return CursorContextFactory.toggleBinary(state.instrument.reverse)
+            }
+            14 -> {
+                if (isSoundFont) return CursorContextFactory.none()
+                if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
                 val loopModes = listOf("off", "fwd", "png")
                 return CursorContextFactory.toggleTernary(state.instrument.loopMode, loopModes)
             }
-            14 -> {
-                // LOOP ST row - hex byte (00-FF)
-                if (state.cursorColumn == 0) {
-                    return CursorContextFactory.readOnly()
-                }
-                return CursorContextFactory.hexByte(
-                    currentValue = state.instrument.loopStart,
-                    min = 0,
-                    max = 255
-                )
+            15 -> {
+                if (isSoundFont) return CursorContextFactory.none()
+                if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
+                return CursorContextFactory.hexByte(state.instrument.loopStart, 0, 255)
             }
             else -> return CursorContextFactory.none()
         }
@@ -805,135 +856,90 @@ class InstrumentModule : TrackerModule {
     /**
      * Handle input action for instrument screen.
      *
-     * Uses InstrumentController for all business logic (proper UI/logic separation).
-     *
-     * Row layout:
-     * - Row 0: TYPE (col 1) + LOAD (col 3)
-     * - Row 1: NAME (read-only)
-     * - Row 2: ROOT + VOL
-     * - Row 3: DETUNE + PAN
-     * - Row 4: TBL TIC
-     * - Row 5: SPACER
-     * - Row 6: DRIVE + FILTER
-     * - Row 7: CRUSH + CUT
-     * - Row 8: DWNSMPL + RES
-     * - Row 9: SPACER
-     * - Row 10: START
-     * - Row 11: END
-     * - Row 12: REV
-     * - Row 13: LOOP
-     * - Row 14: LOOP ST
+     * New row layout (rows 0-2 handled in MainActivity, rows 3+ handled here):
+     * - Row 0:  TYPE/LOAD/SAVE — handled in MainActivity
+     * - Row 1:  NAME — read-only
+     * - Row 2:  LOAD SOURCE — handled in MainActivity
+     * - Row 3:  ROOT + VOL
+     * - Row 4:  DETUNE + PAN
+     * - Row 5:  TBL TIC
+     * - Row 6:  SPACER
+     * SAMPLER (rows 7-15): DRIVE+FILTER, CRUSH+CUT, DWNSMPL+RES, SPACER, START, END, REV, LOOP, LOOP ST
+     * SOUNDFONT (rows 7-8): BANK+PRESET, PRESET NAME (read-only)
      */
     fun handleInput(
         state: InstrumentState,
         action: com.conanizer.pockettracker.core.logic.InputAction,
         instrumentController: com.conanizer.pockettracker.core.logic.InstrumentController
     ): InputResult {
+        val isSoundFont = state.instrument.instrumentType == InstrumentType.SOUNDFONT
         when (state.cursorRow) {
-            0 -> {
-                // TYPE + LOAD row
-                // Column 1: TYPE (read-only for now)
-                // Column 3: LOAD button (handled in MainActivity as button action)
-            }
-            1 -> {
-                // NAME row - read-only (shows loaded sample filename)
-            }
-            2 -> {
-                // ROOT + VOL row (columns: 0=name, 1=ROOT, 2=name, 3=VOL)
-                when (state.cursorColumn) {
-                    1 -> {  // ROOT value
-                        when (action) {
-                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                                instrumentController.updateRoot(state.instrument, Note.fromMidi(action.value))
-                            }
-                            is com.conanizer.pockettracker.core.logic.InputAction.DELETE -> {
-                                instrumentController.updateRoot(state.instrument, Note.fromString("C-4"))
-                            }
-                            else -> {}
-                        }
-                    }
-                    3 -> {  // VOL value
-                        when (action) {
-                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                                instrumentController.updateVolume(state.instrument, action.value)
-                            }
-                            else -> {}
-                        }
-                    }
-                }
-            }
+            0, 1, 2 -> { /* handled in MainActivity */ }
             3 -> {
-                // DETUNE + PAN row (columns: 0=name, 1=DETUNE, 2=name, 3=PAN)
+                // ROOT + VOL
                 when (state.cursorColumn) {
-                    1 -> {  // DETUNE value
-                        when (action) {
-                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                                instrumentController.updateDetune(state.instrument, action.value)
-                            }
-                            else -> {}
-                        }
+                    1 -> when (action) {
+                        is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                            instrumentController.updateRoot(state.instrument, Note.fromMidi(action.value))
+                        is com.conanizer.pockettracker.core.logic.InputAction.DELETE ->
+                            instrumentController.updateRoot(state.instrument, Note.fromString("C-4"))
+                        else -> {}
                     }
-                    3 -> {  // PAN value
-                        when (action) {
-                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                                instrumentController.updatePan(state.instrument, action.value)
-                            }
-                            else -> {}
-                        }
+                    3 -> when (action) {
+                        is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                            instrumentController.updateVolume(state.instrument, action.value)
+                        else -> {}
                     }
                 }
             }
             4 -> {
-                // TBL TIC row - table tick rate
-                when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        instrumentController.updateTableTicRate(state.instrument, action.value)
+                // DETUNE + PAN
+                when (state.cursorColumn) {
+                    1 -> when (action) {
+                        is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                            instrumentController.updateDetune(state.instrument, action.value)
+                        else -> {}
                     }
-                    else -> {}
+                    3 -> when (action) {
+                        is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                            instrumentController.updatePan(state.instrument, action.value)
+                        else -> {}
+                    }
                 }
             }
-            5 -> {
-                // SPACER row - no editing
+            5 -> when (action) {
+                is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    instrumentController.updateTableTicRate(state.instrument, action.value)
+                else -> {}
             }
-            6 -> {
-                // DRIVE + FILTER row (columns: 0=name, 1=drive, 2=name, 3=filter)
-                when (state.cursorColumn) {
-                    1 -> {  // DRIVE value
-                        when (action) {
-                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                                instrumentController.updateDrive(state.instrument, action.value)
-                            }
+            6 -> { /* SPACER */ }
+            7 -> {
+                if (isSoundFont) {
+                    // BANK + PRESET
+                    when (state.cursorColumn) {
+                        1 -> when (action) {
+                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                                instrumentController.updateSfBank(state.instrument, action.value)
+                            else -> {}
+                        }
+                        3 -> when (action) {
+                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                                instrumentController.updateSfPreset(state.instrument, action.value)
                             else -> {}
                         }
                     }
-                    3 -> {  // FILTER type
-                        when (action) {
+                } else {
+                    // DRIVE + FILTER
+                    when (state.cursorColumn) {
+                        1 -> when (action) {
+                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                                instrumentController.updateDrive(state.instrument, action.value)
+                            else -> {}
+                        }
+                        3 -> when (action) {
                             is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
                                 val filterTypes = listOf("off", "lp", "hp", "bp")
-                                if (action.value in 0..3) {
-                                    instrumentController.updateFilterType(state.instrument, filterTypes[action.value])
-                                }
-                            }
-                            else -> {}
-                        }
-                    }
-                }
-            }
-            7 -> {
-                // CRUSH + CUT row (columns: 0=name, 1=crush, 2=name, 3=cut)
-                when (state.cursorColumn) {
-                    1 -> {  // CRUSH value
-                        when (action) {
-                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                                instrumentController.updateCrush(state.instrument, action.value)
-                            }
-                            else -> {}
-                        }
-                    }
-                    3 -> {  // CUT value
-                        when (action) {
-                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                                instrumentController.updateFilterCut(state.instrument, action.value)
+                                if (action.value in 0..3) instrumentController.updateFilterType(state.instrument, filterTypes[action.value])
                             }
                             else -> {}
                         }
@@ -941,76 +947,66 @@ class InstrumentModule : TrackerModule {
                 }
             }
             8 -> {
-                // DWNSMPL + RES row (columns: 0=name, 1=downsample, 2=name, 3=res)
-                when (state.cursorColumn) {
-                    1 -> {  // DWNSMPL value
-                        when (action) {
-                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                                instrumentController.updateDownsample(state.instrument, action.value)
-                            }
+                if (!isSoundFont) {
+                    // CRUSH + CUT
+                    when (state.cursorColumn) {
+                        1 -> when (action) {
+                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                                instrumentController.updateCrush(state.instrument, action.value)
                             else -> {}
                         }
-                    }
-                    3 -> {  // RES value
-                        when (action) {
-                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                                instrumentController.updateFilterRes(state.instrument, action.value)
-                            }
+                        3 -> when (action) {
+                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                                instrumentController.updateFilterCut(state.instrument, action.value)
                             else -> {}
                         }
                     }
                 }
             }
             9 -> {
-                // SPACER row - no editing
-            }
-            10 -> {
-                // START (sample start point)
-                when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        instrumentController.updateSampleStart(state.instrument, action.value)
-                    }
-                    else -> {}
-                }
-            }
-            11 -> {
-                // END (sample end point)
-                when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        instrumentController.updateSampleEnd(state.instrument, action.value)
-                    }
-                    else -> {}
-                }
-            }
-            12 -> {
-                // REV (reverse: off/on)
-                when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        instrumentController.updateReverse(state.instrument, action.value == 1)
-                    }
-                    else -> {}
-                }
-            }
-            13 -> {
-                // LOOP mode (off/fwd/png)
-                when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        val loopModes = listOf("off", "fwd", "png")
-                        if (action.value in 0..2) {
-                            instrumentController.updateLoopMode(state.instrument, loopModes[action.value])
+                if (!isSoundFont) {
+                    // DWNSMPL + RES
+                    when (state.cursorColumn) {
+                        1 -> when (action) {
+                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                                instrumentController.updateDownsample(state.instrument, action.value)
+                            else -> {}
+                        }
+                        3 -> when (action) {
+                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                                instrumentController.updateFilterRes(state.instrument, action.value)
+                            else -> {}
                         }
                     }
-                    else -> {}
                 }
             }
-            14 -> {
-                // LOOP ST (loop start point)
-                when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                        instrumentController.updateLoopStart(state.instrument, action.value)
-                    }
-                    else -> {}
+            10 -> { /* SPACER */ }
+            11 -> when (action) {
+                is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    instrumentController.updateSampleStart(state.instrument, action.value)
+                else -> {}
+            }
+            12 -> when (action) {
+                is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    instrumentController.updateSampleEnd(state.instrument, action.value)
+                else -> {}
+            }
+            13 -> when (action) {
+                is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    instrumentController.updateReverse(state.instrument, action.value == 1)
+                else -> {}
+            }
+            14 -> when (action) {
+                is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                    val loopModes = listOf("off", "fwd", "png")
+                    if (action.value in 0..2) instrumentController.updateLoopMode(state.instrument, loopModes[action.value])
                 }
+                else -> {}
+            }
+            15 -> when (action) {
+                is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    instrumentController.updateLoopStart(state.instrument, action.value)
+                else -> {}
             }
         }
 
@@ -1028,23 +1024,22 @@ class InstrumentModule : TrackerModule {
  * STATE DATA FOR INSTRUMENT SCREEN
  *
  * @param instrument The instrument being edited
- * @param cursorRow Which row:
- *   - 0=TYPE+LOAD, 1=NAME
- *   - 2=ROOT+VOL, 3=DETUNE+PAN, 4=TBL TIC, 5=SPACER
- *   - 6=DRIVE+FILTER, 7=CRUSH+CUT, 8=DWNSMPL+RES, 9=SPACER
- *   - 10=START, 11=END, 12=REV, 13=LOOP, 14=LOOP ST
- * @param cursorColumn Which column:
- *   - 0 = Parameter name (left column)
- *   - 1 = Value 1 (for dual-param rows)
- *   - 2 = Name 2 (for dual-param rows, empty for TYPE+LOAD row)
- *   - 3 = Value 2 / LOAD button (for dual-param rows)
+ * @param cursorRow Which row (new layout):
+ *   - 0=TYPE+LOAD+SAVE, 1=NAME, 2=LOAD SOURCE
+ *   - 3=ROOT+VOL, 4=DETUNE+PAN, 5=TBL TIC, 6=SPACER
+ *   SAMPLER: 7=DRIVE+FILTER, 8=CRUSH+CUT, 9=DWNSMPL+RES, 10=SPACER,
+ *            11=START, 12=END, 13=REV, 14=LOOP, 15=LOOP ST
+ *   SOUNDFONT: 7=BANK+PRESET, 8=PRESET NAME
+ * @param cursorColumn Which column (0=name label, 1=value1, 2=button/name2, 3=value2/button)
  * @param statusMessage Status message to show at bottom
  * @param isSuccess True if status is success, false if error
+ * @param soundfontPresetName Display name for the current soundfont preset (from tsf)
  */
 data class InstrumentState(
     val instrument: Instrument,
     val cursorRow: Int = 0,
     val cursorColumn: Int = 1,  // Start on value, not name
     val statusMessage: String = "",
-    val isSuccess: Boolean = true
+    val isSuccess: Boolean = true,
+    val soundfontPresetName: String = ""
 )

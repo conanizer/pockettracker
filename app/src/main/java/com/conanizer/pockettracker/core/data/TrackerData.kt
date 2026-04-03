@@ -310,6 +310,10 @@ data class Track(
     var mute: Boolean = false  // Track mute state
 )
 
+// Instrument type selector
+@Serializable
+enum class InstrumentType { SAMPLER, SOUNDFONT }
+
 // Instrument definition
 @Serializable
 data class Instrument(
@@ -345,7 +349,15 @@ data class Instrument(
     var tableTicRate: Int = 0x06,   // Default: 6 tics per row (2 rows per phrase step at 12 tics/step)
 
     // Modulation slots (4 per instrument)
-    var modSlots: Array<ModSlot> = Array(4) { ModSlot() }
+    var modSlots: Array<ModSlot> = Array(4) { ModSlot() },
+
+    // Instrument type (defaults to SAMPLER for backward compatibility)
+    var instrumentType: InstrumentType = InstrumentType.SAMPLER,
+
+    // SoundFont-specific fields (only used when instrumentType == SOUNDFONT)
+    var soundfontPath: String? = null,  // Absolute path to .sf2 or .sf3 file
+    var sfBank: Int = 0,               // Bank number (0-127)
+    var sfPreset: Int = 0              // Program/preset number (0-127)
 )
 
 /**

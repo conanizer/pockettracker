@@ -323,6 +323,28 @@ class OboeAudioBackend : IAudioBackend {
         native_setOfflineRendering(rendering)
     }
 
+    // SoundFont methods
+    override fun loadSoundfont(instrumentId: Int, filePath: String): Int =
+        native_loadSoundfont(instrumentId, filePath)
+
+    override fun setSoundfontPreset(sfSlot: Int, bank: Int, preset: Int) {
+        native_setSoundfontPreset(sfSlot, bank, preset)
+    }
+
+    override fun scheduleSoundfontNote(
+        frame: Long, trackId: Int, sfSlot: Int,
+        midiNote: Int, velocity: Int, vol: Float, pan: Float, preset: Int
+    ) {
+        native_scheduleSoundfontNote(frame, trackId, sfSlot, midiNote, velocity, vol, pan, preset)
+    }
+
+    override fun unloadSoundfont(sfSlot: Int) {
+        native_unloadSoundfont(sfSlot)
+    }
+
+    override fun getSoundfontPresetName(sfSlot: Int, bank: Int, preset: Int): String =
+        native_getSoundfontPresetName(sfSlot, bank, preset) ?: "---"
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Native Methods (JNI → C++)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -420,4 +442,14 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_triggerNoteOff(trackId: Int)
     private external fun native_scheduleNoteOff(frame: Long, trackId: Int)
     private external fun native_setOfflineRendering(rendering: Boolean)
+
+    // SoundFont JNI declarations
+    private external fun native_loadSoundfont(instrumentId: Int, path: String): Int
+    private external fun native_setSoundfontPreset(sfSlot: Int, bank: Int, preset: Int)
+    private external fun native_scheduleSoundfontNote(
+        frame: Long, trackId: Int, sfSlot: Int,
+        midiNote: Int, velocity: Int, vol: Float, pan: Float, preset: Int
+    )
+    private external fun native_unloadSoundfont(sfSlot: Int)
+    private external fun native_getSoundfontPresetName(sfSlot: Int, bank: Int, preset: Int): String?
 }

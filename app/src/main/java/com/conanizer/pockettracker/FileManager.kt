@@ -1,6 +1,7 @@
 package com.conanizer.pockettracker
 
 import android.util.Log
+import com.conanizer.pockettracker.core.data.InstrumentPreset
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.storage.IFileSystem
 import com.conanizer.pockettracker.core.storage.FileInfo
@@ -45,6 +46,43 @@ class FileManager(private val fileSystem: IFileSystem) {
      */
     fun getSamplesDirectory(): String {
         return fileSystem.getSamplesDirectory()
+    }
+
+    fun getInstrumentsDirectory(): String = fileSystem.getInstrumentsDirectory()
+
+    fun getSoundfontsDirectory(): String = fileSystem.getSoundfontsDirectory()
+
+    /**
+     * Save an InstrumentPreset as a .pti file.
+     * @param preset The preset to save
+     * @param path Absolute file path (should end in .pti)
+     * @return true on success
+     */
+    fun saveInstrumentPreset(preset: InstrumentPreset, path: String): Boolean {
+        return try {
+            val jsonString = json.encodeToString(preset)
+            fileSystem.writeFile(path, jsonString)
+            Log.d(TAG, "✅ Instrument preset saved: $path")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to save instrument preset: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Load an InstrumentPreset from a .pti file.
+     * @param path Absolute file path
+     * @return InstrumentPreset on success, null on failure
+     */
+    fun loadInstrumentPreset(path: String): InstrumentPreset? {
+        return try {
+            val jsonString = fileSystem.readFile(path) ?: return null
+            json.decodeFromString<InstrumentPreset>(jsonString)
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to load instrument preset: ${e.message}")
+            null
+        }
     }
 
     /**

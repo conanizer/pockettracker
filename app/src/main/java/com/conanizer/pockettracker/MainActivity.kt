@@ -37,6 +37,7 @@ import com.conanizer.pockettracker.core.logic.FileController
 import com.conanizer.pockettracker.core.logic.InputAction
 import com.conanizer.pockettracker.core.audio.AudioEngine
 import com.conanizer.pockettracker.core.data.MAIN_ROW_SCREENS
+import com.conanizer.pockettracker.core.data.InstrumentType
 import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.data.ScreenType
@@ -318,7 +319,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // PHASE 4: Extracted from MainActivity to separate business logic
     // PHASE 5: Uses StateObserver for UI reactivity
     val instrumentController = remember {
-        InstrumentController(audioEngine, logger, stateObserver)
+        InstrumentController(audioEngine, logger, stateObserver, fileController)
     }
 
     // EffectProcessor: Processes effects (Milestone 2 - Kill effect implemented!)
@@ -333,6 +334,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // MILESTONE 2: Now includes EffectProcessor for effects support
     val playbackController = remember {
         PlaybackController(audioEngine, effectProcessor, logger, stateObserver)
+    }
+    // Wire InstrumentController into PlaybackController for soundfont slot lookups
+    LaunchedEffect(playbackController, instrumentController) {
+        playbackController.instrumentController = instrumentController
     }
 
     // ClipboardManager: Handles copy/paste (stub for now, implementation in Milestone 2.5)
@@ -626,6 +631,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         )
     }
     var previousScreen by remember { mutableStateOf(ScreenType.PROJECT) }
+    // Tracks what action triggered the file browser from the INSTRUMENT screen
+    // Values: "LOAD_SOURCE", "LOAD_PRESET", "SAVE_PRESET"
+    var instrumentFileBrowserAction by remember { mutableStateOf("") }
 
     // Reset note/volume combo when leaving PHRASE screen
     // (instrument is kept so quick-insert uses the last instrument you worked with)
@@ -976,11 +984,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             }
             ScreenType.INSTRUMENT -> {
                 val instrumentState = InstrumentState(
-                    trackerController.project.instruments[trackerController.currentInstrument],
-                    trackerController.instrumentCursorRow,
-                    trackerController.instrumentCursorColumn,
-                    trackerController.statusMessage,
-                    trackerController.statusSuccess
+                    instrument = trackerController.project.instruments[trackerController.currentInstrument],
+                    cursorRow = trackerController.instrumentCursorRow,
+                    cursorColumn = trackerController.instrumentCursorColumn,
+                    statusMessage = trackerController.statusMessage,
+                    isSuccess = trackerController.statusSuccess,
+                    soundfontPresetName = instrumentController.getSoundfontPresetName(trackerController.project)
                 )
                 val context = instrumentModule.getCursorContext(instrumentState)
                 val action = handlerFunction(context)
@@ -1369,32 +1378,51 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                                 }
                                             }
                                             ScreenType.INSTRUMENT -> {
-                                                val ext = item.file.extension.lowercase()
-                                                val result = if (ext == "wav") {
-                                                    // Direct WAV load
-                                                    instrumentController.loadSampleFromFile(
-                                                        trackerController.project,
-                                                        item.file.absolutePath
-                                                    )
-                                                } else if (videoExtractor.isSupportedVideo(item.file.absolutePath)) {
-                                                    // Extract audio from video → save as WAV → load
-                                                    instrumentController.loadSampleFromVideo(
-                                                        trackerController.project,
-                                                        item.file.absolutePath,
-                                                        videoExtractor,
-                                                        fileSystem
-                                                    )
-                                                } else {
-                                                    com.conanizer.pockettracker.core.logic.LoadResult.Error("Unsupported format")
-                                                }
-                                                if (result is com.conanizer.pockettracker.core.logic.LoadResult.Success) {
-                                                    trackerController.projectVersion++
-                                                    trackerController.currentScreen = previousScreen
-                                                } else {
-                                                    fileBrowserState = fileBrowserState.copy(
-                                                        statusMessage = "LOAD FAILED",
-                                                        statusSuccess = false
-                                                    )
+                                                when (instrumentFileBrowserAction) {
+                                                    "LOAD_PRESET" -> {
+                                                        instrumentController.loadPreset(trackerController.project, item.file.absolutePath)
+                                                        trackerController.projectVersion++
+                                                        trackerController.currentScreen = previousScreen
+                                                    }
+                                                    "LOAD_SOURCE" -> {
+                                                        val ext = item.file.extension.lowercase()
+                                                        if (ext == "sf2" || ext == "sf3") {
+                                                            instrumentController.loadSoundfont(trackerController.project, item.file.absolutePath)
+                                                            trackerController.projectVersion++
+                                                            trackerController.currentScreen = previousScreen
+                                                        } else {
+                                                            val result = if (ext == "wav") {
+                                                                instrumentController.loadSampleFromFile(trackerController.project, item.file.absolutePath)
+                                                            } else if (videoExtractor.isSupportedVideo(item.file.absolutePath)) {
+                                                                instrumentController.loadSampleFromVideo(trackerController.project, item.file.absolutePath, videoExtractor, fileSystem)
+                                                            } else {
+                                                                com.conanizer.pockettracker.core.logic.LoadResult.Error("Unsupported format")
+                                                            }
+                                                            if (result is com.conanizer.pockettracker.core.logic.LoadResult.Success) {
+                                                                trackerController.projectVersion++
+                                                                trackerController.currentScreen = previousScreen
+                                                            } else {
+                                                                fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
+                                                            }
+                                                        }
+                                                    }
+                                                    else -> {
+                                                        // Legacy fallback: treat as LOAD_SOURCE (WAV/video)
+                                                        val ext = item.file.extension.lowercase()
+                                                        val result = if (ext == "wav") {
+                                                            instrumentController.loadSampleFromFile(trackerController.project, item.file.absolutePath)
+                                                        } else if (videoExtractor.isSupportedVideo(item.file.absolutePath)) {
+                                                            instrumentController.loadSampleFromVideo(trackerController.project, item.file.absolutePath, videoExtractor, fileSystem)
+                                                        } else {
+                                                            com.conanizer.pockettracker.core.logic.LoadResult.Error("Unsupported format")
+                                                        }
+                                                        if (result is com.conanizer.pockettracker.core.logic.LoadResult.Success) {
+                                                            trackerController.projectVersion++
+                                                            trackerController.currentScreen = previousScreen
+                                                        } else {
+                                                            fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
+                                                        }
+                                                    }
                                                 }
                                             }
                                             else -> {
@@ -1604,38 +1632,66 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                         }
                     }
 
-                    // INSTRUMENT: Handle LOAD button
+                    // INSTRUMENT: Handle button rows
                     ScreenType.INSTRUMENT -> {
+                        instrumentController.currentInstrument = trackerController.currentInstrument
+                        val instrument = trackerController.project.instruments[trackerController.currentInstrument]
                         when (trackerController.instrumentCursorRow) {
-                            0 -> {  // ROW 0: TYPE + [LOAD] button (column 3)
-                                if (trackerController.instrumentCursorColumn == 3) {
-                                    // Sync instrumentController before opening file browser
-                                    instrumentController.currentInstrument = trackerController.currentInstrument
-                                    val samplesDir = File(fileManager.getSamplesDirectory())
-                                    Log.d("InstrumentScreen", "LOAD button pressed - opening file browser for instrument ${trackerController.currentInstrument}")
-                                    Log.d("InstrumentScreen", "Samples directory: ${samplesDir.absolutePath}")
-                                    Log.d("InstrumentScreen", "Directory exists: ${samplesDir.exists()}")
-                                    Log.d("InstrumentScreen", "Directory can read: ${samplesDir.canRead()}")
-                                    if (samplesDir.exists()) {
-                                        val files = samplesDir.listFiles()
-                                        Log.d("InstrumentScreen", "Files in directory: ${files?.size ?: 0}")
-                                        files?.forEach { Log.d("InstrumentScreen", "  - ${it.name}") }
+                            0 -> {
+                                when (trackerController.instrumentCursorColumn) {
+                                    1 -> {  // TYPE toggle: SAMPLER ↔ SOUNDFONT
+                                        val newType = if (instrument.instrumentType == InstrumentType.SOUNDFONT)
+                                            InstrumentType.SAMPLER else InstrumentType.SOUNDFONT
+                                        instrumentController.setInstrumentType(trackerController.project, newType)
+                                        trackerController.projectVersion++
                                     }
-
-                                    previousScreen = trackerController.currentScreen
-                                    trackerController.currentScreen = ScreenType.FILE_BROWSER
-                                    // Show WAV files and video/audio container files
-                                    val sampleExtensions = listOf("wav") + FileBrowserModule.VIDEO_EXTENSIONS
-                                    fileBrowserState = FileBrowserModule.State(
-                                        currentDirectory = samplesDir,
-                                        items = fileBrowserModule.buildItemList(samplesDir, fileExtensions = sampleExtensions),
-                                        cursor = 0,
-                                        scroll = 0,
-                                        mode = FileBrowserModule.BrowserMode.NORMAL,
-                                        fileExtensions = sampleExtensions,
-                                        statusMessage = ""
+                                    2 -> {  // LOAD .pti
+                                        instrumentFileBrowserAction = "LOAD_PRESET"
+                                        previousScreen = trackerController.currentScreen
+                                        trackerController.currentScreen = ScreenType.FILE_BROWSER
+                                        val instrumentsDir = File(fileManager.getInstrumentsDirectory())
+                                        fileBrowserState = fileBrowserModule.navigateToFolder(
+                                            fileBrowserState.copy(
+                                                fileExtensions = listOf("pti"),
+                                                mode = FileBrowserModule.BrowserMode.NORMAL,
+                                                statusMessage = ""
+                                            ),
+                                            instrumentsDir
+                                        )
+                                    }
+                                    3 -> {  // SAVE .pti — save immediately to instruments dir
+                                        val instrumentsDir = fileManager.getInstrumentsDirectory()
+                                        val fileName = "${instrument.name.ifEmpty { "inst${instrument.id.toString(16).padStart(2,'0').uppercase()}" }}.pti"
+                                        instrumentController.savePreset(trackerController.project, "$instrumentsDir/$fileName")
+                                        trackerController.projectVersion++
+                                    }
+                                }
+                            }
+                            2 -> {  // LOAD SOURCE button
+                                instrumentFileBrowserAction = "LOAD_SOURCE"
+                                previousScreen = trackerController.currentScreen
+                                trackerController.currentScreen = ScreenType.FILE_BROWSER
+                                if (instrument.instrumentType == InstrumentType.SOUNDFONT) {
+                                    val soundfontsDir = File(fileManager.getSoundfontsDirectory())
+                                    fileBrowserState = fileBrowserModule.navigateToFolder(
+                                        fileBrowserState.copy(
+                                            fileExtensions = listOf("sf2", "sf3"),
+                                            mode = FileBrowserModule.BrowserMode.NORMAL,
+                                            statusMessage = ""
+                                        ),
+                                        soundfontsDir
                                     )
-                                    Log.d("InstrumentScreen", "File browser opened for wav+video, items: ${fileBrowserState.items.size}")
+                                } else {
+                                    val samplesDir = File(fileManager.getSamplesDirectory())
+                                    val sampleExtensions = listOf("wav") + FileBrowserModule.VIDEO_EXTENSIONS
+                                    fileBrowserState = fileBrowserModule.navigateToFolder(
+                                        fileBrowserState.copy(
+                                            fileExtensions = sampleExtensions,
+                                            mode = FileBrowserModule.BrowserMode.NORMAL,
+                                            statusMessage = ""
+                                        ),
+                                        samplesDir
+                                    )
                                 }
                             }
                             // Other rows use A+direction combos for value editing

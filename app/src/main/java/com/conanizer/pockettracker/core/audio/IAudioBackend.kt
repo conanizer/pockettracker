@@ -511,4 +511,37 @@ interface IAudioBackend {
      * @param rendering true = WAV export in progress, false = normal live playback
      */
     fun setOfflineRendering(rendering: Boolean)
+
+    // ── SoundFont methods ──────────────────────────────────────────────────────
+
+    /**
+     * Load an SF2/SF3 file and assign it to an internal slot.
+     * @return slot index (0-3), or -1 on failure
+     */
+    fun loadSoundfont(instrumentId: Int, filePath: String): Int
+
+    /**
+     * Set the active bank/preset for a loaded soundfont slot.
+     * Preset is also applied per-note in scheduleSoundfontNote.
+     */
+    fun setSoundfontPreset(sfSlot: Int, bank: Int, preset: Int)
+
+    /**
+     * Schedule a soundfont note at a sample-accurate frame.
+     */
+    fun scheduleSoundfontNote(
+        frame: Long, trackId: Int, sfSlot: Int,
+        midiNote: Int, velocity: Int, vol: Float, pan: Float, preset: Int
+    )
+
+    /**
+     * Free the memory used by a soundfont slot.
+     */
+    fun unloadSoundfont(sfSlot: Int)
+
+    /**
+     * Return the preset name string for display on the instrument screen.
+     * Returns "---" if slot is invalid or preset not found.
+     */
+    fun getSoundfontPresetName(sfSlot: Int, bank: Int, preset: Int): String
 }
