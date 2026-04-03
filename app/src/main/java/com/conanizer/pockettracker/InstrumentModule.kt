@@ -599,7 +599,7 @@ class InstrumentModule : TrackerModule {
         )
 
         // COLUMN 2: LOAD .pti button
-        val name2ColumnX = nameColumnX + 230
+        val name2ColumnX = nameColumnX + 320
         drawBitmapText(
             text = "LOAD",
             x = name2ColumnX,
@@ -611,7 +611,7 @@ class InstrumentModule : TrackerModule {
         )
 
         // COLUMN 3: SAVE .pti button
-        val value2ColumnX = valueColumnX + 220
+        val value2ColumnX = valueColumnX + 270
         drawBitmapText(
             text = "SAVE",
             x = value2ColumnX,
