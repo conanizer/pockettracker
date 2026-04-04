@@ -348,6 +348,12 @@ class OboeAudioBackend : IAudioBackend {
     override fun getSoundfontFirstBankPreset(sfSlot: Int): IntArray =
         native_getSoundfontFirstBankPreset(sfSlot)
 
+    override fun getSoundfontPresetCount(sfSlot: Int): Int =
+        native_getSoundfontPresetCount(sfSlot)
+
+    override fun getSoundfontPresetAt(sfSlot: Int, index: Int): IntArray =
+        native_getSoundfontPresetAt(sfSlot, index)
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Native Methods (JNI → C++)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -456,4 +462,6 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_unloadSoundfont(sfSlot: Int)
     private external fun native_getSoundfontPresetName(sfSlot: Int, bank: Int, preset: Int): String?
     private external fun native_getSoundfontFirstBankPreset(sfSlot: Int): IntArray
+    private external fun native_getSoundfontPresetCount(sfSlot: Int): Int
+    private external fun native_getSoundfontPresetAt(sfSlot: Int, index: Int): IntArray
 }

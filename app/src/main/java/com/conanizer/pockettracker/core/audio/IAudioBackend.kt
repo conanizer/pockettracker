@@ -550,4 +550,10 @@ interface IAudioBackend {
      * Called once after loading a soundfont to initialize sfBank/sfPreset.
      */
     fun getSoundfontFirstBankPreset(sfSlot: Int): IntArray
+
+    /** Returns the total number of presets in the SF2 file (0 if not loaded). */
+    fun getSoundfontPresetCount(sfSlot: Int): Int
+
+    /** Returns [bank, preset_number] for the preset at the given list index, or [-1,-1] on error. */
+    fun getSoundfontPresetAt(sfSlot: Int, index: Int): IntArray
 }

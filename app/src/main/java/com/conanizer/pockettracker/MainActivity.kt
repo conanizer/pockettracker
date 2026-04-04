@@ -1003,13 +1003,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 }
             }
             ScreenType.INSTRUMENT -> {
+                val inst = trackerController.project.instruments[trackerController.currentInstrument]
                 val instrumentState = InstrumentState(
-                    instrument = trackerController.project.instruments[trackerController.currentInstrument],
+                    instrument = inst,
                     cursorRow = trackerController.instrumentCursorRow,
                     cursorColumn = trackerController.instrumentCursorColumn,
                     statusMessage = trackerController.statusMessage,
                     isSuccess = trackerController.statusSuccess,
-                    soundfontPresetName = instrumentController.getSoundfontPresetName(trackerController.project)
+                    soundfontPresetName  = instrumentController.getSoundfontPresetName(trackerController.project),
+                    soundfontPresetCount = instrumentController.getSoundfontPresetCount(inst),
+                    soundfontPresetIndex = instrumentController.getSoundfontCurrentPresetIndex(inst)
                 )
                 val context = instrumentModule.getCursorContext(instrumentState)
                 val action = handlerFunction(context)
@@ -3219,6 +3222,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 if (slot != null) audioEngine.backend.getSoundfontPresetName(slot, inst.sfBank, inst.sfPreset)
                 else "---"
             } else "---"
+        },
+        soundfontPresetCount    = stateVersion.let {
+            instrumentController.getSoundfontPresetCount(project.instruments[currentInstrument])
+        },
+        soundfontPresetIndex    = stateVersion.let {
+            instrumentController.getSoundfontCurrentPresetIndex(project.instruments[currentInstrument])
         }
     )
 

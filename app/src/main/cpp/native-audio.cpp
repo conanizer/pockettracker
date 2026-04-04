@@ -979,10 +979,20 @@ public:
                         }
                         tsf_channel_set_pan(sf.handle, note.trackId, note.pan);
                         tsf_channel_set_volume(sf.handle, note.trackId, note.volume);
-                        tsf_channel_set_bank_preset(sf.handle, note.trackId, note.sfBank, note.sfPreset);
-                        tsf_channel_note_on(sf.handle, note.trackId, note.midiNote, note.midiVelocity / 127.0f);
+                        int bankPresetResult = tsf_channel_set_bank_preset(sf.handle, note.trackId, note.sfBank, note.sfPreset);
+                        int noteOnResult = tsf_channel_note_on(sf.handle, note.trackId, note.midiNote, note.midiVelocity / 127.0f);
+                        LOGD("🎹 SF FIRE: slot=%d track=%d bank=%d preset=%d midi=%d vel=%.2f vol=%.2f bankPreset=%d noteOn=%d presetNum=%d voiceNum=%d",
+                             note.sfSlot, note.trackId, note.sfBank, note.sfPreset, note.midiNote,
+                             note.midiVelocity / 127.0f, note.volume,
+                             bankPresetResult, noteOnResult,
+                             sf.handle ? sf.handle->presetNum : -1,
+                             sf.handle ? sf.handle->voiceNum  : -1);
                         activeNotePerTrack[note.trackId]   = note.midiNote;
                         activeSfSlotPerTrack[note.trackId] = note.sfSlot;
+                    } else {
+                        LOGD("🎹 SF DROPPED: sfSlot=%d MAX=%d handle=%s",
+                             note.sfSlot, MAX_SOUNDFONTS,
+                             (note.sfSlot >= 0 && note.sfSlot < MAX_SOUNDFONTS && soundfonts[note.sfSlot].handle) ? "ok" : "null");
                     }
                     continue;  // Skip voice pool processing
                 }
@@ -3204,6 +3214,33 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSo
         if (f->presetNum > 0) {
             values[0] = (jint)f->presets[0].bank;
             values[1] = (jint)f->presets[0].preset;
+        }
+    }
+    env->SetIntArrayRegion(result, 0, 2, values);
+    return result;
+}
+
+// Returns the total number of presets in the SF2 file, or 0 if not loaded.
+JNIEXPORT jint JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSoundfontPresetCount(
+        JNIEnv *env, jobject thiz, jint sfSlot) {
+    if (sfSlot < 0 || sfSlot >= MAX_SOUNDFONTS || !soundfonts[sfSlot].handle) return 0;
+    std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
+    return (jint)soundfonts[sfSlot].handle->presetNum;
+}
+
+// Returns [bank, preset_number] of the preset at the given index in the SF2, or [-1, -1] on error.
+JNIEXPORT jintArray JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSoundfontPresetAt(
+        JNIEnv *env, jobject thiz, jint sfSlot, jint index) {
+    jintArray result = env->NewIntArray(2);
+    jint values[2] = {-1, -1};
+    if (sfSlot >= 0 && sfSlot < MAX_SOUNDFONTS && soundfonts[sfSlot].handle) {
+        std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
+        tsf* f = soundfonts[sfSlot].handle;
+        if (index >= 0 && index < f->presetNum) {
+            values[0] = (jint)f->presets[index].bank;
+            values[1] = (jint)f->presets[index].preset;
         }
     }
     env->SetIntArrayRegion(result, 0, 2, values);

@@ -202,9 +202,12 @@ class InstrumentModule : TrackerModule {
         // ROWS 7+: type-specific layout
         // ─────────────────────────────────────
         if (instrument.instrumentType == InstrumentType.SOUNDFONT) {
-            // SOUNDFONT: BANK + PRESET, then PRESET NAME
+            // SOUNDFONT: BANK (read-only) + PRESET index, then PRESET NAME
             val bankHex = instrument.sfBank.toString(16).padStart(2, '0').uppercase()
-            val presetHex = instrument.sfPreset.toString(16).padStart(2, '0').uppercase()
+            val presetCount = instrumentState.soundfontPresetCount
+            val presetIdxStr = if (presetCount > 0)
+                "${instrumentState.soundfontPresetIndex + 1}/${presetCount}"
+            else "--"
             drawDualParameterRow(
                 x = x,
                 y = rowY,
@@ -214,7 +217,7 @@ class InstrumentModule : TrackerModule {
                 param1Name = "BANK",
                 param1Value = bankHex,
                 param2Name = "PRESET",
-                param2Value = presetHex,
+                param2Value = presetIdxStr,
                 cursorRow = instrumentState.cursorRow,
                 cursorColumn = instrumentState.cursorColumn,
                 currentRow = currentRow
@@ -782,11 +785,12 @@ class InstrumentModule : TrackerModule {
             6 -> return CursorContextFactory.none()  // SPACER
             7 -> {
                 if (isSoundFont) {
-                    // BANK + PRESET
+                    // BANK (read-only, auto-set by preset navigation) + PRESET (index navigation)
+                    val maxIdx = (state.soundfontPresetCount - 1).coerceAtLeast(0)
                     when (state.cursorColumn) {
                         0, 2 -> return CursorContextFactory.readOnly()
-                        1 -> return CursorContextFactory.hexByte(state.instrument.sfBank, 0, 127)
-                        3 -> return CursorContextFactory.hexByte(state.instrument.sfPreset, 0, 127)
+                        1 -> return CursorContextFactory.readOnly()  // bank is read-only
+                        3 -> return CursorContextFactory.hexByte(state.soundfontPresetIndex, 0, maxIdx)
                         else -> return CursorContextFactory.none()
                     }
                 } else {
@@ -915,16 +919,11 @@ class InstrumentModule : TrackerModule {
             6 -> { /* SPACER */ }
             7 -> {
                 if (isSoundFont) {
-                    // BANK + PRESET
+                    // PRESET index navigation (BANK is read-only, auto-set by preset navigation)
                     when (state.cursorColumn) {
-                        1 -> when (action) {
-                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
-                                instrumentController.updateSfBank(state.instrument, action.value)
-                            else -> {}
-                        }
                         3 -> when (action) {
                             is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
-                                instrumentController.updateSfPreset(state.instrument, action.value)
+                                instrumentController.setSoundfontPresetByIndex(state.instrument, action.value)
                             else -> {}
                         }
                     }
@@ -1041,5 +1040,7 @@ data class InstrumentState(
     val cursorColumn: Int = 1,  // Start on value, not name
     val statusMessage: String = "",
     val isSuccess: Boolean = true,
-    val soundfontPresetName: String = ""
+    val soundfontPresetName: String = "",
+    val soundfontPresetCount: Int = 0,    // Total presets in SF2 (0 if not loaded)
+    val soundfontPresetIndex: Int = 0     // Current index in SF2 preset list
 )

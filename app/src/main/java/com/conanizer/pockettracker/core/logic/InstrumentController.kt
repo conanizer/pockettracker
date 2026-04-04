@@ -610,6 +610,43 @@ class InstrumentController(
         audioEngine.backend.setSoundfontPreset(slot, instrument.sfBank, preset)
     }
 
+    /**
+     * Navigate to the preset at [index] in the SF2 preset list.
+     * Updates both sfBank and sfPreset to the values for that preset.
+     */
+    fun setSoundfontPresetByIndex(instrument: Instrument, index: Int) {
+        val path = instrument.soundfontPath ?: return
+        val slot = sfSlotMap[path] ?: return
+        val pair = audioEngine.backend.getSoundfontPresetAt(slot, index)
+        if (pair[0] < 0) return
+        instrument.sfBank   = pair[0]
+        instrument.sfPreset = pair[1]
+        audioEngine.backend.setSoundfontPreset(slot, pair[0], pair[1])
+    }
+
+    /**
+     * Returns the list index of the current bank+preset, or 0 if not found.
+     */
+    fun getSoundfontCurrentPresetIndex(instrument: Instrument): Int {
+        val path = instrument.soundfontPath ?: return 0
+        val slot = sfSlotMap[path] ?: return 0
+        val count = audioEngine.backend.getSoundfontPresetCount(slot)
+        for (i in 0 until count) {
+            val pair = audioEngine.backend.getSoundfontPresetAt(slot, i)
+            if (pair[0] == instrument.sfBank && pair[1] == instrument.sfPreset) return i
+        }
+        return 0
+    }
+
+    /**
+     * Returns the total number of presets in the loaded SF2, or 0 if none.
+     */
+    fun getSoundfontPresetCount(instrument: Instrument): Int {
+        val path = instrument.soundfontPath ?: return 0
+        val slot = sfSlotMap[path] ?: return 0
+        return audioEngine.backend.getSoundfontPresetCount(slot)
+    }
+
     fun updateSoundfontPreset(project: Project, bank: Int, preset: Int) {
         val instrument = project.instruments[currentInstrument]
         instrument.sfBank = bank

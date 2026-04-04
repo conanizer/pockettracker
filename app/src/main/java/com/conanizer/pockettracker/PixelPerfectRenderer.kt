@@ -114,8 +114,10 @@ fun PixelPerfectTracker(
     settingsCursorColumn: Int = 1,
     // Cursor remember setting (for settings screen display)
     cursorRemember: Boolean = false,
-    // SoundFont preset name for instrument screen display
-    soundfontPresetName: String = ""
+    // SoundFont preset navigation state
+    soundfontPresetName: String = "",
+    soundfontPresetCount: Int = 0,
+    soundfontPresetIndex: Int = 0
 ) {
     if (currentScreen == ScreenType.FILE_BROWSER) {
         android.util.Log.d("PixelPerfectTracker", "FILE_BROWSER screen, fileBrowserState=${if (fileBrowserState != null) "not null (${fileBrowserState.items.size} items)" else "NULL"}")
@@ -275,7 +277,9 @@ fun PixelPerfectTracker(
                         settingsCursorColumn = settingsCursorColumn,
                         cursorRemember = cursorRemember,
                         trackNotes = trackNotes,
-                        soundfontPresetName = soundfontPresetName
+                        soundfontPresetName  = soundfontPresetName,
+                        soundfontPresetCount = soundfontPresetCount,
+                        soundfontPresetIndex = soundfontPresetIndex
                     )
                 }
             }
@@ -383,8 +387,10 @@ class TrackerLayout {
         cursorRemember: Boolean = false,
         // Track note monitor
         trackNotes: List<Note> = List(8) { Note.EMPTY },
-        // SoundFont preset name for instrument screen display
-        soundfontPresetName: String = ""
+        // SoundFont preset navigation state
+        soundfontPresetName: String = "",
+        soundfontPresetCount: Int = 0,
+        soundfontPresetIndex: Int = 0
     ) {
         // ===================================
         // DRAW BACKGROUND
@@ -576,7 +582,9 @@ class TrackerLayout {
                                     cursorColumn = instrumentCursorColumn,
                                     statusMessage = instrumentStatusMessage,
                                     isSuccess = instrumentStatusSuccess,
-                                    soundfontPresetName = soundfontPresetName
+                                    soundfontPresetName  = soundfontPresetName,
+                                    soundfontPresetCount = soundfontPresetCount,
+                                    soundfontPresetIndex = soundfontPresetIndex
                                 )
                             )
                         }

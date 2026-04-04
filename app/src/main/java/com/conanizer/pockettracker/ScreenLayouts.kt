@@ -89,7 +89,9 @@ data class TrackerScreenParams(
     val settingsCursorRow: Int = 0,
     val settingsCursorColumn: Int = 1,
     val cursorRemember: Boolean = false,
-    val soundfontPresetName: String = ""
+    val soundfontPresetName: String = "",
+    val soundfontPresetCount: Int = 0,
+    val soundfontPresetIndex: Int = 0
 )
 
 /** Thin wrapper — forwards every field of [params] to [PixelPerfectTracker]. */
@@ -148,7 +150,9 @@ private fun TrackerScreen(params: TrackerScreenParams, modifier: Modifier = Modi
         settingsCursorRow    = params.settingsCursorRow,
         settingsCursorColumn = params.settingsCursorColumn,
         cursorRemember       = params.cursorRemember,
-        soundfontPresetName  = params.soundfontPresetName
+        soundfontPresetName  = params.soundfontPresetName,
+        soundfontPresetCount = params.soundfontPresetCount,
+        soundfontPresetIndex = params.soundfontPresetIndex
     )
 }
 
