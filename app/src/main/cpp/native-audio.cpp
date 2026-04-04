@@ -131,8 +131,9 @@ struct SoundfontEntry {
 static SoundfontEntry soundfonts[MAX_SOUNDFONTS];
 
 // Per-track state for soundfont note-off support
-static int activeNotePerTrack[8]   = {-1,-1,-1,-1,-1,-1,-1,-1};
-static int activeSfSlotPerTrack[8] = {-1,-1,-1,-1,-1,-1,-1,-1};
+static int activeNotePerTrack[8]      = {-1,-1,-1,-1,-1,-1,-1,-1};
+static int activeSfSlotPerTrack[8]    = {-1,-1,-1,-1,-1,-1,-1,-1};
+static float sfChannelNoteVolume[8]   = {1.f,1.f,1.f,1.f,1.f,1.f,1.f,1.f}; // per-note vol for real-time track-vol updates
 
 // ===================================
 // PHASE 1: NOTE QUEUE INFRASTRUCTURE
@@ -987,6 +988,7 @@ public:
                         }
                         float trackVol;
                         { std::lock_guard<std::mutex> vlock(volumeMutex); trackVol = trackVolumes[note.trackId]; }
+                        sfChannelNoteVolume[note.trackId] = note.volume;  // saved so setTrackVolume can scale correctly
                         tsf_channel_set_pan(sf.handle, note.trackId, note.pan);
                         tsf_channel_set_volume(sf.handle, note.trackId, note.volume * trackVol);
                         int bankPresetResult = tsf_channel_set_bank_preset(sf.handle, note.trackId, note.sfBank, note.sfPreset);
@@ -1703,15 +1705,21 @@ public:
                 std::lock_guard<std::mutex> sfLock(soundfonts[s].mutex);
                 memset(tempSfBuf, 0, sizeof(float) * numFrames * 2);
                 tsf_render_float(soundfonts[s].handle, tempSfBuf, numFrames, 0);
-                // Capture peak of this SF's output and attribute to each active track using it
+                // Capture peak of this SF's output and distribute proportionally
+                // among tracks sharing this SF, weighted by each track's note volume.
                 float sfPeak = 0.0f;
                 for (int i = 0; i < numFrames * 2; i++) {
                     sfPeak = fmaxf(sfPeak, fabsf(tempSfBuf[i]));
                     output[i] += tempSfBuf[i] * masterVol;
                 }
+                float totalNoteVol = 0.0f;
+                for (int t = 0; t < 8; t++) {
+                    if (activeSfSlotPerTrack[t] == s) totalNoteVol += sfChannelNoteVolume[t];
+                }
                 for (int t = 0; t < 8; t++) {
                     if (activeSfSlotPerTrack[t] == s) {
-                        framePeaksPerTrack[t] = fmaxf(framePeaksPerTrack[t], sfPeak);
+                        float share = (totalNoteVol > 0.0f) ? (sfChannelNoteVolume[t] / totalNoteVol) : 1.0f;
+                        framePeaksPerTrack[t] = fmaxf(framePeaksPerTrack[t], sfPeak * share);
                     }
                 }
             }
@@ -2041,11 +2049,13 @@ public:
         if (trackId < 0 || trackId >= 8) return;
         { std::lock_guard<std::mutex> lock(volumeMutex); trackVolumes[trackId] = volume; }
         // Update the TSF channel volume for any active soundfont on this track.
+        // Use noteVol × trackVol so per-note volume is preserved.
         // Release volumeMutex first to avoid lock-order inversion with sf.mutex.
         int sfSlot = activeSfSlotPerTrack[trackId];
         if (sfSlot >= 0 && sfSlot < MAX_SOUNDFONTS && soundfonts[sfSlot].handle) {
+            float noteVol = sfChannelNoteVolume[trackId];
             std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
-            tsf_channel_set_volume(soundfonts[sfSlot].handle, trackId, volume);
+            tsf_channel_set_volume(soundfonts[sfSlot].handle, trackId, noteVol * volume);
         }
         LOGD("🔊 Track %d volume set to %.2f", trackId, volume);
     }
