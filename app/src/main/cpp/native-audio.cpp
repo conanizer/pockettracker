@@ -175,7 +175,8 @@ struct ScheduledNote {
     int  sfSlot      = -1;      // Index into soundfonts[] array
     int  midiNote    = 60;      // MIDI note 0-127
     int  midiVelocity = 100;    // MIDI velocity 0-127
-    int  sfPreset    = 0;       // SF2 preset number (bank always 0 for now)
+    int  sfBank      = 0;       // SF2 bank number (0-127)
+    int  sfPreset    = 0;       // SF2 preset number within bank (0-127)
 
     // For priority queue sorting (earliest frame first)
     bool operator>(const ScheduledNote& other) const {
@@ -978,7 +979,7 @@ public:
                         }
                         tsf_channel_set_pan(sf.handle, note.trackId, note.pan);
                         tsf_channel_set_volume(sf.handle, note.trackId, note.volume);
-                        tsf_channel_set_presetnumber(sf.handle, note.trackId, note.sfPreset, false);
+                        tsf_channel_set_bank_preset(sf.handle, note.trackId, note.sfBank, note.sfPreset);
                         tsf_channel_note_on(sf.handle, note.trackId, note.midiNote, note.midiVelocity / 127.0f);
                         activeNotePerTrack[note.trackId]   = note.midiNote;
                         activeSfSlotPerTrack[note.trackId] = note.sfSlot;
@@ -1824,7 +1825,8 @@ public:
 
     // Schedule a soundfont note (public method — called from JNI)
     void scheduleSoundfontNote(int64_t targetFrame, int trackId, int sfSlot,
-                               int midiNote, int midiVelocity, float vol, float pan, int preset) {
+                               int midiNote, int midiVelocity, float vol, float pan,
+                               int bank, int preset) {
         ScheduledNote note{};
         note.targetFrame      = targetFrame;
         note.trackId          = trackId;
@@ -1834,6 +1836,7 @@ public:
         note.midiVelocity     = midiVelocity;
         note.volume           = vol;
         note.pan              = pan;
+        note.sfBank           = bank;
         note.sfPreset         = preset;
         note.sampleId         = -1;
         note.frequency        = 440.0f;
@@ -3155,11 +3158,11 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setSo
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleSoundfontNote(
         JNIEnv *env, jobject thiz, jlong frame, jint trackId, jint sfSlot,
-        jint midiNote, jint velocity, jfloat vol, jfloat pan, jint preset) {
+        jint midiNote, jint velocity, jfloat vol, jfloat pan, jint bank, jint preset) {
     if (engine) {
         engine->scheduleSoundfontNote((int64_t)frame, (int)trackId, (int)sfSlot,
                                       (int)midiNote, (int)velocity,
-                                      (float)vol, (float)pan, (int)preset);
+                                      (float)vol, (float)pan, (int)bank, (int)preset);
     }
 }
 

@@ -611,7 +611,7 @@ class InstrumentController(
         val slot = sfSlotMap[path] ?: return
         val frame = audioEngine.backend.getCurrentFrame() + 2
         audioEngine.backend.scheduleSoundfontNote(
-            frame, 0, slot, midiNote, 100, 1.0f, 0.5f, instrument.sfPreset
+            frame, 0, slot, midiNote, 100, 1.0f, 0.5f, instrument.sfBank, instrument.sfPreset
         )
     }
 
@@ -634,9 +634,12 @@ class InstrumentController(
     fun savePreset(project: Project, filePath: String) {
         val fc = fileController ?: run { setStatus("NO FILE CTRL", false); return }
         val instrument = project.instruments[currentInstrument]
-        val tableRows = if (instrument.tableId in 0..255)
-            project.tables[instrument.tableId].rows.copyOf()
-        else null
+        // Use the explicitly assigned table, or fall back to the instrument's natural table (id == index)
+        val effectiveTableId = if (instrument.tableId in 0..255) instrument.tableId else instrument.id
+        val candidateRows = project.tables[effectiveTableId].rows
+        // Only embed table data if it has non-default content (avoid bloating every preset)
+        val hasContent = candidateRows.any { r -> r.transpose != 0 || r.volume != -1 || r.fx1Type != 0 }
+        val tableRows = if (hasContent) candidateRows.copyOf() else null
         val ok = fc.saveInstrumentPreset(instrument, tableRows, filePath)
         setStatus(if (ok) "SAVED: ${instrument.name}" else "SAVE FAILED", ok)
     }
@@ -703,8 +706,15 @@ class InstrumentController(
                 if (path != null) {
                     instrument.sampleFilePath = path
                     val ok = audioEngine.loadSampleFromFile(instrument.id, path)
-                    if (!ok) setStatus("SRC MISSING: ${path.substringAfterLast('/')}", false)
-                    else { instrument.sampleId = currentInstrument; setStatus("LOADED: ${src.name}", true) }
+                    if (!ok) {
+                        setStatus("SRC MISSING: ${path.substringAfterLast('/')}", false)
+                    } else {
+                        instrument.sampleId = currentInstrument
+                        // Push all parameters (filter, drive, start/end, etc.) to C++ for this slot
+                        audioEngine.updateInstrumentBaseFrequency(instrument)
+                        audioEngine.updateInstrumentPlaybackParams(instrument)
+                        setStatus("LOADED: ${src.name}", true)
+                    }
                 } else {
                     setStatus("LOADED: ${src.name}", true)
                 }

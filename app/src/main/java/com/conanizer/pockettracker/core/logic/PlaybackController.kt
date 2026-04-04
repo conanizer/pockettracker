@@ -1565,7 +1565,8 @@ class PlaybackController(
                         val velocity = (finalVolume * 127).toInt().coerceIn(1, 127)
                         audioEngine.backend.scheduleSoundfontNote(
                             effectiveTargetFrame, trackId, slot,
-                            midiNote, velocity, finalVolume, instrumentPan, instrument.sfPreset
+                            midiNote, velocity, finalVolume, instrumentPan,
+                            instrument.sfBank, instrument.sfPreset
                         )
                         noteScheduled = true
                     }

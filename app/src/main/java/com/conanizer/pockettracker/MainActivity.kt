@@ -760,7 +760,20 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         // IMPORTANT: Use trackerController.project directly, not the local 'project' val
         // The local 'project' is captured at composition time and may be stale
         trackerController.project.instruments.forEach { instrument ->
-            if (instrument.sampleFilePath != null) {
+            if (instrument.instrumentType == com.conanizer.pockettracker.core.data.InstrumentType.SOUNDFONT &&
+                instrument.soundfontPath != null) {
+                // Reload soundfont and repopulate sfSlotMap
+                val path = instrument.soundfontPath!!
+                val slot = audioEngine.backend.loadSoundfont(instrument.id, path)
+                if (slot >= 0) {
+                    instrumentController.sfSlotMap[path] = slot
+                    loadedCount++
+                    Log.d("ProjectLoad", "✅ Reloaded soundfont for instrument ${instrument.id.toString(16).padStart(2, '0')}: $path")
+                } else {
+                    failedCount++
+                    Log.e("ProjectLoad", "❌ Failed to reload soundfont for instrument ${instrument.id.toString(16).padStart(2, '0')}: $path")
+                }
+            } else if (instrument.sampleFilePath != null) {
                 val filePath = instrument.sampleFilePath!!
                 val success = audioEngine.loadSampleFromFile(instrument.id, filePath)
 
@@ -1487,8 +1500,26 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                 }
                             }
                             FileBrowserModule.BrowserMode.RENAME -> {
-                                // Confirm rename (will implement in Phase 6)
-                                fileBrowserState = fileBrowserState.copy(mode = FileBrowserModule.BrowserMode.NORMAL)
+                                if (instrumentFileBrowserAction == "SAVE_PRESET") {
+                                    // Save .pti with the typed filename
+                                    val name = fileBrowserState.renameBuffer.trim()
+                                    if (name.isNotEmpty()) {
+                                        val dir = fileBrowserState.currentDirectory.absolutePath
+                                        val filePath = "$dir/$name.pti"
+                                        instrumentController.currentInstrument = trackerController.currentInstrument
+                                        instrumentController.savePreset(trackerController.project, filePath)
+                                        trackerController.projectVersion++
+                                    }
+                                    instrumentFileBrowserAction = ""
+                                    trackerController.currentScreen = previousScreen
+                                    fileBrowserState = fileBrowserState.copy(
+                                        mode = FileBrowserModule.BrowserMode.NORMAL,
+                                        renameBuffer = "",
+                                        renameCursor = 0
+                                    )
+                                } else {
+                                    fileBrowserState = fileBrowserState.copy(mode = FileBrowserModule.BrowserMode.NORMAL)
+                                }
                             }
                             FileBrowserModule.BrowserMode.CREATE -> {
                                 // Confirm create folder (will implement in Phase 6)
@@ -1659,11 +1690,25 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                             instrumentsDir
                                         )
                                     }
-                                    3 -> {  // SAVE .pti — save immediately to instruments dir
-                                        val instrumentsDir = fileManager.getInstrumentsDirectory()
-                                        val fileName = "${instrument.name.ifEmpty { "inst${instrument.id.toString(16).padStart(2,'0').uppercase()}" }}.pti"
-                                        instrumentController.savePreset(trackerController.project, "$instrumentsDir/$fileName")
-                                        trackerController.projectVersion++
+                                    3 -> {  // SAVE .pti — open browser for filename entry
+                                        instrumentFileBrowserAction = "SAVE_PRESET"
+                                        previousScreen = trackerController.currentScreen
+                                        trackerController.currentScreen = ScreenType.FILE_BROWSER
+                                        val instrumentsDir = java.io.File(fileManager.getInstrumentsDirectory())
+                                        instrumentsDir.mkdirs()
+                                        val defaultName = instrument.name.ifEmpty {
+                                            "inst${instrument.id.toString(16).padStart(2,'0').uppercase()}"
+                                        }
+                                        fileBrowserState = fileBrowserModule.navigateToFolder(
+                                            fileBrowserState.copy(
+                                                fileExtensions = null,
+                                                mode = FileBrowserModule.BrowserMode.RENAME,
+                                                renameBuffer = defaultName,
+                                                renameCursor = 0,
+                                                statusMessage = ""
+                                            ),
+                                            instrumentsDir
+                                        )
                                     }
                                 }
                             }
