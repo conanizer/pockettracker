@@ -277,6 +277,7 @@ class InstrumentController(
             }
             val midiNote = (instrument.root.octave + 1) * 12 + instrument.root.pitch
             logger.d(TAG, "🎵 Previewing soundfont instrument ${formatHex(currentInstrument)} slot=$slot bank=${instrument.sfBank} preset=${instrument.sfPreset} midi=$midiNote")
+            audioEngine.backend.resumeStream()
             val frame = audioEngine.backend.getCurrentFrame() + 2
             audioEngine.backend.scheduleSoundfontNote(
                 frame, 0, slot, midiNote, 100, instrument.volume / 255f, 0.5f,
