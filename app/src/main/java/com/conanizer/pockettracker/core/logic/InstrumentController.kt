@@ -265,6 +265,26 @@ class InstrumentController(
     fun previewInstrument(project: Project) {
         val instrument = project.instruments[currentInstrument]
 
+        // SOUNDFONT path: bypass sampler engine
+        if (instrument.instrumentType == InstrumentType.SOUNDFONT) {
+            val path = instrument.soundfontPath ?: run {
+                logger.d(TAG, "⏭️ Skipping soundfont preview: no soundfont loaded")
+                return
+            }
+            val slot = sfSlotMap[path] ?: run {
+                logger.d(TAG, "⏭️ Skipping soundfont preview: slot not in sfSlotMap")
+                return
+            }
+            val midiNote = (instrument.root.octave + 1) * 12 + instrument.root.pitch
+            logger.d(TAG, "🎵 Previewing soundfont instrument ${formatHex(currentInstrument)} slot=$slot bank=${instrument.sfBank} preset=${instrument.sfPreset} midi=$midiNote")
+            val frame = audioEngine.backend.getCurrentFrame() + 2
+            audioEngine.backend.scheduleSoundfontNote(
+                frame, 0, slot, midiNote, 100, instrument.volume / 255f, 0.5f,
+                instrument.sfBank, instrument.sfPreset
+            )
+            return
+        }
+
         // Don't play if no sample is loaded
         if (instrument.sampleFilePath == null) {
             logger.d(TAG, "⏭️ Skipping preview for instrument ${formatHex(currentInstrument)}: no sample loaded")

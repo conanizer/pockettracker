@@ -113,7 +113,9 @@ fun PixelPerfectTracker(
     settingsCursorRow: Int = 0,
     settingsCursorColumn: Int = 1,
     // Cursor remember setting (for settings screen display)
-    cursorRemember: Boolean = false
+    cursorRemember: Boolean = false,
+    // SoundFont preset name for instrument screen display
+    soundfontPresetName: String = ""
 ) {
     if (currentScreen == ScreenType.FILE_BROWSER) {
         android.util.Log.d("PixelPerfectTracker", "FILE_BROWSER screen, fileBrowserState=${if (fileBrowserState != null) "not null (${fileBrowserState.items.size} items)" else "NULL"}")
@@ -570,7 +572,8 @@ class TrackerLayout {
                                     cursorRow = instrumentCursorRow,
                                     cursorColumn = instrumentCursorColumn,
                                     statusMessage = instrumentStatusMessage,
-                                    isSuccess = instrumentStatusSuccess
+                                    isSuccess = instrumentStatusSuccess,
+                                    soundfontPresetName = soundfontPresetName
                                 )
                             )
                         }

@@ -3210,7 +3210,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         fxHelperState           = fxHelperState,
         settingsCursorRow       = stateVersion.let { trackerController.settingsCursorRow },
         settingsCursorColumn    = stateVersion.let { trackerController.settingsCursorColumn },
-        cursorRemember          = cursorRemember
+        cursorRemember          = cursorRemember,
+        soundfontPresetName     = stateVersion.let {
+            val inst = project.instruments[currentInstrument]
+            val path = inst.soundfontPath
+            if (path != null && inst.instrumentType == InstrumentType.SOUNDFONT) {
+                val slot = instrumentController.sfSlotMap[path]
+                if (slot != null) audioEngine.backend.getSoundfontPresetName(slot, inst.sfBank, inst.sfPreset)
+                else "---"
+            } else "---"
+        }
     )
 
     val hapticView = LocalView.current
