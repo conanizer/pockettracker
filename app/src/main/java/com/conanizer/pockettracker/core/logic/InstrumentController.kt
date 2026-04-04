@@ -560,6 +560,14 @@ class InstrumentController(
         sfSlotMap[filePath] = slot
         instrument.soundfontPath = filePath
         instrument.instrumentType = InstrumentType.SOUNDFONT
+
+        // Initialize bank/preset to the first preset that actually exists in this SF2
+        val firstPreset = audioEngine.backend.getSoundfontFirstBankPreset(slot)
+        if (firstPreset[0] >= 0) {
+            instrument.sfBank   = firstPreset[0]
+            instrument.sfPreset = firstPreset[1]
+        }
+
         val name = filePath.substringAfterLast('/').substringBeforeLast('.')
         setStatus("SF LOADED: $name", success = true)
     }
@@ -682,21 +690,13 @@ class InstrumentController(
         instrument.sfPreset        = src.sfPreset
         instrument.modSlots        = src.modSlots.copyOf()
 
-        // Load table data if embedded
+        // Load table data if embedded — always into the destination instrument's own table slot
+        // (instrument index = table index, so INST01 always owns TABLE01)
         if (preset.tableRows != null) {
-            val tableId = if (instrument.tableId in 0..255) {
-                instrument.tableId
-            } else {
-                // Find a free table slot (rows all at default)
-                val freeSlot = project.tables.indexOfFirst { t ->
-                    t.rows.all { r -> r.transpose == 0 && r.volume == -1 && r.fx1Type == 0 }
-                }
-                if (freeSlot >= 0) { instrument.tableId = freeSlot; freeSlot } else -1
-            }
-            if (tableId >= 0) {
-                preset.tableRows.forEachIndexed { i, row -> project.tables[tableId].rows[i] = row }
-                audioEngine.loadTable(project.tables[tableId])
-            }
+            val targetTableId = currentInstrument
+            preset.tableRows.forEachIndexed { i, row -> project.tables[targetTableId].rows[i] = row }
+            instrument.tableId = targetTableId
+            audioEngine.loadTable(project.tables[targetTableId])
         }
 
         // Auto-load source file
@@ -724,8 +724,21 @@ class InstrumentController(
                 if (path != null) {
                     instrument.soundfontPath = path
                     val slot = audioEngine.backend.loadSoundfont(instrument.id, path)
-                    if (slot < 0) setStatus("SRC MISSING: ${path.substringAfterLast('/')}", false)
-                    else { sfSlotMap[path] = slot; setStatus("LOADED: ${src.name}", true) }
+                    if (slot < 0) {
+                        setStatus("SRC MISSING: ${path.substringAfterLast('/')}", false)
+                    } else {
+                        sfSlotMap[path] = slot
+                        // Validate saved bank/preset; fall back to first available if not found
+                        val presetName = audioEngine.backend.getSoundfontPresetName(slot, instrument.sfBank, instrument.sfPreset)
+                        if (presetName == "---") {
+                            val firstPreset = audioEngine.backend.getSoundfontFirstBankPreset(slot)
+                            if (firstPreset[0] >= 0) {
+                                instrument.sfBank   = firstPreset[0]
+                                instrument.sfPreset = firstPreset[1]
+                            }
+                        }
+                        setStatus("LOADED: ${src.name}", true)
+                    }
                 } else {
                     setStatus("LOADED: ${src.name}", true)
                 }

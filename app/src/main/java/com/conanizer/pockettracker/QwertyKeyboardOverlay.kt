@@ -58,7 +58,8 @@ enum class QwertyContext {
     PROJECT_NAME,   // Apply text as project name
     FILE_RENAME,    // Rename file at contextExtra path (keep original extension)
     FOLDER_CREATE,  // Create folder in contextExtra directory with typed name
-    RESAMPLE        // Render selection to WAV with typed name as base name
+    RESAMPLE,       // Render selection to WAV with typed name as base name
+    INSTRUMENT_SAVE // Save instrument as .pti with typed name; contextExtra = instruments directory
 }
 
 // ============================================================================

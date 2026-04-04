@@ -767,6 +767,13 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 val slot = audioEngine.backend.loadSoundfont(instrument.id, path)
                 if (slot >= 0) {
                     instrumentController.sfSlotMap[path] = slot
+                    // If bank/preset was never saved (both 0) verify first preset exists; init if not
+                    val firstPreset = audioEngine.backend.getSoundfontFirstBankPreset(slot)
+                    if (firstPreset[0] >= 0 &&
+                        audioEngine.backend.getSoundfontPresetName(slot, instrument.sfBank, instrument.sfPreset) == "---") {
+                        instrument.sfBank   = firstPreset[0]
+                        instrument.sfPreset = firstPreset[1]
+                    }
                     loadedCount++
                     Log.d("ProjectLoad", "✅ Reloaded soundfont for instrument ${instrument.id.toString(16).padStart(2, '0')}: $path")
                 } else {
@@ -1500,26 +1507,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                 }
                             }
                             FileBrowserModule.BrowserMode.RENAME -> {
-                                if (instrumentFileBrowserAction == "SAVE_PRESET") {
-                                    // Save .pti with the typed filename
-                                    val name = fileBrowserState.renameBuffer.trim()
-                                    if (name.isNotEmpty()) {
-                                        val dir = fileBrowserState.currentDirectory.absolutePath
-                                        val filePath = "$dir/$name.pti"
-                                        instrumentController.currentInstrument = trackerController.currentInstrument
-                                        instrumentController.savePreset(trackerController.project, filePath)
-                                        trackerController.projectVersion++
-                                    }
-                                    instrumentFileBrowserAction = ""
-                                    trackerController.currentScreen = previousScreen
-                                    fileBrowserState = fileBrowserState.copy(
-                                        mode = FileBrowserModule.BrowserMode.NORMAL,
-                                        renameBuffer = "",
-                                        renameCursor = 0
-                                    )
-                                } else {
-                                    fileBrowserState = fileBrowserState.copy(mode = FileBrowserModule.BrowserMode.NORMAL)
-                                }
+                                // Confirm rename (will implement in Phase 6)
+                                fileBrowserState = fileBrowserState.copy(mode = FileBrowserModule.BrowserMode.NORMAL)
                             }
                             FileBrowserModule.BrowserMode.CREATE -> {
                                 // Confirm create folder (will implement in Phase 6)
@@ -1690,24 +1679,22 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                             instrumentsDir
                                         )
                                     }
-                                    3 -> {  // SAVE .pti — open browser for filename entry
-                                        instrumentFileBrowserAction = "SAVE_PRESET"
-                                        previousScreen = trackerController.currentScreen
-                                        trackerController.currentScreen = ScreenType.FILE_BROWSER
-                                        val instrumentsDir = java.io.File(fileManager.getInstrumentsDirectory())
-                                        instrumentsDir.mkdirs()
+                                    3 -> {  // SAVE .pti — open QWERTY keyboard for filename
+                                        val instrumentsDir = fileManager.getInstrumentsDirectory()
+                                        java.io.File(instrumentsDir).mkdirs()
                                         val defaultName = instrument.name.ifEmpty {
-                                            "inst${instrument.id.toString(16).padStart(2,'0').uppercase()}"
+                                            "INST${instrument.id.toString(16).padStart(2,'0').uppercase()}"
                                         }
-                                        fileBrowserState = fileBrowserModule.navigateToFolder(
-                                            fileBrowserState.copy(
-                                                fileExtensions = null,
-                                                mode = FileBrowserModule.BrowserMode.RENAME,
-                                                renameBuffer = defaultName,
-                                                renameCursor = 0,
-                                                statusMessage = ""
-                                            ),
-                                            instrumentsDir
+                                        qwertyKeyboardState = QwertyKeyboardState(
+                                            isOpen = true,
+                                            text = defaultName,
+                                            maxLength = 20,
+                                            textCursor = defaultName.length,
+                                            fieldLabel = "SAVE PRESET:",
+                                            originalText = defaultName,
+                                            clearOnFirstB = true,
+                                            context = QwertyContext.INSTRUMENT_SAVE,
+                                            contextExtra = instrumentsDir
                                         )
                                     }
                                 }
@@ -2095,6 +2082,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     fileBrowserState, fileBrowserState.currentDirectory
                                 )
                             }
+                        }
+                        QwertyContext.INSTRUMENT_SAVE -> {
+                            val name = typedText.ifEmpty { "PRESET" }
+                            val dir = qwertyKeyboardState.contextExtra
+                            val filePath = "$dir/$name.pti"
+                            instrumentController.currentInstrument = trackerController.currentInstrument
+                            instrumentController.savePreset(trackerController.project, filePath)
+                            trackerController.projectVersion++
                         }
                         QwertyContext.RESAMPLE -> {
                             val customName = typedText.ifEmpty { null }

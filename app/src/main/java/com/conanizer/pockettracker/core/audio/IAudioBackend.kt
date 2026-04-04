@@ -544,4 +544,10 @@ interface IAudioBackend {
      * Returns "---" if slot is invalid or preset not found.
      */
     fun getSoundfontPresetName(sfSlot: Int, bank: Int, preset: Int): String
+
+    /**
+     * Returns [bank, preset_number] of the first preset in the SF2, or [-1, -1] if invalid.
+     * Called once after loading a soundfont to initialize sfBank/sfPreset.
+     */
+    fun getSoundfontFirstBankPreset(sfSlot: Int): IntArray
 }

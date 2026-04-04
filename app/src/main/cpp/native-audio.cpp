@@ -3187,8 +3187,27 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSo
         return env->NewStringUTF("---");
     }
     std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
-    const char* name = tsf_bank_get_presetname(soundfonts[sfSlot].handle, bank, preset);
+    const char* name = tsf_bank_get_presetname(soundfonts[sfSlot].handle, (int)bank, (int)preset);
     return env->NewStringUTF(name ? name : "---");
+}
+
+// Returns [bank, preset_number] of the first preset in the SF2, or [-1, -1] if none loaded.
+// Used to initialize sfBank/sfPreset when a soundfont is first loaded.
+JNIEXPORT jintArray JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSoundfontFirstBankPreset(
+        JNIEnv *env, jobject thiz, jint sfSlot) {
+    jintArray result = env->NewIntArray(2);
+    jint values[2] = {-1, -1};
+    if (sfSlot >= 0 && sfSlot < MAX_SOUNDFONTS && soundfonts[sfSlot].handle) {
+        std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
+        tsf* f = soundfonts[sfSlot].handle;
+        if (f->presetNum > 0) {
+            values[0] = (jint)f->presets[0].bank;
+            values[1] = (jint)f->presets[0].preset;
+        }
+    }
+    env->SetIntArrayRegion(result, 0, 2, values);
+    return result;
 }
 
 }
