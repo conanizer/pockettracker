@@ -887,11 +887,9 @@ public:
                 activeSfSlotPerTrack[t] = -1;
             }
         }
-        // Pause stream to prevent background noise when idle
-        if (stream && stream->getState() == oboe::StreamState::Started) {
-            stream->pause();
-            LOGD("Stream paused (stopAll)");
-        }
+        // Keep stream running so preview notes and future playback work immediately.
+        // With all voices stopped and queue cleared, the callback outputs silence.
+        LOGD("stopAll: voices and SF notes cleared, stream stays running");
     }
 
     int getActiveVoiceCount() {
