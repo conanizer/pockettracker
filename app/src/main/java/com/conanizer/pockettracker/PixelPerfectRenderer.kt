@@ -274,7 +274,8 @@ fun PixelPerfectTracker(
                         settingsCursorRow = settingsCursorRow,
                         settingsCursorColumn = settingsCursorColumn,
                         cursorRemember = cursorRemember,
-                        trackNotes = trackNotes
+                        trackNotes = trackNotes,
+                        soundfontPresetName = soundfontPresetName
                     )
                 }
             }
@@ -381,7 +382,9 @@ class TrackerLayout {
         // Cursor remember setting (passed through to SettingsState for display)
         cursorRemember: Boolean = false,
         // Track note monitor
-        trackNotes: List<Note> = List(8) { Note.EMPTY }
+        trackNotes: List<Note> = List(8) { Note.EMPTY },
+        // SoundFont preset name for instrument screen display
+        soundfontPresetName: String = ""
     ) {
         // ===================================
         // DRAW BACKGROUND
