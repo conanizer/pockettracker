@@ -949,7 +949,7 @@ public:
             while (killQueue.hasKillAt(currentFrame)) {
                 ScheduledKill kill = killQueue.pop();
                 if (kill.softKill) {
-                    triggerNoteOff(kill.trackId);
+                    triggerNoteOff(kill.trackId);  // Sampler: trigger ADSR release
                     LOGD("🎵 Note-off: track %d at frame %lld", kill.trackId, (long long)currentFrame);
                 } else {
                     for (int v = 0; v < MAX_VOICES; v++) {
@@ -958,6 +958,16 @@ public:
                             LOGD("🔪 Killed track %d at frame %lld", kill.trackId, (long long)currentFrame);
                         }
                     }
+                }
+                // SF: both soft and hard kill send note-off (TSF handles its own release)
+                if (kill.trackId >= 0 && kill.trackId < 8 && activeSfSlotPerTrack[kill.trackId] >= 0) {
+                    int s = activeSfSlotPerTrack[kill.trackId];
+                    if (soundfonts[s].handle && activeNotePerTrack[kill.trackId] >= 0) {
+                        std::lock_guard<std::mutex> sfLock(soundfonts[s].mutex);
+                        tsf_channel_note_off(soundfonts[s].handle, kill.trackId, activeNotePerTrack[kill.trackId]);
+                    }
+                    activeNotePerTrack[kill.trackId]   = -1;
+                    activeSfSlotPerTrack[kill.trackId] = -1;
                 }
             }
 
@@ -975,8 +985,10 @@ public:
                         if (activeNotePerTrack[note.trackId] >= 0) {
                             tsf_channel_note_off(sf.handle, note.trackId, activeNotePerTrack[note.trackId]);
                         }
+                        float trackVol;
+                        { std::lock_guard<std::mutex> vlock(volumeMutex); trackVol = trackVolumes[note.trackId]; }
                         tsf_channel_set_pan(sf.handle, note.trackId, note.pan);
-                        tsf_channel_set_volume(sf.handle, note.trackId, note.volume);
+                        tsf_channel_set_volume(sf.handle, note.trackId, note.volume * trackVol);
                         int bankPresetResult = tsf_channel_set_bank_preset(sf.handle, note.trackId, note.sfBank, note.sfPreset);
                         int noteOnResult = tsf_channel_note_on(sf.handle, note.trackId, note.midiNote, note.midiVelocity / 127.0f);
                         LOGD("🎹 SF FIRE: slot=%d track=%d bank=%d preset=%d midi=%d vel=%.2f vol=%.2f bankPreset=%d noteOn=%d presetNum=%d voiceNum=%d",
@@ -1691,8 +1703,16 @@ public:
                 std::lock_guard<std::mutex> sfLock(soundfonts[s].mutex);
                 memset(tempSfBuf, 0, sizeof(float) * numFrames * 2);
                 tsf_render_float(soundfonts[s].handle, tempSfBuf, numFrames, 0);
+                // Capture peak of this SF's output and attribute to each active track using it
+                float sfPeak = 0.0f;
                 for (int i = 0; i < numFrames * 2; i++) {
+                    sfPeak = fmaxf(sfPeak, fabsf(tempSfBuf[i]));
                     output[i] += tempSfBuf[i] * masterVol;
+                }
+                for (int t = 0; t < 8; t++) {
+                    if (activeSfSlotPerTrack[t] == s) {
+                        framePeaksPerTrack[t] = fmaxf(framePeaksPerTrack[t], sfPeak);
+                    }
                 }
             }
         }
@@ -2016,11 +2036,17 @@ public:
         }
     }
 
-    // Set real-time track volume (affects playback immediately)
+    // Set real-time track volume (affects playback immediately, including SF channels)
     void setTrackVolume(int trackId, float volume) {
         if (trackId < 0 || trackId >= 8) return;
-        std::lock_guard<std::mutex> lock(volumeMutex);
-        trackVolumes[trackId] = volume;
+        { std::lock_guard<std::mutex> lock(volumeMutex); trackVolumes[trackId] = volume; }
+        // Update the TSF channel volume for any active soundfont on this track.
+        // Release volumeMutex first to avoid lock-order inversion with sf.mutex.
+        int sfSlot = activeSfSlotPerTrack[trackId];
+        if (sfSlot >= 0 && sfSlot < MAX_SOUNDFONTS && soundfonts[sfSlot].handle) {
+            std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
+            tsf_channel_set_volume(soundfonts[sfSlot].handle, trackId, volume);
+        }
         LOGD("🔊 Track %d volume set to %.2f", trackId, volume);
     }
 

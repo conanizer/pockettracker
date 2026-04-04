@@ -283,6 +283,9 @@ class InstrumentController(
                 frame, 0, slot, midiNote, 100, instrument.volume / 255f, 0.5f,
                 instrument.sfBank, instrument.sfPreset
             )
+            // Schedule note-off after ~1 second so preview doesn't sustain forever
+            val sampleRate = audioEngine.backend.getSampleRate().takeIf { it > 0 } ?: 44100
+            audioEngine.backend.scheduleKill(frame + sampleRate, 0)
             return
         }
 
