@@ -319,8 +319,8 @@ interface IAudioBackend {
      * @param noteOctave Octave of the note (0-9) for TICFC mode
      * @param notePitch Pitch of the note (0-11, C=0) for TICFE mode
      * @param pslInitialOffset PSL initial pitch offset in semitones (0 = no PSL)
-     * @param pslDuration PSL slide duration in ticks (0 = no slide)
-     * @param pbnRate PBN pitch bend rate in semitones/tick (0 = no bend)
+     * @param pslDuration PSL slide duration in audio frames (0 = no slide)
+     * @param pbnRate PBN pitch bend rate in semitones/frame (0 = no bend)
      * @param vibratoSpeed PVB/PVX vibrato speed in Hz (0 = no vibrato)
      * @param vibratoDepth PVB/PVX vibrato depth in semitones (0 = no vibrato)
      */

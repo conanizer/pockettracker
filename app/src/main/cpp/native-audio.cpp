@@ -1122,30 +1122,21 @@ public:
                                           sampleRate, note.startPointOverride,
                                           note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
 
-                        // PSL: Set initial pitch offset and start slide to note pitch
+                        // PSL: Set initial pitch offset and start slide to note pitch.
+                        // pslDuration is already in audio frames (converted by AudioEngine.kt).
                         if (fabsf(note.pslInitialOffset) > 0.001f && note.pslDuration > 0.0f) {
                             voices[v].pitchOffset = note.pslInitialOffset;
-                            float beatsPerSecond = 120.0f / 60.0f;
-                            float stepsPerBeat = 4.0f;
-                            float ticsPerStep = 12.0f;
-                            float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
-                            float framesPerTic = sampleRate / ticsPerSecond;
-                            float totalFrames = framesPerTic * note.pslDuration;
-                            if (totalFrames < 1.0f) totalFrames = 1.0f;
+                            float totalFrames = fmaxf(1.0f, note.pslDuration);
                             voices[v].pitchSlideTarget = 0.0f;
                             voices[v].pitchSlideRate = -note.pslInitialOffset / totalFrames;
                             voices[v].pitchSliding = true;
                             LOGD("🎵 PSL applied: offset=%.2f, duration=%.0f ticks, rate=%.6f",
                                  note.pslInitialOffset, note.pslDuration, voices[v].pitchSlideRate);
                         }
-                        // PBN: Set continuous pitch bend rate
+                        // PBN: Set continuous pitch bend rate.
+                        // pbnRate is already in semitones/frame (converted by AudioEngine.kt).
                         if (fabsf(note.pbnRate) > 0.0001f) {
-                            float beatsPerSecond = 120.0f / 60.0f;
-                            float stepsPerBeat = 4.0f;
-                            float ticsPerStep = 12.0f;
-                            float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
-                            float framesPerTic = sampleRate / ticsPerSecond;
-                            voices[v].pitchSlideRate = note.pbnRate / framesPerTic;
+                            voices[v].pitchSlideRate = note.pbnRate;
                             voices[v].pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
                             voices[v].pitchSliding = true;
                             LOGD("🎵 PBN applied: rate=%.4f semitones/tick", note.pbnRate);
@@ -1246,11 +1237,9 @@ public:
                 shouldAdvance = false;
             } else if (voice.tableTicRate == 0xFF) {
                 // TICFF: 200Hz mode - faster advancement
-                // At 44100Hz with ~256 sample callbacks, that's ~172 callbacks/sec
-                // We want 200Hz, so advance roughly every callback with some accumulation
-                // 200Hz = advance every 220.5 samples, so accumulate frames
+                // Accumulate frames; advance table row every (sampleRate/200) samples
                 voice.tic200HzAccum += numFrames;
-                float samplesPerTic = 44100.0f / 200.0f;  // ~220.5 samples per tic
+                float samplesPerTic = sampleRate / 200.0f;  // samples per 200Hz tic
                 if (voice.tic200HzAccum >= samplesPerTic) {
                     voice.tic200HzAccum -= samplesPerTic;
                     shouldProcessRow = true;
@@ -2091,13 +2080,13 @@ public:
             if (voices[v].isActive && voices[v].trackId == trackId) {
                 Voice& voice = voices[v];
 
-                // Calculate frames per tick based on tempo
-                // At 44100Hz, 120BPM, 12 tics/step: ~230 samples per tic
+                // Calculate frames per tick based on tempo and actual sample rate
+                float sr = stream ? (float)stream->getSampleRate() : 44100.0f;
                 float beatsPerSecond = tempo / 60.0f;
                 float stepsPerBeat = 4.0f;  // 16 steps = 4 beats
                 float ticsPerStep = 12.0f;  // Standard tics per step
                 float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
-                float framesPerTic = 44100.0f / ticsPerSecond;
+                float framesPerTic = sr / ticsPerSecond;
                 float totalFrames = framesPerTic * durationTicks;
 
                 if (totalFrames < 1.0f) totalFrames = 1.0f;
@@ -2127,12 +2116,13 @@ public:
                     voice.pitchSlideRate = 0.0f;
                     LOGD("🎵 Pitch bend stopped: track=%d", trackId);
                 } else {
-                    // Calculate rate per frame
+                    // Calculate rate per frame using actual sample rate
+                    float sr = stream ? (float)stream->getSampleRate() : 44100.0f;
                     float beatsPerSecond = tempo / 60.0f;
                     float stepsPerBeat = 4.0f;
                     float ticsPerStep = 12.0f;
                     float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
-                    float framesPerTic = 44100.0f / ticsPerSecond;
+                    float framesPerTic = sr / ticsPerSecond;
 
                     voice.pitchSlideRate = semitonesPerTick / framesPerTic;
                     // Set target far in the direction of bend (will slide until stopped)
@@ -2491,7 +2481,7 @@ public:
         if (voice.vibratoActive) {
             // Advance LFO phase
             // Phase increment per frame = 2π × frequency / sample_rate
-            float phaseIncrement = (2.0f * (float)M_PI * voice.vibratoSpeed / 44100.0f) * numFrames;
+            float phaseIncrement = (2.0f * (float)M_PI * voice.vibratoSpeed / sampleRate) * numFrames;
             voice.vibratoPhase += phaseIncrement;
 
             // Wrap phase to [0, 2π]

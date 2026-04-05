@@ -525,6 +525,13 @@ class AudioEngine(
         val tempo = project.tempo
         pushInstrumentModulation(instrument, tempo)
 
+        // Convert tick-based pitch effect params to frame-based so C++ needs no tempo knowledge.
+        // framesPerTic = sampleRate / (tempo/60 * 4 steps/beat * 12 tics/step)
+        val sampleRate = backend.getSampleRate().toFloat()
+        val framesPerTic = sampleRate / (tempo / 60f * 4f * 12f)
+        val pslDurationFrames = if (pslDuration > 0f) pslDuration * framesPerTic else 0f
+        val pbnRatePerFrame  = if (pbnRate  != 0f)  pbnRate  / framesPerTic  else 0f
+
         // Resume stream so audio callback can process the queue
         backend.resumeStream()
 
@@ -532,7 +539,7 @@ class AudioEngine(
         backend.scheduleNoteWithTable(
             targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan,
             startPointOverride, tableId, tableTicRate, note.octave, note.pitch,
-            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
+            pslInitialOffset, pslDurationFrames, pbnRatePerFrame, vibratoSpeed, vibratoDepth,
             tableStartRow
         )
     }
