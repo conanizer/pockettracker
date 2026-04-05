@@ -397,7 +397,47 @@ inline int transposeToSemitones(uint8_t transpose) {
     }
 }
 
-struct Voice {
+// ===================================
+// IAUDIOVOICE — unified voice interface (UAA Phase 1)
+// ===================================
+// All concrete voice types (sampler, soundfont, future synths) implement this.
+// The mixer loop and effect helpers operate on IAudioVoice* so they are
+// source-agnostic — the same code works for every source type.
+class IAudioVoice {
+public:
+    virtual ~IAudioVoice() = default;
+
+    // True while this slot is producing audio (or fading out).
+    virtual bool active() const = 0;
+
+    // Hard-stop: silence immediately, mark slot free.
+    virtual void hardStop() = 0;
+
+    // Soft note-off: trigger ADSR release (or hard-stop if no release envelope).
+    virtual void noteOff() = 0;
+
+    // Real-time volume override (Vxx effect, table volume column).
+    virtual void setVolume(float v) = 0;
+
+    // Real-time pan override (table/mod destination).
+    virtual void setPan(float pan) = 0;
+
+    // Retrigger the voice at the given start-point (Repeat effect).
+    // startPoint: 0-255 normalised, -1 = use current.
+    virtual void retrigger(int startPoint) = 0;
+
+    // Change the pitch to midiNote (Arpeggio effect).
+    virtual void setMidiNote(int midiNote) = 0;
+
+    // Render up to numFrames of stereo audio into buf (interleaved L/R).
+    // Returns the peak level of this block (used for per-track metering).
+    virtual float render(float* buf, int numFrames) = 0;
+
+    // Track assignment (0-7), or -1 if unassigned.
+    virtual int getTrackId() const = 0;
+};
+
+struct Voice : public IAudioVoice {
     bool isActive;
     int fadeInRemaining;     // Anti-click: counts down from DECLICK_SAMPLES to 0 at note start
     float* sampleData;
@@ -675,6 +715,63 @@ struct Voice {
         fadeOutRemaining = DECLICK_SAMPLES;
         // trackId intentionally NOT cleared — see allocator Step 1
     }
+
+    // ── IAudioVoice implementation ──────────────────────────────────────────
+
+    bool active()      const override { return isActive; }
+    int  getTrackId()  const override { return trackId; }
+
+    void hardStop() override { stop(); }
+
+    void noteOff() override {
+        // Transitions ADSR/TRIG modulators to release stage (same as triggerNoteOff path).
+        // For voices with no release envelope this is equivalent to hardStop().
+        bool hasRelease = false;
+        for (int m = 0; m < 4; m++) {
+            if ((voiceMods[m].type == 2 || voiceMods[m].type == 5) && voiceMods[m].stage == 3) {
+                voiceMods[m].stage = 4;  // ADSR/TRIG → release
+                hasRelease = true;
+            }
+        }
+        if (!hasRelease) stop();
+    }
+
+    void setVolume(float v) override { volume = v; baseVolume = v; }
+
+    void setPan(float pan) override {
+        basePan = pan;
+        float angle = pan * (float)M_PI * 0.5f;
+        panLeft  = cosf(angle);
+        panRight = sinf(angle);
+    }
+
+    void retrigger(int startPoint) override {
+        if (!isActive || !sampleData) return;
+        if (startPoint >= 0 && startPoint <= 255 && sampleLength > 0) {
+            position = (float)((startPoint * sampleLength) / 255);
+            position = fmaxf((float)actualStart, fminf(position, (float)(actualEnd - 1)));
+        } else {
+            position = (float)actualStart;
+        }
+        fadeInRemaining = DECLICK_SAMPLES;
+    }
+
+    void setMidiNote(int midiNote) override {
+        // Convert MIDI note to playback rate relative to base frequency.
+        // basePlaybackRate was set at trigger time for the original note.
+        // New rate = basePlaybackRate × 2^((newMidi - originalMidi) / 12).
+        // We approximate originalMidi from noteOctave/notePitch.
+        int originalMidi = (noteOctave + 1) * 12 + notePitch;
+        float semitones = (float)(midiNote - originalMidi);
+        playbackRate = basePlaybackRate * powf(2.0f, semitones / 12.0f);
+    }
+
+    // render() is intentionally not implemented on Voice — the mixer loop in
+    // processAudioBlock handles Voice rendering inline for cache efficiency.
+    // SoundfontVoice (Phase 2) will implement render() fully.
+    float render(float* /*buf*/, int /*numFrames*/) override { return 0.0f; }
+
+    // ── end IAudioVoice ─────────────────────────────────────────────────────
 
     // Returns a [0..1] fade multiplier and advances fadeInRemaining.
     // Call once per output sample in the mix loop to eliminate clicks.
