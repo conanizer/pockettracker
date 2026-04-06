@@ -531,7 +531,9 @@ interface IAudioBackend {
      */
     fun scheduleSoundfontNote(
         frame: Long, trackId: Int, sfSlot: Int,
-        midiNote: Int, velocity: Int, vol: Float, pan: Float, bank: Int, preset: Int
+        midiNote: Int, velocity: Int, vol: Float, pan: Float, bank: Int, preset: Int,
+        pslInitialOffset: Float = 0f, pslDuration: Float = 0f,
+        pbnRate: Float = 0f, vibratoSpeed: Float = 0f, vibratoDepth: Float = 0f
     )
 
     /**

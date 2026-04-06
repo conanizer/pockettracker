@@ -516,11 +516,19 @@ class AudioEngine(
             val transpose = instrument.root.toMidi() - 60
             val midiNote = (baseMidi + transpose).coerceIn(0, 127)
             val velocity = (volume * 127).toInt().coerceIn(1, 127)
+            // Convert tick-based pitch params to frame-based (same as sampler path)
+            val tempo = project.tempo
+            val sr = backend.getSampleRate().toFloat()
+            val framesPerTic = sr / (tempo / 60f * 4f * 12f)
+            val framesPerStep = framesPerTic * 12f
+            val pslDurationFrames = if (pslDuration > 0f) pslDuration * framesPerTic else 0f
+            val pbnRatePerFrame   = if (pbnRate  != 0f)  pbnRate  / framesPerStep  else 0f
             backend.resumeStream()
             backend.scheduleSoundfontNote(
                 targetFrame, trackId, slot,
                 midiNote, velocity, volume, pan,
-                instrument.sfBank, instrument.sfPreset
+                instrument.sfBank, instrument.sfPreset,
+                pslInitialOffset, pslDurationFrames, pbnRatePerFrame, vibratoSpeed, vibratoDepth
             )
             return
         }

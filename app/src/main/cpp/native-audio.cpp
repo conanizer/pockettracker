@@ -802,6 +802,16 @@ struct SoundfontVoice : public IAudioVoice {
     int        activeNote   = -1;       // Currently playing MIDI note (-1 = none)
     float      noteVolume   = 1.0f;     // Note-level volume (used for real-time vol updates)
 
+    // Pitch effect state (PSL/PBN/PVB/PVX) — applied via TSF pitch wheel each block
+    float pitchOffset      = 0.0f;    // Current semitones offset (PSL/PBN accumulator)
+    float pitchSlideTarget = 0.0f;    // Target semitones for PSL (0) or PBN (±127)
+    float pitchSlideRate   = 0.0f;    // Semitones per audio frame
+    bool  pitchSliding     = false;
+    float vibratoPhase     = 0.0f;    // LFO phase [0, 2π]
+    float vibratoSpeed     = 0.0f;    // LFO frequency in Hz
+    float vibratoDepth     = 0.0f;    // LFO depth in semitones
+    bool  vibratoActive    = false;
+
     // IAudioVoice
     bool active()     const override { return isActive; }
     int  getTrackId() const override { return _trackId; }
@@ -872,6 +882,57 @@ struct SoundfontVoice : public IAudioVoice {
         tsf_channel_note_on(handle, 0, midiNote, midiVelocity / 127.0f);
         activeNote = midiNote;
         isActive   = true;
+    }
+
+    // Reset all pitch effect state (call after triggerNote)
+    void resetPitchState() {
+        pitchOffset      = 0.0f;
+        pitchSlideTarget = 0.0f;
+        pitchSlideRate   = 0.0f;
+        pitchSliding     = false;
+        vibratoPhase     = 0.0f;
+        vibratoActive    = false;
+    }
+
+    // Advance pitch state and apply to TSF via pitch wheel — call once per audio block,
+    // BEFORE render(). No mutex needed: audio callback is single-threaded.
+    void applyPitchMod(float sampleRate, int numFrames) {
+        if (!handle) return;
+        if (!pitchSliding && !vibratoActive) return;
+
+        // Advance pitch slide (PSL / PBN)
+        if (pitchSliding) {
+            float delta      = pitchSlideTarget - pitchOffset;
+            float totalDelta = pitchSlideRate * numFrames;
+            if (fabsf(totalDelta) >= fabsf(delta)) {
+                pitchOffset = pitchSlideTarget;
+                if (fabsf(pitchSlideTarget) < 100.0f) pitchSliding = false;  // PSL reached target
+            } else {
+                pitchOffset += totalDelta;
+            }
+        }
+
+        // Advance vibrato LFO (PVB / PVX)
+        if (vibratoActive) {
+            float inc = (2.0f * (float)M_PI * vibratoSpeed / sampleRate) * numFrames;
+            vibratoPhase += inc;
+            while (vibratoPhase >= 2.0f * (float)M_PI) vibratoPhase -= 2.0f * (float)M_PI;
+        }
+
+        // Compute total pitch mod in semitones
+        float pitchMod = pitchOffset;
+        if (vibratoActive) pitchMod += sinf(vibratoPhase) * vibratoDepth;
+
+        // Map semitones → MIDI pitch wheel [0, 16383] (center = 8192)
+        // Use a fixed range of 48 semitones (4 octaves) to cover all pitch effects.
+        constexpr float PITCH_RANGE = 48.0f;
+        float clamped    = fmaxf(-PITCH_RANGE, fminf(PITCH_RANGE, pitchMod));
+        int   pitchWheel = (int)(8192.0f + clamped / PITCH_RANGE * 8191.0f);
+        if (pitchWheel < 0) pitchWheel = 0;
+        if (pitchWheel > 16383) pitchWheel = 16383;
+
+        tsf_channel_set_pitchrange(handle, 0, PITCH_RANGE);
+        tsf_channel_set_pitchwheel(handle, 0, pitchWheel);
     }
 
     void close() {
@@ -1177,6 +1238,24 @@ public:
                             sv.triggerNote(note.sfSlot, note.midiNote, note.midiVelocity,
                                            note.volume, note.pan, note.sfBank, note.sfPreset,
                                            t, sampleRate);
+                            // Apply pitch effects (PSL / PBN / PVB / PVX)
+                            sv.resetPitchState();
+                            if (note.pslInitialOffset != 0.0f && note.pslDuration > 0.0f) {
+                                sv.pitchOffset      = note.pslInitialOffset;
+                                sv.pitchSlideTarget = 0.0f;
+                                sv.pitchSlideRate   = -note.pslInitialOffset / note.pslDuration;
+                                sv.pitchSliding     = true;
+                            }
+                            if (fabsf(note.pbnRate) > 0.0001f) {
+                                sv.pitchSlideRate   = note.pbnRate;
+                                sv.pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
+                                sv.pitchSliding     = true;
+                            }
+                            if (note.vibratoDepth > 0.01f) {
+                                sv.vibratoSpeed  = note.vibratoSpeed;
+                                sv.vibratoDepth  = note.vibratoDepth;
+                                sv.vibratoActive = true;
+                            }
                             LOGD("🎹 SF FIRE (per-track): slot=%d track=%d bank=%d preset=%d midi=%d vel=%d vol=%.2f",
                                  note.sfSlot, t, note.sfBank, note.sfPreset,
                                  note.midiNote, note.midiVelocity, note.volume);
@@ -1874,6 +1953,7 @@ public:
             { std::lock_guard<std::mutex> vlock(volumeMutex); masterVol = masterVolume; }
             for (int t = 0; t < 8; t++) {
                 if (!sfVoices[t].isActive || !sfVoices[t].handle) continue;
+                sfVoices[t].applyPitchMod((float)sampleRate, numFrames);
                 memset(sfBuf, 0, sizeof(float) * numFrames * 2);
                 float peak = sfVoices[t].render(sfBuf, numFrames);
                 framePeaksPerTrack[t] = fmaxf(framePeaksPerTrack[t], peak);
@@ -2022,7 +2102,9 @@ public:
     // Schedule a soundfont note (public method — called from JNI)
     void scheduleSoundfontNote(int64_t targetFrame, int trackId, int sfSlot,
                                int midiNote, int midiVelocity, float vol, float pan,
-                               int bank, int preset) {
+                               int bank, int preset,
+                               float pslInitialOffset, float pslDuration,
+                               float pbnRate, float vibratoSpeed, float vibratoDepth) {
         ScheduledNote note{};
         note.targetFrame      = targetFrame;
         note.trackId          = trackId;
@@ -2042,11 +2124,11 @@ public:
         note.tableTicRate     = 6;
         note.noteOctave       = 4;
         note.notePitch        = 0;
-        note.pslInitialOffset = 0.0f;
-        note.pslDuration      = 0.0f;
-        note.pbnRate          = 0.0f;
-        note.vibratoSpeed     = 0.0f;
-        note.vibratoDepth     = 0.0f;
+        note.pslInitialOffset = pslInitialOffset;
+        note.pslDuration      = pslDuration;
+        note.pbnRate          = pbnRate;
+        note.vibratoSpeed     = vibratoSpeed;
+        note.vibratoDepth     = vibratoDepth;
         note.tableStartRow    = -1;
         noteQueue.schedule(note);
     }
@@ -3392,11 +3474,15 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setSo
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleSoundfontNote(
         JNIEnv *env, jobject thiz, jlong frame, jint trackId, jint sfSlot,
-        jint midiNote, jint velocity, jfloat vol, jfloat pan, jint bank, jint preset) {
+        jint midiNote, jint velocity, jfloat vol, jfloat pan, jint bank, jint preset,
+        jfloat pslInitialOffset, jfloat pslDuration, jfloat pbnRate,
+        jfloat vibratoSpeed, jfloat vibratoDepth) {
     if (engine) {
         engine->scheduleSoundfontNote((int64_t)frame, (int)trackId, (int)sfSlot,
                                       (int)midiNote, (int)velocity,
-                                      (float)vol, (float)pan, (int)bank, (int)preset);
+                                      (float)vol, (float)pan, (int)bank, (int)preset,
+                                      (float)pslInitialOffset, (float)pslDuration,
+                                      (float)pbnRate, (float)vibratoSpeed, (float)vibratoDepth);
     }
 }
 
