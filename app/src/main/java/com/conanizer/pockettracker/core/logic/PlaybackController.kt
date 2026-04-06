@@ -1,6 +1,5 @@
 package com.conanizer.pockettracker.core.logic
 
-import com.conanizer.pockettracker.core.data.InstrumentType
 import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.data.PhraseStep
 import com.conanizer.pockettracker.core.data.Project
@@ -182,6 +181,13 @@ class PlaybackController(
     var instrumentController: InstrumentController? = null,
 ) {
     private val TAG = "PlaybackController"
+
+    init {
+        // Wire SF slot lookup into AudioEngine so scheduleNote() can route SF instruments.
+        // The lambda captures instrumentController by reference (var), so it always sees the
+        // current value even if instrumentController is set after PlaybackController is created.
+        audioEngine.sfSlotProvider = { path -> instrumentController?.sfSlotMap?.get(path) }
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // STATE
@@ -1552,46 +1558,27 @@ class PlaybackController(
                     "(${step.volume}/255=${"%.4f".format(step.volume / 255f)}), " +
                     "finalVolume=${"%.4f".format(finalVolume)}")
 
-            // Schedule the note — branch on instrument type
-            when (instrument.instrumentType) {
-                InstrumentType.SOUNDFONT -> {
-                    val path = instrument.soundfontPath
-                    val slot = if (path != null) instrumentController?.sfSlotMap?.get(path) else null
-                    if (slot != null) {
-                        // MIDI note = (octave+1)*12 + pitch, offset by ROOT transpose from C-4
-                        val baseMidi = (note.octave + 1) * 12 + note.pitch
-                        val transpose = instrument.root.toMidi() - 60
-                        val midiNote = (baseMidi + transpose).coerceIn(0, 127)
-                        val velocity = (finalVolume * 127).toInt().coerceIn(1, 127)
-                        audioEngine.backend.scheduleSoundfontNote(
-                            effectiveTargetFrame, trackId, slot,
-                            midiNote, velocity, finalVolume, instrumentPan,
-                            instrument.sfBank, instrument.sfPreset
-                        )
-                        noteScheduled = true
-                    }
-                }
-                InstrumentType.SAMPLER -> {
-                    audioEngine.scheduleNote(
-                        targetFrame = effectiveTargetFrame,
-                        note = note,
-                        instrumentId = effectiveStep.instrument,
-                        trackId = trackId,
-                        volume = finalVolume,
-                        pan = instrumentPan,
-                        project = project,
-                        startPointOverride = params.startPoint,
-                        pslInitialOffset = pslInitialOffset,
-                        pslDuration = pslDuration,
-                        pbnRate = pbnRate,
-                        vibratoSpeed = vibratoSpeed,
-                        vibratoDepth = vibratoDepth,
-                        tableIdOverride = tableIdOverride,
-                        tableStartRow = tableStartRow
-                    )
-                    noteScheduled = true
-                }
-            }
+            // Schedule the note — unified path handles both SAMPLER and SOUNDFONT.
+            // AudioEngine.scheduleNote() routes to backend.scheduleSoundfontNote() for SF
+            // instruments (via sfSlotProvider), so arpeggio/repeat retriggers work for both.
+            audioEngine.scheduleNote(
+                targetFrame = effectiveTargetFrame,
+                note = note,
+                instrumentId = effectiveStep.instrument,
+                trackId = trackId,
+                volume = finalVolume,
+                pan = instrumentPan,
+                project = project,
+                startPointOverride = params.startPoint,
+                pslInitialOffset = pslInitialOffset,
+                pslDuration = pslDuration,
+                pbnRate = pbnRate,
+                vibratoSpeed = vibratoSpeed,
+                vibratoDepth = vibratoDepth,
+                tableIdOverride = tableIdOverride,
+                tableStartRow = tableStartRow
+            )
+            noteScheduled = true
 
             // Update track state with this note (for persistent REPEAT retrigger)
             trackState.lastNote = note

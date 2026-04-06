@@ -1,6 +1,7 @@
 package com.conanizer.pockettracker.core.audio
 
 import com.conanizer.pockettracker.core.data.Instrument
+import com.conanizer.pockettracker.core.data.InstrumentType
 import com.conanizer.pockettracker.core.data.ModDest
 import com.conanizer.pockettracker.core.data.ModType
 import com.conanizer.pockettracker.core.data.Note
@@ -41,6 +42,13 @@ class AudioEngine(
     // Sample metadata (base frequencies and sample rate compensation ratios)
     private val sampleBaseFrequencies = mutableMapOf<Int, Float>()
     private val sampleRateRatios = mutableMapOf<Int, Float>()
+
+    /**
+     * Provider for SoundFont slot lookup — injected by PlaybackController so that
+     * scheduleNote() can route SF instruments without an Android dependency in AudioEngine.
+     * Maps soundfontPath → sfSlot index. Set once after engine creation.
+     */
+    var sfSlotProvider: ((soundfontPath: String) -> Int?)? = null
 
     /**
      * Initialize audio engine and load default samples.
@@ -498,6 +506,25 @@ class AudioEngine(
             android.util.Log.w("AudioEngine", "❌ Invalid instrumentId=$instrumentId, skipping note")
             return
         }
+
+        // ── SoundFont path ────────────────────────────────────────────────────────
+        // Handled first so arpeggio/repeat retriggers reach SF instruments too.
+        if (instrument.instrumentType == InstrumentType.SOUNDFONT) {
+            val path = instrument.soundfontPath ?: return
+            val slot = sfSlotProvider?.invoke(path) ?: return
+            val baseMidi = (note.octave + 1) * 12 + note.pitch
+            val transpose = instrument.root.toMidi() - 60
+            val midiNote = (baseMidi + transpose).coerceIn(0, 127)
+            val velocity = (volume * 127).toInt().coerceIn(1, 127)
+            backend.resumeStream()
+            backend.scheduleSoundfontNote(
+                targetFrame, trackId, slot,
+                midiNote, velocity, volume, pan,
+                instrument.sfBank, instrument.sfPreset
+            )
+            return
+        }
+        // ── Sampler path ──────────────────────────────────────────────────────────
 
         // Skip if instrument has no sample loaded — sampleFilePath == null means empty slot.
         // This prevents stale C++ sample data from playing when an instrument looks empty in the UI.

@@ -1131,6 +1131,10 @@ public:
                 ScheduledKill kill = killQueue.pop();
                 if (kill.softKill) {
                     triggerNoteOff(kill.trackId);  // Sampler: trigger ADSR release
+                    // SF: noteOff (TSF handles its own release envelope internally)
+                    if (kill.trackId >= 0 && kill.trackId < 8) {
+                        sfVoices[kill.trackId].noteOff();
+                    }
                     LOGD("🎵 Note-off: track %d at frame %lld", kill.trackId, (long long)currentFrame);
                 } else {
                     for (int v = 0; v < MAX_VOICES; v++) {
@@ -1139,10 +1143,10 @@ public:
                             LOGD("🔪 Killed track %d at frame %lld", kill.trackId, (long long)currentFrame);
                         }
                     }
-                }
-                // SF: both soft and hard kill send note-off (TSF handles its own release)
-                if (kill.trackId >= 0 && kill.trackId < 8) {
-                    sfVoices[kill.trackId].hardStop();
+                    // SF: hard kill (immediate stop)
+                    if (kill.trackId >= 0 && kill.trackId < 8) {
+                        sfVoices[kill.trackId].hardStop();
+                    }
                 }
             }
 
