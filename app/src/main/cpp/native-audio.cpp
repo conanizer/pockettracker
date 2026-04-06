@@ -123,17 +123,13 @@ static const int MAX_SOUNDFONTS = 4;
 
 struct SoundfontEntry {
     tsf* handle = nullptr;
-    std::mutex mutex;       // Protects all note_on/note_off/render calls
-    int instrumentId = -1;  // Which Instrument slot owns this (-1 = free)
+    std::mutex mutex;            // Protects all note_on/note_off/render calls on master handle
+    int instrumentId = -1;       // Which Instrument slot owns this (-1 = free)
     std::string filePath;
+    std::vector<uint8_t> fileData; // Raw SF2 bytes kept for per-track clone creation
 };
 
 static SoundfontEntry soundfonts[MAX_SOUNDFONTS];
-
-// Per-track state for soundfont note-off support
-static int activeNotePerTrack[8]      = {-1,-1,-1,-1,-1,-1,-1,-1};
-static int activeSfSlotPerTrack[8]    = {-1,-1,-1,-1,-1,-1,-1,-1};
-static float sfChannelNoteVolume[8]   = {1.f,1.f,1.f,1.f,1.f,1.f,1.f,1.f}; // per-note vol for real-time track-vol updates
 
 // ===================================
 // PHASE 1: NOTE QUEUE INFRASTRUCTURE
@@ -792,6 +788,107 @@ struct Voice : public IAudioVoice {
     }
 };
 
+// ===================================
+// SOUNDFONTVOICE — wraps a per-track tsf* clone (UAA Phase 2)
+// ===================================
+// Each of the 8 tracks gets its own SoundfontVoice with an independent tsf* instance.
+// This gives accurate per-track metering and will support per-track effects in Phase 3.
+struct SoundfontVoice : public IAudioVoice {
+    tsf*       handle       = nullptr;  // Per-track clone (created from SoundfontEntry.fileData)
+    std::mutex mutex;                   // Protects handle from concurrent Kotlin-thread access
+    bool       isActive     = false;
+    int        _trackId     = -1;
+    int        sourceSfSlot = -1;       // Which soundfonts[] entry was used to create handle
+    int        activeNote   = -1;       // Currently playing MIDI note (-1 = none)
+    float      noteVolume   = 1.0f;     // Note-level volume (used for real-time vol updates)
+
+    // IAudioVoice
+    bool active()     const override { return isActive; }
+    int  getTrackId() const override { return _trackId; }
+
+    void hardStop() override {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (handle && activeNote >= 0) {
+            tsf_channel_note_off(handle, 0, activeNote);
+        }
+        activeNote = -1;
+        isActive   = false;
+    }
+
+    void noteOff() override { hardStop(); }  // TSF handles its own release
+
+    void setVolume(float v) override {
+        std::lock_guard<std::mutex> lock(mutex);
+        noteVolume = v;
+        if (handle) tsf_channel_set_volume(handle, 0, v);
+    }
+
+    void setPan(float pan) override {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (handle) tsf_channel_set_pan(handle, 0, pan);
+    }
+
+    void retrigger(int /*startPoint*/) override { /* not applicable to SF */ }
+
+    void setMidiNote(int midiNote) override {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (!handle) return;
+        if (activeNote >= 0) tsf_channel_note_off(handle, 0, activeNote);
+        tsf_channel_note_on(handle, 0, midiNote, noteVolume);
+        activeNote = midiNote;
+    }
+
+    // Renders numFrames of stereo audio into buf (caller must zero buf first).
+    // Returns peak level for per-track metering.
+    // Note: volume column applied externally (trackVolumes * masterVolume in mix loop).
+    float render(float* buf, int numFrames) override {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (!handle) return 0.0f;
+        tsf_render_float(handle, buf, numFrames, 0 /* overwrite */);
+        float peak = 0.0f;
+        for (int i = 0; i < numFrames * 2; i++) {
+            peak = fmaxf(peak, fabsf(buf[i]));
+        }
+        return peak;
+    }
+
+    // Trigger a new note (called from audio thread — no mutex needed here since
+    // audio thread and render() are sequential within the same callback).
+    void triggerNote(int sfSlot, int midiNote, int midiVelocity, float vol, float pan,
+                     int bank, int preset, int trackId, float sampleRate) {
+        // If this voice has a clone from a different sfSlot, it was already closed in the
+        // caller before triggerNote is called.
+        sourceSfSlot = sfSlot;
+        _trackId     = trackId;
+        noteVolume   = vol;
+        // Channel 0: set pan, volume, bank/preset, then note-on
+        // Note-off any previous note first to avoid voice leaks
+        if (activeNote >= 0) {
+            tsf_channel_note_off(handle, 0, activeNote);
+        }
+        tsf_channel_set_pan(handle, 0, pan);
+        tsf_channel_set_volume(handle, 0, vol);
+        tsf_channel_set_bank_preset(handle, 0, bank, preset);
+        tsf_channel_note_on(handle, 0, midiNote, midiVelocity / 127.0f);
+        activeNote = midiNote;
+        isActive   = true;
+    }
+
+    void close() {
+        if (handle) {
+            tsf_close(handle);
+            handle = nullptr;
+        }
+        isActive     = false;
+        activeNote   = -1;
+        sourceSfSlot = -1;
+        _trackId     = -1;
+    }
+};
+
+// Per-track soundfont voices (one per track, lazily cloned from SoundfontEntry)
+static SoundfontVoice sfVoices[8];
+
 class AudioEngine : public oboe::AudioStreamDataCallback {
 public:
     AudioEngine() {
@@ -958,14 +1055,8 @@ public:
             }
         }
         // Stop any active soundfont note on this track
-        if (trackId >= 0 && trackId < 8 && activeSfSlotPerTrack[trackId] >= 0) {
-            int s = activeSfSlotPerTrack[trackId];
-            if (soundfonts[s].handle && activeNotePerTrack[trackId] >= 0) {
-                std::lock_guard<std::mutex> sfLock(soundfonts[s].mutex);
-                tsf_channel_note_off(soundfonts[s].handle, trackId, activeNotePerTrack[trackId]);
-            }
-            activeNotePerTrack[trackId]   = -1;
-            activeSfSlotPerTrack[trackId] = -1;
+        if (trackId >= 0 && trackId < 8) {
+            sfVoices[trackId].hardStop();
         }
     }
 
@@ -975,15 +1066,7 @@ public:
         }
         // Stop all soundfont notes on all tracks
         for (int t = 0; t < 8; t++) {
-            if (activeSfSlotPerTrack[t] >= 0) {
-                int s = activeSfSlotPerTrack[t];
-                if (soundfonts[s].handle && activeNotePerTrack[t] >= 0) {
-                    std::lock_guard<std::mutex> sfLock(soundfonts[s].mutex);
-                    tsf_channel_note_off(soundfonts[s].handle, t, activeNotePerTrack[t]);
-                }
-                activeNotePerTrack[t]   = -1;
-                activeSfSlotPerTrack[t] = -1;
-            }
+            sfVoices[t].hardStop();
         }
         // Keep stream running so preview notes and future playback work immediately.
         // With all voices stopped and queue cleared, the callback outputs silence.
@@ -1058,14 +1141,8 @@ public:
                     }
                 }
                 // SF: both soft and hard kill send note-off (TSF handles its own release)
-                if (kill.trackId >= 0 && kill.trackId < 8 && activeSfSlotPerTrack[kill.trackId] >= 0) {
-                    int s = activeSfSlotPerTrack[kill.trackId];
-                    if (soundfonts[s].handle && activeNotePerTrack[kill.trackId] >= 0) {
-                        std::lock_guard<std::mutex> sfLock(soundfonts[s].mutex);
-                        tsf_channel_note_off(soundfonts[s].handle, kill.trackId, activeNotePerTrack[kill.trackId]);
-                    }
-                    activeNotePerTrack[kill.trackId]   = -1;
-                    activeSfSlotPerTrack[kill.trackId] = -1;
+                if (kill.trackId >= 0 && kill.trackId < 8) {
+                    sfVoices[kill.trackId].hardStop();
                 }
             }
 
@@ -1074,34 +1151,36 @@ public:
                 ScheduledNote note = noteQueue.pop();
 
                 // ---- SOUNDFONT PATH ----
-                // Soundfonts bypass the voice pool — tsf manages its own polyphony.
+                // Each track has its own SoundfontVoice with an independent tsf* clone.
+                // This gives accurate per-track metering and supports per-track effects (Phase 3).
                 if (note.isSoundfont) {
-                    if (note.sfSlot >= 0 && note.sfSlot < MAX_SOUNDFONTS && soundfonts[note.sfSlot].handle) {
-                        SoundfontEntry& sf = soundfonts[note.sfSlot];
-                        std::lock_guard<std::mutex> sfLock(sf.mutex);
-                        // Note-off any previous note on this track
-                        if (activeNotePerTrack[note.trackId] >= 0) {
-                            tsf_channel_note_off(sf.handle, note.trackId, activeNotePerTrack[note.trackId]);
+                    int t = note.trackId;
+                    if (t >= 0 && t < 8 &&
+                        note.sfSlot >= 0 && note.sfSlot < MAX_SOUNDFONTS &&
+                        !soundfonts[note.sfSlot].fileData.empty()) {
+
+                        SoundfontVoice& sv = sfVoices[t];
+                        // If the track's clone came from a different sfSlot, rebuild it.
+                        if (sv.sourceSfSlot != note.sfSlot || sv.handle == nullptr) {
+                            sv.close();  // frees old handle if any
+                            const auto& fd = soundfonts[note.sfSlot].fileData;
+                            sv.handle = tsf_load_memory(fd.data(), (int)fd.size());
+                            if (sv.handle) {
+                                tsf_set_output(sv.handle, TSF_STEREO_INTERLEAVED, (int)sampleRate, 0.0f);
+                            }
                         }
-                        float trackVol;
-                        { std::lock_guard<std::mutex> vlock(volumeMutex); trackVol = trackVolumes[note.trackId]; }
-                        sfChannelNoteVolume[note.trackId] = note.volume;  // saved so setTrackVolume can scale correctly
-                        tsf_channel_set_pan(sf.handle, note.trackId, note.pan);
-                        tsf_channel_set_volume(sf.handle, note.trackId, note.volume * trackVol);
-                        int bankPresetResult = tsf_channel_set_bank_preset(sf.handle, note.trackId, note.sfBank, note.sfPreset);
-                        int noteOnResult = tsf_channel_note_on(sf.handle, note.trackId, note.midiNote, note.midiVelocity / 127.0f);
-                        LOGD("🎹 SF FIRE: slot=%d track=%d bank=%d preset=%d midi=%d vel=%.2f vol=%.2f bankPreset=%d noteOn=%d presetNum=%d voiceNum=%d",
-                             note.sfSlot, note.trackId, note.sfBank, note.sfPreset, note.midiNote,
-                             note.midiVelocity / 127.0f, note.volume,
-                             bankPresetResult, noteOnResult,
-                             sf.handle ? sf.handle->presetNum : -1,
-                             sf.handle ? sf.handle->voiceNum  : -1);
-                        activeNotePerTrack[note.trackId]   = note.midiNote;
-                        activeSfSlotPerTrack[note.trackId] = note.sfSlot;
+                        if (sv.handle) {
+                            sv.triggerNote(note.sfSlot, note.midiNote, note.midiVelocity,
+                                           note.volume, note.pan, note.sfBank, note.sfPreset,
+                                           t, sampleRate);
+                            LOGD("🎹 SF FIRE (per-track): slot=%d track=%d bank=%d preset=%d midi=%d vel=%d vol=%.2f",
+                                 note.sfSlot, t, note.sfBank, note.sfPreset,
+                                 note.midiNote, note.midiVelocity, note.volume);
+                        } else {
+                            LOGD("🎹 SF CLONE FAILED: sfSlot=%d track=%d", note.sfSlot, t);
+                        }
                     } else {
-                        LOGD("🎹 SF DROPPED: sfSlot=%d MAX=%d handle=%s",
-                             note.sfSlot, MAX_SOUNDFONTS,
-                             (note.sfSlot >= 0 && note.sfSlot < MAX_SOUNDFONTS && soundfonts[note.sfSlot].handle) ? "ok" : "null");
+                        LOGD("🎹 SF DROPPED: sfSlot=%d track=%d (invalid or no file data)", note.sfSlot, note.trackId);
                     }
                     continue;  // Skip voice pool processing
                 }
@@ -1780,33 +1859,24 @@ public:
             }
         }
 
-        // Mix soundfont output into the main output buffer
-        // Each loaded SF2 renders into a temp stereo buffer, then gets mixed in with master volume.
+        // ===================================
+        // SOUNDFONT VOICE RENDERING (UAA Phase 2)
+        // ===================================
+        // Each track's SoundfontVoice renders independently → accurate per-track metering.
+        // Track and master volume applied here (not at note-on time).
         {
-            float tempSfBuf[2048];  // 1024 frames * 2 channels — safe for any Oboe buffer size
+            float sfBuf[2048];  // 1024 frames * 2 channels — safe for any Oboe buffer size
             float masterVol;
             { std::lock_guard<std::mutex> vlock(volumeMutex); masterVol = masterVolume; }
-            for (int s = 0; s < MAX_SOUNDFONTS; s++) {
-                if (!soundfonts[s].handle) continue;
-                std::lock_guard<std::mutex> sfLock(soundfonts[s].mutex);
-                memset(tempSfBuf, 0, sizeof(float) * numFrames * 2);
-                tsf_render_float(soundfonts[s].handle, tempSfBuf, numFrames, 0);
-                // Capture peak of this SF's output and distribute proportionally
-                // among tracks sharing this SF, weighted by each track's note volume.
-                float sfPeak = 0.0f;
+            for (int t = 0; t < 8; t++) {
+                if (!sfVoices[t].isActive || !sfVoices[t].handle) continue;
+                memset(sfBuf, 0, sizeof(float) * numFrames * 2);
+                float peak = sfVoices[t].render(sfBuf, numFrames);
+                framePeaksPerTrack[t] = fmaxf(framePeaksPerTrack[t], peak);
+                float trackVol;
+                { std::lock_guard<std::mutex> vlock(volumeMutex); trackVol = trackVolumes[t]; }
                 for (int i = 0; i < numFrames * 2; i++) {
-                    sfPeak = fmaxf(sfPeak, fabsf(tempSfBuf[i]));
-                    output[i] += tempSfBuf[i] * masterVol;
-                }
-                float totalNoteVol = 0.0f;
-                for (int t = 0; t < 8; t++) {
-                    if (activeSfSlotPerTrack[t] == s) totalNoteVol += sfChannelNoteVolume[t];
-                }
-                for (int t = 0; t < 8; t++) {
-                    if (activeSfSlotPerTrack[t] == s) {
-                        float share = (totalNoteVol > 0.0f) ? (sfChannelNoteVolume[t] / totalNoteVol) : 1.0f;
-                        framePeaksPerTrack[t] = fmaxf(framePeaksPerTrack[t], sfPeak * share);
-                    }
+                    output[i] += sfBuf[i] * trackVol * masterVol;
                 }
             }
         }
@@ -2134,15 +2204,8 @@ public:
     void setTrackVolume(int trackId, float volume) {
         if (trackId < 0 || trackId >= 8) return;
         { std::lock_guard<std::mutex> lock(volumeMutex); trackVolumes[trackId] = volume; }
-        // Update the TSF channel volume for any active soundfont on this track.
-        // Use noteVol × trackVol so per-note volume is preserved.
-        // Release volumeMutex first to avoid lock-order inversion with sf.mutex.
-        int sfSlot = activeSfSlotPerTrack[trackId];
-        if (sfSlot >= 0 && sfSlot < MAX_SOUNDFONTS && soundfonts[sfSlot].handle) {
-            float noteVol = sfChannelNoteVolume[trackId];
-            std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
-            tsf_channel_set_volume(soundfonts[sfSlot].handle, trackId, noteVol * volume);
-        }
+        // For SoundfontVoice the track volume is applied at mix time (trackVolumes[t] * masterVol)
+        // so no per-voice update needed. The setVolume call below handles note-level vol only.
         LOGD("🔊 Track %d volume set to %.2f", trackId, volume);
     }
 
@@ -3253,17 +3316,51 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadS
         std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
         tsf_close(soundfonts[slot].handle);
         soundfonts[slot].handle = nullptr;
+        soundfonts[slot].fileData.clear();
         soundfonts[slot].instrumentId = -1;
         soundfonts[slot].filePath.clear();
+        // Close any per-track voices cloned from this slot
+        for (int t = 0; t < 8; t++) {
+            if (sfVoices[t].sourceSfSlot == slot) sfVoices[t].close();
+        }
         LOGD("🎹 Evicted soundfont slot %d to make room for instrumentId %d", slot, (int)instrumentId);
     }
 
-    // Load the soundfont
+    // Load file bytes into memory for per-track cloning
     {
+        FILE* f = fopen(pathStr, "rb");
+        if (!f) {
+            LOGE("❌ Failed to open soundfont: %s", pathStr);
+            env->ReleaseStringUTFChars(path, pathStr);
+            return -1;
+        }
+        fseek(f, 0, SEEK_END);
+        long fileSize = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        if (fileSize <= 0) {
+            LOGE("❌ Empty soundfont file: %s", pathStr);
+            fclose(f);
+            env->ReleaseStringUTFChars(path, pathStr);
+            return -1;
+        }
+
         std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
-        soundfonts[slot].handle = tsf_load_filename(pathStr);
+        soundfonts[slot].fileData.resize((size_t)fileSize);
+        if (fread(soundfonts[slot].fileData.data(), 1, (size_t)fileSize, f) != (size_t)fileSize) {
+            LOGE("❌ Failed to read soundfont: %s", pathStr);
+            fclose(f);
+            soundfonts[slot].fileData.clear();
+            env->ReleaseStringUTFChars(path, pathStr);
+            return -1;
+        }
+        fclose(f);
+
+        // Create master handle from memory for preset queries (not used for audio rendering)
+        soundfonts[slot].handle = tsf_load_memory(soundfonts[slot].fileData.data(),
+                                                   (int)soundfonts[slot].fileData.size());
         if (!soundfonts[slot].handle) {
-            LOGE("❌ Failed to load soundfont: %s", pathStr);
+            LOGE("❌ Failed to parse soundfont: %s", pathStr);
+            soundfonts[slot].fileData.clear();
             env->ReleaseStringUTFChars(path, pathStr);
             return -1;
         }
@@ -3301,11 +3398,16 @@ JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1unloadSoundfont(
         JNIEnv *env, jobject thiz, jint sfSlot) {
     if (sfSlot < 0 || sfSlot >= MAX_SOUNDFONTS) return;
+    // Close per-track voices cloned from this slot BEFORE closing the master handle
+    for (int t = 0; t < 8; t++) {
+        if (sfVoices[t].sourceSfSlot == (int)sfSlot) sfVoices[t].close();
+    }
     std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
     if (soundfonts[sfSlot].handle) {
         tsf_close(soundfonts[sfSlot].handle);
         soundfonts[sfSlot].handle = nullptr;
     }
+    soundfonts[sfSlot].fileData.clear();
     soundfonts[sfSlot].instrumentId = -1;
     soundfonts[sfSlot].filePath.clear();
     LOGD("🎹 Unloaded soundfont slot %d", (int)sfSlot);
