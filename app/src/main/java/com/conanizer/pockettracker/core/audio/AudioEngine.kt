@@ -556,8 +556,10 @@ class AudioEngine(
         // framesPerTic = sampleRate / (tempo/60 * 4 steps/beat * 12 tics/step)
         val sampleRate = backend.getSampleRate().toFloat()
         val framesPerTic = sampleRate / (tempo / 60f * 4f * 12f)
+        val framesPerStep = framesPerTic * 12f  // TICS_PER_STEP = 12
         val pslDurationFrames = if (pslDuration > 0f) pslDuration * framesPerTic else 0f
-        val pbnRatePerFrame  = if (pbnRate  != 0f)  pbnRate  / framesPerTic  else 0f
+        // pbnRate is semitones/step (per EffectProcessor docs: "PBN 10 = 1 semitone per step")
+        val pbnRatePerFrame  = if (pbnRate  != 0f)  pbnRate  / framesPerStep  else 0f
 
         // Resume stream so audio callback can process the queue
         backend.resumeStream()
@@ -810,6 +812,14 @@ class AudioEngine(
         val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
         val frequency = note.toFrequency()
 
+        // Convert tick-based pitch params to frame-based (same as scheduleNote)
+        val tempo = project.tempo
+        val sr = backend.getSampleRate().toFloat()
+        val framesPerTic = sr / (tempo / 60f * 4f * 12f)
+        val framesPerStep = framesPerTic * 12f
+        val pslDurationFrames = if (pslDuration > 0f) pslDuration * framesPerTic else 0f
+        val pbnRatePerFrame   = if (pbnRate  != 0f)  pbnRate  / framesPerStep  else 0f
+
         // Resume stream so audio callback can process the queue
         backend.resumeStream()
 
@@ -818,7 +828,7 @@ class AudioEngine(
         backend.scheduleNoteWithTable(
             targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan,
             startPointOverride, tableId, tableTicRate, note.octave, note.pitch,
-            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
+            pslInitialOffset, pslDurationFrames, pbnRatePerFrame, vibratoSpeed, vibratoDepth,
             tableStartRow
         )
     }

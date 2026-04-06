@@ -2287,13 +2287,15 @@ public:
                     float ticsPerStep = 12.0f;
                     float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
                     float framesPerTic = sr / ticsPerSecond;
+                    // semitonesPerTick is actually semitones/step from Kotlin (PBN value / 16)
+                    float framesPerStep = framesPerTic * ticsPerStep;
 
-                    voice.pitchSlideRate = semitonesPerTick / framesPerTic;
+                    voice.pitchSlideRate = semitonesPerTick / framesPerStep;
                     // Set target far in the direction of bend (will slide until stopped)
                     voice.pitchSlideTarget = (semitonesPerTick > 0) ? 127.0f : -127.0f;
                     voice.pitchSliding = true;
 
-                    LOGD("🎵 Pitch bend: track=%d, rate=%.4f semitones/tic", trackId, semitonesPerTick);
+                    LOGD("🎵 Pitch bend: track=%d, rate=%.4f semitones/step", trackId, semitonesPerTick);
                 }
                 return;
             }

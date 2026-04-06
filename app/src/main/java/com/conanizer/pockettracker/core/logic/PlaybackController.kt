@@ -1526,7 +1526,7 @@ class PlaybackController(
                 trackState.pitchBendActive = true
                 val direction = if (params.pbnValue < 0x80) "UP" else "DOWN"
                 logger.d(TAG, "🎵 PBN ${params.pbnValue.toString(16).uppercase().padStart(2, '0')}: " +
-                        "Bend $direction at $pbnRate semitones/tick")
+                        "Bend $direction at $pbnRate semitones/step")
             }
 
             // PVB: Calculate standard vibrato
