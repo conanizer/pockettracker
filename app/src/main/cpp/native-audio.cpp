@@ -1595,7 +1595,7 @@ public:
         for (int v = 0; v < MAX_VOICES; v++) {
             Voice& voice = voices[v];
             if (!voice.isActive) continue;
-            updateVoicePitchMod(voice, numFrames);
+            updateVoicePitchMod(voice, numFrames, sampleRate);
         }
 
         // ===================================
@@ -2620,7 +2620,7 @@ public:
     }
 
     // Update pitch modulation for a single voice (called per frame in audio callback)
-    void updateVoicePitchMod(Voice& voice, int numFrames) {
+    void updateVoicePitchMod(Voice& voice, int numFrames, float sampleRate) {
         // Process pitch slide
         if (voice.pitchSliding) {
             float delta = voice.pitchSlideTarget - voice.pitchOffset;
