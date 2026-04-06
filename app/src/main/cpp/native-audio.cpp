@@ -425,6 +425,18 @@ public:
     // Change the pitch to midiNote (Arpeggio effect).
     virtual void setMidiNote(int midiNote) = 0;
 
+    // Pitch effects (PSL/PBN/PVB/PVX) — rate/total-frames already converted from ticks by Kotlin.
+    // setPitchSlideRaw: slide from current offset to targetSemitones over totalFrames audio frames.
+    virtual void setPitchSlideRaw(float targetSemitones, float totalFrames) = 0;
+    // setPitchBendRaw: continuous bend at ratePerFrame semitones/frame; 0 = stop.
+    virtual void setPitchBendRaw(float ratePerFrame) = 0;
+    // setVibratoRaw: LFO vibrato at speed Hz, depth semitones; depth=0 = stop.
+    virtual void setVibratoRaw(float speed, float depth) = 0;
+    // clearPitchMod: reset all pitch mod state (offset, slide, vibrato).
+    virtual void clearPitchMod() = 0;
+    // setInitialPitchOffset: set pitchOffset without starting a slide (PSL setup).
+    virtual void setInitialPitchOffset(float semitones) = 0;
+
     // Render up to numFrames of stereo audio into buf (interleaved L/R).
     // Returns the peak level of this block (used for per-track metering).
     virtual float render(float* buf, int numFrames) = 0;
@@ -767,6 +779,42 @@ struct Voice : public IAudioVoice {
     // SoundfontVoice (Phase 2) will implement render() fully.
     float render(float* /*buf*/, int /*numFrames*/) override { return 0.0f; }
 
+    // ── Pitch effect interface (IAudioVoice) ────────────────────────────────
+    void setPitchSlideRaw(float targetSemitones, float totalFrames) override {
+        float delta = targetSemitones - pitchOffset;
+        pitchSlideTarget = targetSemitones;
+        pitchSlideRate   = delta / totalFrames;
+        pitchSliding     = true;
+    }
+    void setPitchBendRaw(float ratePerFrame) override {
+        if (fabsf(ratePerFrame) < 0.000001f) {
+            pitchSliding   = false;
+            pitchSlideRate = 0.0f;
+        } else {
+            pitchSlideRate   = ratePerFrame;
+            pitchSlideTarget = (ratePerFrame > 0) ? 127.0f : -127.0f;
+            pitchSliding     = true;
+        }
+    }
+    void setVibratoRaw(float speed, float depth) override {
+        if (depth < 0.01f) {
+            vibratoActive = false;
+            vibratoDepth  = 0.0f;
+        } else {
+            vibratoSpeed  = speed;
+            vibratoDepth  = depth;
+            vibratoActive = true;
+        }
+    }
+    void clearPitchMod() override {
+        pitchOffset    = 0.0f;
+        pitchSliding   = false;
+        pitchSlideRate = 0.0f;
+        vibratoActive  = false;
+        vibratoDepth   = 0.0f;
+    }
+    void setInitialPitchOffset(float semitones) override { pitchOffset = semitones; }
+
     // ── end IAudioVoice ─────────────────────────────────────────────────────
 
     // Returns a [0..1] fade multiplier and advances fadeInRemaining.
@@ -847,6 +895,47 @@ struct SoundfontVoice : public IAudioVoice {
         tsf_channel_note_on(handle, 0, midiNote, noteVolume);
         activeNote = midiNote;
     }
+
+    // ── Pitch effect interface (IAudioVoice) ────────────────────────────────
+    // The pitch state fields are advanced and applied to TSF pitch wheel by applyPitchMod().
+    void setPitchSlideRaw(float targetSemitones, float totalFrames) override {
+        float delta = targetSemitones - pitchOffset;
+        pitchSlideTarget = targetSemitones;
+        pitchSlideRate   = delta / totalFrames;
+        pitchSliding     = true;
+    }
+    void setPitchBendRaw(float ratePerFrame) override {
+        if (fabsf(ratePerFrame) < 0.000001f) {
+            pitchSliding   = false;
+            pitchSlideRate = 0.0f;
+        } else {
+            pitchSlideRate   = ratePerFrame;
+            pitchSlideTarget = (ratePerFrame > 0) ? 127.0f : -127.0f;
+            pitchSliding     = true;
+        }
+    }
+    void setVibratoRaw(float speed, float depth) override {
+        if (depth < 0.01f) {
+            vibratoActive = false;
+            vibratoDepth  = 0.0f;
+        } else {
+            vibratoSpeed  = speed;
+            vibratoDepth  = depth;
+            vibratoActive = true;
+        }
+    }
+    void clearPitchMod() override {
+        pitchOffset    = 0.0f;
+        pitchSliding   = false;
+        pitchSlideRate = 0.0f;
+        vibratoActive  = false;
+        vibratoDepth   = 0.0f;
+        // Reset TSF pitch wheel to centre
+        std::lock_guard<std::mutex> lock(mutex);
+        if (handle) tsf_channel_set_pitchwheel(handle, 0, 8192);
+    }
+    void setInitialPitchOffset(float semitones) override { pitchOffset = semitones; }
+    // ── end IAudioVoice ─────────────────────────────────────────────────────
 
     // Renders numFrames of stereo audio into buf (caller must zero buf first).
     // Returns peak level for per-track metering.
@@ -2319,121 +2408,78 @@ public:
     // PITCH MODULATION METHODS (Phase 6)
     // ===================================
 
-    // Set pitch slide for a voice (PSL effect)
-    // Slides from current pitch offset to target over duration
+    // Returns the active voice for a given track, checking SF voices first.
+    // Sampler voices are in the 8-slot pool (any slot may own any track).
+    // SF voices are per-track (sfVoices[trackId]).
+    IAudioVoice* findActiveVoiceForTrack(int trackId) {
+        if (trackId >= 0 && trackId < 8 && sfVoices[trackId].isActive) {
+            return &sfVoices[trackId];
+        }
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (voices[v].isActive && voices[v].trackId == trackId) {
+                return &voices[v];
+            }
+        }
+        return nullptr;
+    }
+
+    // ── Pitch effect setters — work for both Sampler and SoundFont voices ──
+
+    // Set pitch slide for a voice (PSL effect).
+    // Slides from current pitch offset to targetSemitones over durationTicks ticks.
     void setPitchSlide(int trackId, float targetSemitones, float durationTicks, int tempo) {
-        for (int v = 0; v < MAX_VOICES; v++) {
-            if (voices[v].isActive && voices[v].trackId == trackId) {
-                Voice& voice = voices[v];
+        IAudioVoice* v = findActiveVoiceForTrack(trackId);
+        if (!v) return;
+        float sr = stream ? (float)stream->getSampleRate() : 44100.0f;
+        float framesPerTic = sr / (tempo / 60.0f * 4.0f * 12.0f);
+        float totalFrames = fmaxf(1.0f, framesPerTic * durationTicks);
+        v->setPitchSlideRaw(targetSemitones, totalFrames);
+        LOGD("🎵 Pitch slide: track=%d, to=%.2f over %.0f frames", trackId, targetSemitones, totalFrames);
+    }
 
-                // Calculate frames per tick based on tempo and actual sample rate
-                float sr = stream ? (float)stream->getSampleRate() : 44100.0f;
-                float beatsPerSecond = tempo / 60.0f;
-                float stepsPerBeat = 4.0f;  // 16 steps = 4 beats
-                float ticsPerStep = 12.0f;  // Standard tics per step
-                float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
-                float framesPerTic = sr / ticsPerSecond;
-                float totalFrames = framesPerTic * durationTicks;
-
-                if (totalFrames < 1.0f) totalFrames = 1.0f;
-
-                float delta = targetSemitones - voice.pitchOffset;
-                voice.pitchSlideTarget = targetSemitones;
-                voice.pitchSlideRate = delta / totalFrames;
-                voice.pitchSliding = true;
-
-                LOGD("🎵 Pitch slide: track=%d, from=%.2f to=%.2f over %.0f frames (rate=%.6f)",
-                     trackId, voice.pitchOffset, targetSemitones, totalFrames, voice.pitchSlideRate);
-                return;
-            }
+    // Set continuous pitch bend (PBN effect).
+    // semitonesPerStep is the rate in semitones/step (PBN value / 16); 0 = stop.
+    void setPitchBend(int trackId, float semitonesPerStep, int tempo) {
+        IAudioVoice* v = findActiveVoiceForTrack(trackId);
+        if (!v) return;
+        if (fabsf(semitonesPerStep) < 0.0001f) {
+            v->setPitchBendRaw(0.0f);
+            LOGD("🎵 Pitch bend stopped: track=%d", trackId);
+        } else {
+            float sr = stream ? (float)stream->getSampleRate() : 44100.0f;
+            float framesPerStep = sr / (tempo / 60.0f * 4.0f * 12.0f) * 12.0f;
+            float ratePerFrame = semitonesPerStep / framesPerStep;
+            v->setPitchBendRaw(ratePerFrame);
+            LOGD("🎵 Pitch bend: track=%d, rate=%.4f semitones/step", trackId, semitonesPerStep);
         }
     }
 
-    // Set continuous pitch bend (PBN effect)
-    // Bends pitch continuously at specified rate until stopped
-    void setPitchBend(int trackId, float semitonesPerTick, int tempo) {
-        for (int v = 0; v < MAX_VOICES; v++) {
-            if (voices[v].isActive && voices[v].trackId == trackId) {
-                Voice& voice = voices[v];
-
-                if (fabsf(semitonesPerTick) < 0.0001f) {
-                    // PBN00 = Stop bending
-                    voice.pitchSliding = false;
-                    voice.pitchSlideRate = 0.0f;
-                    LOGD("🎵 Pitch bend stopped: track=%d", trackId);
-                } else {
-                    // Calculate rate per frame using actual sample rate
-                    float sr = stream ? (float)stream->getSampleRate() : 44100.0f;
-                    float beatsPerSecond = tempo / 60.0f;
-                    float stepsPerBeat = 4.0f;
-                    float ticsPerStep = 12.0f;
-                    float ticsPerSecond = beatsPerSecond * stepsPerBeat * ticsPerStep;
-                    float framesPerTic = sr / ticsPerSecond;
-                    // semitonesPerTick is actually semitones/step from Kotlin (PBN value / 16)
-                    float framesPerStep = framesPerTic * ticsPerStep;
-
-                    voice.pitchSlideRate = semitonesPerTick / framesPerStep;
-                    // Set target far in the direction of bend (will slide until stopped)
-                    voice.pitchSlideTarget = (semitonesPerTick > 0) ? 127.0f : -127.0f;
-                    voice.pitchSliding = true;
-
-                    LOGD("🎵 Pitch bend: track=%d, rate=%.4f semitones/step", trackId, semitonesPerTick);
-                }
-                return;
-            }
-        }
-    }
-
-    // Set vibrato (PVB/PVX effect)
+    // Set vibrato (PVB/PVX effect). depth=0 stops vibrato.
     void setVibrato(int trackId, float speed, float depth) {
-        for (int v = 0; v < MAX_VOICES; v++) {
-            if (voices[v].isActive && voices[v].trackId == trackId) {
-                Voice& voice = voices[v];
-
-                if (depth < 0.01f) {
-                    // Stop vibrato
-                    voice.vibratoActive = false;
-                    voice.vibratoDepth = 0.0f;
-                    LOGD("🎵 Vibrato stopped: track=%d", trackId);
-                } else {
-                    voice.vibratoSpeed = speed;
-                    voice.vibratoDepth = depth;
-                    voice.vibratoActive = true;
-                    // Don't reset phase - allows smooth parameter changes
-                    LOGD("🎵 Vibrato: track=%d, speed=%.1fHz, depth=%.2f semitones",
-                         trackId, speed, depth);
-                }
-                return;
-            }
+        IAudioVoice* v = findActiveVoiceForTrack(trackId);
+        if (!v) return;
+        v->setVibratoRaw(speed, depth);
+        if (depth < 0.01f) {
+            LOGD("🎵 Vibrato stopped: track=%d", trackId);
+        } else {
+            LOGD("🎵 Vibrato: track=%d, speed=%.1fHz, depth=%.2f semitones", trackId, speed, depth);
         }
     }
 
-    // Clear all pitch modulation for a voice
+    // Clear all pitch modulation for a voice (PSL/PBN/PVB/PVX reset).
     void clearPitchMod(int trackId) {
-        for (int v = 0; v < MAX_VOICES; v++) {
-            if (voices[v].isActive && voices[v].trackId == trackId) {
-                Voice& voice = voices[v];
-                voice.pitchOffset = 0.0f;
-                voice.pitchSliding = false;
-                voice.pitchSlideRate = 0.0f;
-                voice.vibratoActive = false;
-                voice.vibratoDepth = 0.0f;
-                LOGD("🎵 Pitch mod cleared: track=%d", trackId);
-                return;
-            }
-        }
+        IAudioVoice* v = findActiveVoiceForTrack(trackId);
+        if (!v) return;
+        v->clearPitchMod();
+        LOGD("🎵 Pitch mod cleared: track=%d", trackId);
     }
 
-    // Set initial pitch offset for a voice (used by PSL portamento effect)
-    // This sets the starting pitch offset before calling setPitchSlide
+    // Set initial pitch offset (PSL setup: call before setPitchSlide).
     void setInitialPitchOffset(int trackId, float semitones) {
-        for (int v = 0; v < MAX_VOICES; v++) {
-            if (voices[v].isActive && voices[v].trackId == trackId) {
-                voices[v].pitchOffset = semitones;
-                LOGD("🎵 Pitch offset set: track=%d, offset=%.2f semitones", trackId, semitones);
-                return;
-            }
-        }
+        IAudioVoice* v = findActiveVoiceForTrack(trackId);
+        if (!v) return;
+        v->setInitialPitchOffset(semitones);
+        LOGD("🎵 Pitch offset set: track=%d, offset=%.2f semitones", trackId, semitones);
     }
 
     // ===================================
