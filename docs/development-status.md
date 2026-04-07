@@ -1,6 +1,6 @@
 # Development Status
 
-**Last Updated:** 2026-03-19
+**Last Updated:** 2026-04-07
 
 ## Current Phase
 
@@ -40,10 +40,11 @@ Week 16:     MVP Release
 - Platform-agnostic architecture (IAudioBackend + IResourceLoader interfaces)
 - Sample-accurate note queue system (C++ priority queue, <0.02ms jitter)
 - Linear interpolation (eliminates aliasing artifacts during pitch-shifting)
-- Native C++ audio engine with Oboe (44.1kHz, LowLatency, Exclusive mode)
+- Native C++ audio engine with Oboe (44.1kHz, OpenSL ES preferred, AAudio fallback)
 - 8-voice polyphony with per-track voice stealing + 3-step allocator
 - 256 sample slots with stereo/mono WAV loading (auto-converts)
 - Automatic sample rate compensation
+- SoundFont (SF2) instruments via TinySoundFont — shared handle per SF2 slot, per-track MIDI channels (0-7), up to 8 simultaneous SF2 files
 - Advanced playback: start/end points, reverse, looping (fwd/ping-pong)
 - Queue-based playback: phrase, chain (with transpose), song (8-track)
 - Continuous buffering with 2-phrase lookahead
@@ -125,6 +126,7 @@ Week 16:     MVP Release
 ## Known Issues
 
 - Generic input warning spam after device restart (harmless, goes away after reboot)
+- SF2 per-track meters show the same level for all tracks sharing one SF2 file (TSF renders all MIDI channels into one buffer; true per-track isolation requires per-track rendering, deferred post-MVP)
 
 ---
 
@@ -200,13 +202,25 @@ Week 16:     MVP Release
 ## Technical Notes
 
 ### Audio Engine Details
-- Sample rate: 44100 Hz (forced via Oboe builder)
-- Performance mode: LowLatency (MMAP fast audio path)
-- Sharing mode: Exclusive
+- Sample rate: 44100 Hz (forced via Oboe builder; device converts to native rate internally)
+- Audio API: OpenSL ES preferred (avoids CCodec enumeration on startup), AAudio fallback
+- Stream open order: OpenSL ES Exclusive → OpenSL ES Shared → OpenSL ES None/Shared → AAudio Exclusive
+- Performance mode: LowLatency
+- Sharing mode: Exclusive where supported, Shared otherwise
 - Format: Float32, stereo output
 - Buffer size: Auto-selected (~192-480 frames)
 - All samples stored as mono
 - Playback rate = target_frequency / base_frequency
+- Audio init runs off main thread (Dispatchers.IO) to prevent UI freeze on startup
+- Hot-path logging gated behind AUDIO_TRACE=0 compile flag (set to 1 for per-note tracing)
+
+### SoundFont (SF2) Details
+- TinySoundFont (TSF) header-only synthesizer
+- One shared `tsf*` handle per SF2 slot (up to 8 slots = 8 different SF2 files)
+- Each track maps to a MIDI channel (track 0 = ch 0 … track 7 = ch 7) on the slot's handle
+- `tsf_render_float()` called once per active slot per audio block — no per-track clone
+- SF2 loading: `tsf_load_filename()` directly; no file buffer copy kept in memory
+- Memory: ~1× SF2 file size (single handle), vs old architecture which used ~8×
 
 ### MIDI Note Convention
 - C-4 = MIDI 60 (middle C)
