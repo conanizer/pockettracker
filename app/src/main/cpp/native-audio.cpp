@@ -859,6 +859,9 @@ struct SoundfontVoice : public IAudioVoice {
     float vibratoSpeed     = 0.0f;    // LFO frequency in Hz
     float vibratoDepth     = 0.0f;    // LFO depth in semitones
     bool  vibratoActive    = false;
+    // Set true by clearPitchMod() (JNI thread) to ask audio thread to reset pitch wheel.
+    // Written from JNI thread, read+cleared from audio thread — safe for bool on ARM64.
+    bool  needsPitchReset  = false;
 
     // IAudioVoice
     bool active()     const override { return isActive; }
@@ -930,9 +933,10 @@ struct SoundfontVoice : public IAudioVoice {
         pitchSlideRate = 0.0f;
         vibratoActive  = false;
         vibratoDepth   = 0.0f;
-        // Reset TSF pitch wheel to centre
-        std::lock_guard<std::mutex> lock(mutex);
-        if (handle) tsf_channel_set_pitchwheel(handle, 0, 8192);
+        // Signal the audio thread to reset the TSF pitch wheel to centre on the next block.
+        // We MUST NOT call TSF here: clearPitchMod() runs on the JNI/Kotlin thread while
+        // applyPitchMod() runs on the audio thread — concurrent TSF access causes crashes.
+        needsPitchReset = true;
     }
     void setInitialPitchOffset(float semitones) override { pitchOffset = semitones; }
     // ── end IAudioVoice ─────────────────────────────────────────────────────
@@ -981,12 +985,23 @@ struct SoundfontVoice : public IAudioVoice {
         pitchSliding     = false;
         vibratoPhase     = 0.0f;
         vibratoActive    = false;
+        needsPitchReset  = false;  // New note: pitch wheel starts at centre, no reset needed
     }
 
     // Advance pitch state and apply to TSF via pitch wheel — call once per audio block,
-    // BEFORE render(). No mutex needed: audio callback is single-threaded.
+    // BEFORE render(). Called from audio thread only — safe to call TSF without the mutex.
     void applyPitchMod(float sampleRate, int numFrames) {
         if (!handle) return;
+
+        // If clearPitchMod() was called from the JNI thread, reset pitch wheel to centre now
+        // (audio thread is the only caller of TSF, so this is safe without a lock).
+        if (needsPitchReset) {
+            constexpr float PITCH_RANGE = 48.0f;
+            tsf_channel_set_pitchrange(handle, 0, PITCH_RANGE);
+            tsf_channel_set_pitchwheel(handle, 0, 8192);
+            needsPitchReset = false;
+        }
+
         if (!pitchSliding && !vibratoActive) return;
 
         // Advance pitch slide (PSL / PBN)
