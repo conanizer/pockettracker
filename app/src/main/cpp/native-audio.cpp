@@ -2100,17 +2100,22 @@ public:
                     tsf_render_float(soundfonts[s].handle, sfBuf, numFrames, 0 /* overwrite */);
                 }
 
-                // Compute peak and mix. Per-track volume was set at note-on via
-                // tsf_channel_set_volume; only master volume scales the final output.
-                float peak = 0.0f;
+                // Mix into output and measure the combined slot peak.
+                float slotPeak = 0.0f;
                 for (int i = 0; i < numFrames * 2; i++) {
-                    peak = fmaxf(peak, fabsf(sfBuf[i]));
+                    slotPeak = fmaxf(slotPeak, fabsf(sfBuf[i]));
                     output[i] += sfBuf[i] * masterVol;
                 }
-                // Share the slot peak across all active tracks using this slot.
-                for (int t = 0; t < 8; t++) {
-                    if (sfVoices[t].isActive && sfVoices[t].sfSlot == s) {
-                        framePeaksPerTrack[t] = fmaxf(framePeaksPerTrack[t], peak);
+                // Per-track peak: tsf_render_float() mixes all MIDI channels into one buffer,
+                // so we can't isolate individual track PCM. Use each track's own channel volume
+                // (noteVolume × trackVolume) as a proportional proxy. This correctly shows which
+                // tracks are active and at what relative level without requiring per-channel renders.
+                if (slotPeak > 0.001f) {
+                    for (int t = 0; t < 8; t++) {
+                        if (sfVoices[t].isActive && sfVoices[t].sfSlot == s) {
+                            float proxy = sfVoices[t].noteVolume * sfVoices[t].trackVolume * masterVol;
+                            framePeaksPerTrack[t] = fmaxf(framePeaksPerTrack[t], proxy);
+                        }
                     }
                 }
             }
