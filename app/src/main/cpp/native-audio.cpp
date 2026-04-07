@@ -1081,31 +1081,45 @@ public:
     bool openStream() {
         oboe::AudioStreamBuilder builder;
         builder.setDataCallback(this);
-
-        // Enable low-latency mode for precise timing
-        // This enables MMAP (fast audio path) and reduces buffer size
-        builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
-
-        // Try exclusive mode first for lowest latency, fallback to shared if not available
-        builder.setSharingMode(oboe::SharingMode::Exclusive);
-
         builder.setFormat(oboe::AudioFormat::Float);
         builder.setChannelCount(oboe::ChannelCount::Stereo);
-
-        // Set sample rate to 44100 Hz (most common for audio samples)
-        // This eliminates compensation for 44100 Hz samples (perfect pitch!)
-        // Samples at other rates (48000 Hz) will still be compensated
         builder.setSampleRate(44100);
 
+        // Attempt 1: low-latency exclusive (MMAP path, ideal for music trackers).
+        builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
+        builder.setSharingMode(oboe::SharingMode::Exclusive);
         oboe::Result result = builder.openStream(stream);
+
+        // Attempt 2: low-latency shared (still low-latency, avoids exclusive MMAP contention).
         if (result != oboe::Result::OK) {
-            LOGE("Failed to create stream: %s", oboe::convertToText(result));
+            LOGD("openStream: exclusive failed (%s), trying shared LowLatency",
+                 oboe::convertToText(result));
+            builder.setSharingMode(oboe::SharingMode::Shared);
+            result = builder.openStream(stream);
+        }
+
+        // Attempt 3: normal latency / shared (maximum compatibility, avoids MMAP entirely).
+        // This path also avoids the CCodec/C2 codec enumeration that can block for 35 s
+        // on some custom Android ROMs (e.g. GammaCoreOS on Miyoo Flip).
+        if (result != oboe::Result::OK) {
+            LOGD("openStream: LowLatency failed (%s), trying None/Shared (no MMAP)",
+                 oboe::convertToText(result));
+            builder.setPerformanceMode(oboe::PerformanceMode::None);
+            builder.setSharingMode(oboe::SharingMode::Shared);
+            result = builder.openStream(stream);
+        }
+
+        if (result != oboe::Result::OK) {
+            LOGE("openStream: all attempts failed: %s", oboe::convertToText(result));
             return false;
         }
 
-        LOGD("Stream: %d Hz (requested 44100), buffer: %d",
+        LOGD("Stream opened: %d Hz, bufSz=%d, api=%s, perf=%s, sharing=%s",
              stream->getSampleRate(),
-             stream->getBufferSizeInFrames());
+             stream->getBufferSizeInFrames(),
+             oboe::convertToText(stream->getAudioApi()),
+             oboe::convertToText(stream->getPerformanceMode()),
+             oboe::convertToText(stream->getSharingMode()));
 
         result = stream->requestStart();
         if (result != oboe::Result::OK) {
@@ -1113,7 +1127,7 @@ public:
             return false;
         }
 
-        LOGD("Started OK");
+        LOGD("Stream started OK");
         return true;
     }
 

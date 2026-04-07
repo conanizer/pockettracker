@@ -19,11 +19,15 @@ import androidx.core.view.WindowCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.sp
 import android.content.res.Configuration
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -300,19 +304,26 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val audioBackend = remember { OboeAudioBackend() }
     val resourceLoader = remember { AndroidResourceLoader(context) }
 
-    // Step 2: Create platform-agnostic AudioEngine
-    // ✅ No more Context dependency - fully portable!
-    val audioEngine = remember {
-        AudioEngine(audioBackend, resourceLoader, logger).apply {
-            create()
-        }
-    }
+    // Step 2: Create platform-agnostic AudioEngine (object only — stream opens below)
+    val audioEngine = remember { AudioEngine(audioBackend, resourceLoader, logger) }
 
     // Step 3: Cleanup when app closes (important to prevent memory leaks)
     DisposableEffect(Unit) {
         onDispose {
             audioEngine.close()
         }
+    }
+
+    // Open the Oboe audio stream on an IO thread.
+    // On some devices (e.g. Miyoo Flip / GammaCoreOS) opening an AAudio LowLatency/Exclusive
+    // stream triggers Android's C2 codec framework to enumerate ~42 codecs, which can take
+    // up to 35 seconds and completely freezes the main thread if done synchronously.
+    var audioReady by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            audioEngine.create()
+        }
+        audioReady = true
     }
 
     // InstrumentController: Manages all instrument operations
@@ -389,9 +400,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // NOTE: GenericInputHandler has been migrated to InputController (Phase 4)
     // All input handling now goes through trackerController.inputController
 
-    // Initialize real-time volumes in audio backend on startup
-    LaunchedEffect(Unit) {
-        // Sync all track/master volumes to audio backend
+    // Sync mixer volumes to audio backend once the stream is open.
+    // (setTrackVolume/setMasterVolume are no-ops if native engine is null, so this must
+    // run after audioReady — i.e., after LaunchedEffect(Unit) above finishes create().)
+    LaunchedEffect(audioReady) {
+        if (!audioReady) return@LaunchedEffect
         for (i in 0 until 8) {
             val vol = trackerController.project.tracks[i].volume
             audioBackend.setTrackVolume(i, com.conanizer.pockettracker.core.data.VolumeUtils.hexToFloat(vol))
@@ -3230,6 +3243,24 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             instrumentController.getSoundfontCurrentPresetIndex(project.instruments[currentInstrument])
         }
     )
+
+    // Show a loading screen until the Oboe stream is open.
+    // Audio init can take a long time on some devices (e.g. GammaCoreOS / Miyoo Flip)
+    // because AAudio's first-open triggers C2 codec enumeration. Running it on Dispatchers.IO
+    // keeps the UI thread free so this screen is visible immediately.
+    if (!audioReady) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "AUDIO LOADING...",
+                color = Color(0xFF00CC00),
+                fontSize = 14.sp
+            )
+        }
+        return
+    }
 
     val hapticView = LocalView.current
     CompositionLocalProvider(
