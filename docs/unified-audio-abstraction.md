@@ -14,6 +14,53 @@ Stable and crash-free, but per-track meters, tables, and arpeggio/repeat effects
 
 ---
 
+## ⚠️ Why We Are Here — The Miyoo Flip Crash History
+
+**This section is critical context.** The current shared-handle architecture is not what was originally planned (UAA Phase 2 calls for per-instrument clones). It exists because the original per-track clone approach caused hard crashes on the Miyoo Flip, and the shared-handle approach was the stable fix. **Phase 2 must not blindly revert to the old clone strategy.**
+
+### Original architecture (crashed)
+
+Each track that played an SF2 note created its own `tsf*` clone via `tsf_load_memory()`:
+```cpp
+// On note trigger (audio thread):
+if (sv.handle == nullptr) {
+    sv.handle = tsf_load_memory(fileData.data(), fileData.size()); // ← THE PROBLEM
+}
+tsf_note_on(sv.handle, preset, midiNote, velocity);
+```
+
+**Two fatal problems:**
+
+1. **`tsf_load_memory()` on the audio thread.** TSF parses the entire SF2 file on every clone creation — this is an expensive allocation (~milliseconds for a large SF2). Called from the real-time audio callback, it caused buffer underruns, lag, and eventual crashes on the Miyoo Flip (1 GB RAM, weak CPU).
+
+2. **Race condition between JNI thread and audio thread.** `clearPitchMod()` was called from a JNI thread (Kotlin side) while `applyPitchMod()` ran on the audio thread — both touching the same `tsf*` handle without synchronisation. TSF is not thread-safe.
+
+### First attempted fix (wrong root cause)
+
+Initial diagnosis blamed the race condition in `clearPitchMod`. A `needsPitchReset` bool was added to defer the pitch reset to the audio thread. This did not fix the crashes — the real cause was `tsf_load_memory()` on the audio thread.
+
+### Actual fix (current architecture)
+
+Replaced per-track clones with **one shared `tsf*` per SF2 file**:
+- SF2 loaded once via `tsf_load_filename()` at instrument load time (not on audio thread)
+- Each track uses a dedicated MIDI channel (0-7) on the shared handle
+- `tsf_render_float()` called once per slot per audio block — renders all channels mixed
+- No cloning, no per-note allocation, no audio-thread file I/O
+
+**Result:** Stable on Miyoo Flip. No crashes.
+
+### What Phase 2 must do differently
+
+UAA Phase 2 plans per-instrument `tsf*` clones for isolated per-track rendering. To avoid repeating the crash:
+
+- **Load SF2 file data once** into a memory buffer (not on the audio thread)
+- **Create clones via `tsf_load_memory(buffer)`** from the JNI/loading thread, before any audio starts
+- **Never call `tsf_load_memory()` or `tsf_load_filename()` from the audio callback**
+- **Protect each clone with its own mutex** if any JNI thread may touch it concurrently
+- **Test on Miyoo Flip specifically** — it's the weakest target device and where this class of bug surfaces first
+
+---
+
 ## Problem
 
 PocketTracker currently has two parallel audio code paths that share no code:
