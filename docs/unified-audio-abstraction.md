@@ -4,10 +4,12 @@
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 1 | IAudioVoice interface extraction | ✅ Done |
-| 2 | Per-instrument TSF clones + per-track render | ⏳ Deferred post-MVP |
-| 3 | Effect processor unification (ARP, REP, tables on SF) | ⏳ Deferred post-MVP |
+| 2a | ParamBus — unified parameter + modulation accumulator | ⏳ Deferred post-MVP |
+| 2b | Per-instrument TSF clones + per-track render buffers | ⏳ Deferred post-MVP |
+| 3 | Effect processor unification (all effects on SF via ParamBus) | ⏳ Deferred post-MVP |
 | 4 | Kotlin layer cleanup (remove SOUNDFONT branches) | ⏳ Deferred post-MVP |
-| 5 | Synth foundation (wavetable, FM) | 🔮 Future |
+| 5 | Per-track stem export (WAV per track) | ⏳ Deferred post-MVP |
+| 6 | Synth foundation (wavetable, FM) | 🔮 Future |
 
 **Current workaround:** One shared `tsf*` per SF2 file, tracks mapped to MIDI channels 0-7.
 Stable and crash-free, but per-track meters, tables, and arpeggio/repeat effects don't apply to SF instruments.
@@ -16,7 +18,7 @@ Stable and crash-free, but per-track meters, tables, and arpeggio/repeat effects
 
 ## ⚠️ Why We Are Here — The Miyoo Flip Crash History
 
-**This section is critical context.** The current shared-handle architecture is not what was originally planned (UAA Phase 2 calls for per-instrument clones). It exists because the original per-track clone approach caused hard crashes on the Miyoo Flip, and the shared-handle approach was the stable fix. **Phase 2 must not blindly revert to the old clone strategy.**
+**This section is critical context.** The current shared-handle architecture is not what was originally planned (UAA Phase 2 calls for per-instrument clones). It exists because the original per-track clone approach caused hard crashes on the Miyoo Flip, and the shared-handle approach was the stable fix. **Phase 2b must not blindly revert to the old clone strategy.**
 
 ### Original architecture (crashed)
 
@@ -49,14 +51,14 @@ Replaced per-track clones with **one shared `tsf*` per SF2 file**:
 
 **Result:** Stable on Miyoo Flip. No crashes.
 
-### What Phase 2 must do differently
+### What Phase 2b must do differently
 
-UAA Phase 2 plans per-instrument `tsf*` clones for isolated per-track rendering. To avoid repeating the crash:
+UAA Phase 2b plans per-instrument `tsf*` clones for isolated per-track rendering. To avoid repeating the crash:
 
-- **Load SF2 file data once** into a memory buffer (not on the audio thread)
-- **Create clones via `tsf_load_memory(buffer)`** from the JNI/loading thread, before any audio starts
+- **Load SF2 file data once** into a memory buffer on the loading thread, keep it alive
+- **Create clones via `tsf_load_memory(buffer)`** from the JNI/loading thread, before any audio starts — never from the audio callback
 - **Never call `tsf_load_memory()` or `tsf_load_filename()` from the audio callback**
-- **Protect each clone with its own mutex** if any JNI thread may touch it concurrently
+- **Each clone is owned by one track** — no shared access, no mutex needed at render time
 - **Test on Miyoo Flip specifically** — it's the weakest target device and where this class of bug surfaces first
 
 ---
@@ -78,30 +80,161 @@ PocketTracker currently has two parallel audio code paths that share no code:
 
 Future synth voices (wavetable, FM, subtractive) would add a third path, making maintenance O(N×effects).
 
+The original Phase 3 plan addressed this with typed setters on `IAudioVoice` (`setVolume()`,
+`setPan()`, `setPitchMod()`, etc.). This still pushes the branching into every `SoundfontVoice`
+method — O(N×effects) in a different place. The **ParamBus** approach eliminates the branching
+entirely: modulation sources write to a shared accumulator, each voice type reads and translates
+once in `render()`.
+
 ---
 
 ## Goal
 
 A single audio event pipeline where the sound **source** is a plugin and everything else
-(effects, volume, metering, scheduling) is source-agnostic.
+(effects, volume, metering, modulation, scheduling) is source-agnostic.
 
 ---
 
 ## Architecture
 
-### Core Abstractions (C++)
+### ParamBus — Unified Parameter + Modulation Accumulator
+
+Every continuously-controllable value in the system (volume, pan, pitch, filter cutoff, etc.)
+is represented as a slot in a `ParamBus`. Each slot has a **base** value (set by the user /
+instrument settings) and a **mod accumulator** (written by all active modulation sources
+during a frame). The final value is `clamp(base + mod)`.
+
+```cpp
+enum ParamId {
+    PARAM_VOL = 0,
+    PARAM_PAN,
+    PARAM_PITCH,       // semitones offset from note
+    PARAM_FILTER_CUT,
+    PARAM_FILTER_RES,
+    PARAM_DRIVE,
+    PARAM_CRUSH,
+    PARAM_DOWNSAMPLE,
+    PARAM_START_POINT, // no-op for SF/Synth
+    PARAM_COUNT
+};
+
+struct ParamBus {
+    float base[PARAM_COUNT];  // user-set values, written at instrument load / note trigger
+    float mod[PARAM_COUNT];   // frame accumulator — reset to 0 at start of each audio block
+
+    void resetMods()                        { memset(mod, 0, sizeof(mod)); }
+    void addMod(ParamId id, float delta)    { mod[id] += delta; }
+    void setBase(ParamId id, float value)   { base[id] = value; }
+    float get(ParamId id) const             { return base[id] + mod[id]; }
+};
+```
+
+**All modulation sources write to the bus** — tables, ADSR, LFO, effect columns:
+```cpp
+// Table volume column
+voice->params.addMod(PARAM_VOL, tableVolNormalized);
+
+// LFO targeting filter cutoff
+voice->params.addMod(PARAM_FILTER_CUT, lfoValue * depth);
+
+// Arpeggio offsetting pitch
+voice->params.addMod(PARAM_PITCH, arpSemitones);
+
+// Repeat ramp ramping volume
+voice->params.addMod(PARAM_VOL, repeatRampGain);
+```
+
+Zero branching on source type in any of these. The **translation to source-specific API** lives
+only in each voice's `render()` — one place, once.
+
+### IAudioVoice — Simplified Interface
+
+With ParamBus handling all continuous parameters, the interface only needs event methods
+and render:
+
+```cpp
+class IAudioVoice {
+public:
+    ParamBus params;
+
+    // Events — still explicit because they are not continuous values
+    virtual void noteOn(int midiNote, float vel) = 0;
+    virtual void noteOff() = 0;
+    virtual void hardStop() = 0;
+    virtual void retrigger(int startPoint) = 0;  // Repeat effect
+
+    // Render — reads params internally, returns peak level
+    virtual float render(float* buf, int frames) = 0;
+
+    virtual ~IAudioVoice() = default;
+};
+```
+
+Compare to the previous plan's 8+ typed setters (`setVolume`, `setPan`, `setNote`,
+`setPitchMod`, `setStartPoint`, …). ParamBus replaces all of them with a single uniform
+write path.
+
+### SamplerVoice — Existing Logic, Now Reads from ParamBus
+
+`SamplerVoice` already does all of this internally (the `Voice` struct has all these fields).
+Phase 2a is just plumbing: replace direct field reads with `params.get(PARAM_*)` calls.
+No behavior change. The existing signal chain (downsample → crush → interpolate → drive →
+filter → volume → pan) stays exactly the same.
+
+### SoundfontVoice — ParamBus → TSF API Translation
+
+```cpp
+class SoundfontVoice : public IAudioVoice {
+    tsf* handle;     // one clone per active SF instrument (see Phase 2b)
+    int  preset;
+
+public:
+    void noteOn(int midiNote, float vel) override {
+        tsf_note_on(handle, preset, midiNote, vel);
+    }
+    void noteOff() override {
+        tsf_note_off(handle, preset, lastMidiNote);
+    }
+    void hardStop() override {
+        tsf_note_off(handle, preset, lastMidiNote);  // TSF has no hard-stop; note-off is close enough
+    }
+    void retrigger(int /*startPoint*/) override {
+        tsf_note_off(handle, preset, lastMidiNote);
+        tsf_note_on(handle, preset, lastMidiNote, lastVel);
+    }
+
+    float render(float* buf, int frames) override {
+        // Translate ParamBus to TSF API — one place, no branching elsewhere
+        int midiNote = baseMidiNote + (int)roundf(params.get(PARAM_PITCH));
+        if (midiNote != lastAppliedNote) {
+            tsf_note_off(handle, preset, lastAppliedNote);
+            tsf_note_on(handle, preset, midiNote, lastVel);
+            lastAppliedNote = midiNote;
+        }
+        tsf_channel_set_volume(handle, 0, clamp01(params.get(PARAM_VOL)));
+        tsf_channel_set_pan(handle, 0, (clampf(params.get(PARAM_PAN), -1, 1) + 1.0f) * 0.5f);
+
+        tsf_render_float(handle, buf, frames, 0);
+
+        // Measure peak from rendered buffer
+        float peak = 0;
+        for (int i = 0; i < frames * 2; i++) peak = fmaxf(peak, fabsf(buf[i]));
+        return peak;
+    }
+};
+```
+
+Effects like arpeggio, vibrato, volume ramp, table — all handled by `params.addMod()` calls
+upstream. `SoundfontVoice::render()` just reads the accumulated result and calls TSF. No
+effect-specific code inside `SoundfontVoice`.
+
+### Core Abstractions Overview
 
 ```
-IAudioSource
-├── SamplerSource      — current WAV voice pool
-├── SoundfontSource    — wraps one TSF instance, renders one channel per track
-└── SynthSource        — future (wavetable, FM, …)
-
-AudioVoice
-├── sourceType: SAMPLER | SOUNDFONT | SYNTH
-├── trackId, volume, pan
-├── tableId, effects state
-└── render(float* buf, int frames) → float peak
+IAudioVoice (ParamBus params + event methods + render)
+├── SamplerVoice    — existing Voice logic, reads from params
+├── SoundfontVoice  — tsf* clone per instrument, translates params → TSF API
+└── SynthVoice      — future (wavetable, FM, …)
 ```
 
 ### Event Pipeline (same for all source types)
@@ -113,129 +246,164 @@ NoteQueue (existing, unchanged)
     ↓
 processAudioBlock per-frame loop
     ↓
+voice->params.resetMods()           ← clear accumulator each block
+    ↓
 VoiceManager.trigger(note)
-    ├── SamplerSource  → assign voice slot, load params
-    ├── SoundfontSource → tsf_channel_set_bank_preset + note_on on isolated instance
-    └── SynthSource    → set oscillator params
+    ├── SamplerVoice  → assign slot, set params.base values
+    └── SoundfontVoice → tsf_note_on on isolated clone, set params.base
     ↓
-per-frame effect tick (EffectProcessor — same code for all)
-    ├── Vxx → voice.setVolume(v)
-    ├── K00 → voice.noteOff() or voice.hardStop()
-    ├── Rxx → voice.retrigger()
-    ├── Axx → voice.setNote(arpeggioNote)
-    ├── PSL/PBN/PVB → voice.setPitchMod(params)
-    └── Oxx → voice.setStartPoint(offset)   [no-op for SF/Synth]
+per-frame modulation tick (source-agnostic — just writes to params)
+    ├── Table tick       → params.addMod(PARAM_VOL, col)
+    │                    → params.addMod(PARAM_PITCH, transpose)
+    ├── ADSR/LFO         → params.addMod(dest, envValue * depth)
+    └── Effect columns:
+        ├── Vxx          → params.addMod(PARAM_VOL, v)
+        ├── Axx          → params.addMod(PARAM_PITCH, arpSemitones)
+        ├── PSL/PBN/PVB  → params.addMod(PARAM_PITCH, pitchMod)
+        ├── Oxx          → params.addMod(PARAM_START_POINT, offset)  [no-op in SF]
+        ├── K00          → voice->hardStop()                         [event]
+        └── Rxx          → voice->retrigger(startPoint)              [event]
     ↓
-voice.render(trackBuf, frames) → peak
+peak = voice->render(trackBuf[track], frames)   ← reads params, returns peak
     ↓
-trackPeak[trackId] = max(trackPeak[trackId], peak)  ← per-track, always accurate
+trackPeak[track] = max(trackPeak[track], peak)  ← per-track, always accurate
     ↓
-mix trackBuf → output (apply trackVolumes[trackId] × masterVolume)
+mix trackBuf[track] → output (apply trackVolumes[track] × masterVolume)
 ```
 
 ---
 
 ## Key Design Decisions
 
-### 1. One TSF instance per active SF track (not per file)
+### 1. ParamBus separates "what to do" from "how to do it"
+
+Modulation sources (EffectProcessor, tables, ADSR, LFO) express intent by writing to the bus.
+Voice types translate intent to their own API in `render()`. Adding a new modulation source
+or effect only requires writing to the bus — no changes to any voice type. Adding a new voice
+type only requires implementing `render()` — no changes to any effect code.
+
+### 2. Events vs continuous values
+
+ParamBus handles continuously-valued parameters. Discrete events (`noteOn`, `noteOff`,
+`hardStop`, `retrigger`) remain explicit methods on `IAudioVoice` because they are not
+additive — they represent state transitions, not magnitude adjustments.
+
+### 3. One TSF instance per active SF instrument (Phase 2b)
 
 **Current**: one TSF per SF2 file, renders all channels together.
 **Problem**: can't get per-track audio, can't apply per-track effects.
-**New**: load the SF2 file data once, then create one `tsf*` clone per active instrument slot.
-
-TSF supports loading from memory (`tsf_load_memory`), so:
-```
-sfFileData = load_file_to_memory(path)          // load once
-sfHandle[instrumentId] = tsf_load_memory(data)  // one clone per instrument
-```
-
-Each instrument gets its own `tsf*` that renders independently.
-Memory cost: TSF is ~100–500KB per instance (presets + voice state). With 256 slots but
-only a handful active at once, this is manageable. Consider a max of 8–16 loaded instances,
-evicting LRU when exceeded (same strategy as current sfSlotMap).
-
-### 2. SoundfontSource.render() uses tsf_render_float on one instance
-
-Since each active instrument has its own `tsf*`:
-- `render(buf, frames)` calls `tsf_render_float` on that instrument's `tsf*`
-- Output is mono/stereo for just that instrument
-- Peak is measured directly from the output
-- Track volume and effects applied uniformly by VoiceManager
-
-### 3. Effects via unified VoiceInterface
+**New**: load SF2 file data once to a memory buffer, create one `tsf*` clone per active
+instrument slot (max 8 loaded, LRU eviction — same strategy as current `sfSlotMap`).
 
 ```cpp
-class AudioVoice {
-    virtual void noteOn(int midiNote, float vel) = 0;
-    virtual void noteOff() = 0;
-    virtual void hardStop() = 0;
-    virtual void setVolume(float v) = 0;
-    virtual void setPan(float p) = 0;
-    virtual void setNote(int midiNote) = 0;     // for arpeggio
-    virtual void retrigger(int startPoint) = 0; // for Repeat
-    virtual float render(float* buf, int frames) = 0; // returns peak
-};
+// On instrument load — JNI/loading thread, never audio thread:
+sfFileBuffers[path] = readFileToVector(path);          // load file data once
+sfClones[instrId]   = tsf_load_memory(
+    sfFileBuffers[path].data(), sfFileBuffers[path].size()
+);
+tsf_set_output(sfClones[instrId], TSF_STEREO_INTERLEAVED, 44100, 0);
+
+// On audio thread — no allocation, no file I/O:
+tsf_note_on(sfClones[instrId], preset, midiNote, vel);
+tsf_render_float(sfClones[instrId], trackBuf, frames, 0);
 ```
 
-`EffectProcessor` calls `voice->setVolume()`, `voice->setNote()`, etc. — same code path for
-Sampler, SF, and future synths. No branching on instrument type.
+Memory per clone: ~1× SF2 file size (TSF stores sample data internally). With 8 slots
+and typical SF2 files at 1–10 MB, total SF memory is 8–80 MB — acceptable on Miyoo Flip.
 
-### 4. Track volume applied at mix time (not per-note)
+### 4. Per-track render buffers enable stem export
 
-Remove `trackVolumes` from per-note scheduling. Apply it once at mix time:
+Once each voice renders to its own `trackBuf[track]` (instead of the shared SF mix),
+per-track stem export is trivial:
+
 ```cpp
-for each track t:
-    float peak = voices[t]->render(trackBuf, frames);
-    trackPeaks[t] = max(trackPeaks[t], peak);
-    for i in 0..frames*2:
-        output[i] += trackBuf[i] * trackVolumes[t] * masterVolume;
+for (int t = 0; t < NUM_TRACKS; t++) {
+    float peak = voices[t]->render(trackBuf[t], frames);
+    trackPeaks[t] = fmaxf(trackPeaks[t], peak);
+
+    // Stem export: write trackBuf[t] to WAV for track t
+    if (renderingStems) stemWriters[t].write(trackBuf[t], frames);
+
+    // Master mix
+    for (int i = 0; i < frames * 2; i++)
+        output[i] += trackBuf[t][i] * trackVolumes[t] * masterVolume;
+}
 ```
 
-This means changing the mixer volume takes effect immediately on any playing voice
-without any per-voice bookkeeping.
+No architectural changes needed after Phase 2b — stems fall out automatically.
+
+### 5. Track volume applied at mix time (not per-note)
+
+`trackVolumes[t]` applied once during the master mix loop, not baked into notes.
+Mixer fader changes take effect immediately on any playing voice without per-voice bookkeeping.
 
 ---
 
 ## Migration Plan
 
-### Phase 1 — Interface extraction (no behavior change)
+### Phase 1 — Interface extraction ✅ Done
 
 1. Define `IAudioVoice` C++ abstract class
 2. Wrap existing `Voice` struct as `SamplerVoice : IAudioVoice`
 3. All existing code still works, just through the interface
 
-### Phase 2 — SoundfontSource refactor
+### Phase 2a — ParamBus (additive, low risk)
 
-1. Change SF loading: one `tsf*` per instrument slot (max 8 loaded), not per file
-2. Implement `SoundfontVoice : IAudioVoice` wrapping a `tsf*` instance
-3. Route SF notes through VoiceManager alongside sampler voices
-4. Remove the separate SF mixing block; SF now goes through the same per-track mix loop
+1. Add `ParamBus` struct to `native-audio.cpp` (or a new `ParamBus.h`)
+2. Add `ParamBus params` field to `IAudioVoice`
+3. At the start of each `processAudioBlock`, call `voice->params.resetMods()` per active voice
+4. Replace `EffectProcessor` direct field writes with `params.addMod()` calls
+5. Replace table-tick and envelope field writes with `params.addMod()` calls
+6. `SamplerVoice::render()` reads `params.get(*)` instead of direct Voice fields
+7. Verify: sampler audio is bit-for-bit identical before and after (offline render comparison)
 
-**Result**: per-track SF metering and volume work without any approximation heuristics.
+**No behavior change. SoundfontVoice not yet involved.**
 
-### Phase 3 — Effect processor unification
+### Phase 2b — Per-instrument TSF clones (medium risk, test on Miyoo Flip)
 
-1. Move `EffectProcessor` calls to operate on `IAudioVoice*` instead of `Voice&`
-2. Implement the effect methods in `SoundfontVoice`:
-   - `setVolume()` → `tsf_channel_set_volume`
-   - `setNote()` → `tsf_channel_note_off` + `tsf_channel_note_on` on new MIDI note (arpeggio)
-   - `retrigger()` → `tsf_channel_note_off` + `tsf_channel_note_on` (Repeat)
-   - `hardStop()` → `tsf_channel_note_off`
-   - `setStartPoint()` → no-op (not applicable to SF)
+1. In `InstrumentController.loadSoundfont()`:
+   - Read SF2 file to `sfFileBuffers[path]` (keep in memory)
+   - Create `sfClones[instrId] = tsf_load_memory(...)` on the loading thread
+   - Replace current `sfSlotMap` with `sfClones` keyed by instrument ID
+2. Implement `SoundfontVoice : IAudioVoice` wrapping one `tsf*` clone
+3. Route SF notes through `VoiceManager` alongside sampler voices
+4. Remove the separate SF mixing block from `processAudioBlock`; SF now renders into `trackBuf[track]`
+5. Allocate per-track float buffers (`trackBuf[0..7]`) in `processAudioBlock`
 
-**Result**: all top-5 effects work on SF instruments.
+**Result:** Per-track SF metering and mixer volume work without approximation.
+Test thoroughly on Miyoo Flip before merging.
+
+### Phase 3 — Effect unification (falls mostly out of Phase 2a)
+
+After Phase 2a, all effect code writes to `params`. The only remaining work:
+1. Implement arpeggio in `SoundfontVoice::render()` via MIDI note swap (note-off + note-on on new pitch)
+2. Implement `retrigger()` in `SoundfontVoice`
+3. `setStartPoint()` / `PARAM_START_POINT` → no-op in `SoundfontVoice` (already handled by addMod writing to bus; SF just ignores it in render)
+4. Table tick and ADSR/LFO already source-agnostic after Phase 2a — no changes needed
+
+**Result:** All top-5 effects and modulation work on SF instruments.
 
 ### Phase 4 — Kotlin layer cleanup
 
-1. Remove SF-specific branches from `PlaybackController` (`InstrumentType.SOUNDFONT` when block)
-2. `scheduleStepWithEffects` becomes source-agnostic
-3. Effect processor Kotlin side already source-agnostic (it just calls `scheduleNote`)
+1. Remove `InstrumentType.SOUNDFONT` branches from `PlaybackController.scheduleStepWithEffects`
+2. `scheduleStepWithEffects` becomes fully source-agnostic
+3. Remove SF-specific JNI methods from `IAudioBackend` / `OboeAudioBackend` that are no longer needed
 
-### Phase 5 — Synth foundation (future)
+### Phase 5 — Per-track stem export
+
+1. Add `stemWriters: Array<WavWriter?>` to the render path
+2. When stem export is active, write each `trackBuf[t]` to a per-track WAV file
+3. UI: "STEM MIX" button in Project screen alongside existing "WAV MIX"
+4. Output to `Documents/PocketTracker/Renders/ProjectName_stem_T1.wav`, etc.
+
+No new audio architecture needed — this is pure I/O layered on top of Phase 2b's per-track buffers.
+
+### Phase 6 — Synth foundation (future)
 
 1. Implement `SynthVoice : IAudioVoice` with oscillator + envelope
-2. No changes needed to effect processor, mixer, or peak meters
-3. Add `InstrumentType.SYNTH` + UI parameters
+2. `SynthVoice::render()` reads `params.get(PARAM_PITCH)` etc. — ParamBus works identically
+3. No changes needed to EffectProcessor, tables, ADSR/LFO, mixer, or peak meters
+4. Add `InstrumentType.SYNTH` + UI parameters
 
 ---
 
@@ -243,12 +411,13 @@ without any per-voice bookkeeping.
 
 | File | Change |
 |------|--------|
-| `native-audio.cpp` | Add IAudioVoice, SamplerVoice, SoundfontVoice; unify processAudioBlock |
-| `TrackerData.kt` | Add SF clone slot field to Instrument (optional) |
-| `InstrumentController.kt` | Update loadSoundfont to create per-instrument tsf clone |
-| `PlaybackController.kt` | Remove SOUNDFONT/SAMPLER branch in scheduleStepWithEffects |
-| `IAudioBackend.kt` | Remove SF-specific JNI methods that are no longer needed |
-| `OboeAudioBackend.kt` | Remove corresponding native_ declarations |
+| `native-audio.cpp` | Add `ParamBus`, `IAudioVoice`, `SamplerVoice`, `SoundfontVoice`; per-track buffers; unify `processAudioBlock` |
+| `ParamBus.h` (new, optional) | `ParamBus` struct + `ParamId` enum — can stay in `native-audio.cpp` if preferred |
+| `InstrumentController.kt` | `loadSoundfont` reads file to buffer + creates clone on loading thread |
+| `PlaybackController.kt` | Remove `SOUNDFONT`/`SAMPLER` branch in `scheduleStepWithEffects` |
+| `IAudioBackend.kt` | Remove SF-specific JNI methods no longer needed |
+| `OboeAudioBackend.kt` | Remove corresponding `native_*` declarations |
+| `RenderController.kt` | Add stem export mode (Phase 5) |
 
 ---
 
@@ -256,19 +425,20 @@ without any per-voice bookkeeping.
 
 | Phase | Effort | Risk |
 |-------|--------|------|
-| 1 — Interface extraction | 1–2 days | Low |
-| 2 — SoundfontSource refactor | 3–4 days | Medium (TSF cloning needs testing) |
-| 3 — Effect unification | 2–3 days | Medium |
+| 2a — ParamBus | 2–3 days | Low (additive, verifiable via offline render comparison) |
+| 2b — TSF clones + per-track buffers | 3–4 days | Medium (must test on Miyoo Flip) |
+| 3 — Effect unification | 1–2 days | Low (mostly falls out of 2a) |
 | 4 — Kotlin cleanup | 1 day | Low |
-| 5 — Synth foundation | Post-MVP | — |
+| 5 — Stem export | 1–2 days | Low (I/O only, no DSP changes) |
+| 6 — Synth foundation | Post-MVP | — |
 
-Total for Phase 1–4: ~1.5–2 weeks.
+Total for Phase 2a–5: ~1.5–2 weeks.
 
 ---
 
-## Current Workarounds (until Phase 2-4 land)
+## Current Workarounds (until Phase 2a–4 land)
 
-- **Per-track metering**: all tracks sharing one SF2 slot show the same combined peak (tsf_render_float mixes all channels); true per-track isolation requires Phase 2
+- **Per-track metering**: all tracks sharing one SF2 slot show the same combined peak (`tsf_render_float` mixes all channels); true per-track isolation requires Phase 2b
 - **Track volume on SF**: `noteVolume × trackVolume` baked into TSF channel volume at note-on; `setTrackVolume()` updates the channel live
 - **Effects on SF**: Kill (note-off) and Volume work; Arpeggio, Repeat, Table FX not applied
 - **Memory**: one `tsf*` per SF2 file (~1× file size), not per instrument
