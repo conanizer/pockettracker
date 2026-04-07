@@ -118,15 +118,18 @@ inline void calculateBiquadCoeffs(
 // ===================================
 // Supports up to MAX_SOUNDFONTS simultaneously loaded SF2/SF3 files.
 // tsf is NOT thread-safe — each entry has its own mutex.
+// The mutex is held by:
+//   • audio thread   — triggerNote(), applyPitchMod(), tsf_render_float()
+//   • JNI/main thread — hardStop(), setVolume(), setPan(), unloadSoundfont()
 
 static const int MAX_SOUNDFONTS = 4;
 
 struct SoundfontEntry {
     tsf* handle = nullptr;
-    std::mutex mutex;            // Protects all note_on/note_off/render calls on master handle
+    std::mutex mutex;            // Protects handle from concurrent audio/JNI access
     int instrumentId = -1;       // Which Instrument slot owns this (-1 = free)
     std::string filePath;
-    std::vector<uint8_t> fileData; // Raw SF2 bytes kept for per-track clone creation
+    // fileData removed: per-track clones are gone; master handle is used directly via MIDI channels.
 };
 
 static SoundfontEntry soundfonts[MAX_SOUNDFONTS];
@@ -837,70 +840,85 @@ struct Voice : public IAudioVoice {
 };
 
 // ===================================
-// SOUNDFONTVOICE — wraps a per-track tsf* clone (UAA Phase 2)
+// SOUNDFONTVOICE — per-track state; rendering via shared soundfonts[sfSlot].handle
 // ===================================
-// Each of the 8 tracks gets its own SoundfontVoice with an independent tsf* instance.
-// This gives accurate per-track metering and will support per-track effects in Phase 3.
+// Design: ONE tsf* instance per SoundfontEntry (per unique SF2 file).
+// Each of the 8 tracks maps to a MIDI channel (0–7) on that shared instance.
+// This eliminates the per-track tsf_load_memory() call that previously stalled the
+// audio callback for hundreds of ms and used 8× the SF2 file size in RAM.
+//
+// Thread safety:
+//   audio thread : triggerNote(), applyPitchMod() — sequential, no lock needed.
+//   audio thread : tsf_render_float()             — holds soundfonts[slot].mutex.
+//   JNI thread   : hardStop(), setVolume(), etc.  — holds soundfonts[slot].mutex.
 struct SoundfontVoice : public IAudioVoice {
-    tsf*       handle       = nullptr;  // Per-track clone (created from SoundfontEntry.fileData)
-    std::mutex mutex;                   // Protects handle from concurrent Kotlin-thread access
-    bool       isActive     = false;
-    int        _trackId     = -1;
-    int        sourceSfSlot = -1;       // Which soundfonts[] entry was used to create handle
-    int        activeNote   = -1;       // Currently playing MIDI note (-1 = none)
-    float      noteVolume   = 1.0f;     // Note-level volume (used for real-time vol updates)
+    int   sfSlot      = -1;    // soundfonts[] index that owns this voice (-1 = unassigned)
+    int   _trackId    = -1;    // Track index = MIDI channel on the shared tsf* handle
+    bool  isActive    = false;
+    int   activeNote  = -1;
+    float noteVolume  = 1.0f;  // Note-only volume (instrument × phrase × V-effect)
+    float trackVolume = 1.0f;  // Cached track volume; combined with noteVolume for TSF channel
 
-    // Pitch effect state (PSL/PBN/PVB/PVX) — applied via TSF pitch wheel each block
-    float pitchOffset      = 0.0f;    // Current semitones offset (PSL/PBN accumulator)
-    float pitchSlideTarget = 0.0f;    // Target semitones for PSL (0) or PBN (±127)
-    float pitchSlideRate   = 0.0f;    // Semitones per audio frame
+    // Pitch effect state (PSL/PBN/PVB/PVX) — advanced each block, applied via MIDI pitch wheel
+    float pitchOffset      = 0.0f;
+    float pitchSlideTarget = 0.0f;
+    float pitchSlideRate   = 0.0f;
     bool  pitchSliding     = false;
-    float vibratoPhase     = 0.0f;    // LFO phase [0, 2π]
-    float vibratoSpeed     = 0.0f;    // LFO frequency in Hz
-    float vibratoDepth     = 0.0f;    // LFO depth in semitones
+    float vibratoPhase     = 0.0f;
+    float vibratoSpeed     = 0.0f;
+    float vibratoDepth     = 0.0f;
     bool  vibratoActive    = false;
-    // Set true by clearPitchMod() (JNI thread) to ask audio thread to reset pitch wheel.
-    // Written from JNI thread, read+cleared from audio thread — safe for bool on ARM64.
+    // Written from JNI thread, read+cleared on audio thread — ARM64 bool write is atomic.
     bool  needsPitchReset  = false;
 
-    // IAudioVoice
+    // ── IAudioVoice ─────────────────────────────────────────────────────────
     bool active()     const override { return isActive; }
     int  getTrackId() const override { return _trackId; }
 
+    // Called from JNI thread (stop button) or audio thread (kill note queue).
     void hardStop() override {
-        std::lock_guard<std::mutex> lock(mutex);
-        if (handle && activeNote >= 0) {
-            tsf_channel_note_off(handle, 0, activeNote);
+        if (sfSlot >= 0 && sfSlot < MAX_SOUNDFONTS) {
+            std::lock_guard<std::mutex> lock(soundfonts[sfSlot].mutex);
+            tsf* h = soundfonts[sfSlot].handle;
+            if (h && activeNote >= 0) tsf_channel_note_off(h, _trackId, activeNote);
         }
         activeNote = -1;
         isActive   = false;
     }
 
-    void noteOff() override { hardStop(); }  // TSF handles its own release
+    void noteOff() override { hardStop(); }  // TSF handles its own release tail
 
     void setVolume(float v) override {
-        std::lock_guard<std::mutex> lock(mutex);
         noteVolume = v;
-        if (handle) tsf_channel_set_volume(handle, 0, v);
+        if (sfSlot >= 0 && sfSlot < MAX_SOUNDFONTS) {
+            std::lock_guard<std::mutex> lock(soundfonts[sfSlot].mutex);
+            tsf* h = soundfonts[sfSlot].handle;
+            if (h) tsf_channel_set_volume(h, _trackId, v * trackVolume);
+        }
     }
 
     void setPan(float pan) override {
-        std::lock_guard<std::mutex> lock(mutex);
-        if (handle) tsf_channel_set_pan(handle, 0, pan);
+        if (sfSlot >= 0 && sfSlot < MAX_SOUNDFONTS) {
+            std::lock_guard<std::mutex> lock(soundfonts[sfSlot].mutex);
+            tsf* h = soundfonts[sfSlot].handle;
+            if (h) tsf_channel_set_pan(h, _trackId, pan);
+        }
     }
 
-    void retrigger(int /*startPoint*/) override { /* not applicable to SF */ }
+    void retrigger(int /*startPoint*/) override {}  // not applicable to SF
 
     void setMidiNote(int midiNote) override {
-        std::lock_guard<std::mutex> lock(mutex);
-        if (!handle) return;
-        if (activeNote >= 0) tsf_channel_note_off(handle, 0, activeNote);
-        tsf_channel_note_on(handle, 0, midiNote, noteVolume);
+        if (sfSlot < 0 || sfSlot >= MAX_SOUNDFONTS) return;
+        std::lock_guard<std::mutex> lock(soundfonts[sfSlot].mutex);
+        tsf* h = soundfonts[sfSlot].handle;
+        if (!h) return;
+        if (activeNote >= 0) tsf_channel_note_off(h, _trackId, activeNote);
+        tsf_channel_note_on(h, _trackId, midiNote, noteVolume);
         activeNote = midiNote;
     }
 
-    // ── Pitch effect interface (IAudioVoice) ────────────────────────────────
-    // The pitch state fields are advanced and applied to TSF pitch wheel by applyPitchMod().
+    // ── Pitch effect interface ───────────────────────────────────────────────
+    // All pitch setters only write state fields — no TSF calls, safe from JNI thread.
     void setPitchSlideRaw(float targetSemitones, float totalFrames) override {
         float delta = targetSemitones - pitchOffset;
         pitchSlideTarget = targetSemitones;
@@ -918,14 +936,8 @@ struct SoundfontVoice : public IAudioVoice {
         }
     }
     void setVibratoRaw(float speed, float depth) override {
-        if (depth < 0.01f) {
-            vibratoActive = false;
-            vibratoDepth  = 0.0f;
-        } else {
-            vibratoSpeed  = speed;
-            vibratoDepth  = depth;
-            vibratoActive = true;
-        }
+        if (depth < 0.01f) { vibratoActive = false; vibratoDepth = 0.0f; }
+        else { vibratoSpeed = speed; vibratoDepth = depth; vibratoActive = true; }
     }
     void clearPitchMod() override {
         pitchOffset    = 0.0f;
@@ -933,51 +945,40 @@ struct SoundfontVoice : public IAudioVoice {
         pitchSlideRate = 0.0f;
         vibratoActive  = false;
         vibratoDepth   = 0.0f;
-        // Signal the audio thread to reset the TSF pitch wheel to centre on the next block.
-        // We MUST NOT call TSF here: clearPitchMod() runs on the JNI/Kotlin thread while
-        // applyPitchMod() runs on the audio thread — concurrent TSF access causes crashes.
-        needsPitchReset = true;
+        needsPitchReset = true;  // audio thread resets pitch wheel on next block
     }
     void setInitialPitchOffset(float semitones) override { pitchOffset = semitones; }
     // ── end IAudioVoice ─────────────────────────────────────────────────────
 
-    // Renders numFrames of stereo audio into buf (caller must zero buf first).
-    // Returns peak level for per-track metering.
-    // Note: volume column applied externally (trackVolumes * masterVolume in mix loop).
-    float render(float* buf, int numFrames) override {
-        std::lock_guard<std::mutex> lock(mutex);
-        if (!handle) return 0.0f;
-        tsf_render_float(handle, buf, numFrames, 0 /* overwrite */);
-        float peak = 0.0f;
-        for (int i = 0; i < numFrames * 2; i++) {
-            peak = fmaxf(peak, fabsf(buf[i]));
-        }
-        return peak;
-    }
+    // render() is intentionally unused for SF voices.
+    // Rendering is done per-slot in processAudioBlock (one tsf_render_float per active slot).
+    float render(float*, int) override { return 0.0f; }
 
-    // Trigger a new note (called from audio thread — no mutex needed here since
-    // audio thread and render() are sequential within the same callback).
-    void triggerNote(int sfSlot, int midiNote, int midiVelocity, float vol, float pan,
-                     int bank, int preset, int trackId, float sampleRate) {
-        // If this voice has a clone from a different sfSlot, it was already closed in the
-        // caller before triggerNote is called.
-        sourceSfSlot = sfSlot;
-        _trackId     = trackId;
-        noteVolume   = vol;
-        // Channel 0: set pan, volume, bank/preset, then note-on
-        // Note-off any previous note first to avoid voice leaks
-        if (activeNote >= 0) {
-            tsf_channel_note_off(handle, 0, activeNote);
-        }
-        tsf_channel_set_pan(handle, 0, pan);
-        tsf_channel_set_volume(handle, 0, vol);
-        tsf_channel_set_bank_preset(handle, 0, bank, preset);
-        tsf_channel_note_on(handle, 0, midiNote, midiVelocity / 127.0f);
+    // ── Audio-thread-only methods (no lock needed) ──────────────────────────
+
+    // Trigger a new note. Called from processAudioBlock (audio thread).
+    // noteVol = instrument × phrase volume (from Kotlin).
+    // trkVol  = current track mixer volume (fetched from trackVolumes[] at call site).
+    // TSF channel volume = noteVol * trkVol so per-track mixing works on the shared handle.
+    void triggerNote(int slot, int midiNote, int midiVelocity,
+                     float noteVol, float trkVol, float pan,
+                     int bank, int preset, int trackId) {
+        sfSlot      = slot;
+        _trackId    = trackId;
+        noteVolume  = noteVol;
+        trackVolume = trkVol;
+        tsf* h = soundfonts[slot].handle;
+        if (!h) return;
+        if (activeNote >= 0) tsf_channel_note_off(h, _trackId, activeNote);
+        tsf_channel_set_pan(h, _trackId, pan);
+        tsf_channel_set_volume(h, _trackId, noteVol * trkVol);
+        tsf_channel_set_bank_preset(h, _trackId, bank, preset);
+        tsf_channel_note_on(h, _trackId, midiNote, midiVelocity / 127.0f);
         activeNote = midiNote;
         isActive   = true;
     }
 
-    // Reset all pitch effect state (call after triggerNote)
+    // Reset pitch state after a new note trigger.
     void resetPitchState() {
         pitchOffset      = 0.0f;
         pitchSlideTarget = 0.0f;
@@ -985,20 +986,20 @@ struct SoundfontVoice : public IAudioVoice {
         pitchSliding     = false;
         vibratoPhase     = 0.0f;
         vibratoActive    = false;
-        needsPitchReset  = false;  // New note: pitch wheel starts at centre, no reset needed
+        needsPitchReset  = false;
     }
 
-    // Advance pitch state and apply to TSF via pitch wheel — call once per audio block,
-    // BEFORE render(). Called from audio thread only — safe to call TSF without the mutex.
+    // Advance pitch LFO/slide and write MIDI pitch wheel to the shared handle.
+    // Called once per audio block, BEFORE the per-slot render. Audio thread only.
     void applyPitchMod(float sampleRate, int numFrames) {
-        if (!handle) return;
+        if (sfSlot < 0 || sfSlot >= MAX_SOUNDFONTS) return;
+        tsf* h = soundfonts[sfSlot].handle;
+        if (!h) return;
 
-        // If clearPitchMod() was called from the JNI thread, reset pitch wheel to centre now
-        // (audio thread is the only caller of TSF, so this is safe without a lock).
+        constexpr float PITCH_RANGE = 48.0f;
         if (needsPitchReset) {
-            constexpr float PITCH_RANGE = 48.0f;
-            tsf_channel_set_pitchrange(handle, 0, PITCH_RANGE);
-            tsf_channel_set_pitchwheel(handle, 0, 8192);
+            tsf_channel_set_pitchrange(h, _trackId, PITCH_RANGE);
+            tsf_channel_set_pitchwheel(h, _trackId, 8192);
             needsPitchReset = false;
         }
 
@@ -1010,7 +1011,7 @@ struct SoundfontVoice : public IAudioVoice {
             float totalDelta = pitchSlideRate * numFrames;
             if (fabsf(totalDelta) >= fabsf(delta)) {
                 pitchOffset = pitchSlideTarget;
-                if (fabsf(pitchSlideTarget) < 100.0f) pitchSliding = false;  // PSL reached target
+                if (fabsf(pitchSlideTarget) < 100.0f) pitchSliding = false;
             } else {
                 pitchOffset += totalDelta;
             }
@@ -1023,35 +1024,30 @@ struct SoundfontVoice : public IAudioVoice {
             while (vibratoPhase >= 2.0f * (float)M_PI) vibratoPhase -= 2.0f * (float)M_PI;
         }
 
-        // Compute total pitch mod in semitones
         float pitchMod = pitchOffset;
         if (vibratoActive) pitchMod += sinf(vibratoPhase) * vibratoDepth;
 
-        // Map semitones → MIDI pitch wheel [0, 16383] (center = 8192)
-        // Use a fixed range of 48 semitones (4 octaves) to cover all pitch effects.
-        constexpr float PITCH_RANGE = 48.0f;
         float clamped    = fmaxf(-PITCH_RANGE, fminf(PITCH_RANGE, pitchMod));
         int   pitchWheel = (int)(8192.0f + clamped / PITCH_RANGE * 8191.0f);
         if (pitchWheel < 0) pitchWheel = 0;
         if (pitchWheel > 16383) pitchWheel = 16383;
 
-        tsf_channel_set_pitchrange(handle, 0, PITCH_RANGE);
-        tsf_channel_set_pitchwheel(handle, 0, pitchWheel);
+        tsf_channel_set_pitchrange(h, _trackId, PITCH_RANGE);
+        tsf_channel_set_pitchwheel(h, _trackId, pitchWheel);
     }
 
-    void close() {
-        if (handle) {
-            tsf_close(handle);
-            handle = nullptr;
-        }
-        isActive     = false;
-        activeNote   = -1;
-        sourceSfSlot = -1;
-        _trackId     = -1;
+    // Reset voice state when the owning slot is unloaded.
+    void detach() {
+        isActive    = false;
+        activeNote  = -1;
+        sfSlot      = -1;
+        _trackId    = -1;
+        noteVolume  = 1.0f;
+        trackVolume = 1.0f;
     }
 };
 
-// Per-track soundfont voices (one per track, lazily cloned from SoundfontEntry)
+// Per-track soundfont voice state (shares soundfonts[sfSlot].handle via MIDI channels)
 static SoundfontVoice sfVoices[8];
 
 class AudioEngine : public oboe::AudioStreamDataCallback {
@@ -1320,54 +1316,41 @@ public:
                 ScheduledNote note = noteQueue.pop();
 
                 // ---- SOUNDFONT PATH ----
-                // Each track has its own SoundfontVoice with an independent tsf* clone.
-                // This gives accurate per-track metering and supports per-track effects (Phase 3).
+                // Tracks use the master tsf* handle via MIDI channels (channel = trackId).
+                // No per-track clone creation — tsf_load_memory() never runs on the audio thread.
                 if (note.isSoundfont) {
                     int t = note.trackId;
                     if (t >= 0 && t < 8 &&
                         note.sfSlot >= 0 && note.sfSlot < MAX_SOUNDFONTS &&
-                        !soundfonts[note.sfSlot].fileData.empty()) {
+                        soundfonts[note.sfSlot].handle != nullptr) {
 
                         SoundfontVoice& sv = sfVoices[t];
-                        // If the track's clone came from a different sfSlot, rebuild it.
-                        if (sv.sourceSfSlot != note.sfSlot || sv.handle == nullptr) {
-                            sv.close();  // frees old handle if any
-                            const auto& fd = soundfonts[note.sfSlot].fileData;
-                            sv.handle = tsf_load_memory(fd.data(), (int)fd.size());
-                            if (sv.handle) {
-                                tsf_set_output(sv.handle, TSF_STEREO_INTERLEAVED, (int)sampleRate, 0.0f);
-                            }
+                        float trkVol;
+                        { std::lock_guard<std::mutex> vlock(volumeMutex); trkVol = trackVolumes[t]; }
+                        sv.triggerNote(note.sfSlot, note.midiNote, note.midiVelocity,
+                                       note.volume, trkVol, note.pan, note.sfBank, note.sfPreset, t);
+                        sv.resetPitchState();
+                        if (note.pslInitialOffset != 0.0f && note.pslDuration > 0.0f) {
+                            sv.pitchOffset      = note.pslInitialOffset;
+                            sv.pitchSlideTarget = 0.0f;
+                            sv.pitchSlideRate   = -note.pslInitialOffset / note.pslDuration;
+                            sv.pitchSliding     = true;
                         }
-                        if (sv.handle) {
-                            sv.triggerNote(note.sfSlot, note.midiNote, note.midiVelocity,
-                                           note.volume, note.pan, note.sfBank, note.sfPreset,
-                                           t, sampleRate);
-                            // Apply pitch effects (PSL / PBN / PVB / PVX)
-                            sv.resetPitchState();
-                            if (note.pslInitialOffset != 0.0f && note.pslDuration > 0.0f) {
-                                sv.pitchOffset      = note.pslInitialOffset;
-                                sv.pitchSlideTarget = 0.0f;
-                                sv.pitchSlideRate   = -note.pslInitialOffset / note.pslDuration;
-                                sv.pitchSliding     = true;
-                            }
-                            if (fabsf(note.pbnRate) > 0.0001f) {
-                                sv.pitchSlideRate   = note.pbnRate;
-                                sv.pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
-                                sv.pitchSliding     = true;
-                            }
-                            if (note.vibratoDepth > 0.01f) {
-                                sv.vibratoSpeed  = note.vibratoSpeed;
-                                sv.vibratoDepth  = note.vibratoDepth;
-                                sv.vibratoActive = true;
-                            }
-                            LOGD("🎹 SF FIRE (per-track): slot=%d track=%d bank=%d preset=%d midi=%d vel=%d vol=%.2f",
-                                 note.sfSlot, t, note.sfBank, note.sfPreset,
-                                 note.midiNote, note.midiVelocity, note.volume);
-                        } else {
-                            LOGD("🎹 SF CLONE FAILED: sfSlot=%d track=%d", note.sfSlot, t);
+                        if (fabsf(note.pbnRate) > 0.0001f) {
+                            sv.pitchSlideRate   = note.pbnRate;
+                            sv.pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
+                            sv.pitchSliding     = true;
                         }
+                        if (note.vibratoDepth > 0.01f) {
+                            sv.vibratoSpeed  = note.vibratoSpeed;
+                            sv.vibratoDepth  = note.vibratoDepth;
+                            sv.vibratoActive = true;
+                        }
+                        LOGD("🎹 SF FIRE: slot=%d track/ch=%d bank=%d preset=%d midi=%d vel=%d vol=%.2f",
+                             note.sfSlot, t, note.sfBank, note.sfPreset,
+                             note.midiNote, note.midiVelocity, note.volume);
                     } else {
-                        LOGD("🎹 SF DROPPED: sfSlot=%d track=%d (invalid or no file data)", note.sfSlot, note.trackId);
+                        LOGD("🎹 SF DROPPED: sfSlot=%d track=%d (handle not loaded)", note.sfSlot, note.trackId);
                     }
                     continue;  // Skip voice pool processing
                 }
@@ -2047,24 +2030,51 @@ public:
         }
 
         // ===================================
-        // SOUNDFONT VOICE RENDERING (UAA Phase 2)
+        // SOUNDFONT RENDERING — one tsf_render_float() per active slot
         // ===================================
-        // Each track's SoundfontVoice renders independently → accurate per-track metering.
-        // Track and master volume applied here (not at note-on time).
+        // All tracks sharing the same SF2 file (same slot) are rendered together via MIDI
+        // channels. Per-track volume is baked into the TSF channel volume at note-on time
+        // and updated via setTrackVolume(). Only master volume is applied at output.
         {
             float sfBuf[2048];  // 1024 frames * 2 channels — safe for any Oboe buffer size
             float masterVol;
             { std::lock_guard<std::mutex> vlock(volumeMutex); masterVol = masterVolume; }
+
+            // 1. Apply per-track pitch mods (audio thread, before render — no lock needed).
             for (int t = 0; t < 8; t++) {
-                if (!sfVoices[t].isActive || !sfVoices[t].handle) continue;
-                sfVoices[t].applyPitchMod((float)sampleRate, numFrames);
+                if (sfVoices[t].isActive) {
+                    sfVoices[t].applyPitchMod((float)sampleRate, numFrames);
+                }
+            }
+
+            // 2. Render each active slot once, mix into output.
+            for (int s = 0; s < MAX_SOUNDFONTS; s++) {
+                if (!soundfonts[s].handle) continue;
+
+                bool anyActive = false;
+                for (int t = 0; t < 8; t++) {
+                    if (sfVoices[t].isActive && sfVoices[t].sfSlot == s) { anyActive = true; break; }
+                }
+                if (!anyActive) continue;
+
                 memset(sfBuf, 0, sizeof(float) * numFrames * 2);
-                float peak = sfVoices[t].render(sfBuf, numFrames);
-                framePeaksPerTrack[t] = fmaxf(framePeaksPerTrack[t], peak);
-                float trackVol;
-                { std::lock_guard<std::mutex> vlock(volumeMutex); trackVol = trackVolumes[t]; }
+                {
+                    std::lock_guard<std::mutex> sfLock(soundfonts[s].mutex);
+                    tsf_render_float(soundfonts[s].handle, sfBuf, numFrames, 0 /* overwrite */);
+                }
+
+                // Compute peak and mix. Per-track volume was set at note-on via
+                // tsf_channel_set_volume; only master volume scales the final output.
+                float peak = 0.0f;
                 for (int i = 0; i < numFrames * 2; i++) {
-                    output[i] += sfBuf[i] * trackVol * masterVol;
+                    peak = fmaxf(peak, fabsf(sfBuf[i]));
+                    output[i] += sfBuf[i] * masterVol;
+                }
+                // Share the slot peak across all active tracks using this slot.
+                for (int t = 0; t < 8; t++) {
+                    if (sfVoices[t].isActive && sfVoices[t].sfSlot == s) {
+                        framePeaksPerTrack[t] = fmaxf(framePeaksPerTrack[t], peak);
+                    }
                 }
             }
         }
@@ -2390,12 +2400,19 @@ public:
         }
     }
 
-    // Set real-time track volume (affects playback immediately, including SF channels)
+    // Set real-time track volume (affects playback immediately, including SF channels).
+    // For SF voices the channel volume = noteVolume * trackVolume, so we push the update
+    // directly into the TSF channel so the change takes effect within the current note.
     void setTrackVolume(int trackId, float volume) {
         if (trackId < 0 || trackId >= 8) return;
         { std::lock_guard<std::mutex> lock(volumeMutex); trackVolumes[trackId] = volume; }
-        // For SoundfontVoice the track volume is applied at mix time (trackVolumes[t] * masterVol)
-        // so no per-voice update needed. The setVolume call below handles note-level vol only.
+        SoundfontVoice& sv = sfVoices[trackId];
+        sv.trackVolume = volume;  // Keep cached value in sync (safe: JNI thread, volume is float)
+        if (sv.isActive && sv.sfSlot >= 0 && sv.sfSlot < MAX_SOUNDFONTS) {
+            std::lock_guard<std::mutex> sfLock(soundfonts[sv.sfSlot].mutex);
+            tsf* h = soundfonts[sv.sfSlot].handle;
+            if (h) tsf_channel_set_volume(h, trackId, sv.noteVolume * volume);
+        }
         LOGD("🔊 Track %d volume set to %.2f", trackId, volume);
     }
 
@@ -3465,51 +3482,22 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadS
         std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
         tsf_close(soundfonts[slot].handle);
         soundfonts[slot].handle = nullptr;
-        soundfonts[slot].fileData.clear();
         soundfonts[slot].instrumentId = -1;
         soundfonts[slot].filePath.clear();
-        // Close any per-track voices cloned from this slot
+        // Detach any per-track voices that were using this slot
         for (int t = 0; t < 8; t++) {
-            if (sfVoices[t].sourceSfSlot == slot) sfVoices[t].close();
+            if (sfVoices[t].sfSlot == slot) sfVoices[t].detach();
         }
         LOGD("🎹 Evicted soundfont slot %d to make room for instrumentId %d", slot, (int)instrumentId);
     }
 
-    // Load file bytes into memory for per-track cloning
+    // Load and parse the SF2 file into a single master TSF handle.
+    // All 8 tracks share this handle via MIDI channels — no per-track clones needed.
     {
-        FILE* f = fopen(pathStr, "rb");
-        if (!f) {
-            LOGE("❌ Failed to open soundfont: %s", pathStr);
-            env->ReleaseStringUTFChars(path, pathStr);
-            return -1;
-        }
-        fseek(f, 0, SEEK_END);
-        long fileSize = ftell(f);
-        fseek(f, 0, SEEK_SET);
-        if (fileSize <= 0) {
-            LOGE("❌ Empty soundfont file: %s", pathStr);
-            fclose(f);
-            env->ReleaseStringUTFChars(path, pathStr);
-            return -1;
-        }
-
         std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
-        soundfonts[slot].fileData.resize((size_t)fileSize);
-        if (fread(soundfonts[slot].fileData.data(), 1, (size_t)fileSize, f) != (size_t)fileSize) {
-            LOGE("❌ Failed to read soundfont: %s", pathStr);
-            fclose(f);
-            soundfonts[slot].fileData.clear();
-            env->ReleaseStringUTFChars(path, pathStr);
-            return -1;
-        }
-        fclose(f);
-
-        // Create master handle from memory for preset queries (not used for audio rendering)
-        soundfonts[slot].handle = tsf_load_memory(soundfonts[slot].fileData.data(),
-                                                   (int)soundfonts[slot].fileData.size());
+        soundfonts[slot].handle = tsf_load_filename(pathStr);
         if (!soundfonts[slot].handle) {
             LOGE("❌ Failed to parse soundfont: %s", pathStr);
-            soundfonts[slot].fileData.clear();
             env->ReleaseStringUTFChars(path, pathStr);
             return -1;
         }
@@ -3517,6 +3505,7 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadS
         tsf_set_output(soundfonts[slot].handle, TSF_STEREO_INTERLEAVED, sampleRate, 0.0f);
         soundfonts[slot].instrumentId = (int)instrumentId;
         soundfonts[slot].filePath = pathStr;
+        LOGD("🎹 Loaded soundfont slot %d: %s (instrumentId=%d)", slot, pathStr, (int)instrumentId);
     }
 
     env->ReleaseStringUTFChars(path, pathStr);
@@ -3551,16 +3540,15 @@ JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1unloadSoundfont(
         JNIEnv *env, jobject thiz, jint sfSlot) {
     if (sfSlot < 0 || sfSlot >= MAX_SOUNDFONTS) return;
-    // Close per-track voices cloned from this slot BEFORE closing the master handle
+    // Detach per-track voices using this slot BEFORE closing the master handle
     for (int t = 0; t < 8; t++) {
-        if (sfVoices[t].sourceSfSlot == (int)sfSlot) sfVoices[t].close();
+        if (sfVoices[t].sfSlot == (int)sfSlot) sfVoices[t].detach();
     }
     std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
     if (soundfonts[sfSlot].handle) {
         tsf_close(soundfonts[sfSlot].handle);
         soundfonts[sfSlot].handle = nullptr;
     }
-    soundfonts[sfSlot].fileData.clear();
     soundfonts[sfSlot].instrumentId = -1;
     soundfonts[sfSlot].filePath.clear();
     LOGD("🎹 Unloaded soundfont slot %d", (int)sfSlot);
