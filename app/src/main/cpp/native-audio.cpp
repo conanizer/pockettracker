@@ -2106,16 +2106,12 @@ public:
                     slotPeak = fmaxf(slotPeak, fabsf(sfBuf[i]));
                     output[i] += sfBuf[i] * masterVol;
                 }
-                // Per-track peak: tsf_render_float() mixes all MIDI channels into one buffer,
-                // so we can't isolate individual track PCM. Use each track's own channel volume
-                // (noteVolume × trackVolume) as a proportional proxy. This correctly shows which
-                // tracks are active and at what relative level without requiring per-channel renders.
-                if (slotPeak > 0.001f) {
-                    for (int t = 0; t < 8; t++) {
-                        if (sfVoices[t].isActive && sfVoices[t].sfSlot == s) {
-                            float proxy = sfVoices[t].noteVolume * sfVoices[t].trackVolume * masterVol;
-                            framePeaksPerTrack[t] = fmaxf(framePeaksPerTrack[t], proxy);
-                        }
+                // All tracks sharing this SF2 slot get the same combined peak.
+                // True per-track isolation requires per-channel renders — deferred until
+                // per-track rendering is implemented.
+                for (int t = 0; t < 8; t++) {
+                    if (sfVoices[t].isActive && sfVoices[t].sfSlot == s) {
+                        framePeaksPerTrack[t] = fmaxf(framePeaksPerTrack[t], slotPeak);
                     }
                 }
             }
