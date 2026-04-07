@@ -1,5 +1,19 @@
 # Unified Audio Abstraction Plan
 
+**Status (April 2026):**
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | IAudioVoice interface extraction | ✅ Done |
+| 2 | Per-instrument TSF clones + per-track render | ⏳ Deferred post-MVP |
+| 3 | Effect processor unification (ARP, REP, tables on SF) | ⏳ Deferred post-MVP |
+| 4 | Kotlin layer cleanup (remove SOUNDFONT branches) | ⏳ Deferred post-MVP |
+| 5 | Synth foundation (wavetable, FM) | 🔮 Future |
+
+**Current workaround:** One shared `tsf*` per SF2 file, tracks mapped to MIDI channels 0-7.
+Stable and crash-free, but per-track meters, tables, and arpeggio/repeat effects don't apply to SF instruments.
+
+---
+
 ## Problem
 
 PocketTracker currently has two parallel audio code paths that share no code:
@@ -205,11 +219,9 @@ Total for Phase 1–4: ~1.5–2 weeks.
 
 ---
 
-## Current Workarounds (until refactor)
+## Current Workarounds (until Phase 2-4 land)
 
-These are approximate fixes that will be replaced by the proper abstraction:
-
-- **Per-track metering**: proportional by note volume (not actual per-voice render)
-- **Track volume on SF**: stored `sfChannelNoteVolume[8]` applied at change time
-- **Effects on SF**: Kill and Volume work; Arpeggio/Repeat are pass-through (may work partially)
-- **Table FX on SF**: not applied
+- **Per-track metering**: all tracks sharing one SF2 slot show the same combined peak (tsf_render_float mixes all channels); true per-track isolation requires Phase 2
+- **Track volume on SF**: `noteVolume × trackVolume` baked into TSF channel volume at note-on; `setTrackVolume()` updates the channel live
+- **Effects on SF**: Kill (note-off) and Volume work; Arpeggio, Repeat, Table FX not applied
+- **Memory**: one `tsf*` per SF2 file (~1× file size), not per instrument

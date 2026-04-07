@@ -258,7 +258,9 @@ add it to `processAudioBlock()`. NEVER add processing logic directly to `onAudio
 **Architecture:** Sample-accurate queue system in C++
 
 **Key Features:**
-- ✅ Oboe-based real-time audio (44.1kHz, LowLatency + Exclusive mode)
+- ✅ Oboe-based real-time audio (44.1kHz; OpenSL ES preferred, AAudio fallback)
+- ✅ Stream open order: OpenSL ES Exclusive → Shared → None/Shared → AAudio Exclusive
+- ✅ Audio init runs off main thread (Dispatchers.IO) — no UI freeze on startup
 - ✅ Sample-accurate note scheduling (<0.02ms jitter)
 - ✅ Linear interpolation (eliminates aliasing)
 - ✅ 8-voice polyphony with per-track voice stealing
@@ -266,6 +268,7 @@ add it to `processAudioBlock()`. NEVER add processing logic directly to `onAudio
 - ✅ Resonant biquad filters (LP/HP/BP using Audio EQ Cookbook)
 - ✅ Effects chain: Downsample → Crush → Interpolate → Drive → Filter → Volume
 - ✅ Waveform capture for oscilloscope visualization
+- ✅ SoundFont (SF2) instruments via TinySoundFont (TSF) — see below
 
 **Performance:**
 - Timing precision: <0.02ms jitter (100x better than Kotlin timing)
@@ -344,6 +347,29 @@ class AudioEngine(
     // All logic here - no Android dependencies!
 }
 ```
+
+### SoundFont (SF2) Engine
+
+**Implementation:** TinySoundFont (TSF) — single-header C++ SF2 synthesizer embedded in `native-audio.cpp`.
+
+**Current architecture (stable, working):**
+- One shared `tsf*` handle per SF2 file slot (up to 8 active SF2 files simultaneously)
+- Each track maps to a MIDI channel on the slot's handle: track 0 → ch 0 … track 7 → ch 7
+- `tsf_render_float()` called once per active slot per audio block — mixes all MIDI channels together
+- SF2 loaded via `tsf_load_filename()` directly; no file buffer copy kept in memory
+- Memory: ~1× SF2 file size (one handle per file, not per track)
+
+**Limitations of current approach (deferred to Unified Audio Abstraction):**
+- Per-track meters show the same level for all tracks sharing one SF2 (shared render buffer)
+- Table FX, Arpeggio, Repeat effects not applied to SF instruments
+- Track volume baked into TSF channel volume at note-on; immediate changes update live
+
+**Unified Audio Abstraction (planned post-MVP):** See `docs/unified-audio-abstraction.md` for the full plan.
+Current UAA status:
+- Phase 1 (IAudioVoice interface): ✅ Done
+- Phase 2 (per-instrument TSF clones, per-track render): ⏳ Deferred
+- Phase 3 (effect processor unification for SF): ⏳ Deferred
+- Phase 4 (Kotlin layer cleanup): ⏳ Deferred
 
 **Linux Implementation (Future):**
 ```cpp
@@ -728,7 +754,8 @@ kotlin {
 |-------|------------|-------|
 | **UI** | Jetpack Compose | Android-specific |
 | **Language** | Kotlin 1.9+ | Primary language |
-| **Audio** | C++ with Oboe | Already portable! ✅ |
+| **Audio** | C++ with Oboe (OpenSL ES / AAudio) | Already portable! ✅ |
+| **SF2 Synth** | TinySoundFont (TSF) | Single-header, embedded in native-audio.cpp |
 | **Build** | Gradle 8.x | Android build system |
 | **Native Build** | CMake 3.22.1+ | C++ compilation |
 | **Serialization** | Kotlinx Serialization | JSON save/load |
@@ -825,6 +852,7 @@ See **REFACTORING_ROADMAP.md** for detailed step-by-step refactoring plan.
 ---
 
 **Version History:**
+- v2.1 (2026-04-07): Added SF2/TSF engine section; OpenSL ES stream priority; async audio init; UAA phase status
 - v2.0 (2026-03-13): Updated to reflect complete refactoring; all architecture goals achieved; modulation engine fully implemented
 - v1.0 (2025-01-01): Initial architecture document with refactoring plan
 
