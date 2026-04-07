@@ -18,6 +18,16 @@
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
+// LOGT — trace-level log for hot paths (note triggers, table processing, etc.).
+// Disabled by default to avoid flooding logcat during playback.
+// Flip to 1 to get per-note / per-table-row tracing when debugging audio logic.
+#define AUDIO_TRACE 0
+#if AUDIO_TRACE
+#  define LOGT(...) LOGD(__VA_ARGS__)
+#else
+#  define LOGT(...)
+#endif
+
 const int MAX_VOICES = 8;  // Reduced for testing
 const int DECLICK_SAMPLES = 64;  // ~1.45ms anti-click fade at 44100Hz
 
@@ -1079,33 +1089,46 @@ public:
     }
 
     bool openStream() {
+        // OpenSL ES does NOT trigger CCodec/C2 codec enumeration that spams 2000+ log lines
+        // and blocks for up to 35 seconds on some Android ROMs (e.g. GammaCoreOS on Miyoo Flip).
+        // Try OpenSL ES first; fall back to AAudio only if OpenSL ES is unavailable.
+
         oboe::AudioStreamBuilder builder;
         builder.setDataCallback(this);
         builder.setFormat(oboe::AudioFormat::Float);
         builder.setChannelCount(oboe::ChannelCount::Stereo);
         builder.setSampleRate(44100);
 
-        // Attempt 1: low-latency exclusive (MMAP path, ideal for music trackers).
+        // Attempt 1: OpenSL ES LowLatency Exclusive (best latency, no CCodec spam).
+        builder.setAudioApi(oboe::AudioApi::OpenSLES);
         builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
         builder.setSharingMode(oboe::SharingMode::Exclusive);
         oboe::Result result = builder.openStream(stream);
 
-        // Attempt 2: low-latency shared (still low-latency, avoids exclusive MMAP contention).
+        // Attempt 2: OpenSL ES LowLatency Shared.
         if (result != oboe::Result::OK) {
-            LOGD("openStream: exclusive failed (%s), trying shared LowLatency",
+            LOGD("openStream: OpenSLES exclusive failed (%s), trying OpenSLES shared LowLatency",
                  oboe::convertToText(result));
             builder.setSharingMode(oboe::SharingMode::Shared);
             result = builder.openStream(stream);
         }
 
-        // Attempt 3: normal latency / shared (maximum compatibility, avoids MMAP entirely).
-        // This path also avoids the CCodec/C2 codec enumeration that can block for 35 s
-        // on some custom Android ROMs (e.g. GammaCoreOS on Miyoo Flip).
+        // Attempt 3: OpenSL ES None/Shared (maximum OpenSL ES compatibility).
         if (result != oboe::Result::OK) {
-            LOGD("openStream: LowLatency failed (%s), trying None/Shared (no MMAP)",
+            LOGD("openStream: OpenSLES LowLatency failed (%s), trying OpenSLES None/Shared",
                  oboe::convertToText(result));
             builder.setPerformanceMode(oboe::PerformanceMode::None);
             builder.setSharingMode(oboe::SharingMode::Shared);
+            result = builder.openStream(stream);
+        }
+
+        // Attempt 4: AAudio LowLatency Exclusive (fallback; may trigger CCodec on some ROMs).
+        if (result != oboe::Result::OK) {
+            LOGD("openStream: OpenSLES failed (%s), falling back to AAudio LowLatency Exclusive",
+                 oboe::convertToText(result));
+            builder.setAudioApi(oboe::AudioApi::Unspecified);
+            builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
+            builder.setSharingMode(oboe::SharingMode::Exclusive);
             result = builder.openStream(stream);
         }
 
@@ -1310,12 +1333,12 @@ public:
                     if (kill.trackId >= 0 && kill.trackId < 8) {
                         sfVoices[kill.trackId].noteOff();
                     }
-                    LOGD("🎵 Note-off: track %d at frame %lld", kill.trackId, (long long)currentFrame);
+                    LOGT("🎵 Note-off: track %d at frame %lld", kill.trackId, (long long)currentFrame);
                 } else {
                     for (int v = 0; v < MAX_VOICES; v++) {
                         if (voices[v].trackId == kill.trackId && voices[v].isActive) {
                             voices[v].stop();
-                            LOGD("🔪 Killed track %d at frame %lld", kill.trackId, (long long)currentFrame);
+                            LOGT("🔪 Killed track %d at frame %lld", kill.trackId, (long long)currentFrame);
                         }
                     }
                     // SF: hard kill (immediate stop)
@@ -1360,11 +1383,11 @@ public:
                             sv.vibratoDepth  = note.vibratoDepth;
                             sv.vibratoActive = true;
                         }
-                        LOGD("🎹 SF FIRE: slot=%d track/ch=%d bank=%d preset=%d midi=%d vel=%d vol=%.2f",
+                        LOGT("🎹 SF FIRE: slot=%d track/ch=%d bank=%d preset=%d midi=%d vel=%d vol=%.2f",
                              note.sfSlot, t, note.sfBank, note.sfPreset,
                              note.midiNote, note.midiVelocity, note.volume);
                     } else {
-                        LOGD("🎹 SF DROPPED: sfSlot=%d track=%d (handle not loaded)", note.sfSlot, note.trackId);
+                        LOGT("🎹 SF DROPPED: sfSlot=%d track=%d (handle not loaded)", note.sfSlot, note.trackId);
                     }
                     continue;  // Skip voice pool processing
                 }
@@ -1380,7 +1403,7 @@ public:
                         if (voices[v].tableTicRate == 0x00 && voices[v].tableId >= 0) {
                             wasTIC00Mode = true;
                             savedTableRow = (voices[v].tableRow + 1) % 16;
-                            LOGD("📋 TIC00: Saving table row %d for track %d retrigger", savedTableRow, note.trackId);
+                            LOGT("📋 TIC00: Saving table row %d for track %d retrigger", savedTableRow, note.trackId);
                         }
                     }
                 }
@@ -1430,7 +1453,7 @@ public:
                     for (int v = 0; v < MAX_VOICES; v++) {
                         if (voices[v].isFadingOut) {
                             targetSlot = v;
-                            LOGD("⚠️ Voice pool tight: preempting fading slot %d for track %d", v, note.trackId);
+                            LOGT("⚠️ Voice pool tight: preempting fading slot %d for track %d", v, note.trackId);
                             break;
                         }
                     }
@@ -1456,13 +1479,13 @@ public:
                                 int tic3 = checkTic(lastRow.fx3Type, lastRow.fx3Value);
                                 if (tic1 >= 0) {
                                     effectiveTicRate = tic1;
-                                    LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
+                                    LOGT("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
                                 } else if (tic2 >= 0) {
                                     effectiveTicRate = tic2;
-                                    LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
+                                    LOGT("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
                                 } else if (tic3 >= 0) {
                                     effectiveTicRate = tic3;
-                                    LOGD("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
+                                    LOGT("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
                                 }
                             }
                         }
@@ -1490,7 +1513,7 @@ public:
                             voices[v].pitchSlideTarget = 0.0f;
                             voices[v].pitchSlideRate = -note.pslInitialOffset / totalFrames;
                             voices[v].pitchSliding = true;
-                            LOGD("🎵 PSL applied: offset=%.2f, duration=%.0f ticks, rate=%.6f",
+                            LOGT("🎵 PSL applied: offset=%.2f, duration=%.0f ticks, rate=%.6f",
                                  note.pslInitialOffset, note.pslDuration, voices[v].pitchSlideRate);
                         }
                         // PBN: Set continuous pitch bend rate.
@@ -1499,14 +1522,14 @@ public:
                             voices[v].pitchSlideRate = note.pbnRate;
                             voices[v].pitchSlideTarget = (note.pbnRate > 0) ? 127.0f : -127.0f;
                             voices[v].pitchSliding = true;
-                            LOGD("🎵 PBN applied: rate=%.4f semitones/tick", note.pbnRate);
+                            LOGT("🎵 PBN applied: rate=%.4f semitones/tick", note.pbnRate);
                         }
                         // PVB/PVX: Set vibrato
                         if (note.vibratoDepth > 0.01f) {
                             voices[v].vibratoSpeed = note.vibratoSpeed;
                             voices[v].vibratoDepth = note.vibratoDepth;
                             voices[v].vibratoActive = true;
-                            LOGD("🎵 Vibrato applied: speed=%.1fHz, depth=%.2f semitones",
+                            LOGT("🎵 Vibrato applied: speed=%.1fHz, depth=%.2f semitones",
                                  note.vibratoSpeed, note.vibratoDepth);
                         }
 
@@ -1542,18 +1565,18 @@ public:
                         }
 
                         voiceFound = true;
-                        LOGD("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, vol=%.4f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
+                        LOGT("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, vol=%.4f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
                              (long long)currentFrame, note.sampleId, note.trackId, rate, note.volume, note.pan, note.startPointOverride,
                              note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
                     } else {
                         if (note.sampleId < 0 || note.sampleId >= 256) {
-                            LOGD("❌ Invalid sampleId=%d for note at frame %lld", note.sampleId, (long long)currentFrame);
+                            LOGT("❌ Invalid sampleId=%d for note at frame %lld", note.sampleId, (long long)currentFrame);
                         } else {
-                            LOGD("❌ Sample %d not loaded! Note at frame %lld cannot play", note.sampleId, (long long)currentFrame);
+                            LOGT("❌ Sample %d not loaded! Note at frame %lld cannot play", note.sampleId, (long long)currentFrame);
                         }
                     }
                 } else {
-                    LOGD("⚠️ No free voice (all 8 fully active) for note at frame %lld, sample=%d", (long long)currentFrame, note.sampleId);
+                    LOGT("⚠️ No free voice (all 8 fully active) for note at frame %lld, sample=%d", (long long)currentFrame, note.sampleId);
                 }
             }
         }
@@ -1649,7 +1672,7 @@ public:
                             // K00 - Kill voice immediately
                             if (fxValue == 0x00) {
                                 voice.isActive = false;
-                                LOGD("📋 Table effect: KILL voice %d", v);
+                                LOGT("📋 Table effect: KILL voice %d", v);
                             }
                             break;
 
@@ -1664,7 +1687,7 @@ public:
                                 voice.tableId = -1;
                                 voice.hopTargetRow = -1;
                                 voice.hopRepeatCount = 0;
-                                LOGD("📋 Table HOP FF: stopped table for voice %d", v);
+                                LOGT("📋 Table HOP FF: stopped table for voice %d", v);
                             } else {
                                 int repeatCount = (fxValue >> 4) & 0x0F;  // High nibble = X
                                 int targetRow = fxValue & 0x0F;           // Low nibble = Y
@@ -1673,14 +1696,14 @@ public:
                                     // HOP 0Y = Infinite loop to row Y
                                     hopExecuted = true;
                                     hopTarget = targetRow;
-                                    LOGD("📋 Table HOP %02X: infinite loop to row %d, voice %d", fxValue, targetRow, v);
+                                    LOGT("📋 Table HOP %02X: infinite loop to row %d, voice %d", fxValue, targetRow, v);
                                 } else {
                                     // HOP XY (X>0) = Jump X times, then continue
                                     // Initialize counter if this is a new HOP or different target
                                     if (voice.hopTargetRow == -1 || voice.hopTargetRow != targetRow) {
                                         voice.hopRepeatCount = repeatCount;
                                         voice.hopTargetRow = targetRow;
-                                        LOGD("📋 Table HOP %02X: initialized counter=%d, target=%d, voice %d",
+                                        LOGT("📋 Table HOP %02X: initialized counter=%d, target=%d, voice %d",
                                              fxValue, repeatCount, targetRow, v);
                                     }
 
@@ -1688,12 +1711,12 @@ public:
                                         voice.hopRepeatCount--;
                                         hopExecuted = true;
                                         hopTarget = targetRow;
-                                        LOGD("📋 Table HOP: jump to row %d, %d jumps remaining, voice %d",
+                                        LOGT("📋 Table HOP: jump to row %d, %d jumps remaining, voice %d",
                                              targetRow, voice.hopRepeatCount, v);
                                     } else {
                                         // Counter exhausted, don't jump, reset state and continue normally
                                         voice.hopTargetRow = -1;
-                                        LOGD("📋 Table HOP: counter exhausted, continuing past row, voice %d", v);
+                                        LOGT("📋 Table HOP: counter exhausted, continuing past row, voice %d", v);
                                     }
                                 }
                             }
@@ -1720,7 +1743,7 @@ public:
                             if (fxValue >= 0x01 && fxValue <= 0xFB) {
                                 voice.tableTicRate = fxValue;
                                 voice.tableTicCounter = 0;  // Reset counter when rate changes
-                                LOGD("📋 Table effect: TIC %02X - set tick rate to %d", fxValue, fxValue);
+                                LOGT("📋 Table effect: TIC %02X - set tick rate to %d", fxValue, fxValue);
                             }
                             // Note: TIC00 is handled specially - it means "trigger mode"
                             // where table advances only when the note is triggered
@@ -1731,7 +1754,7 @@ public:
                             // Unlike HOP, no repeat count — always jumps
                             hopExecuted = true;
                             hopTarget = fxValue & 0x0F;
-                            LOGD("📋 Table THO %02X: hop to row %d, voice %d", fxValue, hopTarget, v);
+                            LOGT("📋 Table THO %02X: hop to row %d, voice %d", fxValue, hopTarget, v);
                             break;
 
                         default:
@@ -1755,7 +1778,7 @@ public:
                 if (hopExecuted && hopTarget >= 0) {
                     // HOP effect: jump to target row (works in all TIC modes including TIC00)
                     voice.tableRow = hopTarget % 16;
-                    LOGD("📋 Table HOP: voice %d jumped to row %d", v, voice.tableRow);
+                    LOGT("📋 Table HOP: voice %d jumped to row %d", v, voice.tableRow);
                 } else if (shouldAdvance) {
                     // Normal advancement (only for non-TIC00/TICFC/TICFE modes)
                     voice.tableRow = (voice.tableRow + 1) % 16;
@@ -1763,7 +1786,7 @@ public:
 
                 // Debug log (only occasionally to avoid spam)
                 if (shouldAdvance && voice.tableRow == 0) {
-                    LOGD("📋 Table %d loop: voice=%d, transpose=%.0f, vol=%.2f",
+                    LOGT("📋 Table %d loop: voice=%d, transpose=%.0f, vol=%.2f",
                          voice.tableId, v, voice.tableTranspose, voice.tableVolume);
                 }
             }
