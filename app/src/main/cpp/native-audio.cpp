@@ -407,6 +407,50 @@ inline int transposeToSemitones(uint8_t transpose) {
 }
 
 // ===================================
+// PARAM BUS — unified parameter + modulation accumulator (UAA Phase 2a)
+// ===================================
+// Every continuously-controllable value is a slot in the bus.
+// Each slot has a base value (set at trigger or by effect setters) and a mod
+// accumulator (reset to 0 each audio block, written by all modulation sources).
+// Final value = base + mod. Clamping is done at the read site.
+//
+// This decouples modulation sources (envelopes, LFO, tables, effect columns) from
+// voice types. Sources write addMod(); voices read get() in render() and translate
+// to their own API. No branching on instrument type anywhere in effect code.
+//
+// NOTE: VOL modulation is intentionally NOT accumulated here — it's applied
+// per-sample in the mix loop with envelope interpolation for click-free fades.
+// PARAM_VOL base is set for future SoundfontVoice block-rate use.
+
+enum ParamId {
+    PARAM_VOL        = 0,  // Volume: 0.0–1.0 (base only in Phase 2a; mod done per-sample)
+    PARAM_PAN        = 1,  // Pan: 0.0=left, 0.5=center, 1.0=right
+    PARAM_PITCH      = 2,  // Pitch offset in semitones from envelope/LFO mods (not PSL/PBN state)
+    PARAM_FILTER_CUT = 3,  // Filter cutoff: 0–255 param units
+    PARAM_FILTER_RES = 4,  // Filter resonance: 0–255 param units
+    PARAM_COUNT      = 5
+};
+
+struct ParamBus {
+    float base[PARAM_COUNT];  // User-set values; written at trigger or by effect setters
+    float mod[PARAM_COUNT];   // Frame accumulator — reset each block, written by modulation sources
+
+    ParamBus() {
+        base[PARAM_VOL]        = 1.0f;
+        base[PARAM_PAN]        = 0.5f;
+        base[PARAM_PITCH]      = 0.0f;
+        base[PARAM_FILTER_CUT] = 128.0f;
+        base[PARAM_FILTER_RES] = 0.0f;
+        memset(mod, 0, sizeof(mod));
+    }
+
+    void resetMods()                      { memset(mod, 0, sizeof(mod)); }
+    void addMod(ParamId id, float delta)  { mod[id] += delta; }
+    void setBase(ParamId id, float value) { base[id] = value; }
+    float get(ParamId id)   const         { return base[id] + mod[id]; }
+};
+
+// ===================================
 // IAUDIOVOICE — unified voice interface (UAA Phase 1)
 // ===================================
 // All concrete voice types (sampler, soundfont, future synths) implement this.
@@ -415,6 +459,10 @@ inline int transposeToSemitones(uint8_t transpose) {
 class IAudioVoice {
 public:
     virtual ~IAudioVoice() = default;
+
+    // Unified parameter bus: base values (user-set) + mod accumulators (frame-reset).
+    // All modulation sources write addMod(); voice render() reads get() and translates.
+    ParamBus params;
 
     // True while this slot is producing audio (or fading out).
     virtual bool active() const = 0;
@@ -570,12 +618,9 @@ struct Voice : public IAudioVoice {
                          sustainLevel(0.5f), lfoHz(4.0f), lfoPhase(0.0f), oscShape(0) {}
     };
     VoiceModSlot voiceMods[4]; // 4 mod slots per voice
-    float baseVolume;          // Voice volume before modulation
-    float modPitchOffset;      // Accumulated pitch offset from PITCH/FINE_PITCH-destination mods (semitones)
-    float basePan;             // Pan position at trigger time (0.0=left, 0.5=center, 1.0=right)
-    float modPanOffset;        // Accumulated pan offset from PAN-destination mods (±0.5)
-    float modCutOffset;        // Accumulated filter cutoff offset from FILTER_CUTOFF mods (±255)
-    float modResOffset;        // Accumulated filter resonance offset from FILTER_RES mods (±255)
+    float baseVolume;          // Voice volume before modulation (mirrors params.base[PARAM_VOL])
+    // modPitchOffset, basePan, modPanOffset, modCutOffset, modResOffset removed (UAA Phase 2a).
+    // These are now params.mod[PARAM_PITCH/PAN/FILTER_CUT/FILTER_RES] and params.base[PARAM_PAN].
 
     // Voice-steal fade-out: instead of a hard cut, fade over DECLICK_SAMPLES frames
     int fadeOutRemaining;  // Counts down from DECLICK_SAMPLES to 0 during fade-out
@@ -597,12 +642,12 @@ struct Voice : public IAudioVoice {
               hopRepeatCount(0), hopTargetRow(-1),
               pitchOffset(0.0f), pitchSlideTarget(0.0f), pitchSlideRate(0.0f), pitchSliding(false),
               vibratoPhase(0.0f), vibratoSpeed(0.0f), vibratoDepth(0.0f), vibratoActive(false),
-              baseVolume(1.0f), modPitchOffset(0.0f),
-              basePan(0.5f), modPanOffset(0.0f), modCutOffset(0.0f), modResOffset(0.0f),
+              baseVolume(1.0f),
               fadeOutRemaining(0), isFadingOut(false) {}
+              // params (ParamBus) is default-constructed: base={1,0.5,0,128,0}, mod={0}
 
     void trigger(float* sample, int length, int track, float rate, float vol, float pan,
-                 const InstrumentParams& params, float sampleRate, int startPointOverride = -1,
+                 const InstrumentParams& instrParams, float sampleRate, int startPointOverride = -1,
                  int tblId = -1, int tblTicRate = 6, int octave = 4, int pitch = 0, int startRow = 0) {
         sampleData = sample;
         sampleLength = length;
@@ -619,10 +664,10 @@ struct Voice : public IAudioVoice {
 
         // Convert normalized 0-255 values to actual sample positions
         // Use startPointOverride if provided (Offset effect), otherwise use instrument default
-        int effectiveStartPoint = (startPointOverride >= 0) ? startPointOverride : params.startPoint;
+        int effectiveStartPoint = (startPointOverride >= 0) ? startPointOverride : instrParams.startPoint;
         actualStart = (effectiveStartPoint * length) / 255;
-        actualEnd = (params.endPoint * length) / 255;
-        actualLoopStart = (params.loopStart * length) / 255;
+        actualEnd = (instrParams.endPoint * length) / 255;
+        actualLoopStart = (instrParams.loopStart * length) / 255;
 
         // Clamp to valid range
         actualStart = std::max(0, std::min(actualStart, length - 1));
@@ -636,19 +681,19 @@ struct Voice : public IAudioVoice {
         }
 
         // Set playback parameters
-        reverse = params.reverse;
-        loopMode = params.loopMode;
+        reverse = instrParams.reverse;
+        loopMode = instrParams.loopMode;
         loopingBack = false;
 
         // Set distortion/bitcrusher parameters
-        drive = params.drive;
-        crush = params.crush;
-        downsample = params.downsample;
+        drive = instrParams.drive;
+        crush = instrParams.crush;
+        downsample = instrParams.downsample;
 
         // Set filter parameters and calculate coefficients
-        filterType = params.filterType;
-        filterCut = params.filterCut;
-        filterRes = params.filterRes;
+        filterType = instrParams.filterType;
+        filterCut = instrParams.filterCut;
+        filterRes = instrParams.filterRes;
         calculateBiquadCoeffs(filterType, filterCut, filterRes, sampleRate,
                               b0, b1, b2, a1, a2);
 
@@ -679,11 +724,14 @@ struct Voice : public IAudioVoice {
         vibratoSpeed = 0.0f;
         vibratoDepth = 0.0f;
         vibratoActive = false;
-        modPitchOffset = 0.0f;
-        basePan = pan;
-        modPanOffset = 0.0f;
-        modCutOffset = 0.0f;
-        modResOffset = 0.0f;
+        // Initialize ParamBus base values and clear mod accumulators.
+        // filterCut/filterRes already set above from instrParams.
+        params.setBase(PARAM_VOL,        vol);
+        params.setBase(PARAM_PAN,        pan);
+        params.setBase(PARAM_PITCH,      0.0f);
+        params.setBase(PARAM_FILTER_CUT, (float)filterCut);
+        params.setBase(PARAM_FILTER_RES, (float)filterRes);
+        params.resetMods();
 
         // Store note identity for note monitor display and special TIC modes
         noteOctave = std::max(0, std::min(octave, 9));
@@ -757,10 +805,10 @@ struct Voice : public IAudioVoice {
         if (!hasRelease) stop();
     }
 
-    void setVolume(float v) override { volume = v; baseVolume = v; }
+    void setVolume(float v) override { volume = v; baseVolume = v; params.setBase(PARAM_VOL, v); }
 
     void setPan(float pan) override {
-        basePan = pan;
+        params.setBase(PARAM_PAN, pan);
         float angle = pan * (float)M_PI * 0.5f;
         panLeft  = cosf(angle);
         panRight = sinf(angle);
@@ -1533,9 +1581,9 @@ public:
                                  note.vibratoSpeed, note.vibratoDepth);
                         }
 
-                        // Initialize modulation state from instrument mod slots
+                        // Initialize modulation state from instrument mod slots.
+                        // params.resetMods() was already called in trigger(); no extra reset needed.
                         voices[v].baseVolume = note.volume;
-                        voices[v].modPitchOffset = 0.0f;
                         for (int m = 0; m < 4; m++) {
                             const InstrumentModSlot& src = instrumentModSlots[note.sampleId][m];
                             Voice::VoiceModSlot& dst = voices[v].voiceMods[m];
@@ -1821,18 +1869,19 @@ public:
             Voice& voice = voices[v];
             if (!voice.isActive) continue;
 
-            // PAN modulation: recalculate stereo gains from basePan + mod offset
-            if (fabsf(voice.modPanOffset) > 0.001f) {
-                float modPan = fmaxf(0.0f, fminf(1.0f, voice.basePan + voice.modPanOffset));
+            // PAN modulation: recalculate stereo gains from ParamBus (base=basePan, mod=env/LFO)
+            if (fabsf(voice.params.mod[PARAM_PAN]) > 0.001f) {
+                float modPan = fmaxf(0.0f, fminf(1.0f, voice.params.get(PARAM_PAN)));
                 float panAngle = modPan * (float)M_PI * 0.5f;
                 voice.panLeft = cosf(panAngle);
                 voice.panRight = sinf(panAngle);
             }
 
-            // FILTER modulation: recalculate biquad coefficients
-            if (voice.filterType != 0 && (fabsf(voice.modCutOffset) > 0.5f || fabsf(voice.modResOffset) > 0.5f)) {
-                int modCut = std::max(0, std::min(255, voice.filterCut + (int)voice.modCutOffset));
-                int modRes = std::max(0, std::min(255, voice.filterRes + (int)voice.modResOffset));
+            // FILTER modulation: recalculate biquad coefficients from ParamBus
+            if (voice.filterType != 0 && (fabsf(voice.params.mod[PARAM_FILTER_CUT]) > 0.5f ||
+                                           fabsf(voice.params.mod[PARAM_FILTER_RES]) > 0.5f)) {
+                int modCut = std::max(0, std::min(255, (int)voice.params.get(PARAM_FILTER_CUT)));
+                int modRes = std::max(0, std::min(255, (int)voice.params.get(PARAM_FILTER_RES)));
                 calculateBiquadCoeffs(voice.filterType, modCut, modRes, sampleRate,
                                       voice.b0, voice.b1, voice.b2, voice.a1, voice.a2);
             }
@@ -1975,7 +2024,7 @@ public:
                             finalVol = fmaxf(0.0f, finalVol + (envAtI - 1.0f) * mod.effectiveAmt);
                         }
                     }
-                    // PITCH dest: already accumulated into voice.modPitchOffset by updateVoiceModulation
+                    // PITCH dest: accumulated into voice.params.mod[PARAM_PITCH] by updateVoiceModulation
                 }
                 float sample = processedSample * finalVol * voice.tableVolume;
 
@@ -2623,12 +2672,9 @@ public:
     // Advance modulation stages for one voice (called once per audio callback).
     // Handles AHD (type=1), ADSR (type=2), LFO (type=3), DRUM (type=4), TRIG (type=5).
     // Phase 4.4: Mod-to-mod routing: dest=8 (MOD_AMT), 9 (MOD_RATE), 10 (MOD_BOTH).
-    // Accumulates modPitchOffset from PITCH-destination (dest=3) slots.
+    // Writes to voice.params via addMod() for PITCH/PAN/FILTER_CUT/FILTER_RES destinations.
     void updateVoiceModulation(Voice& voice, int numFrames, float sampleRate = 44100.0f) {
-        voice.modPitchOffset = 0.0f;  // Reset accumulators each callback
-        voice.modPanOffset = 0.0f;
-        voice.modCutOffset = 0.0f;
-        voice.modResOffset = 0.0f;
+        voice.params.resetMods();  // Reset ParamBus mod accumulators each callback
 
         float sr = sampleRate;
 
@@ -2795,23 +2841,23 @@ public:
                 }
             }
 
-            // Accumulate modulation to destinations
-            // Done stages (AHD=4, ADSR=5) have envValue=0 so contribute nothing
+            // Accumulate modulation to ParamBus destinations.
+            // Done stages (AHD=4, ADSR=5) have envValue=0 so contribute nothing.
             switch (mod.dest) {
                 case 2: // PAN: ±0.5 range (shifts centre ±0.5)
-                    voice.modPanOffset += mod.envValue * mod.effectiveAmt * 0.5f;
+                    voice.params.addMod(PARAM_PAN, mod.envValue * mod.effectiveAmt * 0.5f);
                     break;
                 case 3: // PITCH: up to ±12 semitones (1 octave)
-                    voice.modPitchOffset += mod.envValue * mod.effectiveAmt * 12.0f;
+                    voice.params.addMod(PARAM_PITCH, mod.envValue * mod.effectiveAmt * 12.0f);
                     break;
                 case 4: // FINE_PITCH: up to ±1 semitone (fine detune / subtle vibrato)
-                    voice.modPitchOffset += mod.envValue * mod.effectiveAmt * 1.0f;
+                    voice.params.addMod(PARAM_PITCH, mod.envValue * mod.effectiveAmt * 1.0f);
                     break;
                 case 5: // FILTER_CUTOFF: up to ±255 cutoff param units
-                    voice.modCutOffset += mod.envValue * mod.effectiveAmt * 255.0f;
+                    voice.params.addMod(PARAM_FILTER_CUT, mod.envValue * mod.effectiveAmt * 255.0f);
                     break;
                 case 6: // FILTER_RES: up to ±255 resonance param units
-                    voice.modResOffset += mod.envValue * mod.effectiveAmt * 255.0f;
+                    voice.params.addMod(PARAM_FILTER_RES, mod.envValue * mod.effectiveAmt * 255.0f);
                     break;
                 default:
                     break; // VOL(1) handled in mix loop, STA(7)/MOD_*(8-10) handled elsewhere
@@ -2855,9 +2901,11 @@ public:
         }
     }
 
-    // Get modulated playback rate including pitch offset, vibrato, and mod-slot pitch
+    // Get modulated playback rate including pitch offset, vibrato, and mod-slot pitch.
+    // pitchOffset = PSL/PBN slide state (persists across blocks).
+    // params.get(PARAM_PITCH) = env/LFO contributions (reset + re-accumulated each block).
     float getModulatedPlaybackRate(Voice& voice) {
-        float pitchMod = voice.pitchOffset + voice.modPitchOffset;
+        float pitchMod = voice.pitchOffset + voice.params.get(PARAM_PITCH);
 
         // Add vibrato modulation (sine wave)
         if (voice.vibratoActive) {
