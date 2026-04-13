@@ -48,26 +48,31 @@ No branching on instrument type in effect code.
 ```cpp
 enum ParamId {
     // Audio parameters (sound modules read these)
-    PARAM_VOL         = 0,   // 0.0–1.0
-    PARAM_PAN         = 1,   // 0.0=left, 0.5=center, 1.0=right
-    PARAM_PITCH       = 2,   // semitone offset (±N)
-    PARAM_FILTER_CUT  = 3,   // 0–255
-    PARAM_FILTER_RES  = 4,   // 0–255
-    PARAM_DRIVE       = 5,   // 0–255 (pre-gain / overdrive)
-    PARAM_CRUSH       = 6,   // 0–15  (bit depth reduction)
-    PARAM_DOWNSAMPLE  = 7,   // 0–15  (sample rate reduction)
+    PARAM_VOL           = 0,   // 0.0–1.0 (per-sample in mix loop; base only in bus)
+    PARAM_PAN           = 1,   // 0.0=left, 0.5=center, 1.0=right
+    PARAM_PITCH         = 2,   // semitone offset (±N); ALL pitch sources write here
+    PARAM_FILTER_CUT    = 3,   // 0–255
+    PARAM_FILTER_RES    = 4,   // 0–255
+    PARAM_DRIVE         = 5,   // 0–255 (pre-gain / overdrive)
+    PARAM_CRUSH         = 6,   // 0–15  (bit depth reduction)
+    PARAM_DOWNSAMPLE    = 7,   // 0–15  (sample rate reduction)
+    PARAM_TABLE_VOL     = 8,   // 0.0–1.0 (table Vxx row volume multiplier)
+    PARAM_TABLE_PITCH   = 9,   // semitone offset from table row transpose
+    PARAM_SAMPLE_START  = 10,  // 0–255 (sample playback start point)
+    PARAM_SAMPLE_END    = 11,  // 0–255 (sample playback end point)
+    PARAM_LOOP_START    = 12,  // 0–255 (loop restart point)
 
     // Mod-to-mod meta-parameters (mod slots read these)
-    PARAM_MOD0_AMP    = 8,   // Scales slot 0 effectiveAmt
-    PARAM_MOD0_RATE   = 9,   // Scales slot 0 effectiveRateMult
-    PARAM_MOD1_AMP    = 10,
-    PARAM_MOD1_RATE   = 11,
-    PARAM_MOD2_AMP    = 12,
-    PARAM_MOD2_RATE   = 13,
-    PARAM_MOD3_AMP    = 14,
-    PARAM_MOD3_RATE   = 15,
+    PARAM_MOD0_AMP      = 13,  // Scales slot 0 effectiveAmt
+    PARAM_MOD0_RATE     = 14,  // Scales slot 0 effectiveRateMult
+    PARAM_MOD1_AMP      = 15,
+    PARAM_MOD1_RATE     = 16,
+    PARAM_MOD2_AMP      = 17,
+    PARAM_MOD2_RATE     = 18,
+    PARAM_MOD3_AMP      = 19,
+    PARAM_MOD3_RATE     = 20,
 
-    PARAM_COUNT       = 16
+    PARAM_COUNT         = 21
 };
 ```
 
@@ -102,22 +107,26 @@ Another slot can target `MOD_N_AMP` to make the scalar drift over time.
 0  NONE
 1  VOL           → PARAM_VOL
 2  PAN           → PARAM_PAN
-3  PITCH         → PARAM_PITCH  (semitones)
-4  FINE_PITCH    → PARAM_PITCH  (cents, ÷100 before add)
+3  PITCH         → PARAM_PITCH        (semitones, ±12)
+4  FINE_PITCH    → PARAM_PITCH        (cents, value ÷ 100)
 5  FILTER_CUT    → PARAM_FILTER_CUT
 6  FILTER_RES    → PARAM_FILTER_RES
-7  SAMPLE_START  → sampler-only (keep as direct field; not universal)
+7  SAMPLE_START  → PARAM_SAMPLE_START (0–255 normalized)
 8  DRIVE         → PARAM_DRIVE
 9  CRUSH         → PARAM_CRUSH
 10 DOWNSAMPLE    → PARAM_DOWNSAMPLE
-11 MOD0_AMP      → PARAM_MOD0_AMP
-12 MOD0_RATE     → PARAM_MOD0_RATE
-13 MOD1_AMP      → PARAM_MOD1_AMP
-14 MOD1_RATE     → PARAM_MOD1_RATE
-15 MOD2_AMP      → PARAM_MOD2_AMP
-16 MOD2_RATE     → PARAM_MOD2_RATE
-17 MOD3_AMP      → PARAM_MOD3_AMP
-18 MOD3_RATE     → PARAM_MOD3_RATE
+11 TABLE_VOL     → PARAM_TABLE_VOL
+12 TABLE_PITCH   → PARAM_TABLE_PITCH
+13 SAMPLE_END    → PARAM_SAMPLE_END
+14 LOOP_START    → PARAM_LOOP_START
+15 MOD0_AMP      → PARAM_MOD0_AMP
+16 MOD0_RATE     → PARAM_MOD0_RATE
+17 MOD1_AMP      → PARAM_MOD1_AMP
+18 MOD1_RATE     → PARAM_MOD1_RATE
+19 MOD2_AMP      → PARAM_MOD2_AMP
+20 MOD2_RATE     → PARAM_MOD2_RATE
+21 MOD3_AMP      → PARAM_MOD3_AMP
+22 MOD3_RATE     → PARAM_MOD3_RATE
 ```
 
 ---
@@ -174,10 +183,30 @@ rather than fighting the per-sample vs per-block impedance mismatch.
    SF render path then reads `params.get(PARAM_PITCH)` and passes to
    `applyPitchMod()` instead of its own state.
 
+4. **Unify pitch contributions into PARAM_PITCH:**  
+   Currently `getModulatedPlaybackRate()` merges two separate sources:
+   ```cpp
+   float pitchMod = voice.pitchOffset            // PSL/PBN/vibrato (state machine)
+                  + voice.params.get(PARAM_PITCH); // LFO/ADSR (ParamBus)
+   ```
+   Instead, the PSL/PBN/vibrato update loop should call
+   `addMod(PARAM_PITCH, delta)` each block alongside LFO/ADSR. The state
+   machines (slide target, rate, vibrato phase) are preserved — only the
+   *output* of each machine routes through the bus.  
+   `getModulatedPlaybackRate()` then reads only `params.get(PARAM_PITCH)`.  
+   **Benefit:** SF voices and future synths get PSL/PBN/vibrato for free, and
+   any mod slot can modulate vibrato depth via `MOD_N_AMP` targeting a vibrato
+   slot.
+
+5. **Route table row transpose through PARAM_TABLE_PITCH:**  
+   Instead of `voice.tableTranspose → direct playbackRate write`, each table
+   tick calls `addMod(PARAM_TABLE_PITCH, semitones)`. The pitch recalculation
+   in `getModulatedPlaybackRate()` includes `params.get(PARAM_TABLE_PITCH)`.
+
 **Files changed:** `native-audio.cpp` only.  
 **Risk:** Low. No new data structures, just routing corrections.  
 **Testing:** Table Vxx still works on sampler. SF notes respond to instrument
-mod slot LFO on pitch.
+mod slot LFO on pitch. PSL/PBN slides still function correctly.
 
 ---
 
@@ -194,6 +223,18 @@ mod slot LFO on pitch.
 
 **Result:** You can now add a VoiceModSlot with `dest=DRIVE, type=LFO` and get
 tremolo-like drive modulation.
+
+Also connect the sample point params:
+- `PARAM_SAMPLE_START` — `ModDest.SAMPLE_START` was already defined in Kotlin
+  but never implemented in C++. Now route it: mix-loop reads
+  `(int)(params.get(PARAM_SAMPLE_START) / 255f * sampleLength)` as dynamic
+  `actualStart`. Enables wavetable-style scanning when an LFO targets
+  `SAMPLE_START`.
+- `PARAM_SAMPLE_END` and `PARAM_LOOP_START` — same pattern. Makes loop point
+  modulation possible (morphing loop length with an envelope).
+
+These three are **sampler-only** params — SF voices ignore them (no-op in SF
+render path).
 
 **Files changed:** `native-audio.cpp`, `IAudioBackend.kt` (dest constants).  
 **Risk:** Low.
