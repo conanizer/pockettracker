@@ -238,26 +238,91 @@ Interpolation: 11 multiply-adds per sample per voice ≈ 0.1% CPU on Miyoo Flip.
 
 ## File Structure
 
-`native-audio.cpp` is already 3700 lines. The modulation system is logically
-independent of Oboe, JNI, and sample playback, so it belongs in its own file.
-The modulation layer is also entirely portable (no Android dependencies), which
-matches the project's portability rules for logic-layer code.
+`native-audio.cpp` is 3700 lines containing everything: filter math, sampler,
+SF2, table engine, modulation, audio loop, and JNI. Each logical module belongs
+in its own file — this makes the code navigable, testable per-module, and
+enforces the portability boundary (no Android imports in audio logic).
 
 ```
 app/src/main/cpp/
-├── CMakeLists.txt          ← add mod-system.cpp here
-├── native-audio.cpp        ← AudioEngine, JNI bridge, processAudioBlock
-│                              includes mod-system.h, uses ModRoute / processRoutes()
-├── audio-voices.h          ← IAudioVoice, Voice, SoundfontVoice declarations
-├── audio-voices.cpp        ← Voice / SoundfontVoice implementation (future split)
-├── mod-system.h            ← ModSourceId, ParamId, ModRoute, VoiceModState structs
-└── mod-system.cpp          ← processRoutes(), modulator tick functions (LFO, ADSR)
-                               ZERO Oboe / JNI / Android dependencies — fully portable
+│
+│  ── Portable audio logic (no Android / Oboe / JNI dependencies) ──────────
+│
+├── filter.h              (header-only)
+│     calculateBiquadCoeffs(), applyBiquad(), BiquadState struct
+│     Currently: lines 48–125
+│
+├── effects.h             (header-only)
+│     applyDrive(), applyCrush(), applyDownsample()
+│     Currently: inline inside AudioEngine mix loop
+│
+├── note-queue.h          (header-only)
+│     ScheduledNote, ScheduledKill, NoteQueue, KillQueue
+│     Currently: lines 147–346
+│
+├── table-engine.h/.cpp
+│     TableRow, Table structs + table tick/advance logic
+│     Currently: lines 369–408 + embedded in AudioEngine
+│
+├── mod-system.h/.cpp
+│     ModSourceId, ParamId, ParamBus, ModRoute, VoiceModState
+│     processRoutes(), LFO tick, ADSR tick
+│     Currently: lines 409–452 + updateVoiceModulation() in AudioEngine
+│
+├── audio-voice.h         (header-only)
+│     IAudioVoice abstract class, InstrumentModSlot, InstrumentParams
+│     Currently: lines 325–508
+│
+├── sampler-voice.h/.cpp
+│     Voice : IAudioVoice  (sampler implementation)
+│     Currently: lines 509–899
+│
+├── soundfont-voice.h/.cpp
+│     SoundfontVoice : IAudioVoice, SoundfontEntry, soundfonts[] pool
+│     Currently: lines 126–146 + 900–1108
+│
+│  ── Android-specific (Oboe + JNI) ─────────────────────────────────────
+│
+├── audio-engine.h/.cpp
+│     AudioEngine : oboe::AudioStreamDataCallback
+│     processAudioBlock(), triggerNote(), mix loop
+│     Includes all modules above, owns the per-track buffers
+│     Currently: lines 1109–3003 (~1900 lines → shrinks as modules move out)
+│
+├── jni-bridge.cpp
+│     All JNIEXPORT functions — thin wrappers calling AudioEngine methods
+│     Currently: lines 3004–3699
+│
+└── CMakeLists.txt        (add all new .cpp files here)
 ```
 
-`mod-system.h` and `mod-system.cpp` have no includes beyond `<cmath>` and
-`<cstring>`. They can be compiled and unit-tested on any platform. This makes
-the Linux port trivially reusable.
+### Dependency order (no cycles)
+
+```
+filter.h ──────────────────────────────────────────────────┐
+effects.h ─────────────────────────────────────────────────┤
+note-queue.h ──────────────────────────────────────────────┤
+mod-system.h ──────────────────────────────────────────────┤
+                                                            ▼
+table-engine ──── mod-system.h                        audio-voice.h
+audio-voice.h ─── mod-system.h, filter.h                   │
+sampler-voice ─── audio-voice.h, filter.h, effects.h        ├── sampler-voice
+soundfont-voice ─ audio-voice.h, tsf.h                      ├── soundfont-voice
+                                                            │
+                                            audio-engine ───┤ (owns everything)
+                                            jni-bridge ─────┘
+```
+
+Every file above the `audio-engine` line has zero Android/Oboe/JNI includes —
+fully portable, compilable on Linux without the NDK. `jni-bridge.cpp` is the
+only file that needs to know about JNI types.
+
+### Split is independent of the module system refactor
+
+The file split can be done before, during, or after the modulation phases —
+it is purely mechanical (move code, update includes, add to CMakeLists.txt).
+No behavior changes. Recommended to do it first so each phase touches a
+single focused file rather than one 3700-line monolith.
 
 ---
 
