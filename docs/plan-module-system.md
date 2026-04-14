@@ -338,6 +338,22 @@ LFO or envelope, because all are just values in `modSourceValues[]`.
 **Result:** Any existing LFO/ADSR can now target DRIVE or CRUSH just by changing
 `dest` in a route. No other code changes.
 
+**SF2 note on DRIVE / FILTER / CRUSH:**  
+TSF's `tsf_channel_midi_control()` does NOT implement CC#74 (filter cutoff),
+CC#71 (filter resonance), or any envelope/LFO CCs. SF2 synthesis parameters
+are baked into the preset and not runtime-controllable via TSF's API.
+
+The only path for filter/drive/bitcrush on SF voices is **post-render**: apply
+our own biquad / tanh / bitcrush to the TSF output buffer after `tsf_render_float()`
+returns. This is implemented in Phase 5 alongside the SF `modDestValues` read.  
+Limitation: currently `tsf_render_float()` mixes all 8 tracks together, so
+effects are per-SF2-file rather than per-track. Per-track isolation requires
+Phase 2b (per-track TSF buffers) from `unified-audio-abstraction.md`.
+
+`PARAM_SAMPLE_START`, `PARAM_SAMPLE_END`, `PARAM_LOOP_START` are silently
+ignored by SF voices — no special-casing needed, SF voice simply doesn't read
+those params.
+
 **Files:** `native-audio.cpp`  
 **Risk:** Low.
 
