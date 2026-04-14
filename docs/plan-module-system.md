@@ -443,47 +443,49 @@ track. Each track buffer is then available for per-track effect processing.
 
 ---
 
-### Phase 7 — Track-level insert effect chain
+### Phase 7 — Apply instrument effects to per-channel SF buffers
 
-**Goal:** Each track has a filter/drive/bitcrush chain applied to its audio
-buffer before the mixer. Fixes SF filter parity. Gives track-level coloring
-independent of per-voice modulation.
+**Goal:** SF instruments get the same filter/drive/bitcrush as sampler instruments,
+configured per-instrument, not shared across the whole SF2 file.
 
-**Audio pipeline becomes:**
+**No new data model.** `Instrument` already has `filterType`, `filterCut`,
+`filterRes`, `drive`, `crush`, `downsample`. These are the instrument's effects —
+they belong to the instrument, not to a track layer.
+
+**The problem Phase 6 solves:** Previously `tsf_render_float()` mixed all 8
+tracks into one buffer, so track 1's filter affected track 2's audio too (they
+shared the same SF2 file). With `tsf_render_float_channel()` each track has its
+own buffer.
+
+**What Phase 7 adds:** After rendering track `t`'s SF buffer, look up which
+instrument is playing on that track and apply its `filter/drive/crush` to the
+buffer before mixing:
+
+```cpp
+for (int t = 0; t < 8; t++) {
+    if (!sfVoices[t].isActive) continue;
+    tsf_render_float_channel(h, t, trackBuffer[t], numFrames, 0);
+
+    // Apply the instrument's effects to this track's output
+    const InstrumentParams& p = sfVoices[t].instrParams;
+    if (p.drive > 0)    applyDrive(trackBuffer[t], numFrames, p.drive);
+    if (p.crush > 0)    applyCrush(trackBuffer[t], numFrames, p.crush);
+    if (p.filterType)   applyBiquad(trackBuffer[t], numFrames, sfVoices[t].filterState, p);
+
+    // Mix into master
+    mixTrackBuffer(trackBuffer[t], numFrames, t);
+}
 ```
-Voices → per-track buffers → TrackFX chain → Mixer → Master
-```
 
-**New data model:**
-```kotlin
-data class TrackFX(
-    val filterType: Int = 0,   // 0=off, 1=lp, 2=hp, 3=bp
-    val filterCut:  Int = 128,
-    val filterRes:  Int = 0,
-    val drive:      Int = 0,
-    val crush:      Int = 0,
-    val downsample: Int = 0
-)
-// Project.trackFX: Array<TrackFX> = Array(8) { TrackFX() }
-```
+Track 1 using a trumpet preset and track 2 using strings from the same SF2 file
+now have fully independent filter and drive settings, because effects are applied
+per-channel buffer, not to the combined output.
 
-**In `processAudioBlock`:**
-1. Sampler voices write to `trackBuffers[voice.trackId]` instead of directly
-   to the master mix.
-2. SF channels write to `trackBuffers[channel]` via `tsf_render_float_channel`
-   (Phase 6).
-3. For each track: apply TrackFX biquad → drive → bitcrush to `trackBuffers[t]`.
-4. Apply track volume/pan and accumulate into master output.
+**Memory:** 8 track float buffers × numFrames × 2ch × 4 bytes ≈ 16KB. Negligible.
 
-**Per-voice vs per-track effects:**  
-Per-voice effects (instrument mod slots targeting PARAM_DRIVE etc.) are still
-supported — they shape the individual voice before it enters the track buffer.
-TrackFX processes everything on the track together, like an insert effect.
-
-**Memory:** 8 track buffers × numFrames × 2 channels × 4 bytes ≈ 8 × 256 × 2 × 4 = 16KB. Negligible.
-
-**Files:** `native-audio.cpp`, `TrackerData.kt`, serialization.  
-**Risk:** Low-medium.
+**Files:** `native-audio.cpp` only — `SoundfontVoice` gains a `filterState`
+biquad struct and `instrParams` copy (same fields `Voice` already has).  
+**Risk:** Low.
 
 ---
 
