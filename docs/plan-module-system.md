@@ -185,43 +185,54 @@ in the instrument screen. Nothing about the UI layout changes.
 
 ---
 
-## Per-Sample vs Per-Block (unchanged constraint)
+## Per-Sample vs Per-Block — Sub-Block Interpolation
 
-| Parameter | Update rate | Reason |
-|---|---|---|
-| VOL | **Per-sample** (envelope) + per-block (scalar/table) | See below |
-| All others | Per-block (~5ms) | Inaudible at this rate |
+All parameters are computed at block rate by the route processing loop. A
+**sub-block interpolation layer** then smooths every parameter between
+consecutive block values, giving per-sample precision without per-sample
+modulation logic.
 
-**VOL is dual-layer and that is intentional:**
+### How it works
 
-The existing per-sample envelope interpolation must be preserved exactly. Moving
-`ADSR → VOL` through `modDestValues[]` as a single block-rate value would produce
-step-clicks every ~5ms because the envelope level jumps discretely between blocks.
-The current fix is per-sample interpolation between `prevEnvValue` and `envValue`.
-
-**Layer 1 — per-sample (preserved, unchanged):**  
-LFO/ADSR/AHD mod slots targeting VOL continue to use the existing interpolated
-envelope loop inside `processAudioBlock`. This code does not move.
-
-**Layer 2 — per-block (new):**  
-`modDestValues[PARAM_VOL]` is a block-rate multiplier computed by the route
-processing loop and applied on top of layer 1:
 ```cpp
-// At start of mix loop (once per block):
-float blockVolMult = 1.0f + modDestValues[PARAM_VOL];
+// VoiceModState carries both current and previous block values:
+float modDestValues[PARAM_COUNT];      // filled by processRoutes() each block
+float prevModDestValues[PARAM_COUNT];  // snapshot from previous block
 
-// Per-sample (unchanged envelope loop):
-float finalVol = voice.volume * blockVolMult;   // ← layer 2 applied here
-for (int m = 0; m < 4; m++) {
-    if (mod.dest == VOL) finalVol += interpolated_envelope_value;  // ← layer 1
-}
-float sample = processedSample * finalVol;
+// At block start: snapshot previous values
+memcpy(prevModDestValues, modDestValues, sizeof(float) * PARAM_COUNT);
+
+// processRoutes() fills modDestValues[] with new accumulated values.
+
+// Per-sample mix loop: interpolate between prev and current
+float t = (float)(i + 1) / (float)numFrames;  // 0.0 → 1.0 across block
+
+float vol   = prev[PARAM_VOL]   + (curr[PARAM_VOL]   - prev[PARAM_VOL])   * t;
+float pitch = prev[PARAM_PITCH] + (curr[PARAM_PITCH] - prev[PARAM_PITCH]) * t;
+float cut   = prev[PARAM_FILTER_CUT] + (curr[PARAM_FILTER_CUT] - prev[PARAM_FILTER_CUT]) * t;
+// ... all PARAM_COUNT values
 ```
 
-Table Vxx, SCALAR, and other block-rate sources write to `modSourceValues[]`
-and route to `PARAM_VOL` → `modDestValues[PARAM_VOL]` → layer 2.  
-Fast envelopes continue through layer 1.  
-Click-free behavior is preserved in both layers.
+This is the identical formula already used in the existing `prevEnvValue →
+envValue` VOL interpolation — generalized to every parameter at once.
+
+### What this replaces
+
+- The "dual-layer VOL" complexity is gone. All parameters use one path.
+- The `prevEnvValue` / `envValue` fields on `VoiceModSlot` become redundant:
+  interpolation now happens at the destination, not the source.
+- No per-parameter special-casing. Adding `PARAM_DRIVE` or `PARAM_CRUSH`
+  automatically gets smooth interpolation for free.
+
+### Bonus: filter and pan also smooth
+
+Currently filter cutoff and pan update at block rate — audible as stepping at
+high LFO speeds. Sub-block interpolation makes them smooth automatically.
+
+### Cost
+
+One extra `float prevModDestValues[PARAM_COUNT]` per voice = 44 bytes.
+Interpolation: 11 multiply-adds per sample per voice ≈ 0.1% CPU on Miyoo Flip.
 
 ---
 
