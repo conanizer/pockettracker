@@ -189,13 +189,64 @@ in the instrument screen. Nothing about the UI layout changes.
 
 | Parameter | Update rate | Reason |
 |---|---|---|
-| VOL | **Per-sample** | Block-boundary amplitude steps cause audible clicks |
+| VOL | **Per-sample** (envelope) + per-block (scalar/table) | See below |
 | All others | Per-block (~5ms) | Inaudible at this rate |
 
-`PARAM_VOL` in `modDestValues[]` is computed once per block, then used as a
-*static multiplier on top of* the existing per-sample envelope interpolation.
-The per-sample VOL loop is preserved. `modDestValues[PARAM_VOL]` adds an extra
-scale factor on the `finalVol` calculation. This keeps click-free fades working.
+**VOL is dual-layer and that is intentional:**
+
+The existing per-sample envelope interpolation must be preserved exactly. Moving
+`ADSR → VOL` through `modDestValues[]` as a single block-rate value would produce
+step-clicks every ~5ms because the envelope level jumps discretely between blocks.
+The current fix is per-sample interpolation between `prevEnvValue` and `envValue`.
+
+**Layer 1 — per-sample (preserved, unchanged):**  
+LFO/ADSR/AHD mod slots targeting VOL continue to use the existing interpolated
+envelope loop inside `processAudioBlock`. This code does not move.
+
+**Layer 2 — per-block (new):**  
+`modDestValues[PARAM_VOL]` is a block-rate multiplier computed by the route
+processing loop and applied on top of layer 1:
+```cpp
+// At start of mix loop (once per block):
+float blockVolMult = 1.0f + modDestValues[PARAM_VOL];
+
+// Per-sample (unchanged envelope loop):
+float finalVol = voice.volume * blockVolMult;   // ← layer 2 applied here
+for (int m = 0; m < 4; m++) {
+    if (mod.dest == VOL) finalVol += interpolated_envelope_value;  // ← layer 1
+}
+float sample = processedSample * finalVol;
+```
+
+Table Vxx, SCALAR, and other block-rate sources write to `modSourceValues[]`
+and route to `PARAM_VOL` → `modDestValues[PARAM_VOL]` → layer 2.  
+Fast envelopes continue through layer 1.  
+Click-free behavior is preserved in both layers.
+
+---
+
+## File Structure
+
+`native-audio.cpp` is already 3700 lines. The modulation system is logically
+independent of Oboe, JNI, and sample playback, so it belongs in its own file.
+The modulation layer is also entirely portable (no Android dependencies), which
+matches the project's portability rules for logic-layer code.
+
+```
+app/src/main/cpp/
+├── CMakeLists.txt          ← add mod-system.cpp here
+├── native-audio.cpp        ← AudioEngine, JNI bridge, processAudioBlock
+│                              includes mod-system.h, uses ModRoute / processRoutes()
+├── audio-voices.h          ← IAudioVoice, Voice, SoundfontVoice declarations
+├── audio-voices.cpp        ← Voice / SoundfontVoice implementation (future split)
+├── mod-system.h            ← ModSourceId, ParamId, ModRoute, VoiceModState structs
+└── mod-system.cpp          ← processRoutes(), modulator tick functions (LFO, ADSR)
+                               ZERO Oboe / JNI / Android dependencies — fully portable
+```
+
+`mod-system.h` and `mod-system.cpp` have no includes beyond `<cmath>` and
+`<cstring>`. They can be compiled and unit-tested on any platform. This makes
+the Linux port trivially reusable.
 
 ---
 
