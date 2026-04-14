@@ -409,6 +409,138 @@ already written by Phase 2.
 
 ---
 
+### Phase 6 — Per-channel TSF rendering (TSF fork patch)
+
+**Goal:** Each track gets its own output buffer from TSF, enabling per-track
+filter/drive/bitcrush on SF instruments.
+
+**The fix:** `tsf_render_float` iterates all voices. Each `tsf_voice` already
+has a `playingChannel` field. Add one function to `tsf.h`:
+
+```c
+TSFDEF void tsf_render_float_channel(tsf* f, int channel,
+                                     float* buffer, int samples, int flag_mixing)
+{
+    struct tsf_voice *v = f->voices, *vEnd = v + f->voiceNum;
+    if (!flag_mixing) TSF_MEMSET(buffer, 0, (f->outputmode == TSF_MONO ? 1 : 2)
+                                            * sizeof(float) * samples);
+    for (; v != vEnd; v++)
+        if (v->playingPreset != -1 && v->playingChannel == channel)
+            tsf_voice_render(f, v, buffer, samples);
+}
+```
+
+4 lines added to `tsf.h`. Zero extra memory, no separate TSF instances, no
+crash risk on Miyoo Flip. One shared TSF instance, 8 separate channel renders.
+
+**In `processAudioBlock`:**  
+Replace the single `tsf_render_float()` call with a loop calling
+`tsf_render_float_channel(h, t, trackBuffers[t], numFrames, 0)` for each active
+track. Each track buffer is then available for per-track effect processing.
+
+**Files:** `tsf.h` (fork patch), `native-audio.cpp`.  
+**Risk:** Low.
+
+---
+
+### Phase 7 — Track-level insert effect chain
+
+**Goal:** Each track has a filter/drive/bitcrush chain applied to its audio
+buffer before the mixer. Fixes SF filter parity. Gives track-level coloring
+independent of per-voice modulation.
+
+**Audio pipeline becomes:**
+```
+Voices → per-track buffers → TrackFX chain → Mixer → Master
+```
+
+**New data model:**
+```kotlin
+data class TrackFX(
+    val filterType: Int = 0,   // 0=off, 1=lp, 2=hp, 3=bp
+    val filterCut:  Int = 128,
+    val filterRes:  Int = 0,
+    val drive:      Int = 0,
+    val crush:      Int = 0,
+    val downsample: Int = 0
+)
+// Project.trackFX: Array<TrackFX> = Array(8) { TrackFX() }
+```
+
+**In `processAudioBlock`:**
+1. Sampler voices write to `trackBuffers[voice.trackId]` instead of directly
+   to the master mix.
+2. SF channels write to `trackBuffers[channel]` via `tsf_render_float_channel`
+   (Phase 6).
+3. For each track: apply TrackFX biquad → drive → bitcrush to `trackBuffers[t]`.
+4. Apply track volume/pan and accumulate into master output.
+
+**Per-voice vs per-track effects:**  
+Per-voice effects (instrument mod slots targeting PARAM_DRIVE etc.) are still
+supported — they shape the individual voice before it enters the track buffer.
+TrackFX processes everything on the track together, like an insert effect.
+
+**Memory:** 8 track buffers × numFrames × 2 channels × 4 bytes ≈ 8 × 256 × 2 × 4 = 16KB. Negligible.
+
+**Files:** `native-audio.cpp`, `TrackerData.kt`, serialization.  
+**Risk:** Low-medium.
+
+---
+
+### Phase 8 — SF preset parameter editing
+
+**Goal:** Expose SF2 preset parameters (envelopes, filter, modulation routing)
+on the instrument screen for static editing.
+
+**How it works:** TSF parses SF2 generators into `tsf_region` structs at load
+time. Each region contains:
+- `ampenv` / `modenv` — `{delay, attack, hold, decay, sustain, release}` structs
+- `initialFilterFc` / `initialFilterQ` — filter cutoff and resonance defaults
+- `modEnvToPitch`, `modEnvToFilterFc`, `modLfoToFilterFc`, `modLfoToVolume` —
+  modulation routing amounts baked into the preset
+- `pan`, `attenuation`, `transpose`, `tune`
+
+Add two functions to the TSF fork:
+
+```c
+// Read first region's parameters (for display as defaults)
+const struct tsf_region* tsf_get_preset_region(tsf* f, int bank, int preset_number);
+
+// Patch all regions for a preset with user overrides (-1 / NULL = keep original)
+void tsf_preset_apply_overrides(tsf* f, int bank, int preset_number,
+                                const struct tsf_envelope* ampenv,
+                                int filterFc, int filterQ);
+```
+
+**In Instrument data model:**
+```kotlin
+data class SFOverrides(
+    val ampAttack:  Int = -1,  // -1 = use SF2 default
+    val ampDecay:   Int = -1,
+    val ampSustain: Int = -1,
+    val ampRelease: Int = -1,
+    val filterCut:  Int = -1,
+    val filterRes:  Int = -1
+)
+// Instrument gains: val sfOverrides: SFOverrides = SFOverrides()
+```
+
+Overrides applied by calling `tsf_preset_apply_overrides` after SF2 loads or
+when the instrument is edited.
+
+**These parameters are static** — they set the starting values inside TSF's
+synthesis engine. They are not part of the real-time modulation system (cannot
+be targeted by mod slots). Think of them as "preset customization" rather than
+"modulation destinations."
+
+**Benefit:** Useful SF2 instruments can be tuned per-instrument (e.g., shorten
+a piano's release for a staccato version) without needing to edit the SF2 file.
+
+**Files:** `tsf.h` (fork), `native-audio.cpp`, `TrackerData.kt`.  
+**Risk:** Low.
+
+---
+
 ## What Does NOT Change
 
 ### Sequencer-level effects (no phase handles these — they stay as-is)
