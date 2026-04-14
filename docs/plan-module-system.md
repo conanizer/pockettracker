@@ -2,434 +2,398 @@
 
 **Status:** Planning  
 **Branch:** `claude/audit-audio-module-system-RSQ3K`  
-**Prerequisite reading:** `docs/unified-audio-abstraction.md`
+**Prerequisite reading:** `docs/unified-audio-abstraction.md`  
+**Reference designs:** SunVox 1.3b source, Surge XT, Polyhedrus (Serum-style), VCV Rack
 
 ---
 
 ## Goal
 
-A true modular audio architecture where **value-changing modules** (LFO, ADSR,
-scalar, table FX) connect to **sound module parameters** (pitch, volume, pan,
-filter, drive, bitcrush) *exclusively* through the `ParamBus`.
+Restructure the internal audio architecture so that every value-changing module
+(LFO, ADSR, table effects, pitch slides, vibrato) writes to a shared source array,
+and every sound module (sampler, SF2, future synth) reads from a shared
+destination array. The two arrays are connected by a routing table.
 
-The key property: adding a new sound module (synth, SF2, future wavetable) costs
-only exposing its parameters in the bus. Every existing modulation source works
-on it immediately, with no per-source special-casing.
+**The key property:** adding a new sound module or a new modulation source
+costs one enum entry and one read/write. Nothing else needs to change.
+No existing effect code is touched. No duplicated wiring.
+
+**The UI does not change.** The instrument screen still shows 4 mod slots with
+TYPE / DEST / VALUE / RATE / DEPTH fields. This is purely an internal
+restructuring.
 
 ---
 
-## What We Have Now vs What We Need
+## Why the current code is not this yet
 
-### Current state (problems)
+The current `ParamBus` (`base[]` + `mod[]`) is the right idea but sources still
+reach destinations through three separate paths:
 
-| Path | How it works now | Problem |
+| Source | Current path | Problem |
 |---|---|---|
-| ADSR/LFO → sampler pitch | `addMod(PARAM_PITCH)` ✅ | Working |
-| ADSR/LFO → sampler vol | Per-sample `finalVol` loop ⚠️ | Correct behavior, but bypasses ParamBus |
-| Table Vxx → sampler vol | Direct `voice.tableVolume` field ❌ | Bypasses ParamBus entirely |
-| Table Oxx → sample start | Direct `voice.position` field ❌ | Sampler-specific, no bus path |
-| Drive/crush base values | `InstrumentParams` → direct fields ❌ | Not in ParamBus, can't be modulated |
-| ADSR/LFO → SF pitch | `applyPitchMod()` separate path ❌ | Bypasses ParamBus |
-| ADSR/LFO → SF vol/pan/filter | Not connected at all ❌ | No path exists |
-| Table FX → SF | Not connected at all ❌ | No path exists |
+| LFO / ADSR mod slots | `addMod(dest)` via `updateVoiceModulation` | Only called for sampler voices |
+| Table Vxx | Direct `voice.tableVolume` field write | Bypasses bus |
+| Table row transpose | Direct `voice.playbackRate` write | Bypasses bus |
+| Table Oxx | Direct `voice.position` write | Bypasses bus |
+| Vibrato (PVB/PVX) | `vibratoPhase/Speed/Depth` state, merged in `getModulatedPlaybackRate()` | Parallel system |
+| PSL / PBN pitch slides | `pitchOffset` state, merged in `getModulatedPlaybackRate()` | Parallel system |
+| Drive / crush / downsample | Direct `voice.drive/crush/downsample` fields | Never modulated at all |
+| SF voices | All modulation paths separate from sampler | No shared code |
 
-### Target state
-
-Every modulation source calls `voice->params.addMod(paramId, delta)`.  
-Every sound module reads `voice->params.get(paramId)` in its render path.  
-No branching on instrument type in effect code.
+**Target:** all of the above write to `modSourceValues[id]`. The route table
+accumulates them into `modDestValues[id]`. Every sound module reads only
+from `modDestValues[]`. The routing loop is 20 lines of code with no
+type-switching.
 
 ---
 
-## Architecture
+## Core Architecture (Polyhedrus / Surge XT pattern)
 
-### ParamBus (expanded)
+### Two arrays per voice
 
 ```cpp
-enum ParamId {
-    // Audio parameters (sound modules read these)
-    PARAM_VOL           = 0,   // 0.0–1.0 (per-sample in mix loop; base only in bus)
-    PARAM_PAN           = 1,   // 0.0=left, 0.5=center, 1.0=right
-    PARAM_PITCH         = 2,   // semitone offset (±N); ALL pitch sources write here
-    PARAM_FILTER_CUT    = 3,   // 0–255
-    PARAM_FILTER_RES    = 4,   // 0–255
-    PARAM_DRIVE         = 5,   // 0–255 (pre-gain / overdrive)
-    PARAM_CRUSH         = 6,   // 0–15  (bit depth reduction)
-    PARAM_DOWNSAMPLE    = 7,   // 0–15  (sample rate reduction)
-    PARAM_TABLE_VOL     = 8,   // 0.0–1.0 (table Vxx row volume multiplier)
-    PARAM_TABLE_PITCH   = 9,   // semitone offset from table row transpose
-    PARAM_SAMPLE_START  = 10,  // 0–255 (sample playback start point)
-    PARAM_SAMPLE_END    = 11,  // 0–255 (sample playback end point)
-    PARAM_LOOP_START    = 12,  // 0–255 (loop restart point)
+// Every modulation source writes its current value here once per block.
+float modSourceValues[MOD_SRC_COUNT];
 
-    // Mod-to-mod meta-parameters (mod slots read these)
-    PARAM_MOD0_AMP      = 13,  // Scales slot 0 effectiveAmt
-    PARAM_MOD0_RATE     = 14,  // Scales slot 0 effectiveRateMult
-    PARAM_MOD1_AMP      = 15,
-    PARAM_MOD1_RATE     = 16,
-    PARAM_MOD2_AMP      = 17,
-    PARAM_MOD2_RATE     = 18,
-    PARAM_MOD3_AMP      = 19,
-    PARAM_MOD3_RATE     = 20,
+// Route accumulation output. Every sound module reads from here.
+// Equivalent to the current params.mod[] but populated via the route table.
+float modDestValues[PARAM_COUNT];
+```
 
-    PARAM_COUNT         = 21
+This is the pattern from Polyhedrus (open-source Serum-style synth) and
+Surge XT. Sources write, routes accumulate, destinations read. No source ever
+"knows" what it's modulating. No destination ever "knows" what is driving it.
+
+### ModSourceId — what produces values
+
+```cpp
+enum ModSourceId {
+    MOD_SRC_NONE = 0,
+
+    // Per-voice dynamic sources (state advances each audio block)
+    MOD_SRC_LFO0, MOD_SRC_LFO1, MOD_SRC_LFO2, MOD_SRC_LFO3,
+    MOD_SRC_ENV0, MOD_SRC_ENV1, MOD_SRC_ENV2, MOD_SRC_ENV3,
+
+    // Per-note static sources (captured at note-on, constant for note's lifetime)
+    MOD_SRC_VELOCITY,   // 0.0–1.0
+    MOD_SRC_KEYTRACK,   // (midiNote - rootNote) / 12.0, bipolar
+    MOD_SRC_RANDOM,     // random value sampled at note-on, 0.0–1.0
+
+    // Sequencer-driven sources (written by playback system each block)
+    MOD_SRC_TABLE_VOL,    // 0.0–1.0 from table row volume column
+    MOD_SRC_TABLE_PITCH,  // semitones from table row transpose column
+    MOD_SRC_PITCH_SLIDE,  // semitones from PSL/PBN state machine
+    MOD_SRC_VIBRATO,      // −1..+1 sine from PVB/PVX state machine
+
+    MOD_SRC_COUNT
 };
 ```
 
-**Rule:** `base[]` holds the user-set (static) value. `mod[]` is the per-block
-accumulator. Final value = `clamp(base[id] + mod[id])`. Reset `mod[]` at the
-start of each audio block.
+### ParamId — what receives values (destinations)
 
-### Value-changing module types (VoiceModSlot)
+```cpp
+enum ParamId {
+    // Universal audio parameters (all sound modules)
+    PARAM_VOL           = 0,   // 0.0–1.0
+    PARAM_PAN           = 1,   // 0.0=left, 0.5=center, 1.0=right
+    PARAM_PITCH         = 2,   // semitone offset (all pitch sources converge here)
+    PARAM_FILTER_CUT    = 3,   // 0–255
+    PARAM_FILTER_RES    = 4,   // 0–255
+    PARAM_DRIVE         = 5,   // 0–255
+    PARAM_CRUSH         = 6,   // 0–15
+    PARAM_DOWNSAMPLE    = 7,   // 0–15
+
+    // Sampler-only parameters (SF / synth voices ignore these)
+    PARAM_SAMPLE_START  = 8,   // 0–255 — enables wavetable-style LFO scanning
+    PARAM_SAMPLE_END    = 9,   // 0–255
+    PARAM_LOOP_START    = 10,  // 0–255
+
+    PARAM_COUNT         = 11
+};
+```
+
+### ModRoute — the connection (pure data, no behavior)
+
+Directly from Polyhedrus `ModMatrix.h`:
+
+```cpp
+struct ModRoute {
+    ModSourceId source;    // which source drives this route
+    ParamId     dest;      // which parameter receives the value
+    float       depth;     // signed scale: −1.0..+1.0
+    ModSourceId via;       // optional secondary modulator (MOD_SRC_NONE = unused)
+    float       viaAmount; // 0.0 = ignore via, 1.0 = via fully controls depth
+};
+```
+
+**ViaSource is how "modulate the modulation" works — no special system needed.**
+Example: velocity controls how much an LFO affects pitch:
+```
+route = { LFO0, PITCH, depth=1.0, via=VELOCITY, viaAmount=1.0 }
+// result: pitch += LFO0_value * VELOCITY_value * 1.0
+```
+The formula (from Polyhedrus `ApplyRoute`):
+```cpp
+float val = source * ((1.0f - viaAmount) + via * viaAmount);
+modDestValues[dest] += val * depth;
+```
+No two-pass ordering. No meta-parameter destinations. No cycle risk.
+This replaces the current `MOD_AMT` / `MOD_RATE` / `MOD_BOTH` destination system
+entirely.
+
+### Route processing loop (the entire modulation engine)
+
+```cpp
+void processRoutes(
+    const float* srcValues,     // modSourceValues[MOD_SRC_COUNT]
+    float*       dstValues,     // modDestValues[PARAM_COUNT]
+    const ModRoute* routes,     // instrument's route table (user + fixed)
+    int          routeCount)
+{
+    memset(dstValues, 0, sizeof(float) * PARAM_COUNT);
+    for (int i = 0; i < routeCount; i++) {
+        if (routes[i].source == MOD_SRC_NONE) continue;
+        float src = srcValues[routes[i].source];
+        float via = srcValues[routes[i].via];   // 0.0 when via == MOD_SRC_NONE
+        float val = src * ((1.0f - routes[i].viaAmount) + via * routes[i].viaAmount);
+        dstValues[routes[i].dest] += val * routes[i].depth;
+    }
+}
+```
+
+This is the complete hot path. ~20 instructions × 4 routes. No branches on
+instrument type. No virtual dispatch. Adding a new source = add to the enum,
+write to `modSourceValues[]`. Adding a new destination = add to the enum,
+read from `modDestValues[]`. The loop above never changes.
+
+### Fixed routes vs user routes (Surge XT pattern)
 
 ```
-Type 0  NONE     — disabled slot
-Type 1  AHD      — attack / hold / decay envelope
-Type 2  ADSR     — attack / decay / sustain / release envelope
-Type 3  LFO      — oscillator (TRI, SIN, SAW, SQR, RND)
-Type 4  SCALAR   — constant value, 00–FF mapped to destination range
-Type 5  DRUM     — one-shot amplitude decay curve
-Type 6  TRIG     — envelope triggered on note-on, immediate release
+Fixed routes (always active, instrument-type-independent):
+    TABLE_VOL   → PARAM_VOL    depth=1.0   (table Vxx row volume)
+    TABLE_PITCH → PARAM_PITCH  depth=1.0   (table row transpose)
+    PITCH_SLIDE → PARAM_PITCH  depth=1.0   (PSL/PBN output)
+    VIBRATO     → PARAM_PITCH  depth=vibratoDepth  (PVB/PVX output)
+
+User routes (4 slots, configured in instrument mod matrix, stored in Instrument):
+    Slot 0..3: { source, dest, depth, via, viaAmount }
 ```
 
-**NEW: SCALAR type.**  
-A mod slot that outputs a fixed value every block. Used for:
-- Static parameter offsets ("always shift pitch +7 semitones")
-- Providing a constant "carrier" that other mod slots can then modulate
-- Replacing magic numbers in instrument params with visible, routeable values
-
-SCALAR slot configuration: `value` (0–255), `dest` (any ParamId).  
-Another slot can target `MOD_N_AMP` to make the scalar drift over time.
-
-### Destination mapping (slot `dest` field)
-
-```
-0  NONE
-1  VOL           → PARAM_VOL
-2  PAN           → PARAM_PAN
-3  PITCH         → PARAM_PITCH        (semitones, ±12)
-4  FINE_PITCH    → PARAM_PITCH        (cents, value ÷ 100)
-5  FILTER_CUT    → PARAM_FILTER_CUT
-6  FILTER_RES    → PARAM_FILTER_RES
-7  SAMPLE_START  → PARAM_SAMPLE_START (0–255 normalized)
-8  DRIVE         → PARAM_DRIVE
-9  CRUSH         → PARAM_CRUSH
-10 DOWNSAMPLE    → PARAM_DOWNSAMPLE
-11 TABLE_VOL     → PARAM_TABLE_VOL
-12 TABLE_PITCH   → PARAM_TABLE_PITCH
-13 SAMPLE_END    → PARAM_SAMPLE_END
-14 LOOP_START    → PARAM_LOOP_START
-15 MOD0_AMP      → PARAM_MOD0_AMP
-16 MOD0_RATE     → PARAM_MOD0_RATE
-17 MOD1_AMP      → PARAM_MOD1_AMP
-18 MOD1_RATE     → PARAM_MOD1_RATE
-19 MOD2_AMP      → PARAM_MOD2_AMP
-20 MOD2_RATE     → PARAM_MOD2_RATE
-21 MOD3_AMP      → PARAM_MOD3_AMP
-22 MOD3_RATE     → PARAM_MOD3_RATE
-```
+Fixed routes never appear in the UI — they just exist and fire when the
+sequencer activates them. User routes are the 4 mod slots the user configures
+in the instrument screen. Nothing about the UI layout changes.
 
 ---
 
-## Per-Sample vs Per-Block
+## Per-Sample vs Per-Block (unchanged constraint)
 
-This is the trickiest constraint in the implementation.
-
-| Parameter | Update rate | Why |
+| Parameter | Update rate | Reason |
 |---|---|---|
-| VOL | **Per-sample** | Amplitude steps at block boundaries cause audible clicks |
-| PAN | Per-block | Stereo position change inaudible at ~5ms |
-| PITCH | Per-block | Pitch recalculated at block start via `getModulatedPlaybackRate()` |
-| FILTER_CUT / RES | Per-block | Biquad coefficient recalculation is cheap but not needed per-sample |
-| DRIVE / CRUSH / DOWNSAMPLE | Per-block | Effect strength change inaudible at ~5ms |
+| VOL | **Per-sample** | Block-boundary amplitude steps cause audible clicks |
+| All others | Per-block (~5ms) | Inaudible at this rate |
 
-**VOL special handling:**  
-VOL modulation must remain per-sample for click-free fades. The current
-interpolation (`prevEnvValue` → `envValue` over the block) must be preserved.
-
-Two options:
-1. Keep per-sample VOL loop separate, add `params.mod[PARAM_VOL]` as an
-   *additional* multiplier read once per block on top of the per-sample path.
-2. Route `tableVolume` into the per-sample loop as a third multiplier.
-
-**Recommended: option 2** — merge `tableVolume` into the mix-loop volume chain
-rather than fighting the per-sample vs per-block impedance mismatch.
+`PARAM_VOL` in `modDestValues[]` is computed once per block, then used as a
+*static multiplier on top of* the existing per-sample envelope interpolation.
+The per-sample VOL loop is preserved. `modDestValues[PARAM_VOL]` adds an extra
+scale factor on the `finalVol` calculation. This keeps click-free fades working.
 
 ---
 
 ## Implementation Phases
 
-### Phase 1 — Fix existing gaps (no new features, pure correctness)
+### Phase 1 — Source array infrastructure
 
-**Goal:** Make the system behave as the UAA comments already claim.
+**Goal:** Add `modSourceValues[]` and `modDestValues[]` arrays to voices.
+Wire all existing code to write/read through them.
 
-1. **Fix table volume (Vxx):**  
-   Instead of `voice.tableVolume = fxValue / 255f`, call  
-   `voice.params.addMod(PARAM_VOL_TABLE, delta)` — but since we're keeping
-   per-sample VOL, the simplest fix is: store a `tableVolumeTarget` and apply it
-   in the per-sample mix loop alongside the existing envelope chain.  
-   Remove the `* voice.tableVolume` multiplier at line 2029 and integrate it as
-   a fourth volume multiplier in the per-sample loop.
+1. Add `float modSourceValues[MOD_SRC_COUNT]` and `float modDestValues[PARAM_COUNT]`
+   to `Voice` and `SoundfontVoice`.
 
-2. **Route drive/crush/downsample through ParamBus:**  
-   At trigger time: `params.setBase(PARAM_DRIVE, instrParams.drive)`, etc.  
-   In the mix loop, read `params.get(PARAM_DRIVE)` instead of `voice.drive`.  
-   Enables future LFO/ADSR modulation of drive and crush.
-
-3. **Call updateVoiceModulation on sfVoices[]:**  
-   SF voices have `params` (ParamBus) and `voiceMods[]` but updateVoiceModulation
-   is never called for them.  
-   Add a second loop: `for sfVoices[t] if active → updateVoiceModulation()`.  
-   SF render path then reads `params.get(PARAM_PITCH)` and passes to
-   `applyPitchMod()` instead of its own state.
-
-4. **Unify pitch contributions into PARAM_PITCH:**  
-   Currently `getModulatedPlaybackRate()` merges two separate sources:
+2. At note-on, populate static sources:
    ```cpp
-   float pitchMod = voice.pitchOffset            // PSL/PBN/vibrato (state machine)
-                  + voice.params.get(PARAM_PITCH); // LFO/ADSR (ParamBus)
+   modSourceValues[MOD_SRC_VELOCITY] = note.volume;
+   modSourceValues[MOD_SRC_KEYTRACK] = (midiNote - rootMidi) / 12.0f;
+   modSourceValues[MOD_SRC_RANDOM]   = randomFloat();
    ```
-   Instead, the PSL/PBN/vibrato update loop should call
-   `addMod(PARAM_PITCH, delta)` each block alongside LFO/ADSR. The state
-   machines (slide target, rate, vibrato phase) are preserved — only the
-   *output* of each machine routes through the bus.  
-   `getModulatedPlaybackRate()` then reads only `params.get(PARAM_PITCH)`.  
-   **Benefit:** SF voices and future synths get PSL/PBN/vibrato for free, and
-   any mod slot can modulate vibrato depth via `MOD_N_AMP` targeting a vibrato
-   slot.
 
-5. **Route table row transpose through PARAM_TABLE_PITCH:**  
-   Instead of `voice.tableTranspose → direct playbackRate write`, each table
-   tick calls `addMod(PARAM_TABLE_PITCH, semitones)`. The pitch recalculation
-   in `getModulatedPlaybackRate()` includes `params.get(PARAM_TABLE_PITCH)`.
+3. Route existing `VoiceModSlot` evaluation through the new arrays:
+   - LFO/ADSR/AHD compute their value → write to `modSourceValues[MOD_SRC_LFO0 + i]`
+     or `modSourceValues[MOD_SRC_ENV0 + i]`
+   - Remove the current `addMod(dest, value)` call inside `updateVoiceModulation`
+   - Instead, the route processing loop handles `addMod` after all sources
+     have written their values
 
-**Files changed:** `native-audio.cpp` only.  
-**Risk:** Low. No new data structures, just routing corrections.  
-**Testing:** Table Vxx still works on sampler. SF notes respond to instrument
-mod slot LFO on pitch. PSL/PBN slides still function correctly.
+4. Call `processRoutes()` after all source values are updated, before mix loop.
+
+5. Mix loop and pitch calculation read from `modDestValues[]` instead of
+   `params.mod[]` directly. (`params.base[]` is still used for user-set
+   instrument defaults.)
+
+**Files:** `native-audio.cpp`  
+**Risk:** Medium — refactors `updateVoiceModulation` core, but behavior unchanged.
 
 ---
 
-### Phase 2 — Expand ParamBus and add PARAM_DRIVE/CRUSH/DOWNSAMPLE
+### Phase 2 — Route all bypass paths
 
-**Goal:** Make drive, crush, and downsample modulatable by existing mod slots.
+**Goal:** Make table effects, pitch slides, and vibrato write through the source
+array instead of directly to voice fields.
 
-1. Extend `ParamId` enum to 16 values (audio params + mod meta-params).
-2. Update `ParamBus` constructor with sensible defaults for new params.
-3. In `processAudioBlock` mix loop: read `params.get(PARAM_DRIVE)` etc. instead
-   of `voice.drive` directly.
-4. In `updateVoiceModulation`: add cases for destinations DRIVE, CRUSH,
-   DOWNSAMPLE that call `addMod()`.
+1. **Table Vxx:** `voice.tableVolume = x` → `voice.modSourceValues[MOD_SRC_TABLE_VOL] = x`
+2. **Table row transpose:** direct `playbackRate` write →
+   `voice.modSourceValues[MOD_SRC_TABLE_PITCH] = semitones`
+3. **PSL/PBN:** `pitchOffset` field → `voice.modSourceValues[MOD_SRC_PITCH_SLIDE] = offset`
+   (State machine logic unchanged; only the *output* routes through the array.)
+4. **PVB/PVX:** `vibratoPhase/Speed/Depth` state →
+   `voice.modSourceValues[MOD_SRC_VIBRATO] = sinf(phase) * depth`
 
-**Result:** You can now add a VoiceModSlot with `dest=DRIVE, type=LFO` and get
-tremolo-like drive modulation.
+All four become fixed routes (depth=1.0) from the source to `PARAM_PITCH` or
+`PARAM_VOL`. The `pitchOffset` field and `tableVolume` field are removed.
+`getModulatedPlaybackRate()` reads only `modDestValues[PARAM_PITCH]`.
 
-Also connect the sample point params:
-- `PARAM_SAMPLE_START` — `ModDest.SAMPLE_START` was already defined in Kotlin
-  but never implemented in C++. Now route it: mix-loop reads
-  `(int)(params.get(PARAM_SAMPLE_START) / 255f * sampleLength)` as dynamic
-  `actualStart`. Enables wavetable-style scanning when an LFO targets
-  `SAMPLE_START`.
-- `PARAM_SAMPLE_END` and `PARAM_LOOP_START` — same pattern. Makes loop point
-  modulation possible (morphing loop length with an envelope).
+**Result:** SF voices and future synths automatically receive table transpose,
+pitch slides, and vibrato — the route processing loop handles them the same as
+LFO or envelope, because all are just values in `modSourceValues[]`.
 
-These three are **sampler-only** params — SF voices ignore them (no-op in SF
-render path).
+**Files:** `native-audio.cpp`  
+**Risk:** Low — logic identical, only write target changes.
 
-**Files changed:** `native-audio.cpp`, `IAudioBackend.kt` (dest constants).  
+---
+
+### Phase 3 — Expand destination parameters
+
+**Goal:** Make drive, crush, downsample, and sample points modulatable.
+
+1. Extend `ParamId` to include `PARAM_DRIVE`, `PARAM_CRUSH`, `PARAM_DOWNSAMPLE`,
+   `PARAM_SAMPLE_START`, `PARAM_SAMPLE_END`, `PARAM_LOOP_START`.
+2. Set their base values from `InstrumentParams` at note-on:
+   `params.setBase(PARAM_DRIVE, instrParams.drive)` etc.
+3. Mix loop reads `params.base[PARAM_DRIVE] + modDestValues[PARAM_DRIVE]` for
+   actual drive value. Same for crush and downsample.
+4. `PARAM_SAMPLE_START`: mix loop reads `(int)(base + dest) / 255 * sampleLength`
+   as dynamic `actualStart` — enables wavetable-style LFO scanning.
+
+**Result:** Any existing LFO/ADSR can now target DRIVE or CRUSH just by changing
+`dest` in a route. No other code changes.
+
+**Files:** `native-audio.cpp`  
 **Risk:** Low.
 
 ---
 
-### Phase 3 — SCALAR module type
+### Phase 4 — SCALAR source type
 
-**Goal:** Add a static-value mod slot that behaves like a "constant modulation
-source." This is the "00–FF scale" concept.
+**Goal:** Add a source that outputs a constant 00–FF value every block.
 
-**Implementation:**
+`SCALAR` is a new source that writes a fixed value to `modSourceValues[MOD_SRC_LFOx]`
+(it reuses an LFO slot with `type=SCALAR`, since it is just a degenerate LFO
+that never oscillates). Implementation in `updateVoiceModulation`:
+
 ```cpp
-// In updateVoiceModulation, new case:
 case MOD_SCALAR:
-    if (mod.stage != 0) {  // stage=1 means active
-        // value is stored in mod.amount, already normalized to dest range
-        // effectiveAmt applies scaling from mod-to-mod
-        voice.params.addMod(paramId, mod.amount * mod.effectiveAmt);
-    }
+    mod.envValue = mod.amount;  // constant; no advance needed
     break;
 ```
 
-**SCALAR slot data:**
-- `type = 4` (SCALAR)
-- `amount` = the constant value (0.0–1.0 normalized, maps to destination range)
-- `dest` = any ParamId
-- `stage = 1` when active, `0` when disabled
-- Can be targeted by `MOD_N_AMP` from another slot to scale its contribution
+Then it writes to `modSourceValues` like any other type.
 
-**Use case example:**  
-Slot 0: `SCALAR, dest=FILTER_CUT, amount=0.5` → sets cutoff to midpoint  
-Slot 1: `LFO, dest=MOD0_AMP, rate=2Hz, amount=0.3` → makes cutoff oscillate
+**Use case:** "Always add +7 semitones to pitch" — a SCALAR mod slot with
+`source=LFO0 (type=SCALAR, value=7/12)` and `dest=PITCH`. Another route can
+`via=ENV0` to make the scalar fade in with an envelope.
 
-**Files changed:** `native-audio.cpp`, mod type constants in Kotlin.  
+**Data model:** New `type=SCALAR` constant in Kotlin `ModType`; new field
+`scalarValue: Int` in `InstrumentModSlot`. Existing saves deserialize
+unknown types as `NONE`.
+
+**Files:** `native-audio.cpp`, `TrackerData.kt`, mod type constants.  
 **Risk:** Low.
 
 ---
 
-### Phase 4 — Formal mod-to-mod via ParamBus meta-params
+### Phase 5 — SF and future voices read modDestValues[]
 
-**Goal:** Replace the current `effectiveAmt` / `effectiveRateMult` fields with
-values read from `params.get(PARAM_MOD_N_AMP/RATE)`. This makes mod-to-mod
-routing go through the same bus as everything else.
+**Goal:** `SoundfontVoice` reads `modDestValues[]` for all parameters,
+making every modulation source automatically work with SF2 instruments.
 
-**Current system (problematic):**  
-`updateVoiceModulation` iterates slots in order, accumulates `effectiveAmt` and
-`effectiveRateMult` directly on the target slot's fields. This is a two-pass hack
-inside a single function.
+1. Move `VoiceModSlot voiceMods[4]` up to `IAudioVoice` base (or a shared
+   struct), so `updateVoiceModulation()` runs identically for sampler and SF.
+2. `SoundfontVoice::applyPitchMod()` reads
+   `params.base[PARAM_PITCH] + modDestValues[PARAM_PITCH]` for total pitch offset.
+3. SF volume reads `params.base[PARAM_VOL] * (1 + modDestValues[PARAM_VOL])`.
+4. Drive/crush/downsample applied post-render on SF output buffer.
 
-**New system:**
+**Result:** An ADSR targeting VOL works on SF instruments with zero SF-specific
+code. Table transpose, pitch slides, vibrato — all arrive via fixed routes
+already written by Phase 2.
 
-Pass 1 (meta-param slots): Process slots whose `dest` is `MOD_N_AMP` or
-`MOD_N_RATE`. These write to `params.mod[PARAM_MOD_N_*]`.
-
-Pass 2 (audio param slots): Process remaining slots. Each slot reads its
-effective amplitude as:
-```cpp
-float slotBase = mod.amount;  // user-set depth
-float slotScale = params.get(PARAM_MOD_N_AMP);  // contribution from pass 1
-float effective = slotBase * slotScale;
-params.addMod(audioParamId, modValue * effective);
-```
-
-**Cycle prevention:** A slot targeting `MOD_N_AMP` where N = its own slot index
-is ignored (self-modulation disabled). Deeper cycles (0→1→0) are prevented by
-the two-pass ordering: meta-param slots always run first.
-
-**Result:** One LFO can modulate the rate or amplitude of any other slot by
-targeting `MOD_N_AMP` / `MOD_N_RATE`, and this works uniformly for all module
-types.
-
-**Files changed:** `native-audio.cpp`, `updateVoiceModulation` function.  
-**Risk:** Medium. Ordering change could affect existing instruments.  
-**Mitigation:** Test with existing mod slot configurations. The two-pass approach
-should be backward-compatible since pass-1 slots were already handled first
-implicitly.
-
----
-
-### Phase 5 — VoiceModSlot on SoundfontVoice
-
-**Goal:** SF instruments get the same 4 mod slots as sampler, so all modulation
-sources automatically work with SF2.
-
-**Current state:** `SoundfontVoice` has `params` (ParamBus) but no `voiceMods[]`.
-
-**Implementation:**
-1. Move `VoiceModSlot voiceMods[4]` up to `IAudioVoice`.
-2. `updateVoiceModulation()` signature takes `IAudioVoice&` (or a shared
-   base struct), runs the same loop for both voice types.
-3. `SoundfontVoice` render path reads `params.get(PARAM_PITCH)` and feeds to
-   `applyPitchMod()`. Reads `params.get(PARAM_VOL)` for per-block volume scale.
-4. Drive/crush/downsample on SF are applied post-render (to the SF output buffer
-   before mixing), not per-sample.
-
-**Result:** Assigning an ADSR to `dest=PITCH` works on SF instruments without
-any SF-specific code.
-
-**Files changed:** `native-audio.cpp` (significant refactor of IAudioVoice,
-Voice, SoundfontVoice).  
-**Risk:** Medium-high. Biggest structural change in this plan.  
-**Mitigation:** Implement Phase 1–4 first. Phase 5 is independent and can be
-deferred without blocking the other phases.
-
----
-
-### Phase 6 — UI Shell (modulation matrix)
-
-**Goal:** A unified UI that lets the user configure all 4 mod slots for an
-instrument and see the parameter routing clearly.
-
-**Design:**
-
-The instrument screen gains a "MOD" section (separate scroll region or tab).
-
-```
-┌──────────────────────────────────────────────────┐
-│ MOD MATRIX                                        │
-│                                                   │
-│ SLOT  TYPE    DEST      VALUE   RATE    DEPTH     │
-│  0    LFO     PITCH     ---     4 Hz    0.5       │
-│  1    ADSR    VOL       ---     A2/D4   1.0       │
-│  2    SCALAR  FILTER_CUT 80     ---     1.0       │
-│  3    LFO     MOD0_AMP  ---     0.1Hz   0.8       │
-└──────────────────────────────────────────────────┘
-```
-
-Cursor navigation: DPAD moves between cells. A+DPAD edits value.  
-TYPE cycles through: NONE → AHD → ADSR → LFO → SCALAR  
-DEST cycles through all ParamId values (shown as human-readable names)
-
-**00–FF display:** All values shown in hex (00–FF) as is standard in trackers.
-`DEPTH 0x80` = 50% modulation depth. `SCALAR VALUE 0xFF` = full-scale.
-
-**Live display:** During playback, show current `params.get(paramId)` as a
-small bar to the right of each DEST label. This makes modulation visible.
-
-**Files changed:** `InstrumentModule.kt`, `TrackerData.kt` (if mod slot data
-moves to serialized instrument), `InstrumentController.kt`.  
-**Risk:** Medium (UI complexity). Can be done incrementally — show existing mod
-slots first, then add SCALAR, then add live display.
+**Files:** `native-audio.cpp` (significant IAudioVoice, Voice, SoundfontVoice change).  
+**Risk:** Medium-high. Implement last, after Phases 1–4 are tested.
 
 ---
 
 ## What Does NOT Change
 
-These stay as sequencer-level operations, not modulation sources:
+### Sequencer-level effects (no phase handles these — they stay as-is)
 
-- **Arpeggio (Axx)** — schedules new noteOn events at different pitches
+These schedule *events*, not continuous parameter changes. They are not
+value-changing modules.
+
+- **Arpeggio (Axx)** — schedules new noteOn calls at different pitches
 - **Repeat (Rxx)** — schedules retrigger events
 - **Kill (Kxx)** — schedules voice stop
-- **HOP (Hxx), TIC (Txx), THO** — table flow control
-- **PSL / PBN / PVB / PVX** — pitch state machines (persist across blocks, not
-  accumulated in mod[])
+- **HOP / TIC / THO** — table row flow control
+- **Table Oxx** — sample position seek (one-shot, not continuous modulation)
 
-These are "time-domain" effects that change what notes exist, not "value
-domain" effects that modulate a running voice's parameters.
+### The UI
 
----
-
-## Data Model Impact
-
-`VoiceModSlot` is currently serialized as part of `Instrument` (via Kotlin data
-classes). Adding SCALAR type requires:
-
-- New `type` constant (4) in Kotlin `ModSlotType` enum/object
-- New field `scalarValue: Int` (0–255) in `InstrumentModSlot` data class
-- Existing saved projects will deserialize with `type=SCALAR` as `NONE` (safe
-  default when unknown type is deserialized)
+The instrument screen (mod slot editor) looks and behaves identically. The 4
+slots still show TYPE / DEST / VALUE / RATE / DEPTH. The only future-facing
+addition would be a `VIA` column for the via-source, which is optional and can
+be added whenever it's useful without architectural changes.
 
 ---
 
-## Recommended Implementation Order
+## Data Model Changes Summary
+
+| Change | Location | Backward compat |
+|---|---|---|
+| Add `modSourceValues[16]` + `modDestValues[11]` to Voice | `native-audio.cpp` | Internal only |
+| New `ModSourceId` enum | `native-audio.cpp` | Internal only |
+| Remove `pitchOffset`, `tableVolume`, `tableTranspose` fields | `native-audio.cpp` | Internal only |
+| Add `PARAM_DRIVE/CRUSH/etc.` to `ParamId` | `native-audio.cpp` | Internal only |
+| New `type=SCALAR` in `ModType` | `TrackerData.kt` | Unknown types → NONE |
+| Add `scalarValue: Int` to `InstrumentModSlot` | `TrackerData.kt` | Defaults to 0 |
+| `ModRoute` struct replacing `VoiceModSlot` destination mapping | `native-audio.cpp` | Internal only |
+
+Saved `.ptp` project files are unaffected except for the SCALAR field (safe default).
+
+---
+
+## Implementation Order
 
 ```
-Phase 1  →  Phase 2  →  Phase 3  →  Phase 6 (UI)
-                ↓
-            Phase 4  →  Phase 5
+Phase 1 (source arrays + route loop infrastructure)
+    ↓
+Phase 2 (route bypass paths: table, PSL/PBN, vibrato)
+    ↓
+Phase 3 (expand ParamId: drive, crush, sample points)
+    ↓
+Phase 4 (SCALAR source type)
+    ↓
+Phase 5 (SF parity — defer until 1–4 tested on hardware)
 ```
 
-Phases 1–3 + 6 are a coherent MVP deliverable: all existing effects properly
-routed, drive/crush modulatable, scalar type available in UI.
-
-Phases 4–5 are the "deep" mod-to-mod and SF-parity work — higher value but
-higher risk, best done after the simpler phases are tested.
+Phases 1–4 are the complete MVP. After Phase 4 the architecture fully satisfies
+the "anything connects to anything" property for sampler instruments. Phase 5
+extends it to SF2 and, by the same pattern, to any future synth voice.
 
 ---
 
-## Risk Summary
+## Reference Designs
 
-| Risk | Likelihood | Impact | Mitigation |
-|---|---|---|---|
-| Per-sample VOL click regression | Medium | High | Preserve existing VOL interpolation, only add tableVolume to the chain |
-| SF crash on Miyoo Flip (1GB RAM) | Low | High | Phase 5 adds no new allocations — modsSlots are stack-allocated |
-| Backward compat on serialized mods | Low | Medium | New type=SCALAR deserializes as NONE on old builds |
-| Mod ordering change breaks presets | Low | Low | Two-pass is compatible with current single-pass behavior |
-| Circular mod-to-mod | Low | Medium | Prevent by design: slot N cannot target MOD_N_AMP |
+| System | Key pattern borrowed |
+|---|---|
+| **SunVox 1.3b** | Control signals are plain values, separate from audio signal path; modules are opaque state blobs + function pointer |
+| **Surge XT** | Fixed routes (always-on) vs user routes (configurable); per-voice vs scene-level source distinction |
+| **Polyhedrus (Serum-style)** | `modSourceValues[]` + `modDestValues[]` two-array pattern; `ViaSource` formula for depth modulation without meta-params |
+| **VCV Rack** | 1-sample delay between write and read = no graph traversal needed; process sources first, then accumulate, then synthesize |
