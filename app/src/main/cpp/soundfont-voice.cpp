@@ -117,3 +117,14 @@ void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
     tsf_channel_set_pitchrange(h, _trackId, PITCH_RANGE);
     tsf_channel_set_pitchwheel(h, _trackId, pitchWheel);
 }
+
+// ── TSF internal-access helper ──────────────────────────────────────────────
+// TSF_IMPLEMENTATION is defined above, so the full tsf struct is visible here.
+// jni-bridge.cpp uses the forward-declared opaque tsf*, so it can't access members directly.
+
+bool tsf_get_preset_at(tsf* f, int index, int* bank, int* preset_number) {
+    if (!f || index < 0 || index >= f->presetNum) return false;
+    *bank          = f->presets[index].bank;
+    *preset_number = f->presets[index].preset;
+    return true;
+}

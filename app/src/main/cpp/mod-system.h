@@ -47,6 +47,73 @@ struct ParamBus {
 };
 
 // ===================================
+// MODULE SYSTEM — Source/Destination arrays (Phase 1)
+// ===================================
+// Two-array pattern (Polyhedrus / Surge XT):
+//   modSourceValues[] — every modulation source writes its current value here once per block.
+//   modDestValues[]   — processRoutes() accumulates weighted source values into destinations.
+//   Sound modules read only from modDestValues[]. Sources never know what they're modulating.
+//
+// Adding a new source: add one enum entry, write to modSourceValues[]. Nothing else changes.
+// Adding a new destination: add one enum entry to ParamId, read from modDestValues[].
+// The processRoutes loop below never changes.
+
+enum ModSourceId {
+    MOD_SRC_NONE = 0,  // Always 0.0f — used as via=NONE placeholder
+
+    // Per-voice dynamic sources (state machine advances each audio block)
+    MOD_SRC_ENV0, MOD_SRC_ENV1, MOD_SRC_ENV2, MOD_SRC_ENV3,  // AHD / ADSR / DRUM / TRIG types
+    MOD_SRC_LFO0, MOD_SRC_LFO1, MOD_SRC_LFO2, MOD_SRC_LFO3,  // LFO type
+
+    // Per-note static sources (captured at note-on, constant for the note's lifetime)
+    MOD_SRC_VELOCITY,  // 0.0–1.0  (note volume proxies velocity)
+    MOD_SRC_KEYTRACK,  // (midiNote − 60) / 12.0, bipolar
+    MOD_SRC_RANDOM,    // random 0.0–1.0 sampled at note-on
+
+    // Sequencer-driven sources — written each block by table/pitch state machines (Phase 2)
+    MOD_SRC_TABLE_VOL,    // 0.0–1.0 from table row Vxx column
+    MOD_SRC_TABLE_PITCH,  // semitones from table row transpose column
+    MOD_SRC_PITCH_SLIDE,  // semitones from PSL / PBN state machine
+    MOD_SRC_VIBRATO,      // −1..+1 sine from PVB / PVX state machine
+
+    MOD_SRC_COUNT  // = 16
+};
+
+// ModRoute — a single weighted connection from one source to one destination.
+//   depth     : signed scale applied to the source value (±1.0 typical).
+//   via       : optional secondary modulator; MOD_SRC_NONE = unused.
+//   viaAmount : 0.0 = ignore via completely; 1.0 = via fully controls effective depth.
+// Formula (Polyhedrus ApplyRoute):
+//   val = source * ((1 − viaAmount) + via * viaAmount)
+//   modDestValues[dest] += val * depth
+struct ModRoute {
+    ModSourceId source;
+    ParamId     dest;
+    float       depth;
+    ModSourceId via;       // MOD_SRC_NONE if unused
+    float       viaAmount; // 0.0 if unused
+};
+
+// Process all routes: zero dstValues, then accumulate weighted source contributions.
+// srcValues : modSourceValues[MOD_SRC_COUNT] — filled this block by state machines.
+// dstValues : modDestValues[PARAM_COUNT]     — receives accumulated mod deltas.
+inline void processRoutes(
+    const float*    srcValues,
+    float*          dstValues,
+    const ModRoute* routes,
+    int             routeCount)
+{
+    memset(dstValues, 0, sizeof(float) * PARAM_COUNT);
+    for (int i = 0; i < routeCount; i++) {
+        if (routes[i].source == MOD_SRC_NONE) continue;
+        float src = srcValues[routes[i].source];
+        float via = srcValues[routes[i].via];  // 0.0 when via == MOD_SRC_NONE
+        float val = src * ((1.0f - routes[i].viaAmount) + via * routes[i].viaAmount);
+        dstValues[routes[i].dest] += val * routes[i].depth;
+    }
+}
+
+// ===================================
 // IAUDIOVOICE — unified voice interface (UAA Phase 1)
 // ===================================
 // All concrete voice types (sampler, soundfont, future synths) implement this.

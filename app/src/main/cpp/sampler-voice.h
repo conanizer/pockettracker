@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include <cstdlib>
 #include <algorithm>
 #include "mod-system.h"
 #include "filter.h"
@@ -120,6 +121,22 @@ struct Voice : public IAudioVoice {
     // modPitchOffset, basePan, modPanOffset, modCutOffset, modResOffset removed (UAA Phase 2a).
     // These are now params.mod[PARAM_PITCH/PAN/FILTER_CUT/FILTER_RES] and params.base[PARAM_PAN].
 
+    // ── Module system arrays (Phase 1) ─────────────────────────────────────
+    // modSourceValues[] — each state machine writes its output here once per block.
+    //   Dynamic sources (ENV/LFO slots) are cleared at the top of updateVoiceModulation.
+    //   Static sources (VELOCITY/KEYTRACK/RANDOM) are set at note-on and kept until next note.
+    //   Phase 2 writes TABLE_VOL/PITCH/PITCH_SLIDE/VIBRATO from their respective state machines.
+    // modDestValues[]     — processRoutes() accumulates weighted source values here.
+    // prevModDestValues[] — snapshot of modDestValues at start of each block (for sub-block interpolation).
+    float modSourceValues[MOD_SRC_COUNT]{};
+    float modDestValues[PARAM_COUNT]{};
+    float prevModDestValues[PARAM_COUNT]{};
+
+    // Static note-on sources (captured at trigger, constant for note's lifetime)
+    float noteVelocity = 0.0f;  // 0.0–1.0 (note volume proxies velocity)
+    float noteKeytrack = 0.0f;  // (midiNote − 60) / 12.0, bipolar
+    float noteRandom   = 0.0f;  // random 0.0–1.0
+
     // Voice-steal fade-out: instead of a hard cut, fade over DECLICK_SAMPLES frames
     int fadeOutRemaining;  // Counts down from DECLICK_SAMPLES to 0 during fade-out
     bool isFadingOut;      // true while the voice-steal fade-out is active
@@ -230,6 +247,24 @@ struct Voice : public IAudioVoice {
         params.setBase(PARAM_FILTER_CUT, (float)filterCut);
         params.setBase(PARAM_FILTER_RES, (float)filterRes);
         params.resetMods();
+
+        // Capture static mod sources at note-on (constant for this note's lifetime).
+        noteVelocity  = vol;
+        int midiNote  = (octave + 1) * 12 + pitch;
+        noteKeytrack  = (float)(midiNote - 60) / 12.0f;
+        noteRandom    = (float)(rand() & 0xFFFF) / 65535.0f;
+
+        // Clear all source values; then write static ones.
+        // Dynamic slots (ENV/LFO) will be written each block by updateVoiceModulation.
+        memset(modSourceValues, 0, sizeof(modSourceValues));
+        modSourceValues[MOD_SRC_VELOCITY] = noteVelocity;
+        modSourceValues[MOD_SRC_KEYTRACK] = noteKeytrack;
+        modSourceValues[MOD_SRC_RANDOM]   = noteRandom;
+        // modSourceValues[MOD_SRC_NONE] remains 0.0f — required by processRoutes via=NONE path.
+
+        // Clear destination arrays for this note.
+        memset(modDestValues,     0, sizeof(modDestValues));
+        memset(prevModDestValues, 0, sizeof(prevModDestValues));
 
         // Store note identity for note monitor display and special TIC modes
         noteOctave = std::max(0, std::min(octave, 9));

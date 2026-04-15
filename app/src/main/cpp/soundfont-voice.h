@@ -126,3 +126,8 @@ struct SoundfontVoice : public IAudioVoice {
         trackVolume = 1.0f;
     }
 };
+
+// Helper: get bank and preset_number for a preset at the given index.
+// Defined in soundfont-voice.cpp where TSF_IMPLEMENTATION is active (full tsf struct visible).
+// Returns true on success, false if f is null or index is out of range.
+bool tsf_get_preset_at(tsf* f, int index, int* bank, int* preset_number);
