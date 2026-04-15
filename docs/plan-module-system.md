@@ -328,6 +328,76 @@ single focused file rather than one 3700-line monolith.
 
 ## Implementation Phases
 
+### Phase 0 — Split native-audio.cpp into separate files
+
+**Goal:** Break the 3700-line monolith into focused files before any logic
+changes. Purely mechanical — no behavior changes, no new functionality.
+
+**Why first:** Each later phase will touch only one or two focused files instead
+of hunting through a 3700-line file. The portability boundary (no Android imports
+in audio logic) is enforced automatically by file structure.
+
+**Current state (partial — interrupted mid-split):**
+
+Files already written:
+- `filter.h` — biquad math (lines 48–125) ✅
+- `audio-defs.h` — log macros, MAX_VOICES, DECLICK_SAMPLES, FX_* constants ✅
+- `note-queue.h` — ScheduledNote, ScheduledKill, NoteQueue, KillQueue, InstrumentParams, InstrumentModSlot, TableRow, Table, transposeToSemitones, SoundfontEntry, soundfonts[] extern ✅
+- `mod-system.h` — ParamId, ParamBus, IAudioVoice ✅
+- `sampler-voice.h` — Voice struct with VoiceModSlot nested, all Voice methods inline ✅
+- `soundfont-voice.h` — SoundfontVoice class ✅
+- `soundfont-voice.cpp` — TSF_IMPLEMENTATION, soundfonts[] definition, SoundfontVoice method bodies ✅
+- `audio-engine.h` — AudioEngine class declaration, extern SoundfontVoice sfVoices[8] ✅
+
+Files still needed:
+- `audio-engine.cpp` — SoundfontVoice sfVoices[8] definition + all AudioEngine
+  method bodies as `AudioEngine::methodName()` out-of-class definitions
+- `jni-bridge.cpp` — `static AudioEngine* engine = nullptr` + all JNIEXPORT functions
+
+**Steps to complete Phase 0:**
+
+1. Write `audio-engine.cpp`:
+   ```cpp
+   #include "audio-engine.h"
+   #include "tsf.h"  // full API declarations (no TSF_IMPLEMENTATION)
+
+   SoundfontVoice sfVoices[8];
+
+   AudioEngine::AudioEngine() { ... }       // lines 1113–1128
+   AudioEngine::~AudioEngine() { ... }      // lines 1130–1137
+   bool AudioEngine::openStream() { ... }   // lines 1139–1203
+   void AudioEngine::closeStream() { ... }  // lines 1205–1211
+   // ... all methods from lines 1109–3002, strip default param values from defs
+   ```
+   Key: default parameter values (e.g. `float pan = 0.5f`, `int releaseSamples = 0`)
+   must NOT be repeated in the `.cpp` definitions — only in the `.h` declarations.
+
+2. Write `jni-bridge.cpp`:
+   ```cpp
+   #include <jni.h>
+   #include "audio-engine.h"
+   #include "tsf.h"
+
+   static AudioEngine* engine = nullptr;
+
+   extern "C" {
+   // ... all JNIEXPORT functions verbatim from lines 3006–3699
+   }
+   ```
+
+3. Empty `native-audio.cpp` (replace with a comment) to avoid duplicate symbols
+   when all three new `.cpp` files compile alongside it.
+
+4. Update `CMakeLists.txt` — add `soundfont-voice.cpp`, `audio-engine.cpp`,
+   `jni-bridge.cpp` to the `add_library` source list; remove or stub
+   `native-audio.cpp`.
+
+**Files:** `audio-engine.cpp` (new), `jni-bridge.cpp` (new), `native-audio.cpp`
+(empty stub), `CMakeLists.txt`  
+**Risk:** Low — mechanical move, no logic changes. Verify build after step 4.
+
+---
+
 ### Phase 1 — Source array infrastructure
 
 **Goal:** Add `modSourceValues[]` and `modDestValues[]` arrays to voices.
