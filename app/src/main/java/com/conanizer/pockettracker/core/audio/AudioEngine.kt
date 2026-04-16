@@ -684,6 +684,33 @@ class AudioEngine(
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // SF2 OVERRIDE HELPERS (Phase 8)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Apply SFOverrides.ampAttack/Decay/Sustain/Release to TSF regions.
+     * Call after SF2 loads or when any override field changes.
+     */
+    fun applySoundfontEnvelopeOverrides(instrument: Instrument) {
+        val slot = instrument.sampleId
+        val ov = instrument.sfOverrides
+        backend.setSoundfontEnvelopeOverrides(slot, instrument.sfBank, instrument.sfPreset,
+            ov.ampAttack, ov.ampDecay, ov.ampSustain, ov.ampRelease)
+    }
+
+    /**
+     * Apply SFOverrides.filterCut/filterRes to the instrument's instrParams in C++.
+     * -1 = bypass Phase-7 filter (filterType=off). 0-255 = LP filter at that value.
+     */
+    fun applySoundfontFilterOverrides(instrument: Instrument) {
+        val ov = instrument.sfOverrides
+        val filterType = if (ov.filterCut >= 0) 1 else 0  // 1=LP, 0=off
+        val filterCut  = if (ov.filterCut >= 0) ov.filterCut else 255
+        val filterRes  = if (ov.filterRes >= 0) ov.filterRes else 0
+        backend.setSoundfontFilterOverrides(instrument.sampleId, filterType, filterCut, filterRes)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // TABLE SUPPORT (Phase 3.5)
     // ═══════════════════════════════════════════════════════════════════════════
 

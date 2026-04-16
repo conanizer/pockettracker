@@ -592,6 +592,10 @@ class InstrumentController(
             instrument.sfPreset = firstPreset[1]
         }
 
+        // Apply any stored overrides to the freshly-loaded TSF preset regions
+        audioEngine.applySoundfontEnvelopeOverrides(instrument)
+        audioEngine.applySoundfontFilterOverrides(instrument)
+
         val name = filePath.substringAfterLast('/').substringBeforeLast('.')
         setStatus("SF LOADED: $name", success = true)
     }
@@ -684,6 +688,35 @@ class InstrumentController(
         )
     }
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // SF2 Override Parameters (Phase 8)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    fun updateSfAttack(instrument: Instrument, value: Int) {
+        instrument.sfOverrides = instrument.sfOverrides.copy(ampAttack = value)
+        audioEngine.applySoundfontEnvelopeOverrides(instrument)
+    }
+    fun updateSfDecay(instrument: Instrument, value: Int) {
+        instrument.sfOverrides = instrument.sfOverrides.copy(ampDecay = value)
+        audioEngine.applySoundfontEnvelopeOverrides(instrument)
+    }
+    fun updateSfSustain(instrument: Instrument, value: Int) {
+        instrument.sfOverrides = instrument.sfOverrides.copy(ampSustain = value)
+        audioEngine.applySoundfontEnvelopeOverrides(instrument)
+    }
+    fun updateSfRelease(instrument: Instrument, value: Int) {
+        instrument.sfOverrides = instrument.sfOverrides.copy(ampRelease = value)
+        audioEngine.applySoundfontEnvelopeOverrides(instrument)
+    }
+    fun updateSfFilterCut(instrument: Instrument, value: Int) {
+        instrument.sfOverrides = instrument.sfOverrides.copy(filterCut = value)
+        audioEngine.applySoundfontFilterOverrides(instrument)
+    }
+    fun updateSfFilterRes(instrument: Instrument, value: Int) {
+        instrument.sfOverrides = instrument.sfOverrides.copy(filterRes = value)
+        audioEngine.applySoundfontFilterOverrides(instrument)
+    }
+
     /**
      * Change the instrument type. Clears sound-source metadata for the old type.
      */
@@ -749,6 +782,7 @@ class InstrumentController(
         instrument.tableTicRate    = src.tableTicRate
         instrument.sfBank          = src.sfBank
         instrument.sfPreset        = src.sfPreset
+        instrument.sfOverrides     = src.sfOverrides
         instrument.modSlots        = src.modSlots.copyOf()
 
         // Load table data if embedded — always into the destination instrument's own table slot
@@ -798,6 +832,8 @@ class InstrumentController(
                                 instrument.sfPreset = firstPreset[1]
                             }
                         }
+                        audioEngine.applySoundfontEnvelopeOverrides(instrument)
+                        audioEngine.applySoundfontFilterOverrides(instrument)
                         setStatus("LOADED: ${src.name}", true)
                     }
                 } else {

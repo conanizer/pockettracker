@@ -316,6 +316,22 @@ data class Track(
 @Serializable
 enum class InstrumentType { SAMPLER, SOUNDFONT }
 
+/**
+ * SF2 envelope/filter overrides (per-instrument, static customization of TSF preset).
+ * -1 = use SF2 preset default; 0-255 = override.
+ * Envelope: 0=instant (~0.001s), 255=long (~10s). Sustain: 0=silence, 255=full.
+ * Filter: same 0-255 scale as sampler filterCut/filterRes; -1 = bypass Phase-7 filter.
+ */
+@Serializable
+data class SFOverrides(
+    val ampAttack:  Int = -1,
+    val ampDecay:   Int = -1,
+    val ampSustain: Int = -1,
+    val ampRelease: Int = -1,
+    val filterCut:  Int = -1,
+    val filterRes:  Int = -1
+)
+
 // Instrument definition
 @Serializable
 data class Instrument(
@@ -359,7 +375,10 @@ data class Instrument(
     // SoundFont-specific fields (only used when instrumentType == SOUNDFONT)
     var soundfontPath: String? = null,  // Absolute path to .sf2 or .sf3 file
     var sfBank: Int = 0,               // Bank number (0-127)
-    var sfPreset: Int = 0              // Program/preset number (0-127)
+    var sfPreset: Int = 0,             // Program/preset number (0-127)
+
+    // SF2 preset parameter overrides (only used when instrumentType == SOUNDFONT)
+    var sfOverrides: SFOverrides = SFOverrides()
 )
 
 /**

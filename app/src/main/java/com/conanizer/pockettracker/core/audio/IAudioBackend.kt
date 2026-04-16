@@ -545,6 +545,20 @@ interface IAudioBackend {
     )
 
     /**
+     * Apply SF2 envelope overrides by patching TSF preset regions directly.
+     * Pass -1 for any field to keep the SF2 preset's built-in value.
+     * atk/dec/rel: 0-255 → ~0.001s-10s (exponential). sus: 0-255 → 0.0-1.0 gain.
+     */
+    fun setSoundfontEnvelopeOverrides(sfSlot: Int, bank: Int, preset: Int,
+                                      atk: Int, dec: Int, sus: Int, rel: Int)
+
+    /**
+     * Apply SF2 filter override by updating the instrument's instrParams in C++.
+     * filterType: 0=off, 1=lp, 2=hp, 3=bp. filterCut/filterRes: 0-255.
+     */
+    fun setSoundfontFilterOverrides(sampleId: Int, filterType: Int, filterCut: Int, filterRes: Int)
+
+    /**
      * Free the memory used by a soundfont slot.
      */
     fun unloadSoundfont(sfSlot: Int)

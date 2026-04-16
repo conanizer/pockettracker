@@ -252,6 +252,55 @@ class InstrumentModule : TrackerModule {
                 spacing = CHAR_SPACING,
                 fontScale = FONT_SCALE
             )
+            rowY += ROW_HEIGHT
+            currentRow++
+
+            // ─────────────────────────────────────
+            // ROW 9: ATK + DEC (SF2 envelope overrides)
+            // ─────────────────────────────────────
+            val ov = instrument.sfOverrides
+            val atkStr = if (ov.ampAttack  < 0) "--" else ov.ampAttack.toString(16).padStart(2,'0').uppercase()
+            val decStr = if (ov.ampDecay   < 0) "--" else ov.ampDecay.toString(16).padStart(2,'0').uppercase()
+            drawDualParameterRow(
+                x = x, y = rowY, scale = scale,
+                nameColumnX = nameColumnX, valueColumnX = valueColumnX,
+                param1Name = "ATK", param1Value = atkStr,
+                param2Name = "DEC", param2Value = decStr,
+                cursorRow = instrumentState.cursorRow, cursorColumn = instrumentState.cursorColumn,
+                currentRow = currentRow
+            )
+            rowY += ROW_HEIGHT
+            currentRow++
+
+            // ─────────────────────────────────────
+            // ROW 10: SUS + REL
+            // ─────────────────────────────────────
+            val susStr = if (ov.ampSustain < 0) "--" else ov.ampSustain.toString(16).padStart(2,'0').uppercase()
+            val relStr = if (ov.ampRelease < 0) "--" else ov.ampRelease.toString(16).padStart(2,'0').uppercase()
+            drawDualParameterRow(
+                x = x, y = rowY, scale = scale,
+                nameColumnX = nameColumnX, valueColumnX = valueColumnX,
+                param1Name = "SUS", param1Value = susStr,
+                param2Name = "REL", param2Value = relStr,
+                cursorRow = instrumentState.cursorRow, cursorColumn = instrumentState.cursorColumn,
+                currentRow = currentRow
+            )
+            rowY += ROW_HEIGHT
+            currentRow++
+
+            // ─────────────────────────────────────
+            // ROW 11: CUT + RES (SF2 filter overrides)
+            // ─────────────────────────────────────
+            val cutStr = if (ov.filterCut < 0) "--" else ov.filterCut.toString(16).padStart(2,'0').uppercase()
+            val resStr = if (ov.filterRes < 0) "--" else ov.filterRes.toString(16).padStart(2,'0').uppercase()
+            drawDualParameterRow(
+                x = x, y = rowY, scale = scale,
+                nameColumnX = nameColumnX, valueColumnX = valueColumnX,
+                param1Name = "CUT", param1Value = cutStr,
+                param2Name = "RES", param2Value = resStr,
+                cursorRow = instrumentState.cursorRow, cursorColumn = instrumentState.cursorColumn,
+                currentRow = currentRow
+            )
         } else {
             // SAMPLER: DRIVE+FILTER (row 7), CRUSH+CUT (row 8), DWNSMPL+RES (row 9), SPACER (row 10), then sample params
             val driveHex = instrument.drive.toString(16).padStart(2, '0').uppercase()
@@ -743,9 +792,12 @@ class InstrumentModule : TrackerModule {
      * - Row 13: REV
      * - Row 14: LOOP
      * - Row 15: LOOP ST
-     * SOUNDFONT only (rows 7-8):
+     * SOUNDFONT only (rows 7-11):
      * - Row 7:  BANK + PRESET (dual: 1=BANK, 3=PRESET)
      * - Row 8:  PRESET NAME (read-only)
+     * - Row 9:  ATK + DEC (SF2 envelope overrides, -1=default)
+     * - Row 10: SUS + REL (SF2 envelope overrides, -1=default)
+     * - Row 11: CUT + RES (SF2 filter override via Phase-7 biquad, -1=bypass)
      */
     fun getCursorContext(state: InstrumentState): CursorContext {
         val isSoundFont = state.instrument.instrumentType == InstrumentType.SOUNDFONT
@@ -817,8 +869,21 @@ class InstrumentModule : TrackerModule {
                 }
             }
             9 -> {
-                if (isSoundFont) return CursorContextFactory.none()  // no row 9 for soundfont
-                // DWNSMPL + RES
+                if (isSoundFont) {
+                    // ATK + DEC (SF2 envelope overrides)
+                    val ov = state.instrument.sfOverrides
+                    when (state.cursorColumn) {
+                        0, 2 -> return CursorContextFactory.readOnly()
+                        1 -> return CursorContextFactory.hexByte(
+                            if (ov.ampAttack < 0) 0 else ov.ampAttack,
+                            emptyValue = -1, canDelete = ov.ampAttack >= 0, canInsert = ov.ampAttack < 0)
+                        3 -> return CursorContextFactory.hexByte(
+                            if (ov.ampDecay < 0) 0 else ov.ampDecay,
+                            emptyValue = -1, canDelete = ov.ampDecay >= 0, canInsert = ov.ampDecay < 0)
+                        else -> return CursorContextFactory.none()
+                    }
+                }
+                // DWNSMPL + RES (SAMPLER)
                 when (state.cursorColumn) {
                     0, 2 -> return CursorContextFactory.readOnly()
                     1 -> return CursorContextFactory.hexNibble(state.instrument.downsample)
@@ -826,9 +891,38 @@ class InstrumentModule : TrackerModule {
                     else -> return CursorContextFactory.none()
                 }
             }
-            10 -> return CursorContextFactory.none()  // SPACER (SAMPLER) or unused
+            10 -> {
+                if (isSoundFont) {
+                    // SUS + REL (SF2 envelope overrides)
+                    val ov = state.instrument.sfOverrides
+                    when (state.cursorColumn) {
+                        0, 2 -> return CursorContextFactory.readOnly()
+                        1 -> return CursorContextFactory.hexByte(
+                            if (ov.ampSustain < 0) 0 else ov.ampSustain,
+                            emptyValue = -1, canDelete = ov.ampSustain >= 0, canInsert = ov.ampSustain < 0)
+                        3 -> return CursorContextFactory.hexByte(
+                            if (ov.ampRelease < 0) 0 else ov.ampRelease,
+                            emptyValue = -1, canDelete = ov.ampRelease >= 0, canInsert = ov.ampRelease < 0)
+                        else -> return CursorContextFactory.none()
+                    }
+                }
+                return CursorContextFactory.none()  // SPACER (SAMPLER)
+            }
             11 -> {
-                if (isSoundFont) return CursorContextFactory.none()
+                if (isSoundFont) {
+                    // CUT + RES (SF2 filter overrides)
+                    val ov = state.instrument.sfOverrides
+                    when (state.cursorColumn) {
+                        0, 2 -> return CursorContextFactory.readOnly()
+                        1 -> return CursorContextFactory.hexByte(
+                            if (ov.filterCut < 0) 0 else ov.filterCut,
+                            emptyValue = -1, canDelete = ov.filterCut >= 0, canInsert = ov.filterCut < 0)
+                        3 -> return CursorContextFactory.hexByte(
+                            if (ov.filterRes < 0) 0 else ov.filterRes,
+                            emptyValue = -1, canDelete = ov.filterRes >= 0, canInsert = ov.filterRes < 0)
+                        else -> return CursorContextFactory.none()
+                    }
+                }
                 if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
                 return CursorContextFactory.hexByte(state.instrument.sampleStart, 0, 255)
             }
@@ -963,8 +1057,30 @@ class InstrumentModule : TrackerModule {
                 }
             }
             9 -> {
-                if (!isSoundFont) {
-                    // DWNSMPL + RES
+                if (isSoundFont) {
+                    // ATK + DEC (SF2 envelope overrides)
+                    when (state.cursorColumn) {
+                        1 -> when (action) {
+                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                                instrumentController.updateSfAttack(state.instrument, action.value)
+                            is com.conanizer.pockettracker.core.logic.InputAction.DELETE ->
+                                instrumentController.updateSfAttack(state.instrument, -1)
+                            is com.conanizer.pockettracker.core.logic.InputAction.INSERT_DEFAULT ->
+                                instrumentController.updateSfAttack(state.instrument, 0)
+                            else -> {}
+                        }
+                        3 -> when (action) {
+                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                                instrumentController.updateSfDecay(state.instrument, action.value)
+                            is com.conanizer.pockettracker.core.logic.InputAction.DELETE ->
+                                instrumentController.updateSfDecay(state.instrument, -1)
+                            is com.conanizer.pockettracker.core.logic.InputAction.INSERT_DEFAULT ->
+                                instrumentController.updateSfDecay(state.instrument, 0)
+                            else -> {}
+                        }
+                    }
+                } else {
+                    // DWNSMPL + RES (SAMPLER)
                     when (state.cursorColumn) {
                         1 -> when (action) {
                             is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
@@ -979,11 +1095,62 @@ class InstrumentModule : TrackerModule {
                     }
                 }
             }
-            10 -> { /* SPACER */ }
-            11 -> when (action) {
-                is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
-                    instrumentController.updateSampleStart(state.instrument, action.value)
-                else -> {}
+            10 -> {
+                if (isSoundFont) {
+                    // SUS + REL (SF2 envelope overrides)
+                    when (state.cursorColumn) {
+                        1 -> when (action) {
+                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                                instrumentController.updateSfSustain(state.instrument, action.value)
+                            is com.conanizer.pockettracker.core.logic.InputAction.DELETE ->
+                                instrumentController.updateSfSustain(state.instrument, -1)
+                            is com.conanizer.pockettracker.core.logic.InputAction.INSERT_DEFAULT ->
+                                instrumentController.updateSfSustain(state.instrument, 128)
+                            else -> {}
+                        }
+                        3 -> when (action) {
+                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                                instrumentController.updateSfRelease(state.instrument, action.value)
+                            is com.conanizer.pockettracker.core.logic.InputAction.DELETE ->
+                                instrumentController.updateSfRelease(state.instrument, -1)
+                            is com.conanizer.pockettracker.core.logic.InputAction.INSERT_DEFAULT ->
+                                instrumentController.updateSfRelease(state.instrument, 0)
+                            else -> {}
+                        }
+                    }
+                }
+                /* SAMPLER: SPACER — no action */
+            }
+            11 -> {
+                if (isSoundFont) {
+                    // CUT + RES (SF2 filter overrides)
+                    when (state.cursorColumn) {
+                        1 -> when (action) {
+                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                                instrumentController.updateSfFilterCut(state.instrument, action.value)
+                            is com.conanizer.pockettracker.core.logic.InputAction.DELETE ->
+                                instrumentController.updateSfFilterCut(state.instrument, -1)
+                            is com.conanizer.pockettracker.core.logic.InputAction.INSERT_DEFAULT ->
+                                instrumentController.updateSfFilterCut(state.instrument, 255)
+                            else -> {}
+                        }
+                        3 -> when (action) {
+                            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                                instrumentController.updateSfFilterRes(state.instrument, action.value)
+                            is com.conanizer.pockettracker.core.logic.InputAction.DELETE ->
+                                instrumentController.updateSfFilterRes(state.instrument, -1)
+                            is com.conanizer.pockettracker.core.logic.InputAction.INSERT_DEFAULT ->
+                                instrumentController.updateSfFilterRes(state.instrument, 0)
+                            else -> {}
+                        }
+                    }
+                } else {
+                    when (action) {
+                        is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                            instrumentController.updateSampleStart(state.instrument, action.value)
+                        else -> {}
+                    }
+                }
             }
             12 -> when (action) {
                 is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
@@ -1028,7 +1195,7 @@ class InstrumentModule : TrackerModule {
  *   - 3=ROOT+VOL, 4=DETUNE+PAN, 5=TBL TIC, 6=SPACER
  *   SAMPLER: 7=DRIVE+FILTER, 8=CRUSH+CUT, 9=DWNSMPL+RES, 10=SPACER,
  *            11=START, 12=END, 13=REV, 14=LOOP, 15=LOOP ST
- *   SOUNDFONT: 7=BANK+PRESET, 8=PRESET NAME
+ *   SOUNDFONT: 7=BANK+PRESET, 8=PRESET NAME, 9=ATK+DEC, 10=SUS+REL, 11=CUT+RES
  * @param cursorColumn Which column (0=name label, 1=value1, 2=button/name2, 3=value2/button)
  * @param statusMessage Status message to show at bottom
  * @param isSuccess True if status is success, false if error

@@ -199,6 +199,12 @@ TSFDEF void tsf_render_float(tsf* f, float* buffer, int samples, int flag_mixing
 // Enables per-track output buffers when multiple tracks share one tsf* handle.
 TSFDEF void tsf_render_float_channel(tsf* f, int channel, float* buffer, int samples, int flag_mixing CPP_DEFAULT0);
 
+// Patch all regions for the given bank/preset with user-supplied envelope overrides.
+// Pass -1 for any field to keep the SF2 preset's original value.
+// atk/dec/rel: 0-255 mapped to ~0.001s-10s (exponential). sus: 0-255 → 0.0-1.0 linear gain.
+TSFDEF void tsf_preset_apply_overrides(tsf* f, int bank, int preset_number,
+                                        int atk, int dec, int sus, int rel);
+
 // Higher level channel based functions, set up channel parameters
 //   channel: channel number
 //   preset_index: preset index >= 0 and < tsf_get_presetcount()
@@ -1757,6 +1763,34 @@ TSFDEF void tsf_render_float_channel(tsf* f, int channel, float* buffer, int sam
 	for (; v != vEnd; v++)
 		if (v->playingPreset != -1 && v->playingChannel == channel)
 			tsf_voice_render(f, v, buffer, samples);
+}
+
+// Map 0-255 override value to envelope time in seconds (exponential: 0→0.001s, 255→10s).
+static float tsf_ovr_to_secs(int val)
+{
+	// 0.001 * 10000^(val/255)  =  0.001 * exp(val/255 * ln(10000))
+	// ln(10000) ≈ 9.21034
+	return 0.001f * TSF_EXPF((float)val * (9.21034f / 255.0f));
+}
+
+TSFDEF void tsf_preset_apply_overrides(tsf* f, int bank, int preset_number,
+                                        int atk, int dec, int sus, int rel)
+{
+	int i, j;
+	for (i = 0; i < f->presetNum; i++)
+	{
+		struct tsf_preset* p = &f->presets[i];
+		if (p->bank != bank || p->preset != preset_number) continue;
+		for (j = 0; j < p->regionNum; j++)
+		{
+			struct tsf_region* r = &p->regions[j];
+			if (atk >= 0) r->ampenv.attack  = tsf_ovr_to_secs(atk);
+			if (dec >= 0) r->ampenv.decay   = tsf_ovr_to_secs(dec);
+			if (sus >= 0) r->ampenv.sustain = (float)sus / 255.0f;
+			if (rel >= 0) r->ampenv.release = tsf_ovr_to_secs(rel);
+		}
+		return;
+	}
 }
 
 static void tsf_channel_setup_voice(tsf* f, struct tsf_voice* v)

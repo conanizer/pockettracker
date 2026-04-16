@@ -350,6 +350,16 @@ class OboeAudioBackend : IAudioBackend {
         )
     }
 
+    override fun setSoundfontEnvelopeOverrides(sfSlot: Int, bank: Int, preset: Int,
+                                               atk: Int, dec: Int, sus: Int, rel: Int) {
+        native_setSoundfontEnvelopeOverrides(sfSlot, bank, preset, atk, dec, sus, rel)
+    }
+
+    override fun setSoundfontFilterOverrides(sampleId: Int, filterType: Int,
+                                             filterCut: Int, filterRes: Int) {
+        native_setSoundfontFilterOverrides(sampleId, filterType, filterCut, filterRes)
+    }
+
     override fun unloadSoundfont(sfSlot: Int) {
         native_unloadSoundfont(sfSlot)
     }
@@ -476,6 +486,10 @@ class OboeAudioBackend : IAudioBackend {
         pbnRate: Float, vibratoSpeed: Float, vibratoDepth: Float,
         phraseVol: Float, sampleId: Int
     )
+    private external fun native_setSoundfontEnvelopeOverrides(sfSlot: Int, bank: Int, preset: Int,
+                                                               atk: Int, dec: Int, sus: Int, rel: Int)
+    private external fun native_setSoundfontFilterOverrides(sampleId: Int, filterType: Int,
+                                                            filterCut: Int, filterRes: Int)
     private external fun native_unloadSoundfont(sfSlot: Int)
     private external fun native_getSoundfontPresetName(sfSlot: Int, bank: Int, preset: Int): String?
     private external fun native_getSoundfontFirstBankPreset(sfSlot: Int): IntArray

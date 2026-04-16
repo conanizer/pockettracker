@@ -612,6 +612,29 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setSo
 }
 
 JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setSoundfontEnvelopeOverrides(
+        JNIEnv *env, jobject thiz, jint sfSlot, jint bank, jint preset,
+        jint atk, jint dec, jint sus, jint rel) {
+    if (sfSlot < 0 || sfSlot >= MAX_SOUNDFONTS || !soundfonts[sfSlot].handle) return;
+    std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
+    tsf_preset_apply_overrides(soundfonts[sfSlot].handle, (int)bank, (int)preset,
+                               (int)atk, (int)dec, (int)sus, (int)rel);
+    LOGD("🎹 SF envelope overrides: slot=%d bank=%d preset=%d atk=%d dec=%d sus=%d rel=%d",
+         (int)sfSlot, (int)bank, (int)preset, (int)atk, (int)dec, (int)sus, (int)rel);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setSoundfontFilterOverrides(
+        JNIEnv *env, jobject thiz, jint sampleId, jint filterType, jint filterCut, jint filterRes) {
+    if (engine) {
+        engine->setInstrumentParams((int)sampleId,
+            0, 255, false, 0, 0, // start, end, reverse, loop, loopSt
+            0, 0, 0,             // drive, crush, downsample
+            (int)filterType, (int)filterCut, (int)filterRes);
+    }
+}
+
+JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleSoundfontNote(
         JNIEnv *env, jobject thiz, jlong frame, jint trackId, jint sfSlot,
         jint midiNote, jint velocity, jfloat vol, jfloat pan, jint bank, jint preset,
