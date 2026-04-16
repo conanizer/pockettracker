@@ -241,11 +241,17 @@ struct Voice : public IAudioVoice {
         vibratoActive = false;
         // Initialize ParamBus base values and clear mod accumulators.
         // filterCut/filterRes already set above from instrParams.
-        params.setBase(PARAM_VOL,        vol);
-        params.setBase(PARAM_PAN,        pan);
-        params.setBase(PARAM_PITCH,      0.0f);
-        params.setBase(PARAM_FILTER_CUT, (float)filterCut);
-        params.setBase(PARAM_FILTER_RES, (float)filterRes);
+        params.setBase(PARAM_VOL,          vol);
+        params.setBase(PARAM_PAN,          pan);
+        params.setBase(PARAM_PITCH,        0.0f);
+        params.setBase(PARAM_FILTER_CUT,   (float)filterCut);
+        params.setBase(PARAM_FILTER_RES,   (float)filterRes);
+        params.setBase(PARAM_DRIVE,        (float)instrParams.drive);
+        params.setBase(PARAM_CRUSH,        (float)instrParams.crush);
+        params.setBase(PARAM_DOWNSAMPLE,   (float)instrParams.downsample);
+        params.setBase(PARAM_SAMPLE_START, (float)effectiveStartPoint);
+        params.setBase(PARAM_SAMPLE_END,   (float)instrParams.endPoint);
+        params.setBase(PARAM_LOOP_START,   (float)instrParams.loopStart);
         params.resetMods();
 
         // Capture static mod sources at note-on (constant for this note's lifetime).

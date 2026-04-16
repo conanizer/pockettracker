@@ -803,6 +803,20 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         // Get modulated playback rate (includes pitch slide + vibrato)
         float modulatedRate = getModulatedPlaybackRate(voice);
 
+        // Phase 3: effective distortion and sample-bound params (base + mod, clamped)
+        int effDrive      = std::max(0, std::min(255, (int)(voice.params.base[PARAM_DRIVE]      + voice.modDestValues[PARAM_DRIVE])));
+        int effCrush      = std::max(0, std::min(15,  (int)(voice.params.base[PARAM_CRUSH]      + voice.modDestValues[PARAM_CRUSH])));
+        int effDownsample = std::max(0, std::min(15,  (int)(voice.params.base[PARAM_DOWNSAMPLE] + voice.modDestValues[PARAM_DOWNSAMPLE])));
+        {
+            float rawStart   = voice.params.base[PARAM_SAMPLE_START] + voice.modDestValues[PARAM_SAMPLE_START];
+            float rawEnd     = voice.params.base[PARAM_SAMPLE_END]   + voice.modDestValues[PARAM_SAMPLE_END];
+            float rawLoop    = voice.params.base[PARAM_LOOP_START]   + voice.modDestValues[PARAM_LOOP_START];
+            int sl = voice.sampleLength;
+            voice.actualStart     = std::max(0,             std::min((int)(rawStart * sl / 255.0f), sl - 2));
+            voice.actualEnd       = std::max(voice.actualStart + 1, std::min((int)(rawEnd * sl / 255.0f), sl - 1));
+            voice.actualLoopStart = std::max(voice.actualStart, std::min((int)(rawLoop * sl / 255.0f), voice.actualEnd));
+        }
+
         for (int i = 0; i < numFrames; i++) {
             int idx = (int)voice.position;
             float frac = voice.position - (float)idx;
@@ -833,16 +847,16 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             float sample2 = voice.sampleData[idx + 1];
 
             // STEP 1: DOWNSAMPLE (sample rate reduction via sample-and-hold)
-            if (voice.downsample > 0) {
-                int downsampleFactor = 1 << voice.downsample;
+            if (effDownsample > 0) {
+                int downsampleFactor = 1 << effDownsample;
                 int quantizedIdx = (idx / downsampleFactor) * downsampleFactor;
                 sample1 = voice.sampleData[quantizedIdx];
                 sample2 = voice.sampleData[quantizedIdx];
             }
 
             // STEP 2: CRUSH (bit depth reduction)
-            if (voice.crush > 0) {
-                int bits = 16 - voice.crush;
+            if (effCrush > 0) {
+                int bits = 16 - effCrush;
                 if (bits < 1) bits = 1;
                 int levels = 1 << bits;
                 sample1 = floorf(sample1 * levels) / levels;
@@ -854,8 +868,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
             // STEP 4: DRIVE (pre-gain boost with soft clipping)
             float processedSample = interpolatedSample;
-            if (voice.drive > 0) {
-                float driveGain = voice.drive / 128.0f;
+            if (effDrive > 0) {
+                float driveGain = effDrive / 128.0f;
                 processedSample *= driveGain;
                 processedSample = tanhf(processedSample);
             }

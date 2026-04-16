@@ -19,12 +19,18 @@
 // PARAM_VOL base is set for future SoundfontVoice block-rate use.
 
 enum ParamId {
-    PARAM_VOL        = 0,  // Volume: 0.0–1.0 (base only in Phase 2a; mod done per-sample)
-    PARAM_PAN        = 1,  // Pan: 0.0=left, 0.5=center, 1.0=right
-    PARAM_PITCH      = 2,  // Pitch offset in semitones from envelope/LFO mods (not PSL/PBN state)
-    PARAM_FILTER_CUT = 3,  // Filter cutoff: 0–255 param units
-    PARAM_FILTER_RES = 4,  // Filter resonance: 0–255 param units
-    PARAM_COUNT      = 5
+    PARAM_VOL          = 0,  // Volume: 0.0–1.0 (base only in Phase 2a; mod done per-sample)
+    PARAM_PAN          = 1,  // Pan: 0.0=left, 0.5=center, 1.0=right
+    PARAM_PITCH        = 2,  // Pitch offset in semitones from envelope/LFO mods (not PSL/PBN state)
+    PARAM_FILTER_CUT   = 3,  // Filter cutoff: 0–255 param units
+    PARAM_FILTER_RES   = 4,  // Filter resonance: 0–255 param units
+    PARAM_DRIVE        = 5,  // Drive pre-gain boost: 0–255
+    PARAM_CRUSH        = 6,  // Bit-crush depth: 0–15 (0=off, 15=1-bit)
+    PARAM_DOWNSAMPLE   = 7,  // Sample-rate reduction: 0–15 (0=off; factor = 1 << value)
+    PARAM_SAMPLE_START = 8,  // Sample start point: 0–255 normalized
+    PARAM_SAMPLE_END   = 9,  // Sample end point: 0–255 normalized
+    PARAM_LOOP_START   = 10, // Loop start point: 0–255 normalized
+    PARAM_COUNT        = 11
 };
 
 struct ParamBus {
@@ -32,11 +38,17 @@ struct ParamBus {
     float mod[PARAM_COUNT];   // Frame accumulator — reset each block, written by modulation sources
 
     ParamBus() {
-        base[PARAM_VOL]        = 1.0f;
-        base[PARAM_PAN]        = 0.5f;
-        base[PARAM_PITCH]      = 0.0f;
-        base[PARAM_FILTER_CUT] = 128.0f;
-        base[PARAM_FILTER_RES] = 0.0f;
+        base[PARAM_VOL]          = 1.0f;
+        base[PARAM_PAN]          = 0.5f;
+        base[PARAM_PITCH]        = 0.0f;
+        base[PARAM_FILTER_CUT]   = 128.0f;
+        base[PARAM_FILTER_RES]   = 0.0f;
+        base[PARAM_DRIVE]        = 0.0f;
+        base[PARAM_CRUSH]        = 0.0f;
+        base[PARAM_DOWNSAMPLE]   = 0.0f;
+        base[PARAM_SAMPLE_START] = 0.0f;
+        base[PARAM_SAMPLE_END]   = 255.0f;
+        base[PARAM_LOOP_START]   = 0.0f;
         memset(mod, 0, sizeof(mod));
     }
 
