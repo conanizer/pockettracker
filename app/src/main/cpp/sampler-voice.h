@@ -278,6 +278,12 @@ struct Voice : public IAudioVoice {
         memset(modDestValues,     0, sizeof(modDestValues));
         memset(prevModDestValues, 0, sizeof(prevModDestValues));
 
+        // Pre-seed PARAM_VOL so the first block's per-sample interpolation starts at the correct
+        // value (instrVol × phraseVol) rather than 0, which would conflict with antiClickFade.
+        // TABLE_VOL=1.0 at note-on so the initial route output is instrVol × phraseVol × 1.0.
+        modDestValues[PARAM_VOL]     = instrVol * phraseVol;
+        prevModDestValues[PARAM_VOL] = instrVol * phraseVol;
+
         // Store note identity for note monitor display and special TIC modes
         noteOctave = std::max(0, std::min(octave, 9));
         notePitch  = std::max(0, std::min(pitch, 11));

@@ -871,6 +871,15 @@ class AudioEngine(
         backend.setVoiceTableRow(trackId, row)
     }
 
+    /**
+     * Schedule a phraseVol update at exact frame (Vxx effect on empty steps).
+     * Uses the same sample-accurate queue as notes so the change fires at the
+     * correct step boundary, not when the PlaybackController runs ahead.
+     */
+    fun scheduleTrackPhraseVol(targetFrame: Long, trackId: Int, phraseVol: Float) {
+        backend.scheduleTrackPhraseVol(targetFrame, trackId, phraseVol)
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // PITCH MODULATION (Phase 7)
     // ═══════════════════════════════════════════════════════════════════════════

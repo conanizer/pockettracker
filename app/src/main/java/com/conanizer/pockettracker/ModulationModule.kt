@@ -58,6 +58,9 @@ class ModulationModule : TrackerModule {
         val OSC_SHAPES  = listOf("TRI", "SIN", "RMP+", "RMP-", "EXP+", "EXP-", "SQU+", "SQU-", "RND", "DRK")
         val TRIG_MODES  = listOf("FREE", "RETG", "HOLD", "ONCE")
 
+        // SCALAR is internal-only (used for instrVol/phraseVol routes); not user-selectable.
+        val USER_MOD_TYPES = ModType.values().filter { it != ModType.SCALAR }
+
         fun rowLabels(type: ModType): List<String> = when (type) {
             ModType.NONE     -> listOf("TYPE")
             ModType.AHD      -> listOf("TYPE", "DEST", "AMT", "ATK", "HOLD", "DEC")
@@ -212,12 +215,12 @@ class ModulationModule : TrackerModule {
         val slot = state.activeSlot
 
         return when (state.cursorRow) {
-            0 -> CursorContext(                          // TYPE cycling
+            0 -> CursorContext(                          // TYPE cycling (SCALAR excluded — internal only)
                 valueType = CursorValueType.EFFECT_TYPE,
                 capabilities = CursorCapabilities(canIncrement = true, canDecrement = true),
-                currentValue = slot.type.ordinal,
+                currentValue = USER_MOD_TYPES.indexOf(slot.type).coerceAtLeast(0),
                 minValue = 0,
-                maxValue = ModType.values().size - 1,
+                maxValue = USER_MOD_TYPES.size - 1,
                 smallStep = 1,
                 largeStep = 1
             )
@@ -287,8 +290,8 @@ class ModulationModule : TrackerModule {
         when (action) {
             is InputAction.SET_VALUE -> {
                 when (state.cursorRow) {
-                    0 -> slot.type = ModType.values().getOrElse(
-                            action.value.coerceIn(0, ModType.values().size - 1)
+                    0 -> slot.type = USER_MOD_TYPES.getOrElse(
+                            action.value.coerceIn(0, USER_MOD_TYPES.size - 1)
                         ) { ModType.NONE }
                     1 -> if (slot.type != ModType.NONE) slot.dest = ModDest.values().getOrElse(
                             action.value.coerceIn(0, ModDest.values().size - 1)

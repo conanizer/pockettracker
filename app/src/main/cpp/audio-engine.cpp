@@ -138,9 +138,10 @@ void AudioEngine::clearAllSamples() {
     for (int i = 0; i < MAX_VOICES; i++) {
         voices[i].stop();
     }
-    // Clear the scheduled note/kill queues so buffered notes don't re-trigger.
+    // Clear the scheduled note/kill/param queues so buffered events don't re-trigger.
     noteQueue.clear();
     killQueue.clear();
+    paramUpdateQueue.clear();
 
     for (int i = 0; i < 256; i++) {
         if (samples[i]) {
@@ -194,7 +195,7 @@ void AudioEngine::triggerNote(int sampleId, int trackId, float freq, float baseF
         if (!voices[i].isActive) {
             float rate = freq / baseFreq;
             float sampleRate = stream ? (float)stream->getSampleRate() : 44100.0f;
-            voices[i].trigger(samples[sampleId], sampleLengths[sampleId], trackId, rate, vol, pan,
+            voices[i].trigger(samples[sampleId], sampleLengths[sampleId], trackId, rate, vol, 1.0f, pan,
                               instrumentParams[sampleId], sampleRate);
             LOGD("Note: track=%d, sampleId=%d, rate=%.3f, pan=%.2f", trackId, sampleId, rate, pan);
             return;
@@ -276,6 +277,17 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // PHASE 1: Process note queue at sample-accurate timing
     for (int32_t frame = 0; frame < numFrames; frame++) {
         int64_t currentFrame = globalFrameCounter + frame;
+
+        // Process scheduled parameter updates (e.g. Vxx phraseVol on empty steps)
+        while (paramUpdateQueue.hasUpdateAt(currentFrame)) {
+            ScheduledParamUpdate upd = paramUpdateQueue.pop();
+            for (int v = 0; v < MAX_VOICES; v++) {
+                if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
+                    voices[v].modSourceValues[(ModSourceId)upd.sourceId] = upd.value;
+                    break;
+                }
+            }
+        }
 
         // Process all scheduled kill events for this exact frame (BEFORE notes)
         while (killQueue.hasKillAt(currentFrame)) {
@@ -907,9 +919,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 }
                 // PITCH dest: accumulated into voice.params.mod[PARAM_PITCH] by updateVoiceModulation
             }
-            // modDestValues[PARAM_VOL] = TABLE_VOL fixed route output (Phase 2).
-            // Initialized to 1.0 at note-on; table Vxx and row volume column update it.
-            float sample = processedSample * finalVol * voice.modDestValues[PARAM_VOL];
+            // modDestValues[PARAM_VOL] = TABLE_VOL × phraseVol × instrVol (processRoutes, once/block).
+            // Interpolate per-sample using prevModDestValues to avoid clicks on block-boundary changes
+            // (e.g. Vxx on empty step, table row volume changes).
+            float volRoute = voice.prevModDestValues[PARAM_VOL]
+                           + (voice.modDestValues[PARAM_VOL] - voice.prevModDestValues[PARAM_VOL]) * t;
+            float sample = processedSample * finalVol * volRoute;
 
             // STEP 7: Apply real-time track and master volume
             float trackVol, masterVol;
@@ -1219,11 +1234,13 @@ void AudioEngine::scheduleNoteOff(int64_t targetFrame, int trackId) {
 void AudioEngine::clearScheduledNotes() {
     noteQueue.clear();
     killQueue.clear();
+    paramUpdateQueue.clear();
 }
 
 void AudioEngine::clearScheduledNotesFrom(int64_t fromFrame) {
     noteQueue.clearFrom(fromFrame);
     killQueue.clearFrom(fromFrame);
+    paramUpdateQueue.clearFrom(fromFrame);
 }
 
 // ============================================================
@@ -1286,6 +1303,10 @@ void AudioEngine::setVoiceTableRow(int trackId, int row) {
         }
     }
     LOGD("📋 THO: No active voice on track %d, ignoring", trackId);
+}
+
+void AudioEngine::scheduleTrackPhraseVol(int64_t targetFrame, int trackId, float phraseVol) {
+    paramUpdateQueue.schedule({ targetFrame, trackId, (int)MOD_SRC_PHRASE_VOL, phraseVol });
 }
 
 // ============================================================
@@ -1508,8 +1529,11 @@ void AudioEngine::updateVoiceModulation(Voice& voice, int numFrames, float sampl
     float sr = sampleRate;
 
     // ── Phase 4.4: Mod-to-mod routing ──────────────────────────────────────
+    // AMT is additive: modulator contributes +norm*src.amount to the target's base amount.
+    // Example: LFO AMT=50 + AHD→MOD_AMT AMT=20 → LFO effective amt sweeps 50→70→50.
+    // RATE remains multiplicative (frequency scaling is naturally exponential).
     {
-        float amtScale[4]  = {1.0f, 1.0f, 1.0f, 1.0f};
+        float amtOffset[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         float rateMult[4]  = {1.0f, 1.0f, 1.0f, 1.0f};
         for (int m = 0; m < 4; m++) {
             const Voice::VoiceModSlot& src = voice.voiceMods[m];
@@ -1518,12 +1542,14 @@ void AudioEngine::updateVoiceModulation(Voice& voice, int numFrames, float sampl
             int target = (m + 1) % 4;
             float norm = (src.type == 3) ? (src.envValue * 0.5f + 0.5f)
                                           : fmaxf(0.0f, src.envValue);
-            float scale = fminf(2.0f, norm * src.amount * 2.0f);
-            if (src.dest == 8 || src.dest == 10) amtScale[target] *= scale;
-            if (src.dest == 9 || src.dest == 10) rateMult[target] *= fmaxf(0.05f, scale);
+            if (src.dest == 8 || src.dest == 10) amtOffset[target] += norm * src.amount;
+            if (src.dest == 9 || src.dest == 10) {
+                float rateScale = fminf(2.0f, norm * src.amount * 2.0f);
+                rateMult[target] *= fmaxf(0.05f, rateScale);
+            }
         }
         for (int m = 0; m < 4; m++) {
-            voice.voiceMods[m].effectiveAmt      = voice.voiceMods[m].amount * amtScale[m];
+            voice.voiceMods[m].effectiveAmt      = fminf(1.0f, voice.voiceMods[m].amount + amtOffset[m]);
             voice.voiceMods[m].effectiveRateMult = rateMult[m];
         }
     }

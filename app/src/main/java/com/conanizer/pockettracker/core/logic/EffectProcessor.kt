@@ -27,6 +27,9 @@ data class ResolvedStepParams(
     /** Volume (0.0-1.0), resolved from VOLUME effect or step.volume */
     val volume: Float = 1.0f,
 
+    /** True when volume was explicitly set by a Vxx effect (not just the step volume column) */
+    val volumeFromVxx: Boolean = false,
+
     /** Frame at which to kill the note, or null if no KILL effect */
     val killAtFrame: Long? = null,
 
@@ -347,6 +350,7 @@ class EffectProcessor(
     ): ResolvedStepParams {
         var startPoint = -1  // -1 = use instrument default
         var volume = defaultVolume
+        var volumeFromVxx = false
         var killAtFrame: Long? = null
         var arpeggioValue: Int? = null
         var arcValue: Int? = null
@@ -389,6 +393,7 @@ class EffectProcessor(
 
                 FX_VOLUME -> {
                     volume = value / 255.0f
+                    volumeFromVxx = true
                     logger.d(TAG, "🔊 VOLUME effect: volume=$volume (raw=$value)")
                 }
 
@@ -547,6 +552,7 @@ class EffectProcessor(
         return ResolvedStepParams(
             startPoint = startPoint,
             volume = volume,
+            volumeFromVxx = volumeFromVxx,
             killAtFrame = killAtFrame,
             arpeggioValue = arpeggioValue,
             arcValue = arcValue,

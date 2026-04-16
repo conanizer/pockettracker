@@ -428,6 +428,14 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setVo
     }
 }
 
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleTrackPhraseVol(
+        JNIEnv *env, jobject thiz, jlong targetFrame, jint trackId, jfloat phraseVol) {
+    if (engine) {
+        engine->scheduleTrackPhraseVol(targetFrame, trackId, phraseVol);
+    }
+}
+
 JNIEXPORT jint JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getVoiceTableRow(
         JNIEnv *env, jobject thiz, jint trackId) {

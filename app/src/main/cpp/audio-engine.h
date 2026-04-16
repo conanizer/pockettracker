@@ -109,6 +109,9 @@ public:
     // Set table row for a voice (THO effect from phrase on empty step)
     void setVoiceTableRow(int trackId, int row);
 
+    // Schedule a phraseVol update at exact frame (Vxx effect on empty steps)
+    void scheduleTrackPhraseVol(int64_t targetFrame, int trackId, float phraseVol);
+
     // Get waveform data for oscilloscope display
     void getWaveform(float* outBuffer, int bufferSize);
 
@@ -211,8 +214,9 @@ private:
     std::mutex tableMutex;         // Protect table data during load/access
 
     // PHASE 1: Sample-accurate timing infrastructure
-    NoteQueue noteQueue;           // Thread-safe queue of scheduled notes
-    KillQueue killQueue;           // Thread-safe queue of scheduled kill events
+    NoteQueue noteQueue;             // Thread-safe queue of scheduled notes
+    KillQueue killQueue;             // Thread-safe queue of scheduled kill events
+    ParamUpdateQueue paramUpdateQueue; // Thread-safe queue of scheduled parameter updates
     int64_t globalFrameCounter;    // Total frames processed since start
     std::atomic<bool> isOfflineRendering{false};  // True during WAV export → onAudioReady outputs silence
 

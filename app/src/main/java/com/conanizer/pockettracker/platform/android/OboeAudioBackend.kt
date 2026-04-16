@@ -249,6 +249,10 @@ class OboeAudioBackend : IAudioBackend {
         native_setVoiceTableRow(trackId, row)
     }
 
+    override fun scheduleTrackPhraseVol(targetFrame: Long, trackId: Int, phraseVol: Float) {
+        native_scheduleTrackPhraseVol(targetFrame, trackId, phraseVol)
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // PITCH MODULATION METHODS (Phase 6)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -440,6 +444,7 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_getVoiceTableRow(trackId: Int): Int
     private external fun native_getVoiceTableId(trackId: Int): Int
     private external fun native_setVoiceTableRow(trackId: Int, row: Int)
+    private external fun native_scheduleTrackPhraseVol(targetFrame: Long, trackId: Int, phraseVol: Float)
 
     // Phase 6 pitch modulation methods
     private external fun native_setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int)

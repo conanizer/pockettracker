@@ -1616,6 +1616,13 @@ class PlaybackController(
         if (!hasNote) {
             val tempo = currentProject?.tempo ?: 120
 
+            // Vxx on empty step: schedule phraseVol update at the step's target frame so the
+            // change fires sample-accurately (PlaybackController runs ahead of the audio clock).
+            if (params.volumeFromVxx) {
+                audioEngine.scheduleTrackPhraseVol(effectiveTargetFrame, trackId, phraseVol)
+                logger.d(TAG, "🔊 Vxx on empty step: track=$trackId phraseVol=$phraseVol at frame=$effectiveTargetFrame")
+            }
+
             // Handle PBN (Pitch Bend) - modify currently playing voice
             if (params.pbnValue != null) {
                 if (params.pbnValue == 0) {

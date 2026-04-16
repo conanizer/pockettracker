@@ -201,6 +201,58 @@ public:
     }
 };
 
+// Scheduled parameter update (e.g. Vxx on empty step — update phraseVol at exact frame)
+struct ScheduledParamUpdate {
+    int64_t targetFrame;     // Exact audio frame to apply the update
+    int trackId;             // Which track's active voice to update
+    int sourceId;            // ModSourceId to write (e.g. MOD_SRC_PHRASE_VOL)
+    float value;             // New value to write
+
+    bool operator>(const ScheduledParamUpdate& other) const {
+        return targetFrame > other.targetFrame;
+    }
+};
+
+class ParamUpdateQueue {
+private:
+    std::priority_queue<ScheduledParamUpdate, std::vector<ScheduledParamUpdate>, std::greater<ScheduledParamUpdate>> queue;
+    std::mutex mutex;
+
+public:
+    void schedule(const ScheduledParamUpdate& update) {
+        std::lock_guard<std::mutex> lock(mutex);
+        queue.push(update);
+    }
+
+    bool hasUpdateAt(int64_t currentFrame) {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (queue.empty()) return false;
+        return queue.top().targetFrame <= currentFrame;
+    }
+
+    ScheduledParamUpdate pop() {
+        std::lock_guard<std::mutex> lock(mutex);
+        ScheduledParamUpdate u = queue.top();
+        queue.pop();
+        return u;
+    }
+
+    void clear() {
+        std::lock_guard<std::mutex> lock(mutex);
+        while (!queue.empty()) queue.pop();
+    }
+
+    void clearFrom(int64_t fromFrame) {
+        std::lock_guard<std::mutex> lock(mutex);
+        std::vector<ScheduledParamUpdate> keep;
+        while (!queue.empty()) {
+            ScheduledParamUpdate u = queue.top(); queue.pop();
+            if (u.targetFrame < fromFrame) keep.push_back(u);
+        }
+        for (auto& u : keep) queue.push(u);
+    }
+};
+
 // Instrument playback parameters
 struct InstrumentParams {
     int startPoint;     // 0-255 (normalized position)

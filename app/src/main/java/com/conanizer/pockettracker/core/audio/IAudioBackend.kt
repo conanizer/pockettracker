@@ -375,6 +375,11 @@ interface IAudioBackend {
      */
     fun setVoiceTableRow(trackId: Int, row: Int)
 
+    /**
+     * Schedule a phraseVol update at exact frame (Vxx effect on empty steps).
+     */
+    fun scheduleTrackPhraseVol(targetFrame: Long, trackId: Int, phraseVol: Float)
+
     // ===================================
     // PITCH MODULATION METHODS (Phase 6)
     // ===================================
