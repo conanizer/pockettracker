@@ -597,18 +597,21 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 row = tables[voice.tableId].rows[voice.tableRow];
             }
 
-            // Apply transpose (convert semitones to playback rate modifier)
+            // Apply transpose — write semitones to source array (Phase 2).
+            // playbackRate no longer has transpose baked in; getModulatedPlaybackRate reads
+            // modDestValues[PARAM_PITCH] which processRoutes accumulates from TABLE_PITCH.
             int semitones = transposeToSemitones(row.transpose);
-            voice.tableTranspose = (float)semitones;
-            float transposeRatio = powf(2.0f, voice.tableTranspose / 12.0f);
-            voice.playbackRate = voice.basePlaybackRate * transposeRatio;
+            voice.tableTranspose = (float)semitones;  // kept for debug log
+            voice.modSourceValues[MOD_SRC_TABLE_PITCH] = (float)semitones;
 
-            // Apply volume (FF = no change = 1.0, 00 = silence = 0.0)
+            // Apply volume — write to source array (Phase 2).
+            // Mix loop reads modDestValues[PARAM_VOL] instead of voice.tableVolume.
             if (row.volume == 0xFF) {
-                voice.tableVolume = 1.0f;  // No change
+                voice.tableVolume = 1.0f;  // kept for debug log
             } else {
                 voice.tableVolume = row.volume / 255.0f;
             }
+            voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume;
 
             // Process table effects (3 effect slots per row)
             bool hopExecuted = false;
@@ -673,6 +676,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     case FX_VOLUME:
                         // Vxx - Set volume (overrides volume column)
                         voice.tableVolume = fxValue / 255.0f;
+                        voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume;
                         break;
 
                     case FX_OFFSET:
@@ -889,7 +893,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 }
                 // PITCH dest: accumulated into voice.params.mod[PARAM_PITCH] by updateVoiceModulation
             }
-            float sample = processedSample * finalVol * voice.tableVolume;
+            // modDestValues[PARAM_VOL] = TABLE_VOL fixed route output (Phase 2).
+            // Initialized to 1.0 at note-on; table Vxx and row volume column update it.
+            float sample = processedSample * finalVol * voice.modDestValues[PARAM_VOL];
 
             // STEP 7: Apply real-time track and master volume
             float trackVol, masterVol;
@@ -1648,16 +1654,20 @@ void AudioEngine::updateVoiceModulation(Voice& voice, int numFrames, float sampl
         voice.modSourceValues[srcId] = mod.envValue;
     }
 
-    // ── Build routes from VoiceModSlot configs and call processRoutes ───────
-    // Routes are rebuilt each block because effectiveAmt (mod-to-mod output) changes per block.
-    // VOL (dest=1) and MOD_* (dest≥7) destinations are excluded — they use separate paths.
-    ModRoute routes[4];
+    // ── Build routes and call processRoutes ─────────────────────────────────
+    // Capacity: 4 user routes + 4 fixed sequencer routes = 8 total.
+    // User routes: from VoiceModSlot configs (rebuilt each block because effectiveAmt changes).
+    // Fixed routes: always-on connections from sequencer sources (table/pitch/vibrato).
+    // VOL (dest=1) and MOD_* (dest≥7) destinations are excluded from user routes.
+    ModRoute routes[8];
     int routeCount = 0;
+
+    // User routes (from instrument mod matrix)
     for (int m = 0; m < 4; m++) {
         const Voice::VoiceModSlot& mod = voice.voiceMods[m];
-        if (mod.type == 0) continue;           // NONE slot
-        if (mod.dest == 0 || mod.dest == 1) continue;  // NONE or VOL destination
-        if (mod.dest >= 7) continue;           // STA / MOD_AMT / MOD_RATE / MOD_BOTH
+        if (mod.type == 0) continue;
+        if (mod.dest == 0 || mod.dest == 1) continue;  // NONE or VOL (per-sample path)
+        if (mod.dest >= 7) continue;                    // STA / MOD_AMT / MOD_RATE / MOD_BOTH
 
         ModSourceId srcId = (mod.type == 3)
             ? (ModSourceId)(MOD_SRC_LFO0 + m)
@@ -1674,6 +1684,16 @@ void AudioEngine::updateVoiceModulation(Voice& voice, int numFrames, float sampl
         }
         routes[routeCount++] = { srcId, destId, scale, MOD_SRC_NONE, 0.0f };
     }
+
+    // Fixed routes (always-on; fire whenever source is non-zero)
+    // TABLE_PITCH and PITCH_SLIDE both add semitones; VIBRATO adds ±depth semitones.
+    // TABLE_VOL multiplies note volume (processRoutes writes modDestValues[PARAM_VOL];
+    //   mix loop reads it instead of voice.tableVolume).
+    routes[routeCount++] = { MOD_SRC_TABLE_PITCH, PARAM_PITCH, 1.0f, MOD_SRC_NONE, 0.0f };
+    routes[routeCount++] = { MOD_SRC_PITCH_SLIDE, PARAM_PITCH, 1.0f, MOD_SRC_NONE, 0.0f };
+    routes[routeCount++] = { MOD_SRC_VIBRATO,     PARAM_PITCH, 1.0f, MOD_SRC_NONE, 0.0f };
+    routes[routeCount++] = { MOD_SRC_TABLE_VOL,   PARAM_VOL,   1.0f, MOD_SRC_NONE, 0.0f };
+
     processRoutes(voice.modSourceValues, voice.modDestValues, routes, routeCount);
 
     // Bridge: copy modDestValues into params.mod[] so existing mix-loop reads of
@@ -1685,7 +1705,7 @@ void AudioEngine::updateVoiceModulation(Voice& voice, int numFrames, float sampl
 }
 
 void AudioEngine::updateVoicePitchMod(Voice& voice, int numFrames, float sampleRate) {
-    // Process pitch slide
+    // Process pitch slide (PSL / PBN)
     if (voice.pitchSliding) {
         float delta = voice.pitchSlideTarget - voice.pitchOffset;
         float totalDelta = voice.pitchSlideRate * numFrames;
@@ -1698,8 +1718,10 @@ void AudioEngine::updateVoicePitchMod(Voice& voice, int numFrames, float sampleR
             voice.pitchOffset += totalDelta;
         }
     }
+    // Write pitch slide output to source array (picked up by processRoutes in updateVoiceModulation).
+    voice.modSourceValues[MOD_SRC_PITCH_SLIDE] = voice.pitchOffset;
 
-    // Process vibrato LFO
+    // Process vibrato LFO (PVB / PVX)
     if (voice.vibratoActive) {
         float phaseIncrement = (2.0f * (float)M_PI * voice.vibratoSpeed / sampleRate) * numFrames;
         voice.vibratoPhase += phaseIncrement;
@@ -1707,16 +1729,19 @@ void AudioEngine::updateVoicePitchMod(Voice& voice, int numFrames, float sampleR
             voice.vibratoPhase -= 2.0f * (float)M_PI;
         }
     }
+    // Write vibrato output to source array. 0.0f when inactive.
+    voice.modSourceValues[MOD_SRC_VIBRATO] = voice.vibratoActive
+        ? sinf(voice.vibratoPhase) * voice.vibratoDepth
+        : 0.0f;
 }
 
 float AudioEngine::getModulatedPlaybackRate(Voice& voice) {
-    float pitchMod = voice.pitchOffset + voice.params.get(PARAM_PITCH);
-
-    if (voice.vibratoActive) {
-        pitchMod += sinf(voice.vibratoPhase) * voice.vibratoDepth;
-    }
-
-    float rateMod = powf(2.0f, pitchMod / 12.0f);
+    // modDestValues[PARAM_PITCH] accumulates all pitch sources via processRoutes:
+    //   TABLE_PITCH (table row transpose) + PITCH_SLIDE (PSL/PBN) +
+    //   VIBRATO (PVB/PVX) + user mod slots targeting PARAM_PITCH.
+    // voice.playbackRate = basePlaybackRate (no transpose baked in after Phase 2),
+    //   or arpeggio-adjusted rate from setMidiNote().
+    float rateMod = powf(2.0f, voice.modDestValues[PARAM_PITCH] / 12.0f);
     return voice.playbackRate * rateMod;
 }
 

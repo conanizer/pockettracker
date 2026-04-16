@@ -257,10 +257,12 @@ struct Voice : public IAudioVoice {
         // Clear all source values; then write static ones.
         // Dynamic slots (ENV/LFO) will be written each block by updateVoiceModulation.
         memset(modSourceValues, 0, sizeof(modSourceValues));
-        modSourceValues[MOD_SRC_VELOCITY] = noteVelocity;
-        modSourceValues[MOD_SRC_KEYTRACK] = noteKeytrack;
-        modSourceValues[MOD_SRC_RANDOM]   = noteRandom;
-        // modSourceValues[MOD_SRC_NONE] remains 0.0f — required by processRoutes via=NONE path.
+        modSourceValues[MOD_SRC_VELOCITY]  = noteVelocity;
+        modSourceValues[MOD_SRC_KEYTRACK]  = noteKeytrack;
+        modSourceValues[MOD_SRC_RANDOM]    = noteRandom;
+        modSourceValues[MOD_SRC_TABLE_VOL] = 1.0f;  // Default: full volume when no table active
+        // TABLE_PITCH, PITCH_SLIDE, VIBRATO start at 0.0f (memset) — correct defaults.
+        // MOD_SRC_NONE remains 0.0f — required by processRoutes via=NONE path.
 
         // Clear destination arrays for this note.
         memset(modDestValues,     0, sizeof(modDestValues));
