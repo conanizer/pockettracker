@@ -529,7 +529,9 @@ class AudioEngine(
                 targetFrame, trackId, slot,
                 midiNote, velocity, volume, pan,
                 instrument.sfBank, instrument.sfPreset,
-                pslInitialOffset, pslDurationFrames, pbnRatePerFrame, vibratoSpeed, vibratoDepth
+                pslInitialOffset, pslDurationFrames, pbnRatePerFrame, vibratoSpeed, vibratoDepth,
+                phraseVol = phraseVol,
+                sampleId = instrumentId
             )
             return
         }

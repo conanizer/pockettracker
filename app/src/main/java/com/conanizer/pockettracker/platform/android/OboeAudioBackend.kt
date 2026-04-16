@@ -340,11 +340,13 @@ class OboeAudioBackend : IAudioBackend {
         frame: Long, trackId: Int, sfSlot: Int,
         midiNote: Int, velocity: Int, vol: Float, pan: Float, bank: Int, preset: Int,
         pslInitialOffset: Float, pslDuration: Float,
-        pbnRate: Float, vibratoSpeed: Float, vibratoDepth: Float
+        pbnRate: Float, vibratoSpeed: Float, vibratoDepth: Float,
+        phraseVol: Float, sampleId: Int
     ) {
         native_scheduleSoundfontNote(
             frame, trackId, sfSlot, midiNote, velocity, vol, pan, bank, preset,
-            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth
+            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
+            phraseVol, sampleId
         )
     }
 
@@ -471,7 +473,8 @@ class OboeAudioBackend : IAudioBackend {
         frame: Long, trackId: Int, sfSlot: Int,
         midiNote: Int, velocity: Int, vol: Float, pan: Float, bank: Int, preset: Int,
         pslInitialOffset: Float, pslDuration: Float,
-        pbnRate: Float, vibratoSpeed: Float, vibratoDepth: Float
+        pbnRate: Float, vibratoSpeed: Float, vibratoDepth: Float,
+        phraseVol: Float, sampleId: Int
     )
     private external fun native_unloadSoundfont(sfSlot: Int)
     private external fun native_getSoundfontPresetName(sfSlot: Int, bank: Int, preset: Int): String?

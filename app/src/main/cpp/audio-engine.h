@@ -74,7 +74,8 @@ public:
                                int midiNote, int midiVelocity, float vol, float pan,
                                int bank, int preset,
                                float pslInitialOffset, float pslDuration,
-                               float pbnRate, float vibratoSpeed, float vibratoDepth);
+                               float pbnRate, float vibratoSpeed, float vibratoDepth,
+                               float phraseVol = 1.0f, int sampleId = -1);
 
     // Schedule a kill event (for Kill effect K00)
     void scheduleKill(int64_t targetFrame, int trackId);

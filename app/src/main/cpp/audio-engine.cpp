@@ -338,16 +338,41 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                                    note.volume, trkVol, note.pan, note.sfBank, note.sfPreset, t);
                     sv.resetPitchState();
 
-                    // Copy instrument effects params and compute biquad coefficients (Phase 7).
-                    sv.instrParams = instrumentParams[note.sampleId];
+                    // Copy instrument effects params and modulation slots (Phase 5 / 7).
+                    // Only valid when sampleId >= 0 (phrase playback); previews pass -1.
+                    if (note.sampleId >= 0 && note.sampleId < 256) {
+                        sv.instrParams = instrumentParams[note.sampleId];
+                        for (int m = 0; m < 4; m++) {
+                            const InstrumentModSlot& src = instrumentModSlots[note.sampleId][m];
+                            VoiceModSlot& dst = sv.voiceMods[m];
+                            dst.type = src.type;
+                            dst.dest = src.dest;
+                            dst.amount = src.amount;
+                            dst.attackSamples = src.attackSamples;
+                            dst.holdSamples = src.holdSamples;
+                            dst.decaySamples = src.decaySamples;
+                            dst.sustainLevel = src.sustainLevel;
+                            dst.lfoHz = src.lfoHz;
+                            dst.oscShape = src.oscShape;
+                            dst.lfoPhase = 0.0f;
+                            dst.releaseSamples = src.releaseSamples;
+                            dst.effectiveAmt = src.amount;
+                            dst.effectiveRateMult = 1.0f;
+                            dst.prevEnvValue = 0.0f;
+                            if (src.type != 0) { dst.stage = 1; dst.envValue = 0.0f; dst.stageCounter = 0; }
+                            else               { dst.stage = 0; dst.envValue = 0.0f; dst.stageCounter = 0; }
+                        }
+                    } else {
+                        sv.instrParams = InstrumentParams{};
+                        for (int m = 0; m < 4; m++) sv.voiceMods[m] = VoiceModSlot{};
+                    }
                     calculateBiquadCoeffs(sv.instrParams.filterType, sv.instrParams.filterCut,
                                           sv.instrParams.filterRes, (int)sampleRate,
                                           sv.b0, sv.b1, sv.b2, sv.a1, sv.a2);
                     sv.x1L = sv.x2L = sv.y1L = sv.y2L = 0.0f;
                     sv.x1R = sv.x2R = sv.y1R = sv.y2R = 0.0f;
 
-                    // Initialize modulation state from instrument mod slots (Phase 5).
-                    // Matches sampler voice trigger init path in sampler-voice.h.
+                    // Initialize modulation state (Phase 5).
                     sv.params.setBase(PARAM_VOL,   note.volume);
                     sv.params.setBase(PARAM_PAN,   note.pan);
                     sv.params.setBase(PARAM_PITCH, 0.0f);
@@ -358,26 +383,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     float initVol = note.volume * note.phraseVolume;
                     sv.modDestValues[PARAM_VOL]     = initVol;
                     sv.prevModDestValues[PARAM_VOL] = initVol;
-                    for (int m = 0; m < 4; m++) {
-                        const InstrumentModSlot& src = instrumentModSlots[note.sampleId][m];
-                        VoiceModSlot& dst = sv.voiceMods[m];
-                        dst.type = src.type;
-                        dst.dest = src.dest;
-                        dst.amount = src.amount;
-                        dst.attackSamples = src.attackSamples;
-                        dst.holdSamples = src.holdSamples;
-                        dst.decaySamples = src.decaySamples;
-                        dst.sustainLevel = src.sustainLevel;
-                        dst.lfoHz = src.lfoHz;
-                        dst.oscShape = src.oscShape;
-                        dst.lfoPhase = 0.0f;
-                        dst.releaseSamples = src.releaseSamples;
-                        dst.effectiveAmt = src.amount;
-                        dst.effectiveRateMult = 1.0f;
-                        dst.prevEnvValue = 0.0f;
-                        if (src.type != 0) { dst.stage = 1; dst.envValue = 0.0f; dst.stageCounter = 0; }
-                        else               { dst.stage = 0; dst.envValue = 0.0f; dst.stageCounter = 0; }
-                    }
                     if (note.pslInitialOffset != 0.0f && note.pslDuration > 0.0f) {
                         sv.pitchOffset      = note.pslInitialOffset;
                         sv.pitchSlideTarget = 0.0f;
@@ -1311,7 +1316,8 @@ void AudioEngine::scheduleSoundfontNote(int64_t targetFrame, int trackId, int sf
                                         int midiNote, int midiVelocity, float vol, float pan,
                                         int bank, int preset,
                                         float pslInitialOffset, float pslDuration,
-                                        float pbnRate, float vibratoSpeed, float vibratoDepth) {
+                                        float pbnRate, float vibratoSpeed, float vibratoDepth,
+                                        float phraseVol, int sampleId) {
     ScheduledNote note{};
     note.targetFrame      = targetFrame;
     note.trackId          = trackId;
@@ -1320,10 +1326,11 @@ void AudioEngine::scheduleSoundfontNote(int64_t targetFrame, int trackId, int sf
     note.midiNote         = midiNote;
     note.midiVelocity     = midiVelocity;
     note.volume           = vol;
+    note.phraseVolume     = phraseVol;
     note.pan              = pan;
     note.sfBank           = bank;
     note.sfPreset         = preset;
-    note.sampleId         = -1;
+    note.sampleId         = sampleId;
     note.frequency        = 440.0f;
     note.baseFrequency    = 440.0f;
     note.startPointOverride = -1;
