@@ -161,7 +161,7 @@ struct Voice : public IAudioVoice {
               fadeOutRemaining(0), isFadingOut(false) {}
               // params (ParamBus) is default-constructed: base={1,0.5,0,128,0}, mod={0}
 
-    void trigger(float* sample, int length, int track, float rate, float vol, float pan,
+    void trigger(float* sample, int length, int track, float rate, float instrVol, float phraseVol, float pan,
                  const InstrumentParams& instrParams, float sampleRate, int startPointOverride = -1,
                  int tblId = -1, int tblTicRate = 6, int octave = 4, int pitch = 0, int startRow = 0) {
         sampleData = sample;
@@ -169,7 +169,10 @@ struct Voice : public IAudioVoice {
         trackId = track;
         playbackRate = rate;
         basePlaybackRate = rate;  // Store original rate for table transpose
-        volume = vol;
+        // voice.volume is neutral (1.0) — instrVol lives in params.base[PARAM_VOL],
+        // phraseVol lives in modSourceValues[MOD_SRC_PHRASE_VOL].
+        // The fixed VOL route multiplies: TABLE_VOL × phraseVol × instrVol.
+        volume = 1.0f;
 
         // Calculate constant-power pan gains
         // pan: 0.0=left, 0.5=center, 1.0=right
@@ -241,7 +244,7 @@ struct Voice : public IAudioVoice {
         vibratoActive = false;
         // Initialize ParamBus base values and clear mod accumulators.
         // filterCut/filterRes already set above from instrParams.
-        params.setBase(PARAM_VOL,          vol);
+        params.setBase(PARAM_VOL,          instrVol);  // instrVol is depth of fixed VOL route
         params.setBase(PARAM_PAN,          pan);
         params.setBase(PARAM_PITCH,        0.0f);
         params.setBase(PARAM_FILTER_CUT,   (float)filterCut);
@@ -255,7 +258,7 @@ struct Voice : public IAudioVoice {
         params.resetMods();
 
         // Capture static mod sources at note-on (constant for this note's lifetime).
-        noteVelocity  = vol;
+        noteVelocity  = instrVol;
         int midiNote  = (octave + 1) * 12 + pitch;
         noteKeytrack  = (float)(midiNote - 60) / 12.0f;
         noteRandom    = (float)(rand() & 0xFFFF) / 65535.0f;
@@ -266,7 +269,8 @@ struct Voice : public IAudioVoice {
         modSourceValues[MOD_SRC_VELOCITY]  = noteVelocity;
         modSourceValues[MOD_SRC_KEYTRACK]  = noteKeytrack;
         modSourceValues[MOD_SRC_RANDOM]    = noteRandom;
-        modSourceValues[MOD_SRC_TABLE_VOL] = 1.0f;  // Default: full volume when no table active
+        modSourceValues[MOD_SRC_TABLE_VOL]  = 1.0f;  // Default: full volume when no table active
+        modSourceValues[MOD_SRC_PHRASE_VOL] = phraseVol;  // Phrase step volume (constant for note's lifetime)
         // TABLE_PITCH, PITCH_SLIDE, VIBRATO start at 0.0f (memset) — correct defaults.
         // MOD_SRC_NONE remains 0.0f — required by processRoutes via=NONE path.
 

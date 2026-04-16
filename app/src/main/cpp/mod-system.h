@@ -88,7 +88,10 @@ enum ModSourceId {
     MOD_SRC_PITCH_SLIDE,  // semitones from PSL / PBN state machine
     MOD_SRC_VIBRATO,      // −1..+1 sine from PVB / PVX state machine
 
-    MOD_SRC_COUNT  // = 16
+    // Per-note scalar sources — set at note-on from Kotlin scheduler, constant for note's lifetime
+    MOD_SRC_PHRASE_VOL,   // 0.0–1.0 from phrase step volume column (or Vxx effect at trigger)
+
+    MOD_SRC_COUNT  // = 17
 };
 
 // ModRoute — a single weighted connection from one source to one destination.

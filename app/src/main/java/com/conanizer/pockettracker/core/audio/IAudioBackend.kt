@@ -330,7 +330,8 @@ interface IAudioBackend {
         trackId: Int,
         freq: Float,
         baseFreq: Float,
-        vol: Float,
+        vol: Float,          // Instrument volume (0.0–1.0) — MOD_SRC_INSTR_VOL
+        phraseVol: Float = 1.0f, // Phrase step volume (0.0–1.0) — MOD_SRC_PHRASE_VOL
         pan: Float = 0.5f,
         startPointOverride: Int = -1,
         tableId: Int = -1,

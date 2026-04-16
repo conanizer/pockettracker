@@ -36,7 +36,8 @@ struct ScheduledNote {
     int trackId;             // Which track/voice (0-7)
     float frequency;         // Target playback frequency
     float baseFrequency;     // Sample's base frequency
-    float volume;            // Playback volume (0.0-1.0)
+    float volume;            // Instrument volume (0.0-1.0) — maps to MOD_SRC_INSTR_VOL
+    float phraseVolume;      // Phrase step volume (0.0-1.0) — maps to MOD_SRC_PHRASE_VOL
     float pan;               // Stereo pan position (0.0=left, 0.5=center, 1.0=right)
     int startPointOverride;  // Optional start point override (-1 = use instrument default)
 

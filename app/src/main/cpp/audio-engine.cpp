@@ -454,7 +454,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     }
 
                     voices[v].trigger(samples[note.sampleId], sampleLengths[note.sampleId],
-                                      note.trackId, rate, note.volume, note.pan, instrumentParams[note.sampleId],
+                                      note.trackId, rate, note.volume, note.phraseVolume, note.pan, instrumentParams[note.sampleId],
                                       sampleRate, note.startPointOverride,
                                       note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
 
@@ -1136,7 +1136,7 @@ int64_t AudioEngine::getCurrentFrame() {
 }
 
 void AudioEngine::scheduleNote(int64_t targetFrame, int sampleId, int trackId,
-                               float frequency, float baseFrequency, float volume, float pan,
+                               float frequency, float baseFrequency, float volume, float phraseVolume, float pan,
                                int startPointOverride, int tableId, int tableTicRate,
                                int noteOctave, int notePitch,
                                float pslInitialOffset, float pslDuration,
@@ -1149,6 +1149,7 @@ void AudioEngine::scheduleNote(int64_t targetFrame, int sampleId, int trackId,
             .frequency = frequency,
             .baseFrequency = baseFrequency,
             .volume = volume,
+            .phraseVolume = phraseVolume,
             .pan = pan,
             .startPointOverride = startPointOverride,
             .tableId = tableId,
@@ -1709,10 +1710,16 @@ void AudioEngine::updateVoiceModulation(Voice& voice, int numFrames, float sampl
     // TABLE_PITCH and PITCH_SLIDE both add semitones; VIBRATO adds ±depth semitones.
     // TABLE_VOL multiplies note volume (processRoutes writes modDestValues[PARAM_VOL];
     //   mix loop reads it instead of voice.tableVolume).
-    routes[routeCount++] = { MOD_SRC_TABLE_PITCH, PARAM_PITCH, 1.0f, MOD_SRC_NONE, 0.0f };
-    routes[routeCount++] = { MOD_SRC_PITCH_SLIDE, PARAM_PITCH, 1.0f, MOD_SRC_NONE, 0.0f };
-    routes[routeCount++] = { MOD_SRC_VIBRATO,     PARAM_PITCH, 1.0f, MOD_SRC_NONE, 0.0f };
-    routes[routeCount++] = { MOD_SRC_TABLE_VOL,   PARAM_VOL,   1.0f, MOD_SRC_NONE, 0.0f };
+    routes[routeCount++] = { MOD_SRC_TABLE_PITCH, PARAM_PITCH, 1.0f, MOD_SRC_NONE,        0.0f };
+    routes[routeCount++] = { MOD_SRC_PITCH_SLIDE, PARAM_PITCH, 1.0f, MOD_SRC_NONE,        0.0f };
+    routes[routeCount++] = { MOD_SRC_VIBRATO,     PARAM_PITCH, 1.0f, MOD_SRC_NONE,        0.0f };
+    // VOL: TABLE_VOL × PHRASE_VOL × instrVol (via-based multiplication, Surge XT pattern)
+    // instrVol = params.base[PARAM_VOL] (set at trigger from instrument volume field)
+    // phraseVol = modSourceValues[MOD_SRC_PHRASE_VOL] (set at trigger from phrase step volume)
+    // tableVol  = modSourceValues[MOD_SRC_TABLE_VOL]  (updated each block by table engine)
+    routes[routeCount++] = { MOD_SRC_TABLE_VOL,   PARAM_VOL,
+                              voice.params.base[PARAM_VOL],   // depth = instrVol
+                              MOD_SRC_PHRASE_VOL, 1.0f };     // via = phraseVol (full multiplication)
 
     processRoutes(voice.modSourceValues, voice.modDestValues, routes, routeCount);
 

@@ -486,7 +486,8 @@ class AudioEngine(
         note: Note,
         instrumentId: Int,
         trackId: Int,
-        volume: Float = 1.0f,
+        volume: Float = 1.0f,      // Instrument volume (0.0–1.0)
+        phraseVol: Float = 1.0f,   // Phrase step volume (0.0–1.0)
         pan: Float = 0.5f,  // 0.0=left, 0.5=center, 1.0=right
         project: Project,
         startPointOverride: Int = -1,  // -1 = use instrument default, 0-255 = Offset effect override
@@ -574,7 +575,7 @@ class AudioEngine(
 
         // Always use scheduleNoteWithTable - C++ handles tableId=-1 as "no table"
         backend.scheduleNoteWithTable(
-            targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan,
+            targetFrame, sampleId, trackId, frequency, baseFreq, volume, phraseVol, pan,
             startPointOverride, tableId, tableTicRate, note.octave, note.pitch,
             pslInitialOffset, pslDurationFrames, pbnRatePerFrame, vibratoSpeed, vibratoDepth,
             tableStartRow
@@ -834,7 +835,7 @@ class AudioEngine(
         android.util.Log.d("AudioEngine", "📋 scheduleNoteWithTable: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, tableId=$tableId, ticRate=$tableTicRate")
 
         backend.scheduleNoteWithTable(
-            targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan,
+            targetFrame, sampleId, trackId, frequency, baseFreq, volume, 1.0f, pan,
             startPointOverride, tableId, tableTicRate, note.octave, note.pitch,
             pslInitialOffset, pslDurationFrames, pbnRatePerFrame, vibratoSpeed, vibratoDepth,
             tableStartRow

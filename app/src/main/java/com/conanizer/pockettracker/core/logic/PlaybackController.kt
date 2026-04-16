@@ -1406,14 +1406,12 @@ class PlaybackController(
         val defaultVolume = effectiveStep.volume / 255.0f
         val params = effectProcessor.resolveStepParams(effectiveStep, targetFrame, defaultVolume)
 
-        // Apply volume chain: instrument × phrase only
-        // NOTE: Track × master are applied in C++ in real-time, allowing mixer changes
-        // to take effect immediately without rescheduling notes
+        // Instrument and phrase volumes are passed separately to C++ as mod sources.
+        // C++ multiplies them via the fixed VOL route: TABLE_VOL × phraseVol × instrVol.
+        // Track × master are applied in the C++ mix loop in real-time.
         val instrument = project.instruments[effectiveStep.instrument]
-        val finalVolume = VolumeUtils.calculateNoteVolume(
-            instrumentVol = instrument.volume,
-            phraseVol = (params.volume * 255).toInt().coerceIn(0, 255)  // Convert back to hex
-        )
+        val instrVol  = VolumeUtils.hexToFloat(instrument.volume)
+        val phraseVol = params.volume  // already 0.0–1.0 from resolveStepParams
 
         // Get instrument pan (hex 0x00-0xFF → float 0.0-1.0)
         val instrumentPan = VolumeUtils.hexToFloat(instrument.pan)
@@ -1552,11 +1550,9 @@ class PlaybackController(
             }
 
             // Debug: Log the full volume chain so we can verify what reaches the audio engine
-            logger.d(TAG, "🔊 Volume chain: instVol=0x${instrument.volume.toString(16).uppercase()} " +
-                    "(${instrument.volume}/255=${"%.4f".format(instrument.volume / 255f)}), " +
-                    "phraseVol=0x${step.volume.toString(16).uppercase()} " +
-                    "(${step.volume}/255=${"%.4f".format(step.volume / 255f)}), " +
-                    "finalVolume=${"%.4f".format(finalVolume)}")
+            logger.d(TAG, "🔊 Volume chain: instrVol=${"%.4f".format(instrVol)}" +
+                    " phraseVol=${"%.4f".format(phraseVol)}" +
+                    " (C++ multiplies: TABLE_VOL × phraseVol × instrVol)")
 
             // Schedule the note — unified path handles both SAMPLER and SOUNDFONT.
             // AudioEngine.scheduleNote() routes to backend.scheduleSoundfontNote() for SF
@@ -1566,7 +1562,8 @@ class PlaybackController(
                 note = note,
                 instrumentId = effectiveStep.instrument,
                 trackId = trackId,
-                volume = finalVolume,
+                volume = instrVol,
+                phraseVol = phraseVol,
                 pan = instrumentPan,
                 project = project,
                 startPointOverride = params.startPoint,
@@ -1583,7 +1580,7 @@ class PlaybackController(
             // Update track state with this note (for persistent REPEAT retrigger)
             trackState.lastNote = note
             trackState.lastInstrument = effectiveStep.instrument
-            trackState.lastVolume = finalVolume
+            trackState.lastVolume = instrVol * phraseVol  // Combined for REPEAT retrigger
             trackState.lastStartPoint = params.startPoint
             trackState.lastPan = instrumentPan
             trackState.lastNoteMidi = note.toMidi()
@@ -1734,7 +1731,7 @@ class PlaybackController(
 
             // Set base volume for the new ramp
             trackState.repeatBaseVolume = when {
-                hasNote -> finalVolume  // New note: fresh start at note volume
+                hasNote -> instrVol * phraseVol  // New note: fresh start at combined note volume
                 savedRampVolume >= 0f -> savedRampVolume  // RPT-to-RPT on empty step: continue from last ramp position
                 else -> trackState.lastVolume  // Fallback: use last played note volume
             }
@@ -1955,7 +1952,8 @@ class PlaybackController(
                 step = effectiveStep,
                 params = params,
                 transposeSemitones = transposeSemitones,
-                finalVolume = finalVolume,
+                instrVol = instrVol,
+                phraseVol = phraseVol,
                 finalPan = instrumentPan
             )
         }
@@ -1998,7 +1996,8 @@ class PlaybackController(
      * @param step The phrase step
      * @param params Resolved step parameters
      * @param transposeSemitones Semitones to transpose
-     * @param finalVolume Pre-calculated volume (inst × phrase); track × master applied in C++
+     * @param instrVol Instrument volume (0.0–1.0)
+     * @param phraseVol Phrase step volume (0.0–1.0); track × master applied in C++
      * @param finalPan Pre-calculated pan (0.0=left, 0.5=center, 1.0=right)
      */
     private fun scheduleArpeggioNotes(
@@ -2011,7 +2010,8 @@ class PlaybackController(
         step: PhraseStep,
         params: ResolvedStepParams,
         transposeSemitones: Int,
-        finalVolume: Float,
+        instrVol: Float,
+        phraseVol: Float,
         finalPan: Float
     ) {
         val semi1 = (trackState.arpeggioValue shr 4) and 0x0F
@@ -2040,9 +2040,10 @@ class PlaybackController(
         // Get the arpeggio pattern length based on mode
         val patternLength = if (trackState.arpeggioMode == 2) 4 else 3  // PINGPONG uses 4, others use 3
 
-        // Get instrument, volume, and pan (finalVolume has inst × phrase; track × master in C++)
+        // Get instrument, volume, and pan; track × master are applied in C++
         val instrumentId = if (hasNote) step.instrument else trackState.lastInstrument
-        val arpVolume = if (hasNote) finalVolume else trackState.lastVolume
+        val arpInstrVol  = if (hasNote) instrVol  else trackState.lastVolume  // Combined as instrVol on retrig
+        val arpPhraseVol = if (hasNote) phraseVol else 1.0f                   // Neutral on retrig (combined in lastVolume)
         val arpPan = if (hasNote) finalPan else trackState.lastPan
         val startPoint = if (hasNote) params.startPoint else trackState.lastStartPoint
 
@@ -2083,7 +2084,8 @@ class PlaybackController(
                         note = arpNote,
                         instrumentId = instrumentId,
                         trackId = trackId,
-                        volume = arpVolume,
+                        volume = arpInstrVol,
+                        phraseVol = arpPhraseVol,
                         pan = arpPan,
                         project = project,
                         startPointOverride = startPoint,
