@@ -66,6 +66,7 @@ class ModulationModule : TrackerModule {
             ModType.DRUM     -> listOf("TYPE", "DEST", "AMT", "ATK", "HOLD", "DEC")
             ModType.TRIG     -> listOf("TYPE", "DEST", "AMT", "ATK", "DEC",  "SUS", "REL")
             ModType.TRACKING -> listOf("TYPE", "DEST", "AMT", "ATK", "DEC")
+            ModType.SCALAR   -> listOf("TYPE", "DEST", "AMT")
         }
 
         fun rowValue(slot: ModSlot, rowIndex: Int, slotIndex: Int = -1): String = when (rowIndex) {

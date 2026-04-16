@@ -1657,12 +1657,18 @@ void AudioEngine::updateVoiceModulation(Voice& voice, int numFrames, float sampl
                     mod.envValue = sinf(mod.lfoPhase);
                     break;
             }
+        } else if (mod.type == 6) {
+            // ── SCALAR: constant output, no state advance ──
+            // mod.amount (0.0–1.0) is the fixed value set at note-on.
+            // stage=1 is set at trigger so this branch is reached every block.
+            mod.envValue = mod.amount;
         }
 
         // Write envValue to source array.
         // VOL (dest=1) is handled per-sample in the mix loop via prevEnvValue — not routed here.
         // MOD_* (dest≥7) are handled by the mod-to-mod system above — not routed here.
-        ModSourceId srcId = (mod.type == 3)
+        // SCALAR (type=6) reuses the LFO slot (same as LFO) — it's a degenerate LFO that never oscillates.
+        ModSourceId srcId = (mod.type == 3 || mod.type == 6)
             ? (ModSourceId)(MOD_SRC_LFO0 + m)
             : (ModSourceId)(MOD_SRC_ENV0 + m);
         voice.modSourceValues[srcId] = mod.envValue;
@@ -1683,7 +1689,7 @@ void AudioEngine::updateVoiceModulation(Voice& voice, int numFrames, float sampl
         if (mod.dest == 0 || mod.dest == 1) continue;  // NONE or VOL (per-sample path)
         if (mod.dest >= 7) continue;                    // STA / MOD_AMT / MOD_RATE / MOD_BOTH
 
-        ModSourceId srcId = (mod.type == 3)
+        ModSourceId srcId = (mod.type == 3 || mod.type == 6)
             ? (ModSourceId)(MOD_SRC_LFO0 + m)
             : (ModSourceId)(MOD_SRC_ENV0 + m);
         ParamId destId;

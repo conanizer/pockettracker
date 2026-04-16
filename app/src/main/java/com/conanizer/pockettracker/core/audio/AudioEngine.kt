@@ -1042,6 +1042,14 @@ class AudioEngine(
                         releaseSamples = releaseSamples)
                     anyActive = true
                 }
+                ModType.SCALAR -> {
+                    if (dest == 0) { backend.setInstrumentModulation(sampleId, slotIndex, 0,0,0f,0,0,0); continue }
+                    // amount (0x00-0xFF) is the fixed output value; no time params needed
+                    val amount = slot.amount / 255.0f
+                    backend.setInstrumentModulation(sampleId, slotIndex, 6, dest, amount,
+                        0, 0, 0)
+                    anyActive = true
+                }
                 else -> {
                     // NONE or future types — clear this slot
                     backend.setInstrumentModulation(sampleId, slotIndex, 0, 0, 0f, 0, 0, 0)

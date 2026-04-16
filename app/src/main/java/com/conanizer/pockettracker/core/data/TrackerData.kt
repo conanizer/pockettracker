@@ -215,7 +215,8 @@ enum class ModType(val displayName: String) {
     LFO("LFO"),
     DRUM("DRUM"),     // future
     TRIG("TRIG"),     // future
-    TRACKING("TRK")   // future
+    TRACKING("TRK"),  // future
+    SCALAR("SCL")     // constant value — amount field is the output (0x00–0xFF)
 }
 
 @Serializable
@@ -260,6 +261,7 @@ data class ModSlot(
         ModType.DRUM     -> 6   // same as AHD for now
         ModType.TRIG     -> 7   // same as ADSR for now
         ModType.TRACKING -> 5   // future
+        ModType.SCALAR   -> 3   // TYPE,DEST,AMT
     }
 }
 
