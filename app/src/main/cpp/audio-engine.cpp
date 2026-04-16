@@ -1042,7 +1042,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     }
 
     // ===================================
-    // SOUNDFONT RENDERING — one tsf_render_float() per active slot
+    // SOUNDFONT RENDERING — per-track channel renders (Phase 6)
     // ===================================
     {
         float sfBuf[2048];  // 1024 frames * 2 channels — safe for any Oboe buffer size
@@ -1082,33 +1082,27 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             sv.applyPitchMod((float)sampleRate, numFrames);
         }
 
-        // 2. Render each active slot once, mix into output.
-        for (int s = 0; s < MAX_SOUNDFONTS; s++) {
-            if (!soundfonts[s].handle) continue;
-
-            bool anyActive = false;
-            for (int t = 0; t < 8; t++) {
-                if (sfVoices[t].isActive && sfVoices[t].sfSlot == s) { anyActive = true; break; }
-            }
-            if (!anyActive) continue;
+        // 2. Render each active track into its own per-channel buffer, then mix.
+        // tsf_render_float_channel() filters by MIDI channel (= trackId), so each track
+        // gets an independent buffer — enabling per-track effects in Phase 7.
+        for (int t = 0; t < 8; t++) {
+            SoundfontVoice& sv = sfVoices[t];
+            if (!sv.isActive || sv.sfSlot < 0) continue;
+            tsf* h = soundfonts[sv.sfSlot].handle;
+            if (!h) continue;
 
             memset(sfBuf, 0, sizeof(float) * numFrames * 2);
             {
-                std::lock_guard<std::mutex> sfLock(soundfonts[s].mutex);
-                tsf_render_float(soundfonts[s].handle, sfBuf, numFrames, 0 /* overwrite */);
+                std::lock_guard<std::mutex> sfLock(soundfonts[sv.sfSlot].mutex);
+                tsf_render_float_channel(h, t, sfBuf, numFrames, 0 /* overwrite */);
             }
 
-            // Mix into output and measure the combined slot peak.
-            float slotPeak = 0.0f;
+            float trackPeak = 0.0f;
             for (int i = 0; i < numFrames * 2; i++) {
-                slotPeak = fmaxf(slotPeak, fabsf(sfBuf[i]));
+                trackPeak = fmaxf(trackPeak, fabsf(sfBuf[i]));
                 output[i] += sfBuf[i] * masterVol;
             }
-            for (int t = 0; t < 8; t++) {
-                if (sfVoices[t].isActive && sfVoices[t].sfSlot == s) {
-                    framePeaksPerTrack[t] = fmaxf(framePeaksPerTrack[t], slotPeak);
-                }
-            }
+            framePeaksPerTrack[t] = fmaxf(framePeaksPerTrack[t], trackPeak);
         }
     }
 

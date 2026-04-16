@@ -194,6 +194,10 @@ TSFDEF int tsf_active_voice_count(tsf* f);
 //   flag_mixing: if 0 clear the buffer first, otherwise mix into existing data
 TSFDEF void tsf_render_short(tsf* f, short* buffer, int samples, int flag_mixing CPP_DEFAULT0);
 TSFDEF void tsf_render_float(tsf* f, float* buffer, int samples, int flag_mixing CPP_DEFAULT0);
+// Render only voices belonging to a single MIDI channel into buffer.
+// Identical to tsf_render_float but skips voices whose playingChannel != channel.
+// Enables per-track output buffers when multiple tracks share one tsf* handle.
+TSFDEF void tsf_render_float_channel(tsf* f, int channel, float* buffer, int samples, int flag_mixing CPP_DEFAULT0);
 
 // Higher level channel based functions, set up channel parameters
 //   channel: channel number
@@ -1741,6 +1745,17 @@ TSFDEF void tsf_render_float(tsf* f, float* buffer, int samples, int flag_mixing
 	if (!flag_mixing) TSF_MEMSET(buffer, 0, (f->outputmode == TSF_MONO ? 1 : 2) * sizeof(float) * samples);
 	for (; v != vEnd; v++)
 		if (v->playingPreset != -1)
+			tsf_voice_render(f, v, buffer, samples);
+}
+
+// PocketTracker fork patch: render only voices on a single MIDI channel.
+// Enables per-track output buffers when multiple tracks share one tsf* handle.
+TSFDEF void tsf_render_float_channel(tsf* f, int channel, float* buffer, int samples, int flag_mixing)
+{
+	struct tsf_voice *v = f->voices, *vEnd = v + f->voiceNum;
+	if (!flag_mixing) TSF_MEMSET(buffer, 0, (f->outputmode == TSF_MONO ? 1 : 2) * sizeof(float) * samples);
+	for (; v != vEnd; v++)
+		if (v->playingPreset != -1 && v->playingChannel == channel)
 			tsf_voice_render(f, v, buffer, samples);
 }
 
