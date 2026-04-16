@@ -85,7 +85,8 @@ void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
         needsPitchReset = false;
     }
 
-    if (!pitchSliding && !vibratoActive) return;
+    // Also apply if instrument mod routing has contributed pitch (Phase 5).
+    if (!pitchSliding && !vibratoActive && modDestValues[PARAM_PITCH] == 0.0f) return;
 
     // Advance pitch slide (PSL / PBN)
     if (pitchSliding) {
@@ -106,7 +107,9 @@ void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
         while (vibratoPhase >= 2.0f * (float)M_PI) vibratoPhase -= 2.0f * (float)M_PI;
     }
 
-    float pitchMod = pitchOffset;
+    // pitchOffset: PSL/PBN pitch slide state (semitones, advanced above)
+    // modDestValues[PARAM_PITCH]: accumulated from LFO/AHD routes targeting PITCH (Phase 5)
+    float pitchMod = pitchOffset + modDestValues[PARAM_PITCH];
     if (vibratoActive) pitchMod += sinf(vibratoPhase) * vibratoDepth;
 
     float clamped    = fmaxf(-PITCH_RANGE, fminf(PITCH_RANGE, pitchMod));

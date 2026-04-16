@@ -179,7 +179,7 @@ public:
     void clearInstrumentModulation(int sampleId);
 
     // Advance modulation stages for one voice (called once per audio callback).
-    void updateVoiceModulation(Voice& voice, int numFrames, float sampleRate = 44100.0f);
+    void updateVoiceModulation(IAudioVoice& voice, int numFrames, float sampleRate = 44100.0f);
 
     // Update pitch modulation for a single voice (called per frame in audio callback)
     void updateVoicePitchMod(Voice& voice, int numFrames, float sampleRate);

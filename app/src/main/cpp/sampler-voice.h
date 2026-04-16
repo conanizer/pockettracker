@@ -83,54 +83,13 @@ struct Voice : public IAudioVoice {
     bool vibratoActive;          // Whether vibrato is active
 
     // ===================================
-    // MODULATION STATE (Phase 4)
+    // MODULATION STATE (Phase 4 / Phase 5)
     // ===================================
-    struct VoiceModSlot {
-        int type;          // 0=NONE, 1=AHD, 2=ADSR, 3=LFO
-        int dest;          // 0=NONE, 1=VOL, 3=PITCH
-        float amount;      // Depth 0.0-1.0
-        // AHD/ADSR stage: 0=idle, 1=attack, 2=hold(AHD)/decay(ADSR), 3=decay(AHD)/sustain(ADSR), 4=done
-        // LFO stage: 1=running
-        int stage;
-        float envValue;    // AHD/ADSR: 0.0-1.0; LFO: -1.0 to +1.0
-        int stageCounter;  // Samples elapsed in current stage
-        int attackSamples;
-        int holdSamples;
-        int decaySamples;
-        float sustainLevel;  // ADSR: sustain level 0.0-1.0
-        float lfoHz;         // LFO: frequency in Hz
-        float lfoPhase;      // LFO: current phase (0 to 2π)
-        int oscShape;        // LFO: oscillator shape (0=TRI, 1=SIN, ...)
-        int releaseSamples;  // ADSR/TRIG: release duration in audio samples
-        // dest values: 0=NONE, 1=VOL, 2=PAN, 3=PITCH, 4=FINE_PITCH, 5=CUT, 6=RES, 7=STA, 8=MOD_AMT, 9=MOD_RATE, 10=MOD_BOTH
-
-        // Mod-to-mod: computed each audio callback by updateVoiceModulation
-        float effectiveAmt;      // amount × incoming MOD_AMT/BOTH scaling
-        float effectiveRateMult; // time/freq multiplier from incoming MOD_RATE/BOTH
-
-        // Per-sample interpolation: snapshot envValue before block advance, interpolate in mix loop
-        float prevEnvValue;  // envValue at start of this block (= end of previous block)
-
-        VoiceModSlot() : type(0), dest(0), amount(0.5f), effectiveAmt(0.5f), effectiveRateMult(1.0f),
-                         stage(0), envValue(0.0f), prevEnvValue(0.0f), stageCounter(0),
-                         attackSamples(0), holdSamples(0), decaySamples(0), releaseSamples(0),
-                         sustainLevel(0.5f), lfoHz(4.0f), lfoPhase(0.0f), oscShape(0) {}
-    };
-    VoiceModSlot voiceMods[4]; // 4 mod slots per voice
+    // VoiceModSlot, voiceMods[4], modSourceValues[], modDestValues[], prevModDestValues[]
+    // are now in IAudioVoice (mod-system.h) so updateVoiceModulation() runs for all voice types.
     float baseVolume;          // Voice volume before modulation (mirrors params.base[PARAM_VOL])
     // modPitchOffset, basePan, modPanOffset, modCutOffset, modResOffset removed (UAA Phase 2a).
     // These are now params.mod[PARAM_PITCH/PAN/FILTER_CUT/FILTER_RES] and params.base[PARAM_PAN].
-
-    // ── Module system arrays (Phase 1) ─────────────────────────────────────
-    // modSourceValues[] — each state machine writes its output here once per block.
-    //   Dynamic sources (ENV/LFO slots) are cleared at the top of updateVoiceModulation.
-    //   Static sources (VELOCITY/KEYTRACK/RANDOM) are set at note-on and kept until next note.
-    //   Phase 2 writes TABLE_VOL/PITCH/PITCH_SLIDE/VIBRATO from their respective state machines.
-    // modDestValues[]     — processRoutes() accumulates weighted source values here.
-    // prevModDestValues[] — snapshot of modDestValues at start of each block (for sub-block interpolation).
-    float modSourceValues[MOD_SRC_COUNT]{};
-    float modDestValues[PARAM_COUNT]{};
-    float prevModDestValues[PARAM_COUNT]{};
 
     // Static note-on sources (captured at trigger, constant for note's lifetime)
     float noteVelocity = 0.0f;  // 0.0–1.0 (note volume proxies velocity)
@@ -348,8 +307,9 @@ struct Voice : public IAudioVoice {
         // For voices with no release envelope this is equivalent to hardStop().
         bool hasRelease = false;
         for (int m = 0; m < 4; m++) {
-            if ((voiceMods[m].type == 2 || voiceMods[m].type == 5) && voiceMods[m].stage == 3) {
-                voiceMods[m].stage = 4;  // ADSR/TRIG → release
+            VoiceModSlot& vmod = voiceMods[m];
+            if ((vmod.type == 2 || vmod.type == 5) && vmod.stage == 3) {
+                vmod.stage = 4;  // ADSR/TRIG → release
                 hasRelease = true;
             }
         }

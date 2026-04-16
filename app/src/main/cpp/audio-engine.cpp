@@ -281,11 +281,16 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         // Process scheduled parameter updates (e.g. Vxx phraseVol on empty steps)
         while (paramUpdateQueue.hasUpdateAt(currentFrame)) {
             ScheduledParamUpdate upd = paramUpdateQueue.pop();
+            // Apply to sampler voices
             for (int v = 0; v < MAX_VOICES; v++) {
                 if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
                     voices[v].modSourceValues[(ModSourceId)upd.sourceId] = upd.value;
                     break;
                 }
+            }
+            // Apply to SF voices (Phase 5)
+            if (upd.trackId >= 0 && upd.trackId < 8 && sfVoices[upd.trackId].isActive) {
+                sfVoices[upd.trackId].modSourceValues[(ModSourceId)upd.sourceId] = upd.value;
             }
         }
 
@@ -332,6 +337,39 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     sv.triggerNote(note.sfSlot, note.midiNote, note.midiVelocity,
                                    note.volume, trkVol, note.pan, note.sfBank, note.sfPreset, t);
                     sv.resetPitchState();
+
+                    // Initialize modulation state from instrument mod slots (Phase 5).
+                    // Matches sampler voice trigger init path in sampler-voice.h.
+                    sv.params.setBase(PARAM_VOL,   note.volume);
+                    sv.params.setBase(PARAM_PAN,   note.pan);
+                    sv.params.setBase(PARAM_PITCH, 0.0f);
+                    sv.params.resetMods();
+                    memset(sv.modSourceValues, 0, sizeof(sv.modSourceValues));
+                    sv.modSourceValues[MOD_SRC_TABLE_VOL]  = 1.0f;
+                    sv.modSourceValues[MOD_SRC_PHRASE_VOL] = note.phraseVolume;
+                    float initVol = note.volume * note.phraseVolume;
+                    sv.modDestValues[PARAM_VOL]     = initVol;
+                    sv.prevModDestValues[PARAM_VOL] = initVol;
+                    for (int m = 0; m < 4; m++) {
+                        const InstrumentModSlot& src = instrumentModSlots[note.sampleId][m];
+                        VoiceModSlot& dst = sv.voiceMods[m];
+                        dst.type = src.type;
+                        dst.dest = src.dest;
+                        dst.amount = src.amount;
+                        dst.attackSamples = src.attackSamples;
+                        dst.holdSamples = src.holdSamples;
+                        dst.decaySamples = src.decaySamples;
+                        dst.sustainLevel = src.sustainLevel;
+                        dst.lfoHz = src.lfoHz;
+                        dst.oscShape = src.oscShape;
+                        dst.lfoPhase = 0.0f;
+                        dst.releaseSamples = src.releaseSamples;
+                        dst.effectiveAmt = src.amount;
+                        dst.effectiveRateMult = 1.0f;
+                        dst.prevEnvValue = 0.0f;
+                        if (src.type != 0) { dst.stage = 1; dst.envValue = 0.0f; dst.stageCounter = 0; }
+                        else               { dst.stage = 0; dst.envValue = 0.0f; dst.stageCounter = 0; }
+                    }
                     if (note.pslInitialOffset != 0.0f && note.pslDuration > 0.0f) {
                         sv.pitchOffset      = note.pslInitialOffset;
                         sv.pitchSlideTarget = 0.0f;
@@ -503,7 +541,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     voices[v].baseVolume = note.volume;
                     for (int m = 0; m < 4; m++) {
                         const InstrumentModSlot& src = instrumentModSlots[note.sampleId][m];
-                        Voice::VoiceModSlot& dst = voices[v].voiceMods[m];
+                        VoiceModSlot& dst = voices[v].voiceMods[m];
                         dst.type = src.type;
                         dst.dest = src.dest;
                         dst.amount = src.amount;
@@ -796,7 +834,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         if (voice.loopMode != 0) {
             bool hasVolMod = false, allDone = true;
             for (int m = 0; m < 4; m++) {
-                const Voice::VoiceModSlot& mod = voice.voiceMods[m];
+                const VoiceModSlot& mod = voice.voiceMods[m];
                 if (mod.dest == 1 && (mod.type == 1 || mod.type == 2 || mod.type == 4 || mod.type == 5)) {
                     hasVolMod = true;
                     int doneStage = (mod.type == 2 || mod.type == 5) ? 5 : 4;
@@ -902,7 +940,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             float t = (numFrames > 1) ? (float)(i + 1) / (float)numFrames : 1.0f;
             float finalVol = voice.volume;
             for (int m = 0; m < 4; m++) {
-                const Voice::VoiceModSlot& mod = voice.voiceMods[m];
+                const VoiceModSlot& mod = voice.voiceMods[m];
                 if (mod.type == 0 || mod.stage == 0) continue;
                 if (mod.dest == 1) { // VOL destination
                     if (mod.type == 3) {
@@ -1011,11 +1049,37 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         float masterVol;
         { std::lock_guard<std::mutex> vlock(volumeMutex); masterVol = masterVolume; }
 
-        // 1. Apply per-track pitch mods (audio thread, before render — no lock needed).
+        // 1. Advance modulation state machines and apply volume/pitch (audio thread, no lock needed).
         for (int t = 0; t < 8; t++) {
-            if (sfVoices[t].isActive) {
-                sfVoices[t].applyPitchMod((float)sampleRate, numFrames);
+            SoundfontVoice& sv = sfVoices[t];
+            if (!sv.isActive) continue;
+
+            // Run the shared modulation engine (envelopes, LFOs, routes) — same as sampler path.
+            updateVoiceModulation(sv, numFrames, (float)sampleRate);
+
+            // Apply modulated volume: modDestValues[PARAM_VOL] = instrVol × phraseVol × tableVol.
+            // LFO/AHD VOL (dest=1) are block-rate for SF — apply directly to channel volume.
+            float noteVol = sv.modDestValues[PARAM_VOL];
+            for (int m = 0; m < 4; m++) {
+                VoiceModSlot& mod = sv.voiceMods[m];
+                if (mod.type == 0 || mod.stage == 0 || mod.dest != 1) continue;
+                if (mod.type == 3) {  // LFO: bipolar tremolo
+                    noteVol = fmaxf(0.0f, noteVol * (1.0f + mod.envValue * mod.effectiveAmt));
+                } else {  // AHD/DRUM/ADSR/TRIG: unipolar gain reduction
+                    noteVol = fmaxf(0.0f, noteVol + (mod.envValue - 1.0f) * mod.effectiveAmt);
+                }
             }
+            // Audio-thread path: no mutex needed (consistent with triggerNote / applyPitchMod).
+            if (sv.sfSlot >= 0) {
+                float trkVol;
+                { std::lock_guard<std::mutex> vlock(volumeMutex); trkVol = trackVolumes[t]; }
+                tsf* h = soundfonts[sv.sfSlot].handle;
+                if (h) tsf_channel_set_volume(h, t, noteVol * trkVol);
+            }
+
+            // Advance pitch slide/vibrato and write MIDI pitch wheel.
+            // applyPitchMod now also adds modDestValues[PARAM_PITCH] (LFO/AHD → PITCH routes).
+            sv.applyPitchMod((float)sampleRate, numFrames);
         }
 
         // 2. Render each active slot once, mix into output.
@@ -1486,7 +1550,7 @@ void AudioEngine::triggerNoteOff(int trackId) {
         if (!voices[v].isActive || voices[v].trackId != trackId) continue;
         bool hasRelease = false;
         for (int m = 0; m < 4; m++) {
-            Voice::VoiceModSlot& mod = voices[v].voiceMods[m];
+            VoiceModSlot& mod = voices[v].voiceMods[m];
             if (mod.dest == 1 && (mod.type == 2 || mod.type == 5)) {
                 if (mod.stage >= 1 && mod.stage <= 3 && mod.releaseSamples > 0) {
                     mod.stage = 4;
@@ -1510,7 +1574,7 @@ void AudioEngine::clearInstrumentModulation(int sampleId) {
     }
 }
 
-void AudioEngine::updateVoiceModulation(Voice& voice, int numFrames, float sampleRate) {
+void AudioEngine::updateVoiceModulation(IAudioVoice& voice, int numFrames, float sampleRate) {
     // Snapshot previous dest values for sub-block interpolation (future use).
     memcpy(voice.prevModDestValues, voice.modDestValues, sizeof(float) * PARAM_COUNT);
 
@@ -1536,7 +1600,7 @@ void AudioEngine::updateVoiceModulation(Voice& voice, int numFrames, float sampl
         float amtOffset[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         float rateMult[4]  = {1.0f, 1.0f, 1.0f, 1.0f};
         for (int m = 0; m < 4; m++) {
-            const Voice::VoiceModSlot& src = voice.voiceMods[m];
+            const VoiceModSlot& src = voice.voiceMods[m];
             if (src.type == 0 || src.stage == 0) continue;
             if (src.dest != 8 && src.dest != 9 && src.dest != 10) continue;
             int target = (m + 1) % 4;
@@ -1555,7 +1619,7 @@ void AudioEngine::updateVoiceModulation(Voice& voice, int numFrames, float sampl
     }
 
     for (int m = 0; m < 4; m++) {
-        Voice::VoiceModSlot& mod = voice.voiceMods[m];
+        VoiceModSlot& mod = voice.voiceMods[m];
         if (mod.type == 0 || mod.stage == 0) continue;
 
         if (mod.type == 1 || mod.type == 4) {
@@ -1711,7 +1775,7 @@ void AudioEngine::updateVoiceModulation(Voice& voice, int numFrames, float sampl
 
     // User routes (from instrument mod matrix)
     for (int m = 0; m < 4; m++) {
-        const Voice::VoiceModSlot& mod = voice.voiceMods[m];
+        const VoiceModSlot& mod = voice.voiceMods[m];
         if (mod.type == 0) continue;
         if (mod.dest == 0 || mod.dest == 1) continue;  // NONE or VOL (per-sample path)
         if (mod.dest >= 7) continue;                    // STA / MOD_AMT / MOD_RATE / MOD_BOTH

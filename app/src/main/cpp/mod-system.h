@@ -94,6 +94,42 @@ enum ModSourceId {
     MOD_SRC_COUNT  // = 17
 };
 
+// ===================================
+// VOICEMODSLOT — per-voice modulation state machine (one per instrument mod slot)
+// ===================================
+// Moved from Voice (sampler-voice.h) to IAudioVoice so updateVoiceModulation()
+// can run identically for sampler, SF, and any future voice type (Phase 5).
+struct VoiceModSlot {
+    int type;          // 0=NONE, 1=AHD, 2=ADSR, 3=LFO, 4=DRUM, 5=TRIG, 6=SCALAR
+    int dest;          // 0=NONE, 1=VOL, 2=PAN, 3=PITCH, 4=FINE_PITCH, 5=CUT, 6=RES, 7=STA, 8=MOD_AMT, 9=MOD_RATE, 10=MOD_BOTH
+    float amount;      // Depth 0.0-1.0
+    // AHD/ADSR stage: 0=idle, 1=attack, 2=hold(AHD)/decay(ADSR), 3=decay(AHD)/sustain(ADSR), 4=done
+    // LFO stage: 1=running
+    int stage;
+    float envValue;    // AHD/ADSR: 0.0-1.0; LFO: -1.0 to +1.0
+    int stageCounter;  // Samples elapsed in current stage
+    int attackSamples;
+    int holdSamples;
+    int decaySamples;
+    float sustainLevel;  // ADSR: sustain level 0.0-1.0
+    float lfoHz;         // LFO: frequency in Hz
+    float lfoPhase;      // LFO: current phase (0 to 2π)
+    int oscShape;        // LFO: oscillator shape (0=TRI, 1=SIN, ...)
+    int releaseSamples;  // ADSR/TRIG: release duration in audio samples
+
+    // Mod-to-mod: computed each audio callback by updateVoiceModulation
+    float effectiveAmt;      // amount + incoming MOD_AMT/BOTH additive offset
+    float effectiveRateMult; // time/freq multiplier from incoming MOD_RATE/BOTH
+
+    // Per-sample interpolation: snapshot envValue before block advance, interpolate in mix loop
+    float prevEnvValue;  // envValue at start of this block (= end of previous block)
+
+    VoiceModSlot() : type(0), dest(0), amount(0.5f), effectiveAmt(0.5f), effectiveRateMult(1.0f),
+                     stage(0), envValue(0.0f), prevEnvValue(0.0f), stageCounter(0),
+                     attackSamples(0), holdSamples(0), decaySamples(0), releaseSamples(0),
+                     sustainLevel(0.5f), lfoHz(4.0f), lfoPhase(0.0f), oscShape(0) {}
+};
+
 // ModRoute — a single weighted connection from one source to one destination.
 //   depth     : signed scale applied to the source value (±1.0 typical).
 //   via       : optional secondary modulator; MOD_SRC_NONE = unused.
@@ -141,6 +177,16 @@ public:
     // Unified parameter bus: base values (user-set) + mod accumulators (frame-reset).
     // All modulation sources write addMod(); voice render() reads get() and translates.
     ParamBus params;
+
+    // Module-system arrays (Phase 1 / Phase 5 — shared across sampler and SF voices).
+    // voiceMods[]       — per-note state machines copied from instrumentModSlots[] at trigger.
+    // modSourceValues[] — each state machine writes its output here once per block.
+    // modDestValues[]   — processRoutes() accumulates weighted source values here.
+    // prevModDestValues[]— snapshot at start of each block for sub-block interpolation.
+    VoiceModSlot voiceMods[4];
+    float modSourceValues[MOD_SRC_COUNT]{};
+    float modDestValues[PARAM_COUNT]{};
+    float prevModDestValues[PARAM_COUNT]{};
 
     // True while this slot is producing audio (or fading out).
     virtual bool active() const = 0;
