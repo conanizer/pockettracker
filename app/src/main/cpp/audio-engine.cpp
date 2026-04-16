@@ -338,6 +338,14 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                                    note.volume, trkVol, note.pan, note.sfBank, note.sfPreset, t);
                     sv.resetPitchState();
 
+                    // Copy instrument effects params and compute biquad coefficients (Phase 7).
+                    sv.instrParams = instrumentParams[note.sampleId];
+                    calculateBiquadCoeffs(sv.instrParams.filterType, sv.instrParams.filterCut,
+                                          sv.instrParams.filterRes, (int)sampleRate,
+                                          sv.b0, sv.b1, sv.b2, sv.a1, sv.a2);
+                    sv.x1L = sv.x2L = sv.y1L = sv.y2L = 0.0f;
+                    sv.x1R = sv.x2R = sv.y1R = sv.y2R = 0.0f;
+
                     // Initialize modulation state from instrument mod slots (Phase 5).
                     // Matches sampler voice trigger init path in sampler-voice.h.
                     sv.params.setBase(PARAM_VOL,   note.volume);
@@ -1077,6 +1085,18 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 if (h) tsf_channel_set_volume(h, t, noteVol * trkVol);
             }
 
+            // If filter mod is active, recalculate biquad coefficients (Phase 7).
+            if (sv.instrParams.filterType != 0) {
+                int modCut = std::max(0, std::min(255,
+                    (int)(sv.instrParams.filterCut + sv.modDestValues[PARAM_FILTER_CUT])));
+                int modRes = std::max(0, std::min(255,
+                    (int)(sv.instrParams.filterRes + sv.modDestValues[PARAM_FILTER_RES])));
+                if (modCut != sv.instrParams.filterCut || modRes != sv.instrParams.filterRes) {
+                    calculateBiquadCoeffs(sv.instrParams.filterType, modCut, modRes,
+                                          (int)sampleRate, sv.b0, sv.b1, sv.b2, sv.a1, sv.a2);
+                }
+            }
+
             // Advance pitch slide/vibrato and write MIDI pitch wheel.
             // applyPitchMod now also adds modDestValues[PARAM_PITCH] (LFO/AHD → PITCH routes).
             sv.applyPitchMod((float)sampleRate, numFrames);
@@ -1095,6 +1115,54 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             {
                 std::lock_guard<std::mutex> sfLock(soundfonts[sv.sfSlot].mutex);
                 tsf_render_float_channel(h, t, sfBuf, numFrames, 0 /* overwrite */);
+            }
+
+            // Phase 7: apply instrument effects to this track's buffer before mixing.
+            // Signal chain: Downsample → Crush → Drive → Filter (matches sampler order).
+            // L and R share filter coefficients but each has independent biquad state.
+            const InstrumentParams& ip = sv.instrParams;
+            for (int i = 0; i < numFrames; i++) {
+                float L = sfBuf[i * 2];
+                float R = sfBuf[i * 2 + 1];
+
+                // Downsample (sample-and-hold)
+                if (ip.downsample > 0) {
+                    int factor = 1 << ip.downsample;
+                    int holdIdx = (i / factor) * factor;
+                    L = sfBuf[holdIdx * 2];      // holdIdx was already written back if < i
+                    R = sfBuf[holdIdx * 2 + 1];  // (processed value — same hold semantics)
+                }
+
+                // Bitcrush (reduce bit depth)
+                if (ip.crush > 0) {
+                    int bits = 16 - ip.crush;
+                    if (bits < 1) bits = 1;
+                    int levels = 1 << bits;
+                    L = floorf(L * levels) / levels;
+                    R = floorf(R * levels) / levels;
+                }
+
+                // Drive (pre-gain boost + tanh soft clip)
+                if (ip.drive > 0) {
+                    float gain = ip.drive / 128.0f;
+                    L = tanhf(L * gain);
+                    R = tanhf(R * gain);
+                }
+
+                // Biquad filter (L and R share coefficients but have independent state)
+                if (ip.filterType != 0) {
+                    float y0L = sv.b0 * L + sv.b1 * sv.x1L + sv.b2 * sv.x2L
+                                           - sv.a1 * sv.y1L - sv.a2 * sv.y2L;
+                    sv.x2L = sv.x1L; sv.x1L = L; sv.y2L = sv.y1L; sv.y1L = y0L;
+                    L = y0L;
+                    float y0R = sv.b0 * R + sv.b1 * sv.x1R + sv.b2 * sv.x2R
+                                           - sv.a1 * sv.y1R - sv.a2 * sv.y2R;
+                    sv.x2R = sv.x1R; sv.x1R = R; sv.y2R = sv.y1R; sv.y1R = y0R;
+                    R = y0R;
+                }
+
+                sfBuf[i * 2]     = L;
+                sfBuf[i * 2 + 1] = R;
             }
 
             float trackPeak = 0.0f;

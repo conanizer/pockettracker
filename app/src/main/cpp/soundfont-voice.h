@@ -1,6 +1,7 @@
 #pragma once
 #include <cmath>
 #include "mod-system.h"
+#include "filter.h"
 
 // Forward declaration — tsf is defined in soundfont-voice.cpp (TSF_IMPLEMENTATION).
 // note-queue.h declares SoundfontEntry and extern soundfonts[].
@@ -90,6 +91,15 @@ struct SoundfontVoice : public IAudioVoice {
     // render() is intentionally unused for SF voices.
     // Rendering is done per-slot in processAudioBlock (one tsf_render_float per active slot).
     float render(float*, int) override { return 0.0f; }
+
+    // ── Effects (Phase 7) — applied post-render to per-channel TSF buffer ──────
+    // Copied from instrumentParams[] at note trigger; independent per SF track.
+    InstrumentParams instrParams;
+    // Biquad filter coefficients — precomputed from instrParams at trigger.
+    float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
+    // Filter history state: L and R channels are independent (stereo SF output).
+    float x1L = 0.0f, x2L = 0.0f, y1L = 0.0f, y2L = 0.0f;
+    float x1R = 0.0f, x2R = 0.0f, y1R = 0.0f, y2R = 0.0f;
 
     // ── Audio-thread-only methods (no lock needed) ──────────────────────────
 
