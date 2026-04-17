@@ -341,12 +341,13 @@ class OboeAudioBackend : IAudioBackend {
         midiNote: Int, velocity: Int, vol: Float, pan: Float, bank: Int, preset: Int,
         pslInitialOffset: Float, pslDuration: Float,
         pbnRate: Float, vibratoSpeed: Float, vibratoDepth: Float,
-        phraseVol: Float, sampleId: Int
+        phraseVol: Float, sampleId: Int,
+        tableId: Int, tableTicRate: Int, noteOctave: Int, notePitch: Int, tableStartRow: Int
     ) {
         native_scheduleSoundfontNote(
             frame, trackId, sfSlot, midiNote, velocity, vol, pan, bank, preset,
             pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
-            phraseVol, sampleId
+            phraseVol, sampleId, tableId, tableTicRate, noteOctave, notePitch, tableStartRow
         )
     }
 
@@ -484,7 +485,8 @@ class OboeAudioBackend : IAudioBackend {
         midiNote: Int, velocity: Int, vol: Float, pan: Float, bank: Int, preset: Int,
         pslInitialOffset: Float, pslDuration: Float,
         pbnRate: Float, vibratoSpeed: Float, vibratoDepth: Float,
-        phraseVol: Float, sampleId: Int
+        phraseVol: Float, sampleId: Int,
+        tableId: Int, tableTicRate: Int, noteOctave: Int, notePitch: Int, tableStartRow: Int
     )
     private external fun native_setSoundfontEnvelopeOverrides(sfSlot: Int, bank: Int, preset: Int,
                                                                atk: Int, dec: Int, sus: Int, rel: Int)

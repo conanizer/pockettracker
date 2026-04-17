@@ -311,9 +311,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         LOGT("🔪 Killed track %d at frame %lld", kill.trackId, (long long)currentFrame);
                     }
                 }
-                // SF: hard kill (immediate stop)
+                // SF: soft kill so TSF's internal release envelope can play out.
                 if (kill.trackId >= 0 && kill.trackId < 8) {
-                    sfVoices[kill.trackId].hardStop();
+                    sfVoices[kill.trackId].noteOff();
                 }
             }
         }
@@ -336,7 +336,28 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     { std::lock_guard<std::mutex> vlock(volumeMutex); trkVol = trackVolumes[t]; }
                     sv.triggerNote(note.sfSlot, note.midiNote, note.midiVelocity,
                                    note.volume, trkVol, note.pan, note.sfBank, note.sfPreset, t);
+                    sv.isReleasingOnly = false;
                     sv.resetPitchState();
+
+                    // M8-style: honour TIC effect in table's last row (same as sampler path).
+                    int effectiveTicRate = note.tableTicRate;
+                    if (note.tableId >= 0 && note.tableId < 256) {
+                        std::lock_guard<std::mutex> lock(tableMutex);
+                        if (tables[note.tableId].loaded) {
+                            const TableRow& lastRow = tables[note.tableId].rows[15];
+                            auto checkTic = [](uint8_t fxType, uint8_t fxValue) -> int {
+                                return (fxType == FX_TIC) ? fxValue : -1;
+                            };
+                            int t1 = checkTic(lastRow.fx1Type, lastRow.fx1Value);
+                            int t2 = checkTic(lastRow.fx2Type, lastRow.fx2Value);
+                            int t3 = checkTic(lastRow.fx3Type, lastRow.fx3Value);
+                            if      (t1 >= 0) effectiveTicRate = t1;
+                            else if (t2 >= 0) effectiveTicRate = t2;
+                            else if (t3 >= 0) effectiveTicRate = t3;
+                        }
+                    }
+                    sv.resetTableState(note.tableId, effectiveTicRate,
+                                       note.noteOctave, note.notePitch, note.tableStartRow);
 
                     // Copy instrument effects params and modulation slots (Phase 5 / 7).
                     // Only valid when sampleId >= 0 (phrase playback); previews pass -1.
@@ -377,7 +398,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     sv.params.setBase(PARAM_PAN,   note.pan);
                     sv.params.setBase(PARAM_PITCH, 0.0f);
                     sv.params.resetMods();
-                    memset(sv.modSourceValues, 0, sizeof(sv.modSourceValues));
+                    memset(sv.modSourceValues,  0, sizeof(sv.modSourceValues));
+                    memset(sv.modDestValues,    0, sizeof(sv.modDestValues));
+                    memset(sv.prevModDestValues,0, sizeof(sv.prevModDestValues));
                     sv.modSourceValues[MOD_SRC_TABLE_VOL]  = 1.0f;
                     sv.modSourceValues[MOD_SRC_PHRASE_VOL] = note.phraseVolume;
                     float initVol = note.volume * note.phraseVolume;
@@ -797,6 +820,131 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     }
 
     // ===================================
+    // TABLE PROCESSING — SF VOICES
+    // ===================================
+    // Mirrors the sampler table loop above.  Effects that write to modSourceValues[]
+    // (transpose, volume) are automatically picked up by updateVoiceModulation / applyPitchMod.
+    // Sampler-only effects (FX_OFFSET) are silently skipped.
+    for (int t = 0; t < 8; t++) {
+        SoundfontVoice& sv = sfVoices[t];
+        if (!sv.isActive || sv.tableId < 0) continue;
+
+        bool tableLoaded = false;
+        {
+            std::lock_guard<std::mutex> lock(tableMutex);
+            tableLoaded = tables[sv.tableId].loaded;
+        }
+        if (!tableLoaded) continue;
+
+        bool shouldProcessRow = false;
+        bool shouldAdvance    = false;
+
+        if (sv.tableTicRate == 0x00) {
+            shouldProcessRow = (sv.tableRow != sv.lastProcessedRow);
+            shouldAdvance    = false;
+        } else if (sv.tableTicRate == 0xFC || sv.tableTicRate == 0xFE) {
+            shouldProcessRow = (sv.tableRow != sv.lastProcessedRow);
+            shouldAdvance    = false;
+        } else if (sv.tableTicRate == 0xFF) {
+            sv.tic200HzAccum += numFrames;
+            float samplesPerTic = sampleRate / 200.0f;
+            if (sv.tic200HzAccum >= samplesPerTic) {
+                sv.tic200HzAccum -= samplesPerTic;
+                shouldProcessRow = true;
+                shouldAdvance    = true;
+            }
+        } else {
+            sv.tableTicCounter++;
+            if (sv.tableTicCounter >= sv.tableTicRate) {
+                sv.tableTicCounter = 0;
+                shouldProcessRow   = true;
+                shouldAdvance      = true;
+            }
+        }
+
+        if (shouldProcessRow) {
+            TableRow row;
+            {
+                std::lock_guard<std::mutex> lock(tableMutex);
+                row = tables[sv.tableId].rows[sv.tableRow];
+            }
+
+            int semitones = transposeToSemitones(row.transpose);
+            sv.tableTranspose = (float)semitones;
+            sv.modSourceValues[MOD_SRC_TABLE_PITCH] = (float)semitones;
+
+            if (row.volume == 0xFF) {
+                sv.tableVolume = 1.0f;
+            } else {
+                sv.tableVolume = row.volume / 255.0f;
+            }
+            sv.modSourceValues[MOD_SRC_TABLE_VOL] = sv.tableVolume;
+
+            bool hopExecuted = false;
+            int  hopTarget   = -1;
+
+            auto processEffect = [&](uint8_t fxType, uint8_t fxValue) {
+                switch (fxType) {
+                    case FX_KILL:
+                        if (fxValue == 0x00) sv.noteOff();
+                        break;
+                    case FX_HOP:
+                        if (fxValue == 0xFF) {
+                            sv.tableId      = -1;
+                            sv.hopTargetRow = -1;
+                            sv.hopRepeatCount = 0;
+                        } else {
+                            int repeatCount = (fxValue >> 4) & 0x0F;
+                            int targetRow   =  fxValue       & 0x0F;
+                            if (repeatCount == 0) {
+                                hopExecuted = true; hopTarget = targetRow;
+                            } else {
+                                if (sv.hopTargetRow == -1 || sv.hopTargetRow != targetRow) {
+                                    sv.hopRepeatCount = repeatCount;
+                                    sv.hopTargetRow   = targetRow;
+                                }
+                                if (sv.hopRepeatCount > 0) {
+                                    sv.hopRepeatCount--;
+                                    hopExecuted = true; hopTarget = targetRow;
+                                } else {
+                                    sv.hopTargetRow = -1;
+                                }
+                            }
+                        }
+                        break;
+                    case FX_VOLUME:
+                        sv.tableVolume = fxValue / 255.0f;
+                        sv.modSourceValues[MOD_SRC_TABLE_VOL] = sv.tableVolume;
+                        break;
+                    case FX_TIC:
+                        if (fxValue >= 0x01 && fxValue <= 0xFB) {
+                            sv.tableTicRate    = fxValue;
+                            sv.tableTicCounter = 0;
+                        }
+                        break;
+                    case FX_THO:
+                        hopExecuted = true; hopTarget = fxValue & 0x0F;
+                        break;
+                    default:
+                        break;  // FX_OFFSET, FX_RETRIGGER, FX_ARP not applicable to SF
+                }
+            };
+
+            processEffect(row.fx1Type, row.fx1Value);
+            processEffect(row.fx2Type, row.fx2Value);
+            processEffect(row.fx3Type, row.fx3Value);
+
+            sv.lastProcessedRow = sv.tableRow;
+
+            if (hopExecuted && hopTarget >= 0) {
+                sv.tableRow = hopTarget % 16;
+            } else if (shouldAdvance) {
+                sv.tableRow = (sv.tableRow + 1) % 16;
+            }
+        }
+    }
+
+    // ===================================
     // PITCH MODULATION PROCESSING (Phase 6)
     // ===================================
     for (int v = 0; v < MAX_VOICES; v++) {
@@ -1076,6 +1224,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             for (int m = 0; m < 4; m++) {
                 VoiceModSlot& mod = sv.voiceMods[m];
                 if (mod.type == 0 || mod.stage == 0 || mod.dest != 1) continue;
+                // Skip completed mods — don't silence the channel during TSF's release tail.
+                // AHD/DRUM done at stage 4, ADSR/TRIG done at stage 5.
+                if ((mod.type == 1 || mod.type == 4) && mod.stage == 4) continue;
+                if ((mod.type == 2 || mod.type == 5) && mod.stage == 5) continue;
                 if (mod.type == 3) {  // LFO: bipolar tremolo
                     noteVol = fmaxf(0.0f, noteVol * (1.0f + mod.envValue * mod.effectiveAmt));
                 } else {  // AHD/DRUM/ADSR/TRIG: unipolar gain reduction
@@ -1088,6 +1240,26 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 { std::lock_guard<std::mutex> vlock(volumeMutex); trkVol = trackVolumes[t]; }
                 tsf* h = soundfonts[sv.sfSlot].handle;
                 if (h) tsf_channel_set_volume(h, t, noteVol * trkVol);
+            }
+
+            // When releasing with ADSR/TRIG VOL mods: stop as soon as all have finished
+            // so the channel volume doesn't jump back to the base level after release.
+            // (Without this, the mod would be skipped at stage 5, making the channel loud
+            // again for one block before TSF silence detection fires.)
+            if (sv.isReleasingOnly) {
+                bool hasAdsrVolMod  = false;
+                bool allAdsrVolDone = true;
+                for (int m = 0; m < 4; m++) {
+                    const VoiceModSlot& mod = sv.voiceMods[m];
+                    if (mod.dest == 1 && (mod.type == 2 || mod.type == 5) && mod.stage > 0) {
+                        hasAdsrVolMod = true;
+                        if (mod.stage < 5) allAdsrVolDone = false;
+                    }
+                }
+                if (hasAdsrVolMod && allAdsrVolDone) {
+                    sv.hardStop();
+                    continue;
+                }
             }
 
             // If filter mod is active, recalculate biquad coefficients (Phase 7).
@@ -1176,6 +1348,21 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 output[i] += sfBuf[i] * masterVol;
             }
             framePeaksPerTrack[t] = fmaxf(framePeaksPerTrack[t], trackPeak);
+
+            // Release tail: when noteOff() was called, keep rendering until TSF goes silent.
+            // Suppressed while an ADSR/TRIG VOL release is active (stage 4) — TSF is still
+            // generating audio for the fade; the render loop in pass 1 calls hardStop() when
+            // the ADSR mod reaches stage 5.
+            if (sv.isReleasingOnly && trackPeak < 0.0005f) {
+                bool adsrReleasing = false;
+                for (int m = 0; m < 4; m++) {
+                    const VoiceModSlot& mod = sv.voiceMods[m];
+                    if (mod.dest == 1 && (mod.type == 2 || mod.type == 5) && mod.stage == 4) {
+                        adsrReleasing = true; break;
+                    }
+                }
+                if (!adsrReleasing) sv.hardStop();
+            }
         }
     }
 
@@ -1317,7 +1504,9 @@ void AudioEngine::scheduleSoundfontNote(int64_t targetFrame, int trackId, int sf
                                         int bank, int preset,
                                         float pslInitialOffset, float pslDuration,
                                         float pbnRate, float vibratoSpeed, float vibratoDepth,
-                                        float phraseVol, int sampleId) {
+                                        float phraseVol, int sampleId,
+                                        int tableId, int tableTicRate,
+                                        int noteOctave, int notePitch, int tableStartRow) {
     ScheduledNote note{};
     note.targetFrame      = targetFrame;
     note.trackId          = trackId;
@@ -1334,16 +1523,16 @@ void AudioEngine::scheduleSoundfontNote(int64_t targetFrame, int trackId, int sf
     note.frequency        = 440.0f;
     note.baseFrequency    = 440.0f;
     note.startPointOverride = -1;
-    note.tableId          = -1;
-    note.tableTicRate     = 6;
-    note.noteOctave       = 4;
-    note.notePitch        = 0;
+    note.tableId          = tableId;
+    note.tableTicRate     = tableTicRate;
+    note.noteOctave       = noteOctave;
+    note.notePitch        = notePitch;
     note.pslInitialOffset = pslInitialOffset;
     note.pslDuration      = pslDuration;
     note.pbnRate          = pbnRate;
     note.vibratoSpeed     = vibratoSpeed;
     note.vibratoDepth     = vibratoDepth;
-    note.tableStartRow    = -1;
+    note.tableStartRow    = tableStartRow;
     noteQueue.schedule(note);
 }
 
@@ -1414,6 +1603,11 @@ int AudioEngine::getVoiceTableRow(int trackId) {
             return voices[v].tableRow;
         }
     }
+    // SF voices are indexed directly by trackId
+    if (trackId >= 0 && trackId < 8) {
+        const SoundfontVoice& sv = sfVoices[trackId];
+        if (sv.isActive && sv.tableId >= 0) return sv.tableRow;
+    }
     return -1;
 }
 
@@ -1422,6 +1616,11 @@ int AudioEngine::getVoiceTableId(int trackId) {
         if (voices[v].isActive && voices[v].trackId == trackId) {
             return voices[v].tableId;
         }
+    }
+    // SF voices are indexed directly by trackId
+    if (trackId >= 0 && trackId < 8) {
+        const SoundfontVoice& sv = sfVoices[trackId];
+        if (sv.isActive) return sv.tableId;
     }
     return -1;
 }

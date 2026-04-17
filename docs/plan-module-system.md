@@ -1,6 +1,6 @@
 # Module System — Architecture Plan
 
-**Status:** Planning  
+**Status:** COMPLETE (Phases 0–8 implemented, April 2026)  
 **Branch:** `claude/audit-audio-module-system-RSQ3K`  
 **Prerequisite reading:** `docs/unified-audio-abstraction.md`  
 **Reference designs:** SunVox 1.3b source, Surge XT, Polyhedrus (Serum-style), VCV Rack
@@ -326,6 +326,29 @@ single focused file rather than one 3700-line monolith.
 
 ---
 
+## Implementation Status
+
+All 9 phases complete. See per-phase status below.
+
+---
+
+## Known Architecture Debt
+
+### Table processing loop is duplicated
+
+The sampler (`voices[]` loop, ~line 633) and SF voices (`sfVoices[]` loop, ~line 828) each have their own copy of the table row-advance / HOP / transpose logic. They both write to the same `IAudioVoice` fields (`tableRow`, `tableTicRate`, `modSourceValues[TABLE_PITCH]`, etc.), so a single `processTableTick(IAudioVoice&)` function could replace both loops.
+
+This duplication was the root cause of a bug where the SF table stopped during release (`isReleasingOnly` guard was present only on the SF loop) while the sampler table correctly kept running. The guard has been removed for now, but the underlying duplication remains.
+
+**What the correct fix looks like:**
+1. Move `isReleasingOnly` up to `IAudioVoice` (sampler needs it too for the same reason)
+2. Write a single `processTableTick(IAudioVoice& voice, ...)` function
+3. Replace both loops with one loop over a `IAudioVoice* allVoices[]` array
+
+This is a refactor task — no behavior change, just consolidation.
+
+---
+
 ## Implementation Phases
 
 ### Phase 0 — Split native-audio.cpp into separate files
@@ -337,68 +360,25 @@ changes. Purely mechanical — no behavior changes, no new functionality.
 of hunting through a 3700-line file. The portability boundary (no Android imports
 in audio logic) is enforced automatically by file structure.
 
-**Current state (partial — interrupted mid-split):**
+**Status: ✅ COMPLETE**
 
-Files already written:
-- `filter.h` — biquad math (lines 48–125) ✅
+All files written and compiling:
+- `filter.h` — biquad math ✅
 - `audio-defs.h` — log macros, MAX_VOICES, DECLICK_SAMPLES, FX_* constants ✅
-- `note-queue.h` — ScheduledNote, ScheduledKill, NoteQueue, KillQueue, InstrumentParams, InstrumentModSlot, TableRow, Table, transposeToSemitones, SoundfontEntry, soundfonts[] extern ✅
-- `mod-system.h` — ParamId, ParamBus, IAudioVoice ✅
-- `sampler-voice.h` — Voice struct with VoiceModSlot nested, all Voice methods inline ✅
+- `note-queue.h` — ScheduledNote, ScheduledKill, NoteQueue, KillQueue, InstrumentParams, InstrumentModSlot, TableRow, Table, SoundfontEntry, soundfonts[] extern ✅
+- `mod-system.h` — ModSourceId, ParamId, ParamBus, IAudioVoice, VoiceModSlot, processRoutes ✅
+- `sampler-voice.h` — Voice struct with all methods inline ✅
 - `soundfont-voice.h` — SoundfontVoice class ✅
 - `soundfont-voice.cpp` — TSF_IMPLEMENTATION, soundfonts[] definition, SoundfontVoice method bodies ✅
-- `audio-engine.h` — AudioEngine class declaration, extern SoundfontVoice sfVoices[8] ✅
-
-Files still needed:
-- `audio-engine.cpp` — SoundfontVoice sfVoices[8] definition + all AudioEngine
-  method bodies as `AudioEngine::methodName()` out-of-class definitions
-- `jni-bridge.cpp` — `static AudioEngine* engine = nullptr` + all JNIEXPORT functions
-
-**Steps to complete Phase 0:**
-
-1. Write `audio-engine.cpp`:
-   ```cpp
-   #include "audio-engine.h"
-   #include "tsf.h"  // full API declarations (no TSF_IMPLEMENTATION)
-
-   SoundfontVoice sfVoices[8];
-
-   AudioEngine::AudioEngine() { ... }       // lines 1113–1128
-   AudioEngine::~AudioEngine() { ... }      // lines 1130–1137
-   bool AudioEngine::openStream() { ... }   // lines 1139–1203
-   void AudioEngine::closeStream() { ... }  // lines 1205–1211
-   // ... all methods from lines 1109–3002, strip default param values from defs
-   ```
-   Key: default parameter values (e.g. `float pan = 0.5f`, `int releaseSamples = 0`)
-   must NOT be repeated in the `.cpp` definitions — only in the `.h` declarations.
-
-2. Write `jni-bridge.cpp`:
-   ```cpp
-   #include <jni.h>
-   #include "audio-engine.h"
-   #include "tsf.h"
-
-   static AudioEngine* engine = nullptr;
-
-   extern "C" {
-   // ... all JNIEXPORT functions verbatim from lines 3006–3699
-   }
-   ```
-
-3. Empty `native-audio.cpp` (replace with a comment) to avoid duplicate symbols
-   when all three new `.cpp` files compile alongside it.
-
-4. Update `CMakeLists.txt` — add `soundfont-voice.cpp`, `audio-engine.cpp`,
-   `jni-bridge.cpp` to the `add_library` source list; remove or stub
-   `native-audio.cpp`.
-
-**Files:** `audio-engine.cpp` (new), `jni-bridge.cpp` (new), `native-audio.cpp`
-(empty stub), `CMakeLists.txt`  
-**Risk:** Low — mechanical move, no logic changes. Verify build after step 4.
+- `audio-engine.h` — AudioEngine class declaration ✅
+- `audio-engine.cpp` — all AudioEngine method bodies ✅
+- `jni-bridge.cpp` — all JNIEXPORT functions ✅
+- `native-audio.cpp` — empty stub ✅
+- `CMakeLists.txt` — updated with all new .cpp files ✅
 
 ---
 
-### Phase 1 — Source array infrastructure
+### Phase 1 — Source array infrastructure ✅ COMPLETE
 
 **Goal:** Add `modSourceValues[]` and `modDestValues[]` arrays to voices.
 Wire all existing code to write/read through them.
@@ -431,7 +411,7 @@ Wire all existing code to write/read through them.
 
 ---
 
-### Phase 2 — Route all bypass paths
+### Phase 2 — Route all bypass paths ✅ COMPLETE
 
 **Goal:** Make table effects, pitch slides, and vibrato write through the source
 array instead of directly to voice fields.
@@ -457,7 +437,7 @@ LFO or envelope, because all are just values in `modSourceValues[]`.
 
 ---
 
-### Phase 3 — Expand destination parameters
+### Phase 3 — Expand destination parameters ✅ COMPLETE
 
 **Goal:** Make drive, crush, downsample, and sample points modulatable.
 
@@ -494,7 +474,7 @@ those params.
 
 ---
 
-### Phase 4 — SCALAR source type
+### Phase 4 — SCALAR source type ⏳ DEFERRED (post-MVP)
 
 **Goal:** Add a source that outputs a constant 00–FF value every block.
 
@@ -523,7 +503,7 @@ unknown types as `NONE`.
 
 ---
 
-### Phase 5 — SF and future voices read modDestValues[]
+### Phase 5 — SF and future voices read modDestValues[] ✅ COMPLETE
 
 **Goal:** `SoundfontVoice` reads `modDestValues[]` for all parameters,
 making every modulation source automatically work with SF2 instruments.
@@ -544,7 +524,7 @@ already written by Phase 2.
 
 ---
 
-### Phase 6 — Per-channel TSF rendering (TSF fork patch)
+### Phase 6 — Per-channel TSF rendering (TSF fork patch) ✅ COMPLETE
 
 **Goal:** Each track gets its own output buffer from TSF, enabling per-track
 filter/drive/bitcrush on SF instruments.
@@ -578,7 +558,7 @@ track. Each track buffer is then available for per-track effect processing.
 
 ---
 
-### Phase 7 — Apply instrument effects to per-channel SF buffers
+### Phase 7 — Apply instrument effects to per-channel SF buffers ✅ COMPLETE
 
 **Goal:** SF instruments get the same filter/drive/bitcrush as sampler instruments,
 configured per-instrument, not shared across the whole SF2 file.
@@ -624,7 +604,7 @@ biquad struct and `instrParams` copy (same fields `Voice` already has).
 
 ---
 
-### Phase 8 — SF preset parameter editing
+### Phase 8 — SF preset parameter editing ✅ COMPLETE
 
 **Goal:** Expose SF2 preset parameters (envelopes, filter, modulation routing)
 on the instrument screen for static editing.

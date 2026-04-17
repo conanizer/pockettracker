@@ -24,8 +24,52 @@ void SoundfontVoice::hardStop() {
         tsf* h = soundfonts[sfSlot].handle;
         if (h && activeNote >= 0) tsf_channel_note_off(h, _trackId, activeNote);
     }
-    activeNote = -1;
-    isActive   = false;
+    activeNote      = -1;
+    isActive        = false;
+    isReleasingOnly = false;
+}
+
+void SoundfontVoice::noteOff() {
+    isReleasingOnly = true;
+
+    // Decide whether to defer tsf_channel_note_off based on active ADSR/TRIG VOL mods.
+    //
+    // ADSR path (ADSR/TRIG VOL mod active):
+    //   Do NOT send note_off yet — TSF must keep generating audio at sustain so the
+    //   ADSR channel-volume fade is audible. The rendering loop sends note_off via
+    //   hardStop() once all ADSR/TRIG VOL mods reach stage 5 (done).
+    //
+    // TSF REL path (no ADSR/TRIG VOL mod):
+    //   Send note_off now so TSF's own release envelope (configured via the SF REL
+    //   parameter) plays out. Silence detection in the render loop fires hardStop().
+    bool hasActiveAdsrVolMod = false;
+    for (int m = 0; m < 4; m++) {
+        const VoiceModSlot& mod = voiceMods[m];
+        if (mod.dest == 1 && (mod.type == 2 || mod.type == 5)
+                && mod.stage >= 1 && mod.stage <= 3) {
+            hasActiveAdsrVolMod = true;
+            break;
+        }
+    }
+
+    if (hasActiveAdsrVolMod) {
+        // Keep activeNote so hardStop() can send the deferred note_off to TSF.
+        for (int m = 0; m < 4; m++) {
+            VoiceModSlot& mod = voiceMods[m];
+            if (mod.dest == 1 && (mod.type == 2 || mod.type == 5)
+                    && mod.stage >= 1 && mod.stage <= 3) {
+                mod.stage        = 4;
+                mod.stageCounter = 0;
+            }
+        }
+    } else {
+        if (sfSlot >= 0 && sfSlot < MAX_SOUNDFONTS) {
+            std::lock_guard<std::mutex> lock(soundfonts[sfSlot].mutex);
+            tsf* h = soundfonts[sfSlot].handle;
+            if (h && activeNote >= 0) tsf_channel_note_off(h, _trackId, activeNote);
+        }
+        activeNote = -1;
+    }
 }
 
 void SoundfontVoice::setVolume(float v) {
@@ -85,8 +129,16 @@ void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
         needsPitchReset = false;
     }
 
-    // Also apply if instrument mod routing has contributed pitch (Phase 5).
-    if (!pitchSliding && !vibratoActive && modDestValues[PARAM_PITCH] == 0.0f) return;
+    // If no pitch mod is active, reset pitch wheel to center and return.
+    // Must NOT skip this when pitch was non-zero last block (e.g. table row returned to
+    // 0 semitones after a +2 row): the wheel is persistent in TSF and must be explicitly
+    // re-centered, or the previous pitch offset sticks (unlike the sampler which
+    // recalculates playbackRate from modDestValues every sample).
+    if (!pitchSliding && !vibratoActive && modDestValues[PARAM_PITCH] == 0.0f) {
+        tsf_channel_set_pitchrange(h, _trackId, PITCH_RANGE);
+        tsf_channel_set_pitchwheel(h, _trackId, 8192);
+        return;
+    }
 
     // Advance pitch slide (PSL / PBN)
     if (pitchSliding) {

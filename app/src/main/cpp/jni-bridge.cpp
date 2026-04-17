@@ -640,14 +640,17 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1sched
         jint midiNote, jint velocity, jfloat vol, jfloat pan, jint bank, jint preset,
         jfloat pslInitialOffset, jfloat pslDuration, jfloat pbnRate,
         jfloat vibratoSpeed, jfloat vibratoDepth,
-        jfloat phraseVol, jint sampleId) {
+        jfloat phraseVol, jint sampleId,
+        jint tableId, jint tableTicRate, jint noteOctave, jint notePitch, jint tableStartRow) {
     if (engine) {
         engine->scheduleSoundfontNote((int64_t)frame, (int)trackId, (int)sfSlot,
                                       (int)midiNote, (int)velocity,
                                       (float)vol, (float)pan, (int)bank, (int)preset,
                                       (float)pslInitialOffset, (float)pslDuration,
                                       (float)pbnRate, (float)vibratoSpeed, (float)vibratoDepth,
-                                      (float)phraseVol, (int)sampleId);
+                                      (float)phraseVol, (int)sampleId,
+                                      (int)tableId, (int)tableTicRate,
+                                      (int)noteOctave, (int)notePitch, (int)tableStartRow);
     }
 }
 

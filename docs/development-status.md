@@ -1,6 +1,6 @@
 # Development Status
 
-**Last Updated:** 2026-04-07
+**Last Updated:** 2026-04-17
 
 ## Current Phase
 
@@ -44,7 +44,7 @@ Week 16:     MVP Release
 - 8-voice polyphony with per-track voice stealing + 3-step allocator
 - 256 sample slots with stereo/mono WAV loading (auto-converts)
 - Automatic sample rate compensation
-- SoundFont (SF2) instruments via TinySoundFont — shared handle per SF2 slot, per-track MIDI channels (0-7), up to 8 simultaneous SF2 files
+- SoundFont (SF2) instruments via TinySoundFont — per-channel rendering (`tsf_render_float_channel` fork), full mod matrix parity with sampler (ADSR/LFO/table/pitch effects), per-instrument filter/drive/crush post-render, SF2 envelope/filter overrides (ATK/DEC/SUS/REL/CUT/RES on instrument screen)
 - Advanced playback: start/end points, reverse, looping (fwd/ping-pong)
 - Queue-based playback: phrase, chain (with transpose), song (8-track)
 - Continuous buffering with 2-phrase lookahead
@@ -126,7 +126,10 @@ Week 16:     MVP Release
 ## Known Issues
 
 - Generic input warning spam after device restart (harmless, goes away after reboot)
-- SF2 per-track meters show the same level for all tracks sharing one SF2 file (TSF renders all MIDI channels into one buffer; true per-track isolation requires per-track rendering, deferred post-MVP)
+
+## Architecture Debt (Post-MVP)
+
+- **Table processing is duplicated** — sampler and SF voices each have their own table row-advance loop in `audio-engine.cpp`. Both operate on `IAudioVoice` fields and contain identical logic (HOP, TIC, transpose, volume). Should be unified into a single `processTableTick(IAudioVoice&)` called from one loop. `isReleasingOnly` should move up to `IAudioVoice` as part of this. See `docs/plan-module-system.md` for details.
 
 ---
 
@@ -167,6 +170,16 @@ Week 16:     MVP Release
 - TIC effect (table tick rate + special modes)
 - HOP effect (phrase/table jump)
 - Pitch effects (PSL, PBN, PVB, PVX)
+
+### Audio Module System (Complete - 2026-04-17)
+- **Phase 0**: Split `native-audio.cpp` monolith into focused files (`filter.h`, `mod-system.h`, `sampler-voice.h`, `soundfont-voice.h/.cpp`, `audio-engine.h/.cpp`, `jni-bridge.cpp`)
+- **Phases 1–3**: `modSourceValues[]` + `modDestValues[]` arrays on all voices; `processRoutes` unified routing loop; all bypass paths (table vol/pitch, PSL/PBN, vibrato) route through source array
+- **Phase 5**: SF voices inherit full modulation engine — same `updateVoiceModulation()` as sampler; ADSR/LFO/AHD/DRUM/TRIG work on SF instruments with zero SF-specific code
+- **Phase 6**: `tsf_render_float_channel` fork — per-track SF buffers enable per-instrument effects
+- **Phase 7**: Per-instrument filter/drive/bitcrush applied to SF output buffer post-render
+- **Phase 8**: SF preset parameter overrides (ATK/DEC/SUS/REL/filterCut/filterRes) editable on instrument screen via `SFOverrides`, applied by `applySoundfontEnvelopeOverrides` at note trigger
+- **SF bug fixes**: HOP effect now works with SF tables; KIL/REL — ADSR release and TSF-native REL both audible after KIL; table arpeggio continues during release tail (matches sampler behavior)
+- **Phase 4 (SCALAR mod type)**: Deferred to post-MVP
 
 ### Extension Pack 3 (Complete - 2026-03-13)
 - Fixes & UX updates (table vol range, FX cycling, key repeat, selection increment)

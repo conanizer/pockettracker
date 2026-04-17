@@ -293,6 +293,27 @@ class AudioEngine(
         project: Project? = null,
         tableIdOverride: Int = -1
     ) {
+        // SF path: route through scheduleNote so mods, tables, and tracking work correctly.
+        if (instrument.instrumentType == InstrumentType.SOUNDFONT && project != null) {
+            backend.resumeStream()
+            val targetFrame = backend.getCurrentFrame() + 100L
+            scheduleNote(
+                targetFrame = targetFrame,
+                note = instrument.root,
+                instrumentId = instrument.id,
+                trackId = 0,
+                volume = VolumeUtils.hexToFloat(instrument.volume),
+                phraseVol = 1.0f,
+                pan = VolumeUtils.hexToFloat(instrument.pan),
+                project = project,
+                tableIdOverride = tableIdOverride
+            )
+            // Hard-stop after 2 seconds so SF sustain notes don't ring forever during preview.
+            val sr = backend.getSampleRate().toLong().coerceAtLeast(44100L)
+            backend.scheduleKill(targetFrame + sr * 2, 0)
+            return
+        }
+
         val sampleId = instrument.sampleId
 
         // Calculate target frequency from ROOT + DETUNE
@@ -524,6 +545,21 @@ class AudioEngine(
             val framesPerStep = framesPerTic * 12f
             val pslDurationFrames = if (pslDuration > 0f) pslDuration * framesPerTic else 0f
             val pbnRatePerFrame   = if (pbnRate  != 0f)  pbnRate  / framesPerStep  else 0f
+
+            // Push mod slots to C++ so SF voice picks them up at trigger (Bug 1 fix)
+            pushInstrumentModulation(instrument, tempo)
+            // Apply envelope overrides every trigger so TSF preset has correct ATK/DEC/SUS/REL
+            // before the note plays. Without this, KIL → noteOff uses the SF2 file's native
+            // (often instant) release instead of the user-configured REL value.
+            applySoundfontEnvelopeOverrides(instrument)
+
+            // Table setup — same logic as sampler path
+            val sfTableId = if (tableIdOverride >= 0) tableIdOverride else instrumentId
+            val sfTicRate = instrument.tableTicRate
+            if (sfTableId in 0..255) {
+                ensureTableLoaded(project.tables[sfTableId])
+            }
+
             backend.resumeStream()
             backend.scheduleSoundfontNote(
                 targetFrame, trackId, slot,
@@ -531,7 +567,12 @@ class AudioEngine(
                 instrument.sfBank, instrument.sfPreset,
                 pslInitialOffset, pslDurationFrames, pbnRatePerFrame, vibratoSpeed, vibratoDepth,
                 phraseVol = phraseVol,
-                sampleId = instrumentId
+                sampleId = instrumentId,
+                tableId = sfTableId,
+                tableTicRate = sfTicRate,
+                noteOctave = note.octave,
+                notePitch = note.pitch,
+                tableStartRow = tableStartRow
             )
             return
         }
@@ -692,7 +733,8 @@ class AudioEngine(
      * Call after SF2 loads or when any override field changes.
      */
     fun applySoundfontEnvelopeOverrides(instrument: Instrument) {
-        val slot = instrument.sampleId
+        val path = instrument.soundfontPath ?: return
+        val slot = sfSlotProvider?.invoke(path) ?: return  // sfSlot (0-7), not instrument index
         val ov = instrument.sfOverrides
         backend.setSoundfontEnvelopeOverrides(slot, instrument.sfBank, instrument.sfPreset,
             ov.ampAttack, ov.ampDecay, ov.ampSustain, ov.ampRelease)

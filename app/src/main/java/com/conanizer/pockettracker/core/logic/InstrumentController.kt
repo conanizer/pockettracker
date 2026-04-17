@@ -265,23 +265,30 @@ class InstrumentController(
     fun previewInstrument(project: Project) {
         val instrument = project.instruments[currentInstrument]
 
-        // SOUNDFONT path: bypass sampler engine
+        // SOUNDFONT path — route through AudioEngine.scheduleNote so pushInstrumentModulation,
+        // table setup, and all effect params are applied exactly as in phrase playback.
         if (instrument.instrumentType == InstrumentType.SOUNDFONT) {
             val path = instrument.soundfontPath ?: run {
                 logger.d(TAG, "⏭️ Skipping soundfont preview: no soundfont loaded")
                 return
             }
-            val slot = sfSlotMap[path] ?: run {
+            sfSlotMap[path] ?: run {
                 logger.d(TAG, "⏭️ Skipping soundfont preview: slot not in sfSlotMap")
                 return
             }
-            val midiNote = (instrument.root.octave + 1) * 12 + instrument.root.pitch
-            logger.d(TAG, "🎵 Previewing soundfont instrument ${formatHex(currentInstrument)} slot=$slot bank=${instrument.sfBank} preset=${instrument.sfPreset} midi=$midiNote")
+            val note = instrument.root
+            logger.d(TAG, "🎵 Previewing soundfont instrument ${formatHex(currentInstrument)} bank=${instrument.sfBank} preset=${instrument.sfPreset} note=$note")
             audioEngine.backend.resumeStream()
             val frame = audioEngine.backend.getCurrentFrame() + 2
-            audioEngine.backend.scheduleSoundfontNote(
-                frame, 0, slot, midiNote, 100, instrument.volume / 255f, 0.5f,
-                instrument.sfBank, instrument.sfPreset
+            audioEngine.scheduleNote(
+                targetFrame = frame,
+                note = note,
+                instrumentId = currentInstrument,
+                trackId = 0,
+                volume = instrument.volume / 255f,
+                phraseVol = 1.0f,
+                pan = instrument.pan / 255f,
+                project = project
             )
             // Schedule note-off after ~1 second so preview doesn't sustain forever
             val sampleRate = audioEngine.backend.getSampleRate().takeIf { it > 0 } ?: 44100
@@ -723,6 +730,13 @@ class InstrumentController(
     fun setInstrumentType(project: Project, newType: InstrumentType) {
         val instrument = project.instruments[currentInstrument]
         instrument.instrumentType = newType
+        // Clear stale source metadata from the previous type so preview/table
+        // screens don't misidentify the instrument as the old type.
+        if (newType == InstrumentType.SOUNDFONT) {
+            instrument.sampleFilePath = null
+        } else {
+            instrument.soundfontPath = null
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

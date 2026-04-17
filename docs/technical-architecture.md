@@ -350,26 +350,26 @@ class AudioEngine(
 
 ### SoundFont (SF2) Engine
 
-**Implementation:** TinySoundFont (TSF) — single-header C++ SF2 synthesizer embedded in `native-audio.cpp`.
+**Implementation:** TinySoundFont (TSF) — single-header C++ SF2 synthesizer, with a small fork patch for per-channel rendering.
 
-**Current architecture (stable, working):**
+**Current architecture (complete as of April 2026):**
 - One shared `tsf*` handle per SF2 file slot (up to 8 active SF2 files simultaneously)
 - Each track maps to a MIDI channel on the slot's handle: track 0 → ch 0 … track 7 → ch 7
-- `tsf_render_float()` called once per active slot per audio block — mixes all MIDI channels together
-- SF2 loaded via `tsf_load_filename()` directly; no file buffer copy kept in memory
-- Memory: ~1× SF2 file size (one handle per file, not per track)
+- **`tsf_render_float_channel(h, t, buf, frames, 0)`** — forked function renders one MIDI channel at a time into a per-track buffer, enabling per-instrument post-processing
+- SF2 loaded via `tsf_load_filename()` directly; memory: ~1× SF2 file size (one handle per file)
+- Full modulation engine parity with sampler: same `updateVoiceModulation()` runs for `SoundfontVoice`; ADSR/LFO/AHD/DRUM/TRIG, all destinations (VOL/PAN/PITCH/FILTER), table effects and pitch slides all work identically
+- Per-instrument effects (filter/drive/bitcrush) applied to each track's SF buffer post-render
+- SF preset parameter overrides (ATK/DEC/SUS/REL/filterCut/filterRes) — set on instrument screen, patched into TSF regions via `applySoundfontEnvelopeOverrides()` at note trigger
+- KIL/REL: ADSR release and TSF-native release both work after KIL — ADSR path defers `tsf_channel_note_off` until release completes; TSF REL path uses immediate note_off + silence detection
+- Table effects (HOP, TIC, transpose, volume) work identically to sampler; table arpeggio continues through release tail
 
-**Limitations of current approach (deferred to Unified Audio Abstraction):**
-- Per-track meters show the same level for all tracks sharing one SF2 (shared render buffer)
-- Table FX, Arpeggio, Repeat effects not applied to SF instruments
-- Track volume baked into TSF channel volume at note-on; immediate changes update live
+**Module System (see `docs/plan-module-system.md`):**
+- Phase 0–3: ✅ File split + source/dest arrays + unified routing loop
+- Phase 5–8: ✅ SF mod parity + per-channel render + per-instrument FX + preset overrides
+- Phase 4 (SCALAR mod type): ⏳ Deferred post-MVP
 
-**Unified Audio Abstraction (planned post-MVP):** See `docs/unified-audio-abstraction.md` for the full plan.
-Current UAA status:
-- Phase 1 (IAudioVoice interface): ✅ Done
-- Phase 2 (per-instrument TSF clones, per-track render): ⏳ Deferred
-- Phase 3 (effect processor unification for SF): ⏳ Deferred
-- Phase 4 (Kotlin layer cleanup): ⏳ Deferred
+**Architecture debt:**
+- Table processing loop is still duplicated (sampler loop + SF loop). Unification into `processTableTick(IAudioVoice&)` is the next step. See `docs/plan-module-system.md` → Known Architecture Debt.
 
 **Linux Implementation (Future):**
 ```cpp
@@ -852,6 +852,7 @@ See **REFACTORING_ROADMAP.md** for detailed step-by-step refactoring plan.
 ---
 
 **Version History:**
+- v2.2 (2026-04-17): Audio module system complete (Phases 0–3, 5–8); SF2 full mod parity; per-channel TSF rendering; SF bug fixes (HOP, KIL/REL, table in release); table abstraction debt noted
 - v2.1 (2026-04-07): Added SF2/TSF engine section; OpenSL ES stream priority; async audio init; UAA phase status
 - v2.0 (2026-03-13): Updated to reflect complete refactoring; all architecture goals achieved; modulation engine fully implemented
 - v1.0 (2025-01-01): Initial architecture document with refactoring plan

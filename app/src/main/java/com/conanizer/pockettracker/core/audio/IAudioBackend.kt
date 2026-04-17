@@ -540,8 +540,13 @@ interface IAudioBackend {
         midiNote: Int, velocity: Int, vol: Float, pan: Float, bank: Int, preset: Int,
         pslInitialOffset: Float = 0f, pslDuration: Float = 0f,
         pbnRate: Float = 0f, vibratoSpeed: Float = 0f, vibratoDepth: Float = 0f,
-        phraseVol: Float = 1f,  // Phrase step volume (0.0–1.0); multiplied into VOL route
-        sampleId: Int = -1      // Instrument slot index for effect/mod lookup (-1 = none)
+        phraseVol: Float = 1f,   // Phrase step volume (0.0–1.0); multiplied into VOL route
+        sampleId: Int = -1,      // Instrument slot index for effect/mod lookup (-1 = none)
+        tableId: Int = -1,       // Table ID (-1 = no table)
+        tableTicRate: Int = 6,   // Tic rate for table advancement
+        noteOctave: Int = 4,     // Note octave (for TICFC/TICFE table modes)
+        notePitch: Int = 0,      // Note pitch  (for TICFE table mode)
+        tableStartRow: Int = -1  // THO: force starting row (-1 = default)
     )
 
     /**

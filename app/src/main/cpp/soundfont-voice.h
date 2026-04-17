@@ -38,6 +38,23 @@ struct SoundfontVoice : public IAudioVoice {
     // Written from JNI thread, read+cleared on audio thread — ARM64 bool write is atomic.
     bool  needsPitchReset  = false;
 
+    // Table state — mirrors Voice table fields; populated from scheduleSoundfontNote.
+    int   tableId          = -1;
+    int   tableRow         = 0;
+    int   lastProcessedRow = -1;
+    int   tableTicRate     = 6;
+    int   tableTicCounter  = 0;
+    float tic200HzAccum    = 0.0f;
+    float tableTranspose   = 0.0f;  // current semitones from table row (for debug)
+    float tableVolume      = 1.0f;  // current vol multiplier from table row (for debug)
+    int   hopRepeatCount   = 0;
+    int   hopTargetRow     = -1;
+    int   noteOctave       = 4;     // note octave (for TICFC/TICFE special modes)
+    int   notePitch        = 0;     // note pitch  (for TICFE mode)
+
+    // Release tail: true after noteOff() — keeps rendering while TSF decays to silence.
+    bool  isReleasingOnly  = false;
+
     // ── IAudioVoice ─────────────────────────────────────────────────────────
     bool active()     const override { return isActive; }
     int  getTrackId() const override { return _trackId; }
@@ -45,7 +62,10 @@ struct SoundfontVoice : public IAudioVoice {
     // Called from JNI thread (stop button) or audio thread (kill note queue).
     void hardStop() override;
 
-    void noteOff() override { hardStop(); }  // TSF handles its own release tail
+    // Soft note-off: tell TSF to start its internal release envelope, keep rendering until silence.
+    // isActive stays true so the audio block keeps calling tsf_render_float_channel.
+    // The render loop detects silence and calls hardStop() to clean up.
+    void noteOff() override;
 
     void setVolume(float v) override;
 
@@ -112,6 +132,8 @@ struct SoundfontVoice : public IAudioVoice {
                      int bank, int preset, int trackId);
 
     // Reset pitch state after a new note trigger.
+    // needsPitchReset=true so applyPitchMod() resets the TSF pitch wheel to center on the
+    // next audio block — required when a previous note left the wheel at an extreme value (PBN).
     void resetPitchState() {
         pitchOffset      = 0.0f;
         pitchSlideTarget = 0.0f;
@@ -119,7 +141,26 @@ struct SoundfontVoice : public IAudioVoice {
         pitchSliding     = false;
         vibratoPhase     = 0.0f;
         vibratoActive    = false;
-        needsPitchReset  = false;
+        needsPitchReset  = true;
+    }
+
+    // Reset table state for a new note.
+    void resetTableState(int tblId, int ticRate, int octave, int pitch, int startRow) {
+        tableId          = tblId;
+        tableRow         = (startRow >= 0) ? startRow % 16 : 0;
+        lastProcessedRow = -1;
+        tableTicRate     = ticRate;
+        tableTicCounter  = 0;
+        tic200HzAccum    = 0.0f;
+        tableTranspose   = 0.0f;
+        tableVolume      = 1.0f;
+        hopRepeatCount   = 0;
+        hopTargetRow     = -1;
+        noteOctave       = octave;
+        notePitch        = pitch;
+        // TICFC/TICFE special modes: pin starting row to note octave/pitch
+        if (ticRate == 0xFC) tableRow = std::min(octave, 15);
+        else if (ticRate == 0xFE) tableRow = pitch;
     }
 
     // Advance pitch LFO/slide and write MIDI pitch wheel to the shared handle.
@@ -128,12 +169,14 @@ struct SoundfontVoice : public IAudioVoice {
 
     // Reset voice state when the owning slot is unloaded.
     void detach() {
-        isActive    = false;
-        activeNote  = -1;
-        sfSlot      = -1;
-        _trackId    = -1;
-        noteVolume  = 1.0f;
-        trackVolume = 1.0f;
+        isActive       = false;
+        activeNote     = -1;
+        sfSlot         = -1;
+        _trackId       = -1;
+        noteVolume     = 1.0f;
+        trackVolume    = 1.0f;
+        isReleasingOnly = false;
+        tableId        = -1;
     }
 };
 

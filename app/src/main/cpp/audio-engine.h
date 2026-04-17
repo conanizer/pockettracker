@@ -75,7 +75,10 @@ public:
                                int bank, int preset,
                                float pslInitialOffset, float pslDuration,
                                float pbnRate, float vibratoSpeed, float vibratoDepth,
-                               float phraseVol = 1.0f, int sampleId = -1);
+                               float phraseVol = 1.0f, int sampleId = -1,
+                               int tableId = -1, int tableTicRate = 6,
+                               int noteOctave = 4, int notePitch = 0,
+                               int tableStartRow = -1);
 
     // Schedule a kill event (for Kill effect K00)
     void scheduleKill(int64_t targetFrame, int trackId);
