@@ -8,6 +8,7 @@ import com.conanizer.pockettracker.core.data.Phrase
 import com.conanizer.pockettracker.core.data.Table
 import com.conanizer.pockettracker.core.data.Groove
 import com.conanizer.pockettracker.core.data.Instrument
+import com.conanizer.pockettracker.core.data.InstrumentType
 import com.conanizer.pockettracker.core.data.ScreenType
 import com.conanizer.pockettracker.core.storage.FileInfo
 
@@ -849,22 +850,22 @@ class TrackerController(
             ScreenType.INSTRUMENT -> {
                 val oldRow = instrumentCursorRow
                 val oldColumn = instrumentCursorColumn
+                val isSoundFont = project.instruments[currentInstrument].instrumentType == InstrumentType.SOUNDFONT
+                val maxRow = if (isSoundFont) 11 else 15
                 instrumentCursorRow = when {
-                    instrumentCursorRow > 0 && instrumentCursorRow != 6 && instrumentCursorRow != 10 -> instrumentCursorRow - 1
-                    instrumentCursorRow == 6 -> 4  // Skip spacer (row 5)
-                    instrumentCursorRow == 10 -> 8  // Skip spacer (row 9)
-                    else -> 14  // Wrap to bottom
+                    instrumentCursorRow == 7 -> 5          // Skip spacer (row 6) going up
+                    !isSoundFont && instrumentCursorRow == 11 -> 9  // Skip SAMPLER spacer (row 10)
+                    instrumentCursorRow > 0 -> instrumentCursorRow - 1
+                    else -> maxRow                          // Wrap from top to bottom
                 }
-
-                // Dual-param rows (updated 2026-02-04):
-                // Row 0: TYPE+[LOAD], Row 2: ROOT+VOL, Row 3: DETUNE+PAN
-                // Row 6: DRIVE+FILTER, Row 7: CRUSH+CUT, Row 8: DWNSMPL+RES
-                val dualParamRows = setOf(0, 2, 3, 6, 7, 8)
-                // Preserve column 3 when navigating between dual-parameter rows
+                // Dual-param rows: 0=TYPE+LOAD+SAVE, 3=ROOT+VOL, 4=DETUNE+PAN
+                // 7=DRIVE+FILTER or BANK+PRESET, 8=CRUSH+CUT (SAMPLER), 9=DWNSMPL+RES (SAMPLER)
+                // SOUNDFONT adds: 9=ATK+DEC, 10=SUS+REL, 11=CUT+RES
+                val dualParamRows = if (isSoundFont) setOf(0, 3, 4, 7, 9, 10, 11) else setOf(0, 3, 4, 7, 8, 9)
                 instrumentCursorColumn = if (oldRow in dualParamRows && instrumentCursorRow in dualParamRows && oldColumn == 3) {
-                    3  // Stay in column 3 when moving within dual-parameter rows
+                    3
                 } else {
-                    1  // Reset to column 1 for all other cases
+                    1
                 }
             }
             ScreenType.TABLE -> {
@@ -925,22 +926,19 @@ class TrackerController(
             ScreenType.INSTRUMENT -> {
                 val oldRow = instrumentCursorRow
                 val oldColumn = instrumentCursorColumn
+                val isSoundFont = project.instruments[currentInstrument].instrumentType == InstrumentType.SOUNDFONT
+                val maxRow = if (isSoundFont) 11 else 15
                 instrumentCursorRow = when {
-                    instrumentCursorRow < 14 && instrumentCursorRow != 4 && instrumentCursorRow != 8 -> instrumentCursorRow + 1
-                    instrumentCursorRow == 4 -> 6  // Skip spacer (row 5)
-                    instrumentCursorRow == 8 -> 10  // Skip spacer (row 9)
-                    else -> 0  // Wrap to top
+                    instrumentCursorRow == 5 -> 7          // Skip spacer (row 6) going down
+                    !isSoundFont && instrumentCursorRow == 9 -> 11  // Skip SAMPLER spacer (row 10)
+                    instrumentCursorRow < maxRow -> instrumentCursorRow + 1
+                    else -> 0                              // Wrap from bottom to top
                 }
-
-                // Dual-param rows (updated 2026-02-04):
-                // Row 0: TYPE+[LOAD], Row 2: ROOT+VOL, Row 3: DETUNE+PAN
-                // Row 6: DRIVE+FILTER, Row 7: CRUSH+CUT, Row 8: DWNSMPL+RES
-                val dualParamRows = setOf(0, 2, 3, 6, 7, 8)
-                // Preserve column 3 when navigating between dual-parameter rows
+                val dualParamRows = if (isSoundFont) setOf(0, 3, 4, 7, 9, 10, 11) else setOf(0, 3, 4, 7, 8, 9)
                 instrumentCursorColumn = if (oldRow in dualParamRows && instrumentCursorRow in dualParamRows && oldColumn == 3) {
-                    3  // Stay in column 3 when moving within dual-parameter rows
+                    3
                 } else {
-                    1  // Reset to column 1 for all other cases
+                    1
                 }
             }
             ScreenType.TABLE -> {
@@ -1219,59 +1217,25 @@ class TrackerController(
     }
 
     /**
-     * Helper to get next column left for INSTRUMENT screen
-     * Columns 0 and 2 are always unreachable (headers/labels)
+     * Helper to get next column left for INSTRUMENT screen.
+     * Row 0 (TYPE+LOAD+SAVE) steps through cols 1→2→3; all others jump 3→1.
      */
     private fun getInstrumentCursorLeftColumn(row: Int, currentColumn: Int): Int {
-        // INSTRUMENT screen column layout per row (updated 2026-02-04):
-        // Row 0: TYPE + [LOAD] - columns 1 and 3 (TYPE at col 1, LOAD button at col 3)
-        // Row 1: NAME - column 1 only
-        // Row 2: ROOT + VOL - columns 1 and 3
-        // Row 3: DETUNE + PAN - columns 1 and 3
-        // Row 4: TBL TIC - column 1 only
-        // Row 5: SPACER (not reachable)
-        // Row 6: DRIVE + FILTER - columns 1 and 3
-        // Row 7: CRUSH + CUT - columns 1 and 3
-        // Row 8: DWNSMPL + RES - columns 1 and 3
-        // Row 9: SPACER (not reachable)
-        // Row 10-14: single param rows - column 1 only
-
-        val dualParamRows = setOf(0, 2, 3, 6, 7, 8)
-        return if (row in dualParamRows) {
-            // Dual-param rows: columns 1 and 3 (skip 2)
-            if (currentColumn > 1) 1 else 1
-        } else {
-            // All other rows: column 1 only
-            1
-        }
+        if (row == 0) return (currentColumn - 1).coerceAtLeast(1)  // step: 3→2→1
+        val isSoundFont = project.instruments[currentInstrument].instrumentType == InstrumentType.SOUNDFONT
+        val dualParamRows = if (isSoundFont) setOf(3, 4, 7, 9, 10, 11) else setOf(3, 4, 7, 8, 9)
+        return if (row in dualParamRows) 1 else 1
     }
 
     /**
-     * Helper to get next column right for INSTRUMENT screen
-     * Columns 0 and 2 are always unreachable (headers/labels)
+     * Helper to get next column right for INSTRUMENT screen.
+     * Row 0 (TYPE+LOAD+SAVE) steps through cols 1→2→3; all others jump 1→3.
      */
     private fun getInstrumentCursorRightColumn(row: Int, currentColumn: Int): Int {
-        // INSTRUMENT screen column layout per row (updated 2026-02-04):
-        // Row 0: TYPE + [LOAD] - columns 1 and 3 (TYPE at col 1, LOAD button at col 3)
-        // Row 1: NAME - column 1 only
-        // Row 2: ROOT + VOL - columns 1 and 3
-        // Row 3: DETUNE + PAN - columns 1 and 3
-        // Row 4: TBL TIC - column 1 only
-        // Row 5: SPACER (not reachable)
-        // Row 6: DRIVE + FILTER - columns 1 and 3
-        // Row 7: CRUSH + CUT - columns 1 and 3
-        // Row 8: DWNSMPL + RES - columns 1 and 3
-        // Row 9: SPACER (not reachable)
-        // Row 10-14: single param rows - column 1 only
-
-        val dualParamRows = setOf(0, 2, 3, 6, 7, 8)
-        return if (row in dualParamRows) {
-            // Dual-param rows: columns 1 and 3 (skip 2)
-            if (currentColumn < 3) 3 else 3
-        } else {
-            // All other rows: column 1 only
-            1
-        }
+        if (row == 0) return (currentColumn + 1).coerceAtMost(3)  // step: 1→2→3
+        val isSoundFont = project.instruments[currentInstrument].instrumentType == InstrumentType.SOUNDFONT
+        val dualParamRows = if (isSoundFont) setOf(3, 4, 7, 9, 10, 11) else setOf(3, 4, 7, 8, 9)
+        return if (row in dualParamRows) 3 else 1
     }
 
 }

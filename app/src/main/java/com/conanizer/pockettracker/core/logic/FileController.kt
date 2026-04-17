@@ -2,6 +2,9 @@ package com.conanizer.pockettracker.core.logic
 
 import com.conanizer.pockettracker.core.logging.ILogger
 import com.conanizer.pockettracker.FileManager
+import com.conanizer.pockettracker.core.data.Instrument
+import com.conanizer.pockettracker.core.data.InstrumentPreset
+import com.conanizer.pockettracker.core.data.TableRow
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.storage.FileInfo
 
@@ -112,6 +115,31 @@ class FileController(
      */
     fun deleteProject(filename: String): Boolean {
         return fileManager.deleteProject(filename)
+    }
+
+    // ========================================
+    // INSTRUMENT PRESET (.pti) OPERATIONS
+    // ========================================
+
+    fun getInstrumentsDirectory(): String = fileManager.getInstrumentsDirectory()
+
+    fun getSoundfontsDirectory(): String = fileManager.getSoundfontsDirectory()
+
+    /**
+     * Save instrument as a .pti preset file.
+     * Embeds table rows if the instrument has a table assigned.
+     */
+    fun saveInstrumentPreset(instrument: Instrument, tableRows: Array<TableRow>?, path: String): Boolean {
+        val preset = InstrumentPreset(instrument = instrument, tableRows = tableRows)
+        return fileManager.saveInstrumentPreset(preset, path)
+    }
+
+    /**
+     * Load a .pti preset file.
+     * Returns null on any failure.
+     */
+    fun loadInstrumentPreset(path: String): InstrumentPreset? {
+        return fileManager.loadInstrumentPreset(path)
     }
 
     // ========================================

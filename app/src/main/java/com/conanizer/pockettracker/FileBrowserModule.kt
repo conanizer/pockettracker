@@ -147,14 +147,9 @@ class FileBrowserModule : TrackerModule {
         }
         val items = mutableListOf<BrowserItem>()
 
-        android.util.Log.d("FileBrowser", "=== Building item list ===")
-        android.util.Log.d("FileBrowser", "Directory: ${directory.absolutePath}")
-        android.util.Log.d("FileBrowser", "Extension filter: $fileExtension")
-
         // Add parent directory entry if not at root
         if (directory.parentFile != null) {
             items.add(BrowserItem.Parent(directory.parentFile!!))
-            android.util.Log.d("FileBrowser", "Added parent '..' entry")
         }
 
         // Get all items in directory
@@ -165,34 +160,15 @@ class FileBrowserModule : TrackerModule {
             .filter { it.isDirectory }
             .filter { showHidden || !it.name.startsWith(".") }
             .sortedBy { it.name.lowercase() }
-        android.util.Log.d("FileBrowser", "Found ${folders.size} folders")
-        folders.forEach {
-            items.add(BrowserItem.Folder(it))
-            android.util.Log.d("FileBrowser", "  [FOLDER] ${it.name}")
-        }
+        folders.forEach { items.add(BrowserItem.Folder(it)) }
 
         // Add files
-        val files = allItems.filter { it.isFile }
-        android.util.Log.d("FileBrowser", "Total files in directory: ${files.size}")
-
-        val matchedFiles = files
+        val matchedFiles = allItems.filter { it.isFile }
             .filter { showHidden || !it.name.startsWith(".") }
-            .also { android.util.Log.d("FileBrowser", "After hidden filter: ${it.size}") }
-            .filter {
-                val match = effectiveExtensions == null || it.extension.lowercase() in effectiveExtensions
-                android.util.Log.d("FileBrowser", "  File: ${it.name}, ext='${it.extension}', filter='$effectiveExtensions', match=$match")
-                match
-            }
+            .filter { effectiveExtensions == null || it.extension.lowercase() in effectiveExtensions }
             .sortedBy { it.name.lowercase() }
 
-        android.util.Log.d("FileBrowser", "Matched ${matchedFiles.size} files")
-        matchedFiles.forEach {
-            items.add(BrowserItem.FileItem(it, it.extension))
-            android.util.Log.d("FileBrowser", "  [FILE] ${it.name}")
-        }
-
-        android.util.Log.d("FileBrowser", "Total items in list: ${items.size}")
-        android.util.Log.d("FileBrowser", "=========================")
+        matchedFiles.forEach { items.add(BrowserItem.FileItem(it, it.extension)) }
 
         return items
     }
@@ -232,10 +208,7 @@ class FileBrowserModule : TrackerModule {
      * Navigate into a folder
      */
     fun navigateToFolder(state: State, folder: File): State {
-        android.util.Log.d("FileBrowser", ">>> NAVIGATING TO FOLDER: ${folder.absolutePath}")
-        android.util.Log.d("FileBrowser", ">>> Extension filter: ${state.activeExtensions}")
         val newItems = buildItemList(folder, state.fileExtension, state.fileExtensions)
-        android.util.Log.d("FileBrowser", ">>> New items count: ${newItems.size}")
         return state.copy(
             currentDirectory = folder,
             items = sortItems(newItems, state.sortMode),

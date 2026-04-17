@@ -19,36 +19,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 📋 Quick Reference
 
-### Current Project State (February 2026)
+### Current Project State (April 2026)
 
-**Status:** MVP Expansion #1-2 COMPLETE! Now working on Extension Pack #3.
+**Status:** All Extension Packs COMPLETE. Testing & Polish phase. Target release: April 2026.
 
 **Completed:**
 - ✅ Audio engine (professional-grade, sample-accurate)
 - ✅ All UI screens working
 - ✅ Playback system complete
 - ✅ Architecture refactoring COMPLETE
-- ✅ Effects system (ALL TOP-5: Arpeggio, Offset, Volume, Kill, Repeat)
+- ✅ Effects system (17+ effects including pitch, table, groove, modulation)
 - ✅ Copy/paste system (M8-style selection)
 - ✅ MVP Expansion #1: Mixer, VOL/PAN, Stereo, WAV Export
-
-**MVP Extension Pack 2 (CURRENT - ~4 weeks):**
-- 🚧 Bug fixes (meter decay, volume immediate, L+A cut)
-- 🚧 Table screen UI (mini-sequencer per instrument)
-- 🚧 TIC effect (table tick rate control)
-- 🚧 HOP effect (phrase/table jump)
-- 🚧 Real-time pitch parameter system
-- 🚧 Pitch effects (PSL, PBN, PVB, PVX)
+- ✅ Extension Pack 2: Tables, HOP/TIC, Pitch Effects
+- ✅ Extension Pack 3: Groove, Modulation, Resampling, Layout system
+- ✅ SoundFont (SF2) instruments via TinySoundFont
+- ✅ Audio init off main thread (no startup freeze)
+- ✅ OpenSL ES stream priority (reduced log spam)
 
 **Next Steps:**
-1. ~~Complete refactoring~~ ✅ DONE
-2. ~~Finish effects system~~ ✅ DONE
-3. ~~Implement copy/paste~~ ✅ DONE
-4. ~~Implement Mixer + WAV Export~~ ✅ DONE
-5. ~~Extension Pack 2~~  ✅ DONE
-6. **Extension Pack 3** ← CURRENT
-7. Testing & polish
-8. MVP release (Late February/March 2026)
+1. ~~All above~~ ✅ DONE
+2. **Testing & polish** ← CURRENT
+3. Documentation & demo video
+4. MVP release (April 2026)
 
 ---
 

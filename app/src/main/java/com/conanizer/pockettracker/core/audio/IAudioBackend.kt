@@ -319,8 +319,8 @@ interface IAudioBackend {
      * @param noteOctave Octave of the note (0-9) for TICFC mode
      * @param notePitch Pitch of the note (0-11, C=0) for TICFE mode
      * @param pslInitialOffset PSL initial pitch offset in semitones (0 = no PSL)
-     * @param pslDuration PSL slide duration in ticks (0 = no slide)
-     * @param pbnRate PBN pitch bend rate in semitones/tick (0 = no bend)
+     * @param pslDuration PSL slide duration in audio frames (0 = no slide)
+     * @param pbnRate PBN pitch bend rate in semitones/frame (0 = no bend)
      * @param vibratoSpeed PVB/PVX vibrato speed in Hz (0 = no vibrato)
      * @param vibratoDepth PVB/PVX vibrato depth in semitones (0 = no vibrato)
      */
@@ -330,7 +330,8 @@ interface IAudioBackend {
         trackId: Int,
         freq: Float,
         baseFreq: Float,
-        vol: Float,
+        vol: Float,          // Instrument volume (0.0–1.0) — MOD_SRC_INSTR_VOL
+        phraseVol: Float = 1.0f, // Phrase step volume (0.0–1.0) — MOD_SRC_PHRASE_VOL
         pan: Float = 0.5f,
         startPointOverride: Int = -1,
         tableId: Int = -1,
@@ -373,6 +374,11 @@ interface IAudioBackend {
      * @param row Target table row (0-15)
      */
     fun setVoiceTableRow(trackId: Int, row: Int)
+
+    /**
+     * Schedule a phraseVol update at exact frame (Vxx effect on empty steps).
+     */
+    fun scheduleTrackPhraseVol(targetFrame: Long, trackId: Int, phraseVol: Float)
 
     // ===================================
     // PITCH MODULATION METHODS (Phase 6)
@@ -511,4 +517,72 @@ interface IAudioBackend {
      * @param rendering true = WAV export in progress, false = normal live playback
      */
     fun setOfflineRendering(rendering: Boolean)
+
+    // ── SoundFont methods ──────────────────────────────────────────────────────
+
+    /**
+     * Load an SF2/SF3 file and assign it to an internal slot.
+     * @return slot index (0-3), or -1 on failure
+     */
+    fun loadSoundfont(instrumentId: Int, filePath: String): Int
+
+    /**
+     * Set the active bank/preset for a loaded soundfont slot.
+     * Preset is also applied per-note in scheduleSoundfontNote.
+     */
+    fun setSoundfontPreset(sfSlot: Int, bank: Int, preset: Int)
+
+    /**
+     * Schedule a soundfont note at a sample-accurate frame.
+     */
+    fun scheduleSoundfontNote(
+        frame: Long, trackId: Int, sfSlot: Int,
+        midiNote: Int, velocity: Int, vol: Float, pan: Float, bank: Int, preset: Int,
+        pslInitialOffset: Float = 0f, pslDuration: Float = 0f,
+        pbnRate: Float = 0f, vibratoSpeed: Float = 0f, vibratoDepth: Float = 0f,
+        phraseVol: Float = 1f,   // Phrase step volume (0.0–1.0); multiplied into VOL route
+        sampleId: Int = -1,      // Instrument slot index for effect/mod lookup (-1 = none)
+        tableId: Int = -1,       // Table ID (-1 = no table)
+        tableTicRate: Int = 6,   // Tic rate for table advancement
+        noteOctave: Int = 4,     // Note octave (for TICFC/TICFE table modes)
+        notePitch: Int = 0,      // Note pitch  (for TICFE table mode)
+        tableStartRow: Int = -1  // THO: force starting row (-1 = default)
+    )
+
+    /**
+     * Apply SF2 envelope overrides by patching TSF preset regions directly.
+     * Pass -1 for any field to keep the SF2 preset's built-in value.
+     * atk/dec/rel: 0-255 → ~0.001s-10s (exponential). sus: 0-255 → 0.0-1.0 gain.
+     */
+    fun setSoundfontEnvelopeOverrides(sfSlot: Int, bank: Int, preset: Int,
+                                      atk: Int, dec: Int, sus: Int, rel: Int)
+
+    /**
+     * Apply SF2 filter override by updating the instrument's instrParams in C++.
+     * filterType: 0=off, 1=lp, 2=hp, 3=bp. filterCut/filterRes: 0-255.
+     */
+    fun setSoundfontFilterOverrides(sampleId: Int, filterType: Int, filterCut: Int, filterRes: Int)
+
+    /**
+     * Free the memory used by a soundfont slot.
+     */
+    fun unloadSoundfont(sfSlot: Int)
+
+    /**
+     * Return the preset name string for display on the instrument screen.
+     * Returns "---" if slot is invalid or preset not found.
+     */
+    fun getSoundfontPresetName(sfSlot: Int, bank: Int, preset: Int): String
+
+    /**
+     * Returns [bank, preset_number] of the first preset in the SF2, or [-1, -1] if invalid.
+     * Called once after loading a soundfont to initialize sfBank/sfPreset.
+     */
+    fun getSoundfontFirstBankPreset(sfSlot: Int): IntArray
+
+    /** Returns the total number of presets in the SF2 file (0 if not loaded). */
+    fun getSoundfontPresetCount(sfSlot: Int): Int
+
+    /** Returns [bank, preset_number] for the preset at the given list index, or [-1,-1] on error. */
+    fun getSoundfontPresetAt(sfSlot: Int, index: Int): IntArray
 }

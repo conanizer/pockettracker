@@ -1,6 +1,7 @@
 package com.conanizer.pockettracker.core.audio
 
 import com.conanizer.pockettracker.core.data.Instrument
+import com.conanizer.pockettracker.core.data.InstrumentType
 import com.conanizer.pockettracker.core.data.ModDest
 import com.conanizer.pockettracker.core.data.ModType
 import com.conanizer.pockettracker.core.data.Note
@@ -41,6 +42,13 @@ class AudioEngine(
     // Sample metadata (base frequencies and sample rate compensation ratios)
     private val sampleBaseFrequencies = mutableMapOf<Int, Float>()
     private val sampleRateRatios = mutableMapOf<Int, Float>()
+
+    /**
+     * Provider for SoundFont slot lookup — injected by PlaybackController so that
+     * scheduleNote() can route SF instruments without an Android dependency in AudioEngine.
+     * Maps soundfontPath → sfSlot index. Set once after engine creation.
+     */
+    var sfSlotProvider: ((soundfontPath: String) -> Int?)? = null
 
     /**
      * Initialize audio engine and load default samples.
@@ -285,6 +293,27 @@ class AudioEngine(
         project: Project? = null,
         tableIdOverride: Int = -1
     ) {
+        // SF path: route through scheduleNote so mods, tables, and tracking work correctly.
+        if (instrument.instrumentType == InstrumentType.SOUNDFONT && project != null) {
+            backend.resumeStream()
+            val targetFrame = backend.getCurrentFrame() + 100L
+            scheduleNote(
+                targetFrame = targetFrame,
+                note = instrument.root,
+                instrumentId = instrument.id,
+                trackId = 0,
+                volume = VolumeUtils.hexToFloat(instrument.volume),
+                phraseVol = 1.0f,
+                pan = VolumeUtils.hexToFloat(instrument.pan),
+                project = project,
+                tableIdOverride = tableIdOverride
+            )
+            // Hard-stop after 2 seconds so SF sustain notes don't ring forever during preview.
+            val sr = backend.getSampleRate().toLong().coerceAtLeast(44100L)
+            backend.scheduleKill(targetFrame + sr * 2, 0)
+            return
+        }
+
         val sampleId = instrument.sampleId
 
         // Calculate target frequency from ROOT + DETUNE
@@ -478,7 +507,8 @@ class AudioEngine(
         note: Note,
         instrumentId: Int,
         trackId: Int,
-        volume: Float = 1.0f,
+        volume: Float = 1.0f,      // Instrument volume (0.0–1.0)
+        phraseVol: Float = 1.0f,   // Phrase step volume (0.0–1.0)
         pan: Float = 0.5f,  // 0.0=left, 0.5=center, 1.0=right
         project: Project,
         startPointOverride: Int = -1,  // -1 = use instrument default, 0-255 = Offset effect override
@@ -498,6 +528,55 @@ class AudioEngine(
             android.util.Log.w("AudioEngine", "❌ Invalid instrumentId=$instrumentId, skipping note")
             return
         }
+
+        // ── SoundFont path ────────────────────────────────────────────────────────
+        // Handled first so arpeggio/repeat retriggers reach SF instruments too.
+        if (instrument.instrumentType == InstrumentType.SOUNDFONT) {
+            val path = instrument.soundfontPath ?: return
+            val slot = sfSlotProvider?.invoke(path) ?: return
+            val baseMidi = (note.octave + 1) * 12 + note.pitch
+            val transpose = instrument.root.toMidi() - 60
+            val midiNote = (baseMidi + transpose).coerceIn(0, 127)
+            val velocity = (volume * 127).toInt().coerceIn(1, 127)
+            // Convert tick-based pitch params to frame-based (same as sampler path)
+            val tempo = project.tempo
+            val sr = backend.getSampleRate().toFloat()
+            val framesPerTic = sr / (tempo / 60f * 4f * 12f)
+            val framesPerStep = framesPerTic * 12f
+            val pslDurationFrames = if (pslDuration > 0f) pslDuration * framesPerTic else 0f
+            val pbnRatePerFrame   = if (pbnRate  != 0f)  pbnRate  / framesPerStep  else 0f
+
+            // Push mod slots to C++ so SF voice picks them up at trigger (Bug 1 fix)
+            pushInstrumentModulation(instrument, tempo)
+            // Apply envelope overrides every trigger so TSF preset has correct ATK/DEC/SUS/REL
+            // before the note plays. Without this, KIL → noteOff uses the SF2 file's native
+            // (often instant) release instead of the user-configured REL value.
+            applySoundfontEnvelopeOverrides(instrument)
+
+            // Table setup — same logic as sampler path
+            val sfTableId = if (tableIdOverride >= 0) tableIdOverride else instrumentId
+            val sfTicRate = instrument.tableTicRate
+            if (sfTableId in 0..255) {
+                ensureTableLoaded(project.tables[sfTableId])
+            }
+
+            backend.resumeStream()
+            backend.scheduleSoundfontNote(
+                targetFrame, trackId, slot,
+                midiNote, velocity, volume, pan,
+                instrument.sfBank, instrument.sfPreset,
+                pslInitialOffset, pslDurationFrames, pbnRatePerFrame, vibratoSpeed, vibratoDepth,
+                phraseVol = phraseVol,
+                sampleId = instrumentId,
+                tableId = sfTableId,
+                tableTicRate = sfTicRate,
+                noteOctave = note.octave,
+                notePitch = note.pitch,
+                tableStartRow = tableStartRow
+            )
+            return
+        }
+        // ── Sampler path ──────────────────────────────────────────────────────────
 
         // Skip if instrument has no sample loaded — sampleFilePath == null means empty slot.
         // This prevents stale C++ sample data from playing when an instrument looks empty in the UI.
@@ -525,14 +604,23 @@ class AudioEngine(
         val tempo = project.tempo
         pushInstrumentModulation(instrument, tempo)
 
+        // Convert tick-based pitch effect params to frame-based so C++ needs no tempo knowledge.
+        // framesPerTic = sampleRate / (tempo/60 * 4 steps/beat * 12 tics/step)
+        val sampleRate = backend.getSampleRate().toFloat()
+        val framesPerTic = sampleRate / (tempo / 60f * 4f * 12f)
+        val framesPerStep = framesPerTic * 12f  // TICS_PER_STEP = 12
+        val pslDurationFrames = if (pslDuration > 0f) pslDuration * framesPerTic else 0f
+        // pbnRate is semitones/step (per EffectProcessor docs: "PBN 10 = 1 semitone per step")
+        val pbnRatePerFrame  = if (pbnRate  != 0f)  pbnRate  / framesPerStep  else 0f
+
         // Resume stream so audio callback can process the queue
         backend.resumeStream()
 
         // Always use scheduleNoteWithTable - C++ handles tableId=-1 as "no table"
         backend.scheduleNoteWithTable(
-            targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan,
+            targetFrame, sampleId, trackId, frequency, baseFreq, volume, phraseVol, pan,
             startPointOverride, tableId, tableTicRate, note.octave, note.pitch,
-            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
+            pslInitialOffset, pslDurationFrames, pbnRatePerFrame, vibratoSpeed, vibratoDepth,
             tableStartRow
         )
     }
@@ -634,6 +722,34 @@ class AudioEngine(
             filterCut = instrument.filterCut,
             filterRes = instrument.filterRes
         )
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SF2 OVERRIDE HELPERS (Phase 8)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Apply SFOverrides.ampAttack/Decay/Sustain/Release to TSF regions.
+     * Call after SF2 loads or when any override field changes.
+     */
+    fun applySoundfontEnvelopeOverrides(instrument: Instrument) {
+        val path = instrument.soundfontPath ?: return
+        val slot = sfSlotProvider?.invoke(path) ?: return  // sfSlot (0-7), not instrument index
+        val ov = instrument.sfOverrides
+        backend.setSoundfontEnvelopeOverrides(slot, instrument.sfBank, instrument.sfPreset,
+            ov.ampAttack, ov.ampDecay, ov.ampSustain, ov.ampRelease)
+    }
+
+    /**
+     * Apply SFOverrides.filterCut/filterRes to the instrument's instrParams in C++.
+     * -1 = bypass Phase-7 filter (filterType=off). 0-255 = LP filter at that value.
+     */
+    fun applySoundfontFilterOverrides(instrument: Instrument) {
+        val ov = instrument.sfOverrides
+        val filterType = if (ov.filterCut >= 0) 1 else 0  // 1=LP, 0=off
+        val filterCut  = if (ov.filterCut >= 0) ov.filterCut else 255
+        val filterRes  = if (ov.filterRes >= 0) ov.filterRes else 0
+        backend.setSoundfontFilterOverrides(instrument.sampleId, filterType, filterCut, filterRes)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -776,15 +892,23 @@ class AudioEngine(
         val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
         val frequency = note.toFrequency()
 
+        // Convert tick-based pitch params to frame-based (same as scheduleNote)
+        val tempo = project.tempo
+        val sr = backend.getSampleRate().toFloat()
+        val framesPerTic = sr / (tempo / 60f * 4f * 12f)
+        val framesPerStep = framesPerTic * 12f
+        val pslDurationFrames = if (pslDuration > 0f) pslDuration * framesPerTic else 0f
+        val pbnRatePerFrame   = if (pbnRate  != 0f)  pbnRate  / framesPerStep  else 0f
+
         // Resume stream so audio callback can process the queue
         backend.resumeStream()
 
         android.util.Log.d("AudioEngine", "📋 scheduleNoteWithTable: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, tableId=$tableId, ticRate=$tableTicRate")
 
         backend.scheduleNoteWithTable(
-            targetFrame, sampleId, trackId, frequency, baseFreq, volume, pan,
+            targetFrame, sampleId, trackId, frequency, baseFreq, volume, 1.0f, pan,
             startPointOverride, tableId, tableTicRate, note.octave, note.pitch,
-            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
+            pslInitialOffset, pslDurationFrames, pbnRatePerFrame, vibratoSpeed, vibratoDepth,
             tableStartRow
         )
     }
@@ -816,6 +940,15 @@ class AudioEngine(
      */
     fun setVoiceTableRow(trackId: Int, row: Int) {
         backend.setVoiceTableRow(trackId, row)
+    }
+
+    /**
+     * Schedule a phraseVol update at exact frame (Vxx effect on empty steps).
+     * Uses the same sample-accurate queue as notes so the change fires at the
+     * correct step boundary, not when the PlaybackController runs ahead.
+     */
+    fun scheduleTrackPhraseVol(targetFrame: Long, trackId: Int, phraseVol: Float) {
+        backend.scheduleTrackPhraseVol(targetFrame, trackId, phraseVol)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -988,6 +1121,14 @@ class AudioEngine(
                     backend.setInstrumentModulation(sampleId, slotIndex, 5, dest, amount,
                         attackSamples, 0, decaySamples, sustainLevel,
                         releaseSamples = releaseSamples)
+                    anyActive = true
+                }
+                ModType.SCALAR -> {
+                    if (dest == 0) { backend.setInstrumentModulation(sampleId, slotIndex, 0,0,0f,0,0,0); continue }
+                    // amount (0x00-0xFF) is the fixed output value; no time params needed
+                    val amount = slot.amount / 255.0f
+                    backend.setInstrumentModulation(sampleId, slotIndex, 6, dest, amount,
+                        0, 0, 0)
                     anyActive = true
                 }
                 else -> {

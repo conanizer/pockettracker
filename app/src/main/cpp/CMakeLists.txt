@@ -6,13 +6,21 @@ project("pockettracker")
 find_package(oboe REQUIRED CONFIG)
 
 # Add our native library
+# Phase 0 file split: native-audio.cpp has been split into focused modules.
+# TSF_IMPLEMENTATION is defined in soundfont-voice.cpp only.
 add_library(pockettracker SHARED
-        native-audio.cpp
+        soundfont-voice.cpp
+        audio-engine.cpp
+        jni-bridge.cpp
 )
 
-# Link with Oboe
+# Include current directory so tsf.h can be found
+target_include_directories(pockettracker PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Link with Oboe and libm (required by tsf.h for math functions)
 target_link_libraries(pockettracker
         oboe::oboe
         android
         log
+        m
 )

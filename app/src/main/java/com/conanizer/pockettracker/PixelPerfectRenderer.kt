@@ -113,7 +113,11 @@ fun PixelPerfectTracker(
     settingsCursorRow: Int = 0,
     settingsCursorColumn: Int = 1,
     // Cursor remember setting (for settings screen display)
-    cursorRemember: Boolean = false
+    cursorRemember: Boolean = false,
+    // SoundFont preset navigation state
+    soundfontPresetName: String = "",
+    soundfontPresetCount: Int = 0,
+    soundfontPresetIndex: Int = 0
 ) {
     if (currentScreen == ScreenType.FILE_BROWSER) {
         android.util.Log.d("PixelPerfectTracker", "FILE_BROWSER screen, fileBrowserState=${if (fileBrowserState != null) "not null (${fileBrowserState.items.size} items)" else "NULL"}")
@@ -272,7 +276,10 @@ fun PixelPerfectTracker(
                         settingsCursorRow = settingsCursorRow,
                         settingsCursorColumn = settingsCursorColumn,
                         cursorRemember = cursorRemember,
-                        trackNotes = trackNotes
+                        trackNotes = trackNotes,
+                        soundfontPresetName  = soundfontPresetName,
+                        soundfontPresetCount = soundfontPresetCount,
+                        soundfontPresetIndex = soundfontPresetIndex
                     )
                 }
             }
@@ -379,7 +386,11 @@ class TrackerLayout {
         // Cursor remember setting (passed through to SettingsState for display)
         cursorRemember: Boolean = false,
         // Track note monitor
-        trackNotes: List<Note> = List(8) { Note.EMPTY }
+        trackNotes: List<Note> = List(8) { Note.EMPTY },
+        // SoundFont preset navigation state
+        soundfontPresetName: String = "",
+        soundfontPresetCount: Int = 0,
+        soundfontPresetIndex: Int = 0
     ) {
         // ===================================
         // DRAW BACKGROUND
@@ -570,7 +581,10 @@ class TrackerLayout {
                                     cursorRow = instrumentCursorRow,
                                     cursorColumn = instrumentCursorColumn,
                                     statusMessage = instrumentStatusMessage,
-                                    isSuccess = instrumentStatusSuccess
+                                    isSuccess = instrumentStatusSuccess,
+                                    soundfontPresetName  = soundfontPresetName,
+                                    soundfontPresetCount = soundfontPresetCount,
+                                    soundfontPresetIndex = soundfontPresetIndex
                                 )
                             )
                         }

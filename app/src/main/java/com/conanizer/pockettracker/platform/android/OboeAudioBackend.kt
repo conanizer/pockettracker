@@ -217,6 +217,7 @@ class OboeAudioBackend : IAudioBackend {
         freq: Float,
         baseFreq: Float,
         vol: Float,
+        phraseVol: Float,
         pan: Float,
         startPointOverride: Int,
         tableId: Int,
@@ -230,7 +231,7 @@ class OboeAudioBackend : IAudioBackend {
         vibratoDepth: Float,
         tableStartRow: Int
     ) {
-        native_scheduleNoteWithTable(frame, sampleId, trackId, freq, baseFreq, vol, pan,
+        native_scheduleNoteWithTable(frame, sampleId, trackId, freq, baseFreq, vol, phraseVol, pan,
             startPointOverride, tableId, tableTicRate, noteOctave, notePitch,
             pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
             tableStartRow)
@@ -246,6 +247,10 @@ class OboeAudioBackend : IAudioBackend {
 
     override fun setVoiceTableRow(trackId: Int, row: Int) {
         native_setVoiceTableRow(trackId, row)
+    }
+
+    override fun scheduleTrackPhraseVol(targetFrame: Long, trackId: Int, phraseVol: Float) {
+        native_scheduleTrackPhraseVol(targetFrame, trackId, phraseVol)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -323,6 +328,55 @@ class OboeAudioBackend : IAudioBackend {
         native_setOfflineRendering(rendering)
     }
 
+    // SoundFont methods
+    override fun loadSoundfont(instrumentId: Int, filePath: String): Int =
+        native_loadSoundfont(instrumentId, filePath)
+
+    override fun setSoundfontPreset(sfSlot: Int, bank: Int, preset: Int) {
+        native_setSoundfontPreset(sfSlot, bank, preset)
+    }
+
+    override fun scheduleSoundfontNote(
+        frame: Long, trackId: Int, sfSlot: Int,
+        midiNote: Int, velocity: Int, vol: Float, pan: Float, bank: Int, preset: Int,
+        pslInitialOffset: Float, pslDuration: Float,
+        pbnRate: Float, vibratoSpeed: Float, vibratoDepth: Float,
+        phraseVol: Float, sampleId: Int,
+        tableId: Int, tableTicRate: Int, noteOctave: Int, notePitch: Int, tableStartRow: Int
+    ) {
+        native_scheduleSoundfontNote(
+            frame, trackId, sfSlot, midiNote, velocity, vol, pan, bank, preset,
+            pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
+            phraseVol, sampleId, tableId, tableTicRate, noteOctave, notePitch, tableStartRow
+        )
+    }
+
+    override fun setSoundfontEnvelopeOverrides(sfSlot: Int, bank: Int, preset: Int,
+                                               atk: Int, dec: Int, sus: Int, rel: Int) {
+        native_setSoundfontEnvelopeOverrides(sfSlot, bank, preset, atk, dec, sus, rel)
+    }
+
+    override fun setSoundfontFilterOverrides(sampleId: Int, filterType: Int,
+                                             filterCut: Int, filterRes: Int) {
+        native_setSoundfontFilterOverrides(sampleId, filterType, filterCut, filterRes)
+    }
+
+    override fun unloadSoundfont(sfSlot: Int) {
+        native_unloadSoundfont(sfSlot)
+    }
+
+    override fun getSoundfontPresetName(sfSlot: Int, bank: Int, preset: Int): String =
+        native_getSoundfontPresetName(sfSlot, bank, preset) ?: "---"
+
+    override fun getSoundfontFirstBankPreset(sfSlot: Int): IntArray =
+        native_getSoundfontFirstBankPreset(sfSlot)
+
+    override fun getSoundfontPresetCount(sfSlot: Int): Int =
+        native_getSoundfontPresetCount(sfSlot)
+
+    override fun getSoundfontPresetAt(sfSlot: Int, index: Int): IntArray =
+        native_getSoundfontPresetAt(sfSlot, index)
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Native Methods (JNI → C++)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -386,6 +440,7 @@ class OboeAudioBackend : IAudioBackend {
         frequency: Float,
         baseFrequency: Float,
         volume: Float,
+        phraseVolume: Float,
         pan: Float,
         startPointOverride: Int,
         tableId: Int,
@@ -402,6 +457,7 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_getVoiceTableRow(trackId: Int): Int
     private external fun native_getVoiceTableId(trackId: Int): Int
     private external fun native_setVoiceTableRow(trackId: Int, row: Int)
+    private external fun native_scheduleTrackPhraseVol(targetFrame: Long, trackId: Int, phraseVol: Float)
 
     // Phase 6 pitch modulation methods
     private external fun native_setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int)
@@ -420,4 +476,25 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_triggerNoteOff(trackId: Int)
     private external fun native_scheduleNoteOff(frame: Long, trackId: Int)
     private external fun native_setOfflineRendering(rendering: Boolean)
+
+    // SoundFont JNI declarations
+    private external fun native_loadSoundfont(instrumentId: Int, path: String): Int
+    private external fun native_setSoundfontPreset(sfSlot: Int, bank: Int, preset: Int)
+    private external fun native_scheduleSoundfontNote(
+        frame: Long, trackId: Int, sfSlot: Int,
+        midiNote: Int, velocity: Int, vol: Float, pan: Float, bank: Int, preset: Int,
+        pslInitialOffset: Float, pslDuration: Float,
+        pbnRate: Float, vibratoSpeed: Float, vibratoDepth: Float,
+        phraseVol: Float, sampleId: Int,
+        tableId: Int, tableTicRate: Int, noteOctave: Int, notePitch: Int, tableStartRow: Int
+    )
+    private external fun native_setSoundfontEnvelopeOverrides(sfSlot: Int, bank: Int, preset: Int,
+                                                               atk: Int, dec: Int, sus: Int, rel: Int)
+    private external fun native_setSoundfontFilterOverrides(sampleId: Int, filterType: Int,
+                                                            filterCut: Int, filterRes: Int)
+    private external fun native_unloadSoundfont(sfSlot: Int)
+    private external fun native_getSoundfontPresetName(sfSlot: Int, bank: Int, preset: Int): String?
+    private external fun native_getSoundfontFirstBankPreset(sfSlot: Int): IntArray
+    private external fun native_getSoundfontPresetCount(sfSlot: Int): Int
+    private external fun native_getSoundfontPresetAt(sfSlot: Int, index: Int): IntArray
 }
