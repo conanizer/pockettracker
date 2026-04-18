@@ -7,6 +7,10 @@
 #include "audio-engine.h"
 #include "tsf.h"  // API declarations only (tsf_close, tsf_load_filename, etc.)
 
+// JNI requires env and thiz in every function signature, but most thin wrappers don't use them.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-parameter"
+
 static AudioEngine* engine = nullptr;
 
 extern "C" {
@@ -729,3 +733,5 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSo
 }
 
 } // extern "C"
+
+#pragma clang diagnostic pop

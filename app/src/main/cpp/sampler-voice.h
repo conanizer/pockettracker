@@ -86,10 +86,9 @@ struct Voice : public IAudioVoice {
     // MODULATION STATE (Phase 4 / Phase 5)
     // ===================================
     // VoiceModSlot, voiceMods[4], modSourceValues[], modDestValues[], prevModDestValues[]
-    // are now in IAudioVoice (mod-system.h) so updateVoiceModulation() runs for all voice types.
-    float baseVolume;          // Voice volume before modulation (mirrors params.base[PARAM_VOL])
-    // modPitchOffset, basePan, modPanOffset, modCutOffset, modResOffset removed (UAA Phase 2a).
-    // These are now params.mod[PARAM_PITCH/PAN/FILTER_CUT/FILTER_RES] and params.base[PARAM_PAN].
+    // are in IAudioVoice (mod-system.h) so updateVoiceModulation() runs for all voice types.
+    // modPitchOffset, basePan, modPanOffset, modCutOffset, modResOffset, baseVolume removed.
+    // Volume flows through params.base[PARAM_VOL] + VOL route → modDestValues[PARAM_VOL].
 
     // Static note-on sources (captured at trigger, constant for note's lifetime)
     float noteVelocity = 0.0f;  // 0.0–1.0 (note volume proxies velocity)
@@ -116,7 +115,6 @@ struct Voice : public IAudioVoice {
               hopRepeatCount(0), hopTargetRow(-1),
               pitchOffset(0.0f), pitchSlideTarget(0.0f), pitchSlideRate(0.0f), pitchSliding(false),
               vibratoPhase(0.0f), vibratoSpeed(0.0f), vibratoDepth(0.0f), vibratoActive(false),
-              baseVolume(1.0f),
               fadeOutRemaining(0), isFadingOut(false) {}
               // params (ParamBus) is default-constructed: base={1,0.5,0,128,0}, mod={0}
 
@@ -316,7 +314,7 @@ struct Voice : public IAudioVoice {
         if (!hasRelease) stop();
     }
 
-    void setVolume(float v) override { volume = v; baseVolume = v; params.setBase(PARAM_VOL, v); }
+    void setVolume(float v) override { volume = v; params.setBase(PARAM_VOL, v); }
 
     void setPan(float pan) override {
         params.setBase(PARAM_PAN, pan);

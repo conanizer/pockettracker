@@ -432,8 +432,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
             // ---- END SOUNDFONT PATH ----
 
-            bool voiceFound = false;
-
             // TIC00 support: Check if previous voice on this track was using trigger mode
             int savedTableRow = 0;
             bool wasTIC00Mode = false;
@@ -573,8 +571,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     }
 
                     // Initialize modulation state from instrument mod slots.
-                    // params.resetMods() was already called in trigger(); no extra reset needed.
-                    voices[v].baseVolume = note.volume;
                     for (int m = 0; m < 4; m++) {
                         const InstrumentModSlot& src = instrumentModSlots[note.sampleId][m];
                         VoiceModSlot& dst = voices[v].voiceMods[m];
@@ -603,7 +599,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         }
                     }
 
-                    voiceFound = true;
                     LOGT("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, vol=%.4f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
                          (long long)currentFrame, note.sampleId, note.trackId, rate, note.volume, note.pan, note.startPointOverride,
                          note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
@@ -1591,12 +1586,6 @@ void AudioEngine::loadTable(int tableId, const uint8_t* rowData) {
     LOGD("📋 Loaded table %d", tableId);
 }
 
-bool AudioEngine::isTableLoaded(int tableId) {
-    if (tableId < 0 || tableId >= 256) return false;
-    std::lock_guard<std::mutex> lock(tableMutex);
-    return tables[tableId].loaded;
-}
-
 int AudioEngine::getVoiceTableRow(int trackId) {
     for (int v = 0; v < MAX_VOICES; v++) {
         if (voices[v].isActive && voices[v].trackId == trackId) {
@@ -1711,17 +1700,6 @@ void AudioEngine::setMasterVolume(float volume) {
     std::lock_guard<std::mutex> lock(volumeMutex);
     masterVolume = volume;
     LOGD("🔊 Master volume set to %.2f", volume);
-}
-
-float AudioEngine::getTrackVolume(int trackId) {
-    if (trackId < 0 || trackId >= 8) return 1.0f;
-    std::lock_guard<std::mutex> lock(volumeMutex);
-    return trackVolumes[trackId];
-}
-
-float AudioEngine::getMasterVolume() {
-    std::lock_guard<std::mutex> lock(volumeMutex);
-    return masterVolume;
 }
 
 // ============================================================
@@ -1846,17 +1824,15 @@ void AudioEngine::updateVoiceModulation(IAudioVoice& voice, int numFrames, float
     // Snapshot previous dest values for sub-block interpolation (future use).
     memcpy(voice.prevModDestValues, voice.modDestValues, sizeof(float) * PARAM_COUNT);
 
-    // Clear dynamic source slots (ENV0-3, LFO0-3).
+    // Clear dynamic source slots (ENV0-3, LFO0-3) before each block.
     // Static sources (VELOCITY/KEYTRACK/RANDOM) keep their note-on values.
-    // Phase 2 will write TABLE_VOL/PITCH/PITCH_SLIDE/VIBRATO from their state machines.
+    // Sequencer sources (TABLE_VOL/PITCH/PITCH_SLIDE/VIBRATO) are written by their state machines
+    // earlier in processAudioBlock and must NOT be cleared here.
     for (int m = 0; m < 4; m++) {
         voice.modSourceValues[MOD_SRC_ENV0 + m] = 0.0f;
         voice.modSourceValues[MOD_SRC_LFO0 + m] = 0.0f;
     }
     voice.modSourceValues[MOD_SRC_NONE] = 0.0f;  // Always 0 — required for via=NONE paths.
-
-    // Reset ParamBus mod[] for backward compat (overwritten from modDestValues at end).
-    voice.params.resetMods();
 
     float sr = sampleRate;
 

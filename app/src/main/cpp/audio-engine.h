@@ -101,9 +101,6 @@ public:
     // Each row: [transpose, volume, fx1Type, fx1Value, fx2Type, fx2Value, fx3Type, fx3Value]
     void loadTable(int tableId, const uint8_t* rowData);
 
-    // Check if a table is loaded
-    bool isTableLoaded(int tableId);
-
     // Get current table row for a voice (for UI feedback)
     int getVoiceTableRow(int trackId);
 
@@ -137,11 +134,6 @@ public:
     // Set real-time master volume (affects playback immediately)
     void setMasterVolume(float volume);
 
-    // Get current track volume
-    float getTrackVolume(int trackId);
-
-    // Get current master volume
-    float getMasterVolume();
 
     // ===================================
     // PITCH MODULATION METHODS (Phase 6)

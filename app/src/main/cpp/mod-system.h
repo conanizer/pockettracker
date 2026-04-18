@@ -11,12 +11,12 @@
 // Final value = base + mod. Clamping is done at the read site.
 //
 // This decouples modulation sources (envelopes, LFO, tables, effect columns) from
-// voice types. Sources write addMod(); voices read get() in render() and translate
-// to their own API. No branching on instrument type anywhere in effect code.
+// voice types. Modulation flows through modSourceValues[] → processRoutes() → modDestValues[],
+// then bridges into params.mod[] so mix-loop reads of params.get() still work.
 //
-// NOTE: VOL modulation is intentionally NOT accumulated here — it's applied
-// per-sample in the mix loop with envelope interpolation for click-free fades.
-// PARAM_VOL base is set for future SoundfontVoice block-rate use.
+// NOTE: VOL modulation (envelope/LFO dest=VOL) is intentionally NOT accumulated here — it's
+// applied per-sample in the mix loop with envelope interpolation for click-free fades.
+// TABLE_VOL × phraseVol × instrVol IS accumulated via the fixed VOL route into modDestValues[].
 
 enum ParamId {
     PARAM_VOL          = 0,  // Volume: 0.0–1.0 (base only in Phase 2a; mod done per-sample)
@@ -53,7 +53,6 @@ struct ParamBus {
     }
 
     void resetMods()                      { memset(mod, 0, sizeof(mod)); }
-    void addMod(ParamId id, float delta)  { mod[id] += delta; }
     void setBase(ParamId id, float value) { base[id] = value; }
     float get(ParamId id)   const         { return base[id] + mod[id]; }
 };
@@ -174,8 +173,9 @@ class IAudioVoice {
 public:
     virtual ~IAudioVoice() = default;
 
-    // Unified parameter bus: base values (user-set) + mod accumulators (frame-reset).
-    // All modulation sources write addMod(); voice render() reads get() and translates.
+    // Unified parameter bus: base values (user-set) + mod delta mirror from modDestValues[].
+    // The bridge in updateVoiceModulation() copies modDestValues[] → params.mod[] each block.
+    // Mix-loop code reads params.get()/params.mod[] for PAN and FILTER; VOL is per-sample.
     ParamBus params;
 
     // Module-system arrays (Phase 1 / Phase 5 — shared across sampler and SF voices).
