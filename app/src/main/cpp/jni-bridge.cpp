@@ -199,7 +199,7 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1sched
         JNIEnv *env, jobject thiz, jlong targetFrame, jint sampleId, jint trackId,
         jfloat frequency, jfloat baseFrequency, jfloat volume, jfloat pan, jint startPointOverride) {
     if (engine) {
-        engine->scheduleNote(targetFrame, sampleId, trackId, frequency, baseFrequency, volume, pan, startPointOverride);
+        engine->scheduleNote(targetFrame, sampleId, trackId, frequency, baseFrequency, volume, /*phraseVolume=*/1.0f, pan, startPointOverride);
     }
 }
 

@@ -108,7 +108,17 @@ void SoundfontVoice::triggerNote(int slot, int midiNote, int midiVelocity,
     trackVolume = trkVol;
     tsf* h = soundfonts[slot].handle;
     if (!h) return;
-    if (activeNote >= 0) tsf_channel_note_off(h, _trackId, activeNote);
+    // Hard-kill all TSF voices on this channel — no release-tail overlap.
+    // New note on same track = voice-steal (immediate cut), matching sampler behavior.
+    // noteOff() / KIL effect preserves TSF release; this path does not.
+    // tsf_voice_kill() is accessible here because TSF_IMPLEMENTATION is defined in this file.
+    {
+        struct tsf_voice* v = h->voices;
+        struct tsf_voice* vEnd = v + h->voiceNum;
+        for (; v != vEnd; v++) {
+            if (v->playingPreset != -1 && v->playingChannel == _trackId) tsf_voice_kill(v);
+        }
+    }
     tsf_channel_set_pan(h, _trackId, pan);
     tsf_channel_set_volume(h, _trackId, noteVol * trkVol);
     tsf_channel_set_bank_preset(h, _trackId, bank, preset);
