@@ -3,7 +3,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include "mod-system.h"
-#include "filter.h"
+#include "effects/instrument-chain.h"
 
 struct Voice : public IAudioVoice {
     bool isActive;
@@ -26,21 +26,8 @@ struct Voice : public IAudioVoice {
     int loopMode;        // 0=off, 1=forward, 2=ping-pong
     bool loopingBack;    // For ping-pong mode direction
 
-    // Distortion/bitcrusher parameters
-    int drive;           // 0-255 (pre-gain boost)
-    int crush;           // 0-15 (bit depth reduction, 0=off, 15=1-bit)
-    int downsample;      // 0-15 (sample rate reduction factor)
-
-    // Filter parameters
-    int filterType;      // 0=off, 1=lp, 2=hp, 3=bp
-    int filterCut;       // 0-255 (cutoff frequency)
-    int filterRes;       // 0-255 (resonance)
-
-    // Biquad filter state (for resonant filters)
-    float b0, b1, b2;    // Feedforward coefficients
-    float a1, a2;        // Feedback coefficients (a0 is normalized to 1)
-    float x1, x2;        // Input history
-    float y1, y2;        // Output history
+    // Per-voice effect chain (filter, and future drive/crush modules)
+    InstrumentChain chain;
 
     // Table state (Phase 3.5)
     int tableId;             // -1 = no table, 0-255 = table ID
@@ -104,10 +91,6 @@ struct Voice : public IAudioVoice {
               panLeft(0.707f), panRight(0.707f),  // Default to center
               actualStart(0), actualEnd(0), actualLoopStart(0),
               reverse(false), loopMode(0), loopingBack(false),
-              drive(0), crush(0), downsample(0),
-              filterType(0), filterCut(128), filterRes(0),
-              b0(1.0f), b1(0.0f), b2(0.0f), a1(0.0f), a2(0.0f),
-              x1(0.0f), x2(0.0f), y1(0.0f), y2(0.0f),
               tableId(-1), tableRow(0), lastProcessedRow(-1), tableTicRate(6), tableTicCounter(0),
               tableTranspose(0.0f), tableVolume(1.0f),
               noteOctave(-1), notePitch(0),
@@ -160,21 +143,10 @@ struct Voice : public IAudioVoice {
         loopMode = instrParams.loopMode;
         loopingBack = false;
 
-        // Set distortion/bitcrusher parameters
-        drive = instrParams.drive;
-        crush = instrParams.crush;
-        downsample = instrParams.downsample;
-
-        // Set filter parameters and calculate coefficients
-        filterType = instrParams.filterType;
-        filterCut = instrParams.filterCut;
-        filterRes = instrParams.filterRes;
-        calculateBiquadCoeffs(filterType, filterCut, filterRes, sampleRate,
-                              b0, b1, b2, a1, a2);
-
-        // Reset filter history (important to avoid clicks)
-        x1 = 0.0f; x2 = 0.0f;
-        y1 = 0.0f; y2 = 0.0f;
+        // Initialize per-voice effect chain
+        chain.reset();
+        chain.filter.setParams(instrParams.filterType, instrParams.filterCut,
+                               instrParams.filterRes, sampleRate);
 
         // Initialize table state (Phase 3.5)
         tableId = tblId;
@@ -204,8 +176,8 @@ struct Voice : public IAudioVoice {
         params.setBase(PARAM_VOL,          instrVol);  // instrVol is depth of fixed VOL route
         params.setBase(PARAM_PAN,          pan);
         params.setBase(PARAM_PITCH,        0.0f);
-        params.setBase(PARAM_FILTER_CUT,   (float)filterCut);
-        params.setBase(PARAM_FILTER_RES,   (float)filterRes);
+        params.setBase(PARAM_FILTER_CUT,   (float)instrParams.filterCut);
+        params.setBase(PARAM_FILTER_RES,   (float)instrParams.filterRes);
         params.setBase(PARAM_DRIVE,        (float)instrParams.drive);
         params.setBase(PARAM_CRUSH,        (float)instrParams.crush);
         params.setBase(PARAM_DOWNSAMPLE,   (float)instrParams.downsample);

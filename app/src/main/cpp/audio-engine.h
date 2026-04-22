@@ -6,6 +6,8 @@
 #include <algorithm>
 #include "sampler-voice.h"
 #include "soundfont-voice.h"
+#include "effects/send-chain.h"
+#include "effects/master-chain.h"
 
 // Per-track soundfont voice state (shares soundfonts[sfSlot].handle via MIDI channels)
 // Declared here so audio-engine.cpp and jni-bridge.cpp can reference sfVoices[].
@@ -236,6 +238,10 @@ private:
     float trackVolumes[8] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
     float masterVolume = 1.0f;
     std::mutex volumeMutex;
+
+    // Effect chain contexts (send and master bus)
+    SendChain sendChains[3];   // index 0=reverb, 1=delay, 2=chorus (all stubs)
+    MasterChain masterChain;   // final output bus (stub)
 
     // Downsampling for oscilloscope (capture every Nth sample)
     // Lower = faster scrolling (more zoomed in), Higher = slower scrolling (more time visible)

@@ -387,11 +387,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         sv.instrParams = InstrumentParams{};
                         for (int m = 0; m < 4; m++) sv.voiceMods[m] = VoiceModSlot{};
                     }
-                    calculateBiquadCoeffs(sv.instrParams.filterType, sv.instrParams.filterCut,
-                                          sv.instrParams.filterRes, (int)sampleRate,
-                                          sv.b0, sv.b1, sv.b2, sv.a1, sv.a2);
-                    sv.x1L = sv.x2L = sv.y1L = sv.y2L = 0.0f;
-                    sv.x1R = sv.x2R = sv.y1R = sv.y2R = 0.0f;
+                    sv.chain.reset();
+                    sv.chain.filter.setParams(sv.instrParams.filterType, sv.instrParams.filterCut,
+                                              sv.instrParams.filterRes, (int)sampleRate);
 
                     // Initialize modulation state (Phase 5).
                     sv.params.setBase(PARAM_VOL,   note.volume);
@@ -976,13 +974,13 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             voice.panRight = sinf(panAngle);
         }
 
-        // FILTER modulation: recalculate biquad coefficients from ParamBus
-        if (voice.filterType != 0 && (fabsf(voice.params.mod[PARAM_FILTER_CUT]) > 0.5f ||
-                                       fabsf(voice.params.mod[PARAM_FILTER_RES]) > 0.5f)) {
+        // FILTER modulation: recompute coefficients when LFO/ADSR drives CUT or RES
+        if (voice.chain.filter.enabled() &&
+                (fabsf(voice.params.mod[PARAM_FILTER_CUT]) > 0.5f ||
+                 fabsf(voice.params.mod[PARAM_FILTER_RES]) > 0.5f)) {
             int modCut = std::max(0, std::min(255, (int)voice.params.get(PARAM_FILTER_CUT)));
             int modRes = std::max(0, std::min(255, (int)voice.params.get(PARAM_FILTER_RES)));
-            calculateBiquadCoeffs(voice.filterType, modCut, modRes, sampleRate,
-                                  voice.b0, voice.b1, voice.b2, voice.a1, voice.a2);
+            voice.chain.filter.setParams(voice.chain.filter.type, modCut, modRes, sampleRate);
         }
 
         // Auto-stop looping voice when volume envelope completes
@@ -1080,17 +1078,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 processedSample = tanhf(processedSample);
             }
 
-            // STEP 5: FILTER (resonant biquad filter)
-            if (voice.filterType != 0) {
-                float x0 = processedSample;
-                float y0 = voice.b0 * x0 + voice.b1 * voice.x1 + voice.b2 * voice.x2
-                           - voice.a1 * voice.y1 - voice.a2 * voice.y2;
-                voice.x2 = voice.x1;
-                voice.x1 = x0;
-                voice.y2 = voice.y1;
-                voice.y1 = y0;
-                processedSample = y0;
-            }
+            // STEP 5: FILTER — routed through InstrumentChain
+            processedSample = voice.chain.processMono(processedSample);
 
             // STEP 6: Apply volume after effects, with modulation (Phase 4)
             float t = (numFrames > 1) ? (float)(i + 1) / (float)numFrames : 1.0f;
@@ -1257,15 +1246,14 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 }
             }
 
-            // If filter mod is active, recalculate biquad coefficients (Phase 7).
-            if (sv.instrParams.filterType != 0) {
+            // If filter mod is active, recompute coefficients via InstrumentChain.
+            if (sv.chain.filter.enabled()) {
                 int modCut = std::max(0, std::min(255,
                     (int)(sv.instrParams.filterCut + sv.modDestValues[PARAM_FILTER_CUT])));
                 int modRes = std::max(0, std::min(255,
                     (int)(sv.instrParams.filterRes + sv.modDestValues[PARAM_FILTER_RES])));
                 if (modCut != sv.instrParams.filterCut || modRes != sv.instrParams.filterRes) {
-                    calculateBiquadCoeffs(sv.instrParams.filterType, modCut, modRes,
-                                          (int)sampleRate, sv.b0, sv.b1, sv.b2, sv.a1, sv.a2);
+                    sv.chain.filter.setParams(sv.chain.filter.type, modCut, modRes, (int)sampleRate);
                 }
             }
 
@@ -1321,17 +1309,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     R = tanhf(R * gain);
                 }
 
-                // Biquad filter (L and R share coefficients but have independent state)
-                if (ip.filterType != 0) {
-                    float y0L = sv.b0 * L + sv.b1 * sv.x1L + sv.b2 * sv.x2L
-                                           - sv.a1 * sv.y1L - sv.a2 * sv.y2L;
-                    sv.x2L = sv.x1L; sv.x1L = L; sv.y2L = sv.y1L; sv.y1L = y0L;
-                    L = y0L;
-                    float y0R = sv.b0 * R + sv.b1 * sv.x1R + sv.b2 * sv.x2R
-                                           - sv.a1 * sv.y1R - sv.a2 * sv.y2R;
-                    sv.x2R = sv.x1R; sv.x1R = R; sv.y2R = sv.y1R; sv.y1R = y0R;
-                    R = y0R;
-                }
+                // Filter — routed through InstrumentChain (stereo L + R independent state)
+                sv.chain.filter.processStereo(L, R);
 
                 sfBuf[i * 2]     = L;
                 sfBuf[i * 2 + 1] = R;
@@ -1360,6 +1339,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
         }
     }
+
+    // Master chain (stub — modules added here in future, limiter moves here eventually)
+    masterChain.process(output, numFrames, channelCount);
 
     // Brickwall limiter at -0.1 dBFS
     {
