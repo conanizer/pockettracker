@@ -233,7 +233,13 @@ class RenderController(
 
         for (instId in usedInstruments) {
             val instrument = project.instruments.getOrNull(instId) ?: continue
-            if (instrument.sampleFilePath == null) continue
+            if (instrument.sampleFilePath == null) {
+                // SF instrument: ensure instrumentParams[instId] has safe defaults so stale
+                // WAV params from a previous render or project load don't bleed into SF output.
+                audioEngine.applySoundfontFilterOverrides(instrument)
+                audioEngine.pushInstrumentModulation(instrument, project.tempo)
+                continue
+            }
 
             val loopModeInt = when (instrument.loopMode) { "fwd" -> 1; "png" -> 2; else -> 0 }
             val filterTypeInt = when (instrument.filterType) { "lp" -> 1; "hp" -> 2; "bp" -> 3; else -> 0 }

@@ -552,6 +552,11 @@ class AudioEngine(
             // before the note plays. Without this, KIL → noteOff uses the SF2 file's native
             // (often instant) release instead of the user-configured REL value.
             applySoundfontEnvelopeOverrides(instrument)
+            // Reset instrumentParams[sfId] to drive=0 + correct filter before every trigger.
+            // Without this, stale WAV drive/filter values from a previous render or project load
+            // persist in the C++ instrumentParams array and get applied to SF voice output,
+            // causing distortion or silence depending on what was left behind.
+            applySoundfontFilterOverrides(instrument)
 
             // Table setup — same logic as sampler path
             val sfTableId = if (tableIdOverride >= 0) tableIdOverride else instrumentId
