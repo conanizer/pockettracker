@@ -1,7 +1,7 @@
 // native-audio.cpp — STUB (Phase 0 file split complete)
 //
 // This file has been split into focused modules:
-//   filter.h          — Biquad filter math (inline)
+//   filter.h          — Biquad coefficient math (kept as reference; SVF used by effects/)
 //   audio-defs.h      — Log macros, constants (MAX_VOICES, DECLICK_SAMPLES, FX_*)
 //   note-queue.h      — SoundfontEntry, NoteQueue/KillQueue, InstrumentParams, Table
 //   mod-system.h      — ParamId, ParamBus, IAudioVoice

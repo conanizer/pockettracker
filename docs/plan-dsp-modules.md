@@ -156,8 +156,8 @@ public:
 
 private:
     float sr;
-    BiquadState lowCrossL, lowCrossR;   // low/mid crossover (stereo)
-    BiquadState highCrossL, highCrossR; // mid/high crossover (stereo)
+    SvfState lowCrossL, lowCrossR;   // low/mid crossover (stereo)
+    SvfState highCrossL, highCrossR; // mid/high crossover (stereo)
     EnvelopeFollower compEnvLow[2];     // per-channel per-band envelope followers
     EnvelopeFollower compEnvMid[2];
     EnvelopeFollower compEnvHigh[2];
@@ -191,8 +191,8 @@ private:
 };
 ```
 
-Swapping `BiquadState` for `DaisySP::Svf` (which gives LP/HP/BP/notch/peak from one
-`Process()` call) does not change the module interface at all.
+`FilterModule` now uses `SvfState` (see `effects/primitives/svf.h`), which gives
+LP/HP/BP/notch/peak from one `process()` call. The module interface is unchanged.
 
 ---
 
@@ -308,8 +308,9 @@ plan-dsp-modules.md    →  FilterModule.mod[CUTOFF] = modDestValues[PARAM_FILTE
 
 ### Done (April 2026)
 
-- ✅ `effects/primitives/biquad.h` — `BiquadState` (state-only, coefficients passed at call time)
-- ✅ `effects/modules/filter-module.h` — `FilterModule` (LP/HP/BP biquad; `setParams()` + `processMono/Stereo`)
+- ✅ `effects/primitives/biquad.h` — `BiquadState` (state-only, coefficients passed at call time; kept for future use)
+- ✅ `effects/primitives/svf.h` — `SvfState` (two-integrator-loop SVF; LP/HP/BP/notch/peak from one process() call)
+- ✅ `effects/modules/filter-module.h` — `FilterModule` (LP/HP/BP SVF; `setParams()` + `processMono/Stereo`)
 - ✅ `effects/modules/drive-module.h` — `DriveModule` (tanh soft clipper, stateless)
 - ✅ `effects/modules/crush-module.h` — `BitcrushModule` (bit-depth quantizer, stateless)
 - ✅ `effects/instrument-chain.h` — `InstrumentChain` wiring all three modules (Crush → Drive → Filter)
@@ -323,7 +324,7 @@ plan-dsp-modules.md    →  FilterModule.mod[CUTOFF] = modDestValues[PARAM_FILTE
 - `DelayLine` primitive (needed for reverb/delay/chorus)
 - Send chain modules: `ReverbModule`, `DelayModule`, `ChorusModule`
 - Master chain modules: `EQModule`, `CompressorModule`, `LimiterModule`
-- `OTTModule` (composed from BiquadState + EnvelopeFollower)
+- `OTTModule` (composed from SvfState crossovers + EnvelopeFollower)
 - Track chain context (after per-track buffers from `unified-audio-abstraction.md`)
 - `BusModContext` + bus-level mod routes
 - DaisySP SVF swap in `FilterModule` (see swap comment in `filter-module.h`)

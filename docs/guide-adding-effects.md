@@ -236,4 +236,4 @@ Send and master chains currently have no modulation. A `BusModContext` (global L
 
 ### DaisySP SVF swap
 
-`FilterModule` currently uses the biquad from `filter.h` (Audio EQ Cookbook). The header documents a clean swap path to DaisySP `Svf`: replace `BiquadState` members with `daisysp::Svf`, update `setParams()` and `processMono/Stereo`. `InstrumentChain` and all call sites in `audio-engine.cpp` stay unchanged.
+Done (April 2026). `FilterModule` now uses `SvfState` (two-integrator-loop SVF topology) instead of the biquad. `InstrumentChain` and all call sites in `audio-engine.cpp` were unchanged. `filter.h` (biquad coefficients) is kept as reference.
