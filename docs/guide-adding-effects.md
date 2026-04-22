@@ -234,6 +234,11 @@ Send and master chains currently have no modulation. A `BusModContext` (global L
 
 `send-chain.h` is a silence-output stub. Reverb, delay, and chorus are planned as the first send chain modules. Each will need at least a `DelayLine` primitive.
 
-### DaisySP SVF swap
+### DaisySP SVF
 
-Done (April 2026). `FilterModule` now uses `SvfState` (two-integrator-loop SVF topology) instead of the biquad. `InstrumentChain` and all call sites in `audio-engine.cpp` were unchanged. `filter.h` (biquad coefficients) is kept as reference.
+Done (April 2026). `FilterModule` now uses `daisysp::Svf` (vendored under
+`effects/primitives/daisysp/`). It is a double-sampled, stable SVF by Andrew
+Simper, ported by Stephen Hensley (MIT licence). `InstrumentChain` and all
+call sites in `audio-engine.cpp` are unchanged. For future modules that need
+an SVF (e.g. OTT crossovers), instantiate `daisysp::Svf` directly.
+`filter.h` (biquad coefficient math) is kept as reference.

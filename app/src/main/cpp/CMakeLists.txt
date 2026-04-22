@@ -12,6 +12,7 @@ add_library(pockettracker SHARED
         soundfont-voice.cpp
         audio-engine.cpp
         jni-bridge.cpp
+        effects/primitives/daisysp/svf.cpp
 )
 
 # Include current directory so tsf.h can be found

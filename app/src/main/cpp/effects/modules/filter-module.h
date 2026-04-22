@@ -1,10 +1,14 @@
 #pragma once
 #include <cmath>
-#include "../primitives/svf.h"
+#include "../primitives/daisysp/svf.h"
 
 // ===========================================================================
-// FilterModule — resonant SVF filter (LP / HP / BP).
-// Wraps two SvfState instances with coefficient management.
+// FilterModule — resonant SVF filter (LP / HP / BP) via DaisySP Svf.
+//
+// DaisySP Svf is a double-sampled, stable state variable filter by Andrew
+// Simper (musicdsp.org), ported by Stephen Hensley. Double sampling gives
+// better high-frequency accuracy; the cubic band term provides nonlinear
+// stabilisation at high resonance instead of hard clipping.
 //
 // Usage (once per audio block when params change):
 //   filter.setParams(type, cutoff, resonance, sampleRate);
@@ -13,60 +17,57 @@
 //   sample = filter.processMono(sample);      // sampler voices (mono)
 //   filter.processStereo(L, R);               // SF voices (stereo)
 //
-// All external call sites (audio-engine.cpp, instrument-chain.h) are
-// unchanged from the biquad version. The SVF primitive (SvfState) is
-// independently reusable — e.g. OTT crossover filters own their own
-// SvfState pair and pass different caller-computed f/damp values.
+// reset() clears integrator state via Init(); parameters are restored by
+// the setParams() call that always follows reset() at voice trigger time.
+// Call sites in InstrumentChain and audio-engine.cpp are unchanged.
 // ===========================================================================
 struct FilterModule {
-    int   type = 0;
-    float freq = 0.0f;   // 2*sin(pi*hz/sr)  — computed in setParams()
-    float damp = 2.0f;   // SVF damping       — computed in setParams()
-    SvfState stateL;     // mono or left channel
-    SvfState stateR;     // right channel (SF stereo only)
+    int   type       = 0;
+    float sampleRate = 44100.0f;
+    daisysp::Svf svfL;   // mono or left channel
+    daisysp::Svf svfR;   // right channel (SF stereo only)
 
     void reset() {
         type = 0;
-        freq = 0.0f; damp = 2.0f;
-        stateL.reset();
-        stateR.reset();
+        svfL.Init(sampleRate);
+        svfR.Init(sampleRate);
     }
 
     // Recompute coefficients. Call once per block when type or modulated params change.
-    void setParams(int filterType, int cutoff, int resonance, float sampleRate) {
+    void setParams(int filterType, int cutoff, int resonance, float sr) {
         type = filterType;
-
-        // cutoff 0-255 → Hz, exponential curve (20 Hz – 20 kHz)
-        float hz = 20.0f * powf(1000.0f, cutoff / 255.0f);
-        hz = fminf(hz, sampleRate * 0.45f);
-
-        // SVF frequency coefficient
-        freq = 2.0f * sinf((float)M_PI * hz / sampleRate);
-
-        // resonance 0-255 → 0..1, then derive damping
-        // high res01 → low damp → high Q; stability cap prevents blow-up near Nyquist
-        float res01 = resonance / 255.0f;
-        float d     = 2.0f * (1.0f - powf(res01, 0.25f));
-        float maxD  = fminf(2.0f, 2.0f / freq - freq * 0.5f);
-        damp = fminf(d, maxD);
+        if (sr != sampleRate) {
+            sampleRate = sr;
+            svfL.Init(sr);
+            svfR.Init(sr);
+        }
+        // cutoff 0-255 → Hz, exponential curve for musical feel (20 Hz – 20 kHz)
+        float hz  = 20.0f * powf(1000.0f, cutoff / 255.0f);
+        hz = fminf(hz, sr * 0.45f);
+        // resonance 0-255 → 0..1
+        float res = resonance / 255.0f;
+        svfL.SetFreq(hz);
+        svfL.SetRes(res);
+        svfR.SetFreq(hz);
+        svfR.SetRes(res);
     }
 
     bool enabled() const { return type != 0; }
 
     inline float processMono(float in) {
         if (!enabled()) return in;
-        stateL.process(in, freq, damp);
-        if (type == 1) return stateL.low();
-        if (type == 2) return stateL.high();
-        return stateL.band();   // type == 3
+        svfL.Process(in);
+        if (type == 1) return svfL.Low();
+        if (type == 2) return svfL.High();
+        return svfL.Band();   // type == 3
     }
 
     inline void processStereo(float& L, float& R) {
         if (!enabled()) return;
-        stateL.process(L, freq, damp);
-        stateR.process(R, freq, damp);
-        if (type == 1) { L = stateL.low();  R = stateR.low();  return; }
-        if (type == 2) { L = stateL.high(); R = stateR.high(); return; }
-        L = stateL.band(); R = stateR.band();
+        svfL.Process(L);
+        svfR.Process(R);
+        if (type == 1) { L = svfL.Low();  R = svfR.Low();  return; }
+        if (type == 2) { L = svfL.High(); R = svfR.High(); return; }
+        L = svfL.Band(); R = svfR.Band();
     }
 };

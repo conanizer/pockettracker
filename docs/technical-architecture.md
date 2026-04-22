@@ -115,9 +115,10 @@ PocketTracker/
         ├── send-chain.h            Parallel send buses (reverb/delay/chorus — stubs)
         ├── master-chain.h          Final output bus (EQ/compressor/limiter — stub)
         ├── primitives/
-        │   └── biquad.h            BiquadState: state-only, coeffs passed at call time
+        │   ├── biquad.h            BiquadState: state-only, coeffs passed at call time (kept for future use)
+        │   └── daisysp/            Vendored DaisySP (MIT): svf.h, svf.cpp, dsp.h
         └── modules/
-            ├── filter-module.h     FilterModule: LP/HP/BP biquad, setParams() + processMono/Stereo
+            ├── filter-module.h     FilterModule: LP/HP/BP via daisysp::Svf, setParams() + processMono/Stereo
             ├── drive-module.h      DriveModule: tanh soft clipper, stateless
             └── crush-module.h      BitcrushModule: bit-depth quantizer, stateless
 
