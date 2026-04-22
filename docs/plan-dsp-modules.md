@@ -1,7 +1,8 @@
-# Plan: DSP Module Architecture
+# DSP Module Architecture
 
-**Status:** Design (pre-implementation, post-MVP)  
-**Purpose:** Define how audio effects are structured internally — composable, reusable, and modulation-ready at every point in the signal chain.
+**Status:** Instrument chain — implemented (April 2026). Send/master chains — stubs. Bus modulation — post-MVP.  
+**Purpose:** Define how audio effects are structured internally — composable, reusable, and modulation-ready at every point in the signal chain.  
+**Implementation guide:** `docs/guide-adding-effects.md`
 
 ---
 
@@ -288,23 +289,6 @@ modulation is post-MVP.**
 
 ## Relationship to Existing Plans
 
-### `plan-audio-effects.md`
-
-That plan describes *what* effects to implement (specific Airwindows/DaisySP/Soundpipe
-sources) and the `InstrumentFX/SendFX/MasterFX` flat data classes. It is still valid for MVP.
-
-This document describes *how* effects should be internally structured. When implementing
-the effects from that plan, structure them as follows:
-
-| Source from plan-audio-effects.md | DSP role |
-|----------------------------------|----------|
-| DaisySP `Svf` | Primitive inside `FilterModule` |
-| Soundpipe `pareq` | Primitive inside `EQModule` |
-| Airwindows `Chamber` | Module (Airwindows' own primitives) |
-| Airwindows `Pressure4` | Module (used inside `OTTModule` or standalone) |
-| Airwindows `ADClip7` | Module (`LimiterModule`) |
-| OTT (not in plan yet) | Composed module (BiquadState + EnvelopeFollower primitives) |
-
 ### `plan-module-system.md`
 
 That plan describes the per-voice modulation routing system. It is the *modulation layer*
@@ -320,18 +304,29 @@ plan-dsp-modules.md    →  FilterModule.mod[CUTOFF] = modDestValues[PARAM_FILTE
 
 ---
 
-## Implementation Order
+## Implementation Status
 
-For MVP (matches `plan-audio-effects.md` phasing):
-1. Implement DSP primitives (`BiquadState` already exists in `filter.h`; add `EnvelopeFollower`, `DelayLine`)
-2. Implement instrument chain modules (`FilterModule`, `DriveModule`, `BitcrushModule`) wrapping DaisySP/Airwindows
-3. Implement send chain modules (`ReverbModule`, `DelayModule`, `ChorusModule`)
-4. Implement master chain modules (`EQModule`, `CompressorModule`, `LimiterModule`)
+### Done (April 2026)
 
-Post-MVP:
-- `OTTModule` (composed from existing primitives, no new primitives needed)
-- Track chain context (after per-track buffers land from `unified-audio-abstraction.md`)
+- ✅ `effects/primitives/biquad.h` — `BiquadState` (state-only, coefficients passed at call time)
+- ✅ `effects/modules/filter-module.h` — `FilterModule` (LP/HP/BP biquad; `setParams()` + `processMono/Stereo`)
+- ✅ `effects/modules/drive-module.h` — `DriveModule` (tanh soft clipper, stateless)
+- ✅ `effects/modules/crush-module.h` — `BitcrushModule` (bit-depth quantizer, stateless)
+- ✅ `effects/instrument-chain.h` — `InstrumentChain` wiring all three modules (Crush → Drive → Filter)
+- ✅ `effects/send-chain.h` — stub (silence output)
+- ✅ `effects/master-chain.h` — stub (no-op pass-through)
+- ✅ All sampler and SF voices use `InstrumentChain`; audio-engine.cpp call sites unchanged
+
+### Post-MVP
+
+- `EnvelopeFollower` primitive (needed for compressor/OTT)
+- `DelayLine` primitive (needed for reverb/delay/chorus)
+- Send chain modules: `ReverbModule`, `DelayModule`, `ChorusModule`
+- Master chain modules: `EQModule`, `CompressorModule`, `LimiterModule`
+- `OTTModule` (composed from BiquadState + EnvelopeFollower)
+- Track chain context (after per-track buffers from `unified-audio-abstraction.md`)
 - `BusModContext` + bus-level mod routes
+- DaisySP SVF swap in `FilterModule` (see swap comment in `filter-module.h`)
 
 ---
 

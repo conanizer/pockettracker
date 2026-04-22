@@ -390,6 +390,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     sv.chain.reset();
                     sv.chain.filter.setParams(sv.instrParams.filterType, sv.instrParams.filterCut,
                                               sv.instrParams.filterRes, (int)sampleRate);
+                    sv.chain.drive.drive = sv.instrParams.drive;
+                    sv.chain.crush.crush = sv.instrParams.crush;
 
                     // Initialize modulation state (Phase 5).
                     sv.params.setBase(PARAM_VOL,   note.volume);
@@ -1007,10 +1009,13 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         // Get modulated playback rate (includes pitch slide + vibrato)
         float modulatedRate = getModulatedPlaybackRate(voice);
 
-        // Phase 3: effective distortion and sample-bound params (base + mod, clamped)
+        // Effective distortion and sample-bound params (base + mod, clamped)
         int effDrive      = std::max(0, std::min(255, (int)(voice.params.base[PARAM_DRIVE]      + voice.modDestValues[PARAM_DRIVE])));
         int effCrush      = std::max(0, std::min(15,  (int)(voice.params.base[PARAM_CRUSH]      + voice.modDestValues[PARAM_CRUSH])));
         int effDownsample = std::max(0, std::min(15,  (int)(voice.params.base[PARAM_DOWNSAMPLE] + voice.modDestValues[PARAM_DOWNSAMPLE])));
+        // Push effective values into the chain so processMono() picks them up this block.
+        voice.chain.drive.drive = effDrive;
+        voice.chain.crush.crush = effCrush;
         {
             float rawStart   = voice.params.base[PARAM_SAMPLE_START] + voice.modDestValues[PARAM_SAMPLE_START];
             float rawEnd     = voice.params.base[PARAM_SAMPLE_END]   + voice.modDestValues[PARAM_SAMPLE_END];
@@ -1058,30 +1063,13 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 sample2 = voice.sampleData[quantizedIdx];
             }
 
-            // STEP 2: CRUSH (bit depth reduction)
-            if (effCrush > 0) {
-                int bits = 16 - effCrush;
-                if (bits < 1) bits = 1;
-                int levels = 1 << bits;
-                sample1 = floorf(sample1 * levels) / levels;
-                sample2 = floorf(sample2 * levels) / levels;
-            }
+            // STEP 2: LINEAR INTERPOLATION (pitch shifting)
+            float processedSample = sample1 + (sample2 - sample1) * frac;
 
-            // STEP 3: LINEAR INTERPOLATION (pitch shifting)
-            float interpolatedSample = sample1 + (sample2 - sample1) * frac;
-
-            // STEP 4: DRIVE (pre-gain boost with soft clipping)
-            float processedSample = interpolatedSample;
-            if (effDrive > 0) {
-                float driveGain = effDrive / 128.0f;
-                processedSample *= driveGain;
-                processedSample = tanhf(processedSample);
-            }
-
-            // STEP 5: FILTER — routed through InstrumentChain
+            // STEP 3: Crush → Drive → Filter via InstrumentChain (post-interpolation)
             processedSample = voice.chain.processMono(processedSample);
 
-            // STEP 6: Apply volume after effects, with modulation (Phase 4)
+            // STEP 4: Apply volume after effects, with modulation (Phase 4)
             float t = (numFrames > 1) ? (float)(i + 1) / (float)numFrames : 1.0f;
             float finalVol = voice.volume;
             for (int m = 0; m < 4; m++) {
@@ -1293,24 +1281,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     R = sfBuf[holdIdx * 2 + 1];  // (processed value — same hold semantics)
                 }
 
-                // Bitcrush (reduce bit depth)
-                if (ip.crush > 0) {
-                    int bits = 16 - ip.crush;
-                    if (bits < 1) bits = 1;
-                    int levels = 1 << bits;
-                    L = floorf(L * levels) / levels;
-                    R = floorf(R * levels) / levels;
-                }
-
-                // Drive (pre-gain boost + tanh soft clip)
-                if (ip.drive > 0) {
-                    float gain = ip.drive / 128.0f;
-                    L = tanhf(L * gain);
-                    R = tanhf(R * gain);
-                }
-
-                // Filter — routed through InstrumentChain (stereo L + R independent state)
-                sv.chain.filter.processStereo(L, R);
+                // Crush → Drive → Filter via InstrumentChain
+                sv.chain.processStereo(L, R);
 
                 sfBuf[i * 2]     = L;
                 sfBuf[i * 2 + 1] = R;

@@ -100,7 +100,26 @@ PocketTracker/
 │
 ├── TrackerData.kt                  ✅ Pure data structures (PORTABLE)
 ├── PixelPerfectRenderer.kt         Compose rendering + pixel font
-└── native-audio.cpp                ✅ C++ audio engine (PORTABLE)
+└── app/src/main/cpp/               C++ audio engine (PORTABLE)
+    ├── audio-engine.cpp / .h       Main engine: processAudioBlock, onAudioReady, renderOffline
+    ├── jni-bridge.cpp              JNI entry points only (thin wrapper)
+    ├── sampler-voice.h             Per-voice state for sample-playback voices
+    ├── soundfont-voice.h / .cpp    Per-voice state for SF2/TinySoundFont voices
+    ├── mod-system.h                Modulation routing (modSourceValues → modDestValues)
+    ├── note-queue.h                Sample-accurate note scheduling queue
+    ├── filter.h                    calculateBiquadCoeffs() (Audio EQ Cookbook)
+    ├── audio-defs.h                PARAM_* constants, voice structs
+    ├── tsf.h                       TinySoundFont (single-header SF2 synth)
+    └── effects/                    DSP module system (three-layer architecture)
+        ├── instrument-chain.h      Per-voice chain: Crush → Drive → Filter
+        ├── send-chain.h            Parallel send buses (reverb/delay/chorus — stubs)
+        ├── master-chain.h          Final output bus (EQ/compressor/limiter — stub)
+        ├── primitives/
+        │   └── biquad.h            BiquadState: state-only, coeffs passed at call time
+        └── modules/
+            ├── filter-module.h     FilterModule: LP/HP/BP biquad, setParams() + processMono/Stereo
+            ├── drive-module.h      DriveModule: tanh soft clipper, stateless
+            └── crush-module.h      BitcrushModule: bit-depth quantizer, stateless
 
 ---
 
@@ -228,7 +247,7 @@ PocketTracker/
 
 ## Audio Processing Chain Rule
 
-**ALL audio processing lives in `processAudioBlock()` in `native-audio.cpp`.**
+**ALL audio processing lives in `processAudioBlock()` in `audio-engine.cpp`.**
 
 `onAudioReady()` and `renderOffline()` are thin wrappers — they call `processAudioBlock()`
 and add only output-destination-specific work on top:
@@ -266,7 +285,8 @@ add it to `processAudioBlock()`. NEVER add processing logic directly to `onAudio
 - ✅ 8-voice polyphony with per-track voice stealing
 - ✅ Global frame counter for precise timing
 - ✅ Resonant biquad filters (LP/HP/BP using Audio EQ Cookbook)
-- ✅ Effects chain: Downsample → Crush → Interpolate → Drive → Filter → Volume
+- ✅ Effects chain: Downsample (pre-interp, inline) → Interpolate → Crush → Drive → Filter → Volume
+- ✅ DSP module system: three-layer (Primitive / Module / Chain) — see `docs/plan-dsp-modules.md`
 - ✅ Waveform capture for oscilloscope visualization
 - ✅ SoundFont (SF2) instruments via TinySoundFont (TSF) — see below
 
@@ -852,6 +872,7 @@ See **REFACTORING_ROADMAP.md** for detailed step-by-step refactoring plan.
 ---
 
 **Version History:**
+- v2.3 (2026-04-22): DSP module system implemented; effects/ directory (primitives + modules + chains); InstrumentChain (Crush→Drive→Filter) wired to all sampler and SF voices; C++ file tree updated in this document; guide-adding-effects.md written
 - v2.2 (2026-04-17): Audio module system complete (Phases 0–3, 5–8); SF2 full mod parity; per-channel TSF rendering; SF bug fixes (HOP, KIL/REL, table in release); table abstraction debt noted
 - v2.1 (2026-04-07): Added SF2/TSF engine section; OpenSL ES stream priority; async audio init; UAA phase status
 - v2.0 (2026-03-13): Updated to reflect complete refactoring; all architecture goals achieved; modulation engine fully implemented
