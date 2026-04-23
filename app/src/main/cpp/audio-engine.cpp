@@ -389,7 +389,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     }
                     sv.chain.reset();
                     sv.chain.filter.setParams(sv.instrParams.filterType, sv.instrParams.filterCut,
-                                              sv.instrParams.filterRes, (int)sampleRate);
+                                              sv.instrParams.filterRes, sv.instrParams.filterDrive,
+                                              (int)sampleRate);
                     sv.chain.drive.drive = sv.instrParams.drive;
                     sv.chain.crush.crush = sv.instrParams.crush;
 
@@ -982,7 +983,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                  fabsf(voice.params.mod[PARAM_FILTER_RES]) > 0.5f)) {
             int modCut = std::max(0, std::min(255, (int)voice.params.get(PARAM_FILTER_CUT)));
             int modRes = std::max(0, std::min(255, (int)voice.params.get(PARAM_FILTER_RES)));
-            voice.chain.filter.setParams(voice.chain.filter.type, modCut, modRes, sampleRate);
+            voice.chain.filter.setParams(voice.chain.filter.type, modCut, modRes, voice.chain.filter.drive, sampleRate);
         }
 
         // Auto-stop looping voice when volume envelope completes
@@ -1241,7 +1242,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 int modRes = std::max(0, std::min(255,
                     (int)(sv.instrParams.filterRes + sv.modDestValues[PARAM_FILTER_RES])));
                 if (modCut != sv.instrParams.filterCut || modRes != sv.instrParams.filterRes) {
-                    sv.chain.filter.setParams(sv.chain.filter.type, modCut, modRes, (int)sampleRate);
+                    sv.chain.filter.setParams(sv.chain.filter.type, modCut, modRes, sv.chain.filter.drive, (int)sampleRate);
                 }
             }
 

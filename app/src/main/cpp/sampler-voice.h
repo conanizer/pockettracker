@@ -146,7 +146,7 @@ struct Voice : public IAudioVoice {
         // Initialize per-voice effect chain
         chain.reset();
         chain.filter.setParams(instrParams.filterType, instrParams.filterCut,
-                               instrParams.filterRes, sampleRate);
+                               instrParams.filterRes, instrParams.filterDrive, sampleRate);
 
         // Initialize table state (Phase 3.5)
         tableId = tblId;

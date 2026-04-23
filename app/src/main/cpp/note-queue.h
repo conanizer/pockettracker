@@ -267,13 +267,14 @@ struct InstrumentParams {
     int downsample;     // 0-15 (sample rate reduction, 0=off, 1=÷2, 2=÷4, etc.)
 
     // Filter parameters
-    int filterType;     // 0=off, 1=lp, 2=hp, 3=bp
+    int filterType;     // 0=off, 1=lp, 2=hp, 3=bp, 4=notch, 5=peak
     int filterCut;      // 0-255 (cutoff frequency)
     int filterRes;      // 0-255 (resonance)
+    int filterDrive;    // 0-255 (SVF resonance saturation; 128 = DaisySP default)
 
     InstrumentParams() : startPoint(0), endPoint(255), reverse(false),
                          loopMode(0), loopStart(0), drive(0), crush(0), downsample(0),
-                         filterType(0), filterCut(128), filterRes(0) {}
+                         filterType(0), filterCut(128), filterRes(0), filterDrive(128) {}
 };
 
 // ===================================
