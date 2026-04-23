@@ -10,8 +10,13 @@
 // SF voices: processStereo() called per sample after tsf_render_float_channel().
 //
 // Signal order: Crush → Drive → Filter
-// (Crush and Drive are post-interpolation for both voice types.
-//  Downsample stays inline in the sampler mix loop — see crush-module.h.)
+// Within Crush: Decimator applies Downsample → Bitcrush in one pass.
+//
+// Sampler voices: crush.setParams(effCrush, 0) — downsample=0 bypasses
+//   the chain downsample; pre-interpolation address quantization stays
+//   inline in the sampler mix loop (different lo-fi character, cannot move).
+// SF voices: crush.setParams(instrParams.crush, instrParams.downsample) —
+//   chain handles both; the old sfBuf index-based downsample is removed.
 //
 // Adding a new module:
 //   1. Add a member of the module type.

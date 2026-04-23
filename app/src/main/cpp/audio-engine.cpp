@@ -391,8 +391,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     sv.chain.filter.setParams(sv.instrParams.filterType, sv.instrParams.filterCut,
                                               sv.instrParams.filterRes, sv.instrParams.filterDrive,
                                               (int)sampleRate);
-                    sv.chain.drive.drive = sv.instrParams.drive;
-                    sv.chain.crush.crush = sv.instrParams.crush;
+                    sv.chain.drive.setDrive(sv.instrParams.drive);
+                    sv.chain.crush.setParams(sv.instrParams.crush, sv.instrParams.downsample);
 
                     // Initialize modulation state (Phase 5).
                     sv.params.setBase(PARAM_VOL,   note.volume);
@@ -1015,8 +1015,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         int effCrush      = std::max(0, std::min(15,  (int)(voice.params.base[PARAM_CRUSH]      + voice.modDestValues[PARAM_CRUSH])));
         int effDownsample = std::max(0, std::min(15,  (int)(voice.params.base[PARAM_DOWNSAMPLE] + voice.modDestValues[PARAM_DOWNSAMPLE])));
         // Push effective values into the chain so processMono() picks them up this block.
-        voice.chain.drive.drive = effDrive;
-        voice.chain.crush.crush = effCrush;
+        voice.chain.drive.setDrive(effDrive);
+        voice.chain.crush.setParams(effCrush, 0);   // sampler: downsample=0, pre-interp handles it
         {
             float rawStart   = voice.params.base[PARAM_SAMPLE_START] + voice.modDestValues[PARAM_SAMPLE_START];
             float rawEnd     = voice.params.base[PARAM_SAMPLE_END]   + voice.modDestValues[PARAM_SAMPLE_END];
@@ -1267,24 +1267,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
 
             // Phase 7: apply instrument effects to this track's buffer before mixing.
-            // Signal chain: Downsample → Crush → Drive → Filter (matches sampler order).
-            // L and R share filter coefficients but each has independent biquad state.
-            const InstrumentParams& ip = sv.instrParams;
+            // Signal chain via InstrumentChain: Downsample+Crush → Drive → Filter.
+            // Downsample and crush are both handled by BitcrushModule (Decimator).
             for (int i = 0; i < numFrames; i++) {
                 float L = sfBuf[i * 2];
                 float R = sfBuf[i * 2 + 1];
-
-                // Downsample (sample-and-hold)
-                if (ip.downsample > 0) {
-                    int factor = 1 << ip.downsample;
-                    int holdIdx = (i / factor) * factor;
-                    L = sfBuf[holdIdx * 2];      // holdIdx was already written back if < i
-                    R = sfBuf[holdIdx * 2 + 1];  // (processed value — same hold semantics)
-                }
-
-                // Crush → Drive → Filter via InstrumentChain
                 sv.chain.processStereo(L, R);
-
                 sfBuf[i * 2]     = L;
                 sfBuf[i * 2 + 1] = R;
             }

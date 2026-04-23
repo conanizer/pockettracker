@@ -13,6 +13,8 @@ add_library(pockettracker SHARED
         audio-engine.cpp
         jni-bridge.cpp
         effects/primitives/daisysp/svf.cpp
+        effects/primitives/daisysp/overdrive.cpp
+        effects/primitives/daisysp/decimator.cpp
 )
 
 # Include current directory so tsf.h can be found
