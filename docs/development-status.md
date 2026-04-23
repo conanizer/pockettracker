@@ -57,6 +57,7 @@ Week 16:     MVP Release
 - Offline WAV render (processAudioBlock unified DSP)
 - Groove quantization (per-track groove assignments)
 - Resonant biquad filters (LP/HP/BP)
+- Master output bus (MasterChain): DaisySP peak-tracking soft limiter replaces inline brickwall clipper
 
 ### Screens & Modules
 - **Oscilloscope** - Real-time waveform visualization (60 FPS)
@@ -180,6 +181,7 @@ Week 16:     MVP Release
 - **Phase 8**: SF preset parameter overrides (ATK/DEC/SUS/REL/filterCut/filterRes) editable on instrument screen via `SFOverrides`, applied by `applySoundfontEnvelopeOverrides` at note trigger
 - **SF bug fixes**: HOP effect now works with SF tables; KIL/REL — ADSR release and TSF-native REL both audible after KIL; table arpeggio continues during release tail (matches sampler behavior)
 - **Phase 4 (SCALAR mod type)**: Deferred to post-MVP
+- **Master chain (2026-04-24)**: `MasterChain` implemented with `LimiterModule` (DaisySP `Limiter` primitive, stereo L+R, peak-tracking soft limiter); `InstrumentChain` per-voice effects replaced inline hard-clipper on final bus
 
 ### Extension Pack 3 (Complete - 2026-03-13)
 - Fixes & UX updates (table vol range, FX cycling, key repeat, selection increment)

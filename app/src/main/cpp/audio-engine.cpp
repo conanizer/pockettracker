@@ -23,6 +23,7 @@ AudioEngine::AudioEngine() {
     }
     waveformIndex = 0;
     waveformDownsampleCounter = 0;
+    masterChain.reset();
 }
 
 AudioEngine::~AudioEngine() {
@@ -1301,17 +1302,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
     }
 
-    // Master chain (stub — modules added here in future, limiter moves here eventually)
+    // Master chain: peak-tracking soft limiter (DaisySP) + future EQ/compressor slots
     masterChain.process(output, numFrames, channelCount);
-
-    // Brickwall limiter at -0.1 dBFS
-    {
-        constexpr float LIMITER_THRESHOLD = 0.98855f;
-        for (int i = 0; i < numFrames; i++) {
-            output[i * channelCount]     = fmaxf(-LIMITER_THRESHOLD, fminf(LIMITER_THRESHOLD, output[i * channelCount]));
-            output[i * channelCount + 1] = fmaxf(-LIMITER_THRESHOLD, fminf(LIMITER_THRESHOLD, output[i * channelCount + 1]));
-        }
-    }
 
     globalFrameCounter += numFrames;
 }
