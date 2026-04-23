@@ -10,8 +10,11 @@
 // (high drive) and compensates output volume automatically so level stays
 // consistent across the drive range.
 //
-// param drive: 0–255 (0 = bypass, 255 = maximum saturation)
-//   Maps to SetDrive(0..1). drive=128 ≈ Init default behaviour.
+// param drive: 0–255 (0 = bypass, 255 = heavy overdrive)
+//   Maps to SetDrive(0.30..0.60). drive=1 ≈ gentle warmth (+2 dB, light saturation).
+//   DaisySP Overdrive below SetDrive(~0.3) attenuates severely: post_gain
+//   compensation assumes real saturation but pre_gain is sub-unity there.
+//   The 1-255 → 0.30-0.60 mapping keeps the effect in the musically usable zone.
 //
 // Call setDrive() once per block when the param changes (not per sample).
 // Process() is a pure function — one od instance is safe for both channels.
@@ -30,7 +33,7 @@ struct DriveModule {
     // Call once per block (or at trigger) when drive changes.
     void setDrive(int d) {
         drive = d;
-        od.SetDrive(d / 255.0f);
+        od.SetDrive(0.3f + (d / 255.0f) * 0.3f);
     }
 
     inline float processMono(float in) {
