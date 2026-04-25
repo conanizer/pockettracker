@@ -33,7 +33,7 @@
 // ===========================================================================
 struct FilterModule {
     int   type       = 0;
-    int   drive      = 128;
+    int   drive      = 150;
     float sampleRate = 44100.0f;
     daisysp::Svf svfL;   // mono or left channel
     daisysp::Svf svfR;   // right channel (SF stereo only)

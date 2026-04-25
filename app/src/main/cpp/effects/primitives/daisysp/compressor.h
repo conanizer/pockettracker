@@ -10,7 +10,7 @@ https://opensource.org/license/lgpl-2-1/
 #ifndef DSY_COMPRESSOR_H
 #define DSY_COMPRESSOR_H
 
-#include "C:\Users\conan\AndroidStudioProjects\Pockettracker\app\src\main\cpp\effects\primitives\daisysp\dsp.h"
+#include "dsp.h"
 
 namespace daisysp
 {
