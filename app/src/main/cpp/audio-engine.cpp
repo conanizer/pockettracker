@@ -1637,6 +1637,16 @@ void AudioEngine::setMasterVolume(float volume) {
     LOGD("🔊 Master volume set to %.2f", volume);
 }
 
+void AudioEngine::setOttDepth(int depth) {
+    float d = depth / 255.0f;
+    masterChain.ott.setDepth(d);
+}
+
+void AudioEngine::setOttDepthForRender(int depth) {
+    float d = depth / 255.0f;
+    masterChain.ott.resetForRender(d);
+}
+
 // ============================================================
 // PITCH MODULATION METHODS
 // ============================================================

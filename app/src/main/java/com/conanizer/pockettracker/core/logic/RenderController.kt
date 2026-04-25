@@ -73,6 +73,9 @@ class RenderController(
 
             progressCallback?.onProgress(0.3f, "Rendering audio...")
 
+            // Reset OTT for clean offline render: fresh compressor state, no warmup fade.
+            audioBackend.setOttDepthForRender(project.ottDepth)
+
             val sampleRate = audioBackend.getSampleRate()
             val audio = audioBackend.renderFrames(totalFrames.toInt(), sampleRate)
 
@@ -150,6 +153,8 @@ class RenderController(
             Log.d(TAG, "🎬 Selection render: $totalFrames frames, tracks=$selectedTrackIds")
 
             progressCallback?.onProgress(0.3f, "Rendering audio...")
+
+            audioBackend.setOttDepthForRender(project.ottDepth)
 
             val sampleRate = audioBackend.getSampleRate()
             val audio = audioBackend.renderFrames(totalFrames.toInt(), sampleRate)

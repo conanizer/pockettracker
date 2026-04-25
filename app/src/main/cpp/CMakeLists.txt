@@ -16,6 +16,9 @@ add_library(pockettracker SHARED
         effects/primitives/daisysp/overdrive.cpp
         effects/primitives/daisysp/decimator.cpp
         effects/primitives/daisysp/limiter.cpp
+        effects/primitives/daisysp/compressor.cpp
+        effects/primitives/daisysp/crossfade.cpp
+        effects/primitives/daisysp/balance.cpp
 )
 
 # Include current directory so tsf.h can be found

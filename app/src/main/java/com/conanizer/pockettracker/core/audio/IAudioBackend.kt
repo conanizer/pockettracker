@@ -283,6 +283,11 @@ interface IAudioBackend {
      */
     fun setMasterVolume(volume: Float)
 
+    // Set OTT depth (0=bypass, 255=full wet). Enables/disables OTT module.
+    fun setOttDepth(depth: Int)
+    // Reset OTT for offline render: clean state, no warmup fade.
+    fun setOttDepthForRender(depth: Int)
+
     // ===================================
     // TABLE METHODS (Phase 3.5)
     // ===================================

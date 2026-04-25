@@ -181,6 +181,14 @@ class TrackerController(
             stateObserver.onStateChanged()
         }
 
+    // Mixer master sub-row (reachable from any column via DPAD UP/DOWN)
+    // 0 = volume row, 1 = OTT depth row
+    var mixerMasterRow = 0
+        set(value) {
+            field = value.coerceIn(0, 1)
+            stateObserver.onStateChanged()
+        }
+
     // Table screen cursor
     var tableCursorRow = 0
         set(value) {
@@ -817,7 +825,7 @@ class TrackerController(
                     cursorRow = r; cursorColumn = c
                 }
                 ScreenType.INSTRUMENT -> { instrumentCursorRow = 0; instrumentCursorColumn = 1 }
-                ScreenType.MIXER      -> { mixerCursorColumn = 0 }
+                ScreenType.MIXER      -> { mixerCursorColumn = 0; mixerMasterRow = 0 }
                 ScreenType.TABLE      -> { tableCursorRow = 0; tableCursorColumn = 1 }
                 ScreenType.GROOVE     -> { grooveCursorRow = 0 }
                 ScreenType.MODS       -> { modCursorRow = 0; modCursorPair = 0; modCursorSide = 0 }
@@ -889,6 +897,9 @@ class TrackerController(
                 }
                 // At pair 0, row 0 — stay at top (no wrap)
             }
+            ScreenType.MIXER -> {
+                if (mixerMasterRow > 0) mixerMasterRow--
+            }
             ScreenType.SONG -> {
                 // SONG screen: 256 rows (0-255), clamp at 0, scroll to keep cursor visible
                 if (cursorRow > 0) {
@@ -959,6 +970,9 @@ class TrackerController(
                     modCursorRow = 0
                 }
                 // At pair 1, last row — stay at bottom (no wrap)
+            }
+            ScreenType.MIXER -> {
+                if (mixerMasterRow < 1) mixerMasterRow++
             }
             ScreenType.SONG -> {
                 // SONG screen: 256 rows (0-255), clamp at 255, scroll to keep cursor visible

@@ -197,6 +197,14 @@ class OboeAudioBackend : IAudioBackend {
         native_setMasterVolume(volume)
     }
 
+    override fun setOttDepth(depth: Int) {
+        native_setOttDepth(depth)
+    }
+
+    override fun setOttDepthForRender(depth: Int) {
+        native_setOttDepthForRender(depth)
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // TABLE METHODS (Phase 3.5)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -430,6 +438,8 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_decayWaveform()
     private external fun native_setTrackVolume(trackId: Int, volume: Float)
     private external fun native_setMasterVolume(volume: Float)
+    private external fun native_setOttDepth(depth: Int)
+    private external fun native_setOttDepthForRender(depth: Int)
 
     // Phase 3.5 table methods
     private external fun native_loadTable(tableId: Int, rowData: ByteArray)

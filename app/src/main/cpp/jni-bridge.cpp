@@ -386,6 +386,20 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setMa
     }
 }
 
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setOttDepth(JNIEnv *env, jobject thiz, jint depth) {
+    if (engine) {
+        engine->setOttDepth(depth);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setOttDepthForRender(JNIEnv *env, jobject thiz, jint depth) {
+    if (engine) {
+        engine->setOttDepthForRender(depth);
+    }
+}
+
 // ===================================
 // TABLE JNI METHODS (Phase 3.5)
 // ===================================

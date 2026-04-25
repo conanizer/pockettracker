@@ -84,9 +84,12 @@ class MixerModule : TrackerModule {
         // ===================================
         val meterY = y + 50  // Start meters below header
 
+        // On OTT row nothing in track columns is selected — only OTT value in master area
+        val onVolumeRow = mixerState.mixerMasterRow == 0
+
         for (trackIndex in 0 until 8) {
             val meterX = x + FIRST_METER_X + (trackIndex * METER_SPACING)
-            val isSelected = mixerState.cursorColumn == trackIndex
+            val isSelected = onVolumeRow && mixerState.cursorColumn == trackIndex
             val track = mixerState.project.tracks[trackIndex]
             val peakLevel = if (trackIndex < mixerState.trackPeaks.size) mixerState.trackPeaks[trackIndex] else 0f
 
@@ -94,7 +97,7 @@ class MixerModule : TrackerModule {
             val labelText = (trackIndex + 1).toString()
             drawBitmapText(
                 text = labelText,
-                x = meterX + (METER_WIDTH - 5 * FONT_SCALE) / 2,  // center single char
+                x = meterX + (METER_WIDTH - 5 * FONT_SCALE) / 2,
                 y = meterY - 25,
                 scale = scale,
                 color = if (isSelected) Color.Yellow else Color.White,
@@ -144,7 +147,7 @@ class MixerModule : TrackerModule {
         // STEP 4: Draw master column
         // ===================================
         val masterX = x + FIRST_METER_X + (8 * METER_SPACING)
-        val isSelected = mixerState.cursorColumn == 8
+        val isSelected = onVolumeRow && mixerState.cursorColumn == 8
 
         // Draw master label centered over the stereo meter pair.
         // Right bar ends at masterX + (METER_WIDTH/2+8) + (METER_WIDTH/2+4) = masterX + METER_WIDTH + 12
@@ -190,14 +193,38 @@ class MixerModule : TrackerModule {
             isMuted = false
         )
 
-        // Draw master volume value
+        // Draw master volume value (highlighted when sub-row 0 is selected)
+        val masterVolSelected = isSelected && mixerState.mixerMasterRow == 0
         val masterVolHex = mixerState.project.masterVolume.toString(16).padStart(2, '0').uppercase()
         drawBitmapText(
             text = masterVolHex,
             x = masterX + 5,
             y = meterY + METER_HEIGHT + 10,
             scale = scale,
-            color = if (isSelected) Color.Yellow else Color.White,
+            color = if (masterVolSelected) Color.Yellow else Color.White,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        // Draw OTT depth row — "OTT" label is unreachable (always gray), value is yellow when row 1 active
+        val ottSelected = mixerState.mixerMasterRow == 1
+        val ottHex = mixerState.project.ottDepth.toString(16).padStart(2, '0').uppercase()
+        val ottLabelWidth = (3 + 1) * (5 * FONT_SCALE + CHAR_SPACING) // "OTT " = 4 chars × 17px
+        drawBitmapText(
+            text = "OTT",
+            x = masterX - 68,
+            y = meterY + METER_HEIGHT + 31,
+            scale = scale,
+            color = Color.Gray,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+        drawBitmapText(
+            text = ottHex,
+            x = masterX - 63 + ottLabelWidth,
+            y = meterY + METER_HEIGHT + 31,
+            scale = scale,
+            color = if (ottSelected) Color.Yellow else Color.White,
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
@@ -308,21 +335,12 @@ class MixerModule : TrackerModule {
      * Get cursor context for mixer screen
      */
     fun getCursorContext(state: MixerState): CursorContext {
-        return if (state.cursorColumn < 8) {
-            // Track volume (00-FF)
-            CursorContextFactory.hexByte(
-                currentValue = state.project.tracks[state.cursorColumn].volume,
-                min = 0,
-                max = 255
-            )
-        } else {
-            // Master volume (00-FF)
-            CursorContextFactory.hexByte(
-                currentValue = state.project.masterVolume,
-                min = 0,
-                max = 255
-            )
-        }
+        if (state.mixerMasterRow == 1)
+            return CursorContextFactory.hexByte(currentValue = state.project.ottDepth, min = 0, max = 255)
+        return if (state.cursorColumn < 8)
+            CursorContextFactory.hexByte(currentValue = state.project.tracks[state.cursorColumn].volume, min = 0, max = 255)
+        else
+            CursorContextFactory.hexByte(currentValue = state.project.masterVolume, min = 0, max = 255)
     }
 
     /**
@@ -335,15 +353,14 @@ class MixerModule : TrackerModule {
     ): InputResult {
         when (action) {
             is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                if (state.cursorColumn < 8) {
-                    // Update track volume
-                    state.project.tracks[state.cursorColumn].volume = action.value.coerceIn(0, 255)
-                } else {
-                    // Update master volume
-                    state.project.masterVolume = action.value.coerceIn(0, 255)
+                val isOtt = state.mixerMasterRow == 1
+                when {
+                    isOtt -> state.project.ottDepth = action.value.coerceIn(0, 255)
+                    state.cursorColumn < 8 -> state.project.tracks[state.cursorColumn].volume = action.value.coerceIn(0, 255)
+                    else -> state.project.masterVolume = action.value.coerceIn(0, 255)
                 }
                 onProjectModified()
-                return InputResult(modified = true)
+                return InputResult(modified = true, ottDepthChanged = isOtt)
             }
             // Mute toggle handled separately via LGPT-style controls (R+B)
             else -> {}
@@ -352,7 +369,8 @@ class MixerModule : TrackerModule {
     }
 
     data class InputResult(
-        val modified: Boolean
+        val modified: Boolean,
+        val ottDepthChanged: Boolean = false
     )
 }
 
@@ -367,6 +385,7 @@ class MixerModule : TrackerModule {
 data class MixerState(
     val project: Project,
     val cursorColumn: Int = 0,
+    val mixerMasterRow: Int = 0,
     val trackPeaks: FloatArray = FloatArray(8),
     val masterPeaks: FloatArray = FloatArray(2)
 ) {
@@ -376,6 +395,7 @@ data class MixerState(
         other as MixerState
         if (project != other.project) return false
         if (cursorColumn != other.cursorColumn) return false
+        if (mixerMasterRow != other.mixerMasterRow) return false
         if (!trackPeaks.contentEquals(other.trackPeaks)) return false
         if (!masterPeaks.contentEquals(other.masterPeaks)) return false
         return true
@@ -384,6 +404,7 @@ data class MixerState(
     override fun hashCode(): Int {
         var result = project.hashCode()
         result = 31 * result + cursorColumn
+        result = 31 * result + mixerMasterRow
         result = 31 * result + trackPeaks.contentHashCode()
         result = 31 * result + masterPeaks.contentHashCode()
         return result

@@ -136,6 +136,11 @@ public:
     // Set real-time master volume (affects playback immediately)
     void setMasterVolume(float volume);
 
+    // Set OTT depth (0=bypass, 255=full wet). Enables/disables OTT module.
+    void setOttDepth(int depth);
+    // Reset OTT for offline render: clean state, no warmup fade.
+    void setOttDepthForRender(int depth);
+
 
     // ===================================
     // PITCH MODULATION METHODS (Phase 6)

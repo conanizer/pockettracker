@@ -77,6 +77,7 @@ fun PixelPerfectTracker(
     isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },  // Check if cell is selected
     // Mixer state
     mixerCursorColumn: Int = 0,        // 0-7 = tracks, 8 = master
+    mixerMasterRow: Int = 0,           // 0 = volume row, 1 = OTT row
     trackPeaks: FloatArray = FloatArray(8),
     masterPeaks: FloatArray = FloatArray(2),
     // Table state
@@ -249,6 +250,7 @@ fun PixelPerfectTracker(
                         selectionMode = selectionMode,
                         isCellSelected = isCellSelected,
                         mixerCursorColumn = mixerCursorColumn,
+                        mixerMasterRow = mixerMasterRow,
                         trackPeaks = trackPeaks,
                         masterPeaks = masterPeaks,
                         currentTable = currentTable,
@@ -346,6 +348,7 @@ class TrackerLayout {
         isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
         // Mixer state
         mixerCursorColumn: Int = 0,
+        mixerMasterRow: Int = 0,
         trackPeaks: FloatArray = FloatArray(8),
         masterPeaks: FloatArray = FloatArray(2),
         // Table state
@@ -698,6 +701,7 @@ class TrackerLayout {
                                 state = MixerState(
                                     project = project,
                                     cursorColumn = mixerCursorColumn,
+                                    mixerMasterRow = mixerMasterRow,
                                     trackPeaks = trackPeaks,
                                     masterPeaks = masterPeaks
                                 )

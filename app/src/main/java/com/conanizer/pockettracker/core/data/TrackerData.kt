@@ -465,6 +465,7 @@ data class Project(
     var tempo: Int = 128,  // BPM
     var transpose: Int = 0,
     var masterVolume: Int = 0xFF,  // 00-FF master volume (FF = max)
+    var ottDepth: Int = 0,         // 00=bypass, FF=full OTT wet
 
     // All phrases (256 slots)
     val phrases: Array<Phrase> = Array(256) { Phrase(it) },
