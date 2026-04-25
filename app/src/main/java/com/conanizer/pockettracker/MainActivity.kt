@@ -410,6 +410,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             audioBackend.setTrackVolume(i, com.conanizer.pockettracker.core.data.VolumeUtils.hexToFloat(vol))
         }
         audioBackend.setMasterVolume(com.conanizer.pockettracker.core.data.VolumeUtils.hexToFloat(trackerController.project.masterVolume))
+        audioBackend.setOttDepth(trackerController.project.ottDepth)
         Log.d("VolumeSync", "Initial volume sync to audio backend complete")
     }
 
