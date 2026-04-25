@@ -7,16 +7,15 @@
 // BandCompressor — linked stereo bidirectional compressor for one band.
 // Key signal = max(|L|, |R|) so both channels get identical gain.
 //
-// Downward (DaisySP): attenuates loud peaks above threshold.
-//   AutoMakeup OFF — the DaisySP formula adds ~7.9 dB flat to all signals,
-//   masking compression character. SetMakeup(+6 dB) instead: unconditional
-//   +6 dB on every sample. With 8:1 ratio at -24 dBFS threshold, the makeup
-//   overcomes compression only above −16 dBFS, so loud peaks get NET reduction
-//   while moderate signals get NET boost → wide-range squash.
+// Downward (DaisySP): attenuates loud peaks above threshold (-27 dBFS).
+//   AutoMakeup OFF, SetMakeup(0) — no unconditional boost inside the compressor.
+//   DaisySP starts with gain_rec_=0.1 after Init(); any non-zero makeup causes
+//   a first-note +makeup-dB pop before compression settles. Keep makeup at 0.
 //
-// Upward (custom): boosts quiet signals below threshold toward the threshold.
-//   Threshold aligned to downward to eliminate the "dead zone" where neither
-//   compressor fires.
+// Upward (custom): boosts signals below -35 dBFS toward the threshold.
+//   Separate lower threshold (vitOTT-matched) creates a ~8 dB neutral zone
+//   between -35 and -27 dBFS where neither compressor fires. This prevents
+//   the upward expander from lifting note tails and inter-note noise floor.
 //
 // Band-specific time constants (vitOTT-matched, ms attack / ms release):
 //   Low:  2.8 / 40   Mid:  1.4 / 28   High: 0.7 / 15
@@ -31,18 +30,16 @@ struct BandCompressor {
 
     void applySettings() {
         downward.SetRatio(8.f);
-        downward.SetThreshold(-24.f);
+        // vitOTT upper threshold average: Low -28 / Mid -25 / High -30 → ~-27 dBFS
+        downward.SetThreshold(-27.f);
         downward.SetAttack(attackSec);
         downward.SetRelease(releaseSec);
         downward.AutoMakeup(false);
-        // +6 dB unconditional makeup per band — OTT character loudness.
-        // Net effect at -24 dBFS threshold with 8:1 ratio:
-        //   signal at -24 dBFS → +6 dB net → -18 dBFS
-        //   signal at -12 dBFS → 10.5 dB compression, 6 dB makeup → -4.5 dB net → -16.5 dBFS
-        //   18 dB input range (-24 to -6 dBFS) compressed to 2.3 dB output range
-        downward.SetMakeup(6.f);
-        // Aligned threshold — both compressors active at every level, no dead zone.
-        upward.setParams(-24.f, 4.f, attackSec, releaseSec, sampleRate);
+        // Makeup stays at 0 — avoids first-note pop from DaisySP's initial gain_rec_=0.1.
+        downward.SetMakeup(0.f);
+        // vitOTT lower threshold average: Low -35 / Mid -36 / High -35 → ~-35 dBFS.
+        // ~8 dB gap above downward threshold prevents upward from lifting note tails.
+        upward.setParams(-35.f, 4.f, attackSec, releaseSec, sampleRate);
     }
 
     void init(float sr, float atk, float rel) {
@@ -77,16 +74,24 @@ struct BandCompressor {
 // Signal flow:
 //   input → [LRCrossover @120 Hz / 2500 Hz]
 //        → 3× BandCompressor (downward + upward per band, band-specific τ)
-//        → sum → linear wet/dry mix → output
+//        → sum × OUTPUT_GAIN → linear wet/dry mix → output
 //
 // One control: depth (0=bypass, 1=full OTT).
 // enabled flag gates the DSP so MasterChain can skip it at depth=0.
 //
-// Startup fade: on the disabled→enabled transition (and on resetForRender),
-// filter/compressor states are reset and the wet signal fades in over
-// WARMUP_SAMPLES to hide the LR4 zero-state startup transient. Depth changes
-// while enabled do NOT reset state, so compressors can maintain gain across
-// key-repeat sweeps.
+// OUTPUT_GAIN (+6 dB) is applied to the wet sum after compression, not inside
+// DaisySP SetMakeup. This avoids the DaisySP first-note pop (gain_rec_=0.1 at
+// Init causes +makeup boost before compression settles). The warmup crossfade
+// masks the OUTPUT_GAIN onset ramp.
+//
+// Warmup fade: wet signal ramps from 0 to depth over WARMUP_SAMPLES.
+// Triggered on: disabled→enabled, resetForRender, and auto-reset.
+//
+// Auto-reset: after SILENCE_RESET_FRAMES of silence the module resets DSP and
+// starts a warmup. This ensures every playback-start-after-silence gets the
+// warmup rather than the LR4 filter-transient + per-band compression artifact
+// that sounds like a fade-in. Depth changes while enabled do NOT reset (avoids
+// compressors losing their gain state during key-repeat parameter sweeps).
 // ===========================================================================
 struct OttModule {
     LRCrossover    xover;
@@ -96,10 +101,14 @@ struct OttModule {
     float sampleRate = 44100.f;
     bool  enabled    = false;
 
-    // Wet fades from 0→depth over WARMUP_SAMPLES on first enable and on render reset.
-    // 512 samples (~11.6ms) is enough: LR4 pole at 120Hz has τ≈83 samples; 6τ=498 ≈ -72 dBFS.
+    // 512 samples (~11.6ms): LR4 pole at 120Hz has τ≈83 samples; 6τ=498 ≈ -72 dBFS.
     int   warmupRemaining = 0;
-    static constexpr int WARMUP_SAMPLES = 512;
+    static constexpr int   WARMUP_SAMPLES      = 512;
+    // Auto-reset after 500 ms of silence so each START-after-stop gets a warmup.
+    int   silenceCounter  = 0;
+    static constexpr int   SILENCE_RESET_FRAMES = 22050;   // 500 ms @ 44100 Hz
+    // +6 dB post-band output gain (vitOTT-style): compensates for SetMakeup(0).
+    static constexpr float OUTPUT_GAIN          = 2.0f;
 
     void reset(float sr) {
         sampleRate = sr;
@@ -109,6 +118,7 @@ struct OttModule {
         bandMid.init(sr,  0.0014f, 0.028f);
         bandHigh.init(sr, 0.0007f, 0.015f);
         warmupRemaining = 0;
+        silenceCounter  = 0;
     }
 
     void setDepth(float d) {
@@ -140,10 +150,28 @@ struct OttModule {
             bandMid.reset();
             bandHigh.reset();
             warmupRemaining = WARMUP_SAMPLES;
+            silenceCounter  = 0;
         }
     }
 
     void process(float* buf, int numFrames, int channelCount) {
+        // Auto-reset: if signal arrives after SILENCE_RESET_FRAMES of silence,
+        // reset DSP and start warmup to hide the LR4 zero-state filter transient.
+        bool hasSignal = false;
+        for (int i = 0; i < numFrames && !hasSignal; i++) {
+            if (fabsf(buf[i * channelCount]) > 1e-4f) hasSignal = true;
+        }
+        if (!hasSignal) {
+            if (silenceCounter < SILENCE_RESET_FRAMES) silenceCounter += numFrames;
+        } else {
+            if (silenceCounter >= SILENCE_RESET_FRAMES) {
+                xover.init(sampleRate);
+                bandLow.reset(); bandMid.reset(); bandHigh.reset();
+                warmupRemaining = WARMUP_SAMPLES;
+            }
+            silenceCounter = 0;
+        }
+
         for (int i = 0; i < numFrames; i++) {
             float dryL = buf[i * channelCount];
             float dryR = buf[i * channelCount + 1];
@@ -155,10 +183,10 @@ struct OttModule {
             bandMid.process(midL, midR);
             bandHigh.process(highL, highR);
 
-            // Low + Mid + High = original (flat LR4 response). Band makeup gains
-            // add the OTT character loudness (+6 dB per band, applied inside process()).
-            float wetL = lowL + midL + highL;
-            float wetR = lowR + midR + highR;
+            // Low + Mid + High reconstructs the original (flat LR4 response).
+            // OUTPUT_GAIN (+6 dB) applied to wet sum; onset boost is masked by warmup.
+            float wetL = (lowL + midL + highL) * OUTPUT_GAIN;
+            float wetR = (lowR + midR + highR) * OUTPUT_GAIN;
 
             // Linear wet/dry crossfade with warmup fade
             float pos = depth;

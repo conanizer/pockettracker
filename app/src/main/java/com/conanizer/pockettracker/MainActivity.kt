@@ -1055,13 +1055,13 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 if (result.modified) {
                     val cursorCol = trackerController.mixerCursorColumn
                     when {
-                        cursorCol < 8 -> {
-                            val vol = trackerController.project.tracks[cursorCol].volume
-                            audioBackend.setTrackVolume(cursorCol, com.conanizer.pockettracker.core.data.VolumeUtils.hexToFloat(vol))
-                        }
                         result.ottDepthChanged -> {
                             audioBackend.setOttDepth(trackerController.project.ottDepth)
                             trackerController.projectVersion++
+                        }
+                        cursorCol < 8 -> {
+                            val vol = trackerController.project.tracks[cursorCol].volume
+                            audioBackend.setTrackVolume(cursorCol, com.conanizer.pockettracker.core.data.VolumeUtils.hexToFloat(vol))
                         }
                         else -> {
                             val vol = trackerController.project.masterVolume

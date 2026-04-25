@@ -57,7 +57,7 @@ Week 16:     MVP Release
 - Offline WAV render (processAudioBlock unified DSP)
 - Groove quantization (per-track groove assignments)
 - Resonant biquad filters (LP/HP/BP)
-- Master output bus (MasterChain): DaisySP peak-tracking soft limiter replaces inline brickwall clipper
+- Master output bus (MasterChain): DaisySP peak-tracking soft limiter + OTT 3-band bidirectional compressor (vitOTT-matched, wet/dry depth control)
 
 ### Screens & Modules
 - **Oscilloscope** - Real-time waveform visualization (60 FPS)
@@ -181,7 +181,8 @@ Week 16:     MVP Release
 - **Phase 8**: SF preset parameter overrides (ATK/DEC/SUS/REL/filterCut/filterRes) editable on instrument screen via `SFOverrides`, applied by `applySoundfontEnvelopeOverrides` at note trigger
 - **SF bug fixes**: HOP effect now works with SF tables; KIL/REL — ADSR release and TSF-native REL both audible after KIL; table arpeggio continues during release tail (matches sampler behavior)
 - **Phase 4 (SCALAR mod type)**: Deferred to post-MVP
-- **Master chain (2026-04-24)**: `MasterChain` implemented with `LimiterModule` (DaisySP `Limiter` primitive, stereo L+R, peak-tracking soft limiter); `InstrumentChain` per-voice effects replaced inline hard-clipper on final bus
+- **Master chain (2026-04-24)**: `MasterChain` with `LimiterModule` (DaisySP soft limiter, stereo L+R); `InstrumentChain` per-voice effects replaced inline hard-clipper on final bus
+- **OTT multiband compressor (2026-04-25)**: `OttModule` — 3-band bidirectional compressor on the master bus. `LRCrossover` at 120 Hz / 2500 Hz → per-band DaisySP downward + custom `UpwardCompressor`. vitOTT-matched settings: downward −27 dBFS / 8:1, upward −35 dBFS / 4:1 (8 dB neutral zone prevents note-tail boost), band time constants Low 2.8 ms/40 ms · Mid 1.4 ms/28 ms · High 0.7 ms/15 ms, +6 dB post-band output gain. Silence-detection auto-reset (500 ms) starts a 512-sample warmup on every playback START, hiding the LR4 zero-state filter transient. Three bug fixes: pop on START (upward compressor `gainRec` now reset in silence gate), fade-in on START (warmup on every silence→signal transition), OTT depth not updating live (Kotlin `when` block checked `cursorCol < 8` before `ottDepthChanged`)
 
 ### Extension Pack 3 (Complete - 2026-03-13)
 - Fixes & UX updates (table vol range, FX cycling, key repeat, selection increment)

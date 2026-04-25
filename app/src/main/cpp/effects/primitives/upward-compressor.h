@@ -54,8 +54,10 @@ struct UpwardCompressor {
         slopeRec = slopeRec * curSlo + (1.0f - curSlo) * inAbs;
 
         if (slopeRec < 1e-6f) {
-            // During true silence: stop accumulating, let gain_ decay smoothly
-            // toward 1.0. Keeps gain_ stable between notes (no abrupt resets).
+            // True silence: reset gainRec so stale accumulated boost can't spike on
+            // the next note onset (old gainRec × atkSlo2 would fire before slopeRec
+            // exits the silence gate, applying large upward gain to the first sample).
+            gainRec = 0.f;
             gainCounter = 0;
             gain_ = gain_ * GAIN_SMOOTH + 1.0f * (1.0f - GAIN_SMOOTH);
             return;
