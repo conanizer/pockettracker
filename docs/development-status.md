@@ -132,6 +132,14 @@ Week 16:     MVP Release
 
 - **Table processing is duplicated** — sampler and SF voices each have their own table row-advance loop in `audio-engine.cpp`. Both operate on `IAudioVoice` fields and contain identical logic (HOP, TIC, transpose, volume). Should be unified into a single `processTableTick(IAudioVoice&)` called from one loop. `isReleasingOnly` should move up to `IAudioVoice` as part of this. See `docs/plan-module-system.md` for details.
 
+- **Mod-to-mod routing is a fixed ring** — slot M can only modulate slot (M+1)%4. A true 4×4 matrix (each modulator targets any of the other three) would cost just 16 extra bytes per voice. Current ring is intentional for simplicity, but limits expressive patches. Document this clearly in the user manual before release.
+
+- **stageCounter drifts when rMult changes mid-stage** — `tickADSR`/`tickAHD` store elapsed samples in stage-local units. If mod-to-mod routing changes `effectiveRateMult` mid-stage, the already-elapsed counter is in the old unit, causing incorrect stage length. In practice only affects LFO→ENV_RATE patches; normal usage is unaffected. Fix: store normalized 0..1 stage progress instead of absolute samples. Deferred post-MVP.
+
+- **sinf in LFO hot path** — `lfoShape()` calls `sinf()` every audio block for every active sine-wave LFO. On low-end ARM (Miyoo Flip) this is measurable. Fix: 256-entry float sine wavetable (~1 KB) with linear interpolation for the sine case; triangle/ramp/square are already branchless. Only worth doing if profiling shows LFO is a bottleneck.
+
+- **Fine pitch destination (dest=4) naming ambiguity** — PARAM_PITCH dest=4 applies `effectiveAmt * 1.0` semitones, identical range to coarse pitch (dest=3, scale=12). "Fine" conventionally means ±1 semitone (cents). Either cap the scale to 0.01–0.1 or rename the destination to avoid misleading users. Deferred post-MVP.
+
 ---
 
 ## Remaining Work
@@ -171,6 +179,19 @@ Week 16:     MVP Release
 - TIC effect (table tick rate + special modes)
 - HOP effect (phrase/table jump)
 - Pitch effects (PSL, PBN, PVB, PVX)
+
+### Mod Module System Split (Complete - 2026-04-27)
+- Extracted all modulation state machines from `audio-engine.cpp` into focused headers under `mods/`
+- `mods/primitives/lfo-oscillator.h` — `lfoShape()` shared by LFO and vibrato
+- `mods/modules/ahd-module.h` — `tickAHD()` (AHD + DRUM envelopes)
+- `mods/modules/adsr-module.h` — `tickADSR()` (ADSR + TRIG envelopes)
+- `mods/modules/lfo-module.h` — `tickLFO()` (phase advance + shaping)
+- `mods/modules/pitch-slide-module.h` — `tickPitchSlide()` (PSL/PBN)
+- `mods/modules/vibrato-module.h` — `tickVibrato()` (PVB/PVX)
+- `mods/mod-runner.h` — `runModMatrix()` (orchestration; replaces ~300-line switch in `updateVoiceModulation`)
+- `updateVoiceModulation()` and `updateVoicePitchMod()` in `audio-engine.cpp` are now one-liner shells
+- **Bug fix**: pitch slide stop condition (`< 100.0f` sentinel removed; slide always stops when target is reached)
+- Per-sample envelope interpolation (`prevEnvValue` snapshot) confirmed intact after split
 
 ### Audio Module System (Complete - 2026-04-17)
 - **Phase 0**: Split `native-audio.cpp` monolith into focused files (`filter.h`, `mod-system.h`, `sampler-voice.h`, `soundfont-voice.h/.cpp`, `audio-engine.h/.cpp`, `jni-bridge.cpp`)

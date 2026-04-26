@@ -219,33 +219,33 @@ about the split.
 
 Each step is independent and buildable on its own. Test between steps.
 
-- [ ] **Step 1** — Create `mods/primitives/lfo-oscillator.h`
+- [x] **Step 1** — Create `mods/primitives/lfo-oscillator.h`
   - Extract the `switch (mod.oscShape)` block from `updateVoiceModulation`
   - Leave original code in place (the module will call it in step 4)
   - Verify: file compiles standalone with `#include "mod-system.h"`
 
-- [ ] **Step 2** — Create `mods/modules/ahd-module.h`
+- [x] **Step 2** — Create `mods/modules/ahd-module.h`
   - Extract the `type==1 || type==4` branch from `updateVoiceModulation`
   - In `updateVoiceModulation`, replace that branch with `tickAHD(mod, numFrames, rMult)`
   - Build, test AHD modulation still works
 
-- [ ] **Step 3** — Create `mods/modules/adsr-module.h`
+- [x] **Step 3** — Create `mods/modules/adsr-module.h`
   - Extract the `type==2 || type==5` branch
   - Replace in `updateVoiceModulation` with `tickADSR(mod, numFrames, rMult)`
   - Build, test ADSR and TRIG release still work
 
-- [ ] **Step 4** — Create `mods/modules/lfo-module.h`
+- [x] **Step 4** — Create `mods/modules/lfo-module.h`
   - Extract the `type==3` branch, call `lfoShape()` from the primitive
   - Replace in `updateVoiceModulation` with `tickLFO(mod, numFrames, sr, rMult)`
   - Build, test LFO modulation still works
 
-- [ ] **Step 5** — Create `mods/modules/pitch-slide-module.h` and `vibrato-module.h`
+- [x] **Step 5** — Create `mods/modules/pitch-slide-module.h` and `vibrato-module.h`
   - Extract both halves of `updateVoicePitchMod()`
   - Vibrato switches from `sinf(vibratoPhase)` to `lfoShape(vibratoPhase, 1)` (shape 1 = SIN)
   - Replace body of `updateVoicePitchMod()` with `tickPitchSlide` + `tickVibrato`
   - Build, test PSL/PBN and PVB/PVX effects still work
 
-- [ ] **Step 6** — Create `mods/mod-runner.h`
+- [x] **Step 6** — Create `mods/mod-runner.h`
   - Move remaining orchestration from `updateVoiceModulation()` into `runModMatrix()`
   - `updateVoiceModulation()` becomes a one-liner
   - Build, full playback test

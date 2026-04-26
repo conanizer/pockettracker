@@ -13,9 +13,7 @@ inline void tickPitchSlide(Voice& voice, int numFrames) {
         float totalDelta = voice.pitchSlideRate * numFrames;
         if (fabsf(totalDelta) >= fabsf(delta)) {
             voice.pitchOffset = voice.pitchSlideTarget;
-            if (fabsf(voice.pitchSlideTarget) < 100.0f) {
-                voice.pitchSliding = false;
-            }
+            voice.pitchSliding = false;
         } else {
             voice.pitchOffset += totalDelta;
         }
