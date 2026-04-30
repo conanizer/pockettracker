@@ -84,7 +84,7 @@ class MixerModule : TrackerModule {
         // ===================================
         val meterY = y + 50  // Start meters below header
 
-        // On OTT row nothing in track columns is selected — only OTT value in master area
+        // Track columns are only active on the volume row; other rows edit master-only params
         val onVolumeRow = mixerState.mixerMasterRow == 0
 
         for (trackIndex in 0 until 8) {
@@ -206,12 +206,12 @@ class MixerModule : TrackerModule {
             fontScale = FONT_SCALE
         )
 
-        // Draw OTT depth row — "OTT" label is unreachable (always gray), value is yellow when row 1 active
-        val ottSelected = mixerState.mixerMasterRow == 1
-        val ottHex = mixerState.project.ottDepth.toString(16).padStart(2, '0').uppercase()
-        val ottLabelWidth = (3 + 1) * (5 * FONT_SCALE + CHAR_SPACING) // "OTT " = 4 chars × 17px
+        // Draw MASTER FX selector row (mixerMasterRow == 1)
+        val masterFxSelected = mixerState.mixerMasterRow == 1
+        val fxLabelWidth = (3 + 1) * (5 * FONT_SCALE + CHAR_SPACING) // "BUS " = 4 chars × 17px
+        val fxValueText = if (mixerState.project.masterBusFx == 0) "OTT" else "DUST"
         drawBitmapText(
-            text = "OTT",
+            text = "BUS",
             x = masterX - 68,
             y = meterY + METER_HEIGHT + 31,
             scale = scale,
@@ -220,11 +220,36 @@ class MixerModule : TrackerModule {
             fontScale = FONT_SCALE
         )
         drawBitmapText(
-            text = ottHex,
-            x = masterX - 63 + ottLabelWidth,
+            text = fxValueText,
+            x = masterX - 63 + fxLabelWidth,
             y = meterY + METER_HEIGHT + 31,
             scale = scale,
-            color = if (ottSelected) Color.Yellow else Color.White,
+            color = if (masterFxSelected) Color.Yellow else Color.White,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        // Draw effect depth row (mixerMasterRow == 2) — label matches active bus effect
+        val depthSelected = mixerState.mixerMasterRow == 2
+        val depthLabelText = if (mixerState.project.masterBusFx == 0) "OTT" else "DUST"
+        val depthHex = (if (mixerState.project.masterBusFx == 0) mixerState.project.ottDepth
+                        else mixerState.project.dustDepth).toString(16).padStart(2, '0').uppercase()
+        val depthLabelWidth = (3 + 1) * (5 * FONT_SCALE + CHAR_SPACING)
+        drawBitmapText(
+            text = depthLabelText,
+            x = masterX - 68,
+            y = meterY + METER_HEIGHT + 52,
+            scale = scale,
+            color = Color.Gray,
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+        drawBitmapText(
+            text = depthHex,
+            x = masterX - 63 + depthLabelWidth,
+            y = meterY + METER_HEIGHT + 52,
+            scale = scale,
+            color = if (depthSelected) Color.Yellow else Color.White,
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
@@ -335,12 +360,26 @@ class MixerModule : TrackerModule {
      * Get cursor context for mixer screen
      */
     fun getCursorContext(state: MixerState): CursorContext {
-        if (state.mixerMasterRow == 1)
-            return CursorContextFactory.hexByte(currentValue = state.project.ottDepth, min = 0, max = 255)
-        return if (state.cursorColumn < 8)
-            CursorContextFactory.hexByte(currentValue = state.project.tracks[state.cursorColumn].volume, min = 0, max = 255)
-        else
-            CursorContextFactory.hexByte(currentValue = state.project.masterVolume, min = 0, max = 255)
+        return when (state.mixerMasterRow) {
+            1 -> CursorContext(   // MASTER FX: cycle OTT(0) / DUST(1)
+                valueType = CursorValueType.HEX_BYTE,
+                capabilities = CursorCapabilities(
+                    canIncrement = true, canDecrement = true,
+                    canIncrementFast = false, canDecrementFast = false
+                ),
+                currentValue = state.project.masterBusFx,
+                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
+            )
+            2 -> {  // Effect depth (OTT or DUST depending on selection)
+                val currentDepth = if (state.project.masterBusFx == 0) state.project.ottDepth
+                                   else state.project.dustDepth
+                CursorContextFactory.hexByte(currentValue = currentDepth, min = 0, max = 255)
+            }
+            else -> if (state.cursorColumn < 8)
+                CursorContextFactory.hexByte(currentValue = state.project.tracks[state.cursorColumn].volume, min = 0, max = 255)
+            else
+                CursorContextFactory.hexByte(currentValue = state.project.masterVolume, min = 0, max = 255)
+        }
     }
 
     /**
@@ -353,14 +392,28 @@ class MixerModule : TrackerModule {
     ): InputResult {
         when (action) {
             is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                val isOtt = state.mixerMasterRow == 1
-                when {
-                    isOtt -> state.project.ottDepth = action.value.coerceIn(0, 255)
-                    state.cursorColumn < 8 -> state.project.tracks[state.cursorColumn].volume = action.value.coerceIn(0, 255)
-                    else -> state.project.masterVolume = action.value.coerceIn(0, 255)
+                when (state.mixerMasterRow) {
+                    1 -> {  // MASTER FX selector
+                        state.project.masterBusFx = action.value.coerceIn(0, 1)
+                        onProjectModified()
+                        return InputResult(modified = true, masterFxChanged = true)
+                    }
+                    2 -> {  // Effect depth (routes to ottDepth or dustDepth)
+                        val isOtt = state.project.masterBusFx == 0
+                        if (isOtt) state.project.ottDepth = action.value.coerceIn(0, 255)
+                        else       state.project.dustDepth = action.value.coerceIn(0, 255)
+                        onProjectModified()
+                        return InputResult(modified = true, ottDepthChanged = isOtt, dustDepthChanged = !isOtt)
+                    }
+                    else -> {  // Volume row
+                        when {
+                            state.cursorColumn < 8 -> state.project.tracks[state.cursorColumn].volume = action.value.coerceIn(0, 255)
+                            else -> state.project.masterVolume = action.value.coerceIn(0, 255)
+                        }
+                        onProjectModified()
+                        return InputResult(modified = true)
+                    }
                 }
-                onProjectModified()
-                return InputResult(modified = true, ottDepthChanged = isOtt)
             }
             // Mute toggle handled separately via LGPT-style controls (R+B)
             else -> {}
@@ -370,7 +423,9 @@ class MixerModule : TrackerModule {
 
     data class InputResult(
         val modified: Boolean,
-        val ottDepthChanged: Boolean = false
+        val ottDepthChanged: Boolean = false,
+        val dustDepthChanged: Boolean = false,
+        val masterFxChanged: Boolean = false
     )
 }
 

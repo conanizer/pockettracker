@@ -1650,6 +1650,18 @@ void AudioEngine::setOttDepthForRender(int depth) {
     masterChain.ott.resetForRender(d);
 }
 
+void AudioEngine::setMasterFx(int fx) {
+    masterChain.setMasterFx(fx);
+}
+
+void AudioEngine::setDustDepth(int depth) {
+    masterChain.setDustDepth(depth / 255.0f);
+}
+
+void AudioEngine::setDustDepthForRender(int depth) {
+    masterChain.setDustDepthForRender(depth / 255.0f);
+}
+
 // ============================================================
 // PITCH MODULATION METHODS
 // ============================================================

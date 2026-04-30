@@ -73,8 +73,12 @@ class RenderController(
 
             progressCallback?.onProgress(0.3f, "Rendering audio...")
 
-            // Reset OTT for clean offline render: fresh compressor state, no warmup fade.
-            audioBackend.setOttDepthForRender(project.ottDepth)
+            // Reset active bus effect for clean offline render.
+            audioBackend.setMasterFx(project.masterBusFx)
+            if (project.masterBusFx == 0)
+                audioBackend.setOttDepthForRender(project.ottDepth)
+            else
+                audioBackend.setDustDepthForRender(project.dustDepth)
 
             val sampleRate = audioBackend.getSampleRate()
             val audio = audioBackend.renderFrames(totalFrames.toInt(), sampleRate)

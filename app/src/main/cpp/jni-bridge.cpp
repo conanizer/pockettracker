@@ -400,6 +400,21 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setOt
     }
 }
 
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setMasterFx(JNIEnv *env, jobject thiz, jint fx) {
+    if (engine) engine->setMasterFx(fx);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setDustDepth(JNIEnv *env, jobject thiz, jint depth) {
+    if (engine) engine->setDustDepth(depth);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setDustDepthForRender(JNIEnv *env, jobject thiz, jint depth) {
+    if (engine) engine->setDustDepthForRender(depth);
+}
+
 // ===================================
 // TABLE JNI METHODS (Phase 3.5)
 // ===================================

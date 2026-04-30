@@ -466,6 +466,8 @@ data class Project(
     var transpose: Int = 0,
     var masterVolume: Int = 0xFF,  // 00-FF master volume (FF = max)
     var ottDepth: Int = 0,         // 00=bypass, FF=full OTT wet
+    var masterBusFx: Int = 0,     // 0=OTT, 1=DUST
+    var dustDepth: Int = 0,       // 00=bypass, FF=full DUST (only active when masterBusFx==1)
 
     // All phrases (256 slots)
     val phrases: Array<Phrase> = Array(256) { Phrase(it) },

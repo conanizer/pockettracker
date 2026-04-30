@@ -411,6 +411,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
         audioBackend.setMasterVolume(com.conanizer.pockettracker.core.data.VolumeUtils.hexToFloat(trackerController.project.masterVolume))
         audioBackend.setOttDepth(trackerController.project.ottDepth)
+        audioBackend.setMasterFx(trackerController.project.masterBusFx)
+        audioBackend.setDustDepth(trackerController.project.dustDepth)
         Log.d("VolumeSync", "Initial volume sync to audio backend complete")
     }
 
@@ -753,8 +755,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         // Sync master volume
         audioBackend.setMasterVolume(com.conanizer.pockettracker.core.data.VolumeUtils.hexToFloat(project.masterVolume))
 
-        // Sync OTT depth
+        // Sync OTT depth and master bus FX selection
         audioBackend.setOttDepth(project.ottDepth)
+        audioBackend.setMasterFx(project.masterBusFx)
+        audioBackend.setDustDepth(project.dustDepth)
 
         Log.d("VolumeSync", "Synced all track/master volumes to audio backend")
     }
@@ -1055,8 +1059,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 if (result.modified) {
                     val cursorCol = trackerController.mixerCursorColumn
                     when {
+                        result.masterFxChanged -> {
+                            audioBackend.setMasterFx(trackerController.project.masterBusFx)
+                            trackerController.projectVersion++
+                        }
                         result.ottDepthChanged -> {
                             audioBackend.setOttDepth(trackerController.project.ottDepth)
+                            trackerController.projectVersion++
+                        }
+                        result.dustDepthChanged -> {
+                            audioBackend.setDustDepth(trackerController.project.dustDepth)
                             trackerController.projectVersion++
                         }
                         cursorCol < 8 -> {

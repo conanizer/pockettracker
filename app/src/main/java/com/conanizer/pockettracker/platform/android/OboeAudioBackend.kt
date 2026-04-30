@@ -205,6 +205,18 @@ class OboeAudioBackend : IAudioBackend {
         native_setOttDepthForRender(depth)
     }
 
+    override fun setMasterFx(fx: Int) {
+        native_setMasterFx(fx)
+    }
+
+    override fun setDustDepth(depth: Int) {
+        native_setDustDepth(depth)
+    }
+
+    override fun setDustDepthForRender(depth: Int) {
+        native_setDustDepthForRender(depth)
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // TABLE METHODS (Phase 3.5)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -440,6 +452,9 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_setMasterVolume(volume: Float)
     private external fun native_setOttDepth(depth: Int)
     private external fun native_setOttDepthForRender(depth: Int)
+    private external fun native_setMasterFx(fx: Int)
+    private external fun native_setDustDepth(depth: Int)
+    private external fun native_setDustDepthForRender(depth: Int)
 
     // Phase 3.5 table methods
     private external fun native_loadTable(tableId: Int, rowData: ByteArray)

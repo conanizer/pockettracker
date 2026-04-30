@@ -182,10 +182,10 @@ class TrackerController(
         }
 
     // Mixer master sub-row (reachable from any column via DPAD UP/DOWN)
-    // 0 = volume row, 1 = OTT depth row
+    // 0 = volume row, 1 = MASTER FX selector, 2 = effect depth
     var mixerMasterRow = 0
         set(value) {
-            field = value.coerceIn(0, 1)
+            field = value.coerceIn(0, 2)
             stateObserver.onStateChanged()
         }
 
@@ -972,7 +972,7 @@ class TrackerController(
                 // At pair 1, last row — stay at bottom (no wrap)
             }
             ScreenType.MIXER -> {
-                if (mixerMasterRow < 1) mixerMasterRow++
+                if (mixerMasterRow < 2) mixerMasterRow++
             }
             ScreenType.SONG -> {
                 // SONG screen: 256 rows (0-255), clamp at 255, scroll to keep cursor visible

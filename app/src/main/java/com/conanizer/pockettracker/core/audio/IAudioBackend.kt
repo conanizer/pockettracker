@@ -287,6 +287,12 @@ interface IAudioBackend {
     fun setOttDepth(depth: Int)
     // Reset OTT for offline render: clean state, no warmup fade.
     fun setOttDepthForRender(depth: Int)
+    // Select active master bus effect (0=OTT, 1=DUST).
+    fun setMasterFx(fx: Int)
+    // Set DUST amount (0=bypass, 255=full).
+    fun setDustDepth(depth: Int)
+    // Reset DUST for offline render: clears delay/envelope state before export.
+    fun setDustDepthForRender(depth: Int)
 
     // ===================================
     // TABLE METHODS (Phase 3.5)

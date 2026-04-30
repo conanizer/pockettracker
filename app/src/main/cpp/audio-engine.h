@@ -140,6 +140,12 @@ public:
     void setOttDepth(int depth);
     // Reset OTT for offline render: clean state, no warmup fade.
     void setOttDepthForRender(int depth);
+    // Select active master bus effect (0=OTT, 1=DUST).
+    void setMasterFx(int fx);
+    // Set DUST amount (0=bypass, 255=full). No-op when masterFx != 1.
+    void setDustDepth(int depth);
+    // Reset DUST for offline render: clears delay/envelope state before export.
+    void setDustDepthForRender(int depth);
 
 
     // ===================================
