@@ -3,8 +3,8 @@
 ## Document Purpose
 This document defines **HOW** PocketTracker is built technically. It covers current architecture, planned refactoring for portability, and technical decisions.
 
-**Last Updated:** 2026-03-13
-**Version:** 2.0
+**Last Updated:** 2026-05-05
+**Version:** 2.4
 **Audience:** Developers, Contributors, Claude Code AI
 
 ---
@@ -88,6 +88,7 @@ PocketTracker/
 │   └── DeviceAdapter.kt            Android InputDevice API
 │
 ├── Modules/
+│   ├── EditorHelpers.kt            ✅ Shared rendering utilities (toHex2, rowBgColor, clearEffect…)
 │   ├── PhraseEditorModule.kt       ✅ Portable rendering
 │   ├── ChainEditorModule.kt        ✅
 │   ├── SongEditorModule.kt         ✅
@@ -96,6 +97,9 @@ PocketTracker/
 │   ├── GrooveModule.kt             ✅
 │   ├── ModulationModule.kt         ✅
 │   ├── MixerModule.kt              ✅
+│   ├── EffectModule.kt             ✅ Global send effects (reverb/delay/EQ config)
+│   ├── EqModule.kt                 ✅ 3-band parametric EQ editor (overlay screen)
+│   ├── SettingsModule.kt           ✅
 │   └── ProjectModule.kt            ✅
 │
 ├── TrackerData.kt                  ✅ Pure data structures (PORTABLE)
@@ -838,10 +842,16 @@ class MainClass {
 - Private members: `_prefixWithUnderscore` (optional)
 
 **Comments:**
-- Every file has header comment explaining purpose
-- Public APIs have KDoc
-- Complex logic has inline comments
-- Use section separators: `// ═══════════════`
+- Only add a comment when the WHY is non-obvious (a hidden constraint, a surprising invariant, a specific bug workaround). If removing the comment would not confuse a future reader, don't write it.
+- Do not write comments that describe WHAT the code does — well-named identifiers already do that.
+- Section separators (`// ═══════════════`) are acceptable inside long files (e.g. `EditorHelpers.kt`) to group unrelated utilities, but not inside individual module functions.
+
+**Screen Module Conventions (`*Module.kt`):**
+- All hex display formatting uses `.toHex2()` / `.toHex1()` from `EditorHelpers.kt`.
+- Row background color in list editors (Phrase, Chain, Song, Table) uses `rowBgColor()` from `EditorHelpers.kt`.
+- `getCursorContext()` uses `CursorContextFactory.*` factory methods exclusively — no raw `CursorContext(...)` constructor unless no factory fits.
+- `draw()` signature: `override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?)` — cast state with early return: `val s = state as? FooState ?: return`.
+- Each module defines its own `private val FONT_SCALE / CHAR_SPACING / ROW_HEIGHT / TEXT_PADDING = …` (mirrors `EditorHelpers.kt` constants; shadowing is intentional for readability).
 
 ### C++ Code Style
 
@@ -873,6 +883,7 @@ See **REFACTORING_ROADMAP.md** for detailed step-by-step refactoring plan.
 ---
 
 **Version History:**
+- v2.4 (2026-05-05): Module code style unified — `.toHex2()`, `rowBgColor()`, factory-only `getCursorContext()`; EffectModule/EqModule/SettingsModule added to file tree; coding conventions updated to reflect current standards.
 - v2.3 (2026-04-22): DSP module system implemented; effects/ directory (primitives + modules + chains); InstrumentChain (Crush→Drive→Filter) wired to all sampler and SF voices; C++ file tree updated in this document; guide-adding-effects.md written
 - v2.2 (2026-04-17): Audio module system complete (Phases 0–3, 5–8); SF2 full mod parity; per-channel TSF rendering; SF bug fixes (HOP, KIL/REL, table in release); table abstraction debt noted
 - v2.1 (2026-04-07): Added SF2/TSF engine section; OpenSL ES stream priority; async audio init; UAA phase status

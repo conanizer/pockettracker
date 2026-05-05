@@ -85,22 +85,22 @@ class ModulationModule : TrackerModule {
                 }
                 else -> slot.dest.displayName
             }
-            2 -> slot.amount.toString(16).padStart(2, '0').uppercase()
+            2 -> slot.amount.toHex2()
             3 -> when (slot.type) {
                 ModType.LFO -> OSC_SHAPES.getOrElse(slot.oscShape) { "???" }
-                else        -> slot.attack.toString(16).padStart(2, '0').uppercase()
+                else        -> slot.attack.toHex2()
             }
             4 -> when (slot.type) {
                 ModType.LFO                          -> TRIG_MODES.getOrElse(slot.lfoTrigMode) { "???" }
-                ModType.AHD, ModType.DRUM            -> slot.hold.toString(16).padStart(2, '0').uppercase()
-                else                                 -> slot.decay.toString(16).padStart(2, '0').uppercase()
+                ModType.AHD, ModType.DRUM            -> slot.hold.toHex2()
+                else                                 -> slot.decay.toHex2()
             }
             5 -> when (slot.type) {
-                ModType.LFO                          -> slot.lfoFreq.toString(16).padStart(2, '0').uppercase()
-                ModType.AHD, ModType.DRUM            -> slot.decay.toString(16).padStart(2, '0').uppercase()
-                else                                 -> slot.sustain.toString(16).padStart(2, '0').uppercase()
+                ModType.LFO                          -> slot.lfoFreq.toHex2()
+                ModType.AHD, ModType.DRUM            -> slot.decay.toHex2()
+                else                                 -> slot.sustain.toHex2()
             }
-            6 -> slot.release.toString(16).padStart(2, '0').uppercase()
+            6 -> slot.release.toHex2()
             else -> "--"
         }
     }
@@ -121,7 +121,7 @@ class ModulationModule : TrackerModule {
         )
 
         // ─── HEADER ───────────────────────────────────────────────────────────
-        val instIdStr = inst.id.toString(16).padStart(2, '0').uppercase()
+        val instIdStr = inst.id.toHex2()
         drawBitmapText(
             text = "MOD $instIdStr",
             x = x + nameX1, y = y + TEXT_PADDING,

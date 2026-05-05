@@ -1,6 +1,6 @@
 # Development Status
 
-**Last Updated:** 2026-05-04
+**Last Updated:** 2026-05-05
 
 ## Current Phase
 
@@ -69,10 +69,12 @@ Week 16:     MVP Release
 - **Project Screen** - Name, tempo, save/load, CLEAN SEQ/INST, layout mode switcher
 - **File Browser** - Navigation, sorting, preview, WAV/video audio extraction
 - **Effects Screen** - Global send effects config: reverb (SIZE/DAMP/EQ), delay (TIME/FDBK/REV-send/EQ), master bus type selector. WET removed (always 100%); REV row on delay sends delay output into reverb bus.
+- **EQ Editor Screen** - Full-screen 3-band parametric EQ editor (TYPE/FREQ/GAIN/Q per band). Opened from mixer master col, effects screen INP EQ rows, or instrument screen EQ row via SELECT.
 - **Mixer Screen** - 8 tracks + master with true dBFS meters; REV/DEL return volume (rows 1-2 in master col); stereo peak meters for REV/DEL send channels (`sendPeaks[4]`: revL/revR/delL/delR)
 - **Table Screen** - 16-row mini-sequencer per instrument
 - **Groove Screen** - Step-timing patterns for swing/shuffle (256 grooves)
 - **Modulation Screen** - 4-slot envelope/LFO editor per instrument
+- **Settings Screen** - Layout mode, scaling, button sound/volume, vibration, keyboard insert mode, cursor persistence
 
 ### Effects (All Complete)
 - **ARP/ARC** - Arpeggio with UP/DOWN/PINGPONG/RANDOM modes and speed control
@@ -161,6 +163,15 @@ Week 16:     MVP Release
 ---
 
 ## Completed Milestones
+
+### Module Code Style Unification (Complete - 2026-05-05)
+
+Standardised all screen modules to a single consistent style (new modules led, old modules updated):
+
+- **Hex formatting**: all `.toString(16).padStart(2,'0').uppercase()` chains replaced with `.toHex2()` (defined in `EditorHelpers.kt`) across every module — PhraseEditorModule, ChainEditorModule, SongEditorModule, ModulationModule, GrooveModule, TableModule, SettingsModule.
+- **Row background helper**: inline `bgColor when { }` blocks (playing row / selection / cursor / every-4th / default) replaced with `rowBgColor()` from `EditorHelpers.kt` in PhraseEditorModule, ChainEditorModule, SongEditorModule, and TableModule.
+- **Comment discipline**: removed all `// ===== STEP N: =====` section separators and verbose docstrings that described WHAT rather than WHY from ChainEditorModule and SongEditorModule. PhraseEditorModule trimmed of column-label comments, keeping only the beat-accent WHY note.
+- **EditorHelpers consolidation**: `clearChainSlot()` and `clearSongChainRef()` from EditorHelpers now used in handleInput DELETE cases (was duplicated inline).
 
 ### Architecture Refactoring (Complete)
 - IAudioBackend interface + OboeAudioBackend implementation

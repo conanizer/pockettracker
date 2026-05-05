@@ -57,7 +57,7 @@ class GrooveModule : TrackerModule {
 
         // ─── ROW 0: HEADER ───
         val headerY = y + TEXT_PADDING
-        val grooveIdStr = groove.id.toString(16).padStart(2, '0').uppercase()
+        val grooveIdStr = groove.id.toHex2()
         val activeLen = groove.activeLength()
 
         drawBitmapText(
@@ -123,7 +123,7 @@ class GrooveModule : TrackerModule {
             )
 
             // Tick value (-1 = "--", otherwise show hex)
-            val tickText = if (isEndMarker) "--" else tickValue.toString(16).padStart(2, '0').uppercase()
+            val tickText = if (isEndMarker) "--" else tickValue.toHex2()
             val tickColor = when {
                 isCursor && grooveState.cursorColumn == 1 -> Color.Yellow
                 isEndMarker || isPastEnd -> Color(0xFF333333)

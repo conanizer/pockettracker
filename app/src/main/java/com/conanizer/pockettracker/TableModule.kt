@@ -52,7 +52,7 @@ class TableModule : TrackerModule {
         // ROW 0: HEADER "TABLE 00" + "06 TIC"
         var rowY = y + TEXT_PADDING
         drawBitmapText(
-            text = "TABLE ${tableState.table.id.toString(16).padStart(2, '0').uppercase()}",
+            text = "TABLE ${tableState.table.id.toHex2()}",
             x = x + 10,
             y = rowY,
             scale = scale,
@@ -62,7 +62,7 @@ class TableModule : TrackerModule {
         )
 
         // TIC rate on the right
-        val ticText = "${tableState.ticRate.toString(16).padStart(2, '0').uppercase()} TIC"
+        val ticText = "${tableState.ticRate.toHex2()} TIC"
         drawBitmapText(
             text = ticText,
             x = x + width - 120,
@@ -131,18 +131,8 @@ class TableModule : TrackerModule {
         // Check if any cell in this row is selected
         val isRowSelected = state.selectionMode && (1..8).any { col -> state.isCellSelected(index, col) }
 
-        // Row background color logic
-        val bgColor = when {
-            state.playbackRow == index -> Color(0xFF004400)  // Green playing
-            isRowSelected -> Color(0xFF1a3a1a)               // Selection green
-            index == state.cursorRow -> Color(0xFF333333)    // Gray cursor
-            index % 4 == 0 -> Color(0xFF151515)              // Lighter every 4
-            else -> Color(0xFF0a0a0a)                        // Default dark
-        }
-
-        // Draw row background
         drawRect(
-            color = bgColor,
+            color = rowBgColor(index, state.cursorRow, state.playbackRow ?: -1, state.playbackRow != null, isRowSelected),
             topLeft = Offset((x * scale).toFloat(), (dataRowY * scale).toFloat()),
             size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
         )
@@ -162,7 +152,7 @@ class TableModule : TrackerModule {
         )
 
         // COLUMN 1: TRANSPOSE (00-FF hex, like chain transpose)
-        val transposeStr = row.transpose.toString(16).padStart(2, '0').uppercase()
+        val transposeStr = row.transpose.toHex2()
         drawBitmapText(
             text = transposeStr,
             x = transposeX,
@@ -179,7 +169,7 @@ class TableModule : TrackerModule {
         )
 
         // COLUMN 2: VOLUME (00-FF or -- if empty)
-        val volStr = if (row.volume == -1) "--" else row.volume.toString(16).padStart(2, '0').uppercase()
+        val volStr = if (row.volume == -1) "--" else row.volume.toHex2()
         drawBitmapText(
             text = volStr,
             x = volX,
@@ -242,7 +232,7 @@ class TableModule : TrackerModule {
         valueSelected: Boolean = false
     ) {
         val fxName = getEffectTypeName(fxType)
-        val fxValueStr = fxValue.toString(16).padStart(2, '0').uppercase()
+        val fxValueStr = fxValue.toHex2()
 
         // FX Name
         drawBitmapText(

@@ -94,7 +94,7 @@ class SettingsModule : TrackerModule {
         rowY += ROW_HEIGHT; currentRow++
 
         // ── ROW 3: BTN VOL ─────────────────────────────────────────────
-        val btnVolHex = s.buttonSoundVolume.toString(16).padStart(2, '0').uppercase()
+        val btnVolHex = s.buttonSoundVolume.toHex2()
         drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
             "BTN VOL", btnVolHex,
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
@@ -109,7 +109,7 @@ class SettingsModule : TrackerModule {
         rowY += ROW_HEIGHT; currentRow++
 
         // ── ROW 5: VIBRO POW ───────────────────────────────────────────
-        val vibroPowHex = s.vibroPower.toString(16).padStart(2, '0').uppercase()
+        val vibroPowHex = s.vibroPower.toHex2()
         drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
             "VIBRO POW", vibroPowHex,
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,

@@ -7,305 +7,117 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.conanizer.pockettracker.core.data.Chain
 
 /**
- * CHAIN EDITOR MODULE - IMPROVED VERSION
+ * CHAIN EDITOR MODULE
  *
- * A chain is a sequence of 16 phrases with optional transpose
+ * 16 phrase slots with optional transpose per slot.
+ * Transpose encoding: 00=−128 semi, 80=0 (no change), FF=+127 semi.
  *
- * Columns:
- * - STEP (hidden label, just row number in hex)
- * - PH (Phrase reference 00-FF or --)
- * - TSP (Transpose in semitones, 00-FF where 80 = no transpose)
- *
- * Transpose:
- * - 00 = -128 semitones (down)
- * - 80 = 0 semitones (no change)
- * - FF = +127 semitones (up)
- * - Practically useful range: 70-90 (-16 to +16 semitones)
- *
- * Size: 620×392 pixels (same as phrase editor)
- * State type: ChainEditorState
+ * Size: 510×392 px
  */
 class ChainEditorModule : TrackerModule {
-    // ===================================
-    // MODULE DIMENSIONS
-    // ===================================
-    override val width = 510
+    override val width  = 510
     override val height = 392
 
-    // ===================================
-    // FONT & LAYOUT CONSTANTS
-    // ===================================
-    private val FONT_SCALE = 3      // 5×5 bitmap scaled 3× = 15×15 pixels
-    private val CHAR_SPACING = 2    // 2px between characters
-    private val ROW_HEIGHT = 21     // Each row is 21px tall
-    private val TEXT_PADDING = 3    // 3px padding above text
+    private val FONT_SCALE   = 3
+    private val CHAR_SPACING = 2
+    private val ROW_HEIGHT   = 21
+    private val TEXT_PADDING = 3
 
-    /**
-     * Main draw function - renders the chain editor
-     */
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
-        // Cast state or return if wrong type
         val chainState = state as? ChainEditorState ?: return
 
-        // ===================================
-        // STEP 1: Draw background
-        // ===================================
         drawRect(
-            color = Color(0xFF0a0a0a),
+            color   = Color(0xFF0a0a0a),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
-            size = Size((width * scale).toFloat(), (height * scale).toFloat())
+            size    = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
 
-        // ===================================
-        // STEP 2: Calculate column positions
-        // Match phrase editor spacing!
-        // ===================================
-        var colX = x + 10  // 10px left padding (same as phrase)
+        var colX  = x + 10
+        val stepX = colX; colX += 30 + 10
+        val phX   = colX; colX += 30 + 20
+        val tspX  = colX
 
-        val stepX = colX
-        colX += 30 + 10      // Step number: 2 chars (30px) + 10px gap
-
-        val phX = colX
-        colX += 30 + 20      // Phrase: 2 chars (30px) + 20px gap
-
-        val tspX = colX      // Transpose: 2 chars (30px)
-
-        // ===================================
-        // STEP 3: Draw header "CHAIN 00"
-        // ===================================
         var rowY = y + TEXT_PADDING
+        drawBitmapText("CHAIN ${chainState.chain.id.toHex2()}", x + 10, rowY, scale, Color.Cyan, CHAR_SPACING, FONT_SCALE)
 
-        // Convert chain ID to hex string
-        val chainIdHex = chainState.chain.id
-            .toString(16)
-            .padStart(2, '0')
-            .uppercase()
-
-        drawBitmapText(
-            text = "CHAIN $chainIdHex",
-            x = x + 10,
-            y = rowY,
-            scale = scale,
-            color = Color.Cyan,
-            spacing = CHAR_SPACING,
-            fontScale = FONT_SCALE
-        )
-
-        // ===================================
-        // STEP 4: Spacer after header
-        // ===================================
         rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING
+        drawBitmapText("PH",  phX,  rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("TSP", tspX, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
 
-        // ===================================
-        // STEP 5: Draw column headers
-        // No "STEP" label - just show PH and TSP
-        // ===================================
-        drawBitmapText(
-            text = "PH",  // Phrase column header
-            x = phX,
-            y = rowY,
-            scale = scale,
-            color = Color.Gray,
-            spacing = CHAR_SPACING,
-            fontScale = FONT_SCALE
-        )
-
-        drawBitmapText(
-            text = "TSP",  // Transpose column header
-            x = tspX,
-            y = rowY,
-            scale = scale,
-            color = Color.Gray,
-            spacing = CHAR_SPACING,
-            fontScale = FONT_SCALE
-        )
-
-        // ===================================
-        // STEP 6: Draw 16 data rows
-        // ===================================
         for (index in 0..15) {
-            // Get phrase reference at this slot
-            val phraseRef = chainState.chain.phraseRefs[index]
-
-            // Get transpose value for this slot (00-FF, default 00)
-            val transposeValue = chainState.chain.transposeValues[index]
-
-            drawChainRow(
-                x = x,
-                y = y,
-                scale = scale,
-                index = index,
-                phraseRef = phraseRef,
-                transposeValue = transposeValue,
-                state = chainState,
-                stepX = stepX,
-                phX = phX,
-                tspX = tspX
-            )
+            drawChainRow(x, y, scale, index, chainState, stepX, phX, tspX)
         }
     }
 
-    /**
-     * Draw a single row in the chain
-     *
-     * Shows: [step number] [phrase ref] [transpose]
-     */
     private fun DrawScope.drawChainRow(
-        x: Int,
-        y: Int,
-        scale: Int,
+        x: Int, y: Int, scale: Int,
         index: Int,
-        phraseRef: Int,
-        transposeValue: Int,
         state: ChainEditorState,
-        stepX: Int,
-        phX: Int,
-        tspX: Int
+        stepX: Int, phX: Int, tspX: Int
     ) {
-        // ===================================
-        // STEP 1: Calculate Y position
-        // ===================================
         val dataRowY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (index * ROW_HEIGHT)
-
-        // Check if any cell in this row is selected
+        val phraseRef = state.chain.phraseRefs[index]
+        val isEmpty   = phraseRef == -1
         val isRowSelected = state.selectionMode && (1..2).any { col -> state.isCellSelected(index, col) }
 
-        // ===================================
-        // STEP 2: Row background color
-        // ===================================
-        val bgColor = when {
-            // Green background when playing this row
-            state.isPlaying && index == state.playbackRow -> Color(0xFF004400)
-
-            // Selection green
-            isRowSelected -> Color(0xFF1a3a1a)
-
-            // Cursor on this row
-            index == state.cursorRow -> Color(0xFF333333)
-
-            // Every 4th row
-            index % 4 == 0 -> Color(0xFF151515)
-
-            // Default
-            else -> Color(0xFF0a0a0a)
-        }
-
-        // Draw row background
         drawRect(
-            color = bgColor,
+            color   = rowBgColor(index, state.cursorRow, state.playbackRow, state.isPlaying, isRowSelected),
             topLeft = Offset((x * scale).toFloat(), (dataRowY * scale).toFloat()),
-            size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
+            size    = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
         )
 
         val textY = dataRowY + TEXT_PADDING
 
-        // ===================================
-        // COLUMN 0: STEP NUMBER (no header label)
-        // ===================================
         drawBitmapText(
-            text = index.toString(16).padStart(1, '0').uppercase(),  // 00-0F
-            x = stepX,
-            y = textY,
-            scale = scale,
+            text = index.toString(16).uppercase(),
+            x = stepX, y = textY, scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 0 -> Color.Yellow
-                index % 4 == 0 -> Color(0xFFAAAAAA)  // Bright accent on quarter rows
+                index % 4 == 0 -> Color(0xFFAAAAAA)
                 else -> Color(0xFF666666)
             },
-            spacing = CHAR_SPACING,
-            fontScale = FONT_SCALE
+            spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
 
-        // ===================================
-        // COLUMN 1: PHRASE REFERENCE (PH)
-        // ===================================
-        val isEmpty = phraseRef == -1
-
-        val phraseText = if (isEmpty) {
-            "--"
-        } else {
-            phraseRef.toString(16).padStart(2, '0').uppercase()
-        }
-
-        val phraseColor = when {
-            index == state.cursorRow && state.cursorColumn == 1 -> Color.Yellow
-            state.selectionMode && state.isCellSelected(index, 1) -> Color(0xFF00DD00)
-            isEmpty -> Color(0xFF444444)
-            else -> Color.White
-        }
-
         drawBitmapText(
-            text = phraseText,
-            x = phX,
-            y = textY,
-            scale = scale,
-            color = phraseColor,
-            spacing = CHAR_SPACING,
-            fontScale = FONT_SCALE
+            text = if (isEmpty) "--" else phraseRef.toHex2(),
+            x = phX, y = textY, scale = scale,
+            color = when {
+                index == state.cursorRow && state.cursorColumn == 1 -> Color.Yellow
+                state.selectionMode && state.isCellSelected(index, 1) -> Color(0xFF00DD00)
+                isEmpty -> Color(0xFF444444)
+                else -> Color.White
+            },
+            spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
 
-        // ===================================
-        // COLUMN 2: TRANSPOSE (TSP)
-        // ===================================
-        // Only show transpose if phrase is not empty
-        val transposeText = if (isEmpty) {
-            "--"
-        } else {
-            transposeValue.toString(16).padStart(2, '0').uppercase()
-        }
-
-        val transposeColor = when {
-            index == state.cursorRow && state.cursorColumn == 2 -> Color.Yellow
-            state.selectionMode && state.isCellSelected(index, 2) -> Color(0xFF00DD00)
-            isEmpty -> Color(0xFF444444)
-            transposeValue == 0x80 -> Color(0xFF888888)  // Dimmed when no transpose
-            else -> Color(0xFFaaaaaa)  // Normal gray when transposed
-        }
-
+        val transposeValue = state.chain.transposeValues[index]
         drawBitmapText(
-            text = transposeText,
-            x = tspX,
-            y = textY,
-            scale = scale,
-            color = transposeColor,
-            spacing = CHAR_SPACING,
-            fontScale = FONT_SCALE
+            text = if (isEmpty) "--" else transposeValue.toHex2(),
+            x = tspX, y = textY, scale = scale,
+            color = when {
+                index == state.cursorRow && state.cursorColumn == 2 -> Color.Yellow
+                state.selectionMode && state.isCellSelected(index, 2) -> Color(0xFF00DD00)
+                isEmpty -> Color(0xFF444444)
+                transposeValue == 0x80 -> Color(0xFF888888)  // 0x80 = no transpose, dim it
+                else -> Color(0xFFaaaaaa)
+            },
+            spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
     }
 
-    /**
-     * Get cursor context for current cursor position
-     *
-     * This tells the generic input system what kind of value we're on
-     * and what actions are available.
-     */
     fun getCursorContext(state: ChainEditorState): CursorContext {
         return when (state.cursorColumn) {
-            // Column 0: Step number (read-only, but can insert phrase)
             0 -> CursorContextFactory.readOnly()
-
-            // Column 1: Phrase reference (00-FE, FF = empty)
-            1 -> {
-                val phraseRef = state.chain.phraseRefs[state.cursorRow]
-                CursorContextFactory.phraseRef(phraseRef, canCreate = true)
-            }
-
-            // Column 2: Transpose (00-FF, 80 = no transpose)
-            2 -> {
-                val phraseRef = state.chain.phraseRefs[state.cursorRow]
-                val isEmpty = phraseRef == -1
-                val transposeValue = state.chain.transposeValues[state.cursorRow]
-                CursorContextFactory.transpose(transposeValue, isEmpty)
-            }
-
-            // Invalid column
+            1 -> CursorContextFactory.phraseRef(state.chain.phraseRefs[state.cursorRow], canCreate = true)
+            2 -> CursorContextFactory.transpose(
+                state.chain.transposeValues[state.cursorRow],
+                isEmpty = state.chain.phraseRefs[state.cursorRow] == -1
+            )
             else -> CursorContextFactory.none()
         }
     }
 
-    /**
-     * Handle input action for chain editor.
-     */
     fun handleInput(
         state: ChainEditorState,
         action: com.conanizer.pockettracker.core.logic.InputAction
@@ -317,37 +129,22 @@ class ChainEditorModule : TrackerModule {
         when (action) {
             is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
                 when (state.cursorColumn) {
-                    1 -> {
-                        // Phrase reference column
-                        chain.phraseRefs[state.cursorRow] = action.value
-                        lastEditedPhrase = action.value
-                    }
-                    2 -> {
-                        // Transpose column
-                        chain.transposeValues[state.cursorRow] = action.value
-                        lastEditedTranspose = action.value
-                    }
+                    1 -> { chain.phraseRefs[state.cursorRow] = action.value; lastEditedPhrase = action.value }
+                    2 -> { chain.transposeValues[state.cursorRow] = action.value; lastEditedTranspose = action.value }
                 }
             }
             is com.conanizer.pockettracker.core.logic.InputAction.DELETE -> {
-                when (state.cursorColumn) {
-                    1 -> {
-                        // Clear phrase reference
-                        chain.phraseRefs[state.cursorRow] = -1  // Empty
-                        chain.transposeValues[state.cursorRow] = 0x00  // Reset transpose to default
-                    }
-                }
+                if (state.cursorColumn == 1) clearChainSlot(chain, state.cursorRow)
             }
             is com.conanizer.pockettracker.core.logic.InputAction.INSERT_DEFAULT -> {
                 if (state.cursorColumn == 1) {
-                    // Insert phrase 0 by default
                     chain.phraseRefs[state.cursorRow] = 0
-                    chain.transposeValues[state.cursorRow] = 0x00  // Default transpose
+                    chain.transposeValues[state.cursorRow] = 0x00
                     lastEditedPhrase = 0
                     lastEditedTranspose = 0
                 }
             }
-            else -> { /* NONE or unhandled - do nothing */ }
+            else -> {}
         }
 
         return InputResult(
@@ -364,17 +161,6 @@ class ChainEditorModule : TrackerModule {
     )
 }
 
-/**
- * STATE DATA FOR CHAIN EDITOR
- *
- * @param chain The chain to display
- * @param cursorRow Which row (0-15)
- * @param cursorColumn Which column (0=step, 1=phrase, 2=transpose)
- * @param playbackRow Which chain row is currently playing (0-15)
- * @param isPlaying Whether playback is active
- * @param selectionMode Whether selection mode is active
- * @param isCellSelected Function to check if a cell is selected
- */
 data class ChainEditorState(
     val chain: Chain,
     val cursorRow: Int,
