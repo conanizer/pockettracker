@@ -247,6 +247,7 @@ class RenderController(
                 // WAV params from a previous render or project load don't bleed into SF output.
                 audioEngine.applySoundfontFilterOverrides(instrument)
                 audioEngine.pushInstrumentModulation(instrument, project.tempo)
+                audioEngine.pushInstrumentEqAndSends(instrument, project)
                 continue
             }
 
@@ -269,6 +270,7 @@ class RenderController(
             )
 
             audioEngine.pushInstrumentModulation(instrument, project.tempo)
+            audioEngine.pushInstrumentEqAndSends(instrument, project)
         }
     }
 

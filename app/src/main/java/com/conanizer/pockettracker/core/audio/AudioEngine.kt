@@ -350,9 +350,10 @@ class AudioEngine(
             forceReloadTable(project.tables[tableId])
         }
 
-        // Push current modulation params so preview reflects latest UI edits
+        // Push current modulation params, EQ, and sends so preview reflects latest UI edits
         val tempo = project?.tempo ?: 120
         pushInstrumentModulation(instrument, tempo)
+        if (project != null) pushInstrumentEqAndSends(instrument, project)
 
         backend.scheduleNoteWithTable(
             frame = targetFrame,
@@ -546,8 +547,9 @@ class AudioEngine(
             val pslDurationFrames = if (pslDuration > 0f) pslDuration * framesPerTic else 0f
             val pbnRatePerFrame   = if (pbnRate  != 0f)  pbnRate  / framesPerStep  else 0f
 
-            // Push mod slots to C++ so SF voice picks them up at trigger (Bug 1 fix)
+            // Push mod slots, EQ, and send levels to C++ so SF voice picks them up at trigger.
             pushInstrumentModulation(instrument, tempo)
+            pushInstrumentEqAndSends(instrument, project)
             // Apply envelope overrides every trigger so TSF preset has correct ATK/DEC/SUS/REL
             // before the note plays. Without this, KIL → noteOff uses the SF2 file's native
             // (often instant) release instead of the user-configured REL value.
@@ -604,10 +606,11 @@ class AudioEngine(
         val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
         val frequency = note.toFrequency()
 
-        // Push modulation params to C++ engine (Phase 4 — AHD)
-        // Must be done before scheduleNoteWithTable so the engine has correct params at trigger time
+        // Push modulation params, EQ, and send levels to C++ engine.
+        // Must be done before scheduleNoteWithTable so the engine has correct params at trigger time.
         val tempo = project.tempo
         pushInstrumentModulation(instrument, tempo)
+        pushInstrumentEqAndSends(instrument, project)
 
         // Convert tick-based pitch effect params to frame-based so C++ needs no tempo knowledge.
         // framesPerTic = sampleRate / (tempo/60 * 4 steps/beat * 12 tics/step)
@@ -1145,6 +1148,16 @@ class AudioEngine(
         if (!anyActive) {
             backend.clearInstrumentModulation(sampleId)
         }
+    }
+
+    /**
+     * Push EQ slot and send levels for an instrument to the C++ engine.
+     * Call before scheduleNote so the note trigger picks up current values.
+     */
+    fun pushInstrumentEqAndSends(instrument: Instrument, project: com.conanizer.pockettracker.core.data.Project) {
+        val sampleId = instrument.sampleId
+        backend.setInstrumentEqSlot(sampleId, instrument.eqSlot)
+        backend.setInstrumentSendLevels(sampleId, instrument.reverbSend, instrument.delaySend)
     }
 
     /**

@@ -303,6 +303,37 @@ data class Groove(
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// EQ SYSTEM
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Serializable
+data class EqBand(
+    var type: Int = 0,    // 0=off 1=loShelf 2=loPass 3=bandPass 4=bell 5=hiShelf 6=hiPass
+    var freq: Int = 0x80, // 00-FF → log 20Hz–20kHz
+    var gain: Int = 0x80, // 00-FF → −12dB to +12dB (80 = 0dB)
+    var q: Int = 0x80     // 00-FF → log 0.1–10.0
+)
+
+@Serializable
+data class EqPreset(
+    val id: Int,
+    val bands: Array<EqBand> = Array(3) { EqBand() }
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+        other as EqPreset
+        return id == other.id && bands.contentEquals(other.bands)
+    }
+
+    override fun hashCode(): Int {
+        var result = id
+        result = 31 * result + bands.contentHashCode()
+        return result
+    }
+}
+
 // Track in song = sequence of chain references
 @Serializable
 data class Track(
@@ -378,7 +409,14 @@ data class Instrument(
     var sfPreset: Int = 0,             // Program/preset number (0-127)
 
     // SF2 preset parameter overrides (only used when instrumentType == SOUNDFONT)
-    var sfOverrides: SFOverrides = SFOverrides()
+    var sfOverrides: SFOverrides = SFOverrides(),
+
+    // Send levels (00-FF each; 00 = silent, FF = full send)
+    var reverbSend: Int = 0x00,
+    var delaySend: Int = 0x00,
+
+    // Per-instrument EQ slot (-1 = off, 00-7F = EQ preset index)
+    var eqSlot: Int = -1
 )
 
 /**
@@ -468,6 +506,26 @@ data class Project(
     var ottDepth: Int = 0,         // 00=bypass, FF=full OTT wet
     var masterBusFx: Int = 0,     // 0=OTT, 1=DUST
     var dustDepth: Int = 0,       // 00=bypass, FF=full DUST (only active when masterBusFx==1)
+
+    // EQ preset bank (128 shared slots, referenced by instruments/sends/master)
+    val eqPresets: Array<EqPreset> = Array(128) { EqPreset(it) },
+
+    // Reverb send channel parameters
+    var reverbFeedback: Int = 0x60,  // 00-FF decay time (maps to 0.0–0.98 feedback)
+    var reverbDamp: Int = 0x80,      // 00-FF damping LP cutoff (maps to ~1kHz–20kHz)
+    var reverbWet: Int = 0x80,       // 00-FF dry/wet mix
+    var reverbInputEq: Int = -1,     // -1=off, 00-7F = EQ preset slot applied before reverb
+
+    // Delay send channel parameters
+    var delayTime: Int = 0x40,       // 00-FF free mode (1ms–2000ms) or 00-0B sync division index
+    var delaySync: Boolean = false,  // false=free ms, true=BPM-synced subdivision
+    var delayFeedback: Int = 0x60,   // 00-FF
+    var delayWet: Int = 0x80,          // 00-FF return gain (controlled from mixer)
+    var delayReverbSend: Int = 0x00,   // 00-FF how much delay output feeds into reverb bus
+    var delayInputEq: Int = -1,        // -1=off, 00-7F = EQ preset slot applied before delay
+
+    // Master chain EQ
+    var masterEqSlot: Int = -1,      // -1=off, 00-7F = EQ preset slot on master bus
 
     // All phrases (256 slots)
     val phrases: Array<Phrase> = Array(256) { Phrase(it) },

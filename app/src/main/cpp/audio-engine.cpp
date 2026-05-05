@@ -26,6 +26,8 @@ AudioEngine::AudioEngine() {
     }
     waveformIndex = 0;
     waveformDownsampleCounter = 0;
+    reverbSend.reset(44100.0f);
+    delaySend.reset(44100.0f);
     masterChain.reset();
 }
 
@@ -157,6 +159,93 @@ void AudioEngine::clearAllSamples() {
     LOGD("All samples cleared");
 }
 
+void AudioEngine::setEqBand(int slot, int band, int type, int freqHex, int gainHex, int qHex) {
+    if (slot < 0 || slot >= 128 || band < 0 || band >= 3) return;
+    auto& b = eqPresets[slot].bands[band];
+    b.type   = type;
+    b.freqHz = 20.0f * powf(1000.0f, freqHex / 255.0f);
+    b.gainDb = (gainHex / 255.0f) * 24.0f - 12.0f;
+    b.q      = 0.1f  * powf(100.0f,  qHex   / 255.0f);
+}
+
+void AudioEngine::setInstrumentEqSlot(int instrId, int slot) {
+    if (instrId < 0 || instrId >= 256) return;
+    if (slot < 0 || slot >= 128) {
+        instrumentParams[instrId].eqActive = false;
+        return;
+    }
+    const auto& preset = eqPresets[slot];
+    bool any = false;
+    for (int i = 0; i < 3; i++) {
+        instrumentParams[instrId].eqBands[i] = preset.bands[i];
+        if (preset.bands[i].type != 0) any = true;
+    }
+    instrumentParams[instrId].eqActive = any;
+}
+
+void AudioEngine::setInstrumentSendLevels(int instrId, int reverbSend, int delaySend) {
+    if (instrId < 0 || instrId >= 256) return;
+    instrumentParams[instrId].reverbSend = reverbSend / 255.0f;
+    instrumentParams[instrId].delaySend  = delaySend  / 255.0f;
+}
+
+void AudioEngine::setReverbParams(int feedbackHex, int dampHex, int wetHex) {
+    reverbSend.setParams(feedbackHex, dampHex);
+    reverbReturnGain = wetHex / 255.0f;
+}
+
+void AudioEngine::setDelayParams(int timeOrSubdiv, int feedbackHex, bool syncMode, float bpm, int wetHex) {
+    if (syncMode) {
+        delaySend.setParamsSync(timeOrSubdiv, feedbackHex, bpm);
+    } else {
+        delaySend.setParamsFree(timeOrSubdiv, feedbackHex);
+    }
+    delayReturnGain = wetHex / 255.0f;
+}
+
+void AudioEngine::setDelayReverbSend(int sendHex) {
+    delayToReverbSend = sendHex / 255.0f;
+}
+
+void AudioEngine::setReverbInputEq(int slot) {
+    if (slot < 0 || slot >= 128) {
+        reverbSend.inputEq.active = false;
+        return;
+    }
+    const auto& preset = eqPresets[slot];
+    reverbSend.inputEq.active = true;
+    for (int b = 0; b < 3; b++)
+        reverbSend.inputEq.bands[b].setParams(
+            preset.bands[b].type, preset.bands[b].freqHz,
+            preset.bands[b].gainDb, preset.bands[b].q);
+}
+
+void AudioEngine::setDelayInputEq(int slot) {
+    if (slot < 0 || slot >= 128) {
+        delaySend.inputEq.active = false;
+        return;
+    }
+    const auto& preset = eqPresets[slot];
+    delaySend.inputEq.active = true;
+    for (int b = 0; b < 3; b++)
+        delaySend.inputEq.bands[b].setParams(
+            preset.bands[b].type, preset.bands[b].freqHz,
+            preset.bands[b].gainDb, preset.bands[b].q);
+}
+
+void AudioEngine::setMasterEqSlot(int slot) {
+    if (slot < 0 || slot >= 128) {
+        masterChain.masterEq.active = false;
+        return;
+    }
+    const auto& preset = eqPresets[slot];
+    masterChain.masterEq.active = true;
+    for (int b = 0; b < 3; b++)
+        masterChain.masterEq.bands[b].setParams(
+            preset.bands[b].type, preset.bands[b].freqHz,
+            preset.bands[b].gainDb, preset.bands[b].q);
+}
+
 void AudioEngine::setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt,
                                       int drv, int crsh, int dwn, int fType, int fCut, int fRes) {
     if (instrumentId < 0 || instrumentId >= 256) return;
@@ -275,8 +364,14 @@ void AudioEngine::resumeStream() {
 // ============================================================
 
 void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCount, float sampleRate) {
-    // Zero per-track peak accumulators for this block
-    for (int t = 0; t < 8; t++) framePeaksPerTrack[t] = 0.0f;
+    // Zero per-track and per-send peak accumulators for this block
+    for (int t = 0; t < 8; t++) { framePeaksPerTrackL[t] = 0.0f; framePeaksPerTrackR[t] = 0.0f; }
+    frameSendPeakRevL = frameSendPeakRevR = frameSendPeakDelL = frameSendPeakDelR = 0.0f;
+
+    // Send-bus accumulation buffers (stereo, panned contributions from all voices)
+    static constexpr int MAX_BLOCK = 1024;
+    float revSendBufL[MAX_BLOCK] = {}, revSendBufR[MAX_BLOCK] = {};
+    float dlySendBufL[MAX_BLOCK] = {}, dlySendBufR[MAX_BLOCK] = {};
 
     // PHASE 1: Process note queue at sample-accurate timing
     for (int32_t frame = 0; frame < numFrames; frame++) {
@@ -391,12 +486,21 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         sv.instrParams = InstrumentParams{};
                         for (int m = 0; m < 4; m++) sv.voiceMods[m] = VoiceModSlot{};
                     }
-                    sv.chain.reset();
+                    sv.chain.reset(sampleRate);
                     sv.chain.filter.setParams(sv.instrParams.filterType, sv.instrParams.filterCut,
                                               sv.instrParams.filterRes, sv.instrParams.filterDrive,
                                               (int)sampleRate);
                     sv.chain.drive.setDrive(sv.instrParams.drive);
                     sv.chain.crush.setParams(sv.instrParams.crush, sv.instrParams.downsample);
+                    if (sv.instrParams.eqActive) {
+                        sv.chain.eq.active = true;
+                        for (int i = 0; i < 3; i++) {
+                            sv.chain.eq.bands[i].setParams(sv.instrParams.eqBands[i].type,
+                                                           sv.instrParams.eqBands[i].freqHz,
+                                                           sv.instrParams.eqBands[i].gainDb,
+                                                           sv.instrParams.eqBands[i].q);
+                        }
+                    }
 
                     // Initialize modulation state (Phase 5).
                     sv.params.setBase(PARAM_VOL,   note.volume);
@@ -1045,8 +1149,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     output[i * channelCount] += sampleL;
                     output[i * channelCount + 1] += sampleR;
                     if (voice.trackId >= 0 && voice.trackId < 8) {
-                        float peakLevel = fmaxf(fabsf(sampleL), fabsf(sampleR));
-                        framePeaksPerTrack[voice.trackId] = fmaxf(framePeaksPerTrack[voice.trackId], peakLevel);
+                        framePeaksPerTrackL[voice.trackId] = fmaxf(framePeaksPerTrackL[voice.trackId], fabsf(sampleL));
+                        framePeaksPerTrackR[voice.trackId] = fmaxf(framePeaksPerTrackR[voice.trackId], fabsf(sampleR));
                     }
                 }
                 voice.isActive = false;
@@ -1102,6 +1206,16 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                            + (voice.modDestValues[PARAM_VOL] - voice.prevModDestValues[PARAM_VOL]) * t;
             float sample = processedSample * finalVol * volRoute;
 
+            // SEND TAP: panned contribution to stereo reverb/delay buses
+            if (voice.reverbSend > 0.0f) {
+                revSendBufL[i] += sample * voice.panLeft  * voice.reverbSend;
+                revSendBufR[i] += sample * voice.panRight * voice.reverbSend;
+            }
+            if (voice.delaySend > 0.0f) {
+                dlySendBufL[i] += sample * voice.panLeft  * voice.delaySend;
+                dlySendBufR[i] += sample * voice.panRight * voice.delaySend;
+            }
+
             // STEP 7: Apply real-time track and master volume
             float trackVol, masterVol;
             {
@@ -1131,8 +1245,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
             // Track peak for metering
             if (!voice.isFadingOut && voice.trackId >= 0 && voice.trackId < 8) {
-                float peakLevel = fmaxf(fabsf(sampleL), fabsf(sampleR));
-                framePeaksPerTrack[voice.trackId] = fmaxf(framePeaksPerTrack[voice.trackId], peakLevel);
+                framePeaksPerTrackL[voice.trackId] = fmaxf(framePeaksPerTrackL[voice.trackId], fabsf(sampleL));
+                framePeaksPerTrackR[voice.trackId] = fmaxf(framePeaksPerTrackR[voice.trackId], fabsf(sampleR));
             }
 
             if (!voice.isActive) break;
@@ -1281,12 +1395,28 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 sfBuf[i * 2 + 1] = R;
             }
 
-            float trackPeak = 0.0f;
-            for (int i = 0; i < numFrames * 2; i++) {
-                trackPeak = fmaxf(trackPeak, fabsf(sfBuf[i]));
-                output[i] += sfBuf[i] * masterVol;
+            // SEND TAP: stereo post-chain SF buffer into reverb/delay buses
+            if (sv.instrParams.reverbSend > 0.0f || sv.instrParams.delaySend > 0.0f) {
+                for (int i = 0; i < numFrames; i++) {
+                    revSendBufL[i] += sfBuf[i * 2]     * sv.instrParams.reverbSend;
+                    revSendBufR[i] += sfBuf[i * 2 + 1] * sv.instrParams.reverbSend;
+                    dlySendBufL[i] += sfBuf[i * 2]     * sv.instrParams.delaySend;
+                    dlySendBufR[i] += sfBuf[i * 2 + 1] * sv.instrParams.delaySend;
+                }
             }
-            framePeaksPerTrack[t] = fmaxf(framePeaksPerTrack[t], trackPeak);
+
+            float trackPeakL = 0.0f, trackPeakR = 0.0f;
+            for (int i = 0; i < numFrames; i++) {
+                float sL = sfBuf[i * 2];
+                float sR = sfBuf[i * 2 + 1];
+                trackPeakL = fmaxf(trackPeakL, fabsf(sL));
+                trackPeakR = fmaxf(trackPeakR, fabsf(sR));
+                output[i * 2]     += sL * masterVol;
+                output[i * 2 + 1] += sR * masterVol;
+            }
+            float trackPeak = fmaxf(trackPeakL, trackPeakR);
+            framePeaksPerTrackL[t] = fmaxf(framePeaksPerTrackL[t], trackPeakL);
+            framePeaksPerTrackR[t] = fmaxf(framePeaksPerTrackR[t], trackPeakR);
 
             // Release tail: when noteOff() was called, keep rendering until TSF goes silent.
             // Suppressed while an ADSR/TRIG VOL release is active (stage 4) — TSF is still
@@ -1305,7 +1435,33 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
     }
 
-    // Master chain: peak-tracking soft limiter (DaisySP) + future EQ/compressor slots
+    // SEND BUSES: delay first so its output can feed into reverb, then reverb
+    {
+        float revWetL[MAX_BLOCK], revWetR[MAX_BLOCK];
+        float dlyWetL[MAX_BLOCK], dlyWetR[MAX_BLOCK];
+        delaySend.process(dlySendBufL, dlySendBufR, dlyWetL, dlyWetR, numFrames);
+        if (delayToReverbSend > 0.0001f) {
+            for (int i = 0; i < numFrames; i++) {
+                revSendBufL[i] += dlyWetL[i] * delayToReverbSend;
+                revSendBufR[i] += dlyWetR[i] * delayToReverbSend;
+            }
+        }
+        reverbSend.process(revSendBufL, revSendBufR, revWetL, revWetR, numFrames);
+        for (int i = 0; i < numFrames; i++) {
+            float rv  = revWetL[i] * reverbReturnGain;
+            float rvR = revWetR[i] * reverbReturnGain;
+            float dl  = dlyWetL[i] * delayReturnGain;
+            float dlR = dlyWetR[i] * delayReturnGain;
+            output[i * channelCount]     += rv + dl;
+            output[i * channelCount + 1] += rvR + dlR;
+            frameSendPeakRevL = fmaxf(frameSendPeakRevL, fabsf(rv));
+            frameSendPeakRevR = fmaxf(frameSendPeakRevR, fabsf(rvR));
+            frameSendPeakDelL = fmaxf(frameSendPeakDelL, fabsf(dl));
+            frameSendPeakDelR = fmaxf(frameSendPeakDelR, fabsf(dlR));
+        }
+    }
+
+    // Master chain: master EQ → bus FX (OTT or DUST) → limiter
     masterChain.process(output, numFrames, channelCount);
 
     globalFrameCounter += numFrames;
@@ -1370,13 +1526,15 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
         std::lock_guard<std::mutex> lock(peakMutex);
 
         for (int t = 0; t < 8; t++) {
-            trackPeaks[t] *= PEAK_DECAY;
+            trackPeaksL[t] *= PEAK_DECAY;
+            trackPeaksR[t] *= PEAK_DECAY;
         }
         masterPeakL *= PEAK_DECAY;
         masterPeakR *= PEAK_DECAY;
 
         for (int t = 0; t < 8; t++) {
-            trackPeaks[t] = fmaxf(trackPeaks[t], framePeaksPerTrack[t]);
+            trackPeaksL[t] = fmaxf(trackPeaksL[t], framePeaksPerTrackL[t]);
+            trackPeaksR[t] = fmaxf(trackPeaksR[t], framePeaksPerTrackR[t]);
         }
 
         float maxL = 0.0f, maxR = 0.0f;
@@ -1388,6 +1546,13 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
         }
         masterPeakL = fmaxf(masterPeakL, maxL);
         masterPeakR = fmaxf(masterPeakR, maxR);
+
+        sendPeakRevL *= PEAK_DECAY; sendPeakRevR *= PEAK_DECAY;
+        sendPeakDelL *= PEAK_DECAY; sendPeakDelR *= PEAK_DECAY;
+        sendPeakRevL = fmaxf(sendPeakRevL, frameSendPeakRevL);
+        sendPeakRevR = fmaxf(sendPeakRevR, frameSendPeakRevR);
+        sendPeakDelL = fmaxf(sendPeakDelL, frameSendPeakDelL);
+        sendPeakDelR = fmaxf(sendPeakDelR, frameSendPeakDelR);
     }
 
     return oboe::DataCallbackResult::Continue;
@@ -1583,7 +1748,8 @@ void AudioEngine::getWaveform(float* outBuffer, int bufferSize) {
 void AudioEngine::getTrackPeaks(float* outBuffer) {
     std::lock_guard<std::mutex> lock(peakMutex);
     for (int i = 0; i < 8; i++) {
-        outBuffer[i] = trackPeaks[i];
+        outBuffer[i * 2]     = trackPeaksL[i];
+        outBuffer[i * 2 + 1] = trackPeaksR[i];
     }
 }
 
@@ -1593,18 +1759,34 @@ void AudioEngine::getMasterPeaks(float* outBuffer) {
     outBuffer[1] = masterPeakR;
 }
 
+void AudioEngine::getSendPeaks(float* outBuffer) {
+    std::lock_guard<std::mutex> lock(peakMutex);
+    outBuffer[0] = sendPeakRevL;
+    outBuffer[1] = sendPeakRevR;
+    outBuffer[2] = sendPeakDelL;
+    outBuffer[3] = sendPeakDelR;
+}
+
 void AudioEngine::decayPeaks() {
     std::lock_guard<std::mutex> lock(peakMutex);
     const float MANUAL_DECAY = 0.92f;
 
     for (int t = 0; t < 8; t++) {
-        trackPeaks[t] *= MANUAL_DECAY;
-        if (trackPeaks[t] < 0.001f) trackPeaks[t] = 0.0f;
+        trackPeaksL[t] *= MANUAL_DECAY;
+        trackPeaksR[t] *= MANUAL_DECAY;
+        if (trackPeaksL[t] < 0.001f) trackPeaksL[t] = 0.0f;
+        if (trackPeaksR[t] < 0.001f) trackPeaksR[t] = 0.0f;
     }
     masterPeakL *= MANUAL_DECAY;
     masterPeakR *= MANUAL_DECAY;
     if (masterPeakL < 0.001f) masterPeakL = 0.0f;
     if (masterPeakR < 0.001f) masterPeakR = 0.0f;
+    sendPeakRevL *= MANUAL_DECAY; sendPeakRevR *= MANUAL_DECAY;
+    sendPeakDelL *= MANUAL_DECAY; sendPeakDelR *= MANUAL_DECAY;
+    if (sendPeakRevL < 0.001f) sendPeakRevL = 0.0f;
+    if (sendPeakRevR < 0.001f) sendPeakRevR = 0.0f;
+    if (sendPeakDelL < 0.001f) sendPeakDelL = 0.0f;
+    if (sendPeakDelR < 0.001f) sendPeakDelR = 0.0f;
 }
 
 void AudioEngine::decayWaveform() {

@@ -437,6 +437,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // MixerModule: Used for mixer screen (8 tracks + master)
     val mixerModule = remember { MixerModule() }
 
+    // EffectModule: Used for effects screen (reverb, delay, master EQ)
+    val effectModule = remember { EffectModule() }
+    val eqModule     = remember { EqModule() }
+
     // TableModule: Used for table editing screen
     val tableModule = remember { TableModule() }
 
@@ -447,8 +451,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val modulationModule = remember { ModulationModule() }
 
     // Peak level buffers for mixer meters (updated periodically)
-    val trackPeakBuffer = remember { FloatArray(8) }
+    val trackPeakBuffer = remember { FloatArray(16) }
     val masterPeakBuffer = remember { FloatArray(2) }
+    val sendPeakBuffer = remember { FloatArray(4) }  // [revL, revR, delL, delR]
 
     // ═══════════════════════════════════════════════════════════════════════
     // LAYOUT MODE — user-selectable, overrides DeviceAdapter auto-detection
@@ -523,6 +528,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
 
     // FX helper overlay state (transient — not persisted)
     var fxHelperState by remember { mutableStateOf(FxHelperState()) }
+
+    // EQ editor overlay state (transient — not persisted)
+    var eqEditorState by remember { mutableStateOf(EqEditorState()) }
 
     val buttonSoundManager = remember { ButtonSoundManager(context) }
     val buttonHapticManager = remember { ButtonHapticManager(context) }
@@ -690,6 +698,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 // Always read current peak values for display
                 audioBackend.getTrackPeaks(trackPeakBuffer)
                 audioBackend.getMasterPeaks(masterPeakBuffer)
+                audioBackend.getSendPeaks(sendPeakBuffer)
                 stateVersion++  // Trigger recomposition
                 kotlinx.coroutines.delay(60)
             }
@@ -914,6 +923,34 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
      * @param handlerFunction Lambda that takes CursorContext and returns InputAction
      */
     fun handleGenericInput(handlerFunction: (CursorContext) -> InputAction) {
+        // EQ editor takes priority over all screens
+        if (eqEditorState.isOpen) {
+            val eqState = EqState(
+                project       = trackerController.project,
+                slotIndex     = eqEditorState.slotIndex,
+                cursorRow     = eqEditorState.cursorRow,
+                callerContext = eqEditorState.callerContext
+            )
+            val context = eqModule.getCursorContext(eqState)
+            val action  = handlerFunction(context)
+            val result  = eqModule.handleInput(eqState, action) { trackerController.projectVersion++ }
+            if (result.eqBandChanged) {
+                val slot    = eqEditorState.slotIndex
+                val bandIdx = eqEditorState.cursorBand
+                val band    = trackerController.project.eqPresets[slot].bands[bandIdx]
+                audioBackend.setEqBand(slot, bandIdx, band.type, band.freq, band.gain, band.q)
+                // Re-apply preset to the DSP processor that's using this slot
+                when (val ctx = eqEditorState.callerContext) {
+                    is EqCallerContext.MasterEq      -> audioBackend.setMasterEqSlot(slot)
+                    is EqCallerContext.ReverbInputEq -> audioBackend.setReverbInputEq(slot)
+                    is EqCallerContext.DelayInputEq  -> audioBackend.setDelayInputEq(slot)
+                    is EqCallerContext.InstrumentEq  -> audioBackend.setInstrumentEqSlot(ctx.instrId, slot)
+                }
+                trackerController.projectVersion++
+            }
+            return
+        }
+
         // Read directly from trackerController to avoid stale captured values
         when (trackerController.currentScreen) {
             ScreenType.CHAIN -> {
@@ -1044,11 +1081,13 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             }
             ScreenType.MIXER -> {
                 val mixerState = MixerState(
-                    trackerController.project,
-                    trackerController.mixerCursorColumn,
-                    trackerController.mixerMasterRow,
-                    trackPeakBuffer,
-                    masterPeakBuffer
+                    project        = trackerController.project,
+                    cursorColumn   = trackerController.mixerCursorColumn,
+                    mixerMasterRow = trackerController.mixerMasterRow,
+                    trackPeaks     = trackPeakBuffer,
+                    masterPeaks    = masterPeakBuffer,
+                    reverbPeaks    = floatArrayOf(sendPeakBuffer[0], sendPeakBuffer[1]),
+                    delayPeaks     = floatArrayOf(sendPeakBuffer[2], sendPeakBuffer[3])
                 )
                 val context = mixerModule.getCursorContext(mixerState)
                 val action = handlerFunction(context)
@@ -1057,27 +1096,78 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 }
                 // Sync real-time audio params to backend if modified
                 if (result.modified) {
+                    val proj = trackerController.project
                     val cursorCol = trackerController.mixerCursorColumn
+                    val masterRow = trackerController.mixerMasterRow
                     when {
-                        result.masterFxChanged -> {
-                            audioBackend.setMasterFx(trackerController.project.masterBusFx)
+                        result.masterEqChanged -> {
+                            val slot = proj.masterEqSlot
+                            if (slot >= 0) audioBackend.setMasterEqSlot(slot)
                             trackerController.projectVersion++
                         }
                         result.ottDepthChanged -> {
-                            audioBackend.setOttDepth(trackerController.project.ottDepth)
+                            audioBackend.setOttDepth(proj.ottDepth)
                             trackerController.projectVersion++
                         }
                         result.dustDepthChanged -> {
-                            audioBackend.setDustDepth(trackerController.project.dustDepth)
+                            audioBackend.setDustDepth(proj.dustDepth)
                             trackerController.projectVersion++
                         }
-                        cursorCol < 8 -> {
-                            val vol = trackerController.project.tracks[cursorCol].volume
+                        result.reverbWetChanged -> {
+                            audioBackend.setReverbParams(proj.reverbFeedback, proj.reverbDamp, proj.reverbWet)
+                            trackerController.projectVersion++
+                        }
+                        result.delayWetChanged -> {
+                            audioBackend.setDelayParams(proj.delayTime, proj.delayFeedback, proj.delaySync, proj.tempo.toFloat(), proj.delayWet)
+                            trackerController.projectVersion++
+                        }
+                        masterRow == 0 && cursorCol < 8 -> {
+                            val vol = proj.tracks[cursorCol].volume
                             audioBackend.setTrackVolume(cursorCol, com.conanizer.pockettracker.core.data.VolumeUtils.hexToFloat(vol))
                         }
-                        else -> {
-                            val vol = trackerController.project.masterVolume
-                            audioBackend.setMasterVolume(com.conanizer.pockettracker.core.data.VolumeUtils.hexToFloat(vol))
+                        masterRow == 0 -> {
+                            audioBackend.setMasterVolume(com.conanizer.pockettracker.core.data.VolumeUtils.hexToFloat(proj.masterVolume))
+                        }
+                    }
+                }
+            }
+            ScreenType.EFFECTS -> {
+                val effectState = EffectState(
+                    project   = trackerController.project,
+                    cursorRow = trackerController.effectsCursorRow
+                )
+                val context = effectModule.getCursorContext(effectState)
+                val action  = handlerFunction(context)
+                val result  = effectModule.handleInput(effectState, action) {
+                    trackerController.projectVersion++
+                }
+                if (result.modified) {
+                    val proj = trackerController.project
+                    when {
+                        result.masterFxChanged -> {
+                            audioBackend.setMasterFx(proj.masterBusFx)
+                            trackerController.projectVersion++
+                        }
+                        result.reverbParamsChanged -> {
+                            audioBackend.setReverbParams(proj.reverbFeedback, proj.reverbDamp, proj.reverbWet)
+                            if (proj.reverbInputEq >= 0) audioBackend.setReverbInputEq(proj.reverbInputEq)
+                            trackerController.projectVersion++
+                        }
+                        result.delayReverbSendChanged -> {
+                            audioBackend.setDelayReverbSend(proj.delayReverbSend)
+                            trackerController.projectVersion++
+                        }
+                        result.delayParamsChanged -> {
+                            audioBackend.setDelayParams(
+                                proj.delayTime, proj.delayFeedback,
+                                proj.delaySync, proj.tempo.toFloat(), proj.delayWet
+                            )
+                            if (proj.delayInputEq >= 0) audioBackend.setDelayInputEq(proj.delayInputEq)
+                            trackerController.projectVersion++
+                        }
+                        result.masterEqChanged -> {
+                            if (proj.masterEqSlot >= 0) audioBackend.setMasterEqSlot(proj.masterEqSlot)
+                            trackerController.projectVersion++
                         }
                     }
                 }
@@ -1323,6 +1413,29 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // EQ EDITOR HELPERS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    fun openEqEditor(slot: Int, caller: EqCallerContext) {
+        eqEditorState = EqEditorState(
+            isOpen = true,
+            slotIndex = slot.coerceIn(0, 127),
+            callerContext = caller
+        )
+    }
+
+    fun applyCallerEqSlotChange(newSlot: Int) {
+        val proj = trackerController.project
+        when (val ctx = eqEditorState.callerContext) {
+            is EqCallerContext.MasterEq      -> { proj.masterEqSlot = newSlot; audioBackend.setMasterEqSlot(newSlot) }
+            is EqCallerContext.ReverbInputEq -> { proj.reverbInputEq = newSlot; audioBackend.setReverbInputEq(newSlot) }
+            is EqCallerContext.DelayInputEq  -> { proj.delayInputEq = newSlot; audioBackend.setDelayInputEq(newSlot) }
+            is EqCallerContext.InstrumentEq  -> { proj.instruments[ctx.instrId].eqSlot = newSlot; audioBackend.setInstrumentEqSlot(ctx.instrId, newSlot) }
+        }
+        trackerController.projectVersion++
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // BUTTON HANDLERS
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -1334,6 +1447,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             onDPadUp = {
                 if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorUp() }
                 else if (showCleanDialog) { cleanDialogCursor = 0 }
+                else if (eqEditorState.isOpen) { eqEditorState = eqEditorState.copy(cursorRow = (eqEditorState.cursorRow - 1).coerceAtLeast(0)) }
                 else handleDPadNavigation { trackerController.inputController.handleDPadUp() }
             },
 
@@ -1343,6 +1457,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             onDPadDown = {
                 if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorDown() }
                 else if (showCleanDialog) { cleanDialogCursor = 1 }
+                else if (eqEditorState.isOpen) { eqEditorState = eqEditorState.copy(cursorRow = (eqEditorState.cursorRow + 1).coerceAtMost(EqModule.MAX_CURSOR_ROW)) }
                 else handleDPadNavigation { trackerController.inputController.handleDPadDown() }
             },
 
@@ -1351,6 +1466,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             // ───────────────────────────────────────────────────────────────
             onDPadLeft = {
                 if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorLeft() }
+                else if (eqEditorState.isOpen) { /* no-op: B+LEFT handles preset cycling */ }
                 else handleDPadNavigation { trackerController.inputController.handleDPadLeft() }
             },
 
@@ -1359,6 +1475,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             // ───────────────────────────────────────────────────────────────
             onDPadRight = {
                 if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorRight() }
+                else if (eqEditorState.isOpen) { /* no-op: B+RIGHT handles preset cycling */ }
                 else handleDPadNavigation { trackerController.inputController.handleDPadRight() }
             },
 
@@ -1737,31 +1854,36 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     }
                                 }
                             }
-                            2 -> {  // LOAD SOURCE button
-                                instrumentFileBrowserAction = "LOAD_SOURCE"
-                                previousScreen = trackerController.currentScreen
-                                trackerController.currentScreen = ScreenType.FILE_BROWSER
-                                if (instrument.instrumentType == InstrumentType.SOUNDFONT) {
-                                    val soundfontsDir = File(fileManager.getSoundfontsDirectory())
-                                    fileBrowserState = fileBrowserModule.navigateToFolder(
-                                        fileBrowserState.copy(
-                                            fileExtensions = listOf("sf2", "sf3"),
-                                            mode = FileBrowserModule.BrowserMode.NORMAL,
-                                            statusMessage = ""
-                                        ),
-                                        soundfontsDir
-                                    )
-                                } else {
-                                    val samplesDir = File(fileManager.getSamplesDirectory())
-                                    val sampleExtensions = listOf("wav") + FileBrowserModule.VIDEO_EXTENSIONS
-                                    fileBrowserState = fileBrowserModule.navigateToFolder(
-                                        fileBrowserState.copy(
-                                            fileExtensions = sampleExtensions,
-                                            mode = FileBrowserModule.BrowserMode.NORMAL,
-                                            statusMessage = ""
-                                        ),
-                                        samplesDir
-                                    )
+                            3 -> {  // SOURCE section: LOAD (col 2), EDIT placeholder (col 3)
+                                when (trackerController.instrumentCursorColumn) {
+                                    2 -> {  // LOAD WAV or SF2
+                                        instrumentFileBrowserAction = "LOAD_SOURCE"
+                                        previousScreen = trackerController.currentScreen
+                                        trackerController.currentScreen = ScreenType.FILE_BROWSER
+                                        if (instrument.instrumentType == InstrumentType.SOUNDFONT) {
+                                            val soundfontsDir = File(fileManager.getSoundfontsDirectory())
+                                            fileBrowserState = fileBrowserModule.navigateToFolder(
+                                                fileBrowserState.copy(
+                                                    fileExtensions = listOf("sf2", "sf3"),
+                                                    mode = FileBrowserModule.BrowserMode.NORMAL,
+                                                    statusMessage = ""
+                                                ),
+                                                soundfontsDir
+                                            )
+                                        } else {
+                                            val samplesDir = File(fileManager.getSamplesDirectory())
+                                            val sampleExtensions = listOf("wav") + FileBrowserModule.VIDEO_EXTENSIONS
+                                            fileBrowserState = fileBrowserModule.navigateToFolder(
+                                                fileBrowserState.copy(
+                                                    fileExtensions = sampleExtensions,
+                                                    mode = FileBrowserModule.BrowserMode.NORMAL,
+                                                    statusMessage = ""
+                                                ),
+                                                samplesDir
+                                            )
+                                        }
+                                    }
+                                    3 -> { /* EDIT — placeholder for future waveform editor */ }
                                 }
                             }
                             // Other rows use A+direction combos for value editing
@@ -1966,6 +2088,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     return@selectHandler
                 }
 
+                // EQ editor: SELECT = close
+                if (eqEditorState.isOpen) {
+                    eqEditorState = EqEditorState()
+                    return@selectHandler
+                }
+
                 // Read directly from trackerController to avoid stale captured values
                 when (trackerController.currentScreen) {
                     // SONG SCREEN: Clear chain reference
@@ -2067,6 +2195,51 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     // FILE_BROWSER: SELECT button does nothing (combos handled separately)
                     ScreenType.FILE_BROWSER -> {
                         // Do nothing - SELECT combos (SELECT+A, SELECT+B, etc.) are handled in InputMapper
+                    }
+
+                    // EFFECTS: SELECT on TIME row toggles sync; SELECT on EQ rows opens EQ editor
+                    ScreenType.EFFECTS -> {
+                        when (trackerController.effectsCursorRow) {
+                            EffectModule.ROW_DLY_TIME -> {
+                                val proj = trackerController.project
+                                proj.delaySync = !proj.delaySync
+                                if (proj.delaySync) proj.delayTime = proj.delayTime.coerceIn(0, 11)
+                                audioBackend.setDelayParams(
+                                    proj.delayTime, proj.delayFeedback,
+                                    proj.delaySync, proj.tempo.toFloat(), proj.delayWet
+                                )
+                                trackerController.projectVersion++
+                            }
+                            EffectModule.ROW_REV_EQ -> {
+                                val slot = trackerController.project.reverbInputEq
+                                openEqEditor(if (slot < 0) 0 else slot, EqCallerContext.ReverbInputEq)
+                            }
+                            EffectModule.ROW_DLY_EQ -> {
+                                val slot = trackerController.project.delayInputEq
+                                openEqEditor(if (slot < 0) 0 else slot, EqCallerContext.DelayInputEq)
+                            }
+                        }
+                    }
+
+                    // MIXER: SELECT on master EQ row opens EQ editor
+                    ScreenType.MIXER -> {
+                        if (trackerController.mixerMasterRow == 1) {
+                            val slot = trackerController.project.masterEqSlot
+                            openEqEditor(if (slot < 0) 0 else slot, EqCallerContext.MasterEq)
+                        }
+                    }
+
+                    // INSTRUMENT: SELECT on EQ value opens EQ editor
+                    ScreenType.INSTRUMENT -> {
+                        val instr = trackerController.project.instruments[trackerController.currentInstrument]
+                        val isSF  = instr.instrumentType == com.conanizer.pockettracker.core.data.InstrumentType.SOUNDFONT
+                        val row   = trackerController.instrumentCursorRow
+                        val col   = trackerController.instrumentCursorColumn
+                        val onEq  = (!isSF && row == 13 && col == 3) || (isSF && row == 14 && col == 1)
+                        if (onEq) {
+                            val slot = instr.eqSlot
+                            openEqEditor(if (slot < 0) 0 else slot, EqCallerContext.InstrumentEq(trackerController.currentInstrument))
+                        }
                     }
 
                     // OTHER SCREENS: Quick jump to main screen
@@ -2246,6 +2419,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     trackerController.playSong()
                                 }
 
+                                ScreenType.EFFECTS -> {
+                                    Log.d("Playback", "  → Starting song (from effects)")
+                                    trackerController.playSong()
+                                }
+
                                 ScreenType.PROJECT -> {
                                     Log.d("Playback", "  → Starting song (from project)")
                                     trackerController.playSong()
@@ -2284,7 +2462,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
 // A + DIRECTION COMBINATIONS (M8-style value editing)
 // ───────────────────────────────────────────────────────────────
             onAUp = {
-                if (fxHelperState.isOpen) {
+                if (eqEditorState.isOpen) {
+                    handleGenericInput { ctx -> trackerController.inputController.handleAButton(ctx) }
+                } else if (fxHelperState.isOpen) {
                     fxHelperState = fxHelperState.fxMoveCursorUp()
                 } else if (isOnFxTypeColumn()) {
                     val idx = getCurrentFxTypeIndex()
@@ -2296,7 +2476,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             },
 
             onADown = {
-                if (fxHelperState.isOpen) {
+                if (eqEditorState.isOpen) {
+                    handleGenericInput { ctx -> trackerController.inputController.handleBButton(ctx) }
+                } else if (fxHelperState.isOpen) {
                     fxHelperState = fxHelperState.fxMoveCursorDown()
                 } else if (isOnFxTypeColumn()) {
                     val idx = getCurrentFxTypeIndex()
@@ -2308,7 +2490,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             },
 
             onALeft = {
-                if (fxHelperState.isOpen) {
+                if (eqEditorState.isOpen) {
+                    handleGenericInput { ctx -> trackerController.inputController.handleALeft(ctx) }
+                } else if (fxHelperState.isOpen) {
                     fxHelperState = fxHelperState.fxMoveCursorLeft()
                 } else {
                     // A+LEFT: Large decrement (selection-aware)
@@ -2317,7 +2501,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             },
 
             onARight = {
-                if (fxHelperState.isOpen) {
+                if (eqEditorState.isOpen) {
+                    handleGenericInput { ctx -> trackerController.inputController.handleARight(ctx) }
+                } else if (fxHelperState.isOpen) {
                     fxHelperState = fxHelperState.fxMoveCursorRight()
                 } else {
                     // A+RIGHT: Large increment (selection-aware)
@@ -2392,6 +2578,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
 // B + DIRECTION COMBINATIONS (Item cycling: chain/phrase/instrument)
 // ───────────────────────────────────────────────────────────────
             onBLeft = {
+                if (eqEditorState.isOpen) {
+                    val newSlot = (eqEditorState.slotIndex - 1).coerceIn(0, 127)
+                    eqEditorState = eqEditorState.copy(slotIndex = newSlot)
+                    applyCallerEqSlotChange(newSlot)
+                } else {
                 // B+LEFT: Navigate to previous chain/phrase/instrument
                 Log.d("Navigation", "B+LEFT: currentScreen=${trackerController.currentScreen}")
                 when (trackerController.currentScreen) {
@@ -2440,9 +2631,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     }
                     else -> { Log.d("Navigation", "  -> No action for screen ${trackerController.currentScreen}") }
                 }
+                } // end else (EQ editor not open)
             },
 
             onBRight = {
+                if (eqEditorState.isOpen) {
+                    val newSlot = (eqEditorState.slotIndex + 1).coerceIn(0, 127)
+                    eqEditorState = eqEditorState.copy(slotIndex = newSlot)
+                    applyCallerEqSlotChange(newSlot)
+                } else {
                 // B+RIGHT: Navigate to next chain/phrase/instrument
                 Log.d("Navigation", "B+RIGHT: currentScreen=${trackerController.currentScreen}")
                 when (trackerController.currentScreen) {
@@ -2491,6 +2688,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     }
                     else -> { Log.d("Navigation", "  -> No action for screen ${trackerController.currentScreen}") }
                 }
+                } // end else (EQ editor not open)
             },
 
 // ───────────────────────────────────────────────────────────────
@@ -2517,6 +2715,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 // R+UP: QWERTY keyboard — switch to letters layout
                 if (qwertyKeyboardState.isOpen) {
                     qwertyKeyboardState = qwertyKeyboardState.copy(layout = 0).withClampedCol()
+                } else if (eqEditorState.isOpen) { /* block map navigation while EQ editor open */
                 } else
                 // R+UP: Navigate to screen above in 5×5 grid OR cycle sort mode up in FILE_BROWSER
                 if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
@@ -2543,6 +2742,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 // R+DOWN: QWERTY keyboard — switch to numbers/symbols layout
                 if (qwertyKeyboardState.isOpen) {
                     qwertyKeyboardState = qwertyKeyboardState.copy(layout = 1).withClampedCol()
+                } else if (eqEditorState.isOpen) { /* block map navigation while EQ editor open */
                 } else
                 // R+DOWN: Navigate to screen below in 5×5 grid OR cycle sort mode down in FILE_BROWSER
                 if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
@@ -2569,6 +2769,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 // R+LEFT: QWERTY keyboard — move text cursor left
                 if (qwertyKeyboardState.isOpen) {
                     qwertyKeyboardState = qwertyKeyboardState.moveTextCursorLeft()
+                } else if (eqEditorState.isOpen) { /* block map navigation while EQ editor open */
                 } else
                 // R+LEFT: Navigate to screen on left OR go to parent folder in FILE_BROWSER
                 if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
@@ -2643,10 +2844,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 // R+RIGHT: QWERTY keyboard — move text cursor right
                 if (qwertyKeyboardState.isOpen) {
                     qwertyKeyboardState = qwertyKeyboardState.moveTextCursorRight()
-                } else {
+                } else if (eqEditorState.isOpen) { /* block map navigation while EQ editor open */
+                } else if (trackerController.currentScreen != ScreenType.FILE_BROWSER) {
                 // R+RIGHT: Navigate to screen on right in main row (disabled in FILE_BROWSER)
-                // Read directly from trackerController to avoid stale captured values
-                if (trackerController.currentScreen != ScreenType.FILE_BROWSER) {
                     val (newScreen, newCol) = trackerController.navigateRight(trackerController.currentScreen, trackerController.previousColumn)
                     if (newScreen != trackerController.currentScreen) {
                         // Capture cursor value from current screen before leaving
@@ -2708,7 +2908,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     trackerController.currentScreen = newScreen
                     trackerController.previousColumn = newCol
                 }
-                }  // end else (non-keyboard R+RIGHT)
             },
 
 // ───────────────────────────────────────────────────────────────
@@ -3226,6 +3425,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         mixerMasterRow          = trackerController.mixerMasterRow,
         trackPeaks              = trackPeakBuffer,
         masterPeaks             = masterPeakBuffer,
+        sendPeaks               = sendPeakBuffer,
         currentTable            = trackerController.currentTable,
         tableCursorRow          = trackerController.tableCursorRow,
         tableCursorColumn       = trackerController.tableCursorColumn,
@@ -3234,6 +3434,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         modCursorRow            = trackerController.modCursorRow,
         modCursorPair           = trackerController.modCursorPair,
         modCursorSide           = trackerController.modCursorSide,
+        effectsCursorRow        = trackerController.effectsCursorRow,
         isRendering             = isRendering,
         renderProgress          = renderProgress,
         showCleanDialog         = showCleanDialog,
@@ -3247,6 +3448,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         vibroPower              = vibroPower,
         qwertyKeyboardState     = qwertyKeyboardState.copy(insertBefore = insertBefore),
         fxHelperState           = fxHelperState,
+        eqEditorState           = eqEditorState,
         settingsCursorRow       = stateVersion.let { trackerController.settingsCursorRow },
         settingsCursorColumn    = stateVersion.let { trackerController.settingsCursorColumn },
         cursorRemember          = cursorRemember,

@@ -189,6 +189,13 @@ class TrackerController(
             stateObserver.onStateChanged()
         }
 
+    // Effects screen cursor row (0-7)
+    var effectsCursorRow = 0
+        set(value) {
+            field = value.coerceIn(0, 7)
+            stateObserver.onStateChanged()
+        }
+
     // Table screen cursor
     var tableCursorRow = 0
         set(value) {
@@ -399,6 +406,7 @@ class TrackerController(
         instrumentCursorRow = 0
         instrumentCursorColumn = 1
         mixerCursorColumn = 0
+        effectsCursorRow = 0
         tableCursorRow = 0
         tableCursorColumn = 1
         grooveCursorRow = 0
@@ -859,21 +867,27 @@ class TrackerController(
                 val oldRow = instrumentCursorRow
                 val oldColumn = instrumentCursorColumn
                 val isSoundFont = project.instruments[currentInstrument].instrumentType == InstrumentType.SOUNDFONT
-                val maxRow = if (isSoundFont) 11 else 15
+                val maxRow = if (isSoundFont) 14 else 15
+                val tripleRow = if (isSoundFont) 5 else 4
+                val dualParamRows = if (isSoundFont) setOf(0, 6, 8, 9, 10) else setOf(0, 5, 7, 8, 9, 11, 12, 13)
                 instrumentCursorRow = when {
-                    instrumentCursorRow == 7 -> 5          // Skip spacer (row 6) going up
-                    !isSoundFont && instrumentCursorRow == 11 -> 9  // Skip SAMPLER spacer (row 10)
+                    instrumentCursorRow == 3 -> 1                       // Skip spacer (row 2) both types
+                    isSoundFont && instrumentCursorRow == 8 -> 6        // Skip SF spacer (row 7)
+                    !isSoundFont && instrumentCursorRow == 7 -> 5       // Skip sampler spacer (row 6)
+                    isSoundFont && instrumentCursorRow == 12 -> 10      // Skip SF spacer (row 11)
+                    !isSoundFont && instrumentCursorRow == 11 -> 9      // Skip sampler spacer (row 10)
                     instrumentCursorRow > 0 -> instrumentCursorRow - 1
-                    else -> maxRow                          // Wrap from top to bottom
+                    else -> maxRow
                 }
-                // Dual-param rows: 0=TYPE+LOAD+SAVE, 3=ROOT+VOL, 4=DETUNE+PAN
-                // 7=DRIVE+FILTER or BANK+PRESET, 8=CRUSH+CUT (SAMPLER), 9=DWNSMPL+RES (SAMPLER)
-                // SOUNDFONT adds: 9=ATK+DEC, 10=SUS+REL, 11=CUT+RES
-                val dualParamRows = if (isSoundFont) setOf(0, 3, 4, 7, 9, 10, 11) else setOf(0, 3, 4, 7, 8, 9)
-                instrumentCursorColumn = if (oldRow in dualParamRows && instrumentCursorRow in dualParamRows && oldColumn == 3) {
-                    3
-                } else {
-                    1
+                instrumentCursorColumn = when {
+                    instrumentCursorRow == 3 -> 2
+                    instrumentCursorRow == tripleRow -> when {
+                        (oldRow in dualParamRows || oldRow == tripleRow) && oldColumn == 3 -> 3
+                        oldRow == tripleRow && oldColumn == 5 -> 5
+                        else -> 1
+                    }
+                    instrumentCursorRow in dualParamRows -> if ((oldRow in dualParamRows || oldRow == tripleRow) && oldColumn >= 3) 3 else 1
+                    else -> 1
                 }
             }
             ScreenType.TABLE -> {
@@ -899,6 +913,9 @@ class TrackerController(
             }
             ScreenType.MIXER -> {
                 if (mixerMasterRow > 0) mixerMasterRow--
+            }
+            ScreenType.EFFECTS -> {
+                if (effectsCursorRow > 0) effectsCursorRow--
             }
             ScreenType.SONG -> {
                 // SONG screen: 256 rows (0-255), clamp at 0, scroll to keep cursor visible
@@ -938,18 +955,27 @@ class TrackerController(
                 val oldRow = instrumentCursorRow
                 val oldColumn = instrumentCursorColumn
                 val isSoundFont = project.instruments[currentInstrument].instrumentType == InstrumentType.SOUNDFONT
-                val maxRow = if (isSoundFont) 11 else 15
+                val maxRow = if (isSoundFont) 14 else 15
+                val tripleRow = if (isSoundFont) 5 else 4
+                val dualParamRows = if (isSoundFont) setOf(0, 6, 8, 9, 10) else setOf(0, 5, 7, 8, 9, 11, 12, 13)
                 instrumentCursorRow = when {
-                    instrumentCursorRow == 5 -> 7          // Skip spacer (row 6) going down
-                    !isSoundFont && instrumentCursorRow == 9 -> 11  // Skip SAMPLER spacer (row 10)
+                    instrumentCursorRow == 1 -> 3                       // Skip spacer (row 2) both types
+                    isSoundFont && instrumentCursorRow == 6 -> 8        // Skip SF spacer (row 7)
+                    !isSoundFont && instrumentCursorRow == 5 -> 7       // Skip sampler spacer (row 6)
+                    isSoundFont && instrumentCursorRow == 10 -> 12      // Skip SF spacer (row 11)
+                    !isSoundFont && instrumentCursorRow == 9 -> 11      // Skip sampler spacer (row 10)
                     instrumentCursorRow < maxRow -> instrumentCursorRow + 1
-                    else -> 0                              // Wrap from bottom to top
+                    else -> 0
                 }
-                val dualParamRows = if (isSoundFont) setOf(0, 3, 4, 7, 9, 10, 11) else setOf(0, 3, 4, 7, 8, 9)
-                instrumentCursorColumn = if (oldRow in dualParamRows && instrumentCursorRow in dualParamRows && oldColumn == 3) {
-                    3
-                } else {
-                    1
+                instrumentCursorColumn = when {
+                    instrumentCursorRow == 3 -> 2
+                    instrumentCursorRow == tripleRow -> when {
+                        (oldRow in dualParamRows || oldRow == tripleRow) && oldColumn == 3 -> 3
+                        oldRow == tripleRow && oldColumn == 5 -> 5
+                        else -> 1
+                    }
+                    instrumentCursorRow in dualParamRows -> if ((oldRow in dualParamRows || oldRow == tripleRow) && oldColumn >= 3) 3 else 1
+                    else -> 1
                 }
             }
             ScreenType.TABLE -> {
@@ -972,7 +998,15 @@ class TrackerController(
                 // At pair 1, last row — stay at bottom (no wrap)
             }
             ScreenType.MIXER -> {
-                if (mixerMasterRow < 2) mixerMasterRow++
+                if (mixerMasterRow < 2) {
+                    mixerMasterRow++
+                    // Send rows (1-2) only have col 0 (REV/DEL) and col 8 (master).
+                    // Track cols 1-7 snap to col 0 (send); col 8 stays on master.
+                    if (mixerMasterRow > 0 && mixerCursorColumn in 1..7) mixerCursorColumn = 0
+                }
+            }
+            ScreenType.EFFECTS -> {
+                if (effectsCursorRow < 7) effectsCursorRow++
             }
             ScreenType.SONG -> {
                 // SONG screen: 256 rows (0-255), clamp at 255, scroll to keep cursor visible
@@ -1012,8 +1046,13 @@ class TrackerController(
                 }
             }
             ScreenType.MIXER -> {
-                // Mixer: move between track columns (0-7) and master (8)
-                if (mixerCursorColumn > 0) mixerCursorColumn--
+                if (mixerMasterRow == 0) {
+                    // Track row wraps: track 0 → master, master → track 0
+                    mixerCursorColumn = if (mixerCursorColumn > 0) mixerCursorColumn - 1 else 8
+                } else {
+                    // Send rows: only col 0 (send) and col 8 (master) — wrap between them
+                    if (mixerCursorColumn == 8) mixerCursorColumn = 0
+                }
             }
             ScreenType.TABLE -> {
                 // Table: columns 0=step (read-only), 1-8 editable
@@ -1062,8 +1101,13 @@ class TrackerController(
                 }
             }
             ScreenType.MIXER -> {
-                // Mixer: move between track columns (0-7) and master (8)
-                if (mixerCursorColumn < 8) mixerCursorColumn++
+                if (mixerMasterRow == 0) {
+                    // Track row wraps: master → track 0, track 7 → master
+                    mixerCursorColumn = if (mixerCursorColumn < 8) mixerCursorColumn + 1 else 0
+                } else {
+                    // Send rows: only col 0 (send) and col 8 (master) — wrap between them
+                    if (mixerCursorColumn == 0) mixerCursorColumn = 8
+                }
             }
             ScreenType.TABLE -> {
                 // Table: columns 0=step, 1=transpose, 2=vol, 3-8=fx (0-8 total)
@@ -1232,24 +1276,36 @@ class TrackerController(
 
     /**
      * Helper to get next column left for INSTRUMENT screen.
-     * Row 0 (TYPE+LOAD+SAVE) steps through cols 1→2→3; all others jump 3→1.
+     * Row 0: steps 3→2→1. Row 3 (source): steps 3→2. Triple row: steps 5→3→1. Dual rows: jump 3→1.
      */
     private fun getInstrumentCursorLeftColumn(row: Int, currentColumn: Int): Int {
-        if (row == 0) return (currentColumn - 1).coerceAtLeast(1)  // step: 3→2→1
         val isSoundFont = project.instruments[currentInstrument].instrumentType == InstrumentType.SOUNDFONT
-        val dualParamRows = if (isSoundFont) setOf(3, 4, 7, 9, 10, 11) else setOf(3, 4, 7, 8, 9)
-        return if (row in dualParamRows) 1 else 1
+        val tripleRow = if (isSoundFont) 5 else 4
+        val dualParamRows = if (isSoundFont) setOf(0, 6, 8, 9, 10) else setOf(0, 5, 7, 8, 9, 11, 12, 13)
+        return when {
+            row == 0 -> (currentColumn - 1).coerceAtLeast(1)           // 3→2→1
+            row == 3 -> (currentColumn - 1).coerceAtLeast(2)           // 3→2 (min col 2)
+            row == tripleRow -> (currentColumn - 2).coerceAtLeast(1)   // 5→3→1
+            row in dualParamRows -> 1                                   // jump 3→1
+            else -> 1
+        }
     }
 
     /**
      * Helper to get next column right for INSTRUMENT screen.
-     * Row 0 (TYPE+LOAD+SAVE) steps through cols 1→2→3; all others jump 1→3.
+     * Row 0: steps 1→2→3. Row 3 (source): steps 2→3. Triple row: steps 1→3→5. Dual rows: jump 1→3.
      */
     private fun getInstrumentCursorRightColumn(row: Int, currentColumn: Int): Int {
-        if (row == 0) return (currentColumn + 1).coerceAtMost(3)  // step: 1→2→3
         val isSoundFont = project.instruments[currentInstrument].instrumentType == InstrumentType.SOUNDFONT
-        val dualParamRows = if (isSoundFont) setOf(3, 4, 7, 9, 10, 11) else setOf(3, 4, 7, 8, 9)
-        return if (row in dualParamRows) 3 else 1
+        val tripleRow = if (isSoundFont) 5 else 4
+        val dualParamRows = if (isSoundFont) setOf(0, 6, 8, 9, 10) else setOf(0, 5, 7, 8, 9, 11, 12, 13)
+        return when {
+            row == 0 -> (currentColumn + 1).coerceAtMost(3)            // 1→2→3
+            row == 3 -> (currentColumn + 1).coerceAtMost(3)            // 2→3 (max col 3)
+            row == tripleRow -> (currentColumn + 2).coerceAtMost(5)    // 1→3→5
+            row in dualParamRows -> 3                                   // jump 1→3
+            else -> 1
+        }
     }
 
 }

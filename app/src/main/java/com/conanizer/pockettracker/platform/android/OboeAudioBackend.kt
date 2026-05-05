@@ -154,7 +154,7 @@ class OboeAudioBackend : IAudioBackend {
     }
 
     override fun getTrackPeaks(buffer: FloatArray) {
-        if (buffer.size >= 8) {
+        if (buffer.size >= 16) {
             native_getTrackPeaks(buffer)
         }
     }
@@ -162,6 +162,12 @@ class OboeAudioBackend : IAudioBackend {
     override fun getMasterPeaks(buffer: FloatArray) {
         if (buffer.size >= 2) {
             native_getMasterPeaks(buffer)
+        }
+    }
+
+    override fun getSendPeaks(buffer: FloatArray) {
+        if (buffer.size >= 4) {
+            native_getSendPeaks(buffer)
         }
     }
 
@@ -215,6 +221,46 @@ class OboeAudioBackend : IAudioBackend {
 
     override fun setDustDepthForRender(depth: Int) {
         native_setDustDepthForRender(depth)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // EQ / SEND / REVERB / DELAY METHODS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    override fun setEqBand(slot: Int, band: Int, type: Int, freqHex: Int, gainHex: Int, qHex: Int) {
+        native_setEqBand(slot, band, type, freqHex, gainHex, qHex)
+    }
+
+    override fun setInstrumentEqSlot(instrId: Int, slot: Int) {
+        native_setInstrumentEqSlot(instrId, slot)
+    }
+
+    override fun setInstrumentSendLevels(instrId: Int, reverbSend: Int, delaySend: Int) {
+        native_setInstrumentSendLevels(instrId, reverbSend, delaySend)
+    }
+
+    override fun setDelayReverbSend(sendHex: Int) {
+        native_setDelayReverbSend(sendHex)
+    }
+
+    override fun setReverbParams(feedbackHex: Int, dampHex: Int, wetHex: Int) {
+        native_setReverbParams(feedbackHex, dampHex, wetHex)
+    }
+
+    override fun setDelayParams(timeOrSubdiv: Int, feedbackHex: Int, syncMode: Boolean, bpm: Float, wetHex: Int) {
+        native_setDelayParams(timeOrSubdiv, feedbackHex, syncMode, bpm, wetHex)
+    }
+
+    override fun setReverbInputEq(slot: Int) {
+        native_setReverbInputEq(slot)
+    }
+
+    override fun setDelayInputEq(slot: Int) {
+        native_setDelayInputEq(slot)
+    }
+
+    override fun setMasterEqSlot(slot: Int) {
+        native_setMasterEqSlot(slot)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -441,6 +487,7 @@ class OboeAudioBackend : IAudioBackend {
     )
     private external fun native_getTrackPeaks(outArray: FloatArray)
     private external fun native_getMasterPeaks(outArray: FloatArray)
+    private external fun native_getSendPeaks(outArray: FloatArray)
     private external fun native_renderFrames(numFrames: Int, sampleRate: Int): FloatArray?
     private external fun native_resetFrameCounter()
     private external fun native_getFrameCounter(): Long
@@ -455,6 +502,17 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_setMasterFx(fx: Int)
     private external fun native_setDustDepth(depth: Int)
     private external fun native_setDustDepthForRender(depth: Int)
+
+    // EQ / send / reverb / delay methods
+    private external fun native_setEqBand(slot: Int, band: Int, type: Int, freqHex: Int, gainHex: Int, qHex: Int)
+    private external fun native_setInstrumentEqSlot(instrId: Int, slot: Int)
+    private external fun native_setInstrumentSendLevels(instrId: Int, reverbSend: Int, delaySend: Int)
+    private external fun native_setDelayReverbSend(sendHex: Int)
+    private external fun native_setReverbParams(feedbackHex: Int, dampHex: Int, wetHex: Int)
+    private external fun native_setDelayParams(timeOrSubdiv: Int, feedbackHex: Int, syncMode: Boolean, bpm: Float, wetHex: Int)
+    private external fun native_setReverbInputEq(slot: Int)
+    private external fun native_setDelayInputEq(slot: Int)
+    private external fun native_setMasterEqSlot(slot: Int)
 
     // Phase 3.5 table methods
     private external fun native_loadTable(tableId: Int, rowData: ByteArray)

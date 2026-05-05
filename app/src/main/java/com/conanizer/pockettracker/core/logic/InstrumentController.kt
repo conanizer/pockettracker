@@ -485,6 +485,25 @@ class InstrumentController(
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // Send Levels and EQ Slot
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    fun updateReverbSend(instrument: Instrument, value: Int) {
+        instrument.reverbSend = value.coerceIn(0, 255)
+        stateObserver.onStateChanged()
+    }
+
+    fun updateDelaySend(instrument: Instrument, value: Int) {
+        instrument.delaySend = value.coerceIn(0, 255)
+        stateObserver.onStateChanged()
+    }
+
+    fun updateEqSlot(instrument: Instrument, value: Int) {
+        instrument.eqSlot = value  // -1 = off, 0-127 = slot
+        stateObserver.onStateChanged()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // Table Parameters
     // ─────────────────────────────────────────────────────────────────────────────
 

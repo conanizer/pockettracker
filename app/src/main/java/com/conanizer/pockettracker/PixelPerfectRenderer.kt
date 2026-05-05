@@ -80,6 +80,7 @@ fun PixelPerfectTracker(
     mixerMasterRow: Int = 0,           // 0 = volume row, 1 = OTT row
     trackPeaks: FloatArray = FloatArray(8),
     masterPeaks: FloatArray = FloatArray(2),
+    sendPeaks: FloatArray = FloatArray(4),
     // Table state
     currentTable: Int = 0,
     tableCursorRow: Int = 0,
@@ -91,6 +92,8 @@ fun PixelPerfectTracker(
     modCursorRow: Int = 0,
     modCursorPair: Int = 0,
     modCursorSide: Int = 0,
+    // Effects screen cursor
+    effectsCursorRow: Int = 0,
     // Render state (WAV export)
     isRendering: Boolean = false,
     renderProgress: Float = 0f,
@@ -110,6 +113,8 @@ fun PixelPerfectTracker(
     qwertyKeyboardState: QwertyKeyboardState = QwertyKeyboardState(),
     // FX helper overlay state
     fxHelperState: FxHelperState = FxHelperState(),
+    // EQ editor overlay state
+    eqEditorState: EqEditorState = EqEditorState(),
     // Settings screen cursor
     settingsCursorRow: Int = 0,
     settingsCursorColumn: Int = 1,
@@ -253,6 +258,7 @@ fun PixelPerfectTracker(
                         mixerMasterRow = mixerMasterRow,
                         trackPeaks = trackPeaks,
                         masterPeaks = masterPeaks,
+                        sendPeaks = sendPeaks,
                         currentTable = currentTable,
                         tableCursorRow = tableCursorRow,
                         tableCursorColumn = tableCursorColumn,
@@ -261,6 +267,7 @@ fun PixelPerfectTracker(
                         modCursorRow = modCursorRow,
                         modCursorPair = modCursorPair,
                         modCursorSide = modCursorSide,
+                        effectsCursorRow = effectsCursorRow,
                         isRendering = isRendering,
                         renderProgress = renderProgress,
                         showCleanDialog = showCleanDialog,
@@ -275,6 +282,7 @@ fun PixelPerfectTracker(
                         vibroPower = vibroPower,
                         qwertyKeyboardState = qwertyKeyboardState,
                         fxHelperState = fxHelperState,
+                        eqEditorState = eqEditorState,
                         settingsCursorRow = settingsCursorRow,
                         settingsCursorColumn = settingsCursorColumn,
                         cursorRemember = cursorRemember,
@@ -311,6 +319,8 @@ class TrackerLayout {
     private val grooveModule = GrooveModule()
     private val modulationModule = ModulationModule()
     private val settingsModule = SettingsModule()
+    private val effectModule = EffectModule()
+    private val eqModule     = EqModule()
     /**
      * Main layout drawing function
      * This arranges all modules on the 640×480 screen
@@ -351,6 +361,7 @@ class TrackerLayout {
         mixerMasterRow: Int = 0,
         trackPeaks: FloatArray = FloatArray(8),
         masterPeaks: FloatArray = FloatArray(2),
+        sendPeaks: FloatArray = FloatArray(4),
         // Table state
         currentTable: Int = 0,
         tableCursorRow: Int = 0,
@@ -362,6 +373,8 @@ class TrackerLayout {
         modCursorRow: Int = 0,
         modCursorPair: Int = 0,
         modCursorSide: Int = 0,
+        // Effects screen cursor
+        effectsCursorRow: Int = 0,
         // Render state (WAV export)
         isRendering: Boolean = false,
         renderProgress: Float = 0f,
@@ -383,6 +396,8 @@ class TrackerLayout {
         qwertyKeyboardState: QwertyKeyboardState = QwertyKeyboardState(),
         // FX helper overlay state
         fxHelperState: FxHelperState = FxHelperState(),
+        // EQ editor overlay state
+        eqEditorState: EqEditorState = EqEditorState(),
         // Settings screen cursor
         settingsCursorRow: Int = 0,
         settingsCursorColumn: Int = 1,
@@ -484,6 +499,19 @@ class TrackerLayout {
             }
         } else {
             clipRect(right = editorClipRight) {
+                if (eqEditorState.isOpen) {
+                    with(eqModule) {
+                        draw(
+                            x = moduleX, y = currentY, scale = scale,
+                            state = EqState(
+                                project       = project,
+                                slotIndex     = eqEditorState.slotIndex,
+                                cursorRow     = eqEditorState.cursorRow,
+                                callerContext = eqEditorState.callerContext
+                            )
+                        )
+                    }
+                } else
                 when (currentScreen) {
                     ScreenType.PROJECT -> {
                         with(projectModule) {
@@ -699,11 +727,30 @@ class TrackerLayout {
                                 y = currentY,
                                 scale = scale,
                                 state = MixerState(
-                                    project = project,
-                                    cursorColumn = mixerCursorColumn,
+                                    project        = project,
+                                    cursorColumn   = mixerCursorColumn,
                                     mixerMasterRow = mixerMasterRow,
-                                    trackPeaks = trackPeaks,
-                                    masterPeaks = masterPeaks
+                                    trackPeaks     = trackPeaks,
+                                    masterPeaks    = masterPeaks,
+                                    reverbPeaks    = floatArrayOf(sendPeaks[0], sendPeaks[1]),
+                                    delayPeaks     = floatArrayOf(sendPeaks[2], sendPeaks[3])
+                                )
+                            )
+                        }
+                    }
+
+                    // ===================================
+                    // EFFECTS SCREEN: Reverb, delay, master EQ
+                    // ===================================
+                    ScreenType.EFFECTS -> {
+                        with(effectModule) {
+                            draw(
+                                x = moduleX,
+                                y = currentY,
+                                scale = scale,
+                                state = EffectState(
+                                    project = project,
+                                    cursorRow = effectsCursorRow
                                 )
                             )
                         }

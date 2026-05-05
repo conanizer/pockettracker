@@ -2,6 +2,7 @@
 #include "modules/filter-module.h"
 #include "modules/drive-module.h"
 #include "modules/crush-module.h"
+#include "modules/eq-module.h"
 
 // ===========================================================================
 // InstrumentChain — per-voice inline effect chain.
@@ -28,22 +29,28 @@ struct InstrumentChain {
     BitcrushModule crush;
     DriveModule    drive;
     FilterModule   filter;
+    EqModule       eq;    // 3-band parametric EQ (loShelf / bell / hiShelf)
 
-    void reset() {
+    // sampleRate required for EqModule init; other modules don't need it here.
+    void reset(float sampleRate = 44100.0f) {
         crush.reset();
         drive.reset();
         filter.reset();
+        eq.reset(sampleRate);
     }
 
+    // Signal order: Crush → Drive → Filter → EQ
     inline float processMono(float in) {
         in = crush.processMono(in);
         in = drive.processMono(in);
-        return filter.processMono(in);
+        in = filter.processMono(in);
+        return eq.processMono(in);
     }
 
     inline void processStereo(float& L, float& R) {
         crush.processStereo(L, R);
         drive.processStereo(L, R);
         filter.processStereo(L, R);
+        eq.processStereo(L, R);
     }
 };

@@ -82,6 +82,10 @@ struct Voice : public IAudioVoice {
     float noteKeytrack = 0.0f;  // (midiNote − 60) / 12.0, bipolar
     float noteRandom   = 0.0f;  // random 0.0–1.0
 
+    // Send levels (copied from instrParams at trigger time)
+    float reverbSend = 0.0f;
+    float delaySend  = 0.0f;
+
     // Voice-steal fade-out: instead of a hard cut, fade over DECLICK_SAMPLES frames
     int fadeOutRemaining;  // Counts down from DECLICK_SAMPLES to 0 during fade-out
     bool isFadingOut;      // true while the voice-steal fade-out is active
@@ -144,9 +148,22 @@ struct Voice : public IAudioVoice {
         loopingBack = false;
 
         // Initialize per-voice effect chain
-        chain.reset();
+        chain.reset(sampleRate);
         chain.filter.setParams(instrParams.filterType, instrParams.filterCut,
                                instrParams.filterRes, instrParams.filterDrive, sampleRate);
+        if (instrParams.eqActive) {
+            chain.eq.active = true;
+            for (int i = 0; i < 3; i++) {
+                chain.eq.bands[i].setParams(instrParams.eqBands[i].type,
+                                            instrParams.eqBands[i].freqHz,
+                                            instrParams.eqBands[i].gainDb,
+                                            instrParams.eqBands[i].q);
+            }
+        }
+
+        // Copy send levels for use in the mix loop
+        reverbSend = instrParams.reverbSend;
+        delaySend  = instrParams.delaySend;
 
         // Initialize table state (Phase 3.5)
         tableId = tblId;

@@ -1,6 +1,6 @@
 # Development Status
 
-**Last Updated:** 2026-04-17
+**Last Updated:** 2026-05-04
 
 ## Current Phase
 
@@ -58,16 +58,18 @@ Week 16:     MVP Release
 - Groove quantization (per-track groove assignments)
 - Resonant biquad filters (LP/HP/BP)
 - Master output bus (MasterChain): DaisySP peak-tracking soft limiter + OTT 3-band bidirectional compressor (vitOTT-matched, wet/dry depth control)
+- **Send effects buses (reverb + delay)**: true stereo buses — sampler voices contribute with per-instrument PAN applied; SF voices use their already-panned stereo buffer. DaisySP ReverbSc (Schroeder-Moorer) + DaisySP DelayLine (ping-pong stereo tap delay). Per-send return gain (00-FF), delay→reverb routing (`delayReverbSend`), per-send input EQ. Delay processed first so its wet output can feed the reverb bus in the same audio block with zero latency.
 
 ### Screens & Modules
 - **Oscilloscope** - Real-time waveform visualization (60 FPS)
 - **Phrase Editor** - 16-step editing with N/V/I/FX columns
 - **Chain Editor** - 16 phrase references with transpose
 - **Song Editor** - 8-track arrangement, 256 rows, B+UP/DOWN page jump
-- **Instrument Screen** - Full parameter set (sample, ROOT, DETUNE, VOL, PAN, filters, loop, start/end)
+- **Instrument Screen** - Full parameter set (sample, ROOT, DETUNE, VOL, PAN, filters, loop, start/end); EQ row opens EQ editor via SELECT button (same as mixer and effects screens); filename displayed without extension
 - **Project Screen** - Name, tempo, save/load, CLEAN SEQ/INST, layout mode switcher
 - **File Browser** - Navigation, sorting, preview, WAV/video audio extraction
-- **Mixer Screen** - 8 tracks + master with true dBFS meters
+- **Effects Screen** - Global send effects config: reverb (SIZE/DAMP/EQ), delay (TIME/FDBK/REV-send/EQ), master bus type selector. WET removed (always 100%); REV row on delay sends delay output into reverb bus.
+- **Mixer Screen** - 8 tracks + master with true dBFS meters; REV/DEL return volume (rows 1-2 in master col); stereo peak meters for REV/DEL send channels (`sendPeaks[4]`: revL/revR/delL/delR)
 - **Table Screen** - 16-row mini-sequencer per instrument
 - **Groove Screen** - Step-timing patterns for swing/shuffle (256 grooves)
 - **Modulation Screen** - 4-slot envelope/LFO editor per instrument
@@ -179,6 +181,17 @@ Week 16:     MVP Release
 - TIC effect (table tick rate + special modes)
 - HOP effect (phrase/table jump)
 - Pitch effects (PSL, PBN, PVB, PVX)
+
+### Send Effects System (Complete - 2026-05-04)
+
+- **Stereo send buses**: reverb and delay buses upgraded from mono to stereo L/R pairs. Sampler voices contribute with constant-power PAN applied; SF voices use their already-panned stereo buffer. Instrument PAN now affects reverb/delay positioning.
+- **Return gain concept**: `reverbWet`/`delayWet` (00-FF) control how loud the send bus output is in the master mix — not an internal wet/dry ratio. The modules always output 100% processed signal. `reverbReturnGain`/`delayReturnGain` floats in AudioEngine apply the gain in the mix loop.
+- **Delay→Reverb routing**: new `delayReverbSend` field (00-FF) in `Project`. Delay is processed first; its wet output is scaled by `delayToReverbSend` and added to the reverb send bus before the reverb processes — zero latency cross-routing.
+- **Effects screen restructure**: WET rows removed from both reverb and delay sections (always 100% wet). New REV row added to delay section for `delayReverbSend`. 8 cursor rows (was 9). New `CURSOR_TO_VIS` mapping for visual layout.
+- **Mixer REV/DEL return volume**: rows 1-2 in the master column display and edit `reverbWet`/`delayWet`. Separate concept from the internal wet/dry that was removed.
+- **Stereo send peak meters**: `sendPeaks[4]` (revL, revR, delL, delR) threaded from C++ `processAudioBlock` through JNI→`OboeAudioBackend`→`AudioEngine`→`TrackerScreenParams`→`PixelPerfectRenderer.drawLayout()`→`MixerState`.
+- **Instrument EQ shortcut**: EQ row on instrument screen opens the EQ editor via SELECT button, using `EqCallerContext.InstrumentEq`, matching the workflow on mixer and effects screens.
+- **Filename extension stripping**: instrument screen shows sample name without `.wav`/`.sf2` extension.
 
 ### Mod Module System Split (Complete - 2026-04-27)
 - Extracted all modulation state machines from `audio-engine.cpp` into focused headers under `mods/`

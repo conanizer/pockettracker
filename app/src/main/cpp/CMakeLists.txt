@@ -19,11 +19,22 @@ add_library(pockettracker SHARED
         effects/primitives/daisysp/compressor.cpp
         effects/primitives/daisysp/crossfade.cpp
         effects/primitives/daisysp/balance.cpp
+        effects/primitives/daisysp/reverbsc.cpp
         effects/modules/dust-chain.cpp
+        effects/soundpipe/pareq.c
 )
 
-# Include current directory so tsf.h can be found
-target_include_directories(pockettracker PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# Flush-to-zero on ARM: prevents denormal floats from causing 10-100x slowdowns
+# in feedback loops (reverb, delay, EQ). Required when using any effects.
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm")
+    target_compile_options(pockettracker PRIVATE -ffast-math)
+endif ()
+
+# Include paths: root (for tsf.h), effects/soundpipe (so pareq.c finds soundpipe.h)
+target_include_directories(pockettracker PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/effects/soundpipe
+)
 
 # Link with Oboe and libm (required by tsf.h for math functions)
 target_link_libraries(pockettracker

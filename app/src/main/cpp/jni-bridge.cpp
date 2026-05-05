@@ -299,9 +299,9 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setIn
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getTrackPeaks(JNIEnv *env, jobject thiz, jfloatArray outArray) {
     if (engine && outArray != nullptr) {
-        float buffer[8];
+        float buffer[16];
         engine->getTrackPeaks(buffer);
-        env->SetFloatArrayRegion(outArray, 0, 8, buffer);
+        env->SetFloatArrayRegion(outArray, 0, 16, buffer);
     }
 }
 
@@ -311,6 +311,15 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getMa
         float buffer[2];
         engine->getMasterPeaks(buffer);
         env->SetFloatArrayRegion(outArray, 0, 2, buffer);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSendPeaks(JNIEnv *env, jobject thiz, jfloatArray outArray) {
+    if (engine && outArray != nullptr) {
+        float buffer[4];
+        engine->getSendPeaks(buffer);
+        env->SetFloatArrayRegion(outArray, 0, 4, buffer);
     }
 }
 
@@ -413,6 +422,66 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setDu
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setDustDepthForRender(JNIEnv *env, jobject thiz, jint depth) {
     if (engine) engine->setDustDepthForRender(depth);
+}
+
+// ===================================
+// EQ / SEND / REVERB / DELAY JNI METHODS
+// ===================================
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setEqBand(
+        JNIEnv *env, jobject thiz,
+        jint slot, jint band, jint type, jint freqHex, jint gainHex, jint qHex) {
+    if (engine) engine->setEqBand(slot, band, type, freqHex, gainHex, qHex);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setInstrumentEqSlot(
+        JNIEnv *env, jobject thiz, jint instrId, jint slot) {
+    if (engine) engine->setInstrumentEqSlot(instrId, slot);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setInstrumentSendLevels(
+        JNIEnv *env, jobject thiz, jint instrId, jint reverbSend, jint delaySend) {
+    if (engine) engine->setInstrumentSendLevels(instrId, reverbSend, delaySend);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setReverbParams(
+        JNIEnv *env, jobject thiz, jint feedbackHex, jint dampHex, jint wetHex) {
+    if (engine) engine->setReverbParams(feedbackHex, dampHex, wetHex);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setDelayParams(
+        JNIEnv *env, jobject thiz,
+        jint timeOrSubdiv, jint feedbackHex, jboolean syncMode, jfloat bpm, jint wetHex) {
+    if (engine) engine->setDelayParams(timeOrSubdiv, feedbackHex, syncMode, bpm, wetHex);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setDelayReverbSend(
+        JNIEnv *env, jobject thiz, jint sendHex) {
+    if (engine) engine->setDelayReverbSend(sendHex);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setReverbInputEq(
+        JNIEnv *env, jobject thiz, jint slot) {
+    if (engine) engine->setReverbInputEq(slot);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setDelayInputEq(
+        JNIEnv *env, jobject thiz, jint slot) {
+    if (engine) engine->setDelayInputEq(slot);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setMasterEqSlot(
+        JNIEnv *env, jobject thiz, jint slot) {
+    if (engine) engine->setMasterEqSlot(slot);
 }
 
 // ===================================

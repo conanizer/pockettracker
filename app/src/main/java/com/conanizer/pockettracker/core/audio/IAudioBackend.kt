@@ -203,10 +203,10 @@ interface IAudioBackend {
     /**
      * Get per-track peak levels for mixer meters.
      *
-     * Returns an array of 8 floats (0.0-1.0) representing peak levels
-     * for tracks 0-7. Values decay over time when no audio is playing.
+     * Returns an array of 16 floats (0.0-1.0) representing stereo peak levels
+     * for tracks 0-7, interleaved [L0, R0, L1, R1, ...]. Values decay over time.
      *
-     * @param buffer Float array of size 8 to fill with peak levels
+     * @param buffer Float array of size 16 to fill with stereo peak levels
      */
     fun getTrackPeaks(buffer: FloatArray)
 
@@ -219,6 +219,9 @@ interface IAudioBackend {
      * @param buffer Float array of size 2 to fill with [left, right] peak levels
      */
     fun getMasterPeaks(buffer: FloatArray)
+
+    /** Returns 4 floats [revL, revR, delL, delR] — reverb and delay send return peaks. */
+    fun getSendPeaks(buffer: FloatArray)
 
     // ===================================
     // OFFLINE RENDER (for WAV export)
@@ -293,6 +296,40 @@ interface IAudioBackend {
     fun setDustDepth(depth: Int)
     // Reset DUST for offline render: clears delay/envelope state before export.
     fun setDustDepthForRender(depth: Int)
+
+    // ===================================
+    // EQ PRESET METHODS
+    // ===================================
+
+    // Set one band of a global EQ preset (0-127). freqHex/gainHex/qHex: 00-FF.
+    fun setEqBand(slot: Int, band: Int, type: Int, freqHex: Int, gainHex: Int, qHex: Int)
+    // Map an instrument to an EQ preset slot (-1 = off). Copies preset at next note trigger.
+    fun setInstrumentEqSlot(instrId: Int, slot: Int)
+
+    // ===================================
+    // SEND LEVEL METHODS
+    // ===================================
+
+    // Set per-instrument reverb/delay send levels (00-FF each).
+    fun setInstrumentSendLevels(instrId: Int, reverbSend: Int, delaySend: Int)
+
+    // ===================================
+    // REVERB / DELAY METHODS
+    // ===================================
+
+    // Set delay→reverb send level. sendHex 00-FF: 00=off, FF=full send.
+    fun setDelayReverbSend(sendHex: Int)
+    // Set reverb bus params. feedbackHex/dampHex/wetHex: 00-FF. wetHex = return gain.
+    fun setReverbParams(feedbackHex: Int, dampHex: Int, wetHex: Int = 0x80)
+    // Set delay bus params. syncMode=false: timeOrSubdiv hex 00-FF (0-2s).
+    //                        syncMode=true:  timeOrSubdiv is subdivision index 0-11, bpm used.
+    //                        wetHex: 00-FF return gain.
+    fun setDelayParams(timeOrSubdiv: Int, feedbackHex: Int, syncMode: Boolean, bpm: Float = 120f, wetHex: Int = 0x80)
+    // Set reverb/delay input EQ from the global preset bank (-1 = off).
+    fun setReverbInputEq(slot: Int)
+    fun setDelayInputEq(slot: Int)
+    // Set master EQ from the global preset bank (-1 = off).
+    fun setMasterEqSlot(slot: Int)
 
     // ===================================
     // TABLE METHODS (Phase 3.5)

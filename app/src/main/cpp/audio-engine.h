@@ -124,6 +124,9 @@ public:
     // Get master peak levels (stereo) for mixer meters
     void getMasterPeaks(float* outBuffer);
 
+    // Get send bus peak levels [revL, revR, delL, delR] for mixer meters
+    void getSendPeaks(float* outBuffer);
+
     // Decay peaks manually (call when audio stream is not running)
     void decayPeaks();
 
@@ -135,6 +138,48 @@ public:
 
     // Set real-time master volume (affects playback immediately)
     void setMasterVolume(float volume);
+
+    // ===================================
+    // EQ METHODS
+    // ===================================
+
+    // Set one band of an EQ preset slot (hex params converted to Hz/dB/Q internally).
+    // slot: 0-127, band: 0-2, type: 0=off 1=loShelf 2=bell 3=hiShelf
+    // freqHex: 00-FF → 20–20kHz log, gainHex: 00-FF → −12..+12 dB, qHex: 00-FF → 0.1–10 log
+    void setEqBand(int slot, int band, int type, int freqHex, int gainHex, int qHex);
+
+    // Map an instrument to an EQ preset slot (-1 = off).
+    // Copies the preset into instrumentParams[instrId] for use at next note trigger.
+    void setInstrumentEqSlot(int instrId, int slot);
+
+    // ===================================
+    // SEND LEVEL METHODS
+    // ===================================
+
+    // Set reverb/delay send levels for an instrument (00-FF each, converted to float).
+    void setInstrumentSendLevels(int instrId, int reverbSend, int delaySend);
+
+    // ===================================
+    // REVERB / DELAY SEND METHODS
+    // ===================================
+
+    // Set reverb params. feedbackHex/dampHex/wetHex: 00-FF. wetHex controls return gain.
+    void setReverbParams(int feedbackHex, int dampHex, int wetHex = 0x80);
+
+    // Set delay params. syncMode false: timeOrSubdiv is hex 00-FF (0-2s).
+    //                   syncMode true:  timeOrSubdiv is subdivision index 0-11, bpm used.
+    //                   wetHex: 00-FF return gain.
+    void setDelayParams(int timeOrSubdiv, int feedbackHex, bool syncMode, float bpm = 120.0f, int wetHex = 0x80);
+
+    // Set delay→reverb send level. sendHex 00-FF: how much delay output feeds into reverb.
+    void setDelayReverbSend(int sendHex);
+
+    // Set reverb/delay input EQ from the global preset bank (-1 = off).
+    void setReverbInputEq(int slot);
+    void setDelayInputEq(int slot);
+
+    // Set master EQ from the global preset bank (-1 = off).
+    void setMasterEqSlot(int slot);
 
     // Set OTT depth (0=bypass, 255=full wet). Enables/disables OTT module.
     void setOttDepth(int depth);
@@ -236,23 +281,38 @@ private:
     std::mutex waveformMutex;
 
     // Per-block per-track peaks: written by processAudioBlock, read by onAudioReady for meters
-    float framePeaksPerTrack[8] = {0};
+    float framePeaksPerTrackL[8] = {0};
+    float framePeaksPerTrackR[8] = {0};
+    float frameSendPeakRevL = 0.0f, frameSendPeakRevR = 0.0f;
+    float frameSendPeakDelL = 0.0f, frameSendPeakDelR = 0.0f;
 
-    // Peak level tracking for mixer meters
-    float trackPeaks[8] = {0};      // Per-track peak levels (0.0 - 1.0)
-    float masterPeakL = 0;          // Master left channel peak
-    float masterPeakR = 0;          // Master right channel peak
+    // Peak level tracking for mixer meters (stereo L/R per track)
+    float trackPeaksL[8] = {0};
+    float trackPeaksR[8] = {0};
+    float masterPeakL = 0.0f;
+    float masterPeakR = 0.0f;
+    float sendPeakRevL = 0.0f, sendPeakRevR = 0.0f;
+    float sendPeakDelL = 0.0f, sendPeakDelR = 0.0f;
     std::mutex peakMutex;
     static constexpr float PEAK_DECAY = 0.95f;  // Decay rate per callback (smooth falloff)
 
     // Real-time volume control (can be changed without rescheduling notes)
     float trackVolumes[8] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
     float masterVolume = 1.0f;
+    float reverbReturnGain  = 0.5f;
+    float delayReturnGain   = 0.5f;
+    float delayToReverbSend = 0.0f;
     std::mutex volumeMutex;
 
-    // Effect chain contexts (send and master bus)
-    SendChain sendChains[3];   // index 0=reverb, 1=delay, 2=chorus (all stubs)
-    MasterChain masterChain;   // final output bus (stub)
+    // Send buses (reverb and delay)
+    ReverbModule reverbSend;
+    DelayModule  delaySend;
+    MasterChain  masterChain;  // final output bus
+
+    // EQ preset bank (128 slots; pre-converted from hex to Hz/dB/Q)
+    struct EqPresetBank {
+        EqBandData bands[3];
+    } eqPresets[128];
 
     // Downsampling for oscilloscope (capture every Nth sample)
     // Lower = faster scrolling (more zoomed in), Higher = slower scrolling (more time visible)

@@ -2,21 +2,24 @@
 #include "modules/limiter-module.h"
 #include "modules/ott-module.h"
 #include "modules/dust-chain.h"
+#include "modules/eq-module.h"
 
 // ===========================================================================
 // MasterChain — final stereo output bus effect chain.
 //
-// Signal flow: mixed output → [OttModule | DustChain] → LimiterModule → output.
+// Signal flow: mixed output → masterEq → [OttModule | DustChain] → LimiterModule → output.
 // Only one bus effect runs at a time; masterFx selects which (0=OTT, 1=DUST).
 // OttModule is bypassed when ott.enabled == false (depth = 0).
 // DustChain is bypassed when dustDepth == 0.
+// masterEq is bypassed when masterEq.active == false (slot = -1).
 // ===========================================================================
 struct MasterChain {
     OttModule         ott;
     skdust::DustChain dust;
     LimiterModule     limiter;
+    EqModule          masterEq;  // Master 3-band parametric EQ (slot -1 = bypass)
 
-    int   masterFx  = 0;    // 0=OTT, 1=DUST
+    int   masterFx  = 0;
     float dustDepth = 0.f;
 
     void reset(float sampleRate = 44100.0f) {
@@ -24,12 +27,12 @@ struct MasterChain {
         dust.prepare(sampleRate, 512, 2);
         dust.reset();
         limiter.reset();
+        masterEq.reset(sampleRate);
     }
 
     void setMasterFx(int fx) {
         masterFx = fx;
         if (fx == 1) {
-            // Reset state when switching to dust so stale envelope/delay data doesn't bleed through.
             dust.reset();
             dust.setDustAmount(dustDepth);
         }
@@ -48,6 +51,16 @@ struct MasterChain {
 
     // Process interleaved stereo buffer in-place. buf layout: [L0, R0, L1, R1, ...]
     void process(float* buf, int numFrames, int channelCount) {
+        // Master EQ (before bus FX)
+        if (masterEq.active) {
+            for (int i = 0; i < numFrames; i++) {
+                float L = buf[i * channelCount];
+                float R = buf[i * channelCount + 1];
+                masterEq.processStereo(L, R);
+                buf[i * channelCount]     = L;
+                buf[i * channelCount + 1] = R;
+            }
+        }
         if (masterFx == 0) {
             if (ott.enabled) ott.process(buf, numFrames, channelCount);
         } else {

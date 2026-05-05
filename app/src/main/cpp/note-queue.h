@@ -253,6 +253,14 @@ public:
     }
 };
 
+// Pre-converted EQ band params (Hz/dB/Q) — populated by setInstrumentEqSlot().
+struct EqBandData {
+    int   type   = 0;       // 0=off 1=loShelf 2=bell 3=hiShelf
+    float freqHz = 1000.0f; // 20–20000 Hz
+    float gainDb = 0.0f;    // −12..+12 dB
+    float q      = 1.0f;    // 0.1–10.0
+};
+
 // Instrument playback parameters
 struct InstrumentParams {
     int startPoint;     // 0-255 (normalized position)
@@ -272,9 +280,18 @@ struct InstrumentParams {
     int filterRes;      // 0-255 (resonance)
     int filterDrive;    // 0-255 (SVF resonance saturation; 128 = DaisySP default)
 
+    // EQ parameters (pre-converted; set by setInstrumentEqSlot)
+    EqBandData eqBands[3];
+    bool eqActive = false;  // true when at least one band is non-bypass
+
+    // Send levels (float 0.0–1.0; set by setInstrumentSendLevels)
+    float reverbSend = 0.0f;
+    float delaySend  = 0.0f;
+
     InstrumentParams() : startPoint(0), endPoint(255), reverse(false),
                          loopMode(0), loopStart(0), drive(0), crush(0), downsample(0),
-                         filterType(0), filterCut(128), filterRes(0), filterDrive(128) {}
+                         filterType(0), filterCut(128), filterRes(0), filterDrive(128),
+                         eqActive(false), reverbSend(0.0f), delaySend(0.0f) {}
 };
 
 // ===================================
