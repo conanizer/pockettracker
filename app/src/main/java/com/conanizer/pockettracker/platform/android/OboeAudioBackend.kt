@@ -62,6 +62,24 @@ class OboeAudioBackend : IAudioBackend {
         Log.d(TAG, "🗑️ Cleared all loaded samples")
     }
 
+    override fun getSampleLength(id: Int): Int = native_getSampleLength(id)
+    override fun getSampleWaveform(id: Int, numBins: Int): FloatArray = native_getSampleWaveform(id, numBins)
+    override fun getSampleWaveformRange(id: Int, startFrame: Int, endFrame: Int, numBins: Int): FloatArray = native_getSampleWaveformRange(id, startFrame, endFrame, numBins)
+    override fun getSampleData(id: Int): FloatArray = native_getSampleData(id)
+    override fun normalizeSample(id: Int, startFrame: Int, endFrame: Int) = native_normalizeSample(id, startFrame, endFrame)
+    override fun fadeInSample(id: Int, startFrame: Int, endFrame: Int) = native_fadeInSample(id, startFrame, endFrame)
+    override fun fadeOutSample(id: Int, startFrame: Int, endFrame: Int) = native_fadeOutSample(id, startFrame, endFrame)
+    override fun silenceRegion(id: Int, startFrame: Int, endFrame: Int) = native_silenceRegion(id, startFrame, endFrame)
+    override fun reverseSample(id: Int, startFrame: Int, endFrame: Int) = native_reverseSample(id, startFrame, endFrame)
+    override fun backupSample(id: Int) = native_backupSample(id)
+    override fun undoSample(id: Int) = native_undoSample(id)
+    override fun getSamplePlaybackPosition(id: Int): Float = native_getSamplePlaybackPosition(id)
+    override fun cropSample(id: Int, startFrame: Int, endFrame: Int) = native_cropSample(id, startFrame, endFrame)
+    override fun deleteSampleRegion(id: Int, startFrame: Int, endFrame: Int) = native_deleteSampleRegion(id, startFrame, endFrame)
+    override fun copyRegion(id: Int, startFrame: Int, endFrame: Int) = native_copyRegion(id, startFrame, endFrame)
+    override fun pasteRegion(id: Int, insertAt: Int) = native_pasteRegion(id, insertAt)
+    override fun getClipboardLength(): Int = native_getClipboardLength()
+
     override fun getTrackActiveNotes(): IntArray = native_getTrackActiveNotes()
 
     override fun scheduleNote(
@@ -580,4 +598,23 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_getSoundfontFirstBankPreset(sfSlot: Int): IntArray
     private external fun native_getSoundfontPresetCount(sfSlot: Int): Int
     private external fun native_getSoundfontPresetAt(sfSlot: Int, index: Int): IntArray
+
+    // Sample editor JNI declarations
+    private external fun native_getSampleLength(id: Int): Int
+    private external fun native_getSampleWaveform(id: Int, numBins: Int): FloatArray
+    private external fun native_getSampleWaveformRange(id: Int, startFrame: Int, endFrame: Int, numBins: Int): FloatArray
+    private external fun native_getSampleData(id: Int): FloatArray
+    private external fun native_normalizeSample(id: Int, startFrame: Int, endFrame: Int)
+    private external fun native_fadeInSample(id: Int, startFrame: Int, endFrame: Int)
+    private external fun native_fadeOutSample(id: Int, startFrame: Int, endFrame: Int)
+    private external fun native_silenceRegion(id: Int, startFrame: Int, endFrame: Int)
+    private external fun native_reverseSample(id: Int, startFrame: Int, endFrame: Int)
+    private external fun native_backupSample(id: Int)
+    private external fun native_undoSample(id: Int)
+    private external fun native_getSamplePlaybackPosition(id: Int): Float
+    private external fun native_cropSample(id: Int, startFrame: Int, endFrame: Int)
+    private external fun native_deleteSampleRegion(id: Int, startFrame: Int, endFrame: Int)
+    private external fun native_copyRegion(id: Int, startFrame: Int, endFrame: Int)
+    private external fun native_pasteRegion(id: Int, insertAt: Int)
+    private external fun native_getClipboardLength(): Int
 }

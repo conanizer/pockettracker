@@ -18,6 +18,8 @@ AudioEngine::AudioEngine() {
         samples[i] = nullptr;
         sampleLengths[i] = 0;
         instrumentParams[i] = InstrumentParams();
+        sampleBackups[i] = nullptr;
+        sampleBackupLengths[i] = 0;
     }
     globalFrameCounter = 0;
 
@@ -34,10 +36,10 @@ AudioEngine::AudioEngine() {
 AudioEngine::~AudioEngine() {
     closeStream();
     for (int i = 0; i < 256; i++) {
-        if (samples[i]) {
-            delete[] samples[i];
-        }
+        if (samples[i])       delete[] samples[i];
+        if (sampleBackups[i]) delete[] sampleBackups[i];
     }
+    delete[] sampleClipboard;
 }
 
 // ============================================================
@@ -157,6 +159,212 @@ void AudioEngine::clearAllSamples() {
         sampleLengths[i] = 0;
     }
     LOGD("All samples cleared");
+}
+
+// ============================================================
+// SAMPLE EDITOR OPERATIONS
+// ============================================================
+
+int AudioEngine::getSampleLength(int id) {
+    if (id < 0 || id >= 256 || !samples[id]) return 0;
+    return sampleLengths[id];
+}
+
+void AudioEngine::getSampleWaveform(int id, float* out, int numBins) {
+    if (id < 0 || id >= 256 || !samples[id] || numBins <= 0) {
+        for (int i = 0; i < numBins * 2; i++) out[i] = 0.0f;
+        return;
+    }
+    int len = sampleLengths[id];
+    float* buf = samples[id];
+    for (int bin = 0; bin < numBins; bin++) {
+        int start = (int)((long long)bin * len / numBins);
+        int end   = (int)((long long)(bin + 1) * len / numBins);
+        if (end > len) end = len;
+        float minV = 0.0f, maxV = 0.0f;
+        for (int i = start; i < end; i++) {
+            if (buf[i] < minV) minV = buf[i];
+            if (buf[i] > maxV) maxV = buf[i];
+        }
+        out[bin * 2]     = minV;
+        out[bin * 2 + 1] = maxV;
+    }
+}
+
+void AudioEngine::getSampleWaveformRange(int id, int startFrame, int endFrame, float* out, int numBins) {
+    if (id < 0 || id >= 256 || !samples[id] || numBins <= 0) {
+        for (int i = 0; i < numBins * 2; i++) out[i] = 0.0f;
+        return;
+    }
+    int len = sampleLengths[id];
+    startFrame = std::max(0, std::min(startFrame, len));
+    endFrame   = std::max(startFrame, std::min(endFrame, len));
+    int rangeLen = endFrame - startFrame;
+    if (rangeLen <= 0) {
+        for (int i = 0; i < numBins * 2; i++) out[i] = 0.0f;
+        return;
+    }
+    float* buf = samples[id];
+    for (int bin = 0; bin < numBins; bin++) {
+        int s = startFrame + (int)((long long)bin * rangeLen / numBins);
+        int e = startFrame + (int)((long long)(bin + 1) * rangeLen / numBins);
+        if (e > endFrame) e = endFrame;
+        float minV = 0.0f, maxV = 0.0f;
+        for (int i = s; i < e; i++) {
+            if (buf[i] < minV) minV = buf[i];
+            if (buf[i] > maxV) maxV = buf[i];
+        }
+        out[bin * 2]     = minV;
+        out[bin * 2 + 1] = maxV;
+    }
+}
+
+void AudioEngine::getSampleData(int id, float* out) {
+    if (id < 0 || id >= 256 || !samples[id]) return;
+    std::memcpy(out, samples[id], sampleLengths[id] * sizeof(float));
+}
+
+float AudioEngine::getSamplePlaybackPosition(int id) {
+    if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] <= 0) return -1.0f;
+    for (int v = 0; v < MAX_VOICES; v++) {
+        const Voice& voice = voices[v];
+        if (voice.isActive && !voice.isFadingOut && voice.sampleData == samples[id]) {
+            return voice.position / (float)sampleLengths[id];
+        }
+    }
+    return -1.0f;
+}
+
+void AudioEngine::normalizeSample(int id, int startFrame, int endFrame) {
+    if (id < 0 || id >= 256 || !samples[id]) return;
+    startFrame = std::max(0, startFrame);
+    endFrame   = std::min(sampleLengths[id], endFrame);
+    if (startFrame >= endFrame) return;
+    float peak = 0.0f;
+    for (int i = startFrame; i < endFrame; i++) {
+        float v = std::abs(samples[id][i]);
+        if (v > peak) peak = v;
+    }
+    if (peak < 0.0001f) return;
+    float gain = 1.0f / peak;
+    for (int i = startFrame; i < endFrame; i++) samples[id][i] *= gain;
+}
+
+void AudioEngine::fadeInSample(int id, int startFrame, int endFrame) {
+    if (id < 0 || id >= 256 || !samples[id]) return;
+    startFrame = std::max(0, startFrame);
+    endFrame   = std::min(sampleLengths[id], endFrame);
+    int count  = endFrame - startFrame;
+    if (count <= 0) return;
+    for (int i = 0; i < count; i++)
+        samples[id][startFrame + i] *= (float)i / count;
+}
+
+void AudioEngine::fadeOutSample(int id, int startFrame, int endFrame) {
+    if (id < 0 || id >= 256 || !samples[id]) return;
+    startFrame = std::max(0, startFrame);
+    endFrame   = std::min(sampleLengths[id], endFrame);
+    int count  = endFrame - startFrame;
+    if (count <= 0) return;
+    for (int i = 0; i < count; i++)
+        samples[id][startFrame + i] *= 1.0f - (float)i / count;
+}
+
+void AudioEngine::silenceRegion(int id, int startFrame, int endFrame) {
+    if (id < 0 || id >= 256 || !samples[id]) return;
+    startFrame = std::max(0, startFrame);
+    endFrame   = std::min(sampleLengths[id], endFrame);
+    std::memset(samples[id] + startFrame, 0, (endFrame - startFrame) * sizeof(float));
+}
+
+void AudioEngine::reverseSample(int id, int startFrame, int endFrame) {
+    if (id < 0 || id >= 256 || !samples[id]) return;
+    startFrame = std::max(0, startFrame);
+    endFrame   = std::min(sampleLengths[id], endFrame);
+    std::reverse(samples[id] + startFrame, samples[id] + endFrame);
+}
+
+void AudioEngine::backupSample(int id) {
+    if (id < 0 || id >= 256 || !samples[id]) return;
+    delete[] sampleBackups[id];
+    int len = sampleLengths[id];
+    sampleBackups[id] = new float[len];
+    std::memcpy(sampleBackups[id], samples[id], len * sizeof(float));
+    sampleBackupLengths[id] = len;
+}
+
+void AudioEngine::undoSample(int id) {
+    if (id < 0 || id >= 256 || !sampleBackups[id]) return;
+    delete[] samples[id];
+    int len = sampleBackupLengths[id];
+    samples[id] = new float[len];
+    std::memcpy(samples[id], sampleBackups[id], len * sizeof(float));
+    sampleLengths[id] = len;
+}
+
+void AudioEngine::cropSample(int id, int startFrame, int endFrame) {
+    if (id < 0 || id >= 256 || !samples[id]) return;
+    startFrame = std::max(0, startFrame);
+    endFrame   = std::min(sampleLengths[id], endFrame);
+    if (startFrame >= endFrame) return;
+    int newLen = endFrame - startFrame;
+    float* buf = new float[newLen];
+    std::memcpy(buf, samples[id] + startFrame, newLen * sizeof(float));
+    delete[] samples[id];
+    samples[id] = buf;
+    sampleLengths[id] = newLen;
+    instrumentParams[id].startPoint = 0;
+    instrumentParams[id].endPoint   = 255;
+}
+
+void AudioEngine::deleteSampleRegion(int id, int startFrame, int endFrame) {
+    if (id < 0 || id >= 256 || !samples[id]) return;
+    startFrame = std::max(0, startFrame);
+    endFrame   = std::min(sampleLengths[id], endFrame);
+    if (startFrame >= endFrame) return;
+    int oldLen = sampleLengths[id];
+    int newLen = oldLen - (endFrame - startFrame);
+    if (newLen <= 0) return;
+    float* buf = new float[newLen];
+    std::memcpy(buf,               samples[id],             startFrame * sizeof(float));
+    std::memcpy(buf + startFrame,  samples[id] + endFrame,  (oldLen - endFrame) * sizeof(float));
+    delete[] samples[id];
+    samples[id] = buf;
+    sampleLengths[id] = newLen;
+    instrumentParams[id].startPoint = 0;
+    instrumentParams[id].endPoint   = 255;
+}
+
+void AudioEngine::copyRegion(int id, int startFrame, int endFrame) {
+    if (id < 0 || id >= 256 || !samples[id]) return;
+    startFrame = std::max(0, startFrame);
+    endFrame   = std::min(sampleLengths[id], endFrame);
+    if (startFrame >= endFrame) return;
+    int len = endFrame - startFrame;
+    delete[] sampleClipboard;
+    sampleClipboard = new float[len];
+    std::memcpy(sampleClipboard, samples[id] + startFrame, len * sizeof(float));
+    sampleClipboardLength = len;
+}
+
+void AudioEngine::pasteRegion(int id, int insertAt) {
+    if (id < 0 || id >= 256 || !samples[id] || !sampleClipboard || sampleClipboardLength <= 0) return;
+    insertAt = std::max(0, std::min(sampleLengths[id], insertAt));
+    int oldLen = sampleLengths[id];
+    int newLen = oldLen + sampleClipboardLength;
+    float* buf = new float[newLen];
+    std::memcpy(buf,                             samples[id],          insertAt * sizeof(float));
+    std::memcpy(buf + insertAt,                  sampleClipboard,      sampleClipboardLength * sizeof(float));
+    std::memcpy(buf + insertAt + sampleClipboardLength, samples[id] + insertAt, (oldLen - insertAt) * sizeof(float));
+    delete[] samples[id];
+    samples[id] = buf;
+    sampleLengths[id] = newLen;
+    instrumentParams[id].startPoint = 0;
+    instrumentParams[id].endPoint   = 255;
+}
+
+int AudioEngine::getClipboardLength() {
+    return sampleClipboardLength;
 }
 
 void AudioEngine::setEqBand(int slot, int band, int type, int freqHex, int gainHex, int qHex) {

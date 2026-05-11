@@ -830,6 +830,130 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSo
     return result;
 }
 
+// ============================================================
+// SAMPLE EDITOR OPERATIONS
+// ============================================================
+
+JNIEXPORT jint JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSampleLength(
+        JNIEnv *env, jobject, jint id) {
+    if (!engine) return 0;
+    return (jint)engine->getSampleLength((int)id);
+}
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSampleWaveform(
+        JNIEnv *env, jobject, jint id, jint numBins) {
+    jfloatArray result = env->NewFloatArray(numBins * 2);
+    if (!engine || numBins <= 0) return result;
+    jfloat* buf = env->GetFloatArrayElements(result, nullptr);
+    engine->getSampleWaveform((int)id, buf, (int)numBins);
+    env->ReleaseFloatArrayElements(result, buf, 0);
+    return result;
+}
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSampleWaveformRange(
+        JNIEnv *env, jobject, jint id, jint startFrame, jint endFrame, jint numBins) {
+    jfloatArray result = env->NewFloatArray(numBins * 2);
+    if (!engine || numBins <= 0) return result;
+    jfloat* buf = env->GetFloatArrayElements(result, nullptr);
+    engine->getSampleWaveformRange((int)id, (int)startFrame, (int)endFrame, buf, (int)numBins);
+    env->ReleaseFloatArrayElements(result, buf, 0);
+    return result;
+}
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSampleData(
+        JNIEnv *env, jobject, jint id) {
+    if (!engine) return env->NewFloatArray(0);
+    int len = engine->getSampleLength((int)id);
+    if (len <= 0) return env->NewFloatArray(0);
+    jfloatArray result = env->NewFloatArray(len);
+    jfloat* buf = env->GetFloatArrayElements(result, nullptr);
+    engine->getSampleData((int)id, buf);
+    env->ReleaseFloatArrayElements(result, buf, 0);
+    return result;
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1normalizeSample(
+        JNIEnv *env, jobject, jint id, jint startFrame, jint endFrame) {
+    if (engine) engine->normalizeSample((int)id, (int)startFrame, (int)endFrame);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1fadeInSample(
+        JNIEnv *env, jobject, jint id, jint startFrame, jint endFrame) {
+    if (engine) engine->fadeInSample((int)id, (int)startFrame, (int)endFrame);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1fadeOutSample(
+        JNIEnv *env, jobject, jint id, jint startFrame, jint endFrame) {
+    if (engine) engine->fadeOutSample((int)id, (int)startFrame, (int)endFrame);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1silenceRegion(
+        JNIEnv *env, jobject, jint id, jint startFrame, jint endFrame) {
+    if (engine) engine->silenceRegion((int)id, (int)startFrame, (int)endFrame);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1reverseSample(
+        JNIEnv *env, jobject, jint id, jint startFrame, jint endFrame) {
+    if (engine) engine->reverseSample((int)id, (int)startFrame, (int)endFrame);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1backupSample(
+        JNIEnv *env, jobject, jint id) {
+    if (engine) engine->backupSample((int)id);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1undoSample(
+        JNIEnv *env, jobject, jint id) {
+    if (engine) engine->undoSample((int)id);
+}
+
+JNIEXPORT jfloat JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSamplePlaybackPosition(
+        JNIEnv*, jobject, jint id) {
+    return engine ? engine->getSamplePlaybackPosition((int)id) : -1.0f;
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1cropSample(
+        JNIEnv*, jobject, jint id, jint startFrame, jint endFrame) {
+    if (engine) engine->cropSample((int)id, (int)startFrame, (int)endFrame);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1deleteSampleRegion(
+        JNIEnv*, jobject, jint id, jint startFrame, jint endFrame) {
+    if (engine) engine->deleteSampleRegion((int)id, (int)startFrame, (int)endFrame);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1copyRegion(
+        JNIEnv*, jobject, jint id, jint startFrame, jint endFrame) {
+    if (engine) engine->copyRegion((int)id, (int)startFrame, (int)endFrame);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1pasteRegion(
+        JNIEnv*, jobject, jint id, jint insertAt) {
+    if (engine) engine->pasteRegion((int)id, (int)insertAt);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getClipboardLength(
+        JNIEnv*, jobject) {
+    return engine ? engine->getClipboardLength() : 0;
+}
+
 } // extern "C"
 
 #pragma clang diagnostic pop

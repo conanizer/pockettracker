@@ -654,6 +654,32 @@ class AudioEngine(
         backend.clearAllSamples()
     }
 
+    // Sample editor operations — thin wrappers over IAudioBackend
+    fun getSampleLength(instrumentId: Int): Int = backend.getSampleLength(instrumentId)
+    fun getSampleWaveform(instrumentId: Int, numBins: Int): FloatArray = backend.getSampleWaveform(instrumentId, numBins)
+    fun getSampleWaveformRange(instrumentId: Int, startFrame: Int, endFrame: Int, numBins: Int): FloatArray = backend.getSampleWaveformRange(instrumentId, startFrame, endFrame, numBins)
+    fun getSampleData(instrumentId: Int): FloatArray = backend.getSampleData(instrumentId)
+    fun normalizeSample(instrumentId: Int, startFrame: Int, endFrame: Int) = backend.normalizeSample(instrumentId, startFrame, endFrame)
+    fun fadeInSample(instrumentId: Int, startFrame: Int, endFrame: Int) = backend.fadeInSample(instrumentId, startFrame, endFrame)
+    fun fadeOutSample(instrumentId: Int, startFrame: Int, endFrame: Int) = backend.fadeOutSample(instrumentId, startFrame, endFrame)
+    fun silenceRegion(instrumentId: Int, startFrame: Int, endFrame: Int) = backend.silenceRegion(instrumentId, startFrame, endFrame)
+    fun reverseSample(instrumentId: Int, startFrame: Int, endFrame: Int) = backend.reverseSample(instrumentId, startFrame, endFrame)
+    fun backupSample(instrumentId: Int) = backend.backupSample(instrumentId)
+    fun undoSample(instrumentId: Int) = backend.undoSample(instrumentId)
+    fun getSamplePlaybackPosition(instrumentId: Int): Float = backend.getSamplePlaybackPosition(instrumentId)
+    fun cropSample(instrumentId: Int, startFrame: Int, endFrame: Int) = backend.cropSample(instrumentId, startFrame, endFrame)
+    fun deleteSampleRegion(instrumentId: Int, startFrame: Int, endFrame: Int) = backend.deleteSampleRegion(instrumentId, startFrame, endFrame)
+    fun copyRegion(instrumentId: Int, startFrame: Int, endFrame: Int) = backend.copyRegion(instrumentId, startFrame, endFrame)
+    fun pasteRegion(instrumentId: Int, insertAt: Int) = backend.pasteRegion(instrumentId, insertAt)
+    fun getClipboardLength(): Int = backend.getClipboardLength()
+
+    // Recover the original WAV sample rate from the stored rate ratio
+    fun getOriginalSampleRate(instrumentId: Int): Int {
+        val ratio = sampleRateRatios[instrumentId] ?: return 44100
+        val deviceRate = getDeviceSampleRate()
+        return (deviceRate / ratio).toInt().coerceAtLeast(8000)
+    }
+
     /**
      * Returns per-track active note from the C++ voice pool.
      * Each element is Note.EMPTY if no voice is playing on that track,

@@ -47,6 +47,25 @@ interface IAudioBackend {
      */
     fun clearAllSamples()
 
+    // Sample editor operations
+    fun getSampleLength(id: Int): Int
+    fun getSampleWaveform(id: Int, numBins: Int): FloatArray
+    fun getSampleWaveformRange(id: Int, startFrame: Int, endFrame: Int, numBins: Int): FloatArray
+    fun getSampleData(id: Int): FloatArray
+    fun normalizeSample(id: Int, startFrame: Int, endFrame: Int)
+    fun fadeInSample(id: Int, startFrame: Int, endFrame: Int)
+    fun fadeOutSample(id: Int, startFrame: Int, endFrame: Int)
+    fun silenceRegion(id: Int, startFrame: Int, endFrame: Int)
+    fun reverseSample(id: Int, startFrame: Int, endFrame: Int)
+    fun backupSample(id: Int)
+    fun undoSample(id: Int)
+    fun getSamplePlaybackPosition(id: Int): Float
+    fun cropSample(id: Int, startFrame: Int, endFrame: Int)
+    fun deleteSampleRegion(id: Int, startFrame: Int, endFrame: Int)
+    fun copyRegion(id: Int, startFrame: Int, endFrame: Int)
+    fun pasteRegion(id: Int, insertAt: Int)
+    fun getClipboardLength(): Int
+
     /**
      * Returns an IntArray[8] where each element is (octave * 12 + pitch) for the active voice
      * on that track, or -1 if no voice is currently playing on that track.

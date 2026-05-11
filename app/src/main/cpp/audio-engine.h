@@ -1,6 +1,7 @@
 #pragma once
 #include <oboe/Oboe.h>
 #include <atomic>
+#include <cstring>
 #include <mutex>
 #include <vector>
 #include <algorithm>
@@ -43,6 +44,28 @@ public:
     int getSampleRate();
 
     void resumeStream();
+
+    // ===================================
+    // SAMPLE EDITOR OPERATIONS
+    // ===================================
+    int   getSampleLength(int id);
+    void  getSampleWaveform(int id, float* out, int numBins);
+    void  getSampleWaveformRange(int id, int startFrame, int endFrame, float* out, int numBins);
+    void  getSampleData(int id, float* out);  // raw float copy for WAV export
+    float getSamplePlaybackPosition(int id);  // 0.0-1.0 fraction of active voice, or -1 if silent
+    void normalizeSample(int id, int startFrame, int endFrame);
+    void fadeInSample(int id, int startFrame, int endFrame);
+    void fadeOutSample(int id, int startFrame, int endFrame);
+    void silenceRegion(int id, int startFrame, int endFrame);
+    void reverseSample(int id, int startFrame, int endFrame);
+    void backupSample(int id);
+    void undoSample(int id);
+    // Destructive resize operations
+    void cropSample(int id, int startFrame, int endFrame);
+    void deleteSampleRegion(int id, int startFrame, int endFrame);
+    void copyRegion(int id, int startFrame, int endFrame);
+    void pasteRegion(int id, int insertAt);
+    int  getClipboardLength();
 
     // ===================================
     // CORE AUDIO PROCESSING BLOCK
@@ -259,7 +282,11 @@ private:
     std::shared_ptr<oboe::AudioStream> stream;
     Voice voices[MAX_VOICES];
     float* samples[256];
-    int sampleLengths[256];
+    int    sampleLengths[256];
+    float* sampleBackups[256];        // single-level undo buffers
+    int    sampleBackupLengths[256];
+    float* sampleClipboard = nullptr; // cross-operation copy/paste buffer
+    int    sampleClipboardLength = 0;
     InstrumentParams instrumentParams[256];
     InstrumentModSlot instrumentModSlots[256][4]; // [sampleId][slotIndex]
 

@@ -51,6 +51,7 @@ import com.conanizer.pockettracker.core.logic.RenderController
 import com.conanizer.pockettracker.platform.android.OboeAudioBackend
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.conanizer.pockettracker.platform.android.AndroidResourceLoader
@@ -62,6 +63,7 @@ import com.conanizer.pockettracker.platform.android.ButtonSoundManager
 import com.conanizer.pockettracker.platform.android.ButtonHapticManager
 import com.conanizer.pockettracker.core.storage.FileInfo
 import com.conanizer.pockettracker.core.storage.FileSortMode
+import com.conanizer.pockettracker.core.storage.WavWriter
 import java.io.File
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -659,6 +661,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // Values: "LOAD_SOURCE", "LOAD_PRESET", "SAVE_PRESET"
     var instrumentFileBrowserAction by remember { mutableStateOf("") }
 
+    // Sample editor module and state
+    val sampleEditorModule = remember { SampleEditorModule() }
+    var sampleEditorState by remember { mutableStateOf(SampleEditorState(sampleId = 0, instrumentId = 0)) }
+
     // Reset note/volume combo when leaving PHRASE screen
     // (instrument is kept so quick-insert uses the last instrument you worked with)
     var wasPhraseScreen by remember { mutableStateOf(false) }
@@ -681,6 +687,62 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         fileBrowserState = fileBrowserState.copy(
             items = fileBrowserModule.sortItems(items, fileBrowserState.sortMode)
         )
+    }
+
+    // Load waveform data whenever the sample editor becomes the active screen or instrument changes
+    LaunchedEffect(trackerController.currentScreen, sampleEditorState.instrumentId) {
+        if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR) {
+            val instId = sampleEditorState.instrumentId
+            val totalFrames = audioEngine.getSampleLength(instId)
+            val waveformData = audioEngine.getSampleWaveform(instId, 620)
+            val sampleRate   = audioEngine.getOriginalSampleRate(instId)
+            val inst = trackerController.project.instruments[instId]
+            sampleEditorState = sampleEditorState.copy(
+                totalFrames  = totalFrames,
+                waveformData = waveformData,
+                sampleRate   = sampleRate,
+                selectionStart = (inst.sampleStart.toLong() * totalFrames) / 255L,
+                selectionEnd   = (inst.sampleEnd.toLong()   * totalFrames) / 255L
+            )
+        }
+    }
+
+    // Reload zoomed waveform when zoom level or view window changes
+    val sampleEditorZoom      = sampleEditorState.zoomLevel
+    val sampleEditorViewStart = sampleEditorState.viewStart
+    LaunchedEffect(sampleEditorZoom, sampleEditorViewStart) {
+        if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.totalFrames > 0) {
+            val instId     = sampleEditorState.instrumentId
+            val totalFrames = sampleEditorState.totalFrames
+            // Compute viewEnd from the captured keys to stay consistent
+            val viewEnd = if (sampleEditorZoom == 0) totalFrames.toLong()
+                          else (sampleEditorViewStart + (totalFrames.toLong() ushr sampleEditorZoom))
+                                  .coerceAtMost(totalFrames.toLong())
+            val waveformData = if (sampleEditorZoom == 0) {
+                audioEngine.getSampleWaveform(instId, 620)
+            } else {
+                audioEngine.getSampleWaveformRange(
+                    instId,
+                    sampleEditorViewStart.toInt(),
+                    viewEnd.toInt(),
+                    620
+                )
+            }
+            sampleEditorState = sampleEditorState.copy(waveformData = waveformData)
+        }
+    }
+
+    // Poll playback position for real-time waveform marker (~30fps)
+    LaunchedEffect(Unit) {
+        while (true) {
+            if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR) {
+                val pos = audioEngine.getSamplePlaybackPosition(sampleEditorState.sampleId)
+                if (pos != sampleEditorState.playbackPosition) {
+                    sampleEditorState = sampleEditorState.copy(playbackPosition = pos)
+                }
+            }
+            delay(33)
+        }
     }
 
     // (Audio engine cleanup moved to line 168-172 with new architecture)
@@ -1060,6 +1122,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     applyFileBrowserInputAction(action)
                 }
             }
+            ScreenType.SAMPLE_EDITOR -> {
+                val context = sampleEditorModule.getCursorContext(sampleEditorState)
+                val action = handlerFunction(context)
+                val result = sampleEditorModule.handleInput(sampleEditorState, action)
+                if (result.modified) {
+                    sampleEditorState = sampleEditorState.applyResult(result).copy(isModified = true)
+                }
+            }
             ScreenType.INSTRUMENT -> {
                 val inst = trackerController.project.instruments[trackerController.currentInstrument]
                 val instrumentState = InstrumentState(
@@ -1287,6 +1357,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             fileBrowserState = fileBrowserState.copy(cursor = newCursor, scroll = newScroll)
                         }
                     }
+                    ScreenType.SAMPLE_EDITOR -> {
+                        val newRow = SampleEditorModule.rowAbove(sampleEditorState.cursorRow)
+                        sampleEditorState = sampleEditorState.copy(
+                            cursorRow = newRow,
+                            cursorCol = sampleEditorState.cursorCol.coerceAtMost(
+                                SampleEditorModule.maxColForRow(newRow, sampleEditorState.sliceMethod))
+                        )
+                    }
                     else -> trackerController.moveCursorUp()
                 }
             }
@@ -1308,6 +1386,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             }
                             fileBrowserState = fileBrowserState.copy(cursor = newCursor, scroll = newScroll)
                         }
+                    }
+                    ScreenType.SAMPLE_EDITOR -> {
+                        val newRow = SampleEditorModule.rowBelow(sampleEditorState.cursorRow)
+                        sampleEditorState = sampleEditorState.copy(
+                            cursorRow = newRow,
+                            cursorCol = sampleEditorState.cursorCol.coerceAtMost(
+                                SampleEditorModule.maxColForRow(newRow, sampleEditorState.sliceMethod))
+                        )
                     }
                     else -> trackerController.moveCursorDown()
                 }
@@ -1336,6 +1422,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             }
                         }
                     }
+                    ScreenType.SAMPLE_EDITOR -> {
+                        if (sampleEditorState.cursorCol > 0) {
+                            sampleEditorState = sampleEditorState.copy(cursorCol = sampleEditorState.cursorCol - 1)
+                        }
+                    }
                     else -> trackerController.moveCursorLeft()
                 }
             }
@@ -1362,6 +1453,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     fileBrowserState = fileBrowserState.copy(cursor = newCursor, scroll = newScroll)
                                 }
                             }
+                        }
+                    }
+                    ScreenType.SAMPLE_EDITOR -> {
+                        val maxCol = SampleEditorModule.maxColForRow(sampleEditorState.cursorRow, sampleEditorState.sliceMethod)
+                        if (sampleEditorState.cursorCol < maxCol) {
+                            sampleEditorState = sampleEditorState.copy(cursorCol = sampleEditorState.cursorCol + 1)
                         }
                     }
                     else -> trackerController.moveCursorRight()
@@ -1504,6 +1601,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     return@buttonA
                 }
 
+                // SAMPLE EDITOR confirm-close dialog: A = YES (close without saving)
+                if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.showConfirmClose) {
+                    trackerController.currentScreen = previousScreen
+                    return@buttonA
+                }
+
                 // Read directly from trackerController to avoid stale captured values
                 when (trackerController.currentScreen) {
                     // FILE BROWSER: Open folder, load file, or confirm actions
@@ -1549,6 +1652,25 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                                             statusMessage = "LOAD FAILED",
                                                             statusSuccess = false
                                                         )
+                                                    }
+                                                }
+                                            }
+                                            ScreenType.SAMPLE_EDITOR -> {
+                                                // Load a new WAV for the sample editor's instrument
+                                                if (item.file.extension.lowercase() == "wav") {
+                                                    val result = instrumentController.loadSampleFromFile(
+                                                        trackerController.project, item.file.absolutePath
+                                                    )
+                                                    if (result is com.conanizer.pockettracker.core.logic.LoadResult.Success) {
+                                                        trackerController.projectVersion++
+                                                        // Trigger waveform reload by bumping the instrumentId key
+                                                        sampleEditorState = sampleEditorState.copy(
+                                                            sampleFilePath = item.file.absolutePath,
+                                                            isModified = false
+                                                        )
+                                                        trackerController.currentScreen = ScreenType.SAMPLE_EDITOR
+                                                    } else {
+                                                        fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
                                                     }
                                                 }
                                             }
@@ -1883,10 +2005,192 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                             )
                                         }
                                     }
-                                    3 -> { /* EDIT — placeholder for future waveform editor */ }
+                                    3 -> {  // EDIT — open sample editor
+                                        val inst = trackerController.project.instruments[trackerController.currentInstrument]
+                                        val sampleId = trackerController.currentInstrument
+                                        sampleEditorState = SampleEditorState(
+                                            sampleId     = sampleId,
+                                            instrumentId = trackerController.currentInstrument,
+                                            sampleName   = inst.sampleFilePath?.substringAfterLast('/')?.substringBeforeLast('.') ?: "",
+                                            sampleFilePath = inst.sampleFilePath,
+                                            cursorRow    = 1,
+                                            cursorCol    = 0,
+                                            isModified   = false
+                                        )
+                                        previousScreen = trackerController.currentScreen
+                                        trackerController.currentScreen = ScreenType.SAMPLE_EDITOR
+                                    }
                                 }
                             }
                             // Other rows use A+direction combos for value editing
+                        }
+                    }
+
+                    // SAMPLE EDITOR: Execute operations on action rows 13, 14, 19
+                    ScreenType.SAMPLE_EDITOR -> {
+                        val s = sampleEditorState
+                        val instId = s.instrumentId
+                        fun doDestructiveOp(op: () -> Unit) {
+                            audioEngine.backupSample(instId)
+                            op()
+                            sampleEditorState = sampleEditorState.copy(
+                                totalFrames  = audioEngine.getSampleLength(instId),
+                                waveformData = audioEngine.getSampleWaveform(instId, 620),
+                                isModified   = true
+                            )
+                        }
+                        val startF = s.selectionStart.toInt()
+                        val endF   = s.selectionEnd.toInt()
+                        // Helper to refresh waveform + reset selection to full sample after resize
+                        fun afterResize() {
+                            val newLen = audioEngine.getSampleLength(instId)
+                            sampleEditorState = sampleEditorState.copy(
+                                totalFrames  = newLen,
+                                waveformData = audioEngine.getSampleWaveform(instId, 620),
+                                selectionStart = 0L,
+                                selectionEnd   = newLen.toLong(),
+                                isModified   = true
+                            )
+                        }
+                        when (s.cursorRow) {
+                            13 -> when (s.cursorCol) {
+                                0 -> { // CROP — destructively trim sample to selection
+                                    if (startF < endF) {
+                                        audioEngine.backupSample(instId)
+                                        audioEngine.cropSample(instId, startF, endF)
+                                        afterResize()
+                                    }
+                                }
+                                1 -> { // COPY — copy selection to clipboard (non-destructive)
+                                    audioEngine.copyRegion(instId, startF, endF)
+                                }
+                                2 -> { // CUT — copy + delete selection
+                                    if (startF < endF) {
+                                        audioEngine.backupSample(instId)
+                                        audioEngine.copyRegion(instId, startF, endF)
+                                        audioEngine.deleteSampleRegion(instId, startF, endF)
+                                        afterResize()
+                                    }
+                                }
+                                3 -> { // DUPL — duplicate selection (insert copy at end)
+                                    if (startF < endF) {
+                                        audioEngine.backupSample(instId)
+                                        audioEngine.copyRegion(instId, startF, endF)
+                                        audioEngine.pasteRegion(instId, sampleEditorState.totalFrames)
+                                        afterResize()
+                                    }
+                                }
+                                4 -> { // PASTE — insert clipboard at selection start
+                                    if (audioEngine.getClipboardLength() > 0) {
+                                        audioEngine.backupSample(instId)
+                                        audioEngine.pasteRegion(instId, startF)
+                                        afterResize()
+                                    }
+                                }
+                                5 -> { // DEL — delete selection region
+                                    if (startF < endF) {
+                                        audioEngine.backupSample(instId)
+                                        audioEngine.deleteSampleRegion(instId, startF, endF)
+                                        afterResize()
+                                    }
+                                }
+                            }
+                            14 -> when (s.cursorCol) {
+                                0 -> doDestructiveOp { audioEngine.normalizeSample(instId, startF, endF) }
+                                1 -> doDestructiveOp { audioEngine.fadeInSample(instId, startF, endF) }
+                                2 -> doDestructiveOp { audioEngine.fadeOutSample(instId, startF, endF) }
+                                3 -> doDestructiveOp { audioEngine.silenceRegion(instId, startF, endF) }
+                                4 -> doDestructiveOp { audioEngine.reverseSample(instId, startF, endF) }
+                                5 -> { // UNDO
+                                    audioEngine.undoSample(instId)
+                                    sampleEditorState = sampleEditorState.copy(
+                                        totalFrames  = audioEngine.getSampleLength(instId),
+                                        waveformData = audioEngine.getSampleWaveform(instId, 620)
+                                    )
+                                }
+                            }
+                            16 -> if (s.cursorCol == 2) { // APPLY FX — not yet implemented
+                            }
+                            18 -> { // NAME — open QWERTY keyboard for renaming
+                                val currentName = s.sampleName
+                                qwertyKeyboardState = QwertyKeyboardState(
+                                    isOpen       = true,
+                                    text         = currentName,
+                                    maxLength    = 20,
+                                    textCursor   = currentName.length.coerceAtMost(20),
+                                    keyCursorRow = 0,
+                                    keyCursorCol = 0,
+                                    layout       = 0,
+                                    fieldLabel   = "SAMPLE NAME:",
+                                    originalText = currentName,
+                                    insertBefore = insertBefore,
+                                    context      = QwertyContext.SAMPLE_NAME,
+                                    contextExtra = fileManager.getSamplesDirectory()
+                                )
+                            }
+                            19 -> when (s.cursorCol) {
+                                0 -> { // LOAD: open file browser for WAV
+                                    instrumentFileBrowserAction = "LOAD_SOURCE"
+                                    previousScreen = ScreenType.SAMPLE_EDITOR
+                                    fileBrowserState = fileBrowserState.copy(
+                                        fileExtension = "wav",
+                                        fileExtensions = listOf("wav")
+                                    )
+                                    trackerController.currentScreen = ScreenType.FILE_BROWSER
+                                }
+                                1 -> { // SAVE: write sample to new WAV in samples directory
+                                    val name = s.sampleName.ifEmpty { "SAMPLE" }
+                                    coroutineScope.launch(Dispatchers.Default) {
+                                        val samplesDir = fileManager.getSamplesDirectory()
+                                        java.io.File(samplesDir).mkdirs()
+                                        var path = "$samplesDir/$name.wav"
+                                        var n = 1
+                                        while (java.io.File(path).exists()) {
+                                            path = "$samplesDir/${name}_${n.toString().padStart(4, '0')}.wav"
+                                            n++
+                                        }
+                                        val floats   = audioEngine.getSampleData(instId)
+                                        val origRate = audioEngine.getOriginalSampleRate(instId)
+                                        val success = WavWriter.writeWav(
+                                            fileSystem   = fileSystem,
+                                            path         = path,
+                                            leftChannel  = floats,
+                                            rightChannel = floats,
+                                            sampleRate   = origRate
+                                        )
+                                        withContext(Dispatchers.Main) {
+                                            if (success) {
+                                                trackerController.project.instruments[instId].sampleFilePath = path
+                                                sampleEditorState = sampleEditorState.copy(
+                                                    sampleFilePath = path,
+                                                    isModified     = false
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                2 -> { // OVERWRITE: write sample buffer back to original WAV
+                                    val filePath = trackerController.project.instruments[instId].sampleFilePath
+                                    if (filePath != null) {
+                                        coroutineScope.launch(Dispatchers.Default) {
+                                            val floats = audioEngine.getSampleData(instId)
+                                            val origRate = audioEngine.getOriginalSampleRate(instId)
+                                            val success = WavWriter.writeWav(
+                                                fileSystem   = fileSystem,
+                                                path         = filePath,
+                                                leftChannel  = floats,
+                                                rightChannel = floats,
+                                                sampleRate   = origRate
+                                            )
+                                            withContext(Dispatchers.Main) {
+                                                if (success) {
+                                                    sampleEditorState = sampleEditorState.copy(isModified = false)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -2025,6 +2329,19 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     // SETTINGS: B returns to previous screen (usually PROJECT)
                     ScreenType.SETTINGS -> {
                         trackerController.currentScreen = previousScreen
+                    }
+
+                    // SAMPLE EDITOR: confirm close only if modified
+                    ScreenType.SAMPLE_EDITOR -> {
+                        if (sampleEditorState.showConfirmClose) {
+                            // B = NO — dismiss dialog
+                            sampleEditorState = sampleEditorState.copy(showConfirmClose = false)
+                        } else if (sampleEditorState.isModified) {
+                            sampleEditorState = sampleEditorState.copy(showConfirmClose = true)
+                        } else {
+                            trackerController.currentScreen = previousScreen
+                        }
+                        return@buttonB
                     }
 
                     // FILE BROWSER: Cancel operation or go back
@@ -2192,6 +2509,28 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                         }
                     }
 
+                    // SAMPLE_EDITOR: SELECT on NAME row opens keyboard; otherwise blocked
+                    ScreenType.SAMPLE_EDITOR -> {
+                        if (sampleEditorState.cursorRow == 18) {
+                            val currentName = sampleEditorState.sampleName
+                            qwertyKeyboardState = QwertyKeyboardState(
+                                isOpen       = true,
+                                text         = currentName,
+                                maxLength    = 20,
+                                textCursor   = currentName.length.coerceAtMost(20),
+                                keyCursorRow = 0,
+                                keyCursorCol = 0,
+                                layout       = 0,
+                                fieldLabel   = "SAMPLE NAME:",
+                                originalText = currentName,
+                                insertBefore = insertBefore,
+                                context      = QwertyContext.SAMPLE_NAME,
+                                contextExtra = fileManager.getSamplesDirectory()
+                            )
+                        }
+                        return@selectHandler
+                    }
+
                     // FILE_BROWSER: SELECT button does nothing (combos handled separately)
                     ScreenType.FILE_BROWSER -> {
                         // Do nothing - SELECT combos (SELECT+A, SELECT+B, etc.) are handled in InputMapper
@@ -2302,6 +2641,13 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             instrumentController.savePreset(trackerController.project, filePath)
                             trackerController.projectVersion++
                         }
+                        QwertyContext.SAMPLE_NAME -> {
+                            val newName = typedText.ifEmpty { sampleEditorState.sampleName }
+                            val instId = sampleEditorState.instrumentId
+                            sampleEditorState = sampleEditorState.copy(sampleName = newName, isModified = true)
+                            trackerController.project.instruments[instId].name = newName
+                            trackerController.projectVersion++
+                        }
                         QwertyContext.RESAMPLE -> {
                             val customName = typedText.ifEmpty { null }
                             val bounds = trackerController.inputController.getSelectionBounds()
@@ -2369,6 +2715,37 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                 trackerController.previewSampleFile(selectedFile.absolutePath)
                             }
                         }
+                    }
+
+                    // Sample editor: Preview selection region with pitch and zoom applied
+                    ScreenType.SAMPLE_EDITOR -> {
+                        val instId = sampleEditorState.instrumentId
+                        val total  = sampleEditorState.totalFrames
+                        val inst   = trackerController.project.instruments[instId]
+                        val savedStart = inst.sampleStart
+                        val savedEnd   = inst.sampleEnd
+                        val savedRoot  = inst.root
+                        // Temporarily set start/end to selection boundaries
+                        if (total > 0 && sampleEditorState.selectionEnd > sampleEditorState.selectionStart) {
+                            inst.sampleStart = ((sampleEditorState.selectionStart * 255L) / total).toInt().coerceIn(0, 255)
+                            inst.sampleEnd   = ((sampleEditorState.selectionEnd   * 255L) / total).toInt().coerceIn(0, 255)
+                            audioEngine.updateInstrumentPlaybackParams(inst)
+                        }
+                        // Apply pitch offset — shift root note so preview plays at adjusted pitch
+                        val pitchSemitones = sampleEditorState.pitchSemitones
+                        if (pitchSemitones != 0) {
+                            val shiftedMidi = (inst.root.toMidi() + pitchSemitones).coerceIn(0, 119)
+                            inst.root = Note.fromMidi(shiftedMidi)
+                        }
+                        val savedInstrument = trackerController.currentInstrument
+                        trackerController.currentInstrument = instId
+                        trackerController.previewInstrument()
+                        trackerController.currentInstrument = savedInstrument
+                        // Restore original values (voice already captured them at trigger time)
+                        inst.root        = savedRoot
+                        inst.sampleStart = savedStart
+                        inst.sampleEnd   = savedEnd
+                        audioEngine.updateInstrumentPlaybackParams(inst)
                     }
 
                     // Instrument screen: Preview instrument with all parameters
@@ -2466,6 +2843,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     handleGenericInput { ctx -> trackerController.inputController.handleAButton(ctx) }
                 } else if (fxHelperState.isOpen) {
                     fxHelperState = fxHelperState.fxMoveCursorUp()
+                } else if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.cursorRow in 3..8) {
+                    // A+UP in waveform/selection rows: move selected marker left (earlier)
+                    val step = maxOf(1L, sampleEditorState.totalFrames.toLong() / (256L shl sampleEditorState.zoomLevel))
+                    sampleEditorState = if (sampleEditorState.cursorCol == 0) {
+                        sampleEditorState.copy(selectionStart = (sampleEditorState.selectionStart - step).coerceAtLeast(0L), isModified = true)
+                    } else {
+                        sampleEditorState.copy(selectionEnd = (sampleEditorState.selectionEnd - step).coerceAtLeast(sampleEditorState.selectionStart + 1L), isModified = true)
+                    }
                 } else if (isOnFxTypeColumn()) {
                     val idx = getCurrentFxTypeIndex()
                     fxHelperState = FxHelperState(isOpen = true, cursorRow = idx / 5, cursorCol = idx % 5)
@@ -2480,6 +2865,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     handleGenericInput { ctx -> trackerController.inputController.handleBButton(ctx) }
                 } else if (fxHelperState.isOpen) {
                     fxHelperState = fxHelperState.fxMoveCursorDown()
+                } else if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.cursorRow in 3..8) {
+                    // A+DOWN in waveform/selection rows: move selected marker right (later)
+                    val step = maxOf(1L, sampleEditorState.totalFrames.toLong() / (256L shl sampleEditorState.zoomLevel))
+                    val maxFrame = sampleEditorState.totalFrames.toLong()
+                    sampleEditorState = if (sampleEditorState.cursorCol == 0) {
+                        sampleEditorState.copy(selectionStart = (sampleEditorState.selectionStart + step).coerceAtMost(sampleEditorState.selectionEnd - 1L), isModified = true)
+                    } else {
+                        sampleEditorState.copy(selectionEnd = (sampleEditorState.selectionEnd + step).coerceAtMost(maxFrame), isModified = true)
+                    }
                 } else if (isOnFxTypeColumn()) {
                     val idx = getCurrentFxTypeIndex()
                     fxHelperState = FxHelperState(isOpen = true, cursorRow = idx / 5, cursorCol = idx % 5)
@@ -2716,6 +3110,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 if (qwertyKeyboardState.isOpen) {
                     qwertyKeyboardState = qwertyKeyboardState.copy(layout = 0).withClampedCol()
                 } else if (eqEditorState.isOpen) { /* block map navigation while EQ editor open */
+                } else if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR) { /* blocked in sample editor */
                 } else
                 // R+UP: Navigate to screen above in 5×5 grid OR cycle sort mode up in FILE_BROWSER
                 if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
@@ -2743,6 +3138,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 if (qwertyKeyboardState.isOpen) {
                     qwertyKeyboardState = qwertyKeyboardState.copy(layout = 1).withClampedCol()
                 } else if (eqEditorState.isOpen) { /* block map navigation while EQ editor open */
+                } else if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR) { /* blocked in sample editor */
                 } else
                 // R+DOWN: Navigate to screen below in 5×5 grid OR cycle sort mode down in FILE_BROWSER
                 if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
@@ -2770,6 +3166,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 if (qwertyKeyboardState.isOpen) {
                     qwertyKeyboardState = qwertyKeyboardState.moveTextCursorLeft()
                 } else if (eqEditorState.isOpen) { /* block map navigation while EQ editor open */
+                } else if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR) { /* blocked in sample editor */
                 } else
                 // R+LEFT: Navigate to screen on left OR go to parent folder in FILE_BROWSER
                 if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
@@ -2845,8 +3242,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 if (qwertyKeyboardState.isOpen) {
                     qwertyKeyboardState = qwertyKeyboardState.moveTextCursorRight()
                 } else if (eqEditorState.isOpen) { /* block map navigation while EQ editor open */
-                } else if (trackerController.currentScreen != ScreenType.FILE_BROWSER) {
-                // R+RIGHT: Navigate to screen on right in main row (disabled in FILE_BROWSER)
+                } else if (trackerController.currentScreen != ScreenType.FILE_BROWSER &&
+                           trackerController.currentScreen != ScreenType.SAMPLE_EDITOR) {
+                // R+RIGHT: Navigate to screen on right in main row (disabled in FILE_BROWSER and SAMPLE_EDITOR)
                     val (newScreen, newCol) = trackerController.navigateRight(trackerController.currentScreen, trackerController.previousColumn)
                     if (newScreen != trackerController.currentScreen) {
                         // Capture cursor value from current screen before leaving
@@ -3417,6 +3815,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         instrumentStatusMessage = instrumentStatusMessage,
         instrumentStatusSuccess = instrumentStatusSuccess,
         fileBrowserState        = fileBrowserState,
+        sampleEditorState       = sampleEditorState,
         selectionInfo           = selectionInfo,
         clipboardInfo           = clipboardInfo,
         selectionMode           = selectionModeActive,
