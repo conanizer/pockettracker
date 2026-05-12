@@ -1136,11 +1136,21 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     if (result.rateMode != null && sampleEditorState.rateMode != prevRateMode) {
                         val newFactor = when (sampleEditorState.rateMode) { 1 -> 2; 2 -> 4; else -> 1 }
                         val instId = sampleEditorState.instrumentId
+                        val oldLen = sampleEditorState.totalFrames
                         audioEngine.applyRateMode(instId, newFactor)
+                        val newLen = audioEngine.getSampleLength(instId)
+                        // Scale all frame positions so markers stay in-bounds and viewStart
+                        // (a computed property) tracks correctly after the buffer resize.
+                        fun scaleFrame(f: Long) =
+                            if (oldLen > 0) (f * newLen.toLong() / oldLen).coerceIn(0L, newLen.toLong()) else 0L
                         sampleEditorState = sampleEditorState.copy(
-                            totalFrames  = audioEngine.getSampleLength(instId),
-                            waveformData = audioEngine.getSampleWaveform(instId, 620),
-                            isModified   = true
+                            totalFrames    = newLen,
+                            sampleRate     = audioEngine.getOriginalSampleRate(instId),
+                            waveformData   = audioEngine.getSampleWaveform(instId, 620),
+                            selectionStart = scaleFrame(sampleEditorState.selectionStart),
+                            selectionEnd   = scaleFrame(sampleEditorState.selectionEnd),
+                            slicePosition  = scaleFrame(sampleEditorState.slicePosition),
+                            isModified     = true
                         )
                     }
                 }
