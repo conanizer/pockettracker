@@ -672,6 +672,7 @@ class AudioEngine(
     fun copyRegion(instrumentId: Int, startFrame: Int, endFrame: Int) = backend.copyRegion(instrumentId, startFrame, endFrame)
     fun pasteRegion(instrumentId: Int, insertAt: Int) = backend.pasteRegion(instrumentId, insertAt)
     fun getClipboardLength(): Int = backend.getClipboardLength()
+    fun findZeroCrossing(instrumentId: Int, frame: Int): Int = backend.findZeroCrossing(instrumentId, frame)
 
     // Recover the original WAV sample rate from the stored rate ratio
     fun getOriginalSampleRate(instrumentId: Int): Int {

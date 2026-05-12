@@ -367,6 +367,22 @@ int AudioEngine::getClipboardLength() {
     return sampleClipboardLength;
 }
 
+int AudioEngine::findZeroCrossing(int id, int frame, int searchRadius) {
+    if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] < 2) return frame;
+    const float* buf = samples[id];
+    const int    len = sampleLengths[id];
+    // Scan outward from `frame` in both directions simultaneously.
+    for (int d = 0; d <= searchRadius; d++) {
+        int fwd = frame + d;
+        int bwd = frame - d;
+        if (fwd >= 1 && fwd < len &&
+            ((buf[fwd - 1] < 0.0f) != (buf[fwd] < 0.0f))) return fwd;
+        if (d > 0 && bwd >= 1 && bwd < len &&
+            ((buf[bwd - 1] < 0.0f) != (buf[bwd] < 0.0f))) return bwd;
+    }
+    return frame;
+}
+
 void AudioEngine::setEqBand(int slot, int band, int type, int freqHex, int gainHex, int qHex) {
     if (slot < 0 || slot >= 128 || band < 0 || band >= 3) return;
     auto& b = eqPresets[slot].bands[band];

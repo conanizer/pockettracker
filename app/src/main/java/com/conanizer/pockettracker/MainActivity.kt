@@ -2941,10 +2941,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     // A+UP in waveform/selection rows: fine step forward / increment (1/256 of visible window)
                     val step = maxOf(1L, sampleEditorState.totalFrames.toLong() / (256L shl sampleEditorState.zoomLevel))
                     val maxFrame = sampleEditorState.totalFrames.toLong()
+                    fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled)
+                        audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt()).toLong() else f
                     sampleEditorState = if (sampleEditorState.cursorCol == 0) {
-                        sampleEditorState.copy(selectionStart = (sampleEditorState.selectionStart + step).coerceAtMost(sampleEditorState.selectionEnd - 1L))
+                        val raw = (sampleEditorState.selectionStart + step).coerceAtMost(sampleEditorState.selectionEnd - 1L)
+                        sampleEditorState.copy(selectionStart = snapFrame(raw).coerceAtMost(sampleEditorState.selectionEnd - 1L))
                     } else {
-                        sampleEditorState.copy(selectionEnd = (sampleEditorState.selectionEnd + step).coerceAtMost(maxFrame))
+                        val raw = (sampleEditorState.selectionEnd + step).coerceAtMost(maxFrame)
+                        sampleEditorState.copy(selectionEnd = snapFrame(raw).coerceAtLeast(sampleEditorState.selectionStart + 1L).coerceAtMost(maxFrame))
                     }
                 } else if (isOnFxTypeColumn()) {
                     val idx = getCurrentFxTypeIndex()
@@ -2963,10 +2967,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 } else if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.cursorRow in 3..8) {
                     // A+DOWN in waveform/selection rows: fine step backward / decrement (1/256 of visible window)
                     val step = maxOf(1L, sampleEditorState.totalFrames.toLong() / (256L shl sampleEditorState.zoomLevel))
+                    fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled)
+                        audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt()).toLong() else f
                     sampleEditorState = if (sampleEditorState.cursorCol == 0) {
-                        sampleEditorState.copy(selectionStart = (sampleEditorState.selectionStart - step).coerceAtLeast(0L))
+                        val raw = (sampleEditorState.selectionStart - step).coerceAtLeast(0L)
+                        sampleEditorState.copy(selectionStart = snapFrame(raw).coerceAtMost(sampleEditorState.selectionEnd - 1L))
                     } else {
-                        sampleEditorState.copy(selectionEnd = (sampleEditorState.selectionEnd - step).coerceAtLeast(sampleEditorState.selectionStart + 1L))
+                        val raw = (sampleEditorState.selectionEnd - step).coerceAtLeast(sampleEditorState.selectionStart + 1L)
+                        sampleEditorState.copy(selectionEnd = snapFrame(raw).coerceAtLeast(sampleEditorState.selectionStart + 1L))
                     }
                 } else if (isOnFxTypeColumn()) {
                     val idx = getCurrentFxTypeIndex()
@@ -2985,10 +2993,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 } else if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.cursorRow in 3..8) {
                     // A+LEFT in waveform/selection rows: fast step backward / decrement (1/16 of visible window)
                     val step = maxOf(1L, sampleEditorState.totalFrames.toLong() / (16L shl sampleEditorState.zoomLevel))
+                    fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled)
+                        audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt()).toLong() else f
                     sampleEditorState = if (sampleEditorState.cursorCol == 0) {
-                        sampleEditorState.copy(selectionStart = (sampleEditorState.selectionStart - step).coerceAtLeast(0L))
+                        val raw = (sampleEditorState.selectionStart - step).coerceAtLeast(0L)
+                        sampleEditorState.copy(selectionStart = snapFrame(raw).coerceAtMost(sampleEditorState.selectionEnd - 1L))
                     } else {
-                        sampleEditorState.copy(selectionEnd = (sampleEditorState.selectionEnd - step).coerceAtLeast(sampleEditorState.selectionStart + 1L))
+                        val raw = (sampleEditorState.selectionEnd - step).coerceAtLeast(sampleEditorState.selectionStart + 1L)
+                        sampleEditorState.copy(selectionEnd = snapFrame(raw).coerceAtLeast(sampleEditorState.selectionStart + 1L))
                     }
                 } else {
                     // A+LEFT: Large decrement (selection-aware)
@@ -3005,10 +3017,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     // A+RIGHT in waveform/selection rows: fast step forward / increment (1/16 of visible window)
                     val step = maxOf(1L, sampleEditorState.totalFrames.toLong() / (16L shl sampleEditorState.zoomLevel))
                     val maxFrame = sampleEditorState.totalFrames.toLong()
+                    fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled)
+                        audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt()).toLong() else f
                     sampleEditorState = if (sampleEditorState.cursorCol == 0) {
-                        sampleEditorState.copy(selectionStart = (sampleEditorState.selectionStart + step).coerceAtMost(sampleEditorState.selectionEnd - 1L))
+                        val raw = (sampleEditorState.selectionStart + step).coerceAtMost(sampleEditorState.selectionEnd - 1L)
+                        sampleEditorState.copy(selectionStart = snapFrame(raw).coerceAtMost(sampleEditorState.selectionEnd - 1L))
                     } else {
-                        sampleEditorState.copy(selectionEnd = (sampleEditorState.selectionEnd + step).coerceAtMost(maxFrame))
+                        val raw = (sampleEditorState.selectionEnd + step).coerceAtMost(maxFrame)
+                        sampleEditorState.copy(selectionEnd = snapFrame(raw).coerceAtLeast(sampleEditorState.selectionStart + 1L).coerceAtMost(maxFrame))
                     }
                 } else {
                     // A+RIGHT: Large increment (selection-aware)

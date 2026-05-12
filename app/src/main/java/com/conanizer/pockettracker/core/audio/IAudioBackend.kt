@@ -65,6 +65,8 @@ interface IAudioBackend {
     fun copyRegion(id: Int, startFrame: Int, endFrame: Int)
     fun pasteRegion(id: Int, insertAt: Int)
     fun getClipboardLength(): Int
+    // Returns nearest zero-crossing frame within ±512 frames, or `frame` if none found.
+    fun findZeroCrossing(id: Int, frame: Int): Int
 
     /**
      * Returns an IntArray[8] where each element is (octave * 12 + pitch) for the active voice

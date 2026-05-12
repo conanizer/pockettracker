@@ -66,6 +66,8 @@ public:
     void copyRegion(int id, int startFrame, int endFrame);
     void pasteRegion(int id, int insertAt);
     int  getClipboardLength();
+    // Returns the nearest zero-crossing frame within ±searchRadius of `frame`, or `frame` if none found.
+    int  findZeroCrossing(int id, int frame, int searchRadius = 512);
 
     // ===================================
     // CORE AUDIO PROCESSING BLOCK

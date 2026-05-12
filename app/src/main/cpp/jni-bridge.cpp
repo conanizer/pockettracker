@@ -954,6 +954,12 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getCl
     return engine ? engine->getClipboardLength() : 0;
 }
 
+JNIEXPORT jint JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1findZeroCrossing(
+        JNIEnv*, jobject, jint id, jint frame) {
+    return engine ? (jint)engine->findZeroCrossing((int)id, (int)frame) : frame;
+}
+
 } // extern "C"
 
 #pragma clang diagnostic pop
