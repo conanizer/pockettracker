@@ -14,5 +14,5 @@ class GitHubIssueSenderFactory : ReportSenderFactory {
             repoName = BuildConfig.GITHUB_REPO_NAME,
         )
 
-    override fun enabled(config: CoreConfiguration): Boolean = true
+    override fun enabled(config: CoreConfiguration): Boolean = BuildConfig.GITHUB_TOKEN.isNotEmpty()
 }

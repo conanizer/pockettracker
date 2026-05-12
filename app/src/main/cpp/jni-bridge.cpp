@@ -954,10 +954,22 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getCl
     return engine ? engine->getClipboardLength() : 0;
 }
 
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1downsampleSample(
+        JNIEnv*, jobject, jint id, jint factor) {
+    if (engine) engine->downsampleSample((int)id, (int)factor);
+}
+
 JNIEXPORT jint JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1findZeroCrossing(
         JNIEnv*, jobject, jint id, jint frame) {
     return engine ? (jint)engine->findZeroCrossing((int)id, (int)frame) : frame;
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1applyRateMode(
+        JNIEnv*, jobject, jint id, jint factor) {
+    if (engine) engine->applyRateMode((int)id, (int)factor);
 }
 
 } // extern "C"

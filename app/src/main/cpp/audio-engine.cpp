@@ -20,6 +20,8 @@ AudioEngine::AudioEngine() {
         instrumentParams[i] = InstrumentParams();
         sampleBackups[i] = nullptr;
         sampleBackupLengths[i] = 0;
+        originalSamples[i] = nullptr;
+        originalSampleLengths[i] = 0;
     }
     globalFrameCounter = 0;
 
@@ -36,8 +38,9 @@ AudioEngine::AudioEngine() {
 AudioEngine::~AudioEngine() {
     closeStream();
     for (int i = 0; i < 256; i++) {
-        if (samples[i])       delete[] samples[i];
-        if (sampleBackups[i]) delete[] sampleBackups[i];
+        if (samples[i])         delete[] samples[i];
+        if (sampleBackups[i])   delete[] sampleBackups[i];
+        if (originalSamples[i]) delete[] originalSamples[i];
     }
     delete[] sampleClipboard;
 }
@@ -127,8 +130,12 @@ void AudioEngine::closeStream() {
 void AudioEngine::loadSample(int id, const float* data, int length) {
     if (id < 0 || id >= 256) return;
 
-    if (samples[id]) {
-        delete[] samples[id];
+    if (samples[id]) delete[] samples[id];
+    // New file replaces the original — discard any cached rate-mode original.
+    if (originalSamples[id]) {
+        delete[] originalSamples[id];
+        originalSamples[id] = nullptr;
+        originalSampleLengths[id] = 0;
     }
 
     samples[id] = new float[length];
@@ -157,6 +164,11 @@ void AudioEngine::clearAllSamples() {
             samples[i] = nullptr;
         }
         sampleLengths[i] = 0;
+        if (originalSamples[i]) {
+            delete[] originalSamples[i];
+            originalSamples[i] = nullptr;
+            originalSampleLengths[i] = 0;
+        }
     }
     LOGD("All samples cleared");
 }
@@ -365,6 +377,60 @@ void AudioEngine::pasteRegion(int id, int insertAt) {
 
 int AudioEngine::getClipboardLength() {
     return sampleClipboardLength;
+}
+
+void AudioEngine::downsampleSample(int id, int factor) {
+    if (id < 0 || id >= 256 || !samples[id] || factor <= 1) return;
+    int oldLen = sampleLengths[id];
+    int newLen = oldLen / factor;
+    if (newLen < 1) return;
+    float* newBuf = new float[newLen];
+    for (int i = 0; i < newLen; i++) newBuf[i] = samples[id][i * factor];
+    delete[] samples[id];
+    samples[id] = newBuf;
+    sampleLengths[id] = newLen;
+    // Instrument start/end points (0-255 fraction) map to the same relative positions,
+    // so they remain valid after decimation without adjustment.
+}
+
+void AudioEngine::applyRateMode(int id, int factor) {
+    if (id < 0 || id >= 256 || !samples[id]) return;
+
+    // Stop any voice currently reading this sample so the callback won't be mid-read
+    // when we swap the buffer pointer below.
+    for (int v = 0; v < MAX_VOICES; v++) {
+        if (voices[v].isActive && voices[v].sampleData == samples[id]) voices[v].stop();
+    }
+
+    // Hold the edit lock so the callback's try_lock fails during the swap, giving the
+    // callback one silent period rather than a use-after-free crash.
+    std::lock_guard<std::mutex> lock(sampleEditMutex);
+
+    if (factor <= 1) {
+        // Restore HIGH: copy original back, then discard cache.
+        if (!originalSamples[id]) return; // Already at HIGH, nothing to restore.
+        delete[] samples[id];
+        samples[id] = new float[originalSampleLengths[id]];
+        std::memcpy(samples[id], originalSamples[id], originalSampleLengths[id] * sizeof(float));
+        sampleLengths[id] = originalSampleLengths[id];
+        delete[] originalSamples[id];
+        originalSamples[id] = nullptr;
+        originalSampleLengths[id] = 0;
+    } else {
+        // Store original on first rate change away from HIGH.
+        if (!originalSamples[id]) {
+            originalSamples[id] = new float[sampleLengths[id]];
+            std::memcpy(originalSamples[id], samples[id], sampleLengths[id] * sizeof(float));
+            originalSampleLengths[id] = sampleLengths[id];
+        }
+        // Always derive from the cached original so NORM→LOFI→NORM roundtrips are lossless.
+        int newLen = originalSampleLengths[id] / factor;
+        if (newLen < 1) return;
+        delete[] samples[id];
+        samples[id] = new float[newLen];
+        for (int i = 0; i < newLen; i++) samples[id][i] = originalSamples[id][i * factor];
+        sampleLengths[id] = newLen;
+    }
 }
 
 int AudioEngine::findZeroCrossing(int id, int frame, int searchRadius) {
@@ -1334,7 +1400,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
     }
 
-    // Mix voices
+    // Mix voices — try_lock so applyRateMode can swap buffers safely.
+    // If the edit lock is held we skip one callback (~10ms silence) instead of crashing.
+    {
+    std::unique_lock<std::mutex> editLock(sampleEditMutex, std::try_to_lock);
+    if (editLock.owns_lock()) {
     for (int v = 0; v < MAX_VOICES; v++) {
         Voice& voice = voices[v];
         if (!voice.isActive || !voice.sampleData) continue;
@@ -1514,8 +1584,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     }
                 }
             }
-        }
-    }
+        } // for (int i = 0; i < numFrames; i++)
+    } // for (int v = 0; v < MAX_VOICES; v++)
+    } // if (editLock.owns_lock())
+    } // sampleEditMutex try_lock scope
 
     // ===================================
     // SOUNDFONT RENDERING — per-track channel renders (Phase 6)

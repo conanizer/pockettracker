@@ -66,6 +66,9 @@ public:
     void copyRegion(int id, int startFrame, int endFrame);
     void pasteRegion(int id, int insertAt);
     int  getClipboardLength();
+    void downsampleSample(int id, int factor);
+    // Non-destructive rate mode: derives buffer from cached original (factor 1=HIGH,2=NORM,4=LOFI).
+    void applyRateMode(int id, int factor);
     // Returns the nearest zero-crossing frame within ±searchRadius of `frame`, or `frame` if none found.
     int  findZeroCrossing(int id, int frame, int searchRadius = 512);
 
@@ -287,6 +290,9 @@ private:
     int    sampleLengths[256];
     float* sampleBackups[256];        // single-level undo buffers
     int    sampleBackupLengths[256];
+    float* originalSamples[256];      // cached HIGH-rate original for non-destructive RATE mode
+    int    originalSampleLengths[256];
+    std::mutex sampleEditMutex;       // held during buffer swap; try-locked in voice mix loop
     float* sampleClipboard = nullptr; // cross-operation copy/paste buffer
     int    sampleClipboardLength = 0;
     InstrumentParams instrumentParams[256];

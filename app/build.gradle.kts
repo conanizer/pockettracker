@@ -33,7 +33,7 @@ android {
     val localProps = Properties()
     val localPropsFile = rootProject.file("local.properties")
     if (localPropsFile.exists()) localProps.load(localPropsFile.inputStream())
-    val githubToken: String = localProps.getProperty("github.token=", "")
+    val githubToken: String = localProps.getProperty("github.token", "")
 
     defaultConfig {
         applicationId = "com.conanizer.pockettracker"

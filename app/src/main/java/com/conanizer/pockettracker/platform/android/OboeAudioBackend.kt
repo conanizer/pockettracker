@@ -79,6 +79,8 @@ class OboeAudioBackend : IAudioBackend {
     override fun copyRegion(id: Int, startFrame: Int, endFrame: Int) = native_copyRegion(id, startFrame, endFrame)
     override fun pasteRegion(id: Int, insertAt: Int) = native_pasteRegion(id, insertAt)
     override fun getClipboardLength(): Int = native_getClipboardLength()
+    override fun downsampleSample(id: Int, factor: Int) = native_downsampleSample(id, factor)
+    override fun applyRateMode(id: Int, factor: Int) = native_applyRateMode(id, factor)
     override fun findZeroCrossing(id: Int, frame: Int): Int = native_findZeroCrossing(id, frame)
 
     override fun getTrackActiveNotes(): IntArray = native_getTrackActiveNotes()
@@ -618,5 +620,7 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_copyRegion(id: Int, startFrame: Int, endFrame: Int)
     private external fun native_pasteRegion(id: Int, insertAt: Int)
     private external fun native_getClipboardLength(): Int
+    private external fun native_downsampleSample(id: Int, factor: Int)
+    private external fun native_applyRateMode(id: Int, factor: Int)
     private external fun native_findZeroCrossing(id: Int, frame: Int): Int
 }

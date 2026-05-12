@@ -42,6 +42,8 @@ class AudioEngine(
     // Sample metadata (base frequencies and sample rate compensation ratios)
     private val sampleBaseFrequencies = mutableMapOf<Int, Float>()
     private val sampleRateRatios = mutableMapOf<Int, Float>()
+    // Original ratios cached for non-destructive RATE mode (cleared when new sample is loaded)
+    private val originalSampleRateRatios = mutableMapOf<Int, Float>()
 
     /**
      * Provider for SoundFont slot lookup — injected by PlaybackController so that
@@ -103,6 +105,7 @@ class AudioEngine(
 
             sampleBaseFrequencies[instrumentId] = adjustedBaseFreq
             sampleRateRatios[instrumentId] = adjustedBaseFreq / 261.63f
+            originalSampleRateRatios.remove(instrumentId)
 
             logger.d(TAG, "✅ Loaded sample: instrumentId=$instrumentId, length=${samples.size}, baseFreq=$adjustedBaseFreq, path=$filePath")
             return true
@@ -651,6 +654,7 @@ class AudioEngine(
     fun clearAllSamples() {
         sampleBaseFrequencies.clear()
         sampleRateRatios.clear()
+        originalSampleRateRatios.clear()
         backend.clearAllSamples()
     }
 
@@ -672,6 +676,30 @@ class AudioEngine(
     fun copyRegion(instrumentId: Int, startFrame: Int, endFrame: Int) = backend.copyRegion(instrumentId, startFrame, endFrame)
     fun pasteRegion(instrumentId: Int, insertAt: Int) = backend.pasteRegion(instrumentId, insertAt)
     fun getClipboardLength(): Int = backend.getClipboardLength()
+    fun downsampleSample(instrumentId: Int, factor: Int) {
+        backend.downsampleSample(instrumentId, factor)
+        sampleRateRatios[instrumentId]?.let { sampleRateRatios[instrumentId] = it * factor }
+    }
+
+    fun applyRateMode(instrumentId: Int, factor: Int) {
+        if (factor <= 1) {
+            // Restore HIGH: reset ratio to original and discard cache.
+            originalSampleRateRatios.remove(instrumentId)?.let { origRatio ->
+                sampleRateRatios[instrumentId] = origRatio
+            }
+        } else {
+            // Cache original ratio on first departure from HIGH.
+            if (!originalSampleRateRatios.containsKey(instrumentId)) {
+                sampleRateRatios[instrumentId]?.let { originalSampleRateRatios[instrumentId] = it }
+            }
+            // Set ratio relative to original so pitch stays correct at any rate.
+            originalSampleRateRatios[instrumentId]?.let { origRatio ->
+                sampleRateRatios[instrumentId] = origRatio * factor
+            }
+        }
+        backend.applyRateMode(instrumentId, factor)
+    }
+
     fun findZeroCrossing(instrumentId: Int, frame: Int): Int = backend.findZeroCrossing(instrumentId, frame)
 
     // Recover the original WAV sample rate from the stored rate ratio

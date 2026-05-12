@@ -65,6 +65,9 @@ interface IAudioBackend {
     fun copyRegion(id: Int, startFrame: Int, endFrame: Int)
     fun pasteRegion(id: Int, insertAt: Int)
     fun getClipboardLength(): Int
+    fun downsampleSample(id: Int, factor: Int)
+    // Non-destructive rate mode: factor 1=HIGH (restore), 2=NORM, 4=LOFI. Derives from cached original.
+    fun applyRateMode(id: Int, factor: Int)
     // Returns nearest zero-crossing frame within ±512 frames, or `frame` if none found.
     fun findZeroCrossing(id: Int, frame: Int): Int
 

@@ -1126,10 +1126,23 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 val context = sampleEditorModule.getCursorContext(sampleEditorState)
                 val action = handlerFunction(context)
                 val result = sampleEditorModule.handleInput(sampleEditorState, action)
-                // View settings (zoom, source, rate, snap, pitch, slice params, fx type/value) do
+                // View settings (zoom, source, snap, pitch, slice params, fx type/value) do
                 // NOT set isModified — only destructive buffer operations do.
                 if (result.modified) {
+                    val prevRateMode = sampleEditorState.rateMode
                     sampleEditorState = sampleEditorState.applyResult(result)
+                    // RATE change: re-derive buffer from cached original so toggling back to HIGH
+                    // is always lossless. No stepFactor arithmetic needed — C++ handles it all.
+                    if (result.rateMode != null && sampleEditorState.rateMode != prevRateMode) {
+                        val newFactor = when (sampleEditorState.rateMode) { 1 -> 2; 2 -> 4; else -> 1 }
+                        val instId = sampleEditorState.instrumentId
+                        audioEngine.applyRateMode(instId, newFactor)
+                        sampleEditorState = sampleEditorState.copy(
+                            totalFrames  = audioEngine.getSampleLength(instId),
+                            waveformData = audioEngine.getSampleWaveform(instId, 620),
+                            isModified   = true
+                        )
+                    }
                 }
             }
             ScreenType.INSTRUMENT -> {
@@ -2175,19 +2188,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     val targetPath = "$samplesDir/$baseName.wav"
                                     if (!java.io.File(targetPath).exists()) {
                                         // No collision — save directly and close
-                                        val rateMode = s.rateMode
                                         coroutineScope.launch(Dispatchers.Default) {
                                             val floats   = audioEngine.getSampleData(instId)
                                             val origRate = audioEngine.getOriginalSampleRate(instId)
-                                            val factor   = when (rateMode) { 1 -> 2; 2 -> 4; else -> 1 }
-                                            val outRate  = origRate / factor
-                                            val outSamples = if (factor > 1) FloatArray(floats.size / factor) { i -> floats[i * factor] } else floats
                                             val success  = WavWriter.writeWav(
                                                 fileSystem   = fileSystem,
                                                 path         = targetPath,
-                                                leftChannel  = outSamples,
-                                                rightChannel = outSamples,
-                                                sampleRate   = outRate
+                                                leftChannel  = floats,
+                                                rightChannel = floats,
+                                                sampleRate   = origRate
                                             )
                                             withContext(Dispatchers.Main) {
                                                 if (success) {
@@ -2229,19 +2238,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                 2 -> { // OVERWRITE: write sample buffer back to original WAV
                                     val filePath = trackerController.project.instruments[instId].sampleFilePath
                                     if (filePath != null) {
-                                        val rateMode = s.rateMode
                                         coroutineScope.launch(Dispatchers.Default) {
                                             val floats   = audioEngine.getSampleData(instId)
                                             val origRate = audioEngine.getOriginalSampleRate(instId)
-                                            val factor   = when (rateMode) { 1 -> 2; 2 -> 4; else -> 1 }
-                                            val outRate  = origRate / factor
-                                            val outSamples = if (factor > 1) FloatArray(floats.size / factor) { i -> floats[i * factor] } else floats
                                             val success = WavWriter.writeWav(
                                                 fileSystem   = fileSystem,
                                                 path         = filePath,
-                                                leftChannel  = outSamples,
-                                                rightChannel = outSamples,
-                                                sampleRate   = outRate
+                                                leftChannel  = floats,
+                                                rightChannel = floats,
+                                                sampleRate   = origRate
                                             )
                                             withContext(Dispatchers.Main) {
                                                 if (success) {
@@ -2714,7 +2719,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             val name = typedText.ifEmpty { "SAMPLE" }
                             val instId = sampleEditorState.instrumentId
                             val samplesDir = qwertyKeyboardState.contextExtra  // capture before state reset
-                            val rateMode = sampleEditorState.rateMode
                             coroutineScope.launch(Dispatchers.Default) {
                                 java.io.File(samplesDir).mkdirs()
                                 var path = "$samplesDir/$name.wav"
@@ -2725,15 +2729,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                 }
                                 val floats   = audioEngine.getSampleData(instId)
                                 val origRate = audioEngine.getOriginalSampleRate(instId)
-                                val factor   = when (rateMode) { 1 -> 2; 2 -> 4; else -> 1 }
-                                val outRate  = origRate / factor
-                                val outSamples = if (factor > 1) FloatArray(floats.size / factor) { i -> floats[i * factor] } else floats
                                 val success  = WavWriter.writeWav(
                                     fileSystem   = fileSystem,
                                     path         = path,
-                                    leftChannel  = outSamples,
-                                    rightChannel = outSamples,
-                                    sampleRate   = outRate
+                                    leftChannel  = floats,
+                                    rightChannel = floats,
+                                    sampleRate   = origRate
                                 )
                                 withContext(Dispatchers.Main) {
                                     if (success) {
