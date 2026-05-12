@@ -75,6 +75,7 @@ class NavigationMapModule : TrackerModule {
             // Popup screens - use the column we came from
             ScreenType.FILE_BROWSER -> navState.sourceColumn
             ScreenType.SETTINGS -> navState.sourceColumn
+            ScreenType.SAMPLE_EDITOR -> navState.sourceColumn
         }
 
         // ===================================
@@ -231,6 +232,7 @@ class NavigationMapModule : TrackerModule {
             ScreenType.EFFECTS -> "X"
             ScreenType.FILE_BROWSER -> "FB"
             ScreenType.SETTINGS -> "SE"
+            ScreenType.SAMPLE_EDITOR -> "SE"
         }
     }
 }

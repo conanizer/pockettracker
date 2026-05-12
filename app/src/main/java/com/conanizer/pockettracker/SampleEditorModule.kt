@@ -54,8 +54,8 @@ class SampleEditorModule : TrackerModule {
     private fun DrawScope.drawRow0Header(x: Int, y: Int, scale: Int, s: SampleEditorState) {
         val ty = y + TEXT_PADDING
         drawBitmapText("SAMPLE EDITOR", x + 10, ty, scale, Color.Cyan,     CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("${s.sampleRate}Hz",  x + 390, ty, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(s.durationDisplay,    x + 512, ty, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("${s.sampleRate}Hz",  x + 360, ty, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText(s.durationDisplay,    x + 492, ty, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
     }
 
     private fun DrawScope.drawRow1View(x: Int, y: Int, scale: Int, s: SampleEditorState) {
@@ -89,10 +89,10 @@ class SampleEditorModule : TrackerModule {
         fun labelColor(col: Int) = if (isCurRow && curCol == col) Color.Yellow else Color.Gray
         fun valueColor(col: Int) = if (isCurRow && curCol == col) Color.Yellow else Color.White
         drawBitmapText(l1, x + 10,  ty, scale, labelColor(c1), CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(v1, x + 90,  ty, scale, valueColor(c1), CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(l2, x + 210, ty, scale, labelColor(c2), CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(v2, x + 320, ty, scale, valueColor(c2), CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(l3, x + 460, ty, scale, labelColor(c3), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText(v1, x + 110,  ty, scale, valueColor(c1), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText(l2, x + 180, ty, scale, labelColor(c2), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText(v2, x + 335, ty, scale, valueColor(c2), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText(l3, x + 445, ty, scale, labelColor(c3), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(v3, x + 535, ty, scale, valueColor(c3), CHAR_SPACING, FONT_SCALE)
     }
 
@@ -151,7 +151,7 @@ class SampleEditorModule : TrackerModule {
             if (eXf >= wfLeft && eXf <= wfRight) {
                 drawLine(mc, Offset((eX * scale).toFloat(), (y * scale).toFloat()),
                              Offset((eX * scale).toFloat(), ((y + WAVEFORM_H) * scale).toFloat()), scale.toFloat())
-                drawBitmapText("E", eX - 10, y + 3, scale, mc, CHAR_SPACING, FONT_SCALE)
+                drawBitmapText("E", eX - 17, y + 3, scale, mc, CHAR_SPACING, FONT_SCALE)
             }
         }
 
@@ -173,12 +173,12 @@ class SampleEditorModule : TrackerModule {
         val cur = s.cursorRow == 8
         if (cur) rowBg(x, y, scale)
         drawBitmapText("SELECTION",               x + 10,  ty, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(s.selectionStart.toHex8(), x + 145, ty, scale,
+        drawBitmapText(s.selectionStart.toHex8(), x + 180, ty, scale,
             if (cur && s.cursorCol == 0) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(s.selectionEnd.toHex8(),   x + 295, ty, scale,
+        drawBitmapText(s.selectionEnd.toHex8(),   x + 335, ty, scale,
             if (cur && s.cursorCol == 1) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("LENGTH",                  x + 430, ty, scale, Color.Gray,  CHAR_SPACING, FONT_SCALE)
-        drawBitmapText((s.selectionEnd - s.selectionStart).toHex8(), x + 525, ty, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        //drawBitmapText("LENGTH",                  x + 430, ty, scale, Color.Gray,  CHAR_SPACING, FONT_SCALE)
+        //drawBitmapText((s.selectionEnd - s.selectionStart).toHex8(), x + 525, ty, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
     }
 
     private fun DrawScope.drawRow10Slice(x: Int, y: Int, scale: Int, s: SampleEditorState) {
@@ -186,15 +186,15 @@ class SampleEditorModule : TrackerModule {
         val cur = s.cursorRow == 10
         if (cur) rowBg(x, y, scale)
         drawBitmapText("SLICE", x + 10, ty, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(SLICE_METHODS[s.sliceMethod], x + 90, ty, scale,
+        drawBitmapText(SLICE_METHODS[s.sliceMethod], x + 175, ty, scale,
             if (cur && s.cursorCol == 0) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
         if (s.sliceMethod != 2) {  // not OFF
             val (lbl, valStr) = when (s.sliceMethod) {
                 0 -> "SENS" to s.sliceSensitivity.toHex2()
                 else -> "BY"   to s.sliceDivisions.toHex2()
             }
-            drawBitmapText(lbl,    x + 285, ty, scale, if (cur && s.cursorCol == 1) Color.Yellow else Color.Gray,  CHAR_SPACING, FONT_SCALE)
-            drawBitmapText(valStr, x + 360, ty, scale, if (cur && s.cursorCol == 1) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+            drawBitmapText(lbl,    x + 335, ty, scale, if (cur && s.cursorCol == 1) Color.Yellow else Color.Gray,  CHAR_SPACING, FONT_SCALE)
+            drawBitmapText(valStr, x + 410, ty, scale, if (cur && s.cursorCol == 1) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
         }
     }
 
@@ -225,11 +225,11 @@ class SampleEditorModule : TrackerModule {
         val cur = s.cursorRow == 16
         if (cur) rowBg(x, y, scale)
         drawBitmapText("EFFECT",               x + 10,  ty, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(FX_TYPES[s.fxType],     x + 100, ty, scale,
+        drawBitmapText(FX_TYPES[s.fxType],     x + 180, ty, scale,
             if (cur && s.cursorCol == 0) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(s.fxValue.toHex2(),     x + 260, ty, scale,
+        drawBitmapText(s.fxValue.toHex2(),     x + 290, ty, scale,
             if (cur && s.cursorCol == 1) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("APPLY",                x + 490, ty, scale,
+        drawBitmapText("APPLY",                x + 440, ty, scale,
             if (cur && s.cursorCol == 2) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
     }
 
@@ -246,8 +246,8 @@ class SampleEditorModule : TrackerModule {
         val cur = s.cursorRow == 19
         if (cur) rowBg(x, y, scale)
         drawBitmapText("LOAD",      x + 120, ty, scale, if (cur && s.cursorCol == 0) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("SAVE",      x + 280, ty, scale, if (cur && s.cursorCol == 1) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("OVERWRITE", x + 400, ty, scale, if (cur && s.cursorCol == 2) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("SAVE",      x + 230, ty, scale, if (cur && s.cursorCol == 1) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("OVERWRITE", x + 335, ty, scale, if (cur && s.cursorCol == 2) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
     }
 
     private fun DrawScope.drawConfirmDialog(x: Int, y: Int, scale: Int) {
@@ -376,12 +376,21 @@ class SampleEditorModule : TrackerModule {
         val OPS_ROW2 = listOf("NORM", "FADE+", "FADE-", "SLNC", "REV", "UNDO")
 
         /** Next navigable row above (skips waveform rows 3-7, spacers 9, 12, 15, 17). */
-        fun rowAbove(row: Int) = when (row) {
-            0  -> 0;  8 -> 2;  10 -> 8;  13 -> 11;  16 -> 14;  18 -> 16;  else -> row - 1
+        fun rowAbove(row: Int, sliceMethod: Int = -1) = when (row) {
+            0  -> 0
+            1  -> 19  // wrap to last row
+            8  -> 2;  10 -> 8
+            13 -> if (sliceMethod == 2) 10 else 11
+            16 -> 14; 18 -> 16
+            else -> row - 1
         }
         /** Next navigable row below (skips waveform rows 3-7, spacers 9, 12, 15, 17). */
-        fun rowBelow(row: Int) = when (row) {
-            19 -> 19; 2 -> 8;  8 -> 10;  11 -> 13;  14 -> 16;  16 -> 18;  else -> row + 1
+        fun rowBelow(row: Int, sliceMethod: Int = -1) = when (row) {
+            2  -> 8;  8 -> 10
+            10 -> if (sliceMethod == 2) 13 else 11
+            11 -> 13; 14 -> 16; 16 -> 18
+            19 -> 1   // wrap to first row
+            else -> row + 1
         }
         /** Maximum cursor column for a given row. */
         fun maxColForRow(row: Int, sliceMethod: Int = 2) = when (row) {
@@ -443,12 +452,16 @@ data class SampleEditorState(
         else -> slicePosition
     }
 
-    // Zoom view window: centers on the point currently being edited
-    private val viewCenter: Long get() = when {
-        cursorRow == 8  && cursorCol == 0 -> selectionStart
-        cursorRow == 8  && cursorCol == 1 -> selectionEnd
-        cursorRow == 11 && sliceMethod == 1 -> effectiveSlicePosition
-        else -> (selectionStart + selectionEnd) / 2L
+    // Zoom view window: follows playback during playback, otherwise anchors to the active marker
+    private val viewCenter: Long get() {
+        if (playbackPosition >= 0f && totalFrames > 0)
+            return (playbackPosition * totalFrames).toLong()
+        return when {
+            cursorRow == 8  && cursorCol == 0 -> selectionStart
+            cursorRow == 8  && cursorCol == 1 -> selectionEnd
+            cursorRow == 11 && sliceMethod != 2 -> effectiveSlicePosition
+            else -> selectionStart
+        }
     }
     val viewStart: Long get() {
         if (zoomLevel == 0 || totalFrames <= 0) return 0L

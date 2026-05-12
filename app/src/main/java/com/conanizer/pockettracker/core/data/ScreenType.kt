@@ -20,7 +20,8 @@ enum class ScreenType(val label: String, val shortLabel: String) {
 
     // Popup screens - replace main view temporarily
     FILE_BROWSER("FILE BROWSER", "FB"),  // File selection popup
-    SETTINGS("SETTINGS", "SE")           // Settings side menu (opened from PROJECT screen)
+    SETTINGS("SETTINGS", "SE"),          // Settings side menu (opened from PROJECT screen)
+    SAMPLE_EDITOR("SAMPLE EDITOR", "SE") // Full-screen waveform editor (opened from INSTRUMENT)
 }
 
 // Navigation grid: 5 columns × 5 rows

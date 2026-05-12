@@ -24,6 +24,9 @@ fun Int.toHex2(): String = (this and 0xFF).toString(16).uppercase().padStart(2, 
 /** Format as 1-digit uppercase hex (e.g. 15 → "F"). Masks to lower 4 bits. */
 fun Int.toHex1(): String = (this and 0x0F).toString(16).uppercase()
 
+/** Format as 8-digit uppercase hex (e.g. 65536L → "00010000"). */
+fun Long.toHex8(): String = this.toString(16).uppercase().padStart(8, '0')
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ROW BACKGROUND COLOR
 // ═══════════════════════════════════════════════════════════════════════════

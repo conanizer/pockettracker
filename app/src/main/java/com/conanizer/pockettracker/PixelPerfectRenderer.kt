@@ -70,6 +70,7 @@ fun PixelPerfectTracker(
     instrumentStatusMessage: String,
     instrumentStatusSuccess: Boolean,
     fileBrowserState: FileBrowserModule.State? = null,
+    sampleEditorState: SampleEditorState? = null,
     // Copy/paste state
     selectionInfo: String = "",        // e.g., "SEL:CELL", "SEL:ROW", "SEL:ALL"
     clipboardInfo: String = "",        // e.g., "PHR:3x4", "CHN:1x8"
@@ -250,6 +251,7 @@ fun PixelPerfectTracker(
                         instrumentStatusMessage = instrumentStatusMessage,
                         instrumentStatusSuccess = instrumentStatusSuccess,
                         fileBrowserState = fileBrowserState,
+                        sampleEditorState = sampleEditorState,
                         selectionInfo = selectionInfo,
                         clipboardInfo = clipboardInfo,
                         selectionMode = selectionMode,
@@ -315,6 +317,7 @@ class TrackerLayout {
     private val songEditor = SongEditorModule()
     private val projectModule = ProjectModule()
     private val fileBrowser = FileBrowserModule()
+    private val sampleEditorModule = SampleEditorModule()
     private val tableModule = TableModule()
     private val grooveModule = GrooveModule()
     private val modulationModule = ModulationModule()
@@ -351,6 +354,7 @@ class TrackerLayout {
         instrumentStatusMessage: String = "",
         instrumentStatusSuccess: Boolean = true,
         fileBrowserState: FileBrowserModule.State? = null,  // File browser state
+        sampleEditorState: SampleEditorState? = null,
         // Copy/paste state
         selectionInfo: String = "",
         clipboardInfo: String = "",
@@ -496,6 +500,12 @@ class TrackerLayout {
                 }
             } else {
                 android.util.Log.e("FileBrowser", "fileBrowserState is NULL - cannot render!")
+            }
+        } else if (currentScreen == ScreenType.SAMPLE_EDITOR) {
+            if (sampleEditorState != null) {
+                with(sampleEditorModule) {
+                    draw(x = 0, y = 0, scale = scale, state = sampleEditorState)
+                }
             }
         } else {
             clipRect(right = editorClipRight) {
@@ -778,7 +788,7 @@ class TrackerLayout {
         // ===================================
         // Note: Hidden when FILE_BROWSER is active to give full screen space
 
-        if (currentScreen != ScreenType.FILE_BROWSER && currentScreen != ScreenType.SETTINGS) {
+        if (currentScreen != ScreenType.FILE_BROWSER && currentScreen != ScreenType.SETTINGS && currentScreen != ScreenType.SAMPLE_EDITOR) {
             val rightBarX = DESIGN_WIDTH_PX - navigationMap.width - SIDE_SPACER  // 515
 
             // BPM row aligns with column headers on all main editors:

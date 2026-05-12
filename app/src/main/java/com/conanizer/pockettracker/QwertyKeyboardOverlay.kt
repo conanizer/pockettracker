@@ -60,7 +60,8 @@ enum class QwertyContext {
     FOLDER_CREATE,  // Create folder in contextExtra directory with typed name
     RESAMPLE,       // Render selection to WAV with typed name as base name
     INSTRUMENT_SAVE, // Save instrument as .pti with typed name; contextExtra = instruments directory
-    SAMPLE_NAME      // Rename sample in sample editor; contextExtra = samplesDirectory
+    SAMPLE_NAME,     // Rename sample in sample editor; contextExtra = samplesDirectory
+    SAMPLE_SAVE      // Save sample editor buffer to WAV; contextExtra = samples directory
 }
 
 // ============================================================================
