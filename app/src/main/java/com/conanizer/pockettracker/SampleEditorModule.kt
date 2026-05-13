@@ -227,7 +227,8 @@ class SampleEditorModule : TrackerModule {
         drawBitmapText("EFFECT",               x + 10,  ty, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
         drawBitmapText(FX_TYPES[s.fxType],     x + 180, ty, scale,
             if (cur && s.cursorCol == 0) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(s.fxValue.toHex2(),     x + 290, ty, scale,
+        val valStr = if (s.fxType == 4) SYNC_TYPES[s.syncType] else s.fxValue.toHex2()
+        drawBitmapText(valStr,                 x + 290, ty, scale,
             if (cur && s.cursorCol == 1) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
         drawBitmapText("APPLY",                x + 440, ty, scale,
             if (cur && s.cursorCol == 2) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
@@ -299,7 +300,8 @@ class SampleEditorModule : TrackerModule {
             13, 14 -> CursorContextFactory.none()  // action rows: handled in MainActivity
             16 -> when (s.cursorCol) {
                 0 -> CursorContextFactory.toggleTernary(FX_TYPES[s.fxType], FX_TYPES)
-                1 -> CursorContextFactory.hexByte(s.fxValue, 0, 255)
+                1 -> if (s.fxType == 4) CursorContextFactory.toggleTernary(SYNC_TYPES[s.syncType], SYNC_TYPES)
+                     else CursorContextFactory.hexByte(s.fxValue, 0, 255)
                 2 -> CursorContextFactory.none()  // APPLY: action
                 else -> CursorContextFactory.none()
             }
@@ -338,7 +340,9 @@ class SampleEditorModule : TrackerModule {
             }
             16 -> when (s.cursorCol) {
                 0 -> if (action is InputAction.SET_VALUE) return InputResult(fxType  = action.value)
-                1 -> if (action is InputAction.SET_VALUE) return InputResult(fxValue = action.value)
+                1 -> if (action is InputAction.SET_VALUE) return if (s.fxType == 4)
+                         InputResult(syncType = action.value)
+                     else InputResult(fxValue = action.value)
             }
         }
         return InputResult()
@@ -357,12 +361,13 @@ class SampleEditorModule : TrackerModule {
         val sliceIndex:       Int?     = null,
         val fxType:           Int?     = null,
         val fxValue:          Int?     = null,
+        val syncType:         Int?     = null,
         val selectionStart:   Long?    = null,
         val selectionEnd:     Long?    = null
     ) {
         val modified = listOf(zoomLevel, sourceMode, rateMode, pitchSemitones, durationIndex,
             snapEnabled, sliceMethod, sliceSensitivity, sliceDivisions, sliceIndex, fxType, fxValue,
-            selectionStart, selectionEnd
+            syncType, selectionStart, selectionEnd
         ).any { it != null }
     }
 
@@ -370,7 +375,8 @@ class SampleEditorModule : TrackerModule {
         val SOURCE_VALUES   = listOf("LEFT", "RIGHT", "STEREO")
         val RATE_VALUES     = listOf("HIGH", "NORM", "LOFI")
         val DURATION_VALUES = listOf("4 BAR", "2 BAR", "1 BAR", "1/2", "1/4", "1/8", "1/16", "1/32")
-        val FX_TYPES        = listOf("OTT", "DUST", "DRIVE", "EQ")
+        val FX_TYPES        = listOf("OTT", "DUST", "DRIVE", "EQ", "SYNC")
+        val SYNC_TYPES      = listOf("RPITCH")
         val SLICE_METHODS   = listOf("TRANSIENT", "DIVIDE", "OFF")
         val OPS_ROW1 = listOf("CROP", "COPY", "CUT", "DUPL", "PASTE", "DEL")
         val OPS_ROW2 = listOf("NORM", "FADE+", "FADE-", "SLNC", "REV", "UNDO")
@@ -398,7 +404,8 @@ class SampleEditorModule : TrackerModule {
             in 3..8  -> 1
             10       -> if (sliceMethod == 2) 0 else 1
             11       -> 1
-            13, 14   -> 5
+            13       -> 5
+            14       -> 5
             16       -> 2
             18       -> 0
             19       -> 2
@@ -439,8 +446,9 @@ data class SampleEditorState(
     val sliceIndex:       Int  = 0,
     val slicePosition:    Long = 0L,
     // FX row
-    val fxType:  Int = 0,   // 0=OTT, 1=DUST, 2=DRIVE, 3=EQ
+    val fxType:  Int = 0,   // 0=OTT, 1=DUST, 2=DRIVE, 3=EQ, 4=SYNC
     val fxValue: Int = 0,
+    val syncType: Int = 0,  // when fxType==SYNC: 0=RPITCH
     // State flags
     val isModified:       Boolean = false,
     val showConfirmClose: Boolean = false,
@@ -477,7 +485,9 @@ data class SampleEditorState(
 
     val durationDisplay: String get() {
         if (sampleRate <= 0 || totalFrames <= 0) return "--:--.--"
-        val ms    = (totalFrames * 1000L) / sampleRate
+        val ratio          = Math.pow(2.0, pitchSemitones / 12.0)
+        val effectiveFrames = (totalFrames / ratio).toLong().coerceAtLeast(1L)
+        val ms    = (effectiveFrames * 1000L) / sampleRate
         val mins  = ms / 60000
         val secs  = (ms % 60000) / 1000
         val centis = (ms % 1000) / 10
@@ -497,6 +507,7 @@ data class SampleEditorState(
         sliceIndex       = r.sliceIndex       ?: sliceIndex,
         fxType           = r.fxType           ?: fxType,
         fxValue          = r.fxValue          ?: fxValue,
+        syncType         = r.syncType         ?: syncType,
         selectionStart   = r.selectionStart   ?: selectionStart,
         selectionEnd     = r.selectionEnd     ?: selectionEnd
     )

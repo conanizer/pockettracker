@@ -42,9 +42,9 @@ START preview playback — plays selection range with pitch offset applied
    16 -> if (s.cursorCol == 2) { // APPLY FX — not yet implemented }
    OTT, DUST, DRIVE offline whole-sample DSP are absent. No C++ applySampleFx() JNI function exists.
 
-2. REPITCH destructive
-   The PITCH semitones field is only used during START preview (shifts root note temporarily). No destructive repitchSample(id, factor) in C++
-   or JNI.
+2. REPITCH destructive ✅ DONE
+   SYNC/RPITCH on FX row (row 16, col APPLY). Calculates semitones from DURATION+BPM and calls pitchShiftSample() immediately.
+   Root note not modified. Backup taken before apply so UNDO works.
 
 3. SNAP / Zero-Crossing
    Toggle exists in state and UI but is never applied. Selection marker editing (A+UP/DOWN in waveform rows) doesn't invoke any zero-crossing
@@ -94,7 +94,7 @@ Summary by priority
 ├────────────────────────────────────────────────────────────────┼────────────┤
 │ FX APPLY (OTT/DUST/DRIVE/EQ offline)                           │ ❌ Stubbed │
 ├────────────────────────────────────────────────────────────────┼────────────┤
-│ Destructive REPITCH                                            │ ❌ Missing │
+│ Destructive REPITCH (SYNC/RPITCH on FX row via APPLY)          │ ✅ Done    │
 ├────────────────────────────────────────────────────────────────┼────────────┤
 │ SNAP zero-crossing                                             │ ❌ Missing │
 ├────────────────────────────────────────────────────────────────┼────────────┤

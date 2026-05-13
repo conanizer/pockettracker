@@ -972,6 +972,12 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1apply
     if (engine) engine->applyRateMode((int)id, (int)factor);
 }
 
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1pitchShiftSample(
+        JNIEnv*, jobject, jint id, jfloat semitones) {
+    if (engine) engine->pitchShiftSample((int)id, (float)semitones);
+}
+
 } // extern "C"
 
 #pragma clang diagnostic pop

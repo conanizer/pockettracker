@@ -150,7 +150,7 @@ All operations act on `[selectionStart, selectionEnd)`. If no selection is activ
 
 The FX row (row 16) applies a single selected effect to the entire sample buffer. Press APPLY (A button on the APPLY column) to execute destructively. The operation can be undone with UNDO.
 
-Four effect types are available, cycled via A+DPAD on the EFFECT column:
+Five effect types are available, cycled via A+DPAD on the EFFECT column:
 
 ### 4.1 OTT
 
@@ -177,6 +177,14 @@ Four effect types are available, cycled via A+DPAD on the EFFECT column:
 - **SELECT on the FX row (when EQ is selected):** opens the EQ editor screen. START inside the EQ screen plays the sample as a preview. SELECT inside the EQ screen applies the EQ destructively and returns to the sample editor. B inside the EQ screen cancels.
 - **APPLY on the FX row:** applies the current EQ preset directly without opening the EQ screen.
 - Implementation: offline biquad filter pass over the full sample buffer, same biquad code as `filter.h`.
+
+### 4.5 SYNC
+
+- Time-sync utilities. The second column selects the sub-type (cycled with A+DPAD); APPLY executes immediately and destructively.
+- Sub-types:
+  - **RPITCH** — destructively pitch-shifts the sample buffer to match the DURATION setting at the project BPM. Calculates the required semitone shift from the current sample length, applies `pitchShiftSample()`, and updates the waveform. Root note is NOT changed. UNDO available.
+  - *(Future: TSTRCH — time-stretch without pitch change, phase vocoder)*
+- Root note is preserved after RPITCH — the sample is resampled to the target speed but the instrument's root note stays the same.
 
 ---
 

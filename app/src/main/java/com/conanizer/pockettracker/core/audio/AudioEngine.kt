@@ -700,6 +700,13 @@ class AudioEngine(
         backend.applyRateMode(instrumentId, factor)
     }
 
+    fun pitchShiftSample(instrumentId: Int, semitones: Int) {
+        // Pitch shift clears the RATE cache in C++, so the shifted buffer becomes the new "original".
+        // Clear originalSampleRateRatios too so RATE mode ratios are not based on stale state.
+        originalSampleRateRatios.remove(instrumentId)
+        backend.pitchShiftSample(instrumentId, semitones.toFloat())
+    }
+
     fun findZeroCrossing(instrumentId: Int, frame: Int): Int = backend.findZeroCrossing(instrumentId, frame)
 
     // Recover the original WAV sample rate from the stored rate ratio

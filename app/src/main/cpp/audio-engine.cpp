@@ -433,6 +433,41 @@ void AudioEngine::applyRateMode(int id, int factor) {
     }
 }
 
+void AudioEngine::pitchShiftSample(int id, float semitones) {
+    if (id < 0 || id >= 256 || !samples[id] || semitones == 0.0f) return;
+
+    for (int v = 0; v < MAX_VOICES; v++) {
+        if (voices[v].isActive && voices[v].sampleData == samples[id]) voices[v].stop();
+    }
+
+    std::lock_guard<std::mutex> lock(sampleEditMutex);
+
+    // Pitch shift makes this buffer the new "original"; discard any RATE cache.
+    if (originalSamples[id]) {
+        delete[] originalSamples[id];
+        originalSamples[id] = nullptr;
+        originalSampleLengths[id] = 0;
+    }
+
+    float ratio  = std::pow(2.0f, semitones / 12.0f);
+    int   oldLen = sampleLengths[id];
+    int   newLen = std::max(1, (int)std::round((float)oldLen / ratio));
+
+    float* newBuf = new float[newLen];
+    for (int i = 0; i < newLen; i++) {
+        float srcPos = i * ratio;
+        int   srcIdx = (int)srcPos;
+        float frac   = srcPos - srcIdx;
+        float s0 = (srcIdx     < oldLen) ? samples[id][srcIdx]     : 0.0f;
+        float s1 = (srcIdx + 1 < oldLen) ? samples[id][srcIdx + 1] : s0;
+        newBuf[i] = s0 + (s1 - s0) * frac;
+    }
+
+    delete[] samples[id];
+    samples[id]       = newBuf;
+    sampleLengths[id] = newLen;
+}
+
 int AudioEngine::findZeroCrossing(int id, int frame, int searchRadius) {
     if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] < 2) return frame;
     const float* buf = samples[id];

@@ -2161,7 +2161,39 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     )
                                 }
                             }
-                            16 -> if (s.cursorCol == 2) { // APPLY FX — not yet implemented
+                            16 -> if (s.cursorCol == 2) { // APPLY FX
+                                if (s.fxType == 4) { // SYNC
+                                    when (s.syncType) {
+                                        0 -> { // RPITCH — destructively pitch-shift to match DURATION at project BPM
+                                            val bpm = trackerController.project.tempo
+                                            val rawSecs = if (s.sampleRate > 0) s.totalFrames.toDouble() / s.sampleRate else 0.0
+                                            if (rawSecs > 0.0 && bpm > 0) {
+                                                val targetBeats = when (s.durationIndex) {
+                                                    0 -> 16.0; 1 -> 8.0; 2 -> 4.0; 3 -> 2.0
+                                                    4 -> 1.0;  5 -> 0.5; 6 -> 0.25; else -> 0.125
+                                                }
+                                                val targetSecs = targetBeats * 60.0 / bpm
+                                                val semitones = Math.round(12.0 * Math.log(rawSecs / targetSecs) / Math.log(2.0)).toInt().coerceIn(-24, 24)
+                                                if (semitones != 0) {
+                                                    audioEngine.backupSample(instId)
+                                                    val oldLen = s.totalFrames
+                                                    audioEngine.pitchShiftSample(instId, semitones)
+                                                    val newLen = audioEngine.getSampleLength(instId)
+                                                    fun scaleFrame(f: Long) = if (oldLen > 0) (f * newLen.toLong() / oldLen).coerceIn(0L, newLen.toLong()) else 0L
+                                                    sampleEditorState = sampleEditorState.copy(
+                                                        totalFrames    = newLen,
+                                                        waveformData   = audioEngine.getSampleWaveform(instId, 620),
+                                                        pitchSemitones = 0,
+                                                        selectionStart = scaleFrame(sampleEditorState.selectionStart),
+                                                        selectionEnd   = scaleFrame(sampleEditorState.selectionEnd),
+                                                        slicePosition  = scaleFrame(sampleEditorState.slicePosition),
+                                                        isModified     = true
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             18 -> { // NAME — open QWERTY keyboard for renaming
                                 val currentName = s.sampleName
@@ -2196,6 +2228,27 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     val samplesDir = fileManager.getSamplesDirectory()
                                     java.io.File(samplesDir).mkdirs()
                                     val targetPath = "$samplesDir/$baseName.wav"
+                                    // Apply pitch destructively before saving
+                                    run {
+                                        val semitones = sampleEditorState.pitchSemitones
+                                        if (semitones != 0) {
+                                            val oldLen = sampleEditorState.totalFrames
+                                            audioEngine.pitchShiftSample(instId, semitones)
+                                            val newLen = audioEngine.getSampleLength(instId)
+                                            fun scaleFrame(f: Long) = if (oldLen > 0) (f * newLen.toLong() / oldLen).coerceIn(0L, newLen.toLong()) else 0L
+                                            audioEngine.updateInstrumentPlaybackParams(trackerController.project.instruments[instId])
+                                            trackerController.projectVersion++
+                                            sampleEditorState = sampleEditorState.copy(
+                                                totalFrames    = newLen,
+                                                waveformData   = audioEngine.getSampleWaveform(instId, 620),
+                                                pitchSemitones = 0,
+                                                rateMode       = 0,
+                                                selectionStart = scaleFrame(sampleEditorState.selectionStart),
+                                                selectionEnd   = scaleFrame(sampleEditorState.selectionEnd),
+                                                slicePosition  = scaleFrame(sampleEditorState.slicePosition)
+                                            )
+                                        }
+                                    }
                                     if (!java.io.File(targetPath).exists()) {
                                         // No collision — save directly and close
                                         coroutineScope.launch(Dispatchers.Default) {
@@ -2246,6 +2299,27 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     }
                                 }
                                 2 -> { // OVERWRITE: write sample buffer back to original WAV
+                                    // Apply pitch destructively before saving
+                                    run {
+                                        val semitones = sampleEditorState.pitchSemitones
+                                        if (semitones != 0) {
+                                            val oldLen = sampleEditorState.totalFrames
+                                            audioEngine.pitchShiftSample(instId, semitones)
+                                            val newLen = audioEngine.getSampleLength(instId)
+                                            fun scaleFrame(f: Long) = if (oldLen > 0) (f * newLen.toLong() / oldLen).coerceIn(0L, newLen.toLong()) else 0L
+                                            audioEngine.updateInstrumentPlaybackParams(trackerController.project.instruments[instId])
+                                            trackerController.projectVersion++
+                                            sampleEditorState = sampleEditorState.copy(
+                                                totalFrames    = newLen,
+                                                waveformData   = audioEngine.getSampleWaveform(instId, 620),
+                                                pitchSemitones = 0,
+                                                rateMode       = 0,
+                                                selectionStart = scaleFrame(sampleEditorState.selectionStart),
+                                                selectionEnd   = scaleFrame(sampleEditorState.selectionEnd),
+                                                slicePosition  = scaleFrame(sampleEditorState.slicePosition)
+                                            )
+                                        }
+                                    }
                                     val filePath = trackerController.project.instruments[instId].sampleFilePath
                                     if (filePath != null) {
                                         coroutineScope.launch(Dispatchers.Default) {
@@ -2729,6 +2803,27 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             val name = typedText.ifEmpty { "SAMPLE" }
                             val instId = sampleEditorState.instrumentId
                             val samplesDir = qwertyKeyboardState.contextExtra  // capture before state reset
+                            // Apply pitch destructively before saving
+                            run {
+                                val semitones = sampleEditorState.pitchSemitones
+                                if (semitones != 0) {
+                                    val oldLen = sampleEditorState.totalFrames
+                                    audioEngine.pitchShiftSample(instId, semitones)
+                                    val newLen = audioEngine.getSampleLength(instId)
+                                    fun scaleFrame(f: Long) = if (oldLen > 0) (f * newLen.toLong() / oldLen).coerceIn(0L, newLen.toLong()) else 0L
+                                    audioEngine.updateInstrumentPlaybackParams(trackerController.project.instruments[instId])
+                                    trackerController.projectVersion++
+                                    sampleEditorState = sampleEditorState.copy(
+                                        totalFrames    = newLen,
+                                        waveformData   = audioEngine.getSampleWaveform(instId, 620),
+                                        pitchSemitones = 0,
+                                        rateMode       = 0,
+                                        selectionStart = scaleFrame(sampleEditorState.selectionStart),
+                                        selectionEnd   = scaleFrame(sampleEditorState.selectionEnd),
+                                        slicePosition  = scaleFrame(sampleEditorState.slicePosition)
+                                    )
+                                }
+                            }
                             coroutineScope.launch(Dispatchers.Default) {
                                 java.io.File(samplesDir).mkdirs()
                                 var path = "$samplesDir/$name.wav"

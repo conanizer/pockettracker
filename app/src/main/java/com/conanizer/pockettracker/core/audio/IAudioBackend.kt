@@ -68,6 +68,8 @@ interface IAudioBackend {
     fun downsampleSample(id: Int, factor: Int)
     // Non-destructive rate mode: factor 1=HIGH (restore), 2=NORM, 4=LOFI. Derives from cached original.
     fun applyRateMode(id: Int, factor: Int)
+    // Destructive pitch shift in semitones (applied to buffer in-place; clears RATE cache).
+    fun pitchShiftSample(id: Int, semitones: Float)
     // Returns nearest zero-crossing frame within ±512 frames, or `frame` if none found.
     fun findZeroCrossing(id: Int, frame: Int): Int
 
