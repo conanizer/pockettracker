@@ -71,6 +71,8 @@ public:
     void applyRateMode(int id, int factor);
     // Destructive pitch shift by semitones (applied to buffer in-place; clears original cache).
     void pitchShiftSample(int id, float semitones);
+    // Destructive whole-sample DSP: fxType 0=OTT, 1=DUST, 2=DRIVE. fxValue 0-255.
+    void applySampleFx(int id, int fxType, int fxValue, float sampleRate);
     // Returns the nearest zero-crossing frame within ±searchRadius of `frame`, or `frame` if none found.
     int  findZeroCrossing(int id, int frame, int searchRadius = 512);
 

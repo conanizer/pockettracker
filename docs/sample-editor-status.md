@@ -38,9 +38,10 @@ START preview playback — plays selection range with pitch offset applied
   ---
 ❌ NOT IMPLEMENTED
 
-1. FX APPLY (Row 16, col 2) — completely stubbed
-   16 -> if (s.cursorCol == 2) { // APPLY FX — not yet implemented }
-   OTT, DUST, DRIVE offline whole-sample DSP are absent. No C++ applySampleFx() JNI function exists.
+1. FX APPLY (Row 16, col 2) ✅ OTT/DUST/DRIVE done — EQ still stubbed
+   C++ applySampleFx(id, fxType, fxValue, sampleRate): OTT via OttModule.resetForRender+process,
+   DUST via DustChain, DRIVE via DriveModule.processMono. All run offline in 512-sample chunks.
+   Full JNI stack wired. EQ (fxType=3) deferred — needs EQ slot reference.
 
 2. REPITCH destructive ✅ DONE
    SYNC/RPITCH on FX row (row 16, col APPLY). Calculates semitones from DURATION+BPM and calls pitchShiftSample() immediately.
@@ -92,7 +93,9 @@ Summary by priority
 ├────────────────────────────────────────────────────────────────┼────────────┤
 │ SLICE UI (rows 10–11)                                          │ ✅ UI only │
 ├────────────────────────────────────────────────────────────────┼────────────┤
-│ FX APPLY (OTT/DUST/DRIVE/EQ offline)                           │ ❌ Stubbed │
+│ FX APPLY OTT/DUST/DRIVE offline                                 │ ✅ Done    │
+├────────────────────────────────────────────────────────────────┼────────────┤
+│ FX APPLY EQ offline                                             │ ❌ Stubbed │
 ├────────────────────────────────────────────────────────────────┼────────────┤
 │ Destructive REPITCH (SYNC/RPITCH on FX row via APPLY)          │ ✅ Done    │
 ├────────────────────────────────────────────────────────────────┼────────────┤

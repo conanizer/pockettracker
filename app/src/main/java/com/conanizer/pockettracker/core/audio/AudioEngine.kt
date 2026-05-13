@@ -707,6 +707,10 @@ class AudioEngine(
         backend.pitchShiftSample(instrumentId, semitones.toFloat())
     }
 
+    fun applySampleFx(instrumentId: Int, fxType: Int, fxValue: Int, sampleRate: Float) {
+        backend.applySampleFx(instrumentId, fxType, fxValue, sampleRate)
+    }
+
     fun findZeroCrossing(instrumentId: Int, frame: Int): Int = backend.findZeroCrossing(instrumentId, frame)
 
     // Recover the original WAV sample rate from the stored rate ratio

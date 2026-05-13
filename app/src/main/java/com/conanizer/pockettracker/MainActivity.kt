@@ -2162,7 +2162,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                 }
                             }
                             16 -> if (s.cursorCol == 2) { // APPLY FX
-                                if (s.fxType == 4) { // SYNC
+                                when {
+                                    s.fxType in 0..2 -> { // OTT / DUST / DRIVE
+                                        if (s.fxValue > 0) {
+                                            audioEngine.backupSample(instId)
+                                            audioEngine.applySampleFx(instId, s.fxType, s.fxValue, s.sampleRate.toFloat())
+                                            sampleEditorState = sampleEditorState.copy(
+                                                waveformData = audioEngine.getSampleWaveform(instId, 620),
+                                                isModified   = true
+                                            )
+                                        }
+                                    }
+                                    s.fxType == 4 -> { // SYNC
                                     when (s.syncType) {
                                         0 -> { // RPITCH — destructively pitch-shift to match DURATION at project BPM
                                             val bpm = trackerController.project.tempo
@@ -2193,6 +2204,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                             }
                                         }
                                     }
+                                }
                                 }
                             }
                             18 -> { // NAME — open QWERTY keyboard for renaming

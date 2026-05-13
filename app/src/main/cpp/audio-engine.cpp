@@ -468,6 +468,55 @@ void AudioEngine::pitchShiftSample(int id, float semitones) {
     sampleLengths[id] = newLen;
 }
 
+void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRate) {
+    if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] <= 0) return;
+
+    for (int v = 0; v < MAX_VOICES; v++) {
+        if (voices[v].isActive && voices[v].sampleData == samples[id]) voices[v].stop();
+    }
+
+    std::lock_guard<std::mutex> lock(sampleEditMutex);
+
+    float* buf = samples[id];
+    int    len = sampleLengths[id];
+
+    constexpr int CHUNK = 512;
+    float stereo[CHUNK * 2];
+
+    if (fxType == 0) { // OTT
+        OttModule ott;
+        ott.reset(sampleRate);
+        ott.resetForRender(fxValue / 255.0f);
+        for (int pos = 0; pos < len; pos += CHUNK) {
+            int n = std::min(CHUNK, len - pos);
+            for (int i = 0; i < n; i++) {
+                stereo[i * 2]     = buf[pos + i];
+                stereo[i * 2 + 1] = buf[pos + i];
+            }
+            ott.process(stereo, n, 2);
+            for (int i = 0; i < n; i++) buf[pos + i] = stereo[i * 2];
+        }
+    } else if (fxType == 1) { // DUST
+        skdust::DustChain dust;
+        dust.prepare((double)sampleRate, CHUNK, 2);
+        dust.setDustAmount(fxValue / 255.0f);
+        for (int pos = 0; pos < len; pos += CHUNK) {
+            int n = std::min(CHUNK, len - pos);
+            for (int i = 0; i < n; i++) {
+                stereo[i * 2]     = buf[pos + i];
+                stereo[i * 2 + 1] = buf[pos + i];
+            }
+            dust.process(stereo, n, 2);
+            for (int i = 0; i < n; i++) buf[pos + i] = stereo[i * 2];
+        }
+    } else if (fxType == 2) { // DRIVE
+        DriveModule drive;
+        drive.reset();
+        drive.setDrive(fxValue);
+        for (int i = 0; i < len; i++) buf[i] = drive.processMono(buf[i]);
+    }
+}
+
 int AudioEngine::findZeroCrossing(int id, int frame, int searchRadius) {
     if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] < 2) return frame;
     const float* buf = samples[id];
