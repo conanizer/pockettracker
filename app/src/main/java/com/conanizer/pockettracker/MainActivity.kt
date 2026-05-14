@@ -2163,8 +2163,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             }
                             16 -> if (s.cursorCol == 2) { // APPLY FX
                                 when {
-                                    s.fxType in 0..2 -> { // OTT / DUST / DRIVE
-                                        if (s.fxValue > 0) {
+                                    s.fxType in 0..3 -> { // OTT / DUST / DRIVE / EQ
+                                        if (s.fxValue > 0 || s.fxType == 3) {
                                             audioEngine.backupSample(instId)
                                             audioEngine.applySampleFx(instId, s.fxType, s.fxValue, s.sampleRate.toFloat())
                                             sampleEditorState = sampleEditorState.copy(

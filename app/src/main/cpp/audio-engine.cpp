@@ -514,6 +514,19 @@ void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRat
         drive.reset();
         drive.setDrive(fxValue);
         for (int i = 0; i < len; i++) buf[i] = drive.processMono(buf[i]);
+    } else if (fxType == 3) { // EQ — apply preset slot (fxValue = slot 0-127)
+        int slot = std::min(fxValue, 127);
+        const EqPresetBank& preset = eqPresets[slot];
+        EqModule eq;
+        eq.reset(sampleRate);
+        for (int b = 0; b < 3; b++) {
+            const EqBandData& bd = preset.bands[b];
+            eq.bands[b].setParams(bd.type, bd.freqHz, bd.gainDb, bd.q);
+            if (bd.type != 0) eq.active = true;
+        }
+        if (eq.active) {
+            for (int i = 0; i < len; i++) buf[i] = eq.processMono(buf[i]);
+        }
     }
 }
 

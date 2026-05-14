@@ -300,8 +300,11 @@ class SampleEditorModule : TrackerModule {
             13, 14 -> CursorContextFactory.none()  // action rows: handled in MainActivity
             16 -> when (s.cursorCol) {
                 0 -> CursorContextFactory.toggleTernary(FX_TYPES[s.fxType], FX_TYPES)
-                1 -> if (s.fxType == 4) CursorContextFactory.toggleTernary(SYNC_TYPES[s.syncType], SYNC_TYPES)
-                     else CursorContextFactory.hexByte(s.fxValue, 0, 255)
+                1 -> when (s.fxType) {
+                    3    -> CursorContextFactory.hexByte(s.fxValue, 0, 127)  // EQ: slot 0-127
+                    4    -> CursorContextFactory.toggleTernary(SYNC_TYPES[s.syncType], SYNC_TYPES)
+                    else -> CursorContextFactory.hexByte(s.fxValue, 0, 255)
+                }
                 2 -> CursorContextFactory.none()  // APPLY: action
                 else -> CursorContextFactory.none()
             }

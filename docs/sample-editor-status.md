@@ -38,10 +38,10 @@ START preview playback — plays selection range with pitch offset applied
   ---
 ❌ NOT IMPLEMENTED
 
-1. FX APPLY (Row 16, col 2) ✅ OTT/DUST/DRIVE done — EQ still stubbed
+1. FX APPLY (Row 16, col 2) ✅ ALL DONE
    C++ applySampleFx(id, fxType, fxValue, sampleRate): OTT via OttModule.resetForRender+process,
-   DUST via DustChain, DRIVE via DriveModule.processMono. All run offline in 512-sample chunks.
-   Full JNI stack wired. EQ (fxType=3) deferred — needs EQ slot reference.
+   DUST via DustChain, DRIVE via DriveModule.processMono, EQ via EqModule from eqPresets[slot].
+   EQ: fxValue = slot 0-127; cursor context limits to 0-127. No-op if slot has no active bands.
 
 2. REPITCH destructive ✅ DONE
    SYNC/RPITCH on FX row (row 16, col APPLY). Calculates semitones from DURATION+BPM and calls pitchShiftSample() immediately.
@@ -93,13 +93,13 @@ Summary by priority
 ├────────────────────────────────────────────────────────────────┼────────────┤
 │ SLICE UI (rows 10–11)                                          │ ✅ UI only │
 ├────────────────────────────────────────────────────────────────┼────────────┤
-│ FX APPLY OTT/DUST/DRIVE offline                                 │ ✅ Done    │
+│ FX APPLY OTT/DUST/DRIVE offline                                │ ✅ Done    │
 ├────────────────────────────────────────────────────────────────┼────────────┤
-│ FX APPLY EQ offline                                             │ ❌ Stubbed │
+│ FX APPLY EQ offline                                            │ ✅ Done    │
 ├────────────────────────────────────────────────────────────────┼────────────┤
 │ Destructive REPITCH (SYNC/RPITCH on FX row via APPLY)          │ ✅ Done    │
 ├────────────────────────────────────────────────────────────────┼────────────┤
-│ SNAP zero-crossing                                             │ ❌ Missing │
+│ SNAP zero-crossing                                             │ ✅ Done    │
 ├────────────────────────────────────────────────────────────────┼────────────┤
 │ Transient auto-slice                                           │ ❌ Missing │
 ├────────────────────────────────────────────────────────────────┼────────────┤
@@ -111,7 +111,7 @@ Summary by priority
 ├────────────────────────────────────────────────────────────────┼────────────┤
 │ WAV cue  chunk                                                 │ ❌ Missing │
 ├────────────────────────────────────────────────────────────────┼────────────┤
-│ RATE downsampling on save                                      │ ❌ Missing │
+│ RATE downsampling on save                                      │ ✅ Done    │
 ├────────────────────────────────────────────────────────────────┼────────────┤
 │ SOURCE stereo side buffer                                      │ ❌ Missing │
 ├────────────────────────────────────────────────────────────────┼────────────┤
