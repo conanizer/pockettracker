@@ -918,6 +918,18 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1undoS
     if (engine) engine->undoSample((int)id);
 }
 
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1saveFxPreviewBackup(
+        JNIEnv*, jobject, jint id) {
+    if (engine) engine->saveFxPreviewBackup((int)id);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1restoreFxPreviewBackup(
+        JNIEnv*, jobject) {
+    if (engine) engine->restoreFxPreviewBackup();
+}
+
 JNIEXPORT jfloat JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSamplePlaybackPosition(
         JNIEnv*, jobject, jint id) {

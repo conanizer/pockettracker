@@ -1007,6 +1007,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     is EqCallerContext.ReverbInputEq -> audioBackend.setReverbInputEq(slot)
                     is EqCallerContext.DelayInputEq  -> audioBackend.setDelayInputEq(slot)
                     is EqCallerContext.InstrumentEq  -> audioBackend.setInstrumentEqSlot(ctx.instrId, slot)
+                    is EqCallerContext.SampleEditorFx -> { /* no live DSP update needed for sample editor */ }
                 }
                 trackerController.projectVersion++
             }
@@ -1562,6 +1563,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             is EqCallerContext.ReverbInputEq -> { proj.reverbInputEq = newSlot; audioBackend.setReverbInputEq(newSlot) }
             is EqCallerContext.DelayInputEq  -> { proj.delayInputEq = newSlot; audioBackend.setDelayInputEq(newSlot) }
             is EqCallerContext.InstrumentEq  -> { proj.instruments[ctx.instrId].eqSlot = newSlot; audioBackend.setInstrumentEqSlot(ctx.instrId, newSlot) }
+            is EqCallerContext.SampleEditorFx -> { sampleEditorState = sampleEditorState.copy(fxValue = newSlot) }
         }
         trackerController.projectVersion++
     }
@@ -1637,8 +1639,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
 
                 // SAMPLE EDITOR confirm-close dialog: A = YES (close without saving)
                 if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.showConfirmClose) {
+                    audioEngine.restoreFxPreviewBackup()
                     sampleEditorState = sampleEditorState.copy(showConfirmClose = false, isModified = false)
                     trackerController.currentScreen = previousScreen
+                    return@buttonA
+                }
+
+                // EQ editor: plain A is a no-op (A+direction edits values)
+                if (eqEditorState.isOpen) {
                     return@buttonA
                 }
 
@@ -2083,6 +2091,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                         val s = sampleEditorState
                         val instId = s.instrumentId
                         fun doDestructiveOp(op: () -> Unit) {
+                            audioEngine.restoreFxPreviewBackup()
                             audioEngine.backupSample(instId)
                             op()
                             sampleEditorState = sampleEditorState.copy(
@@ -2108,6 +2117,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             13 -> when (s.cursorCol) {
                                 0 -> { // CROP — destructively trim sample to selection
                                     if (startF < endF) {
+                                        audioEngine.restoreFxPreviewBackup()
                                         audioEngine.backupSample(instId)
                                         audioEngine.cropSample(instId, startF, endF)
                                         afterResize()
@@ -2118,6 +2128,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                 }
                                 2 -> { // CUT — copy + delete selection
                                     if (startF < endF) {
+                                        audioEngine.restoreFxPreviewBackup()
                                         audioEngine.backupSample(instId)
                                         audioEngine.copyRegion(instId, startF, endF)
                                         audioEngine.deleteSampleRegion(instId, startF, endF)
@@ -2126,6 +2137,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                 }
                                 3 -> { // DUPL — duplicate selection (insert copy at end)
                                     if (startF < endF) {
+                                        audioEngine.restoreFxPreviewBackup()
                                         audioEngine.backupSample(instId)
                                         audioEngine.copyRegion(instId, startF, endF)
                                         audioEngine.pasteRegion(instId, sampleEditorState.totalFrames)
@@ -2134,6 +2146,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                 }
                                 4 -> { // PASTE — insert clipboard at selection start
                                     if (audioEngine.getClipboardLength() > 0) {
+                                        audioEngine.restoreFxPreviewBackup()
                                         audioEngine.backupSample(instId)
                                         audioEngine.pasteRegion(instId, startF)
                                         afterResize()
@@ -2141,6 +2154,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                 }
                                 5 -> { // DEL — delete selection region
                                     if (startF < endF) {
+                                        audioEngine.restoreFxPreviewBackup()
                                         audioEngine.backupSample(instId)
                                         audioEngine.deleteSampleRegion(instId, startF, endF)
                                         afterResize()
@@ -2154,6 +2168,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                 3 -> doDestructiveOp { audioEngine.silenceRegion(instId, startF, endF) }
                                 4 -> doDestructiveOp { audioEngine.reverseSample(instId, startF, endF) }
                                 5 -> { // UNDO
+                                    audioEngine.restoreFxPreviewBackup()
                                     audioEngine.undoSample(instId)
                                     sampleEditorState = sampleEditorState.copy(
                                         totalFrames  = audioEngine.getSampleLength(instId),
@@ -2165,6 +2180,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                 when {
                                     s.fxType in 0..3 -> { // OTT / DUST / DRIVE / EQ
                                         if (s.fxValue > 0 || s.fxType == 3) {
+                                            audioEngine.restoreFxPreviewBackup()
                                             audioEngine.backupSample(instId)
                                             audioEngine.applySampleFx(instId, s.fxType, s.fxValue, s.sampleRate.toFloat())
                                             sampleEditorState = sampleEditorState.copy(
@@ -2186,6 +2202,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                                 val targetSecs = targetBeats * 60.0 / bpm
                                                 val semitones = Math.round(12.0 * Math.log(rawSecs / targetSecs) / Math.log(2.0)).toInt().coerceIn(-24, 24)
                                                 if (semitones != 0) {
+                                                    audioEngine.restoreFxPreviewBackup()
                                                     audioEngine.backupSample(instId)
                                                     val oldLen = s.totalFrames
                                                     audioEngine.pitchShiftSample(instId, semitones)
@@ -2496,12 +2513,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
 
                     // SAMPLE EDITOR: confirm close only if modified
                     ScreenType.SAMPLE_EDITOR -> {
+                        if (eqEditorState.isOpen) return@buttonB  // B+dpad scrolls EQ presets; SELECT closes editor
                         if (sampleEditorState.showConfirmClose) {
                             // B = NO — dismiss dialog
                             sampleEditorState = sampleEditorState.copy(showConfirmClose = false)
                         } else if (sampleEditorState.isModified) {
                             sampleEditorState = sampleEditorState.copy(showConfirmClose = true)
                         } else {
+                            audioEngine.restoreFxPreviewBackup()
                             trackerController.currentScreen = previousScreen
                         }
                         return@buttonB
@@ -2568,7 +2587,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     return@selectHandler
                 }
 
-                // EQ editor: SELECT = close
+                // EQ editor: SELECT = close (no apply; use APPLY button to apply destructively)
                 if (eqEditorState.isOpen) {
                     eqEditorState = EqEditorState()
                     return@selectHandler
@@ -2672,8 +2691,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                         }
                     }
 
-                    // SAMPLE_EDITOR: SELECT on NAME row opens keyboard; otherwise blocked
+                    // SAMPLE_EDITOR: SELECT on FX row (EQ) opens EQ editor; SELECT on NAME row opens keyboard
                     ScreenType.SAMPLE_EDITOR -> {
+                        if (sampleEditorState.cursorRow == 16 && sampleEditorState.fxType == 3) {
+                            openEqEditor(sampleEditorState.fxValue.coerceIn(0, 127), EqCallerContext.SampleEditorFx)
+                            return@selectHandler
+                        }
                         if (sampleEditorState.cursorRow == 18) {
                             val currentName = sampleEditorState.sampleName
                             qwertyKeyboardState = QwertyKeyboardState(
@@ -2936,7 +2959,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                         }
                     }
 
-                    // Sample editor: Preview selection region with pitch applied
+                    // Sample editor: Preview selection region with pitch and optional FX applied
                     ScreenType.SAMPLE_EDITOR -> {
                         val instId = sampleEditorState.instrumentId
                         val total  = sampleEditorState.totalFrames
@@ -2944,6 +2967,20 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                         val savedStart = inst.sampleStart
                         val savedEnd   = inst.sampleEnd
                         val savedRoot  = inst.root
+
+                        // FX preview: restore previous preview (if any), then apply current FX in-place.
+                        // applySampleFx is length-preserving so sample layout stays intact.
+                        val hasFxPreview = when (sampleEditorState.fxType) {
+                            0, 1, 2 -> sampleEditorState.fxValue > 0   // OTT/DUST/DRIVE: only when non-zero
+                            3       -> true                              // EQ: always (slot may have bands)
+                            else    -> false
+                        }
+                        audioEngine.restoreFxPreviewBackup()
+                        if (hasFxPreview) {
+                            audioEngine.saveFxPreviewBackup(instId)
+                            audioEngine.applySampleFx(instId, sampleEditorState.fxType, sampleEditorState.fxValue, sampleEditorState.sampleRate.toFloat())
+                        }
+
                         // Set start/end to selection boundaries so the voice plays only the selection
                         if (total > 0 && sampleEditorState.selectionEnd > sampleEditorState.selectionStart) {
                             inst.sampleStart = ((sampleEditorState.selectionStart * 255L) / total).toInt().coerceIn(0, 255)
@@ -2970,6 +3007,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             inst.sampleEnd   = savedEnd
                             audioEngine.updateInstrumentPlaybackParams(inst)
                         }
+                        // FX preview buffer persists in samples[instId] until the next START press,
+                        // any destructive op, or leaving the editor — restoreFxPreviewBackup() handles cleanup.
                     }
 
                     // Instrument screen: Preview instrument with all parameters

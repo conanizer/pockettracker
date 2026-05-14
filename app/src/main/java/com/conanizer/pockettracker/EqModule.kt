@@ -130,10 +130,11 @@ class EqModule : TrackerModule {
         drawBitmapText(slotText, x + LABEL_X, rowY(0), scale, Color.Cyan, CHAR_SPACING, FONT_SCALE)
 
         val callerLabel = when (val ctx = s.callerContext) {
-            is EqCallerContext.MasterEq      -> "MASTER"
-            is EqCallerContext.ReverbInputEq -> "REV IN"
-            is EqCallerContext.DelayInputEq  -> "DLY IN"
-            is EqCallerContext.InstrumentEq  -> "INST ${ctx.instrId.toHex2()}"
+            is EqCallerContext.MasterEq       -> "MASTER"
+            is EqCallerContext.ReverbInputEq  -> "REV IN"
+            is EqCallerContext.DelayInputEq   -> "DLY IN"
+            is EqCallerContext.InstrumentEq   -> "INST ${ctx.instrId.toHex2()}"
+            is EqCallerContext.SampleEditorFx -> "SAMPLE"
         }
         val charW = 5 * FONT_SCALE + CHAR_SPACING   // 17px
         val callerX = x + width - LABEL_X - callerLabel.length * charW

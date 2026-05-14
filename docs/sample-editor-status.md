@@ -42,6 +42,13 @@ START preview playback — plays selection range with pitch offset applied
    C++ applySampleFx(id, fxType, fxValue, sampleRate): OTT via OttModule.resetForRender+process,
    DUST via DustChain, DRIVE via DriveModule.processMono, EQ via EqModule from eqPresets[slot].
    EQ: fxValue = slot 0-127; cursor context limits to 0-127. No-op if slot has no active bands.
+   EQ editor: SELECT on FX row (fxType==3) opens EQ editor overlay (EqCallerContext.SampleEditorFx).
+   SELECT closes EQ editor. B+LEFT/RIGHT scrolls presets. fxValue stays in sync via applyCallerEqSlotChange.
+
+   Non-destructive FX preview: START button applies FX in-place to a temp buffer (saveFxPreviewBackup saves
+   clean copy; applySampleFx processes it). Each START press restores previous preview first so value changes
+   are heard immediately. restoreFxPreviewBackup() called before APPLY, UNDO, all destructive ops, and exit
+   so the clean sample is always restored before anything permanent happens.
 
 2. REPITCH destructive ✅ DONE
    SYNC/RPITCH on FX row (row 16, col APPLY). Calculates semitones from DURATION+BPM and calls pitchShiftSample() immediately.
@@ -98,6 +105,10 @@ Summary by priority
 │ FX APPLY EQ offline                                            │ ✅ Done    │
 ├────────────────────────────────────────────────────────────────┼────────────┤
 │ Destructive REPITCH (SYNC/RPITCH on FX row via APPLY)          │ ✅ Done    │
+├────────────────────────────────────────────────────────────────┼────────────┤
+│ EQ editor open from FX row (SELECT → EQ overlay)              │ ✅ Done    │
+├────────────────────────────────────────────────────────────────┼────────────┤
+│ Non-destructive FX preview (START plays with FX, not baked)   │ ✅ Done    │
 ├────────────────────────────────────────────────────────────────┼────────────┤
 │ SNAP zero-crossing                                             │ ✅ Done    │
 ├────────────────────────────────────────────────────────────────┼────────────┤

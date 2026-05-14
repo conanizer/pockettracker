@@ -314,6 +314,32 @@ void AudioEngine::undoSample(int id) {
     sampleLengths[id] = len;
 }
 
+void AudioEngine::saveFxPreviewBackup(int id) {
+    if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] <= 0) return;
+    delete[] fxPreviewBackup;
+    int len = sampleLengths[id];
+    fxPreviewBackup    = new float[len];
+    std::memcpy(fxPreviewBackup, samples[id], len * sizeof(float));
+    fxPreviewBackupLen = len;
+    fxPreviewBackupId  = id;
+}
+
+void AudioEngine::restoreFxPreviewBackup() {
+    if (fxPreviewBackupId < 0 || !fxPreviewBackup) return;
+    int id = fxPreviewBackupId;
+    if (id >= 0 && id < 256 && samples[id] && sampleLengths[id] == fxPreviewBackupLen) {
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (voices[v].isActive && voices[v].sampleData == samples[id]) voices[v].stop();
+        }
+        std::lock_guard<std::mutex> lock(sampleEditMutex);
+        std::memcpy(samples[id], fxPreviewBackup, fxPreviewBackupLen * sizeof(float));
+    }
+    delete[] fxPreviewBackup;
+    fxPreviewBackup    = nullptr;
+    fxPreviewBackupLen = 0;
+    fxPreviewBackupId  = -1;
+}
+
 void AudioEngine::cropSample(int id, int startFrame, int endFrame) {
     if (id < 0 || id >= 256 || !samples[id]) return;
     startFrame = std::max(0, startFrame);

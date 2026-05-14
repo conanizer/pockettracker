@@ -501,7 +501,7 @@ class TrackerLayout {
             } else {
                 android.util.Log.e("FileBrowser", "fileBrowserState is NULL - cannot render!")
             }
-        } else if (currentScreen == ScreenType.SAMPLE_EDITOR) {
+        } else if (currentScreen == ScreenType.SAMPLE_EDITOR && !eqEditorState.isOpen) {
             if (sampleEditorState != null) {
                 with(sampleEditorModule) {
                     draw(x = 0, y = 0, scale = scale, state = sampleEditorState)

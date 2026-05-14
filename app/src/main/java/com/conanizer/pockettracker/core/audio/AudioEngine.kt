@@ -670,6 +670,8 @@ class AudioEngine(
     fun reverseSample(instrumentId: Int, startFrame: Int, endFrame: Int) = backend.reverseSample(instrumentId, startFrame, endFrame)
     fun backupSample(instrumentId: Int) = backend.backupSample(instrumentId)
     fun undoSample(instrumentId: Int) = backend.undoSample(instrumentId)
+    fun saveFxPreviewBackup(instrumentId: Int) = backend.saveFxPreviewBackup(instrumentId)
+    fun restoreFxPreviewBackup() = backend.restoreFxPreviewBackup()
     fun getSamplePlaybackPosition(instrumentId: Int): Float = backend.getSamplePlaybackPosition(instrumentId)
     fun cropSample(instrumentId: Int, startFrame: Int, endFrame: Int) = backend.cropSample(instrumentId, startFrame, endFrame)
     fun deleteSampleRegion(instrumentId: Int, startFrame: Int, endFrame: Int) = backend.deleteSampleRegion(instrumentId, startFrame, endFrame)

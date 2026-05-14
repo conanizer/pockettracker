@@ -59,6 +59,8 @@ interface IAudioBackend {
     fun reverseSample(id: Int, startFrame: Int, endFrame: Int)
     fun backupSample(id: Int)
     fun undoSample(id: Int)
+    fun saveFxPreviewBackup(id: Int)
+    fun restoreFxPreviewBackup()
     fun getSamplePlaybackPosition(id: Int): Float
     fun cropSample(id: Int, startFrame: Int, endFrame: Int)
     fun deleteSampleRegion(id: Int, startFrame: Int, endFrame: Int)

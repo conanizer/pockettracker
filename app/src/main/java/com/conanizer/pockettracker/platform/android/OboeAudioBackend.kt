@@ -73,6 +73,8 @@ class OboeAudioBackend : IAudioBackend {
     override fun reverseSample(id: Int, startFrame: Int, endFrame: Int) = native_reverseSample(id, startFrame, endFrame)
     override fun backupSample(id: Int) = native_backupSample(id)
     override fun undoSample(id: Int) = native_undoSample(id)
+    override fun saveFxPreviewBackup(id: Int) = native_saveFxPreviewBackup(id)
+    override fun restoreFxPreviewBackup() = native_restoreFxPreviewBackup()
     override fun getSamplePlaybackPosition(id: Int): Float = native_getSamplePlaybackPosition(id)
     override fun cropSample(id: Int, startFrame: Int, endFrame: Int) = native_cropSample(id, startFrame, endFrame)
     override fun deleteSampleRegion(id: Int, startFrame: Int, endFrame: Int) = native_deleteSampleRegion(id, startFrame, endFrame)
@@ -616,6 +618,8 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_reverseSample(id: Int, startFrame: Int, endFrame: Int)
     private external fun native_backupSample(id: Int)
     private external fun native_undoSample(id: Int)
+    private external fun native_saveFxPreviewBackup(id: Int)
+    private external fun native_restoreFxPreviewBackup()
     private external fun native_getSamplePlaybackPosition(id: Int): Float
     private external fun native_cropSample(id: Int, startFrame: Int, endFrame: Int)
     private external fun native_deleteSampleRegion(id: Int, startFrame: Int, endFrame: Int)

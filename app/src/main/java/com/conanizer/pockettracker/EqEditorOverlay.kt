@@ -11,6 +11,7 @@ sealed class EqCallerContext {
     object ReverbInputEq : EqCallerContext()
     object DelayInputEq  : EqCallerContext()
     data class InstrumentEq(val instrId: Int) : EqCallerContext()
+    object SampleEditorFx : EqCallerContext()
 }
 
 val EQ_BAND_TYPE_NAMES = listOf("OFF", "LO SH", "LO LP", "BAND", "BELL", "HI SH", "HI LP")

@@ -60,6 +60,10 @@ public:
     void reverseSample(int id, int startFrame, int endFrame);
     void backupSample(int id);
     void undoSample(int id);
+    // Non-destructive FX preview: saves a clean copy separate from the undo slot.
+    // Call saveFxPreviewBackup before applySampleFx for preview; restoreFxPreviewBackup to revert.
+    void saveFxPreviewBackup(int id);
+    void restoreFxPreviewBackup();
     // Destructive resize operations
     void cropSample(int id, int startFrame, int endFrame);
     void deleteSampleRegion(int id, int startFrame, int endFrame);
@@ -294,6 +298,9 @@ private:
     int    sampleLengths[256];
     float* sampleBackups[256];        // single-level undo buffers
     int    sampleBackupLengths[256];
+    float* fxPreviewBackup    = nullptr; // separate clean-sample copy for FX preview (doesn't clobber undo)
+    int    fxPreviewBackupLen = 0;
+    int    fxPreviewBackupId  = -1;
     float* originalSamples[256];      // cached HIGH-rate original for non-destructive RATE mode
     int    originalSampleLengths[256];
     std::mutex sampleEditMutex;       // held during buffer swap; try-locked in voice mix loop
