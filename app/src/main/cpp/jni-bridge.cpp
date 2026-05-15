@@ -996,6 +996,16 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1apply
     if (engine) engine->applySampleFx((int)id, (int)fxType, (int)fxValue, (float)sampleRate);
 }
 
+JNIEXPORT jintArray JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1detectTransients(
+        JNIEnv* env, jobject, jint id, jint sensitivity, jint maxMarkers) {
+    std::vector<int> buf((size_t)maxMarkers);
+    int count = engine ? engine->detectTransients((int)id, (int)sensitivity, buf.data(), (int)maxMarkers) : 0;
+    jintArray result = env->NewIntArray(count);
+    if (result && count > 0) env->SetIntArrayRegion(result, 0, count, buf.data());
+    return result;
+}
+
 } // extern "C"
 
 #pragma clang diagnostic pop

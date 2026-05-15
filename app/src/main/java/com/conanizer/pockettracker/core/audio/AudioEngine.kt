@@ -714,6 +714,7 @@ class AudioEngine(
     }
 
     fun findZeroCrossing(instrumentId: Int, frame: Int): Int = backend.findZeroCrossing(instrumentId, frame)
+    fun detectTransients(instrumentId: Int, sensitivity: Int): IntArray = backend.detectTransients(instrumentId, sensitivity)
 
     // Recover the original WAV sample rate from the stored rate ratio
     fun getOriginalSampleRate(instrumentId: Int): Int {

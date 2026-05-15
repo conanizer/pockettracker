@@ -155,6 +155,77 @@ class SampleEditorModule : TrackerModule {
             }
         }
 
+        // Transient markers (TRANSIENT mode) — same structure as DIVIDE block below
+        if (s.sliceMethod == 0 && s.transientMarkers.isNotEmpty() && s.totalFrames > 0) {
+            val wfLeft     = x + 10
+            val wfRight    = x + 630
+            val onSliceRow = s.cursorRow == 11
+
+            // Highlight current slice region (start → end, not a spot near the marker)
+            if (onSliceRow) {
+                val (sliceStart, sliceEnd) = s.getSliceBounds(s.sliceIndex)
+                val sXf = wfLeft + ((sliceStart - s.viewStart).toFloat() / viewLenF) * 620f
+                val eXf = wfLeft + ((sliceEnd   - s.viewStart).toFloat() / viewLenF) * 620f
+                val sX  = sXf.toInt().coerceIn(wfLeft, wfRight)
+                val eX  = eXf.toInt().coerceIn(wfLeft, wfRight)
+                if (eX > sX) {
+                    drawRect(Color(0x22FFAA00),
+                        topLeft = Offset((sX * scale).toFloat(), (y * scale).toFloat()),
+                        size    = Size(((eX - sX) * scale).toFloat(), (WAVEFORM_H * scale).toFloat()))
+                }
+            }
+
+            // Draw boundary lines at each transient position.
+            // Marker idx is the right edge of slice idx and left edge of slice idx+1,
+            // so active boundaries for sliceIndex are idx==sliceIndex-1 and idx==sliceIndex.
+            s.transientMarkers.forEachIndexed { idx, markerFrame ->
+                val mXf = wfLeft + ((markerFrame - s.viewStart).toFloat() / viewLenF) * 620f
+                if (mXf >= wfLeft && mXf <= wfRight) {
+                    val isActiveBound = onSliceRow && (idx == s.sliceIndex - 1 || idx == s.sliceIndex)
+                    drawLine(if (isActiveBound) Color(0xFFFFAA00) else Color(0xFF664400),
+                        start       = Offset((mXf * scale).toFloat(), (y * scale).toFloat()),
+                        end         = Offset((mXf * scale).toFloat(), ((y + WAVEFORM_H) * scale).toFloat()),
+                        strokeWidth = scale.toFloat())
+                }
+            }
+        }
+
+        // Slice division markers (DIVIDE mode)
+        if (s.sliceMethod == 1 && s.sliceDivisions > 0 && s.totalFrames > 0) {
+            val div     = s.sliceDivisions
+            val wfLeft  = x + 10
+            val wfRight = x + 630
+            val onSliceRow = s.cursorRow == 11
+
+            // Highlight current slice region
+            if (onSliceRow) {
+                val sliceStart = (s.sliceIndex.toLong() * s.totalFrames) / div
+                val sliceEnd   = (((s.sliceIndex + 1).toLong() * s.totalFrames) / div).coerceAtMost(s.totalFrames.toLong())
+                val sXf = wfLeft + ((sliceStart - s.viewStart).toFloat() / viewLenF) * 620f
+                val eXf = wfLeft + ((sliceEnd   - s.viewStart).toFloat() / viewLenF) * 620f
+                val sX  = sXf.toInt().coerceIn(wfLeft, wfRight)
+                val eX  = eXf.toInt().coerceIn(wfLeft, wfRight)
+                if (eX > sX) {
+                    drawRect(Color(0x22FFAA00),
+                        topLeft = Offset((sX * scale).toFloat(), (y * scale).toFloat()),
+                        size    = Size(((eX - sX) * scale).toFloat(), (WAVEFORM_H * scale).toFloat()))
+                }
+            }
+
+            // Draw boundary lines for each division
+            for (i in 1 until div) {
+                val markerFrame = (i.toLong() * s.totalFrames) / div
+                val mXf = wfLeft + ((markerFrame - s.viewStart).toFloat() / viewLenF) * 620f
+                if (mXf >= wfLeft && mXf <= wfRight) {
+                    val isActiveBound = onSliceRow && (i == s.sliceIndex || i == s.sliceIndex + 1)
+                    drawLine(if (isActiveBound) Color(0xFFFFAA00) else Color(0xFF664400),
+                        start       = Offset((mXf * scale).toFloat(), (y * scale).toFloat()),
+                        end         = Offset((mXf * scale).toFloat(), ((y + WAVEFORM_H) * scale).toFloat()),
+                        strokeWidth = scale.toFloat())
+                }
+            }
+        }
+
         // Real-time playback marker — position relative to view window
         if (s.playbackPosition >= 0f && s.totalFrames > 0) {
             val playFrame = s.playbackPosition * s.totalFrames
@@ -203,10 +274,17 @@ class SampleEditorModule : TrackerModule {
         val ty  = y + TEXT_PADDING
         val cur = s.cursorRow == 11
         if (cur) rowBg(x, y, scale)
-        drawBitmapText(s.sliceIndex.toHex2(),          x + 90,  ty, scale,
-            if (cur && s.cursorCol == 0) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(s.effectiveSlicePosition.toHex8(), x + 175, ty, scale,
-            if (cur && s.cursorCol == 1) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+        val idxColor = if (cur && s.cursorCol == 0) Color.Yellow else Color.White
+        val posColor = if (cur && s.cursorCol == 1) Color.Yellow else Color.White
+        if (s.sliceMethod == 0) {
+            // TRANSIENT: N markers → N+1 slices; show "idx/total"
+            val total = s.transientMarkers.size + 1
+            drawBitmapText(s.sliceIndex.toHex2(), x + 90,  ty, scale, idxColor,    CHAR_SPACING, FONT_SCALE)
+            drawBitmapText("/${total.toHex2()}",  x + 120, ty, scale, Color.Gray,  CHAR_SPACING, FONT_SCALE)
+        } else {
+            drawBitmapText(s.sliceIndex.toHex2(), x + 90,  ty, scale, idxColor,    CHAR_SPACING, FONT_SCALE)
+        }
+        drawBitmapText(s.effectiveSlicePosition.toHex8(), x + 175, ty, scale, posColor, CHAR_SPACING, FONT_SCALE)
     }
 
     private fun DrawScope.drawOpsRow(x: Int, y: Int, scale: Int, ops: List<String>, isCur: Boolean, curCol: Int) {
@@ -294,9 +372,13 @@ class SampleEditorModule : TrackerModule {
                 }
                 else -> CursorContextFactory.none()
             }
-            11 -> if (s.sliceMethod == 1 && s.cursorCol == 0)
-                      CursorContextFactory.hexByte(s.sliceIndex, 0, (s.sliceDivisions - 1).coerceAtLeast(0))
-                  else CursorContextFactory.none()
+            11 -> when {
+                s.sliceMethod == 0 && s.cursorCol == 0 ->
+                    CursorContextFactory.hexByte(s.sliceIndex, 0, s.transientMarkers.size)
+                s.sliceMethod == 1 && s.cursorCol == 0 ->
+                    CursorContextFactory.hexByte(s.sliceIndex, 0, (s.sliceDivisions - 1).coerceAtLeast(0))
+                else -> CursorContextFactory.none()
+            }
             13, 14 -> CursorContextFactory.none()  // action rows: handled in MainActivity
             16 -> when (s.cursorCol) {
                 0 -> CursorContextFactory.toggleTernary(FX_TYPES[s.fxType], FX_TYPES)
@@ -334,11 +416,9 @@ class SampleEditorModule : TrackerModule {
                     else -> InputResult(sliceDivisions   = action.value)
                 }
             }
-            11 -> if (s.sliceMethod == 1 && s.cursorCol == 0 && action is InputAction.SET_VALUE) {
+            11 -> if (action is InputAction.SET_VALUE && s.cursorCol == 0 && s.sliceMethod != 2) {
                 val newIdx = action.value
-                val div = s.sliceDivisions.coerceAtLeast(1)
-                val sliceStart = (newIdx.toLong() * s.totalFrames) / div
-                val sliceEnd   = ((newIdx + 1).toLong() * s.totalFrames / div).coerceAtMost(s.totalFrames.toLong())
+                val (sliceStart, sliceEnd) = s.getSliceBounds(newIdx)
                 return InputResult(sliceIndex = newIdx, selectionStart = sliceStart, selectionEnd = sliceEnd)
             }
             16 -> when (s.cursorCol) {
@@ -352,25 +432,26 @@ class SampleEditorModule : TrackerModule {
     }
 
     data class InputResult(
-        val zoomLevel:        Int?     = null,
-        val sourceMode:       Int?     = null,
-        val rateMode:         Int?     = null,
-        val pitchSemitones:   Int?     = null,
-        val durationIndex:    Int?     = null,
-        val snapEnabled:      Boolean? = null,
-        val sliceMethod:      Int?     = null,
-        val sliceSensitivity: Int?     = null,
-        val sliceDivisions:   Int?     = null,
-        val sliceIndex:       Int?     = null,
-        val fxType:           Int?     = null,
-        val fxValue:          Int?     = null,
-        val syncType:         Int?     = null,
-        val selectionStart:   Long?    = null,
-        val selectionEnd:     Long?    = null
+        val zoomLevel:        Int?      = null,
+        val sourceMode:       Int?      = null,
+        val rateMode:         Int?      = null,
+        val pitchSemitones:   Int?      = null,
+        val durationIndex:    Int?      = null,
+        val snapEnabled:      Boolean?  = null,
+        val sliceMethod:      Int?      = null,
+        val sliceSensitivity: Int?      = null,
+        val sliceDivisions:   Int?      = null,
+        val sliceIndex:       Int?      = null,
+        val transientMarkers: IntArray? = null,
+        val fxType:           Int?      = null,
+        val fxValue:          Int?      = null,
+        val syncType:         Int?      = null,
+        val selectionStart:   Long?     = null,
+        val selectionEnd:     Long?     = null
     ) {
         val modified = listOf(zoomLevel, sourceMode, rateMode, pitchSemitones, durationIndex,
-            snapEnabled, sliceMethod, sliceSensitivity, sliceDivisions, sliceIndex, fxType, fxValue,
-            syncType, selectionStart, selectionEnd
+            snapEnabled, sliceMethod, sliceSensitivity, sliceDivisions, sliceIndex, transientMarkers,
+            fxType, fxValue, syncType, selectionStart, selectionEnd
         ).any { it != null }
     }
 
@@ -443,11 +524,12 @@ data class SampleEditorState(
     val selectionStart: Long = 0L,
     val selectionEnd:   Long = 0L,
     // Slicing
-    val sliceMethod:      Int  = 2,    // 0=TRANSIENT, 1=DIVIDE, 2=OFF
-    val sliceSensitivity: Int  = 64,
-    val sliceDivisions:   Int  = 8,
-    val sliceIndex:       Int  = 0,
-    val slicePosition:    Long = 0L,
+    val sliceMethod:      Int      = 2,    // 0=TRANSIENT, 1=DIVIDE, 2=OFF
+    val sliceSensitivity: Int      = 64,
+    val sliceDivisions:   Int      = 8,
+    val sliceIndex:       Int      = 0,
+    val slicePosition:    Long     = 0L,
+    val transientMarkers: IntArray = intArrayOf(),
     // FX row
     val fxType:  Int = 0,   // 0=OTT, 1=DUST, 2=DRIVE, 3=EQ, 4=SYNC
     val fxValue: Int = 0,
@@ -458,10 +540,23 @@ data class SampleEditorState(
     // Real-time playback position (0.0-1.0 fraction, or -1 if not playing)
     val playbackPosition: Float = -1f
 ) {
-    val effectiveSlicePosition: Long get() = when (sliceMethod) {
-        1 -> if (sliceDivisions > 0) (sliceIndex.toLong() * totalFrames) / sliceDivisions else 0L
-        else -> slicePosition
+    /** Returns (sliceStart, sliceEnd) frame pair for the given slice index in the current mode. */
+    fun getSliceBounds(idx: Int): Pair<Long, Long> = when (sliceMethod) {
+        0 -> {
+            val start = if (idx == 0) 0L else transientMarkers.getOrElse(idx - 1) { 0 }.toLong()
+            val end   = transientMarkers.getOrElse(idx) { totalFrames }.toLong()
+            Pair(start, end)
+        }
+        1 -> {
+            val div   = sliceDivisions.coerceAtLeast(1)
+            val start = (idx.toLong() * totalFrames) / div
+            val end   = (((idx + 1).toLong() * totalFrames) / div).coerceAtMost(totalFrames.toLong())
+            Pair(start, end)
+        }
+        else -> Pair(0L, totalFrames.toLong())
     }
+
+    val effectiveSlicePosition: Long get() = getSliceBounds(sliceIndex).first
 
     // Zoom view window: follows playback during playback, otherwise anchors to the active marker
     private val viewCenter: Long get() {
@@ -498,20 +593,21 @@ data class SampleEditorState(
     }
 
     fun applyResult(r: SampleEditorModule.InputResult) = copy(
-        zoomLevel        = r.zoomLevel        ?: zoomLevel,
-        sourceMode       = r.sourceMode       ?: sourceMode,
-        rateMode         = r.rateMode         ?: rateMode,
-        pitchSemitones   = r.pitchSemitones   ?: pitchSemitones,
-        durationIndex    = r.durationIndex    ?: durationIndex,
-        snapEnabled      = r.snapEnabled      ?: snapEnabled,
-        sliceMethod      = r.sliceMethod      ?: sliceMethod,
-        sliceSensitivity = r.sliceSensitivity ?: sliceSensitivity,
-        sliceDivisions   = r.sliceDivisions   ?: sliceDivisions,
-        sliceIndex       = r.sliceIndex       ?: sliceIndex,
-        fxType           = r.fxType           ?: fxType,
-        fxValue          = r.fxValue          ?: fxValue,
-        syncType         = r.syncType         ?: syncType,
-        selectionStart   = r.selectionStart   ?: selectionStart,
-        selectionEnd     = r.selectionEnd     ?: selectionEnd
+        zoomLevel        = r.zoomLevel           ?: zoomLevel,
+        sourceMode       = r.sourceMode          ?: sourceMode,
+        rateMode         = r.rateMode            ?: rateMode,
+        pitchSemitones   = r.pitchSemitones      ?: pitchSemitones,
+        durationIndex    = r.durationIndex       ?: durationIndex,
+        snapEnabled      = r.snapEnabled         ?: snapEnabled,
+        sliceMethod      = r.sliceMethod         ?: sliceMethod,
+        sliceSensitivity = r.sliceSensitivity    ?: sliceSensitivity,
+        sliceDivisions   = r.sliceDivisions      ?: sliceDivisions,
+        sliceIndex       = r.sliceIndex          ?: sliceIndex,
+        transientMarkers = r.transientMarkers    ?: transientMarkers,
+        fxType           = r.fxType              ?: fxType,
+        fxValue          = r.fxValue             ?: fxValue,
+        syncType         = r.syncType            ?: syncType,
+        selectionStart   = r.selectionStart      ?: selectionStart,
+        selectionEnd     = r.selectionEnd        ?: selectionEnd
     )
 }

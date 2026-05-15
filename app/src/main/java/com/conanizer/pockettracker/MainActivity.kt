@@ -732,6 +732,25 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
     }
 
+    // Run transient detection when TRANSIENT mode is active and sensitivity or sample changes
+    val seSliceMethod      = sampleEditorState.sliceMethod
+    val seSliceSensitivity = sampleEditorState.sliceSensitivity
+    val seTotalFrames      = sampleEditorState.totalFrames
+    LaunchedEffect(seSliceMethod, seSliceSensitivity, seTotalFrames) {
+        if (seSliceMethod == 0 && seTotalFrames > 0) {
+            val markers = audioEngine.detectTransients(sampleEditorState.instrumentId, seSliceSensitivity)
+            val firstSliceEnd = markers.firstOrNull()?.toLong() ?: seTotalFrames.toLong()
+            sampleEditorState = sampleEditorState.copy(
+                transientMarkers = markers,
+                sliceIndex       = 0,
+                selectionStart   = 0L,
+                selectionEnd     = firstSliceEnd
+            )
+        } else if (seSliceMethod != 0 && sampleEditorState.transientMarkers.isNotEmpty()) {
+            sampleEditorState = sampleEditorState.copy(transientMarkers = intArrayOf())
+        }
+    }
+
     // Poll playback position for real-time waveform marker (~30fps)
     LaunchedEffect(Unit) {
         while (true) {
@@ -3257,6 +3276,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             else -> { }
                         }
                         trackerController.inputController.exitSelectionMode()
+                    }
+                } else if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR
+                        && sampleEditorState.cursorRow == 8) {
+                    // A+B on SELECTION row: reset marker to sample boundary
+                    sampleEditorState = when (sampleEditorState.cursorCol) {
+                        0 -> sampleEditorState.copy(selectionStart = 0L)
+                        1 -> sampleEditorState.copy(selectionEnd   = sampleEditorState.totalFrames.toLong())
+                        else -> sampleEditorState
                     }
                 } else {
                     // A+B outside selection: Delete/clear single value at cursor

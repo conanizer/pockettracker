@@ -400,7 +400,7 @@ The sample editor occupies the full 640×480 canvas (no oscilloscope, no navigat
 │                                                  │  Row 6   │ (~165px)
 │                                                  │  Row 7  ─┘
 ├──────────────────────────────────────────────────┤
-│ SELECTION   0000A000   0000F000  LENGTH 00005000 │  Row 8  — Selection info
+│ SELECTION   0000A000   0000F000                  │  Row 8  — Selection info
 │                                                  │  Row 9  — Spacer
 │ SLICE       TRANSIENT  SENS  40                  │  Row 10 — Slice method
 │             00         0000A000                  │  Row 11 — Slice detail

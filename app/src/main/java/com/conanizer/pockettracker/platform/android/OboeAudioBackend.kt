@@ -86,6 +86,8 @@ class OboeAudioBackend : IAudioBackend {
     override fun pitchShiftSample(id: Int, semitones: Float) = native_pitchShiftSample(id, semitones)
     override fun applySampleFx(id: Int, fxType: Int, fxValue: Int, sampleRate: Float) = native_applySampleFx(id, fxType, fxValue, sampleRate)
     override fun findZeroCrossing(id: Int, frame: Int): Int = native_findZeroCrossing(id, frame)
+    override fun detectTransients(id: Int, sensitivity: Int): IntArray =
+        native_detectTransients(id, sensitivity, 128)
 
     override fun getTrackActiveNotes(): IntArray = native_getTrackActiveNotes()
 
@@ -631,4 +633,5 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_pitchShiftSample(id: Int, semitones: Float)
     private external fun native_applySampleFx(id: Int, fxType: Int, fxValue: Int, sampleRate: Float)
     private external fun native_findZeroCrossing(id: Int, frame: Int): Int
+    private external fun native_detectTransients(id: Int, sensitivity: Int, maxMarkers: Int): IntArray
 }

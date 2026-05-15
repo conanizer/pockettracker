@@ -79,6 +79,9 @@ public:
     void applySampleFx(int id, int fxType, int fxValue, float sampleRate);
     // Returns the nearest zero-crossing frame within ±searchRadius of `frame`, or `frame` if none found.
     int  findZeroCrossing(int id, int frame, int searchRadius = 512);
+    // Spectral-flux transient detection. Returns count; outMarkers[] filled with frame positions.
+    // sensitivity 0x00 = few markers (high threshold), 0xFF = many markers (low threshold).
+    int  detectTransients(int id, int sensitivity, int* outMarkers, int maxMarkers);
 
     // ===================================
     // CORE AUDIO PROCESSING BLOCK

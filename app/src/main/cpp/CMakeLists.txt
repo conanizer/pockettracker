@@ -12,6 +12,9 @@ add_library(pockettracker SHARED
         soundfont-voice.cpp
         audio-engine.cpp
         jni-bridge.cpp
+        transient-detector.cpp
+        kissfft/kiss_fft.c
+        kissfft/kiss_fftr.c
         effects/primitives/daisysp/svf.cpp
         effects/primitives/daisysp/overdrive.cpp
         effects/primitives/daisysp/decimator.cpp
@@ -34,6 +37,7 @@ endif ()
 target_include_directories(pockettracker PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/effects/soundpipe
+        ${CMAKE_CURRENT_SOURCE_DIR}/kissfft
 )
 
 # Link with Oboe and libm (required by tsf.h for math functions)

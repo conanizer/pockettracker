@@ -76,6 +76,9 @@ interface IAudioBackend {
     fun applySampleFx(id: Int, fxType: Int, fxValue: Int, sampleRate: Float)
     // Returns nearest zero-crossing frame within ±512 frames, or `frame` if none found.
     fun findZeroCrossing(id: Int, frame: Int): Int
+    // Spectral-flux transient detection. Returns frame positions of detected onsets.
+    // sensitivity 0x00 = few markers, 0xFF = many markers. Max 128 markers returned.
+    fun detectTransients(id: Int, sensitivity: Int): IntArray
 
     /**
      * Returns an IntArray[8] where each element is (octave * 12 + pitch) for the active voice
