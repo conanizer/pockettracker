@@ -100,14 +100,18 @@ class AudioEngine(
                 return false
             }
 
-            val (samples, adjustedBaseFreq) = loadWavFileFromPath(filePath)
-            backend.loadSample(instrumentId, samples)
+            val (left, right, adjustedBaseFreq) = loadWavFileFromPath(filePath)
+            if (right != null) {
+                backend.loadSampleStereo(instrumentId, left, right)
+            } else {
+                backend.loadSample(instrumentId, left)
+            }
 
             sampleBaseFrequencies[instrumentId] = adjustedBaseFreq
             sampleRateRatios[instrumentId] = adjustedBaseFreq / 261.63f
             originalSampleRateRatios.remove(instrumentId)
 
-            logger.d(TAG, "✅ Loaded sample: instrumentId=$instrumentId, length=${samples.size}, baseFreq=$adjustedBaseFreq, path=$filePath")
+            logger.d(TAG, "✅ Loaded sample: instrumentId=$instrumentId, length=${left.size}, stereo=${right != null}, baseFreq=$adjustedBaseFreq, path=$filePath")
             return true
         } catch (e: Exception) {
             logger.e(TAG, "❌ Error loading sample from file: ${e.message}")
@@ -117,8 +121,9 @@ class AudioEngine(
 
     /**
      * Load WAV file from external path.
+     * Returns Triple(left, right-or-null, baseFreq). right is null for mono WAVs.
      */
-    private fun loadWavFileFromPath(filePath: String): Pair<FloatArray, Float> {
+    private fun loadWavFileFromPath(filePath: String): Triple<FloatArray, FloatArray?, Float> {
         File(filePath).inputStream().use { inputStream ->
             val fileSize = inputStream.available()
             val buffer = ByteArray(fileSize)
@@ -140,7 +145,7 @@ class AudioEngine(
      * Supported sample rates: any (48000, 44100, etc. all compensated automatically).
      * Non-44-byte headers: scans for "data" chunk instead of assuming fixed offset.
      */
-    private fun parseWavBuffer(buffer: ByteArray): Pair<FloatArray, Float> {
+    private fun parseWavBuffer(buffer: ByteArray): Triple<FloatArray, FloatArray?, Float> {
         if (buffer.size < 12) throw IllegalArgumentException("WAV buffer too small: ${buffer.size}")
 
         fun readShortAt(pos: Int) = ByteBuffer.wrap(buffer, pos, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt()
@@ -223,20 +228,18 @@ class AudioEngine(
             else -> throw IllegalArgumentException("Unsupported WAV format=$audioFormat (effective=$effectiveFormat) bits=$bitsPerSample")
         }
 
-        // Stereo → mono: average L+R channels
-        val samples = if (channels == 2) {
-            FloatArray(rawSamples.size / 2) { i ->
-                (rawSamples[i * 2] + rawSamples[i * 2 + 1]) / 2f
-            }
-        } else {
-            rawSamples
-        }
-
         // Sample rate compensation: adjust base frequency so the engine plays at correct pitch
         val deviceSampleRate = getDeviceSampleRate()
         val adjustedBaseFreq = 261.63f * (deviceSampleRate.toFloat() / sampleRate.toFloat())
 
-        return Pair(samples, adjustedBaseFreq)
+        // Stereo: keep L and R channels separate; mono: right = null
+        return if (channels == 2) {
+            val left  = FloatArray(rawSamples.size / 2) { i -> rawSamples[i * 2] }
+            val right = FloatArray(rawSamples.size / 2) { i -> rawSamples[i * 2 + 1] }
+            Triple(left, right, adjustedBaseFreq)
+        } else {
+            Triple(rawSamples, null, adjustedBaseFreq)
+        }
     }
 
     /**
@@ -254,8 +257,12 @@ class AudioEngine(
             // Stop all audio before loading new sample
             backend.stopAll()
 
-            val (samples, adjustedBaseFreq) = loadWavFileFromPath(filePath)
-            backend.loadSample(255, samples)
+            val (left, right, adjustedBaseFreq) = loadWavFileFromPath(filePath)
+            if (right != null) {
+                backend.loadSampleStereo(255, left, right)
+            } else {
+                backend.loadSample(255, left)
+            }
 
             // CRITICAL: Resume stream so audio callback processes the scheduled note
             backend.resumeStream()
@@ -687,6 +694,40 @@ class AudioEngine(
     fun getSampleWaveform(instrumentId: Int, numBins: Int): FloatArray = backend.getSampleWaveform(instrumentId, numBins)
     fun getSampleWaveformRange(instrumentId: Int, startFrame: Int, endFrame: Int, numBins: Int): FloatArray = backend.getSampleWaveformRange(instrumentId, startFrame, endFrame, numBins)
     fun getSampleData(instrumentId: Int): FloatArray = backend.getSampleData(instrumentId)
+
+    // Stereo sample support
+    fun hasStereoData(instrumentId: Int): Boolean = backend.hasStereoData(instrumentId)
+    fun getSampleDataRight(instrumentId: Int): FloatArray = backend.getSampleDataRight(instrumentId)
+    /** channel: 0=left, 1=right, 2=averaged */
+    fun getSampleWaveformRangeSource(instrumentId: Int, startFrame: Int, endFrame: Int, numBins: Int, channel: Int): FloatArray =
+        backend.getSampleWaveformRangeSource(instrumentId, startFrame, endFrame, numBins, channel)
+
+    /**
+     * Prepare the correct source channel for sample editor preview playback.
+     *
+     * For non-STEREO source modes on a stereo sample, copies the appropriate
+     * mono data into temporary slot 254 so it plays without the right channel.
+     * Returns the slot to use for scheduling the preview note.
+     *
+     * @param instId Instrument/sample ID to prepare from
+     * @param sourceMode 0=LEFT, 1=RIGHT, 2=STEREO, 3=MONO
+     * @return instId if no special handling needed, or 254 for the temp mono slot
+     */
+    fun prepareSampleEditorSourcePreview(instId: Int, sourceMode: Int): Int {
+        if (!hasStereoData(instId) || sourceMode == 2) return instId
+        val left = getSampleData(instId)
+        val data = when (sourceMode) {
+            0    -> left
+            1    -> getSampleDataRight(instId)
+            else -> {  // MONO (3): average L+R
+                val right = getSampleDataRight(instId)
+                FloatArray(left.size) { i -> (left[i] + right[i]) / 2f }
+            }
+        }
+        backend.loadSample(254, data)
+        sampleRateRatios[instId]?.let { sampleRateRatios[254] = it }
+        return 254
+    }
     fun normalizeSample(instrumentId: Int, startFrame: Int, endFrame: Int) = backend.normalizeSample(instrumentId, startFrame, endFrame)
     fun fadeInSample(instrumentId: Int, startFrame: Int, endFrame: Int) = backend.fadeInSample(instrumentId, startFrame, endFrame)
     fun fadeOutSample(instrumentId: Int, startFrame: Int, endFrame: Int) = backend.fadeOutSample(instrumentId, startFrame, endFrame)

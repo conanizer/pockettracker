@@ -704,10 +704,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // Load waveform data whenever the sample editor becomes the active screen or instrument changes
     LaunchedEffect(trackerController.currentScreen, sampleEditorState.instrumentId) {
         if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR) {
-            val instId = sampleEditorState.instrumentId
+            val instId      = sampleEditorState.instrumentId
             val totalFrames = audioEngine.getSampleLength(instId)
-            val waveformData = audioEngine.getSampleWaveform(instId, 620)
-            val sampleRate   = audioEngine.getOriginalSampleRate(instId)
+            val sampleRate  = audioEngine.getOriginalSampleRate(instId)
+            val hasStereo   = audioEngine.hasStereoData(instId)
+            val channel     = when (sampleEditorState.sourceMode) { 0 -> 0; 1 -> 1; else -> 2 }
+            val waveformData = if (hasStereo) {
+                audioEngine.getSampleWaveformRangeSource(instId, 0, totalFrames, 620, channel)
+            } else {
+                audioEngine.getSampleWaveform(instId, 620)
+            }
             val inst = trackerController.project.instruments[instId]
 
             // Use instrument.sliceMarkers as the display source for the editor.
@@ -717,9 +723,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             val cuePoints = inst.sliceMarkers.map { it.toInt() }.toIntArray()
 
             sampleEditorState = sampleEditorState.copy(
-                totalFrames  = totalFrames,
-                waveformData = waveformData,
-                sampleRate   = sampleRate,
+                totalFrames   = totalFrames,
+                waveformData  = waveformData,
+                sampleRate    = sampleRate,
+                hasStereoData = hasStereo,
                 selectionStart   = (inst.sampleStart.toLong() * totalFrames) / 255L,
                 selectionEnd     = (inst.sampleEnd.toLong()   * totalFrames) / 255L,
                 transientMarkers = cuePoints,
@@ -730,26 +737,27 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
     }
 
-    // Reload zoomed waveform when zoom level or view window changes
-    val sampleEditorZoom      = sampleEditorState.zoomLevel
-    val sampleEditorViewStart = sampleEditorState.viewStart
-    LaunchedEffect(sampleEditorZoom, sampleEditorViewStart) {
+    // Reload zoomed waveform when zoom level, view window, or source mode changes
+    val sampleEditorZoom       = sampleEditorState.zoomLevel
+    val sampleEditorViewStart  = sampleEditorState.viewStart
+    val sampleEditorSourceMode = sampleEditorState.sourceMode
+    LaunchedEffect(sampleEditorZoom, sampleEditorViewStart, sampleEditorSourceMode) {
         if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.totalFrames > 0) {
-            val instId     = sampleEditorState.instrumentId
+            val instId      = sampleEditorState.instrumentId
             val totalFrames = sampleEditorState.totalFrames
+            val hasStereo   = sampleEditorState.hasStereoData
+            val channel     = when (sampleEditorSourceMode) { 0 -> 0; 1 -> 1; else -> 2 }
             // Compute viewEnd from the captured keys to stay consistent
-            val viewEnd = if (sampleEditorZoom == 0) totalFrames.toLong()
-                          else (sampleEditorViewStart + (totalFrames.toLong() ushr sampleEditorZoom))
-                                  .coerceAtMost(totalFrames.toLong())
-            val waveformData = if (sampleEditorZoom == 0) {
+            val viewStart = sampleEditorViewStart.toInt()
+            val viewEnd   = (if (sampleEditorZoom == 0) totalFrames.toLong()
+                             else (sampleEditorViewStart + (totalFrames.toLong() ushr sampleEditorZoom))
+                                     .coerceAtMost(totalFrames.toLong())).toInt()
+            val waveformData = if (hasStereo) {
+                audioEngine.getSampleWaveformRangeSource(instId, viewStart, viewEnd, 620, channel)
+            } else if (sampleEditorZoom == 0) {
                 audioEngine.getSampleWaveform(instId, 620)
             } else {
-                audioEngine.getSampleWaveformRange(
-                    instId,
-                    sampleEditorViewStart.toInt(),
-                    viewEnd.toInt(),
-                    620
-                )
+                audioEngine.getSampleWaveformRange(instId, viewStart, viewEnd, 620)
             }
             sampleEditorState = sampleEditorState.copy(waveformData = waveformData)
         }
@@ -780,7 +788,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     LaunchedEffect(Unit) {
         while (true) {
             if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR) {
-                val pos = audioEngine.getSamplePlaybackPosition(sampleEditorState.sampleId)
+                val pollSlot = if (sampleEditorState.hasStereoData && sampleEditorState.sourceMode != 2) 254
+                               else sampleEditorState.sampleId
+                val pos = audioEngine.getSamplePlaybackPosition(pollSlot)
                 if (pos != sampleEditorState.playbackPosition) {
                     sampleEditorState = sampleEditorState.copy(playbackPosition = pos)
                 }
@@ -1190,10 +1200,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                         // (a computed property) tracks correctly after the buffer resize.
                         fun scaleFrame(f: Long) =
                             if (oldLen > 0) (f * newLen.toLong() / oldLen).coerceIn(0L, newLen.toLong()) else 0L
+                        val channel = when (sampleEditorState.sourceMode) { 0 -> 0; 1 -> 1; else -> 2 }
+                        val wfData = if (sampleEditorState.hasStereoData)
+                            audioEngine.getSampleWaveformRangeSource(instId, 0, newLen, 620, channel)
+                        else
+                            audioEngine.getSampleWaveform(instId, 620)
                         sampleEditorState = sampleEditorState.copy(
                             totalFrames    = newLen,
                             sampleRate     = audioEngine.getOriginalSampleRate(instId),
-                            waveformData   = audioEngine.getSampleWaveform(instId, 620),
+                            waveformData   = wfData,
                             selectionStart = scaleFrame(sampleEditorState.selectionStart),
                             selectionEnd   = scaleFrame(sampleEditorState.selectionEnd),
                             slicePosition  = scaleFrame(sampleEditorState.slicePosition),
@@ -2326,15 +2341,26 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     }
                                     if (!java.io.File(targetPath).exists()) {
                                         // No collision — save directly and close
-                                        val cuePoints = computeSliceCuePoints(sampleEditorState)
+                                        val cuePoints  = computeSliceCuePoints(sampleEditorState)
+                                        val srcMode    = sampleEditorState.sourceMode
+                                        val hasStereo  = sampleEditorState.hasStereoData
                                         coroutineScope.launch(Dispatchers.Default) {
-                                            val floats   = audioEngine.getSampleData(instId)
                                             val origRate = audioEngine.getOriginalSampleRate(instId)
+                                            val leftCh: FloatArray; val rightCh: FloatArray
+                                            if (!hasStereo) {
+                                                val m = audioEngine.getSampleData(instId); leftCh = m; rightCh = m
+                                            } else when (srcMode) {
+                                                0 -> { val l = audioEngine.getSampleData(instId);      leftCh = l; rightCh = l }
+                                                1 -> { val r = audioEngine.getSampleDataRight(instId); leftCh = r; rightCh = r }
+                                                2 -> { leftCh = audioEngine.getSampleData(instId); rightCh = audioEngine.getSampleDataRight(instId) }
+                                                else -> { val l = audioEngine.getSampleData(instId); val r = audioEngine.getSampleDataRight(instId)
+                                                          val m = FloatArray(l.size) { i -> (l[i] + r[i]) / 2f }; leftCh = m; rightCh = m }
+                                            }
                                             val success  = WavWriter.writeWav(
                                                 fileSystem   = fileSystem,
                                                 path         = targetPath,
-                                                leftChannel  = floats,
-                                                rightChannel = floats,
+                                                leftChannel  = leftCh,
+                                                rightChannel = rightCh,
                                                 sampleRate   = origRate,
                                                 cuePoints    = cuePoints
                                             )
@@ -2401,14 +2427,25 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     val filePath = trackerController.project.instruments[instId].sampleFilePath
                                     if (filePath != null) {
                                         val cuePoints = computeSliceCuePoints(sampleEditorState)
+                                        val srcMode   = sampleEditorState.sourceMode
+                                        val hasStereo = sampleEditorState.hasStereoData
                                         coroutineScope.launch(Dispatchers.Default) {
-                                            val floats   = audioEngine.getSampleData(instId)
                                             val origRate = audioEngine.getOriginalSampleRate(instId)
+                                            val leftCh: FloatArray; val rightCh: FloatArray
+                                            if (!hasStereo) {
+                                                val m = audioEngine.getSampleData(instId); leftCh = m; rightCh = m
+                                            } else when (srcMode) {
+                                                0 -> { val l = audioEngine.getSampleData(instId);      leftCh = l; rightCh = l }
+                                                1 -> { val r = audioEngine.getSampleDataRight(instId); leftCh = r; rightCh = r }
+                                                2 -> { leftCh = audioEngine.getSampleData(instId); rightCh = audioEngine.getSampleDataRight(instId) }
+                                                else -> { val l = audioEngine.getSampleData(instId); val r = audioEngine.getSampleDataRight(instId)
+                                                          val m = FloatArray(l.size) { i -> (l[i] + r[i]) / 2f }; leftCh = m; rightCh = m }
+                                            }
                                             val success = WavWriter.writeWav(
                                                 fileSystem   = fileSystem,
                                                 path         = filePath,
-                                                leftChannel  = floats,
-                                                rightChannel = floats,
+                                                leftChannel  = leftCh,
+                                                rightChannel = rightCh,
                                                 sampleRate   = origRate,
                                                 cuePoints    = cuePoints
                                             )
@@ -2939,6 +2976,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                 }
                             }
                             val cuePoints = computeSliceCuePoints(sampleEditorState)
+                            val srcMode   = sampleEditorState.sourceMode
+                            val hasStereo = sampleEditorState.hasStereoData
                             coroutineScope.launch(Dispatchers.Default) {
                                 java.io.File(samplesDir).mkdirs()
                                 var path = "$samplesDir/$name.wav"
@@ -2947,13 +2986,22 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     path = "$samplesDir/${name}_${counter.toString().padStart(4, '0')}.wav"
                                     counter++
                                 }
-                                val floats   = audioEngine.getSampleData(instId)
                                 val origRate = audioEngine.getOriginalSampleRate(instId)
+                                val leftCh: FloatArray; val rightCh: FloatArray
+                                if (!hasStereo) {
+                                    val m = audioEngine.getSampleData(instId); leftCh = m; rightCh = m
+                                } else when (srcMode) {
+                                    0 -> { val l = audioEngine.getSampleData(instId);      leftCh = l; rightCh = l }
+                                    1 -> { val r = audioEngine.getSampleDataRight(instId); leftCh = r; rightCh = r }
+                                    2 -> { leftCh = audioEngine.getSampleData(instId); rightCh = audioEngine.getSampleDataRight(instId) }
+                                    else -> { val l = audioEngine.getSampleData(instId); val r = audioEngine.getSampleDataRight(instId)
+                                              val m = FloatArray(l.size) { i -> (l[i] + r[i]) / 2f }; leftCh = m; rightCh = m }
+                                }
                                 val success  = WavWriter.writeWav(
                                     fileSystem   = fileSystem,
                                     path         = path,
-                                    leftChannel  = floats,
-                                    rightChannel = floats,
+                                    leftChannel  = leftCh,
+                                    rightChannel = rightCh,
                                     sampleRate   = origRate,
                                     cuePoints    = cuePoints
                                 )
@@ -3074,10 +3122,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                             val shiftedMidi = (inst.root.toMidi() + pitchSemitones).coerceIn(0, 119)
                             inst.root = Note.fromMidi(shiftedMidi)
                         }
+                        // Prepare mono preview slot for non-STEREO source modes on stereo samples.
+                        // For STEREO or mono files, returns instId (no-op).
+                        val previewSlot = audioEngine.prepareSampleEditorSourcePreview(instId, sampleEditorState.sourceMode)
+                        val savedSampleId = inst.sampleId
+                        if (previewSlot != instId) inst.sampleId = previewSlot
+
                         val savedInstrument = trackerController.currentInstrument
                         trackerController.currentInstrument = instId
                         trackerController.previewInstrument()
                         trackerController.currentInstrument = savedInstrument
+
+                        if (previewSlot != instId) inst.sampleId = savedSampleId
                         // Root is captured via frequency at schedule time — safe to restore immediately
                         inst.root = savedRoot
                         // start/end are read from InstrumentParams at audio-callback time, NOT at schedule

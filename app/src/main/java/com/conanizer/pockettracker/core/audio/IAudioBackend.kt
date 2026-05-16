@@ -40,6 +40,19 @@ interface IAudioBackend {
     fun loadSample(id: Int, samples: FloatArray)
 
     /**
+     * Load a stereo sample into the specified slot.
+     * Both left and right channels must have the same length.
+     *
+     * @param id Sample slot (0-255)
+     * @param left Left channel samples (-1.0 to 1.0)
+     * @param right Right channel samples (-1.0 to 1.0)
+     */
+    fun loadSampleStereo(id: Int, left: FloatArray, right: FloatArray)
+
+    /** Returns true if the sample at [id] has a separate right-channel buffer (stereo). */
+    fun hasStereoData(id: Int): Boolean
+
+    /**
      * Unload all samples from all instrument slots (0-255).
      *
      * Called when creating a new project so that instruments that previously had
@@ -51,7 +64,10 @@ interface IAudioBackend {
     fun getSampleLength(id: Int): Int
     fun getSampleWaveform(id: Int, numBins: Int): FloatArray
     fun getSampleWaveformRange(id: Int, startFrame: Int, endFrame: Int, numBins: Int): FloatArray
+    // channel: 0=left, 1=right, 2=averaged (for STEREO/MONO view). Falls back to left if no stereo.
+    fun getSampleWaveformRangeSource(id: Int, startFrame: Int, endFrame: Int, numBins: Int, channel: Int): FloatArray
     fun getSampleData(id: Int): FloatArray
+    fun getSampleDataRight(id: Int): FloatArray  // right channel; empty if mono
     fun normalizeSample(id: Int, startFrame: Int, endFrame: Int)
     fun fadeInSample(id: Int, startFrame: Int, endFrame: Int)
     fun fadeOutSample(id: Int, startFrame: Int, endFrame: Int)

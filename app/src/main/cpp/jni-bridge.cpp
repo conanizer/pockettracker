@@ -178,6 +178,25 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadS
 }
 
 JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadSampleStereo(
+        JNIEnv *env, jobject thiz, jint id, jfloatArray leftData, jfloatArray rightData) {
+    if (!engine) return;
+    jsize len  = env->GetArrayLength(leftData);
+    jfloat* L  = env->GetFloatArrayElements(leftData,  nullptr);
+    jfloat* R  = env->GetFloatArrayElements(rightData, nullptr);
+    engine->loadSampleStereo(id, L, R, len);
+    env->ReleaseFloatArrayElements(leftData,  L, JNI_ABORT);
+    env->ReleaseFloatArrayElements(rightData, R, JNI_ABORT);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1hasStereoData(
+        JNIEnv *env, jobject thiz, jint id) {
+    if (!engine) return JNI_FALSE;
+    return engine->hasStereoData(id) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1clearAllSamples(
         JNIEnv *env, jobject thiz) {
     if (engine) {
@@ -872,6 +891,30 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSa
     jfloatArray result = env->NewFloatArray(len);
     jfloat* buf = env->GetFloatArrayElements(result, nullptr);
     engine->getSampleData((int)id, buf);
+    env->ReleaseFloatArrayElements(result, buf, 0);
+    return result;
+}
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSampleDataRight(
+        JNIEnv *env, jobject, jint id) {
+    if (!engine) return env->NewFloatArray(0);
+    int len = engine->getSampleLength((int)id);
+    if (len <= 0 || !engine->hasStereoData((int)id)) return env->NewFloatArray(0);
+    jfloatArray result = env->NewFloatArray(len);
+    jfloat* buf = env->GetFloatArrayElements(result, nullptr);
+    engine->getSampleDataRight((int)id, buf);
+    env->ReleaseFloatArrayElements(result, buf, 0);
+    return result;
+}
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSampleWaveformRangeSource(
+        JNIEnv *env, jobject, jint id, jint startFrame, jint endFrame, jint numBins, jint channel) {
+    jfloatArray result = env->NewFloatArray(numBins * 2);
+    if (!engine || numBins <= 0) return result;
+    jfloat* buf = env->GetFloatArrayElements(result, nullptr);
+    engine->getSampleWaveformRangeSource((int)id, (int)startFrame, (int)endFrame, buf, (int)numBins, (int)channel);
     env->ReleaseFloatArrayElements(result, buf, 0);
     return result;
 }

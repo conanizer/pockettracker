@@ -465,7 +465,7 @@ class SampleEditorModule : TrackerModule {
     }
 
     companion object {
-        val SOURCE_VALUES   = listOf("LEFT", "RIGHT", "STEREO")
+        val SOURCE_VALUES   = listOf("LEFT", "RIGHT", "STEREO", "MONO")
         val RATE_VALUES     = listOf("HIGH", "NORM", "LOFI")
         val DURATION_VALUES = listOf("4 BAR", "2 BAR", "1 BAR", "1/2", "1/4", "1/8", "1/16", "1/32")
         val FX_TYPES        = listOf("OTT", "DUST", "DRIVE", "EQ", "SYNC")
@@ -522,9 +522,10 @@ data class SampleEditorState(
     // Waveform display data (min/max per column, populated by JNI)
     val waveformData: FloatArray = floatArrayOf(),
     // Row 1: View controls
-    val zoomLevel:  Int = 0,   // 0=1×, 1=2×, 2=4×, 3=8×, 4=16×
-    val sourceMode: Int = 0,   // 0=LEFT, 1=RIGHT, 2=STEREO
-    val rateMode:   Int = 0,   // 0=HIGH, 1=NORM, 2=LOFI
+    val zoomLevel:    Int     = 0,     // 0=1×, 1=2×, 2=4×, 3=8×, 4=16×
+    val sourceMode:   Int     = 0,     // 0=LEFT, 1=RIGHT, 2=STEREO, 3=MONO
+    val rateMode:     Int     = 0,     // 0=HIGH, 1=NORM, 2=LOFI
+    val hasStereoData: Boolean = false, // true if the loaded sample has a right channel
     // Row 2: Edit controls
     val pitchSemitones: Int     = 0,
     val durationIndex:  Int     = 2,   // default "1 BAR"

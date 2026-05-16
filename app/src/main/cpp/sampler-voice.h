@@ -9,6 +9,7 @@ struct Voice : public IAudioVoice {
     bool isActive;
     int fadeInRemaining;     // Anti-click: counts down from DECLICK_SAMPLES to 0 at note start
     float* sampleData;
+    float* sampleDataRight;  // Right channel for stereo samples (null = mono)
     int sampleLength;
     float position;
     int trackId;
@@ -90,7 +91,7 @@ struct Voice : public IAudioVoice {
     int fadeOutRemaining;  // Counts down from DECLICK_SAMPLES to 0 during fade-out
     bool isFadingOut;      // true while the voice-steal fade-out is active
 
-    Voice() : isActive(false), fadeInRemaining(0), sampleData(nullptr), sampleLength(0),
+    Voice() : isActive(false), fadeInRemaining(0), sampleData(nullptr), sampleDataRight(nullptr), sampleLength(0),
               position(0), trackId(-1), playbackRate(1.0f), basePlaybackRate(1.0f), volume(1.0f),
               panLeft(0.707f), panRight(0.707f),  // Default to center
               actualStart(0), actualEnd(0), actualLoopStart(0),
@@ -105,11 +106,12 @@ struct Voice : public IAudioVoice {
               fadeOutRemaining(0), isFadingOut(false) {}
               // params (ParamBus) is default-constructed: base={1,0.5,0,128,0}, mod={0}
 
-    void trigger(float* sample, int length, int track, float rate, float instrVol, float phraseVol, float pan,
+    void trigger(float* sample, float* sampleRight, int length, int track, float rate, float instrVol, float phraseVol, float pan,
                  const InstrumentParams& instrParams, float sampleRate, int startPointOverride = -1,
                  int endPointOverride = -1,
                  int tblId = -1, int tblTicRate = 6, int octave = 4, int pitch = 0, int startRow = 0) {
         sampleData = sample;
+        sampleDataRight = sampleRight;
         sampleLength = length;
         trackId = track;
         playbackRate = rate;

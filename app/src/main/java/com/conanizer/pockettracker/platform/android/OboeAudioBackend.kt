@@ -57,6 +57,13 @@ class OboeAudioBackend : IAudioBackend {
         Log.d(TAG, "📦 Loaded sample $id (${samples.size} samples)")
     }
 
+    override fun loadSampleStereo(id: Int, left: FloatArray, right: FloatArray) {
+        native_loadSampleStereo(id, left, right)
+        Log.d(TAG, "📦 Loaded stereo sample $id (${left.size} frames)")
+    }
+
+    override fun hasStereoData(id: Int): Boolean = native_hasStereoData(id)
+
     override fun clearAllSamples() {
         native_clearAllSamples()
         Log.d(TAG, "🗑️ Cleared all loaded samples")
@@ -65,7 +72,9 @@ class OboeAudioBackend : IAudioBackend {
     override fun getSampleLength(id: Int): Int = native_getSampleLength(id)
     override fun getSampleWaveform(id: Int, numBins: Int): FloatArray = native_getSampleWaveform(id, numBins)
     override fun getSampleWaveformRange(id: Int, startFrame: Int, endFrame: Int, numBins: Int): FloatArray = native_getSampleWaveformRange(id, startFrame, endFrame, numBins)
+    override fun getSampleWaveformRangeSource(id: Int, startFrame: Int, endFrame: Int, numBins: Int, channel: Int): FloatArray = native_getSampleWaveformRangeSource(id, startFrame, endFrame, numBins, channel)
     override fun getSampleData(id: Int): FloatArray = native_getSampleData(id)
+    override fun getSampleDataRight(id: Int): FloatArray = native_getSampleDataRight(id)
     override fun normalizeSample(id: Int, startFrame: Int, endFrame: Int) = native_normalizeSample(id, startFrame, endFrame)
     override fun fadeInSample(id: Int, startFrame: Int, endFrame: Int) = native_fadeInSample(id, startFrame, endFrame)
     override fun fadeOutSample(id: Int, startFrame: Int, endFrame: Int) = native_fadeOutSample(id, startFrame, endFrame)
@@ -478,6 +487,8 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_create(): Boolean
     private external fun native_delete()
     private external fun native_loadSample(sampleId: Int, sampleData: FloatArray)
+    private external fun native_loadSampleStereo(sampleId: Int, leftData: FloatArray, rightData: FloatArray)
+    private external fun native_hasStereoData(sampleId: Int): Boolean
     private external fun native_clearAllSamples()
     private external fun native_getTrackActiveNotes(): IntArray
     private external fun native_scheduleNote(
@@ -614,7 +625,9 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_getSampleLength(id: Int): Int
     private external fun native_getSampleWaveform(id: Int, numBins: Int): FloatArray
     private external fun native_getSampleWaveformRange(id: Int, startFrame: Int, endFrame: Int, numBins: Int): FloatArray
+    private external fun native_getSampleWaveformRangeSource(id: Int, startFrame: Int, endFrame: Int, numBins: Int, channel: Int): FloatArray
     private external fun native_getSampleData(id: Int): FloatArray
+    private external fun native_getSampleDataRight(id: Int): FloatArray
     private external fun native_normalizeSample(id: Int, startFrame: Int, endFrame: Int)
     private external fun native_fadeInSample(id: Int, startFrame: Int, endFrame: Int)
     private external fun native_fadeOutSample(id: Int, startFrame: Int, endFrame: Int)

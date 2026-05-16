@@ -23,6 +23,8 @@ public:
     void closeStream();
 
     void loadSample(int id, const float* data, int length);
+    void loadSampleStereo(int id, const float* left, const float* right, int length);
+    bool hasStereoData(int id);
     void clearAllSamples();
 
     void setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt,
@@ -51,7 +53,10 @@ public:
     int   getSampleLength(int id);
     void  getSampleWaveform(int id, float* out, int numBins);
     void  getSampleWaveformRange(int id, int startFrame, int endFrame, float* out, int numBins);
-    void  getSampleData(int id, float* out);  // raw float copy for WAV export
+    // channel: 0=left, 1=right, 2=averaged (for STEREO/MONO source views)
+    void  getSampleWaveformRangeSource(int id, int startFrame, int endFrame, float* out, int numBins, int channel);
+    void  getSampleData(int id, float* out);  // raw float copy for WAV export (left channel)
+    void  getSampleDataRight(int id, float* out);  // right channel copy (for SOURCE=RIGHT or STEREO save)
     float getSamplePlaybackPosition(int id);  // 0.0-1.0 fraction of active voice, or -1 if silent
     void normalizeSample(int id, int startFrame, int endFrame);
     void fadeInSample(int id, int startFrame, int endFrame);
@@ -299,6 +304,7 @@ private:
     std::shared_ptr<oboe::AudioStream> stream;
     Voice voices[MAX_VOICES];
     float* samples[256];
+    float* samplesRight[256];          // right channel for stereo samples (null = mono)
     int    sampleLengths[256];
     float* sampleBackups[256];        // single-level undo buffers
     int    sampleBackupLengths[256];

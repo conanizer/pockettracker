@@ -42,7 +42,7 @@ Week 16:     MVP Release
 - Linear interpolation (eliminates aliasing artifacts during pitch-shifting)
 - Native C++ audio engine with Oboe (44.1kHz, OpenSL ES preferred, AAudio fallback)
 - 8-voice polyphony with per-track voice stealing + 3-step allocator
-- 256 sample slots with stereo/mono WAV loading (auto-converts)
+- 256 sample slots with true stereo or mono WAV playback; SOURCE setting selects LEFT/RIGHT/STEREO/MONO non-destructively in sample editor
 - Automatic sample rate compensation
 - SoundFont (SF2) instruments via TinySoundFont — per-channel rendering (`tsf_render_float_channel` fork), full mod matrix parity with sampler (ADSR/LFO/table/pitch effects), per-instrument filter/drive/crush post-render, SF2 envelope/filter overrides (ATK/DEC/SUS/REL/CUT/RES on instrument screen)
 - Advanced playback: start/end points, reverse, looping (fwd/ping-pong)
@@ -163,6 +163,35 @@ Week 16:     MVP Release
 ---
 
 ## Completed Milestones
+
+### Sample Editor — True Stereo + SOURCE (Complete - 2026-05-16)
+
+Stereo WAV files now play back in true stereo throughout the app. The SOURCE setting in the
+sample editor is fully functional with four non-destructive modes:
+
+- **LEFT** — left channel of the stereo file used as mono
+- **RIGHT** — right channel used as mono
+- **STEREO** — both channels played back in true stereo
+- **MONO** — both channels averaged into one mono signal
+
+Implementation details:
+- `samplesRight[256]` buffer array in C++ `AudioEngine` stores the right channel separately.
+  `loadSampleStereo()` fills both buffers; `loadSample()` (mono files) leaves right null.
+- `processAudioBlock` detects `voice.sampleDataRight != nullptr` and uses a full stereo mix
+  path with `InstrumentChain::processStereo()` and balance pan gains.
+- `parseWavBuffer()` returns `Triple<FloatArray, FloatArray?, Float>` — left, optional right,
+  adjusted base frequency. `loadSampleFromFile()` and `previewSampleFile()` call
+  `loadSampleStereo()` or `loadSample()` accordingly.
+- SOURCE change is **non-destructive**: `samples[id]` holds the left channel (working buffer),
+  `samplesRight[id]` holds the right channel. Switching SOURCE never modifies either buffer.
+- Preview (START button): for LEFT/RIGHT/MONO modes, `prepareSampleEditorSourcePreview()`
+  copies the selected mono mix into temporary slot 254 so playback stays mono. Slot 254
+  inherits the sample rate ratio from the real slot so pitch is correct.
+- Waveform display: `getSampleWaveformRangeSource(id, start, end, bins, channel)` reads from
+  left (0), right (1), or averaged (2) channel depending on sourceMode.
+- Playback marker polls slot 254 for mono preview modes, real slot for STEREO/mono files.
+- SAVE/OVERWRITE applies SOURCE at write time: LEFT/RIGHT exports a mono WAV from the chosen
+  channel; STEREO exports a 2-channel WAV; MONO exports averaged mono.
 
 ### Sample Editor — Slicing System (Complete - 2026-05-16)
 

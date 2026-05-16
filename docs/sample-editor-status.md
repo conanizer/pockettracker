@@ -102,10 +102,6 @@ Note-to-slice playback (Instrument screen: SLICE row):
 5. RATE downsampling on save
    rateMode (HIGH/NORM/LOFI) is stored in state but SAVE/OVERWRITE always write at the original sample rate regardless.
 
-6. SOURCE stereo channel switching
-   Changing sourceMode (LEFT/RIGHT/STEREO) updates state only — nothing reloads the working buffer. The WAV loader already converts
-   stereo→mono on load, so there's no stereo side buffer to switch from.
-
   ---
 Summary by priority
 
@@ -148,8 +144,8 @@ Summary by priority
 ├────────────────────────────────────────────────────────────────┼────────────┤
 │ RATE downsampling on save                                      │ ✅ Done    │
 ├────────────────────────────────────────────────────────────────┼────────────┤
-│ SOURCE stereo side buffer                                      │ ❌ Missing │
+│ SOURCE stereo playback + channel selection                     │ ✅ Done    │
 └────────────────────────────────────────────────────────────────┴────────────┘
 
 The core editing workflow is fully working. The sample editor is feature-complete for MVP
-except for BPM display and stereo source switching (both post-MVP).
+except for BPM display.

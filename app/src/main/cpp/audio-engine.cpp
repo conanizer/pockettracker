@@ -16,6 +16,7 @@ SoundfontVoice sfVoices[8];
 AudioEngine::AudioEngine() {
     for (int i = 0; i < 256; i++) {
         samples[i] = nullptr;
+        samplesRight[i] = nullptr;
         sampleLengths[i] = 0;
         instrumentParams[i] = InstrumentParams();
         sampleBackups[i] = nullptr;
@@ -39,6 +40,7 @@ AudioEngine::~AudioEngine() {
     closeStream();
     for (int i = 0; i < 256; i++) {
         if (samples[i])         delete[] samples[i];
+        if (samplesRight[i])    delete[] samplesRight[i];
         if (sampleBackups[i])   delete[] sampleBackups[i];
         if (originalSamples[i]) delete[] originalSamples[i];
     }
@@ -131,6 +133,7 @@ void AudioEngine::loadSample(int id, const float* data, int length) {
     if (id < 0 || id >= 256) return;
 
     if (samples[id]) delete[] samples[id];
+    if (samplesRight[id]) { delete[] samplesRight[id]; samplesRight[id] = nullptr; }
     // New file replaces the original — discard any cached rate-mode original.
     if (originalSamples[id]) {
         delete[] originalSamples[id];
@@ -144,7 +147,32 @@ void AudioEngine::loadSample(int id, const float* data, int length) {
     }
     sampleLengths[id] = length;
 
-    LOGD("Sample %d: %d frames", id, length);
+    LOGD("Sample %d: %d frames (mono)", id, length);
+}
+
+void AudioEngine::loadSampleStereo(int id, const float* left, const float* right, int length) {
+    if (id < 0 || id >= 256 || !left || !right) return;
+
+    if (samples[id]) delete[] samples[id];
+    if (samplesRight[id]) { delete[] samplesRight[id]; samplesRight[id] = nullptr; }
+    if (originalSamples[id]) {
+        delete[] originalSamples[id];
+        originalSamples[id] = nullptr;
+        originalSampleLengths[id] = 0;
+    }
+
+    samples[id] = new float[length];
+    samplesRight[id] = new float[length];
+    std::memcpy(samples[id],      left,  length * sizeof(float));
+    std::memcpy(samplesRight[id], right, length * sizeof(float));
+    sampleLengths[id] = length;
+
+    LOGD("Sample %d: %d frames (stereo)", id, length);
+}
+
+bool AudioEngine::hasStereoData(int id) {
+    if (id < 0 || id >= 256) return false;
+    return samplesRight[id] != nullptr;
 }
 
 void AudioEngine::clearAllSamples() {
@@ -162,6 +190,10 @@ void AudioEngine::clearAllSamples() {
         if (samples[i]) {
             delete[] samples[i];
             samples[i] = nullptr;
+        }
+        if (samplesRight[i]) {
+            delete[] samplesRight[i];
+            samplesRight[i] = nullptr;
         }
         sampleLengths[i] = 0;
         if (originalSamples[i]) {
@@ -234,6 +266,50 @@ void AudioEngine::getSampleWaveformRange(int id, int startFrame, int endFrame, f
 void AudioEngine::getSampleData(int id, float* out) {
     if (id < 0 || id >= 256 || !samples[id]) return;
     std::memcpy(out, samples[id], sampleLengths[id] * sizeof(float));
+}
+
+void AudioEngine::getSampleDataRight(int id, float* out) {
+    if (id < 0 || id >= 256 || !samplesRight[id]) return;
+    std::memcpy(out, samplesRight[id], sampleLengths[id] * sizeof(float));
+}
+
+void AudioEngine::getSampleWaveformRangeSource(int id, int startFrame, int endFrame, float* out, int numBins, int channel) {
+    if (id < 0 || id >= 256 || !samples[id] || numBins <= 0) {
+        for (int i = 0; i < numBins * 2; i++) out[i] = 0.0f;
+        return;
+    }
+    int len = sampleLengths[id];
+    startFrame = std::max(0, std::min(startFrame, len));
+    endFrame   = std::max(startFrame, std::min(endFrame, len));
+    int rangeLen = endFrame - startFrame;
+    if (rangeLen <= 0) {
+        for (int i = 0; i < numBins * 2; i++) out[i] = 0.0f;
+        return;
+    }
+    float* bufL = samples[id];
+    float* bufR = samplesRight[id];
+    // channel 1 (RIGHT) with no right buffer falls back to left
+    if (channel == 1 && !bufR) channel = 0;
+    for (int bin = 0; bin < numBins; bin++) {
+        int s = startFrame + (int)((long long)bin * rangeLen / numBins);
+        int e = startFrame + (int)((long long)(bin + 1) * rangeLen / numBins);
+        if (e > endFrame) e = endFrame;
+        float minV = 0.0f, maxV = 0.0f;
+        for (int i = s; i < e; i++) {
+            float v;
+            if (channel == 1) {
+                v = bufR[i];
+            } else if (channel == 2 && bufR) {
+                v = (bufL[i] + bufR[i]) * 0.5f;  // averaged for STEREO/MONO view
+            } else {
+                v = bufL[i];
+            }
+            if (v < minV) minV = v;
+            if (v > maxV) maxV = v;
+        }
+        out[bin * 2]     = minV;
+        out[bin * 2 + 1] = maxV;
+    }
 }
 
 float AudioEngine::getSamplePlaybackPosition(int id) {
@@ -701,7 +777,7 @@ void AudioEngine::triggerNote(int sampleId, int trackId, float freq, float baseF
         if (!voices[i].isActive) {
             float rate = freq / baseFreq;
             float sampleRate = stream ? (float)stream->getSampleRate() : 44100.0f;
-            voices[i].trigger(samples[sampleId], sampleLengths[sampleId], trackId, rate, vol, 1.0f, pan,
+            voices[i].trigger(samples[sampleId], samplesRight[sampleId], sampleLengths[sampleId], trackId, rate, vol, 1.0f, pan,
                               instrumentParams[sampleId], sampleRate);
             LOGD("Note: track=%d, sampleId=%d, rate=%.3f, pan=%.2f", trackId, sampleId, rate, pan);
             return;
@@ -1059,7 +1135,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         startRow = 0;
                     }
 
-                    voices[v].trigger(samples[note.sampleId], sampleLengths[note.sampleId],
+                    voices[v].trigger(samples[note.sampleId], samplesRight[note.sampleId], sampleLengths[note.sampleId],
                                       note.trackId, rate, note.volume, note.phraseVolume, note.pan, instrumentParams[note.sampleId],
                                       sampleRate, note.startPointOverride, note.endPointOverride,
                                       note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
@@ -1560,9 +1636,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             if (idx < 0 || idx >= voice.sampleLength - 1) {
                 // Handle edge case: exactly at last sample
                 if (idx == voice.sampleLength - 1 && frac == 0.0f) {
-                    float sample = voice.sampleData[idx] * voice.volume;
-                    float sampleL = sample * voice.panLeft;
-                    float sampleR = sample * voice.panRight;
+                    float valL = voice.sampleData[idx];
+                    float valR = voice.sampleDataRight ? voice.sampleDataRight[idx] : valL;
+                    float sampleL = valL * voice.panLeft;
+                    float sampleR = valR * voice.panRight;
                     output[i * channelCount] += sampleL;
                     output[i * channelCount + 1] += sampleR;
                     if (voice.trackId >= 0 && voice.trackId < 8) {
@@ -1574,89 +1651,121 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 break;
             }
 
-            // ===================================
-            // SIGNAL CHAIN: Downsample → Crush → Interpolate → Drive → Volume
-            // ===================================
-
-            float sample1 = voice.sampleData[idx];
-            float sample2 = voice.sampleData[idx + 1];
-
-            // STEP 1: DOWNSAMPLE (sample rate reduction via sample-and-hold)
-            if (effDownsample > 0) {
-                int downsampleFactor = 1 << effDownsample;
-                int quantizedIdx = (idx / downsampleFactor) * downsampleFactor;
-                sample1 = voice.sampleData[quantizedIdx];
-                sample2 = voice.sampleData[quantizedIdx];
-            }
-
-            // STEP 2: LINEAR INTERPOLATION (pitch shifting)
-            float processedSample = sample1 + (sample2 - sample1) * frac;
-
-            // STEP 3: Crush → Drive → Filter via InstrumentChain (post-interpolation)
-            processedSample = voice.chain.processMono(processedSample);
-
-            // STEP 4: Apply volume after effects, with modulation (Phase 4)
+            // STEP 4 scalars (shared by mono and stereo paths)
             float t = (numFrames > 1) ? (float)(i + 1) / (float)numFrames : 1.0f;
             float finalVol = voice.volume;
             for (int m = 0; m < 4; m++) {
                 const VoiceModSlot& mod = voice.voiceMods[m];
                 if (mod.type == 0 || mod.stage == 0) continue;
-                if (mod.dest == 1) { // VOL destination
+                if (mod.dest == 1) {
                     if (mod.type == 3) {
-                        // LFO: bipolar tremolo — interpolate for smooth low-rate modulation
                         float envAtI = mod.prevEnvValue + (mod.envValue - mod.prevEnvValue) * t;
                         finalVol = fmaxf(0.0f, finalVol * (1.0f + envAtI * mod.effectiveAmt));
                     } else {
-                        // AHD/DRUM/ADSR/TRIG: only interpolate on decay (falling envelope)
                         float envAtI = (mod.envValue < mod.prevEnvValue)
                             ? mod.prevEnvValue + (mod.envValue - mod.prevEnvValue) * t
                             : mod.envValue;
                         finalVol = fmaxf(0.0f, finalVol + (envAtI - 1.0f) * mod.effectiveAmt);
                     }
                 }
-                // PITCH dest: accumulated into voice.params.mod[PARAM_PITCH] by updateVoiceModulation
             }
-            // modDestValues[PARAM_VOL] = TABLE_VOL × phraseVol × instrVol (processRoutes, once/block).
-            // Interpolate per-sample using prevModDestValues to avoid clicks on block-boundary changes
-            // (e.g. Vxx on empty step, table row volume changes).
             float volRoute = voice.prevModDestValues[PARAM_VOL]
                            + (voice.modDestValues[PARAM_VOL] - voice.prevModDestValues[PARAM_VOL]) * t;
-            float sample = processedSample * finalVol * volRoute;
-
-            // SEND TAP: panned contribution to stereo reverb/delay buses
-            if (voice.reverbSend > 0.0f) {
-                revSendBufL[i] += sample * voice.panLeft  * voice.reverbSend;
-                revSendBufR[i] += sample * voice.panRight * voice.reverbSend;
-            }
-            if (voice.delaySend > 0.0f) {
-                dlySendBufL[i] += sample * voice.panLeft  * voice.delaySend;
-                dlySendBufR[i] += sample * voice.panRight * voice.delaySend;
-            }
-
-            // STEP 7: Apply real-time track and master volume
             float trackVol, masterVol;
             {
                 std::lock_guard<std::mutex> lock(volumeMutex);
                 trackVol = (voice.trackId >= 0 && voice.trackId < 8) ? trackVolumes[voice.trackId] : 1.0f;
                 masterVol = masterVolume;
             }
-            sample = sample * trackVol * masterVol;
+            float antiClick = voice.antiClickFade();
 
-            // STEP 8: Anti-click fades (fade-in + end-of-sample fade-out)
-            sample *= voice.antiClickFade();
+            float sampleL, sampleR;
 
-            // STEP 8b: Voice-steal fade-out multiplier
-            if (voice.isFadingOut) {
-                sample *= (float)voice.fadeOutRemaining / (float)DECLICK_SAMPLES;
-                if (--voice.fadeOutRemaining <= 0) {
-                    voice.isFadingOut = false;
-                    voice.isActive = false;
+            if (voice.sampleDataRight) {
+                // ── STEREO SAMPLE PATH ────────────────────────────────────────────
+                float s1L, s2L, s1R, s2R;
+                if (effDownsample > 0) {
+                    int factor = 1 << effDownsample;
+                    int qi = (idx / factor) * factor;
+                    s1L = s2L = voice.sampleData[qi];
+                    s1R = s2R = voice.sampleDataRight[qi];
+                } else {
+                    s1L = voice.sampleData[idx];       s2L = voice.sampleData[idx + 1];
+                    s1R = voice.sampleDataRight[idx];  s2R = voice.sampleDataRight[idx + 1];
                 }
+                float procL = s1L + (s2L - s1L) * frac;
+                float procR = s1R + (s2R - s1R) * frac;
+                voice.chain.processStereo(procL, procR);
+
+                float scalar = finalVol * volRoute;
+                procL *= scalar;
+                procR *= scalar;
+
+                if (voice.reverbSend > 0.0f) {
+                    revSendBufL[i] += procL * voice.panLeft  * voice.reverbSend;
+                    revSendBufR[i] += procR * voice.panRight * voice.reverbSend;
+                }
+                if (voice.delaySend > 0.0f) {
+                    dlySendBufL[i] += procL * voice.panLeft  * voice.delaySend;
+                    dlySendBufR[i] += procR * voice.panRight * voice.delaySend;
+                }
+
+                float globalMul = trackVol * masterVol * antiClick;
+                procL *= globalMul;
+                procR *= globalMul;
+
+                if (voice.isFadingOut) {
+                    float fo = (float)voice.fadeOutRemaining / (float)DECLICK_SAMPLES;
+                    procL *= fo;
+                    procR *= fo;
+                    if (--voice.fadeOutRemaining <= 0) {
+                        voice.isFadingOut = false;
+                        voice.isActive = false;
+                    }
+                }
+
+                sampleL = procL * voice.panLeft;
+                sampleR = procR * voice.panRight;
+            } else {
+                // ── MONO SAMPLE PATH ──────────────────────────────────────────────
+                float sample1 = voice.sampleData[idx];
+                float sample2 = voice.sampleData[idx + 1];
+
+                if (effDownsample > 0) {
+                    int downsampleFactor = 1 << effDownsample;
+                    int quantizedIdx = (idx / downsampleFactor) * downsampleFactor;
+                    sample1 = voice.sampleData[quantizedIdx];
+                    sample2 = voice.sampleData[quantizedIdx];
+                }
+
+                float processedSample = sample1 + (sample2 - sample1) * frac;
+                processedSample = voice.chain.processMono(processedSample);
+
+                float sample = processedSample * finalVol * volRoute;
+
+                if (voice.reverbSend > 0.0f) {
+                    revSendBufL[i] += sample * voice.panLeft  * voice.reverbSend;
+                    revSendBufR[i] += sample * voice.panRight * voice.reverbSend;
+                }
+                if (voice.delaySend > 0.0f) {
+                    dlySendBufL[i] += sample * voice.panLeft  * voice.delaySend;
+                    dlySendBufR[i] += sample * voice.panRight * voice.delaySend;
+                }
+
+                sample = sample * trackVol * masterVol * antiClick;
+
+                if (voice.isFadingOut) {
+                    sample *= (float)voice.fadeOutRemaining / (float)DECLICK_SAMPLES;
+                    if (--voice.fadeOutRemaining <= 0) {
+                        voice.isFadingOut = false;
+                        voice.isActive = false;
+                    }
+                }
+
+                sampleL = sample * voice.panLeft;
+                sampleR = sample * voice.panRight;
             }
 
-            // Apply pan and write to stereo channels
-            float sampleL = sample * voice.panLeft;
-            float sampleR = sample * voice.panRight;
             output[i * channelCount] += sampleL;
             output[i * channelCount + 1] += sampleR;
 
