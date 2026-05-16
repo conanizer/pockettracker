@@ -1,5 +1,6 @@
 package com.conanizer.pockettracker.core.storage
 
+import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -32,7 +33,8 @@ object WavWriter {
         path: String,
         leftChannel: FloatArray,
         rightChannel: FloatArray,
-        sampleRate: Int = 44100
+        sampleRate: Int = 44100,
+        cuePoints: IntArray = intArrayOf()
     ): Boolean {
         require(leftChannel.size == rightChannel.size) {
             "Left and right channels must have the same length"
@@ -45,53 +47,72 @@ object WavWriter {
         val blockAlign = numChannels * bytesPerSample
         val byteRate = sampleRate * blockAlign
         val dataSize = numSamples.toLong() * blockAlign  // Long to avoid Int overflow on large renders
-        val fileSize = 36L + dataSize
 
         // Reject renders that would exceed the 32-bit WAV size field (~2GB limit)
         if (dataSize > Int.MAX_VALUE.toLong()) {
             return false
         }
 
+        // cue chunk: "cue " (4) + size (4) + count (4) + n * 24 bytes per cue point
+        val numCue = cuePoints.size
+        val cueChunkDataSize = if (numCue > 0) 4 + numCue * 24 else 0
+        val cueChunkBytes    = if (numCue > 0) 8 + cueChunkDataSize else 0
+
+        val riffContentSize = 36L + dataSize + cueChunkBytes   // after "RIFF" + size
+        val totalFileBytes  = 8L  + riffContentSize            // = 44 + dataSize + cueChunkBytes
+
         // Allocate buffer for entire file
-        val buffer = ByteBuffer.allocate((44L + dataSize).toInt())
+        val buffer = ByteBuffer.allocate(totalFileBytes.toInt())
         buffer.order(ByteOrder.LITTLE_ENDIAN)
 
         // ===================================
         // RIFF HEADER (12 bytes)
         // ===================================
-        buffer.put("RIFF".toByteArray(Charsets.US_ASCII))  // ChunkID
-        buffer.putInt(fileSize.toInt())                     // ChunkSize (safe: checked <= Int.MAX_VALUE above)
-        buffer.put("WAVE".toByteArray(Charsets.US_ASCII))  // Format
+        buffer.put("RIFF".toByteArray(Charsets.US_ASCII))
+        buffer.putInt(riffContentSize.toInt())
+        buffer.put("WAVE".toByteArray(Charsets.US_ASCII))
 
         // ===================================
         // FMT CHUNK (24 bytes)
         // ===================================
-        buffer.put("fmt ".toByteArray(Charsets.US_ASCII))  // Subchunk1ID
-        buffer.putInt(16)                                   // Subchunk1Size (16 for PCM)
-        buffer.putShort(1)                                  // AudioFormat (1 = PCM)
-        buffer.putShort(numChannels.toShort())             // NumChannels
-        buffer.putInt(sampleRate)                          // SampleRate
-        buffer.putInt(byteRate)                            // ByteRate
-        buffer.putShort(blockAlign.toShort())              // BlockAlign
-        buffer.putShort(bitsPerSample.toShort())           // BitsPerSample
+        buffer.put("fmt ".toByteArray(Charsets.US_ASCII))
+        buffer.putInt(16)                                  // PCM
+        buffer.putShort(1)                                 // AudioFormat = PCM
+        buffer.putShort(numChannels.toShort())
+        buffer.putInt(sampleRate)
+        buffer.putInt(byteRate)
+        buffer.putShort(blockAlign.toShort())
+        buffer.putShort(bitsPerSample.toShort())
 
         // ===================================
         // DATA CHUNK (8 + dataSize bytes)
         // ===================================
-        buffer.put("data".toByteArray(Charsets.US_ASCII))  // Subchunk2ID
-        buffer.putInt(dataSize.toInt())                     // Subchunk2Size
+        buffer.put("data".toByteArray(Charsets.US_ASCII))
+        buffer.putInt(dataSize.toInt())
 
-        // Write interleaved samples (L, R, L, R, ...)
         for (i in 0 until numSamples) {
-            // Convert float (-1.0 to 1.0) to 16-bit signed integer
-            val leftSample = floatToInt16(leftChannel[i])
-            val rightSample = floatToInt16(rightChannel[i])
-
-            buffer.putShort(leftSample)
-            buffer.putShort(rightSample)
+            buffer.putShort(floatToInt16(leftChannel[i]))
+            buffer.putShort(floatToInt16(rightChannel[i]))
         }
 
-        // Write to file
+        // ===================================
+        // CUE CHUNK (optional, 12 + n*24 bytes)
+        // Each cue point marks a slice boundary frame.
+        // ===================================
+        if (numCue > 0) {
+            buffer.put("cue ".toByteArray(Charsets.US_ASCII))
+            buffer.putInt(cueChunkDataSize)
+            buffer.putInt(numCue)
+            cuePoints.forEachIndexed { i, frame ->
+                buffer.putInt(i + 1)   // ID (1-based)
+                buffer.putInt(frame)   // position (play-order; same as sample offset for no playlist)
+                buffer.put("data".toByteArray(Charsets.US_ASCII))  // data chunk ID
+                buffer.putInt(0)       // chunk start (byte offset of data chunk from RIFF start, 0 = unknown)
+                buffer.putInt(0)       // block start
+                buffer.putInt(frame)   // sample offset within data chunk
+            }
+        }
+
         return fileSystem.writeBytes(path, buffer.array())
     }
 
@@ -102,9 +123,10 @@ object WavWriter {
         fileSystem: IFileSystem,
         path: String,
         samples: FloatArray,
-        sampleRate: Int = 44100
+        sampleRate: Int = 44100,
+        cuePoints: IntArray = intArrayOf()
     ): Boolean {
-        return writeWav(fileSystem, path, samples, samples, sampleRate)
+        return writeWav(fileSystem, path, samples, samples, sampleRate, cuePoints)
     }
 
     /**
@@ -132,6 +154,56 @@ object WavWriter {
         }
 
         return writeWav(fileSystem, path, leftChannel, rightChannel, sampleRate)
+    }
+
+    /**
+     * Read cue point frame positions from a WAV file's cue chunk.
+     * Returns an empty array if the file has no cue chunk or cannot be read.
+     * Frame 0 is excluded (it's the implicit sample start, not a slice boundary).
+     */
+    fun readCuePoints(path: String): IntArray {
+        return try {
+            val bytes = File(path).readBytes()
+            if (bytes.size < 12) return intArrayOf()
+            val buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+
+            // Verify RIFF/WAVE header
+            val riffId = ByteArray(4).also { buf.get(it) }
+            if (String(riffId, Charsets.US_ASCII) != "RIFF") return intArrayOf()
+            buf.getInt()  // RIFF chunk size
+            val waveId = ByteArray(4).also { buf.get(it) }
+            if (String(waveId, Charsets.US_ASCII) != "WAVE") return intArrayOf()
+
+            // Scan subchunks until we find "cue "
+            while (buf.remaining() >= 8) {
+                val chunkId = ByteArray(4).also { buf.get(it) }
+                val chunkSize = buf.getInt()
+                if (String(chunkId, Charsets.US_ASCII) == "cue ") {
+                    if (buf.remaining() < 4) break
+                    val count = buf.getInt()
+                    val frames = mutableListOf<Int>()
+                    repeat(count) {
+                        if (buf.remaining() < 24) return@repeat
+                        buf.getInt()              // ID
+                        val pos = buf.getInt()    // position (frame number)
+                        buf.getInt()              // data chunk ID ("data")
+                        buf.getInt()              // chunk start
+                        buf.getInt()              // block start
+                        buf.getInt()              // sample offset
+                        if (pos > 0) frames.add(pos)
+                    }
+                    return frames.toIntArray()
+                } else {
+                    // Skip chunk, padding to even boundary
+                    val skip = chunkSize + (chunkSize and 1)
+                    if (buf.remaining() < skip) break
+                    buf.position(buf.position() + skip)
+                }
+            }
+            intArrayOf()
+        } catch (e: Exception) {
+            intArrayOf()
+        }
     }
 
     /**

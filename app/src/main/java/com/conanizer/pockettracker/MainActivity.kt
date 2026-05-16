@@ -195,6 +195,17 @@ class MainActivity : ComponentActivity() {
  * 2. Creates button handlers (what happens when each button is pressed)
  * 3. Chooses which layout to show based on layoutConfig
  */
+
+/** Returns the slice boundary frame positions to embed as a WAV cue chunk. */
+private fun computeSliceCuePoints(state: SampleEditorState): IntArray = when (state.sliceMethod) {
+    0 -> state.transientMarkers.filter { it > 0 && it < state.totalFrames }.toIntArray()
+    1 -> {
+        val div = state.sliceDivisions.coerceAtLeast(1)
+        IntArray(div - 1) { i -> ((i + 1).toLong() * state.totalFrames / div).toInt() }
+    }
+    else -> intArrayOf()
+}
+
 @Composable
 fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: DeviceAdapter) {
     // Get Android context (needed for file access, audio, etc.)
@@ -697,12 +708,20 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             val waveformData = audioEngine.getSampleWaveform(instId, 620)
             val sampleRate   = audioEngine.getOriginalSampleRate(instId)
             val inst = trackerController.project.instruments[instId]
+
+            // Read slice markers from WAV cue chunk (if any)
+            val filePath  = sampleEditorState.sampleFilePath
+            val cuePoints = if (filePath != null) WavWriter.readCuePoints(filePath) else intArrayOf()
+
             sampleEditorState = sampleEditorState.copy(
                 totalFrames  = totalFrames,
                 waveformData = waveformData,
                 sampleRate   = sampleRate,
-                selectionStart = (inst.sampleStart.toLong() * totalFrames) / 255L,
-                selectionEnd   = (inst.sampleEnd.toLong()   * totalFrames) / 255L
+                selectionStart   = (inst.sampleStart.toLong() * totalFrames) / 255L,
+                selectionEnd     = (inst.sampleEnd.toLong()   * totalFrames) / 255L,
+                transientMarkers = cuePoints,
+                sliceMethod      = if (cuePoints.isNotEmpty()) 0 else sampleEditorState.sliceMethod,
+                sliceIndex       = 0
             )
         }
     }
@@ -737,7 +756,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val seSliceSensitivity = sampleEditorState.sliceSensitivity
     val seTotalFrames      = sampleEditorState.totalFrames
     LaunchedEffect(seSliceMethod, seSliceSensitivity, seTotalFrames) {
-        if (seSliceMethod == 0 && seTotalFrames > 0) {
+        if (seSliceMethod == 0 && seTotalFrames > 0 && sampleEditorState.transientMarkers.isEmpty()) {
+            // Only auto-detect when markers are empty: covers first switch to TRANSIENT,
+            // sensitivity changes (which clear markers first), and new sample loads.
+            // When markers came from a WAV cue chunk they are non-empty — detection is skipped.
             val markers = audioEngine.detectTransients(sampleEditorState.instrumentId, seSliceSensitivity)
             val firstSliceEnd = markers.firstOrNull()?.toLong() ?: seTotalFrames.toLong()
             sampleEditorState = sampleEditorState.copy(
@@ -2299,6 +2321,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     }
                                     if (!java.io.File(targetPath).exists()) {
                                         // No collision — save directly and close
+                                        val cuePoints = computeSliceCuePoints(sampleEditorState)
                                         coroutineScope.launch(Dispatchers.Default) {
                                             val floats   = audioEngine.getSampleData(instId)
                                             val origRate = audioEngine.getOriginalSampleRate(instId)
@@ -2307,7 +2330,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                                 path         = targetPath,
                                                 leftChannel  = floats,
                                                 rightChannel = floats,
-                                                sampleRate   = origRate
+                                                sampleRate   = origRate,
+                                                cuePoints    = cuePoints
                                             )
                                             withContext(Dispatchers.Main) {
                                                 if (success) {
@@ -2370,6 +2394,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     }
                                     val filePath = trackerController.project.instruments[instId].sampleFilePath
                                     if (filePath != null) {
+                                        val cuePoints = computeSliceCuePoints(sampleEditorState)
                                         coroutineScope.launch(Dispatchers.Default) {
                                             val floats   = audioEngine.getSampleData(instId)
                                             val origRate = audioEngine.getOriginalSampleRate(instId)
@@ -2378,7 +2403,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                                 path         = filePath,
                                                 leftChannel  = floats,
                                                 rightChannel = floats,
-                                                sampleRate   = origRate
+                                                sampleRate   = origRate,
+                                                cuePoints    = cuePoints
                                             )
                                             withContext(Dispatchers.Main) {
                                                 if (success) {
@@ -2387,6 +2413,33 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                                 }
                                             }
                                         }
+                                    }
+                                }
+                                3 -> { // CHOP: export each slice as a separate WAV into Samples/Chops/{name}/
+                                    if (s.sliceMethod == 2) return@buttonA
+                                    val sliceCount = when (s.sliceMethod) {
+                                        0 -> s.transientMarkers.size + 1
+                                        1 -> s.sliceDivisions.coerceAtLeast(1)
+                                        else -> 0
+                                    }
+                                    if (sliceCount <= 0) return@buttonA
+                                    val baseName = s.sampleName.ifEmpty { "SAMPLE" }
+                                        .replace(Regex("[^A-Za-z0-9_-]"), "_")
+                                    val chopsDirPath = "${fileManager.getSamplesDirectory()}/Chops/$baseName"
+                                    coroutineScope.launch(Dispatchers.Default) {
+                                        java.io.File(chopsDirPath).mkdirs()
+                                        val floats   = audioEngine.getSampleData(instId)
+                                        val origRate = audioEngine.getOriginalSampleRate(instId)
+                                        for (idx in 0 until sliceCount) {
+                                            val (startL, endL) = s.getSliceBounds(idx)
+                                            val start = startL.toInt().coerceIn(0, floats.size)
+                                            val end   = endL.toInt().coerceIn(start, floats.size)
+                                            if (end <= start) continue
+                                            val slice  = floats.copyOfRange(start, end)
+                                            val suffix = idx.toString().padStart(2, '0')
+                                            WavWriter.writeWavMono(fileSystem, "$chopsDirPath/${baseName}_$suffix.wav", slice, origRate)
+                                        }
+                                        Log.d("SampleEditor", "CHOP: $sliceCount slices → $chopsDirPath")
                                     }
                                 }
                             }
@@ -2878,6 +2931,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     )
                                 }
                             }
+                            val cuePoints = computeSliceCuePoints(sampleEditorState)
                             coroutineScope.launch(Dispatchers.Default) {
                                 java.io.File(samplesDir).mkdirs()
                                 var path = "$samplesDir/$name.wav"
@@ -2893,7 +2947,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     path         = path,
                                     leftChannel  = floats,
                                     rightChannel = floats,
-                                    sampleRate   = origRate
+                                    sampleRate   = origRate,
+                                    cuePoints    = cuePoints
                                 )
                                 withContext(Dispatchers.Main) {
                                     if (success) {

@@ -327,6 +327,9 @@ class SampleEditorModule : TrackerModule {
         drawBitmapText("LOAD",      x + 120, ty, scale, if (cur && s.cursorCol == 0) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
         drawBitmapText("SAVE",      x + 230, ty, scale, if (cur && s.cursorCol == 1) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
         drawBitmapText("OVERWRITE", x + 335, ty, scale, if (cur && s.cursorCol == 2) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+        if (s.sliceMethod != 2) {
+            drawBitmapText("CHOP", x + 510, ty, scale, if (cur && s.cursorCol == 3) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+        }
     }
 
     private fun DrawScope.drawConfirmDialog(x: Int, y: Int, scale: Int) {
@@ -412,7 +415,7 @@ class SampleEditorModule : TrackerModule {
             10 -> when (s.cursorCol) {
                 0 -> if (action is InputAction.SET_VALUE) return InputResult(sliceMethod = action.value)
                 1 -> if (action is InputAction.SET_VALUE) return when (s.sliceMethod) {
-                    0    -> InputResult(sliceSensitivity = action.value)
+                    0    -> InputResult(sliceSensitivity = action.value, transientMarkers = intArrayOf())
                     else -> InputResult(sliceDivisions   = action.value)
                 }
             }
@@ -492,7 +495,7 @@ class SampleEditorModule : TrackerModule {
             14       -> 5
             16       -> 2
             18       -> 0
-            19       -> 2
+            19       -> if (sliceMethod == 2) 2 else 3
             else     -> 0
         }
     }
