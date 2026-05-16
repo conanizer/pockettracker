@@ -508,14 +508,14 @@ JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleNoteWithTable(
         JNIEnv *env, jobject thiz, jlong targetFrame, jint sampleId, jint trackId,
         jfloat frequency, jfloat baseFrequency, jfloat volume, jfloat phraseVolume, jfloat pan,
-        jint startPointOverride, jint tableId, jint tableTicRate,
+        jint startPointOverride, jint endPointOverride, jint tableId, jint tableTicRate,
         jint noteOctave, jint notePitch,
         jfloat pslInitialOffset, jfloat pslDuration,
         jfloat pbnRate, jfloat vibratoSpeed, jfloat vibratoDepth,
         jint tableStartRow) {
     if (engine) {
         engine->scheduleNote(targetFrame, sampleId, trackId, frequency, baseFrequency,
-                             volume, phraseVolume, pan, startPointOverride, tableId, tableTicRate,
+                             volume, phraseVolume, pan, startPointOverride, endPointOverride, tableId, tableTicRate,
                              noteOctave, notePitch,
                              pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
                              tableStartRow);

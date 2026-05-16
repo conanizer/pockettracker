@@ -607,7 +607,31 @@ class AudioEngine(
         android.util.Log.d("AudioEngine", "📋 scheduleNote: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, vol=${"%.4f".format(volume)}, pan=$pan, tableId=$tableId")
 
         val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
-        val frequency = note.toFrequency()
+
+        // Handle slice playback (CUT/TRU mode): note selects slice, pitch stays at root.
+        var effectiveNote = note
+        var effectiveStartOverride = startPointOverride
+        var effectiveEndOverride = -1
+        if (instrument.slicingMode != 0 && instrument.sliceMarkers.isNotEmpty()) {
+            val markers = instrument.sliceMarkers
+            val rootMidi = instrument.root.toMidi()
+            val noteMidi = note.toMidi()
+            // N markers define N+1 slices: slice 0 starts at frame 0, slice 1 at markers[0], etc.
+            val sliceIndex = (noteMidi - rootMidi).coerceAtLeast(0).coerceAtMost(markers.size)
+            val totalFrames = backend.getSampleLength(sampleId).toLong()
+            if (totalFrames > 0) {
+                val sliceStart = if (sliceIndex == 0) 0L else markers[sliceIndex - 1]
+                effectiveStartOverride = ((sliceStart * 255L) / totalFrames).toInt().coerceIn(0, 255)
+                effectiveNote = instrument.root  // play at 1.0x rate; note just selects slice
+                if (instrument.slicingMode == 1) { // CUT: stop at next slice boundary
+                    val sliceEnd = if (sliceIndex < markers.size) markers[sliceIndex] else totalFrames
+                    effectiveEndOverride = ((sliceEnd * 255L) / totalFrames).toInt().coerceIn(0, 255)
+                }
+                // TRU: effectiveEndOverride stays -1 → plays to instrument's natural sampleEnd
+            }
+        }
+
+        val frequency = effectiveNote.toFrequency()
 
         // Push modulation params, EQ, and send levels to C++ engine.
         // Must be done before scheduleNoteWithTable so the engine has correct params at trigger time.
@@ -630,7 +654,7 @@ class AudioEngine(
         // Always use scheduleNoteWithTable - C++ handles tableId=-1 as "no table"
         backend.scheduleNoteWithTable(
             targetFrame, sampleId, trackId, frequency, baseFreq, volume, phraseVol, pan,
-            startPointOverride, tableId, tableTicRate, note.octave, note.pitch,
+            effectiveStartOverride, effectiveEndOverride, tableId, tableTicRate, effectiveNote.octave, effectiveNote.pitch,
             pslInitialOffset, pslDurationFrames, pbnRatePerFrame, vibratoSpeed, vibratoDepth,
             tableStartRow
         )
@@ -984,7 +1008,7 @@ class AudioEngine(
 
         backend.scheduleNoteWithTable(
             targetFrame, sampleId, trackId, frequency, baseFreq, volume, 1.0f, pan,
-            startPointOverride, tableId, tableTicRate, note.octave, note.pitch,
+            startPointOverride, -1, tableId, tableTicRate, note.octave, note.pitch,
             pslInitialOffset, pslDurationFrames, pbnRatePerFrame, vibratoSpeed, vibratoDepth,
             tableStartRow
         )

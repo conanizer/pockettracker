@@ -104,7 +104,8 @@ public:
     // Schedule a note to be played at exact frame
     void scheduleNote(int64_t targetFrame, int sampleId, int trackId,
                       float frequency, float baseFrequency, float volume, float phraseVolume = 1.0f, float pan = 0.5f,
-                      int startPointOverride = -1, int tableId = -1, int tableTicRate = 6,
+                      int startPointOverride = -1, int endPointOverride = -1,
+                      int tableId = -1, int tableTicRate = 6,
                       int noteOctave = 4, int notePitch = 0,
                       float pslInitialOffset = 0.0f, float pslDuration = 0.0f,
                       float pbnRate = 0.0f, float vibratoSpeed = 0.0f, float vibratoDepth = 0.0f,

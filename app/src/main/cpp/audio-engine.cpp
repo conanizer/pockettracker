@@ -1061,7 +1061,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
                     voices[v].trigger(samples[note.sampleId], sampleLengths[note.sampleId],
                                       note.trackId, rate, note.volume, note.phraseVolume, note.pan, instrumentParams[note.sampleId],
-                                      sampleRate, note.startPointOverride,
+                                      sampleRate, note.startPointOverride, note.endPointOverride,
                                       note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
 
                     // PSL: Set initial pitch offset and start slide to note pitch.
@@ -1987,7 +1987,7 @@ int64_t AudioEngine::getCurrentFrame() {
 
 void AudioEngine::scheduleNote(int64_t targetFrame, int sampleId, int trackId,
                                float frequency, float baseFrequency, float volume, float phraseVolume, float pan,
-                               int startPointOverride, int tableId, int tableTicRate,
+                               int startPointOverride, int endPointOverride, int tableId, int tableTicRate,
                                int noteOctave, int notePitch,
                                float pslInitialOffset, float pslDuration,
                                float pbnRate, float vibratoSpeed, float vibratoDepth,
@@ -2002,6 +2002,7 @@ void AudioEngine::scheduleNote(int64_t targetFrame, int sampleId, int trackId,
             .phraseVolume = phraseVolume,
             .pan = pan,
             .startPointOverride = startPointOverride,
+            .endPointOverride = endPointOverride,
             .tableId = tableId,
             .tableTicRate = tableTicRate,
             .noteOctave = noteOctave,

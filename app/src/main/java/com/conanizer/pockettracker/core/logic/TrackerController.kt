@@ -869,7 +869,7 @@ class TrackerController(
                 val isSoundFont = project.instruments[currentInstrument].instrumentType == InstrumentType.SOUNDFONT
                 val maxRow = if (isSoundFont) 14 else 15
                 val tripleRow = if (isSoundFont) 5 else 4
-                val dualParamRows = if (isSoundFont) setOf(0, 6, 8, 9, 10) else setOf(0, 5, 7, 8, 9, 11, 12, 13)
+                val dualParamRows = if (isSoundFont) setOf(0, 6, 8, 9, 10) else setOf(0, 5, 7, 8, 9, 11, 12, 13, 14)
                 instrumentCursorRow = when {
                     instrumentCursorRow == 3 -> 1                       // Skip spacer (row 2) both types
                     isSoundFont && instrumentCursorRow == 8 -> 6        // Skip SF spacer (row 7)
@@ -957,7 +957,7 @@ class TrackerController(
                 val isSoundFont = project.instruments[currentInstrument].instrumentType == InstrumentType.SOUNDFONT
                 val maxRow = if (isSoundFont) 14 else 15
                 val tripleRow = if (isSoundFont) 5 else 4
-                val dualParamRows = if (isSoundFont) setOf(0, 6, 8, 9, 10) else setOf(0, 5, 7, 8, 9, 11, 12, 13)
+                val dualParamRows = if (isSoundFont) setOf(0, 6, 8, 9, 10) else setOf(0, 5, 7, 8, 9, 11, 12, 13, 14)
                 instrumentCursorRow = when {
                     instrumentCursorRow == 1 -> 3                       // Skip spacer (row 2) both types
                     isSoundFont && instrumentCursorRow == 6 -> 8        // Skip SF spacer (row 7)
@@ -1281,7 +1281,7 @@ class TrackerController(
     private fun getInstrumentCursorLeftColumn(row: Int, currentColumn: Int): Int {
         val isSoundFont = project.instruments[currentInstrument].instrumentType == InstrumentType.SOUNDFONT
         val tripleRow = if (isSoundFont) 5 else 4
-        val dualParamRows = if (isSoundFont) setOf(0, 6, 8, 9, 10) else setOf(0, 5, 7, 8, 9, 11, 12, 13)
+        val dualParamRows = if (isSoundFont) setOf(0, 6, 8, 9, 10) else setOf(0, 5, 7, 8, 9, 11, 12, 13, 14)
         return when {
             row == 0 -> (currentColumn - 1).coerceAtLeast(1)           // 3→2→1
             row == 3 -> (currentColumn - 1).coerceAtLeast(2)           // 3→2 (min col 2)
@@ -1298,7 +1298,7 @@ class TrackerController(
     private fun getInstrumentCursorRightColumn(row: Int, currentColumn: Int): Int {
         val isSoundFont = project.instruments[currentInstrument].instrumentType == InstrumentType.SOUNDFONT
         val tripleRow = if (isSoundFont) 5 else 4
-        val dualParamRows = if (isSoundFont) setOf(0, 6, 8, 9, 10) else setOf(0, 5, 7, 8, 9, 11, 12, 13)
+        val dualParamRows = if (isSoundFont) setOf(0, 6, 8, 9, 10) else setOf(0, 5, 7, 8, 9, 11, 12, 13, 14)
         return when {
             row == 0 -> (currentColumn + 1).coerceAtMost(3)            // 1→2→3
             row == 3 -> (currentColumn + 1).coerceAtMost(3)            // 2→3 (max col 3)

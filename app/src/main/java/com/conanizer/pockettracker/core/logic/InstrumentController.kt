@@ -166,6 +166,10 @@ class InstrumentController(
             instrument.sampleFilePath = filePath
             instrument.sampleId = currentInstrument
 
+            // Read cue points from WAV so slice playback works without opening the sample editor
+            val cuePoints = WavWriter.readCuePoints(filePath)
+            instrument.sliceMarkers = cuePoints.map { it.toLong() }
+
             // Extract filename from path (last segment after last slash)
             val filename = filePath.substringAfterLast('/').substringBeforeLast('.')
 
@@ -482,6 +486,12 @@ class InstrumentController(
         instrument.loopStart = loopStart.coerceIn(0, 255)
         audioEngine.updateInstrumentPlaybackParams(instrument)
         logger.d(TAG, "🎛️ Updated LOOP START: 0x${formatHex(instrument.loopStart)}")
+    }
+
+    fun updateSlicingMode(instrument: Instrument, mode: Int) {
+        instrument.slicingMode = mode.coerceIn(0, 2)
+        stateObserver.onStateChanged()
+        logger.d(TAG, "🎛️ Updated SLICE: ${listOf("OFF","CUT","TRU")[instrument.slicingMode]}")
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -813,6 +823,7 @@ class InstrumentController(
         instrument.loopMode        = src.loopMode
         instrument.loopStart       = src.loopStart
         instrument.tableTicRate    = src.tableTicRate
+        instrument.slicingMode     = src.slicingMode
         instrument.sfBank          = src.sfBank
         instrument.sfPreset        = src.sfPreset
         instrument.sfOverrides     = src.sfOverrides
@@ -838,6 +849,7 @@ class InstrumentController(
                         setStatus("SRC MISSING: ${path.substringAfterLast('/')}", false)
                     } else {
                         instrument.sampleId = currentInstrument
+                        instrument.sliceMarkers = WavWriter.readCuePoints(path).map { it.toLong() }
                         // Push all parameters (filter, drive, start/end, etc.) to C++ for this slot
                         audioEngine.updateInstrumentBaseFrequency(instrument)
                         audioEngine.updateInstrumentPlaybackParams(instrument)

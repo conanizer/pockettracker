@@ -40,6 +40,7 @@ struct ScheduledNote {
     float phraseVolume;      // Phrase step volume (0.0-1.0) — maps to MOD_SRC_PHRASE_VOL
     float pan;               // Stereo pan position (0.0=left, 0.5=center, 1.0=right)
     int startPointOverride;  // Optional start point override (-1 = use instrument default)
+    int endPointOverride;    // Optional end point override for CUT slice mode (-1 = use instrument default)
 
     // Table parameters (Phase 3.5)
     int tableId;             // Table to use (-1 = no table)

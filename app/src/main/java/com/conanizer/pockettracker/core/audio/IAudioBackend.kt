@@ -415,6 +415,7 @@ interface IAudioBackend {
         phraseVol: Float = 1.0f, // Phrase step volume (0.0–1.0) — MOD_SRC_PHRASE_VOL
         pan: Float = 0.5f,
         startPointOverride: Int = -1,
+        endPointOverride: Int = -1,
         tableId: Int = -1,
         tableTicRate: Int = 6,
         noteOctave: Int = 4,

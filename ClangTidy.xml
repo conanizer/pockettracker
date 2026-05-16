@@ -1,0 +1,1130 @@
+<problems>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>61</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>cutParam</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>41</offset>
+  <length>8</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>66</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>resParam</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>22</offset>
+  <length>8</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>69</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'double' to 'float'</description>
+  <highlighted_element>2.0f</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>15</offset>
+  <length>4</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>201</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Prefer transparent functors 'greater&lt;&gt;'</description>
+  <highlighted_element>std::greater&lt;ScheduledNote&gt;&gt;</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>67</offset>
+  <length>28</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>258</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Prefer transparent functors 'greater&lt;&gt;'</description>
+  <highlighted_element>std::greater&lt;ScheduledKill&gt;&gt;</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>67</offset>
+  <length>28</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>407</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Function 'active' should be marked [[nodiscard]]</description>
+  <highlighted_element>active</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>17</offset>
+  <length>6</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>433</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Function 'getTrackId' should be marked [[nodiscard]]</description>
+  <highlighted_element>getTrackId</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>16</offset>
+  <length>10</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>717</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Function 'active' should be marked [[nodiscard]]</description>
+  <highlighted_element>bool</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>4</offset>
+  <length>4</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>718</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Function 'getTrackId' should be marked [[nodiscard]]</description>
+  <highlighted_element>int</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>4</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>726</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>747</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Result of integer division used in a floating point context; possible loss of precision</description>
+  <highlighted_element>(startPoint * sampleLength)</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>31</offset>
+  <length>27</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>761</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use auto when initializing with a cast to avoid duplicating the type name</description>
+  <highlighted_element>float</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>5</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>806</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Function 'active' should be marked [[nodiscard]]</description>
+  <highlighted_element>bool</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>4</offset>
+  <length>4</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>807</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Function 'getTrackId' should be marked [[nodiscard]]</description>
+  <highlighted_element>int</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>4</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>872</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>midiVelocity</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>49</offset>
+  <length>12</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>894</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Constructor does not initialize these fields: samples, sampleLengths, waveformBuffer</description>
+  <highlighted_element>AudioEngine</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>4</offset>
+  <length>11</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>904</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>911</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Annotate this function with 'override' or (rarely) 'final'</description>
+  <highlighted_element>AudioEngine</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>5</offset>
+  <length>11</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>913</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>986</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1030</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1037</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1052</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1064</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1068</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1078</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1092</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1123</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1140</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>20</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1198</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>16</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1235</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>20</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1407</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Repeated branch body in conditional chain</description>
+  <highlighted_element>{</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>44</offset>
+  <length>1</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1421</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>numFrames</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>39</offset>
+  <length>9</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1458</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>volume</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>44</offset>
+  <length>6</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1524</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>fxValue</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>48</offset>
+  <length>7</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1531</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>fxValue</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>54</offset>
+  <length>7</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1532</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>(voice.sampleLength - 1)</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>65</offset>
+  <length>24</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1595</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1606</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1608</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>12</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1611</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1617</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1641</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>16</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1654</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1710</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>levels</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>47</offset>
+  <length>6</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1710</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>levels</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>57</offset>
+  <length>6</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1711</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>levels</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>47</offset>
+  <length>6</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1711</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>levels</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>57</offset>
+  <length>6</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1721</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>drive</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>44</offset>
+  <length>5</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1759</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>16</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1825</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>actualLoopStart</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>52</offset>
+  <length>15</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1831</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>actualEnd</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>52</offset>
+  <length>9</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1839</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>actualStart</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>48</offset>
+  <length>11</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1852</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>actualEnd</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>48</offset>
+  <length>9</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1927</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use auto when initializing with a cast to avoid duplicating the type name</description>
+  <highlighted_element>float</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>5</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1940</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use auto when initializing with a cast to avoid duplicating the type name</description>
+  <highlighted_element>float</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>5</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1960</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>12</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>1987</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Method 'getCurrentFrame' can be made const</description>
+  <highlighted_element>getCurrentFrame</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>12</offset>
+  <length>15</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2123</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2133</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2186</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2201</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2243</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2249</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>tempo</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>39</offset>
+  <length>5</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2273</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2285</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>tempo</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>43</offset>
+  <length>5</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2305</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2329</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2346</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2389</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2392</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>12</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2427</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Method 'updateVoiceModulation' can be made static</description>
+  <highlighted_element>updateVoiceModulation</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>9</offset>
+  <length>21</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2463</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2473</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>attackSamples</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>77</offset>
+  <length>13</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2474</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>holdSamples</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>77</offset>
+  <length>11</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2475</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>decaySamples</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>77</offset>
+  <length>12</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2479</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>effAttack</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>81</offset>
+  <length>9</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2497</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>effDecay</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>88</offset>
+  <length>8</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2515</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>attackSamples</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>79</offset>
+  <length>13</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2516</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>decaySamples</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>79</offset>
+  <length>12</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2517</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>releaseSamples</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>79</offset>
+  <length>14</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2521</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>effAttack</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>81</offset>
+  <length>9</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2533</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>effDecay</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>76</offset>
+  <length>8</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2550</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>effRelease</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>85</offset>
+  <length>10</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2566</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>numFrames</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>71</offset>
+  <length>9</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2623</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Method 'updateVoicePitchMod' can be made static</description>
+  <highlighted_element>updateVoicePitchMod</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>9</offset>
+  <length>19</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2629</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>numFrames</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>54</offset>
+  <length>9</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2648</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Narrowing conversion from 'int' to 'float'</description>
+  <highlighted_element>numFrames</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>92</offset>
+  <length>9</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2659</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Method 'getModulatedPlaybackRate' can be made static</description>
+  <highlighted_element>getModulatedPlaybackRate</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>10</offset>
+  <length>24</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2698</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Method 'getFrameCounter' can be made const</description>
+  <highlighted_element>getFrameCounter</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>12</offset>
+  <length>15</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>2877</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use auto when initializing with new to avoid duplicating the type name</description>
+  <highlighted_element>float</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>5</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>3019</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use auto when initializing with new to avoid duplicating the type name</description>
+  <highlighted_element>float</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>5</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>3327</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>8</offset>
+  <length>3</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp</file>
+  <line>3406</line>
+  <module>Pockettracker.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/cpp/native-audio.cpp" />
+  <problem_class id="ClangTidy" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Clang-Tidy</problem_class>
+  <description>Use range-based for loop instead</description>
+  <highlighted_element>for</highlighted_element>
+  <language>ObjectiveC</language>
+  <offset>4</offset>
+  <length>3</length>
+</problem>
+</problems>

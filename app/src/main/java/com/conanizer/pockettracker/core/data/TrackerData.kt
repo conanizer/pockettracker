@@ -416,7 +416,14 @@ data class Instrument(
     var delaySend: Int = 0x00,
 
     // Per-instrument EQ slot (-1 = off, 00-7F = EQ preset index)
-    var eqSlot: Int = -1
+    var eqSlot: Int = -1,
+
+    // Slice playback mode (0=OFF, 1=CUT, 2=TRU)
+    // When non-OFF, phrase notes select a slice (C-4 = slice 0 relative to root) instead of pitch.
+    // CUT: play slice[n] → slice[n+1]. TRU: play slice[n] → sample end.
+    var slicingMode: Int = 0,
+    // Slice marker positions in samples (absolute frame indices), sourced from WAV cue chunk.
+    var sliceMarkers: List<Long> = emptyList()
 )
 
 /**

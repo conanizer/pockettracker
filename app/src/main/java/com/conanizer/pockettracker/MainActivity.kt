@@ -203,7 +203,8 @@ private fun computeSliceCuePoints(state: SampleEditorState): IntArray = when (st
         val div = state.sliceDivisions.coerceAtLeast(1)
         IntArray(div - 1) { i -> ((i + 1).toLong() * state.totalFrames / div).toInt() }
     }
-    else -> intArrayOf()
+    // OFF mode: preserve whatever WAV markers are currently visible (read-only display)
+    else -> state.transientMarkers.filter { it > 0 && it < state.totalFrames }.toIntArray()
 }
 
 @Composable
@@ -709,9 +710,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             val sampleRate   = audioEngine.getOriginalSampleRate(instId)
             val inst = trackerController.project.instruments[instId]
 
-            // Read slice markers from WAV cue chunk (if any)
-            val filePath  = sampleEditorState.sampleFilePath
-            val cuePoints = if (filePath != null) WavWriter.readCuePoints(filePath) else intArrayOf()
+            // Use instrument.sliceMarkers as the display source for the editor.
+            // These are already loaded from the WAV cue chunk by loadSampleFromFile,
+            // so no extra file I/O is needed here and there are no race conditions.
+            // instrument.sliceMarkers is only updated when the user saves from the editor.
+            val cuePoints = inst.sliceMarkers.map { it.toInt() }.toIntArray()
 
             sampleEditorState = sampleEditorState.copy(
                 totalFrames  = totalFrames,
@@ -720,7 +723,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 selectionStart   = (inst.sampleStart.toLong() * totalFrames) / 255L,
                 selectionEnd     = (inst.sampleEnd.toLong()   * totalFrames) / 255L,
                 transientMarkers = cuePoints,
-                sliceMethod      = if (cuePoints.isNotEmpty()) 0 else sampleEditorState.sliceMethod,
+                // sliceMethod intentionally not changed: stays at 2 (OFF) on fresh open,
+                // or preserves the user's current choice on navigate-back.
                 sliceIndex       = 0
             )
         }
@@ -757,9 +761,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val seTotalFrames      = sampleEditorState.totalFrames
     LaunchedEffect(seSliceMethod, seSliceSensitivity, seTotalFrames) {
         if (seSliceMethod == 0 && seTotalFrames > 0 && sampleEditorState.transientMarkers.isEmpty()) {
-            // Only auto-detect when markers are empty: covers first switch to TRANSIENT,
-            // sensitivity changes (which clear markers first), and new sample loads.
-            // When markers came from a WAV cue chunk they are non-empty — detection is skipped.
+            // Auto-detect when switching to TRANSIENT with no markers yet.
+            // handleInput clears transientMarkers when user switches TO TRANSIENT,
+            // so this fires on that transition and on sensitivity changes.
             val markers = audioEngine.detectTransients(sampleEditorState.instrumentId, seSliceSensitivity)
             val firstSliceEnd = markers.firstOrNull()?.toLong() ?: seTotalFrames.toLong()
             sampleEditorState = sampleEditorState.copy(
@@ -768,8 +772,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 selectionStart   = 0L,
                 selectionEnd     = firstSliceEnd
             )
-        } else if (seSliceMethod != 0 && sampleEditorState.transientMarkers.isNotEmpty()) {
-            sampleEditorState = sampleEditorState.copy(transientMarkers = intArrayOf())
+            // Markers stay in sampleEditorState only until saved — not synced to instrument here.
         }
     }
 
@@ -921,6 +924,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     // Restore instrument parameters after loading sample
                     audioEngine.updateInstrumentBaseFrequency(instrument)
                     audioEngine.updateInstrumentPlaybackParams(instrument)
+                    // Re-read cue points so slice playback works after project load
+                    instrument.sliceMarkers = WavWriter.readCuePoints(filePath).map { it.toLong() }
 
                     loadedCount++
                     Log.d("ProjectLoad", "✅ Reloaded sample for instrument ${instrument.id.toString(16).padStart(2, '0')}: $filePath")
@@ -2336,6 +2341,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                             withContext(Dispatchers.Main) {
                                                 if (success) {
                                                     trackerController.project.instruments[instId].sampleFilePath = targetPath
+                                                    trackerController.project.instruments[instId].sliceMarkers = cuePoints.map { it.toLong() }
                                                     sampleEditorState = sampleEditorState.copy(
                                                         sampleFilePath = targetPath,
                                                         sampleName     = baseName,
@@ -2408,6 +2414,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                             )
                                             withContext(Dispatchers.Main) {
                                                 if (success) {
+                                                    trackerController.project.instruments[instId].sliceMarkers = cuePoints.map { it.toLong() }
                                                     sampleEditorState = sampleEditorState.copy(isModified = false)
                                                     trackerController.currentScreen = previousScreen
                                                 }

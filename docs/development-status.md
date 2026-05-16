@@ -1,6 +1,6 @@
 # Development Status
 
-**Last Updated:** 2026-05-05
+**Last Updated:** 2026-05-16
 
 ## Current Phase
 
@@ -163,6 +163,24 @@ Week 16:     MVP Release
 ---
 
 ## Completed Milestones
+
+### Sample Editor — Slicing System (Complete - 2026-05-16)
+
+All slice-related features from plan-sample-editor-v2.md §6–§7.5 are now fully implemented:
+
+- **Transient detection**: KissFFT spectral flux onset detection via `detectTransients()` JNI. SENS field (00-FF) controls threshold. Auto-fires when switching to TRANSIENT mode or changing sensitivity; skipped when WAV cue markers are already present.
+- **Slice markers on waveform**: vertical tick marks drawn in TRANSIENT mode (with active-marker highlight) and in OFF mode (read-only display of WAV cue markers, no detection).
+- **WAV `cue ` chunk**: `WavWriter.writeWav()` embeds markers; `WavWriter.readCuePoints()` reads them. Standard format compatible with M8, Blackbox, Reaper, Logic, Adobe Audition.
+- **Slice marker persistence**: `sliceMarkers: List<Long>` field on `Instrument`. Populated by `loadSampleFromFile()` and `reloadProjectSamples()` from the WAV cue chunk. Written back on SAVE/OVERWRITE from the sample editor.
+- **Editor open/close discipline**: opening the sample editor reads `instrument.sliceMarkers` into `transientMarkers` for display; does not modify `instrument.sliceMarkers`. Closing with B discards editor changes. `instrument.sliceMarkers` is only updated on successful WAV write.
+- **CHOP**: exports each slice as a separate WAV into `Samples/Chops/{name}/`.
+- **Note-to-slice playback** (`SLICE` row on instrument screen, alongside `LOOP`):
+  - **OFF** — normal pitch playback (unchanged).
+  - **CUT** — phrase note selects slice (C-4 = slice 0 relative to ROOT). Plays from slice start to next marker, then stops. Loop disabled for CUT. `endPointOverride` enforces boundary via C++ `params.base[PARAM_SAMPLE_END]`.
+  - **TRU** — same slice selection; plays from slice start to sample end.
+  - N markers define N+1 slices; slice 0 always starts at frame 0. Pitch locked to root (rate = 1.0×) while slicing is active.
+- **Slice cursor on instrument screen**: SLICE value (col 3, row 14) navigable via left/right; row 14 added to `dualParamRows` in `TrackerController`.
+- **Preset load**: `slicingMode` copied in `loadPreset()`; `sliceMarkers` intentionally excluded (WAV-specific).
 
 ### Module Code Style Unification (Complete - 2026-05-05)
 

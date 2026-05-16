@@ -107,6 +107,7 @@ struct Voice : public IAudioVoice {
 
     void trigger(float* sample, int length, int track, float rate, float instrVol, float phraseVol, float pan,
                  const InstrumentParams& instrParams, float sampleRate, int startPointOverride = -1,
+                 int endPointOverride = -1,
                  int tblId = -1, int tblTicRate = 6, int octave = 4, int pitch = 0, int startRow = 0) {
         sampleData = sample;
         sampleLength = length;
@@ -125,10 +126,11 @@ struct Voice : public IAudioVoice {
         panRight = sinf(panAngle);
 
         // Convert normalized 0-255 values to actual sample positions
-        // Use startPointOverride if provided (Offset effect), otherwise use instrument default
+        // Use startPointOverride if provided (Offset effect / slice start), otherwise use instrument default
         int effectiveStartPoint = (startPointOverride >= 0) ? startPointOverride : instrParams.startPoint;
+        int effectiveEndPoint   = (endPointOverride   >= 0) ? endPointOverride   : instrParams.endPoint;
         actualStart = (effectiveStartPoint * length) / 255;
-        actualEnd = (instrParams.endPoint * length) / 255;
+        actualEnd   = (effectiveEndPoint   * length) / 255;
         actualLoopStart = (instrParams.loopStart * length) / 255;
 
         // Clamp to valid range
@@ -144,7 +146,8 @@ struct Voice : public IAudioVoice {
 
         // Set playback parameters
         reverse = instrParams.reverse;
-        loopMode = instrParams.loopMode;
+        // CUT slice mode (endPointOverride set): play once to the boundary, no looping
+        loopMode = (endPointOverride >= 0) ? 0 : instrParams.loopMode;
         loopingBack = false;
 
         // Initialize per-voice effect chain
@@ -199,7 +202,7 @@ struct Voice : public IAudioVoice {
         params.setBase(PARAM_CRUSH,        (float)instrParams.crush);
         params.setBase(PARAM_DOWNSAMPLE,   (float)instrParams.downsample);
         params.setBase(PARAM_SAMPLE_START, (float)effectiveStartPoint);
-        params.setBase(PARAM_SAMPLE_END,   (float)instrParams.endPoint);
+        params.setBase(PARAM_SAMPLE_END,   (float)effectiveEndPoint);
         params.setBase(PARAM_LOOP_START,   (float)instrParams.loopStart);
         params.resetMods();
 

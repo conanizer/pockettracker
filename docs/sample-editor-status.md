@@ -7,6 +7,8 @@ UI & Rendering (SampleEditorModule.kt):
 - Selection S/E markers and real-time playback position marker on waveform
 - Zoomed waveform via getSampleWaveformRange() JNI
 - Confirm-close dialog (unsaved changes guard)
+- Slice markers drawn on waveform in TRANSIENT mode (active marker highlighted) and in OFF mode
+  (read-only display of WAV cue markers, no detection)
 
 Cursor & Navigation:
 - Up/down row skip (spacers 9, 12, 15, 17 and waveform rows 3-7)
@@ -14,8 +16,8 @@ Cursor & Navigation:
 - rowAbove/rowBelow helpers all correct
 
 All Destructive Sample Ops (wired to C++ JNI):
-- CROP, COPY, CUT, DUPLICATE, PASTE, DELETE (row 13)
-- NORM, FADE+, FADE-, SILENCE, REVERSE, UNDO (row 14)
+- CROP, COPY, CUT, DUPLICATE, PASTE, DELETE (row 13)
+- NORM, FADE+, FADE-, SILENCE, REVERSE, UNDO (row 14)
 - Backup/undo snapshot system (backupSample / undoSample)
 
 Fields (display + editing):
@@ -28,12 +30,47 @@ Save/Load:
 - SAVE → writes new WAV (auto-increments filename)
 - OVERWRITE → writes to existing path
 - NAME rename via QWERTY overlay
+- CHOP → exports each slice as a separate WAV into Samples/Chops/{name}/
 
 Opening:
 - EDIT button on Instrument screen row 3 col 3 → opens full-screen editor (MainActivity.kt:2008)
 - Full-screen rendering (no oscilloscope, no nav map)
 
 START preview playback — plays selection range with pitch offset applied
+
+Transient detection (SLICE=TRANSIENT):
+- KissFFT-based spectral flux onset detection via detectTransients() JNI
+- SENS field (00-FF) controls threshold; A+DPAD to edit
+- Auto-detects when switching to TRANSIENT mode with empty markers
+- Sensitivity changes clear markers first so detection re-runs
+- Detected markers shown as tick marks on waveform; active marker highlighted
+
+Slice marker persistence:
+- sliceMarkers: List<Long> field on Instrument (absolute frame positions)
+- Read from WAV cue chunk by loadSampleFromFile() and reloadProjectSamples()
+- Written to WAV cue chunk on SAVE/OVERWRITE from sample editor
+- Not overwritten when opening editor (read-only display in OFF mode)
+- Not overwritten on editor exit without saving (B = discard)
+- Synced to instrument only on successful WAV write
+
+WAV cue chunk:
+- WavWriter.writeWav() embeds a cue  chunk with all slice marker positions
+- WavWriter.readCuePoints() reads cue  chunk; frame 0 excluded (implicit sample start)
+- Standard format compatible with M8, Blackbox, Reaper, Logic, Adobe Audition
+
+Note-to-slice playback (Instrument screen: SLICE row):
+- SLICE field on instrument screen row 14 (alongside LOOP): OFF / CUT / TRU
+- OFF: normal pitch playback (unchanged behavior)
+- CUT: phrase note selects slice (C-4 = slice 0 relative to ROOT); plays from slice start
+  to next marker then stops. Loop disabled for CUT slices.
+- TRU: same slice selection as CUT; plays from slice start to sample end.
+- Slice index = (note MIDI − root MIDI).coerceIn(0, markers.size); N markers → N+1 slices.
+  Slice 0 always starts at frame 0.
+- Pitch locked to root (rate = 1.0×) when slicing is active.
+- C++ endPointOverride enforces CUT boundary; params.base[PARAM_SAMPLE_END] updated so
+  the per-block modulation recalculation preserves the boundary.
+- sliceMarkers populated at sample-load time (loadSampleFromFile / reloadProjectSamples),
+  so slicing works without opening the sample editor.
 
   ---
 ❌ NOT IMPLEMENTED
@@ -58,33 +95,16 @@ START preview playback — plays selection range with pitch offset applied
    Toggle exists in state and UI but is never applied. Selection marker editing (A+UP/DOWN in waveform rows) doesn't invoke any zero-crossing
    scan. No C++ findZeroCrossing().
 
-4. Transient detection (SLICE=TRANSIENT)
-   SENS field is rendered and editable, but auto-slicing never runs. No KissFFT in the project, no spectral flux algorithm anywhere in C++.
-
-5. BPM display
+4. BPM display
    DURATION field cycles bar values, but BPM is never calculated from (numBars * 4 * 60 * sampleRate) / totalFrames. Header row just shows
    sampleRate and duration in MM:SS format, not BPM.
 
-6. Slice markers on waveform
-   drawWaveform() draws only the S/E selection markers and the playback cursor. When SLICE=TRANSIENT or DIVIDE, vertical tick marks for all
-   slice positions are not drawn.
-
-7. WAV cue  chunk on save
-   WavWriter.writeWav() writes a standard PCM WAV with no cue  chunk. Plan §6.6 requires embedding slice markers when saving.
-
-8. RATE downsampling on save
+5. RATE downsampling on save
    rateMode (HIGH/NORM/LOFI) is stored in state but SAVE/OVERWRITE always write at the original sample rate regardless.
 
-9. SOURCE stereo channel switching
+6. SOURCE stereo channel switching
    Changing sourceMode (LEFT/RIGHT/STEREO) updates state only — nothing reloads the working buffer. The WAV loader already converts
    stereo→mono on load, so there's no stereo side buffer to switch from.
-
-10. Slice marker persistence
-    sliceMarkers field doesn't exist on Instrument in TrackerData.kt. Slice state lives only in the editor session
-    (SampleEditorState.sliceIndex/slicePosition), not persisted to project or WAV.
-
-11. Save slices as separate files (Plan §7.5)
-    Not implemented at all.
 
   ---
 Summary by priority
@@ -98,7 +118,19 @@ Summary by priority
 ├────────────────────────────────────────────────────────────────┼────────────┤
 │ LOAD / SAVE / OVERWRITE / NAME                                 │ ✅ Done    │
 ├────────────────────────────────────────────────────────────────┼────────────┤
-│ SLICE UI (rows 10–11)                                          │ ✅ UI only │
+│ SLICE UI (rows 10–11)                                          │ ✅ Done    │
+├────────────────────────────────────────────────────────────────┼────────────┤
+│ Transient auto-slice (KissFFT onset detection)                 │ ✅ Done    │
+├────────────────────────────────────────────────────────────────┼────────────┤
+│ Slice markers on waveform                                      │ ✅ Done    │
+├────────────────────────────────────────────────────────────────┼────────────┤
+│ Slice marker persistence (WAV cue chunk + Instrument field)    │ ✅ Done    │
+├────────────────────────────────────────────────────────────────┼────────────┤
+│ WAV cue  chunk read/write                                      │ ✅ Done    │
+├────────────────────────────────────────────────────────────────┼────────────┤
+│ Save slices as separate files (CHOP)                           │ ✅ Done    │
+├────────────────────────────────────────────────────────────────┼────────────┤
+│ Note-to-slice playback (SLICE OFF/CUT/TRU on instrument)       │ ✅ Done    │
 ├────────────────────────────────────────────────────────────────┼────────────┤
 │ FX APPLY OTT/DUST/DRIVE offline                                │ ✅ Done    │
 ├────────────────────────────────────────────────────────────────┼────────────┤
@@ -112,22 +144,12 @@ Summary by priority
 ├────────────────────────────────────────────────────────────────┼────────────┤
 │ SNAP zero-crossing                                             │ ✅ Done    │
 ├────────────────────────────────────────────────────────────────┼────────────┤
-│ Transient auto-slice                                           │ ❌ Missing │
-├────────────────────────────────────────────────────────────────┼────────────┤
 │ BPM detection/display                                          │ ❌ Missing │
-├────────────────────────────────────────────────────────────────┼────────────┤
-│ Slice markers on waveform                                      │ ❌ Missing │
-├────────────────────────────────────────────────────────────────┼────────────┤
-│ Slice marker persistence                                       │ ❌ Missing │
-├────────────────────────────────────────────────────────────────┼────────────┤
-│ WAV cue  chunk                                                 │ ❌ Missing │
 ├────────────────────────────────────────────────────────────────┼────────────┤
 │ RATE downsampling on save                                      │ ✅ Done    │
 ├────────────────────────────────────────────────────────────────┼────────────┤
 │ SOURCE stereo side buffer                                      │ ❌ Missing │
-├────────────────────────────────────────────────────────────────┼────────────┤
-│ Save slices as separate files                                  │ ❌ Missing │
 └────────────────────────────────────────────────────────────────┴────────────┘
 
-The core editing workflow (open → view waveform → select → crop/normalize/fade/reverse/undo → save) is fully working. What's missing is the
-more advanced features: FX apply, repitch, SNAP, transient slicing, BPM, and slice persistence.
+The core editing workflow is fully working. The sample editor is feature-complete for MVP
+except for BPM display and stereo source switching (both post-MVP).

@@ -155,8 +155,9 @@ class SampleEditorModule : TrackerModule {
             }
         }
 
-        // Transient markers (TRANSIENT mode) — same structure as DIVIDE block below
-        if (s.sliceMethod == 0 && s.transientMarkers.isNotEmpty() && s.totalFrames > 0) {
+        // Transient markers — drawn in TRANSIENT (0) and OFF (2) modes when markers are present.
+        // In OFF mode, markers are read-only from the WAV cue chunk and shown for reference.
+        if ((s.sliceMethod == 0 || s.sliceMethod == 2) && s.transientMarkers.isNotEmpty() && s.totalFrames > 0) {
             val wfLeft     = x + 10
             val wfRight    = x + 630
             val onSliceRow = s.cursorRow == 11
@@ -413,7 +414,12 @@ class SampleEditorModule : TrackerModule {
                 2 -> if (action is InputAction.SET_VALUE) return InputResult(snapEnabled    = action.value == 1)
             }
             10 -> when (s.cursorCol) {
-                0 -> if (action is InputAction.SET_VALUE) return InputResult(sliceMethod = action.value)
+                0 -> if (action is InputAction.SET_VALUE) return InputResult(
+                    sliceMethod = action.value,
+                    // Switching to TRANSIENT clears existing markers so detection runs fresh.
+                    // Switching to DIVIDE or OFF preserves markers (they become read-only display).
+                    transientMarkers = if (action.value == 0) intArrayOf() else null
+                )
                 1 -> if (action is InputAction.SET_VALUE) return when (s.sliceMethod) {
                     0    -> InputResult(sliceSensitivity = action.value, transientMarkers = intArrayOf())
                     else -> InputResult(sliceDivisions   = action.value)

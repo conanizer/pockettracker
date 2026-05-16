@@ -313,6 +313,7 @@ class OboeAudioBackend : IAudioBackend {
         phraseVol: Float,
         pan: Float,
         startPointOverride: Int,
+        endPointOverride: Int,
         tableId: Int,
         tableTicRate: Int,
         noteOctave: Int,
@@ -325,7 +326,7 @@ class OboeAudioBackend : IAudioBackend {
         tableStartRow: Int
     ) {
         native_scheduleNoteWithTable(frame, sampleId, trackId, freq, baseFreq, vol, phraseVol, pan,
-            startPointOverride, tableId, tableTicRate, noteOctave, notePitch,
+            startPointOverride, endPointOverride, tableId, tableTicRate, noteOctave, notePitch,
             pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
             tableStartRow)
     }
@@ -553,6 +554,7 @@ class OboeAudioBackend : IAudioBackend {
         phraseVolume: Float,
         pan: Float,
         startPointOverride: Int,
+        endPointOverride: Int,
         tableId: Int,
         tableTicRate: Int,
         noteOctave: Int,

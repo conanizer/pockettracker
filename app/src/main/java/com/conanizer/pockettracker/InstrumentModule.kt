@@ -234,11 +234,14 @@ class InstrumentModule : TrackerModule {
             )
             rowY += ROW_HEIGHT; currentRow++
 
-            // ROW 14: LOOP
-            drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
+            // ROW 14: LOOP + SLICE
+            val sliceModeStr = listOf("OFF", "CUT", "TRU")[instrument.slicingMode]
+            drawDualParameterRow(
+                x, rowY, scale, nameColumnX, valueColumnX,
                 "LOOP", instrument.loopMode,
-                isCursorOnName  = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
-                isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1)
+                "SLICE", sliceModeStr,
+                instrumentState.cursorRow, instrumentState.cursorColumn, currentRow
+            )
             rowY += ROW_HEIGHT; currentRow++
 
             // ROW 15: LOOP ST
@@ -528,9 +531,13 @@ class InstrumentModule : TrackerModule {
                     canInsert = state.instrument.eqSlot < 0)
                 else -> CursorContextFactory.none()
             }
-            !isSoundFont && row == 14 -> {  // LOOP
-                if (col == 0) CursorContextFactory.readOnly()
-                else CursorContextFactory.toggleTernary(state.instrument.loopMode, listOf("off", "fwd", "png"))
+            !isSoundFont && row == 14 -> when (col) {  // LOOP + SLICE
+                1 -> CursorContextFactory.toggleTernary(state.instrument.loopMode, listOf("off", "fwd", "png"))
+                3 -> {
+                    val sliceModes = listOf("OFF", "CUT", "TRU")
+                    CursorContextFactory.toggleTernary(sliceModes[state.instrument.slicingMode.coerceIn(0, 2)], sliceModes)
+                }
+                else -> CursorContextFactory.none()
             }
             !isSoundFont && row == 15 -> {  // LOOP ST
                 if (col == 0) CursorContextFactory.readOnly()
@@ -703,11 +710,19 @@ class InstrumentModule : TrackerModule {
                     else -> {}
                 }
             }
-            !isSoundFont && row == 14 -> when (action) {  // LOOP
-                is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
-                    val loopModes = listOf("off", "fwd", "png")
-                    if (action.value in 0..2)
-                        instrumentController.updateLoopMode(state.instrument, loopModes[action.value])
+            !isSoundFont && row == 14 -> when (col) {  // LOOP + SLICE
+                1 -> when (action) {
+                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                        val loopModes = listOf("off", "fwd", "png")
+                        if (action.value in 0..2)
+                            instrumentController.updateLoopMode(state.instrument, loopModes[action.value])
+                    }
+                    else -> {}
+                }
+                3 -> when (action) {
+                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                        instrumentController.updateSlicingMode(state.instrument, action.value)
+                    else -> {}
                 }
                 else -> {}
             }
