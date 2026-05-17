@@ -14,55 +14,29 @@ PocketTracker is a portable music tracker in the tradition of M8, LSDJ, and Pico
 ## Features
 
 ### Audio engine
-- Sample-accurate note scheduling (<0.02 ms jitter) via Oboe / C++
-- 8-voice polyphony with per-track voice stealing
-- 256 instrument slots — WAV (8/16/24/32-bit PCM + float), true stereo or mono
-- SoundFont (SF2) instruments via TinySoundFont — full mod-matrix parity with sampler
-- Resonant SVF filters (LP / HP / BP) per instrument + bitcrush + drive
-- Constant-power stereo pan; per-instrument volume chain (inst × phrase × track × master)
-- Stereo send buses — reverb (Schroeder-Moorer) + ping-pong delay with EQ and cross-routing
-- Master bus — 3-band OTT compressor + peak-tracking soft limiter
-- Modulation engine — 4 slots per instrument: AHD, ADSR, LFO, DRUM, TRIG  
-  Destinations: VOL, PAN, PITCH, FILTER CUT/RES, SAMPLE START, mod-to-mod routing
-- Groove quantization (256 grooves, per-track assignment)
+- Sample-accurate C++ engine (<0.02 ms jitter), 8-voice polyphony with per-track voice stealing
+- WAV instruments (8–32-bit PCM / float, true stereo) + SoundFont (SF2) via TinySoundFont
+- Per-instrument chain: SVF filter (LP / HP / BP) + bitcrush + drive; constant-power pan
+- Stereo send buses — reverb + ping-pong delay; master bus — OTT 3-band compressor + limiter
+- Modulation engine: 4 slots per instrument (AHD / ADSR / LFO / DRUM / TRIG), 10 destinations including mod-to-mod routing
+- Groove quantization (256 grooves, per-track)
 
-### Composition screens
-- **Phrase editor** — 16 steps, note / volume / instrument / 3 FX columns
-- **Chain editor** — 16 phrase references with per-slot transpose
-- **Song editor** — 8 tracks × 256 rows with page navigation
-- **Table screen** — 16-row mini-sequencer per instrument (transpose, volume, 3 FX)
-- **Groove screen** — step-timing patterns for swing / shuffle
-- **Modulation screen** — 4-slot envelope / LFO editor per instrument
-- **Mixer screen** — 8 track + master volumes with true dBFS meters and REV / DEL returns
-- **Effects screen** — global send bus config (SIZE / DAMP / TIME / FDBK / REV-send / EQ per bus)
-- **EQ editor** — 3-band parametric EQ with real-time spectrum analyzer (master / track / instrument)
+### Screens
+Phrase · Chain · Song · Table · Groove · Modulation · Mixer · Effects · EQ · Sample Editor · Settings
 
 ### Phrase effects
 `ARP` `ARC` `OFF` `VOL` `KIL` `REP` `PSL` `PBN` `PVB` `PVX` `DEL` `CHA` `RND` `RNL` `TBL` `THO` `GRV` `TIC` `HOP`
 
 ### Sample editor
-- Waveform view with zoom; SOURCE mode — LEFT / RIGHT / STEREO / MONO (non-destructive)
-- Destructive ops: crop, copy / cut / paste, normalize, fade in/out, silence, reverse, undo
-- Non-destructive RATE mode (HIGH / NORM / LOFI)
-- SYNC mode: **RPITCH** (pitch-shift to BPM) and **TSTRETCH** (SOLA time-stretch to BPM, Akai-cyclic)
-- Offline FX: EQ, DUST (lo-fi chain), DRIVE (tape saturation), OTT
-- Transient detection + slice markers with WAV `cue ` chunk round-trip (M8 / Blackbox / Reaper compatible)
-- SLICE playback modes on instrument screen (OFF / CUT / TRU); CHOP export
+- Waveform view with zoom; non-destructive SOURCE (LEFT / RIGHT / STEREO / MONO) and RATE (HIGH / NORM / LOFI)
+- Destructive ops: crop, copy / cut / paste, normalize, fade, silence, reverse, undo
+- SYNC: **RPITCH** (pitch-shift to BPM) · **TSTRETCH** (SOLA time-stretch, Akai-cyclic)
+- Offline FX: EQ · DUST · DRIVE · OTT; transient detection + slice markers with WAV cue chunk; CHOP export
 
 ### Workflow
-- Project save / load (`.ptp` — JSON with forward migration)
-- File browser with WAV / video audio preview
-- Full-song WAV export (offline render, all 8 tracks)
-- Selection resampling — render a phrase selection to a new instrument slot
-- M8-style copy / paste (CELL → ROW → SCREEN selection)
-- CLEAN — remove unused sequences or instruments (with confirmation)
-
-### Input & display
-- Pixel-perfect 640×480 rendering (integer scaling, letterboxed)
-- 4 layout modes: FULL, TOUCH PORTRAIT, TOUCH LANDSCAPE, TOUCH PORTRAIT2
-- Auto-switch portrait ↔ landscape on rotation; layout persisted across restarts
-- Physical gamepad / handheld button support (auto-detected via Android InputDevice)
-- Virtual on-screen controls with full multi-touch combo support
+- Project save / load (`.ptp` JSON), file browser with WAV / video preview, full-song WAV export
+- M8-style copy / paste (CELL → ROW → SCREEN), selection resampling, CLEAN
+- 4 layout modes (FULL / TOUCH PORTRAIT / TOUCH LANDSCAPE / TOUCH PORTRAIT2), auto-rotation, physical gamepad + virtual controls
 
 ---
 
@@ -148,7 +122,7 @@ Not yet accepting external contributions — approaching first public release. A
 | [TinySoundFont](https://github.com/schellingb/TinySoundFont) | MIT | SF2 / SoundFont2 synthesizer (with per-channel rendering fork) |
 | [KissFFT](https://github.com/mborgerding/kissfft) | BSD-3-Clause | FFT for spectrum analyzer and transient detection |
 | [Soundpipe](https://github.com/PaulBatchelor/Soundpipe) (pareq stub) | MIT | Parametric EQ biquad |
-| DustChain (skoomaDust) | GPL-3.0 | Lo-fi effect chain; includes APComp FET compressor by Alain Paul (BSD-3-Clause) |
+| [skoomaDust](https://github.com/skoomabwoy/skoomaDust) | GPL-3.0 | Lo-fi effect chain; includes APComp FET compressor by Alain Paul (BSD-3-Clause) |
 | [Jetpack Compose](https://developer.android.com/jetpack/compose) | Apache 2.0 | Android UI toolkit |
 | [Kotlinx Serialization](https://github.com/Kotlin/kotlinx.serialization) | Apache 2.0 | JSON project save / load |
 
@@ -158,6 +132,10 @@ Not yet accepting external contributions — approaching first public release. A
 - **Biquad filter design** — Robert Bristow-Johnson, *Audio EQ Cookbook* (1994, rev. 2016).
 - **OTT 3-band compressor** — Parameters matched to the Xfer Records vitOTT plugin. Downward: −27 dBFS / 8:1; upward: −35 dBFS / 4:1; ~8 dB neutral zone.
 - **Spectral flux transient detection** — Brossier et al., "Fast labelling of notes in music signals," ICASSP 2004.
+
+### Contributors
+
+- [@skoomabwoy](https://github.com/skoomabwoy) — authored the [skoomaDust](https://github.com/skoomabwoy/skoomaDust) lo-fi effect chain integrated into PocketTracker; ongoing technical advice throughout the project
 
 ### Inspiration
 
