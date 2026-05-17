@@ -1,12 +1,12 @@
 # Development Status
 
-**Last Updated:** 2026-05-16
+**Last Updated:** 2026-05-18
 
 ## Current Phase
 
 **All Extension Packs COMPLETE!** -> Testing & Polish -> Documentation -> MVP Release
 
-**Target Release:** April 2026
+**Target Release:** TBD (original April 2026 target missed; release pending testing & docs)
 
 ---
 
@@ -33,7 +33,7 @@ Week 16:     MVP Release
 - Virtual controls with device detection (gaming handheld vs touchscreen)
 - Generic input handler (A+direction for value editing)
 - File management (save/load .ptp projects)
-- Navigation system (5x5 screen grid with SHIFT+DPAD)
+- Navigation system (5x5 screen grid with R+DPAD)
 - Key repeat (hold D-PAD / A+DPAD / B+DPAD)
 
 ### Audio Engine
@@ -344,7 +344,7 @@ Standardised all screen modules to a single consistent style (new modules led, o
 - Sharing mode: Exclusive where supported, Shared otherwise
 - Format: Float32, stereo output
 - Buffer size: Auto-selected (~192-480 frames)
-- All samples stored as mono
+- Stereo WAV support: `samplesRight[256]` buffer in C++ engine; SOURCE setting selects LEFT/RIGHT/STEREO/MONO non-destructively
 - Playback rate = target_frequency / base_frequency
 - Audio init runs off main thread (Dispatchers.IO) to prevent UI freeze on startup
 - Hot-path logging gated behind AUDIO_TRACE=0 compile flag (set to 1 for per-note tracing)

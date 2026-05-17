@@ -20,7 +20,7 @@ This document defines **HOW** PocketTracker is built technically. It covers curr
 8. [File Management](#file-management)
 9. [Build System](#build-system)
 10. [Modulation Engine](#modulation-engine)
-10. [Technology Stack](#technology-stack)
+11. [Technology Stack](#technology-stack)
 
 ---
 
@@ -87,19 +87,20 @@ PocketTracker/
 │   ├── AndroidFileSystem.kt        ✅ Scoped storage implementation
 │   └── DeviceAdapter.kt            Android InputDevice API
 │
-├── Modules/
+├── (root package — com.conanizer.pockettracker)
 │   ├── EditorHelpers.kt            ✅ Shared rendering utilities (toHex2, rowBgColor, clearEffect…)
 │   ├── PhraseEditorModule.kt       ✅ Portable rendering
 │   ├── ChainEditorModule.kt        ✅
 │   ├── SongEditorModule.kt         ✅
 │   ├── InstrumentModule.kt         ✅
+│   ├── SampleEditorModule.kt       ✅ Full-screen waveform editor
 │   ├── TableModule.kt              ✅
 │   ├── GrooveModule.kt             ✅
 │   ├── ModulationModule.kt         ✅
 │   ├── MixerModule.kt              ✅
 │   ├── EffectModule.kt             ✅ Global send effects (reverb/delay/EQ config)
 │   ├── EqModule.kt                 ✅ 3-band parametric EQ editor (overlay screen)
-│   ├── SettingsModule.kt           ✅
+│   ├── SettingsModule.kt           ✅ Layout/scaling/haptics/cursor settings
 │   └── ProjectModule.kt            ✅
 │
 ├── TrackerData.kt                  ✅ Pure data structures (PORTABLE)
@@ -116,8 +117,8 @@ PocketTracker/
     ├── tsf.h                       TinySoundFont (single-header SF2 synth)
     └── effects/                    DSP module system (three-layer architecture)
         ├── instrument-chain.h      Per-voice chain: Crush → Drive → Filter
-        ├── send-chain.h            Parallel send buses (reverb/delay/chorus — stubs)
-        ├── master-chain.h          Final output bus (EQ/compressor/limiter — stub)
+        ├── send-chain.h            Stereo send buses: reverb (DaisySP ReverbSc) + delay (ping-pong)
+        ├── master-chain.h          Final output bus: masterEq → OttModule|DustChain → LimiterModule
         ├── primitives/
         │   ├── biquad.h            BiquadState: state-only, coeffs passed at call time (kept for future use)
         │   └── daisysp/            Vendored DaisySP (MIT): svf.h, svf.cpp, dsp.h
@@ -806,7 +807,7 @@ kotlin {
 **File Organization:**
 ```kotlin
 // 1. Package declaration
-package com.example.pockettracker
+package com.conanizer.pockettracker
 
 // 2. Imports (grouped: stdlib, third-party, project)
 import kotlin.math.*
@@ -839,7 +840,7 @@ class MainClass {
 - Classes: `PascalCase`
 - Functions: `camelCase`
 - Constants: `SCREAMING_SNAKE_CASE`
-- Private members: `_prefixWithUnderscore` (optional)
+- Private members: `camelCase` (no prefix)
 
 **Comments:**
 - Only add a comment when the WHY is non-obvious (a hidden constraint, a surprising invariant, a specific bug workaround). If removing the comment would not confuse a future reader, don't write it.
@@ -883,6 +884,7 @@ See **REFACTORING_ROADMAP.md** for detailed step-by-step refactoring plan.
 ---
 
 **Version History:**
+- v2.5 (2026-05-18): Fact-checked against codebase — fixed ToC duplicate "10.", send/master-chain stub labels, ADSR release status, SCALAR mod type, package name, private member convention, Modules/ directory path, SampleEditorModule added to file tree.
 - v2.4 (2026-05-05): Module code style unified — `.toHex2()`, `rowBgColor()`, factory-only `getCursorContext()`; EffectModule/EqModule/SettingsModule added to file tree; coding conventions updated to reflect current standards.
 - v2.3 (2026-04-22): DSP module system implemented; effects/ directory (primitives + modules + chains); InstrumentChain (Crush→Drive→Filter) wired to all sampler and SF voices; C++ file tree updated in this document; guide-adding-effects.md written
 - v2.2 (2026-04-17): Audio module system complete (Phases 0–3, 5–8); SF2 full mod parity; per-channel TSF rendering; SF bug fixes (HOP, KIL/REL, table in release); table abstraction debt noted
@@ -974,7 +976,7 @@ data class ModSlot(
 )
 ```
 
-**ModType ordinals:** NONE=0, AHD=1, ADSR=2, LFO=3, DRUM=4, TRIG=5, TRACKING=6
+**ModType ordinals:** NONE=0, AHD=1, ADSR=2, LFO=3, DRUM=4, TRIG=5, TRACKING=6 (future), SCALAR=7 (future)
 **ModDest ordinals:** NONE=0, VOLUME=1, PAN=2, PITCH=3, FINE_PITCH=4, FILTER_CUTOFF=5, FILTER_RES=6, SAMPLE_START=7, MOD_AMT=8, MOD_RATE=9, MOD_BOTH=10
 
 ---
@@ -1015,9 +1017,9 @@ All durations in audio samples. One-shot: runs once, then stays at `envValue=0`.
 
 #### Type=2 — ADSR
 
-Stages: **1=Attack** (0→1), **2=Decay** (1→sustainLevel), **3=Sustain** (hold at sustainLevel until voice ends), **4=done (future release)**
+Stages: **1=Attack** (0→1), **2=Decay** (1→sustainLevel), **3=Sustain** (hold at sustainLevel), **4=Release** (sustainLevel→0), **5=done**
 `sustainLevel` = `slot.sustain / 255.0f`
-Release stage not yet implemented (no note-off system).
+Release is implemented: `PlaybackController.scheduleNoteOff()` sends a soft-kill at step end; ADSR/TRIG voices auto-stop when stage 5 is reached on VOL mods.
 
 #### Type=4 — DRUM
 

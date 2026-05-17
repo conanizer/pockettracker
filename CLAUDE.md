@@ -174,6 +174,14 @@ The UI uses a custom pixel-perfect rendering system built on Jetpack Compose Can
 - `ChainEditorModule`: Chain editing screen
 - `SongEditorModule`: Song arrangement screen
 - `InstrumentModule`: Instrument editing
+- `SampleEditorModule`: Full-screen waveform editor (opened from Instrument screen)
+- `MixerModule`: 8 tracks + master with dBFS meters
+- `EffectModule`: Global send effects config (reverb/delay/EQ)
+- `EqModule`: 3-band parametric EQ editor overlay
+- `TableModule`: 16-row mini-sequencer per instrument
+- `GrooveModule`: Step-timing patterns (swing/shuffle)
+- `ModulationModule`: 4-slot envelope/LFO editor per instrument
+- `SettingsModule`: Layout, scaling, button sound/vibration, cursor settings (opened from Project screen)
 - `ProjectModule`: Project settings (tempo, name, save/load)
 - `NavigationMapModule`: 80×105px navigation grid display
 - `FileBrowserModule`: File/folder navigation
@@ -184,20 +192,24 @@ Each module receives state objects and renders itself independently.
 
 **Architecture:** Professional-grade audio engine with sample-accurate note scheduling, matching M8/LGPT/Picotracker timing precision (<0.02ms jitter).
 
-**Kotlin Layer (TrackerAudioEngine.kt):**
-- JNI bridge to C++ audio engine
+**Kotlin Layer (`AudioEngine.kt` + `OboeAudioBackend.kt`):**
+- `OboeAudioBackend` implements `IAudioBackend` via JNI (platform/android/)
+- `AudioEngine` (core/audio/) is platform-agnostic: high-level functions, note scheduling, 2-phrase lookahead
 - High-level functions: `playPhrase()`, `playChain()`, `playSong()`
 - Note scheduling with sample-accurate frame timing
-- 2-phrase lookahead buffering for smooth continuous playback
 
-**C++ Layer (native-audio.cpp):**
-- Oboe-based audio stream (44.1kHz, LowLatency, Exclusive mode)
+**C++ Layer (`audio-engine.cpp`):**
+- Oboe-based audio stream (44.1kHz, OpenSL ES preferred, AAudio fallback)
 - Sample-accurate priority queue (`std::priority_queue<ScheduledNote>`)
 - 8-voice polyphony with per-track voice stealing
 - Linear interpolation for pitch-shifting (professional quality)
 - Sample playback: start/end points, reverse, loop modes (forward/ping-pong)
-- Resonant biquad filters (LP/HP/BP)
+- True stereo playback (`samplesRight[]` buffer for stereo WAV files)
+- Resonant SVF filters (LP/HP/BP via DaisySP) + biquad EQ
+- Master bus: OTT 3-band compressor + DaisySP soft limiter
+- Stereo send buses: DaisySP ReverbSc + ping-pong delay
 - Real-time waveform capture for oscilloscope
+- `native-audio.cpp` is a 15-line stub redirect — all code lives in `audio-engine.cpp`
 
 **Key Features:**
 - Frame-precise triggering (no timing jitter)
@@ -214,14 +226,14 @@ Each module receives state objects and renders itself independently.
 - Default location: `/Documents/PocketTracker/Projects/`
 
 **Sample Files (.wav):**
-- Loaded via ResourceLoader (default samples) or FileSystem (custom samples)
-- Auto-conversion: Stereo → mono
+- Loaded via `AndroidFileSystem` (implements `IFileSystem`)
+- True stereo WAV playback; SOURCE setting selects LEFT/RIGHT/STEREO/MONO non-destructively
 - Automatic sample rate detection and compensation
-- 256 instrument slots (all identical, all user-loadable, no bundled defaults)
+- 256 instrument slots (all identical, all user-loadable, no bundled defaults — all start empty)
 
 **Current Implementation:**
-- `FileManager.kt` - Handles save/load operations
-- **Note:** Will be refactored to use `IFileSystem` interface for portability
+- `FileController.kt` + `IFileSystem` / `AndroidFileSystem` — portable save/load
+- `FileManager.kt` — legacy Android-specific save/load (kept for compatibility)
 
 ---
 
@@ -239,48 +251,22 @@ Each module receives state objects and renders itself independently.
 ### ✅ COMPLETED: Copy/Paste System
 
 **M8-style workflow fully implemented:**
-- ✅ Selection mode (L+B to enter/cycle)
-- ✅ Copy selection (B in selection mode)
-- ✅ Paste (L+A outside selection)
-- ✅ Cut (L+A in selection)
-- ✅ Delete (A+B in selection)
+- ✅ Selection mode: L+B to enter/cycle (CELL → ROW → SCREEN)
+- ✅ Copy: B in selection mode
+- ✅ Cut: L+A in selection
+- ✅ Paste: L+A outside selection
+- ✅ Delete: A+B in selection
 
-### 🚧 NEW: MVP Expansion (~2 weeks)
+### ✅ COMPLETE: MVP Expansion
 
-**See:** `MVP_EXPANSION_PLAN.md` for detailed implementation plan
+**See:** `MVP_EXPANSION_PLAN.md` for full details
 
-**Phase 1-2: Instrument VOL/PAN (Days 1-2)**
-- [ ] Expose VOL (00-FF) in instrument screen UI
-- [ ] Expose PAN (00-FF, 80=center) in instrument screen UI
-- [ ] Cursor navigation and editing
-
-**Phase 3: Stereo Pan in Audio Engine (Days 2-3)**
-- [ ] C++ pan parameter in scheduleNote
-- [ ] Constant-power pan law implementation
-- [ ] True stereo output (not mono duplicated)
-
-**Phase 4: Volume Chain (Days 3-4)**
-- [ ] Volume = instrument × phrase × track × master
-- [ ] Track.volume added to data model
-- [ ] All playback modes use new volume calculation
-
-**Phase 5: Mixer Screen (Days 4-6)**
-- [ ] MixerModule.kt with 8 track columns + master
-- [ ] Peak meters (mono per track)
-- [ ] Volume editing via A+direction
-- [ ] Navigation from row 4 in screen grid
-
-**Phase 6: WAV Export (Days 6-8)**
-- [ ] RenderController.kt for offline rendering
-- [ ] WavWriter.kt for 16-bit stereo WAV output
-- [ ] "WAV MIX" button in Project screen
-- [ ] Auto-increment filenames (ProjectName_0001.wav)
-- [ ] Output to Documents/PocketTracker/Renders/
-
-**Phase 7: Testing (Days 8-10)**
-- [ ] Volume chain verification
-- [ ] Pan verification (L/C/R)
-- [ ] WAV export verification
+- [x] Instrument VOL/PAN editable in UI
+- [x] True stereo pan (constant-power law) in C++ audio engine
+- [x] Volume chain: instrument × phrase × track × master
+- [x] Mixer screen with 8 tracks + master, dBFS meters
+- [x] Stereo send buses: reverb (DaisySP ReverbSc) + delay (ping-pong)
+- [x] WAV Export (`RenderController.kt` offline render, `WavWriter.kt`)
 
 ### 5. Testing & Polish (1 week)
 
@@ -300,32 +286,37 @@ Each module receives state objects and renders itself independently.
 
 ## 🧭 Navigation Between Screens
 
-**5×5 Navigation Grid:**
+**5×5 Navigation Grid (dynamic — content depends on current screen column):**
 
 ```
       0         1         2         3         4
 ┌─────────────────────────────────────────────────┐
-│ ----      ----      SCALE   INST_POOL   ----   │ 0
+│ ----      ----      SCALE   INST_POOL   ----   │ 0  (only on PHRASE / INSTRUMENT)
 │                                                  │
-│ PROJ      PROJ     GROOVE     MODS      ----   │ 1
+│ PROJ      PROJ     GROOVE     MODS      ----   │ 1  (GROOVE/MODS only on their column)
 │                                                  │
-│ SONG     CHAIN     PHRASE     INST     TABLE   │ 2  ← Main editing row
+│ SONG     CHAIN     PHRASE     INST     TABLE   │ 2  ← Main editing row (always visible)
 │                                                  │
-│ MIXER    MIXER     MIXER     MIXER     MIXER   │ 3
+│ ----      ----     MIXER      ----      ----   │ 3  (current column only)
 │                                                  │
-│ EFFECTS  EFFECTS  EFFECTS   EFFECTS   EFFECTS  │ 4
+│ ----      ----    EFFECTS     ----      ----   │ 4  (current column only)
 └─────────────────────────────────────────────────┘
 ```
 
 **Navigation:**
-- L/R + DPAD: Move between screens
-- Release L/R: Jump to selected screen
+- R + DPAD: Move between screens
+- Release R: Jump to selected screen
+
+**Popup screens (not in nav grid — opened contextually):**
+- SETTINGS: opened from PROJECT screen
+- SAMPLE_EDITOR: opened from INSTRUMENT screen
 
 **Implemented Screens:**
 - Row 1: PROJECT ✅
-- Row 2: SONG ✅, CHAIN ✅, PHRASE ✅, INSTRUMENT ✅, TABLE 🚧
+- Row 2: SONG ✅, CHAIN ✅, PHRASE ✅, INSTRUMENT ✅, TABLE ✅
 - Row 3: MIXER ✅
-- Others: Coming in Post-MVP
+- Row 4: EFFECTS ✅
+- Popups: SETTINGS ✅, SAMPLE_EDITOR ✅
 
 ---
 
@@ -345,10 +336,11 @@ Each module receives state objects and renders itself independently.
 
 **Special Combos:**
 - A + DPAD: Value editing (increment/decrement)
-- SELECT + B: Enter selection mode
-- SELECT + A: Paste clipboard
-- A + B: Cut selection
-- L/R + DPAD: Screen navigation
+- L + B: Enter/cycle selection mode (CELL → ROW → SCREEN)
+- L + A (in selection): Cut selection
+- L + A (outside selection): Paste clipboard
+- A + B: Delete/clear selection or value
+- R + DPAD: Screen navigation
 
 **Virtual Controls:**
 - Automatically enabled on touchscreen-only devices
@@ -714,5 +706,5 @@ project.phrases[0] = project.phrases[0].copy(
 
 ---
 
-**Version:** 1.1 (Updated for refactoring context)
-**Last Updated:** 2025-01-02
+**Version:** 1.2 (Fact-checked against codebase)
+**Last Updated:** 2026-05-18

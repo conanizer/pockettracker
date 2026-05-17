@@ -16,10 +16,10 @@ import com.conanizer.pockettracker.core.logging.ILogger
  * - A button = increase/decrease/edit value
  * - A+B = delete/clear
  * - A+A = create new item
- * - SELECT+B = enter/cycle selection mode (CELL → ROW → SCREEN)
+ * - L+B = enter/cycle selection mode (CELL → ROW → SCREEN)
  * - B (in selection) = copy
- * - SELECT+A (in selection) = cut
- * - SELECT+A (outside selection) = paste
+ * - L+A (in selection) = cut
+ * - L+A (outside selection) = paste
  *
  * The specific behavior depends on the CursorContext provided by each module.
  *
