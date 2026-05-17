@@ -2,9 +2,9 @@
 
 **Free, open-source music tracker for Android gaming handhelds**
 
-PocketTracker is a portable music tracker in the tradition of M8, LSDJ, and Picotracker — designed to run on affordable Android handhelds and touchscreen devices, with a 640×480 pixel-art interface and a sample-accurate C++ audio engine.
+PocketTracker is a portable music tracker in the tradition of LSDJ, M8, and Little Piggy Tracker — designed to run on Android handhelds and smartphones.
 
-> Compose and perform music anywhere, on a $60 handheld.
+> **Note:** This project was developed with significant AI assistance (Claude Code). If that's a dealbreaker for you, this project isn't for you — no hard feelings.
 
 **Status:** Testing & Polish — public release date TBD  
 **License:** [GPL-3.0-or-later](LICENSE)
@@ -21,12 +21,6 @@ PocketTracker is a portable music tracker in the tradition of M8, LSDJ, and Pico
 - Modulation engine: 4 slots per instrument (AHD / ADSR / LFO / DRUM / TRIG), 10 destinations including mod-to-mod routing
 - Groove quantization (256 grooves, per-track)
 
-### Screens
-Phrase · Chain · Song · Table · Groove · Modulation · Mixer · Effects · EQ · Sample Editor · Settings
-
-### Phrase effects
-`ARP` `ARC` `OFF` `VOL` `KIL` `REP` `PSL` `PBN` `PVB` `PVX` `DEL` `CHA` `RND` `RNL` `TBL` `THO` `GRV` `TIC` `HOP`
-
 ### Sample editor
 - Waveform view with zoom; non-destructive SOURCE (LEFT / RIGHT / STEREO / MONO) and RATE (HIGH / NORM / LOFI)
 - Destructive ops: crop, copy / cut / paste, normalize, fade, silence, reverse, undo
@@ -41,12 +35,7 @@ Phrase · Chain · Song · Table · Groove · Modulation · Mixer · Effects · 
 ---
 
 ## Supported devices
-
-| Device | RAM | Android | Status |
-|---|---|---|---|
-| Miyoo Flip (primary) | 1 GB | 13 (GammaCoreOS) | ✅ All features |
-| Ayaneo Pocket Air Mini | 3 GB | 11 | ✅ All features |
-| Any Android phone / tablet | — | 8.0+ | ✅ Virtual controls |
+ Almost any Android handheld or smartphone
 
 **Minimum requirements:** Android 8.0 (API 26) · 64-bit · ~512 MB RAM · ~50 MB storage · 640×480 screen
 
@@ -79,7 +68,6 @@ Output APK: `app/build/outputs/apk/debug/`
 |---|---|
 | [`docs/manual-en.md`](docs/manual-en.md) | Full user manual |
 | [`docs/input-system.md`](docs/input-system.md) | Complete controls reference |
-| [`docs/dsp-settings-guide.md`](docs/dsp-settings-guide.md) | Internal DSP tuning constants |
 | [`docs/technical-architecture.md`](docs/technical-architecture.md) | Architecture overview |
 | [`docs/development-status.md`](docs/development-status.md) | Feature status & known issues |
 
