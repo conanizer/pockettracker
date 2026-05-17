@@ -14,7 +14,7 @@ sealed class EqCallerContext {
     object SampleEditorFx : EqCallerContext()
 }
 
-val EQ_BAND_TYPE_NAMES = listOf("OFF", "LO SH", "LO LP", "BAND", "BELL", "HI SH", "HI LP")
+val EQ_BAND_TYPE_NAMES = listOf("OFF", "LOSHELF", "LOWCUT", "BELL", "HISHELF", "HICUT")
 
 data class EqEditorState(
     val isOpen:        Boolean         = false,

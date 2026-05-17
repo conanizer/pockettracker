@@ -35,7 +35,7 @@ data class EqState(
  *   SELECT          — close
  */
 class EqModule : TrackerModule {
-    override val width  = 620
+    override val width  = 495
     override val height = 392
 
     companion object {
@@ -45,19 +45,19 @@ class EqModule : TrackerModule {
 
         // ── Editor area ────────────────────────────────────────────────────────
         const val HEADER_H   = 21
-        const val EDITOR_Y   = HEADER_H + VIS_H + 1  // header (top) + viz + 1px gap
         const val ROW_H      = 21
+        const val EDITOR_Y   = HEADER_H + ROW_H + VIS_H + 1  // header + 1-row spacer + viz + 1px gap
         const val FONT_SCALE   = 3
         const val CHAR_SPACING = 2
 
-        // 3 columns: 206 | 1sep | 206 | 1sep | 206 = 620
-        const val COL_W   = 165
-        val COL_X = intArrayOf(8, 173, 338)
+        // Editor column geometry: left label col + 3 equal band value cols
+        const val LABEL_COL_W = 90
+        const val BAND_COL_W  = 135  // (495 - LABEL_COL_W) / 3
 
         // cursor row constants
         const val MAX_CURSOR_ROW = 11
 
-        val PARAM_LABELS = listOf("TYPE", "FREQ", "GAIN", "Q   ")
+        val PARAM_LABELS = listOf("TYPE", "FREQ", "GAIN", "Q")
     }
 
     data class InputResult(val modified: Boolean, val eqBandChanged: Boolean = false)
@@ -99,7 +99,7 @@ class EqModule : TrackerModule {
 
     private fun DrawScope.drawVisualization(x: Int, y: Int, scale: Int, s: EqState) {
         val vx = x
-        val vy = y + HEADER_H
+        val vy = y + HEADER_H + ROW_H
 
         // Viz background
         drawRect(
@@ -121,8 +121,8 @@ class EqModule : TrackerModule {
             )
         }
 
-        // Frequency grid lines (vertical) at 100Hz, 1kHz, 10kHz
-        val freqMarkers = listOf(20f to "20", 100f to "100", 1000f to "1K", 10000f to "10K", 20000f to "20K")
+        // Frequency grid lines (vertical)
+        val freqMarkers = listOf(20f to "20", 100f to "100", 200f to "200", 500f to "500", 1000f to "1K", 2000f to "2K", 5000f to "5K", 10000f to "10K", 20000f to "20K")
         for ((freq, label) in freqMarkers) {
             val fx = vx + freqToPixel(freq)
             drawLine(
@@ -135,20 +135,30 @@ class EqModule : TrackerModule {
             drawBitmapText(label, fx + 2, vy + 3, scale, Color(0xFF333355), CHAR_SPACING, 2)
         }
 
-        // Spectrum bars (behind curve)
+        // Spectrum bars (behind curve).
+        // C++ getSpectrumMagnitudes already outputs log-mapped bins (bin 0 = 20Hz, bin N-1 = 20kHz),
+        // so bin indices map directly to pixel positions — no Hz↔bin conversion needed here.
         s.spectrumData?.let { spectrum ->
-            val numBins = spectrum.size.coerceAtMost(width)
-            for (xi in 0 until numBins) {
-                val mag   = spectrum[xi]
-                val barH  = (mag * VIS_H).toInt().coerceIn(0, VIS_H)
+            val numBars     = 60
+            val binsPerBar  = spectrum.size.toFloat() / numBars
+            for (bi in 0 until numBars) {
+                val binStart = (bi * binsPerBar).toInt()
+                val binEnd   = ((bi + 1) * binsPerBar).toInt().coerceAtMost(spectrum.size - 1)
+                var mag = 0f
+                for (b in binStart..binEnd) mag = maxOf(mag, spectrum[b])
+                if (mag == 0f) continue
+                val px0  = vx + (bi.toFloat() / numBars * width).toInt()
+                val px1  = (vx + ((bi + 1).toFloat() / numBars * width).toInt()).coerceAtLeast(px0 + 1)
+                val barH = (mag * VIS_H).toInt().coerceIn(0, VIS_H)
                 if (barH == 0) continue
                 val barY  = vy + VIS_H - barH
+                val barW  = (px1 - px0 - 1).coerceAtLeast(1)  // 1px gap between bars
                 val alpha = (mag * 0.6f + 0.05f).coerceIn(0f, 0.6f)
                 val col   = Color(red = 0.1f, green = 0.5f, blue = 0.6f, alpha = alpha)
                 drawRect(
                     color   = col,
-                    topLeft = Offset((( vx + xi) * scale).toFloat(), (barY * scale).toFloat()),
-                    size    = Size(scale.toFloat(), (barH * scale).toFloat())
+                    topLeft = Offset((px0 * scale).toFloat(), (barY * scale).toFloat()),
+                    size    = Size((barW * scale).toFloat(), (barH * scale).toFloat())
                 )
             }
         }
@@ -186,64 +196,80 @@ class EqModule : TrackerModule {
         val edY      = y + EDITOR_Y
         val curBand  = s.cursorRow / 4
         val curParam = s.cursorRow % 4
+        val preset   = s.project.eqPresets.getOrNull(s.slotIndex)
 
-        // Column separators
-        for (sep in listOf(COL_X[1] - 1, COL_X[2] - 1)) {
-            drawLine(
-                color       = Color(0xFF222222),
-                start       = Offset(((x + sep) * scale).toFloat(), (edY * scale).toFloat()),
-                end         = Offset(((x + sep) * scale).toFloat(), ((y + height) * scale).toFloat()),
-                strokeWidth = scale.toFloat()
-            )
-        }
+        // Band column x-offsets (label col + 3 value cols)
+        val bandX = intArrayOf(
+            x + LABEL_COL_W,
+            x + LABEL_COL_W + BAND_COL_W,
+            x + LABEL_COL_W + 2 * BAND_COL_W
+        )
 
-        // Band columns
-        val preset = s.project.eqPresets.getOrNull(s.slotIndex)
+        // Header row: "BAND 1/2/3" labels in each value column
         for (bi in 0..2) {
-            val cx = x + COL_X[bi]
+            val bx = bandX[bi]
             val isBandSel = bi == curBand
-
-            // Band label row
-            val bandLabelY = edY
             if (isBandSel) {
                 drawRect(
                     color   = Color(0xFF1A1A2A),
-                    topLeft = Offset((cx * scale).toFloat(), (bandLabelY * scale).toFloat()),
-                    size    = Size((COL_W * scale).toFloat(), (ROW_H * scale).toFloat())
+                    topLeft = Offset((bx * scale).toFloat(), (edY * scale).toFloat()),
+                    size    = Size((BAND_COL_W * scale).toFloat(), (ROW_H * scale).toFloat())
                 )
             }
-            drawBitmapText("BAND ${bi + 1}", cx + 6, bandLabelY + 3, scale, Color.Cyan, CHAR_SPACING, FONT_SCALE)
+            val hdrCol = if (isBandSel) Color.Cyan else Color(0xFF555555)
+            drawBitmapText("BAND ${bi + 1}", bx + 6, edY + 3, scale, hdrCol, CHAR_SPACING, FONT_SCALE)
+        }
 
-            val band: EqBand? = preset?.bands?.getOrNull(bi)
+        // 4 param rows — shared label on left, one value per band column
+        for (pi in 0..3) {
+            val rowY     = edY + ROW_H + pi * ROW_H
+            val isParSel = pi == curParam
 
-            // 4 param rows
-            for (pi in 0..3) {
-                val rowY    = edY + ROW_H + pi * ROW_H
-                val isSel   = isBandSel && pi == curParam
+            // Left label column
+            if (isParSel) {
+                drawRect(
+                    color   = Color(0xFF161620),
+                    topLeft = Offset((x * scale).toFloat(), (rowY * scale).toFloat()),
+                    size    = Size((LABEL_COL_W * scale).toFloat(), (ROW_H * scale).toFloat())
+                )
+            }
+            val lblCol = if (isParSel) Color(0xFFAAAAAA) else Color(0xFF666666)
+            drawBitmapText(PARAM_LABELS[pi], x + 6, rowY + 3, scale, lblCol, CHAR_SPACING, FONT_SCALE)
 
-                // Cursor highlight
-                if (isSel) {
-                    drawRect(
+            // Value cells — one per band
+            for (bi in 0..2) {
+                val bx        = bandX[bi]
+                val isBandSel = bi == curBand
+                val isCursor  = isBandSel && isParSel
+                val band: EqBand? = preset?.bands?.getOrNull(bi)
+
+                when {
+                    isCursor  -> drawRect(
                         color   = Color(0xFF2A2A3A),
-                        topLeft = Offset((cx * scale).toFloat(), (rowY * scale).toFloat()),
-                        size    = Size((COL_W * scale).toFloat(), (ROW_H * scale).toFloat())
+                        topLeft = Offset((bx * scale).toFloat(), (rowY * scale).toFloat()),
+                        size    = Size((BAND_COL_W * scale).toFloat(), (ROW_H * scale).toFloat())
+                    )
+                    isBandSel -> drawRect(
+                        color   = Color(0xFF161620),
+                        topLeft = Offset((bx * scale).toFloat(), (rowY * scale).toFloat()),
+                        size    = Size((BAND_COL_W * scale).toFloat(), (ROW_H * scale).toFloat())
                     )
                 }
 
-                val labelCol = if (isBandSel) Color(0xFF888888) else Color(0xFF555555)
-                val valueCol = if (isSel) Color.Yellow else if (isBandSel) Color.White else Color(0xFF999999)
-
-                drawBitmapText(PARAM_LABELS[pi], cx + 6, rowY + 3, scale, labelCol, CHAR_SPACING, FONT_SCALE)
+                val valueCol = when {
+                    isCursor  -> Color.Yellow
+                    isBandSel -> Color.White
+                    else      -> Color(0xFF666666)
+                }
 
                 val valText = when {
                     band == null -> "--"
                     pi == 0      -> EQ_BAND_TYPE_NAMES.getOrElse(band.type) { "???" }
-                    pi == 1      -> band.freq.toHex2()
-                    pi == 2      -> band.gain.toHex2()
+                    pi == 1      -> formatFreqHz(20f * 1000f.pow(band.freq / 255f))
+                    pi == 2      -> formatGainDb((band.gain - 128f) / 128f * 12f)
                     else         -> band.q.toHex2()
                 }
-                        val charW = 5 * FONT_SCALE + CHAR_SPACING
-                drawBitmapText(valText, cx + 6 + 5 * charW, rowY + 3, scale, valueCol, CHAR_SPACING, FONT_SCALE)
+                drawBitmapText(valText, bx + 6, rowY + 3, scale, valueCol, CHAR_SPACING, FONT_SCALE)
             }
         }
     }
@@ -322,19 +348,15 @@ class EqModule : TrackerModule {
                 a1 = -2f * ((A-1) + (A+1)*cosW0)
                 a2 = (A+1) + (A-1)*cosW0 - 2*sqA*alpha
             }
-            2 -> { // LO PASS
-                val c = 1f - cosW0
-                b0=c/2f; b1=c; b2=c/2f; a0=1+alpha; a1= -2*cosW0; a2=1-alpha
+            2 -> { // LOWCUT (high pass)
+                val c = 1f + cosW0
+                b0=c/2f; b1= -c; b2=c/2f; a0=1+alpha; a1= -2*cosW0; a2=1-alpha
             }
-            3 -> { // BAND PASS
-                val s2 = sinW0 / 2f
-                b0=s2; b1=0f; b2= -s2; a0=1+alpha; a1= -2*cosW0; a2=1-alpha
-            }
-            4 -> { // BELL (peaking)
+            3 -> { // BELL (peaking)
                 b0=1+alpha*A; b1= -2*cosW0; b2=1-alpha*A
                 a0=1+alpha/A; a1= -2*cosW0; a2=1-alpha/A
             }
-            5 -> { // HI SHELF
+            4 -> { // HISHELF
                 val sqA = sqrt(A)
                 b0 = A * ((A+1) + (A-1)*cosW0 + 2*sqA*alpha)
                 b1 = -2*A * ((A-1) + (A+1)*cosW0)
@@ -343,9 +365,9 @@ class EqModule : TrackerModule {
                 a1 = 2f * ((A-1) - (A+1)*cosW0)
                 a2 = (A+1) - (A-1)*cosW0 - 2*sqA*alpha
             }
-            6 -> { // HI PASS
-                val c = 1f + cosW0
-                b0=c/2f; b1= -c; b2=c/2f; a0=1+alpha; a1= -2*cosW0; a2=1-alpha
+            5 -> { // HICUT (low pass)
+                val c = 1f - cosW0
+                b0=c/2f; b1=c; b2=c/2f; a0=1+alpha; a1= -2*cosW0; a2=1-alpha
             }
             else -> return 0f
         }
@@ -372,6 +394,20 @@ class EqModule : TrackerModule {
     private fun freqToPixel(freq: Float): Int {
         val t = ln(freq / 20f) / ln(1000f)  // log base-1000 of (freq/20)
         return (t * (width - 1)).toInt().coerceIn(0, width - 1)
+    }
+
+    private fun formatFreqHz(hz: Float): String {
+        val rounded = hz.toInt()
+        return when {
+            rounded < 1000  -> "${rounded}Hz"
+            rounded < 10000 -> "${"%.1f".format(hz / 1000f)}kHz"
+            else            -> "${(hz / 1000f + 0.5f).toInt()}kHz"
+        }
+    }
+
+    private fun formatGainDb(db: Float): String {
+        val sign = if (db >= 0f) "+" else ""
+        return "${sign}%.1f".format(db)
     }
 }
 
