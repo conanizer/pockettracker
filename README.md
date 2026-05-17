@@ -4,7 +4,7 @@
 
 PocketTracker is a portable music tracker in the tradition of LSDJ, M8, and Little Piggy Tracker — designed to run on Android handhelds and smartphones.
 
-> **Note:** This project was developed with significant AI assistance (Claude Code). If that's a dealbreaker for you, this project isn't for you — no hard feelings.
+> **Note:** This project was developed with AI assistance. If that bothers you, this project isn't for you.
 
 **Status:** Testing & Polish — public release date TBD  
 **License:** [GPL-3.0-or-later](LICENSE)
