@@ -211,11 +211,11 @@ Hold **A** and press a direction to edit the value under the cursor:
 
 ---
 
-### 5.4 Context Navigation — L + D-pad
+### 5.4 Context Navigation — B + D-pad
 
-Hold **L** and press LEFT/RIGHT to switch between items of the same type:
+Hold **B** and press LEFT/RIGHT to switch between items of the same type:
 
-| Screen | L + LEFT / RIGHT |
+| Screen | B + LEFT / RIGHT |
 |---|---|
 | CHAIN | Previous / next chain (00–FF) |
 | PHRASE | Previous / next phrase (00–FF) |
@@ -339,7 +339,7 @@ When played, the chain loops from slot 00 after the last filled slot.
 | A + UP/DOWN | Increment / decrement |
 | A + LEFT/RIGHT | ±16 (PHR) or ±12 semitones (TRN) |
 | A + B | Delete slot |
-| L + LEFT/RIGHT | Switch to previous / next chain |
+| B + LEFT/RIGHT | Switch to previous / next chain |
 | START | Play current chain |
 
 ---
@@ -373,7 +373,7 @@ Notes are written as pitch + octave: `C-4`, `C#4`, `D-4`, … `B-9`. Range is **
 | A + UP/DOWN | +1 / −1 semitone (note), +1 / −1 (other values) |
 | A + LEFT/RIGHT | ±1 octave (note), ±16 (other values) |
 | A + B | Delete value at cursor |
-| L + LEFT/RIGHT | Switch to previous / next phrase |
+| B + LEFT/RIGHT | Switch to previous / next phrase |
 | START | Play current phrase (loops) |
 
 ### FX columns
@@ -386,7 +386,7 @@ Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex)
 
 The INSTRUMENT screen configures how a sample or SF2 preset is played.
 
-Navigate here with **R+RIGHT** from PHRASE, or **L+LEFT/RIGHT** to switch instruments.
+Navigate here with **R+RIGHT** from PHRASE, or **B+LEFT/RIGHT** to switch instruments.
 
 ### WAV instrument parameters
 
@@ -441,7 +441,7 @@ When slice markers exist on the sample (set via the SAMPLE EDITOR), the SLICE pa
 
 ### Navigating instruments
 
-- **L + LEFT/RIGHT** — switch between instruments 00–FF
+- **B + LEFT/RIGHT** — switch between instruments 00–FF
 - **R+UP** from INSTRUMENT → MODULATION screen
 - **A** on SAMPLE field → opens file browser
 - **SELECT** on SAMPLE field → opens SAMPLE EDITOR
@@ -589,7 +589,7 @@ By default, instrument N uses table N. Override per-note with the **TBL** phrase
 | D-pad | Move cursor |
 | A + UP/DOWN | Edit value |
 | A + B | Delete value |
-| L + LEFT/RIGHT | Previous / next table |
+| B + LEFT/RIGHT | Previous / next table |
 | L + B / copy / paste | Selection, copy, paste (same as phrase) |
 
 ---
@@ -641,7 +641,7 @@ Each track uses groove `00` by default. Use the **GRV XX** phrase effect to swit
 | A + UP/DOWN | Edit tick value |
 | A + LEFT/RIGHT | Edit tick value (large step) |
 | A + B | Clear row |
-| L + LEFT/RIGHT | Previous / next groove |
+| B + LEFT/RIGHT | Previous / next groove |
 
 ---
 
@@ -711,7 +711,7 @@ Example: MOD1 (LFO) → MOD AMT → MOD2 (AHD) — the LFO rhythmically swells t
 | A + UP/DOWN | Edit value |
 | A + LEFT/RIGHT | Edit value (large step) |
 | A + B | Reset to default |
-| L + LEFT/RIGHT | Previous / next instrument |
+| B + LEFT/RIGHT | Previous / next instrument |
 
 ---
 
