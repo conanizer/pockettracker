@@ -1,6 +1,7 @@
 // audio-engine.cpp — AudioEngine method bodies (Phase 0 file split)
 // TSF API declarations only — TSF_IMPLEMENTATION lives in soundfont-voice.cpp
 #include "audio-engine.h"
+#include "kissfft/kiss_fftr.h"
 #include "tsf.h"
 #include "mods/mod-runner.h"
 #include "mods/modules/pitch-slide-module.h"
@@ -31,6 +32,10 @@ AudioEngine::AudioEngine() {
     }
     waveformIndex = 0;
     waveformDownsampleCounter = 0;
+    for (int i = 0; i < SPECTRUM_SIZE; i++) {
+        spectrumBuffer[i] = 0.0f;
+    }
+    spectrumWriteIdx = 0;
     reverbSend.reset(44100.0f);
     delaySend.reset(44100.0f);
     masterChain.reset();
@@ -2049,6 +2054,15 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
         }
     }
 
+    // Capture undownsampled master output for EQ spectrum visualizer
+    {
+        std::lock_guard<std::mutex> lock(spectrumMutex);
+        for (int i = 0; i < numFrames; i++) {
+            spectrumBuffer[spectrumWriteIdx] = output[i * channelCount];
+            spectrumWriteIdx = (spectrumWriteIdx + 1) % SPECTRUM_SIZE;
+        }
+    }
+
     // Update peak levels for mixer meters (live-only — not needed during WAV export)
     {
         std::lock_guard<std::mutex> lock(peakMutex);
@@ -2265,6 +2279,52 @@ void AudioEngine::scheduleTrackPhraseVol(int64_t targetFrame, int trackId, float
 // ============================================================
 // WAVEFORM / METERS
 // ============================================================
+
+void AudioEngine::getSpectrumMagnitudes(int numBins, float* out) {
+    static const int FFT_SIZE = 2048;
+    kiss_fft_scalar input[FFT_SIZE];
+
+    {
+        std::lock_guard<std::mutex> lock(spectrumMutex);
+        int readEnd = spectrumWriteIdx;
+        for (int i = 0; i < FFT_SIZE; i++) {
+            int idx = (readEnd - FFT_SIZE + i + SPECTRUM_SIZE) % SPECTRUM_SIZE;
+            input[i] = spectrumBuffer[idx];
+        }
+    }
+
+    // Hann window
+    for (int i = 0; i < FFT_SIZE; i++) {
+        float w = 0.5f * (1.0f - cosf(2.0f * M_PI * i / (FFT_SIZE - 1)));
+        input[i] *= w;
+    }
+
+    kiss_fftr_cfg cfg = kiss_fftr_alloc(FFT_SIZE, 0, nullptr, nullptr);
+    kiss_fft_cpx cpx_out[FFT_SIZE / 2 + 1];
+    kiss_fftr(cfg, input, cpx_out);
+    kiss_fftr_free(cfg);
+
+    const float sampleRate = 44100.0f;
+    const float fMin = 20.0f, fMax = 20000.0f;
+    const float logRange = logf(fMax / fMin);
+
+    for (int bi = 0; bi < numBins; bi++) {
+        float t    = (float)bi / (numBins - 1);
+        float freq = fMin * expf(t * logRange);
+        int bin    = (int)(freq * FFT_SIZE / sampleRate + 0.5f);
+        if (bin < 1)          bin = 1;
+        if (bin >= FFT_SIZE/2) bin = FFT_SIZE/2 - 1;
+
+        float re  = cpx_out[bin].r;
+        float im  = cpx_out[bin].i;
+        float mag = sqrtf(re*re + im*im) / (FFT_SIZE * 0.5f);
+
+        // Map -80dB..0dB → 0..1
+        float db         = 20.0f * log10f(mag + 1e-9f);
+        float normalized = (db + 80.0f) / 80.0f;
+        out[bi] = fmaxf(0.0f, fminf(1.0f, normalized));
+    }
+}
 
 void AudioEngine::getWaveform(float* outBuffer, int bufferSize) {
     std::lock_guard<std::mutex> lock(waveformMutex);

@@ -318,6 +318,9 @@ interface IAudioBackend {
      */
     fun decayWaveform()
 
+    /** Returns numBins log-spaced (20Hz–20kHz) magnitude values in 0-1 range from master output FFT. */
+    fun getSpectrumMagnitudes(numBins: Int): FloatArray
+
     /**
      * Set real-time track volume.
      * This affects playback immediately without needing to reschedule notes.

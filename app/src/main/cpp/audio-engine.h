@@ -163,6 +163,9 @@ public:
     // Get waveform data for oscilloscope display
     void getWaveform(float* outBuffer, int bufferSize);
 
+    // Get log-spaced frequency-domain magnitude spectrum for EQ visualizer (0-1 per bin)
+    void getSpectrumMagnitudes(int numBins, float* out);
+
     // Get per-track peak levels for mixer meters
     void getTrackPeaks(float* outBuffer);
 
@@ -335,6 +338,12 @@ private:
     float waveformBuffer[WAVEFORM_SIZE];
     int waveformIndex = 0;
     std::mutex waveformMutex;
+
+    // Spectrum capture buffer for EQ visualizer (undownsampled, master left channel)
+    static const int SPECTRUM_SIZE = 4096;
+    float spectrumBuffer[SPECTRUM_SIZE];
+    int spectrumWriteIdx = 0;
+    std::mutex spectrumMutex;
 
     // Per-block per-track peaks: written by processAudioBlock, read by onAudioReady for meters
     float framePeaksPerTrackL[8] = {0};

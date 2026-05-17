@@ -116,6 +116,7 @@ fun PixelPerfectTracker(
     fxHelperState: FxHelperState = FxHelperState(),
     // EQ editor overlay state
     eqEditorState: EqEditorState = EqEditorState(),
+    eqSpectrumData: FloatArray? = null,
     // Settings screen cursor
     settingsCursorRow: Int = 0,
     settingsCursorColumn: Int = 1,
@@ -285,6 +286,7 @@ fun PixelPerfectTracker(
                         qwertyKeyboardState = qwertyKeyboardState,
                         fxHelperState = fxHelperState,
                         eqEditorState = eqEditorState,
+                        eqSpectrumData = eqSpectrumData,
                         settingsCursorRow = settingsCursorRow,
                         settingsCursorColumn = settingsCursorColumn,
                         cursorRemember = cursorRemember,
@@ -402,6 +404,7 @@ class TrackerLayout {
         fxHelperState: FxHelperState = FxHelperState(),
         // EQ editor overlay state
         eqEditorState: EqEditorState = EqEditorState(),
+        eqSpectrumData: FloatArray? = null,
         // Settings screen cursor
         settingsCursorRow: Int = 0,
         settingsCursorColumn: Int = 1,
@@ -517,7 +520,8 @@ class TrackerLayout {
                                 project       = project,
                                 slotIndex     = eqEditorState.slotIndex,
                                 cursorRow     = eqEditorState.cursorRow,
-                                callerContext = eqEditorState.callerContext
+                                callerContext = eqEditorState.callerContext,
+                                spectrumData  = eqSpectrumData
                             )
                         )
                     }

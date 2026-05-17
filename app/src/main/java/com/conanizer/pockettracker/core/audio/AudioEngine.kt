@@ -696,6 +696,8 @@ class AudioEngine(
     fun getSampleData(instrumentId: Int): FloatArray = backend.getSampleData(instrumentId)
 
     // Stereo sample support
+    fun getSpectrumMagnitudes(numBins: Int): FloatArray = backend.getSpectrumMagnitudes(numBins)
+
     fun hasStereoData(instrumentId: Int): Boolean = backend.hasStereoData(instrumentId)
     fun getSampleDataRight(instrumentId: Int): FloatArray = backend.getSampleDataRight(instrumentId)
     /** channel: 0=left, 1=right, 2=averaged */

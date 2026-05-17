@@ -545,6 +545,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
 
     // EQ editor overlay state (transient — not persisted)
     var eqEditorState by remember { mutableStateOf(EqEditorState()) }
+    var eqSpectrumData by remember { mutableStateOf<FloatArray?>(null) }
 
     val buttonSoundManager = remember { ButtonSoundManager(context) }
     val buttonHapticManager = remember { ButtonHapticManager(context) }
@@ -801,6 +802,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
 
     // (Audio engine cleanup moved to line 168-172 with new architecture)
 
+    // Poll spectrum magnitudes for EQ visualizer (~20fps while EQ screen is open)
+    LaunchedEffect(eqEditorState.isOpen) {
+        if (eqEditorState.isOpen) {
+            while (true) {
+                eqSpectrumData = audioEngine.getSpectrumMagnitudes(620)
+                delay(50)
+            }
+        } else {
+            eqSpectrumData = null
+        }
+    }
+
     // Update peak levels for mixer meters (every ~60ms = ~16fps update rate)
     // When not playing, manually decay peaks and waveform (fixes freeze on stop bug)
     LaunchedEffect(currentScreen) {
@@ -1047,7 +1060,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                 project       = trackerController.project,
                 slotIndex     = eqEditorState.slotIndex,
                 cursorRow     = eqEditorState.cursorRow,
-                callerContext = eqEditorState.callerContext
+                callerContext = eqEditorState.callerContext,
+                spectrumData  = eqSpectrumData
             )
             val context = eqModule.getCursorContext(eqState)
             val action  = handlerFunction(context)
@@ -1641,7 +1655,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             onDPadUp = {
                 if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorUp() }
                 else if (showCleanDialog) { cleanDialogCursor = 0 }
-                else if (eqEditorState.isOpen) { eqEditorState = eqEditorState.copy(cursorRow = (eqEditorState.cursorRow - 1).coerceAtLeast(0)) }
+                else if (eqEditorState.isOpen) {
+                    val p = eqEditorState.cursorParam
+                    if (p > 0) eqEditorState = eqEditorState.copy(cursorRow = eqEditorState.cursorBand * 4 + p - 1)
+                }
                 else handleDPadNavigation { trackerController.inputController.handleDPadUp() }
             },
 
@@ -1651,7 +1668,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             onDPadDown = {
                 if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorDown() }
                 else if (showCleanDialog) { cleanDialogCursor = 1 }
-                else if (eqEditorState.isOpen) { eqEditorState = eqEditorState.copy(cursorRow = (eqEditorState.cursorRow + 1).coerceAtMost(EqModule.MAX_CURSOR_ROW)) }
+                else if (eqEditorState.isOpen) {
+                    val p = eqEditorState.cursorParam
+                    if (p < 3) eqEditorState = eqEditorState.copy(cursorRow = eqEditorState.cursorBand * 4 + p + 1)
+                }
                 else handleDPadNavigation { trackerController.inputController.handleDPadDown() }
             },
 
@@ -1660,7 +1680,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             // ───────────────────────────────────────────────────────────────
             onDPadLeft = {
                 if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorLeft() }
-                else if (eqEditorState.isOpen) { /* no-op: B+LEFT handles preset cycling */ }
+                else if (eqEditorState.isOpen) {
+                    val b = eqEditorState.cursorBand
+                    if (b > 0) eqEditorState = eqEditorState.copy(cursorRow = (b - 1) * 4 + eqEditorState.cursorParam)
+                }
                 else handleDPadNavigation { trackerController.inputController.handleDPadLeft() }
             },
 
@@ -1669,7 +1692,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             // ───────────────────────────────────────────────────────────────
             onDPadRight = {
                 if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorRight() }
-                else if (eqEditorState.isOpen) { /* no-op: B+RIGHT handles preset cycling */ }
+                else if (eqEditorState.isOpen) {
+                    val b = eqEditorState.cursorBand
+                    if (b < 2) eqEditorState = eqEditorState.copy(cursorRow = (b + 1) * 4 + eqEditorState.cursorParam)
+                }
                 else handleDPadNavigation { trackerController.inputController.handleDPadRight() }
             },
 
@@ -4289,6 +4315,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         qwertyKeyboardState     = qwertyKeyboardState.copy(insertBefore = insertBefore),
         fxHelperState           = fxHelperState,
         eqEditorState           = eqEditorState,
+        eqSpectrumData          = eqSpectrumData,
         settingsCursorRow       = stateVersion.let { trackerController.settingsCursorRow },
         settingsCursorColumn    = stateVersion.let { trackerController.settingsCursorColumn },
         cursorRemember          = cursorRemember,

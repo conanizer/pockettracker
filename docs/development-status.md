@@ -69,7 +69,7 @@ Week 16:     MVP Release
 - **Project Screen** - Name, tempo, save/load, CLEAN SEQ/INST, layout mode switcher
 - **File Browser** - Navigation, sorting, preview, WAV/video audio extraction
 - **Effects Screen** - Global send effects config: reverb (SIZE/DAMP/EQ), delay (TIME/FDBK/REV-send/EQ), master bus type selector. WET removed (always 100%); REV row on delay sends delay output into reverb bus.
-- **EQ Editor Screen** - Full-screen 3-band parametric EQ editor (TYPE/FREQ/GAIN/Q per band). Opened from mixer master col, effects screen INP EQ rows, or instrument screen EQ row via SELECT.
+- **EQ Editor Screen** - Full-screen 3-band parametric EQ editor. Header row at top (EQ slot, caller context, hint). Below: KissFFT real-time spectrum analyzer (master output, ~20fps) with mathematically-computed biquad frequency response curve overlaid. Bottom third: 3-column band editor (one column per band, TYPE/FREQ/GAIN/Q as rows). DPAD LEFT/RIGHT switches bands; UP/DOWN navigates params within a band.
 - **Mixer Screen** - 8 tracks + master with true dBFS meters; REV/DEL return volume (rows 1-2 in master col); stereo peak meters for REV/DEL send channels (`sendPeaks[4]`: revL/revR/delL/delR)
 - **Table Screen** - 16-row mini-sequencer per instrument
 - **Groove Screen** - Step-timing patterns for swing/shuffle (256 grooves)
