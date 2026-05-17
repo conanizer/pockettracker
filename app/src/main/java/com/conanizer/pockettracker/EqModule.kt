@@ -98,15 +98,39 @@ class EqModule : TrackerModule {
     // ── Visualization ─────────────────────────────────────────────────────────
 
     private fun DrawScope.drawVisualization(x: Int, y: Int, scale: Int, s: EqState) {
-        val vx = x
-        val vy = y + HEADER_H + ROW_H
+        val vx      = x
+        val vy      = y + HEADER_H + ROW_H
+        val bottomY = ((vy + VIS_H) * scale).toFloat()
 
-        // Viz background
+        // Background
         drawRect(
             color   = Color(0xFF0a0a0a),
             topLeft = Offset((vx * scale).toFloat(), (vy * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (VIS_H * scale).toFloat())
         )
+
+        // Pre-compute spectrum curve Y positions (log-mapped bins from C++ map 1:1 to pixels).
+        // Done before grid lines so fill can be drawn underneath them.
+        val curveY: FloatArray? = s.spectrumData?.takeIf { it.size >= 2 }?.let { spectrum ->
+            val n = spectrum.size
+            FloatArray(width) { xi ->
+                val bin0 = (xi.toFloat() / (width - 1) * (n - 1)).toInt().coerceIn(0, n - 1)
+                val mag  = maxOf(spectrum[bin0], spectrum[(bin0 + 1).coerceAtMost(n - 1)])
+                ((vy + VIS_H - (mag * VIS_H).toInt().coerceIn(0, VIS_H)) * scale).toFloat()
+            }
+        }
+
+        // Spectrum fill — drawn before grid lines so grid lines render on top
+        curveY?.let { cy ->
+            val fillPath = Path().apply {
+                moveTo((vx * scale).toFloat(), cy[0])
+                for (xi in 1 until width) lineTo(((vx + xi) * scale).toFloat(), cy[xi])
+                lineTo(((vx + width - 1) * scale).toFloat(), bottomY)
+                lineTo((vx * scale).toFloat(), bottomY)
+                close()
+            }
+            drawPath(fillPath, Color(0xFF161620))
+        }
 
         // dB grid lines (horizontal) at -12, -6, 0, +6, +12
         val dbLevels = listOf(-12, -6, 0, 6, 12)
@@ -121,8 +145,9 @@ class EqModule : TrackerModule {
             )
         }
 
-        // Frequency grid lines (vertical)
-        val freqMarkers = listOf(20f to "20", 100f to "100", 200f to "200", 500f to "500", 1000f to "1K", 2000f to "2K", 5000f to "5K", 10000f to "10K", 20000f to "20K")
+        // Frequency grid lines (vertical) + labels
+        val freqMarkers = listOf(20f to "20", 100f to "100", 200f to "200", 500f to "500",
+            1000f to "1K", 2000f to "2K", 5000f to "5K", 10000f to "10K", 20000f to "20K")
         for ((freq, label) in freqMarkers) {
             val fx = vx + freqToPixel(freq)
             drawLine(
@@ -131,39 +156,19 @@ class EqModule : TrackerModule {
                 end         = Offset((fx * scale).toFloat(), ((vy + VIS_H) * scale).toFloat()),
                 strokeWidth = scale.toFloat()
             )
-            // Label at top
             drawBitmapText(label, fx + 2, vy + 3, scale, Color(0xFF333355), CHAR_SPACING, 2)
         }
 
-        // Spectrum bars (behind curve).
-        // C++ getSpectrumMagnitudes already outputs log-mapped bins (bin 0 = 20Hz, bin N-1 = 20kHz),
-        // so bin indices map directly to pixel positions — no Hz↔bin conversion needed here.
-        s.spectrumData?.let { spectrum ->
-            val numBars     = 60
-            val binsPerBar  = spectrum.size.toFloat() / numBars
-            for (bi in 0 until numBars) {
-                val binStart = (bi * binsPerBar).toInt()
-                val binEnd   = ((bi + 1) * binsPerBar).toInt().coerceAtMost(spectrum.size - 1)
-                var mag = 0f
-                for (b in binStart..binEnd) mag = maxOf(mag, spectrum[b])
-                if (mag == 0f) continue
-                val px0  = vx + (bi.toFloat() / numBars * width).toInt()
-                val px1  = (vx + ((bi + 1).toFloat() / numBars * width).toInt()).coerceAtLeast(px0 + 1)
-                val barH = (mag * VIS_H).toInt().coerceIn(0, VIS_H)
-                if (barH == 0) continue
-                val barY  = vy + VIS_H - barH
-                val barW  = (px1 - px0 - 1).coerceAtLeast(1)  // 1px gap between bars
-                val alpha = (mag * 0.6f + 0.05f).coerceIn(0f, 0.6f)
-                val col   = Color(red = 0.1f, green = 0.5f, blue = 0.6f, alpha = alpha)
-                drawRect(
-                    color   = col,
-                    topLeft = Offset((px0 * scale).toFloat(), (barY * scale).toFloat()),
-                    size    = Size((barW * scale).toFloat(), (barH * scale).toFloat())
-                )
+        // Spectrum curve stroke — drawn after grid lines so it sits above them
+        curveY?.let { cy ->
+            val curvePath = Path().apply {
+                moveTo((vx * scale).toFloat(), cy[0])
+                for (xi in 1 until width) lineTo(((vx + xi) * scale).toFloat(), cy[xi])
             }
+            drawPath(curvePath, Color(0xFF888888), style = Stroke(width = scale.toFloat()))
         }
 
-        // EQ curve
+        // EQ band response curve (yellow, always on top of spectrum)
         val preset = s.project.eqPresets.getOrNull(s.slotIndex)
         if (preset != null) {
             val path = Path()
