@@ -59,6 +59,7 @@ Week 16:     MVP Release
 - Resonant biquad filters (LP/HP/BP)
 - Master output bus (MasterChain): DaisySP peak-tracking soft limiter + OTT 3-band bidirectional compressor (vitOTT-matched, wet/dry depth control)
 - **Send effects buses (reverb + delay)**: true stereo buses — sampler voices contribute with per-instrument PAN applied; SF voices use their already-panned stereo buffer. DaisySP ReverbSc (Schroeder-Moorer) + DaisySP DelayLine (ping-pong stereo tap delay). Per-send return gain (00-FF), delay→reverb routing (`delayReverbSend`), per-send input EQ. Delay processed first so its wet output can feed the reverb bus in the same audio block with zero latency.
+- **Sample editor destructive FX**: OTT, DUST, DRIVE, EQ (offline), SYNC/RPITCH (pitch-shift), SYNC/TSTRETCH (SOLA time-stretch — Akai-cyclic, pitch-preserving)
 
 ### Screens & Modules
 - **Oscilloscope** - Real-time waveform visualization (60 FPS)
@@ -66,6 +67,7 @@ Week 16:     MVP Release
 - **Chain Editor** - 16 phrase references with transpose
 - **Song Editor** - 8-track arrangement, 256 rows, B+UP/DOWN page jump
 - **Instrument Screen** - Full parameter set (sample, ROOT, DETUNE, VOL, PAN, filters, loop, start/end); EQ row opens EQ editor via SELECT button (same as mixer and effects screens); filename displayed without extension
+- **Sample Editor** - Waveform view with zoom + source mode; selection tools; destructive ops (crop, copy/cut/paste, normalize, fade in/out, silence, reverse, undo); RATE mode (HIGH/NORM/LOFI non-destructive); PITCH shift; SYNC (RPITCH pitch-shift to BPM, TSTRETCH time-stretch to BPM); EQ; DUST/DRIVE/OTT offline FX; transient detection + slice markers (TRANSIENT/DIVIDE/OFF); CHOP export; WAV save/overwrite with cue chunk
 - **Project Screen** - Name, tempo, save/load, CLEAN SEQ/INST, layout mode switcher
 - **File Browser** - Navigation, sorting, preview, WAV/video audio extraction
 - **Effects Screen** - Global send effects config: reverb (SIZE/DAMP/EQ), delay (TIME/FDBK/REV-send/EQ), master bus type selector. WET removed (always 100%); REV row on delay sends delay output into reverb bus.
@@ -159,10 +161,35 @@ Week 16:     MVP Release
 - [ ] Controls guide (full reference)
 - [ ] Short demo video
 - [ ] Known issues list
+- [x] DSP settings guide (`docs/dsp-settings-guide.md`) — internal constants and character notes for every DSP unit
 
 ---
 
 ## Completed Milestones
+
+### Sample Editor — TSTRETCH + DSP Guide (Complete - 2026-05-17)
+
+SYNC mode in the sample editor now has two sub-modes: RPITCH (existing pitch-shift) and TSTRETCH (new).
+
+TSTRETCH uses SOLA (Synchronized Overlap-Add) — the same algorithm Akai S950/S1000 used.
+It stretches a sample to a target beat duration at the current project BPM without changing pitch.
+The "Akai-cyclic" mode is the default — the characteristic grit and chop of jungle breaks comes from
+this algorithm, and it's intentional.
+
+Implementation: `sola::stretch()` in `effects/primitives/sola-stretch.h` (header-only). Wired through
+the full stack: `AudioEngine::timeStretchSample()` → JNI → `IAudioBackend` → `AudioEngine.kt` → `MainActivity`.
+Stereo samples are stretched per-channel; both channels stay phase-aligned (algorithm is deterministic).
+UNDO works via the existing `backupSample` / `undoSample` mechanism.
+
+**Tuning constants** in `sola-stretch.h` (one rebuild to try each):
+- `SEQUENCE_MS` (40 ms) — chunk size. Smaller = grittier. 25 ms = S950 chop. 60 ms = smoother.
+- `OVERLAP_MS` (15 ms) — crossfade. Keep at ~25-40% of SEQUENCE_MS to avoid clicks or comb filter.
+- `SEEK_MS` (0) — splice search. 0 = pure cyclic Akai. 10-15 = intelligent/smoother mode.
+
+**DSP settings guide** (`docs/dsp-settings-guide.md`) created alongside — documents tweakable internal
+constants for every DSP unit (TSTRETCH, DRIVE, CRUSH, Filter SVF, OTT, DUST, Reverb, Delay, Limiter).
+
+---
 
 ### Sample Editor — True Stereo + SOURCE (Complete - 2026-05-16)
 

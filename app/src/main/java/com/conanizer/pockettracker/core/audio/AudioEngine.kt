@@ -776,6 +776,11 @@ class AudioEngine(
         backend.pitchShiftSample(instrumentId, semitones.toFloat())
     }
 
+    fun timeStretchSample(instrumentId: Int, ratio: Float) {
+        originalSampleRateRatios.remove(instrumentId)
+        backend.timeStretchSample(instrumentId, ratio)
+    }
+
     fun applySampleFx(instrumentId: Int, fxType: Int, fxValue: Int, sampleRate: Float) {
         backend.applySampleFx(instrumentId, fxType, fxValue, sampleRate)
     }

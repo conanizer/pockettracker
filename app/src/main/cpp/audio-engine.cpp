@@ -6,6 +6,7 @@
 #include "mods/mod-runner.h"
 #include "mods/modules/pitch-slide-module.h"
 #include "mods/modules/vibrato-module.h"
+#include "effects/primitives/sola-stretch.h"
 
 // Definition of the per-track soundfont voice array (extern declared in audio-engine.h)
 SoundfontVoice sfVoices[8];
@@ -573,6 +574,41 @@ void AudioEngine::pitchShiftSample(int id, float semitones) {
     delete[] samples[id];
     samples[id]       = newBuf;
     sampleLengths[id] = newLen;
+}
+
+void AudioEngine::timeStretchSample(int id, float ratio) {
+    if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] <= 0) return;
+    if (ratio > 0.999f && ratio < 1.001f) return;
+
+    for (int v = 0; v < MAX_VOICES; v++) {
+        if (voices[v].isActive && voices[v].sampleData == samples[id]) voices[v].stop();
+    }
+
+    std::lock_guard<std::mutex> lock(sampleEditMutex);
+
+    // Time-stretch makes this buffer the new "original"; discard any RATE cache.
+    if (originalSamples[id]) {
+        delete[] originalSamples[id];
+        originalSamples[id] = nullptr;
+        originalSampleLengths[id] = 0;
+    }
+
+    int oldLen = sampleLengths[id];
+    std::vector<float> newL = sola::stretch(samples[id], oldLen, ratio, 44100.0f);
+    int newLen = (int)newL.size();
+
+    delete[] samples[id];
+    samples[id] = new float[newLen];
+    std::copy(newL.begin(), newL.end(), samples[id]);
+    sampleLengths[id] = newLen;
+
+    if (samplesRight[id]) {
+        std::vector<float> newR = sola::stretch(samplesRight[id], oldLen, ratio, 44100.0f);
+        int rLen = (int)newR.size();
+        delete[] samplesRight[id];
+        samplesRight[id] = new float[rLen];
+        std::copy(newR.begin(), newR.end(), samplesRight[id]);
+    }
 }
 
 void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRate) {

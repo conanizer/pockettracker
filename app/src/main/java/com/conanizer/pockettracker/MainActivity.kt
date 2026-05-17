@@ -2307,6 +2307,34 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                                 }
                                             }
                                         }
+                                        1 -> { // TSTRETCH — destructively time-stretch to match DURATION at project BPM
+                                            val bpm = trackerController.project.tempo
+                                            val rawSecs = if (s.sampleRate > 0) s.totalFrames.toDouble() / s.sampleRate else 0.0
+                                            if (rawSecs > 0.0 && bpm > 0) {
+                                                val targetBeats = when (s.durationIndex) {
+                                                    0 -> 16.0; 1 -> 8.0; 2 -> 4.0; 3 -> 2.0
+                                                    4 -> 1.0;  5 -> 0.5; 6 -> 0.25; else -> 0.125
+                                                }
+                                                val targetSecs = targetBeats * 60.0 / bpm
+                                                val ratio = (targetSecs / rawSecs).toFloat()
+                                                if (ratio > 0.001f && (ratio < 0.999f || ratio > 1.001f)) {
+                                                    audioEngine.restoreFxPreviewBackup()
+                                                    audioEngine.backupSample(instId)
+                                                    val oldLen = s.totalFrames
+                                                    audioEngine.timeStretchSample(instId, ratio)
+                                                    val newLen = audioEngine.getSampleLength(instId)
+                                                    fun scaleFrame(f: Long) = if (oldLen > 0) (f * newLen.toLong() / oldLen).coerceIn(0L, newLen.toLong()) else 0L
+                                                    sampleEditorState = sampleEditorState.copy(
+                                                        totalFrames    = newLen,
+                                                        waveformData   = audioEngine.getSampleWaveform(instId, 620),
+                                                        selectionStart = scaleFrame(sampleEditorState.selectionStart),
+                                                        selectionEnd   = scaleFrame(sampleEditorState.selectionEnd),
+                                                        slicePosition  = scaleFrame(sampleEditorState.slicePosition),
+                                                        isModified     = true
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                                 }

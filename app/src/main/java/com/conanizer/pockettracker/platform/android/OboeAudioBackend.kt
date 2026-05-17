@@ -93,6 +93,7 @@ class OboeAudioBackend : IAudioBackend {
     override fun downsampleSample(id: Int, factor: Int) = native_downsampleSample(id, factor)
     override fun applyRateMode(id: Int, factor: Int) = native_applyRateMode(id, factor)
     override fun pitchShiftSample(id: Int, semitones: Float) = native_pitchShiftSample(id, semitones)
+    override fun timeStretchSample(id: Int, ratio: Float) = native_timeStretchSample(id, ratio)
     override fun applySampleFx(id: Int, fxType: Int, fxValue: Int, sampleRate: Float) = native_applySampleFx(id, fxType, fxValue, sampleRate)
     override fun findZeroCrossing(id: Int, frame: Int): Int = native_findZeroCrossing(id, frame)
     override fun detectTransients(id: Int, sensitivity: Int): IntArray =
@@ -649,6 +650,7 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_downsampleSample(id: Int, factor: Int)
     private external fun native_applyRateMode(id: Int, factor: Int)
     private external fun native_pitchShiftSample(id: Int, semitones: Float)
+    private external fun native_timeStretchSample(id: Int, ratio: Float)
     private external fun native_applySampleFx(id: Int, fxType: Int, fxValue: Int, sampleRate: Float)
     private external fun native_findZeroCrossing(id: Int, frame: Int): Int
     private external fun native_detectTransients(id: Int, sensitivity: Int, maxMarkers: Int): IntArray

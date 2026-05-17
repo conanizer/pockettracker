@@ -1045,6 +1045,12 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1pitch
 }
 
 JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1timeStretchSample(
+        JNIEnv*, jobject, jint id, jfloat ratio) {
+    if (engine) engine->timeStretchSample((int)id, (float)ratio);
+}
+
+JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1applySampleFx(
         JNIEnv*, jobject, jint id, jint fxType, jint fxValue, jfloat sampleRate) {
     if (engine) engine->applySampleFx((int)id, (int)fxType, (int)fxValue, (float)sampleRate);

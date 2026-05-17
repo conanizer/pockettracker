@@ -469,7 +469,7 @@ class SampleEditorModule : TrackerModule {
         val RATE_VALUES     = listOf("HIGH", "NORM", "LOFI")
         val DURATION_VALUES = listOf("4 BAR", "2 BAR", "1 BAR", "1/2", "1/4", "1/8", "1/16", "1/32")
         val FX_TYPES        = listOf("OTT", "DUST", "DRIVE", "EQ", "SYNC")
-        val SYNC_TYPES      = listOf("RPITCH")
+        val SYNC_TYPES      = listOf("RPITCH", "TSTRETCH")
         val SLICE_METHODS   = listOf("TRANSIENT", "DIVIDE", "OFF")
         val OPS_ROW1 = listOf("CROP", "COPY", "CUT", "DUPL", "PASTE", "DEL")
         val OPS_ROW2 = listOf("NORM", "FADE+", "FADE-", "SLNC", "REV", "UNDO")
@@ -543,7 +543,7 @@ data class SampleEditorState(
     // FX row
     val fxType:  Int = 0,   // 0=OTT, 1=DUST, 2=DRIVE, 3=EQ, 4=SYNC
     val fxValue: Int = 0,
-    val syncType: Int = 0,  // when fxType==SYNC: 0=RPITCH
+    val syncType: Int = 0,  // when fxType==SYNC: 0=RPITCH, 1=TSTRETCH
     // State flags
     val isModified:       Boolean = false,
     val showConfirmClose: Boolean = false,
