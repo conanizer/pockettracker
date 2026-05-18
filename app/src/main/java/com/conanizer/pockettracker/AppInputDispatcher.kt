@@ -1302,7 +1302,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             }
 
             ScreenType.PHRASE -> {
-                if (trackerController.cursorColumn == 1) {
+                if (trackerController.cursorColumn == 1 && !trackerController.inputController.isSelectionModeActive()) {
                     val phraseState = PhraseEditorState(trackerController.project.phrases[trackerController.currentPhrase], trackerController.cursorRow, trackerController.cursorColumn, playbackRow = 0, isPlaying = trackerController.isPlaying())
                     val context = phraseEditorModule.getCursorContext(phraseState)
                     if (context.capabilities.isEmpty) {
