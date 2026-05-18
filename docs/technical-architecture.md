@@ -3,7 +3,7 @@
 ## Document Purpose
 This document defines **HOW** PocketTracker is built technically. It covers current architecture, planned refactoring for portability, and technical decisions.
 
-**Last Updated:** 2026-05-05
+**Last Updated:** 2026-05-18
 **Version:** 2.4
 **Audience:** Developers, Contributors, Claude Code AI
 
@@ -81,7 +81,8 @@ PocketTracker/
 │       └── FileInfo.kt             ✅ Platform-agnostic file metadata
 │
 ├── platform/android/
-│   ├── MainActivity.kt             Thin — creates backends + UI
+│   ├── MainActivity.kt             Thin (~1069 lines) — creates backends, wires dispatcher, renders UI
+│   ├── AppInputDispatcher.kt       All button handlers (~2108 lines); wired via AppControllers + AppStateRefs
 │   ├── OboeAudioBackend.kt         ✅ Oboe JNI implementation
 │   ├── AndroidResourceLoader.kt    ✅ R.raw.* loader
 │   ├── AndroidFileSystem.kt        ✅ Scoped storage implementation

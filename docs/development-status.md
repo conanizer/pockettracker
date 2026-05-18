@@ -1,6 +1,6 @@
 # Development Status
 
-**Last Updated:** 2026-05-18
+**Last Updated:** 2026-05-18 (rev 2)
 
 ## Current Phase
 
@@ -252,7 +252,8 @@ Standardised all screen modules to a single consistent style (new modules led, o
 - IResourceLoader interface + AndroidResourceLoader implementation
 - IFileSystem interface + AndroidFileSystem implementation
 - InputController, PlaybackController, InstrumentController, TrackerController, EffectProcessor, FileController, ClipboardManager
-- MainActivity reduced from 2668 to 1862 lines
+- MainActivity reduced from 2668 to 1862 lines (initial refactoring)
+- **AppInputDispatcher extraction (2026-05-18)**: All ~2600-line ButtonHandlers block + helper functions extracted from `PocketTrackerApp` into `AppInputDispatcher.kt`. `MainActivity.kt` further reduced to **1069 lines**. `AppInputDispatcher` (~2108 lines) holds all button handler logic and is wired via `val dispatcher = remember { AppInputDispatcher(appCtrl, appState) }`.
 
 ### MVP Expansion #1 (Complete - 2026-01-27)
 - Mixer Screen with dBFS meters

@@ -14,8 +14,8 @@ package com.conanizer.pockettracker
 
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import androidx.compose.runtime.*
+import com.conanizer.pockettracker.core.logging.ILogger
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.key
@@ -146,11 +146,11 @@ enum class ButtonAction {
  * 6. Calls the appropriate ButtonHandlers callback
  *
  * @param buttonHandlers - The ButtonHandlers instance that defines what each button does
- * @param logInput - If true, logs all button presses to Logcat (useful for debugging)
+ * @param logger - Optional ILogger; pass AndroidLogger() to enable input tracing in Logcat
  */
 class InputMapper(
     private val buttonHandlers: ButtonHandlers,
-    private val logInput: Boolean = false  // Set to true to see input in Logcat
+    private val logger: ILogger? = null
 ) {
     // =========================================================================
     // STATE TRACKING
@@ -327,10 +327,7 @@ class InputMapper(
                 // Mark this key as pressed
                 pressedKeys.add(nativeKeyCode)
 
-                // Optional logging for debugging
-                if (logInput) {
-                    Log.d(TAG, "Key ${keyEvent.key} DOWN (native=$nativeKeyCode) → Button ${virtualButton.name} PRESSED")
-                }
+                logger?.d(TAG, "Key ${keyEvent.key} DOWN (native=$nativeKeyCode) → Button ${virtualButton.name} PRESSED")
 
                 // Trigger the button action
                 handleButtonAction(virtualButton, ButtonAction.PRESSED)
@@ -343,10 +340,7 @@ class InputMapper(
                 // Remove key from pressed set
                 pressedKeys.remove(nativeKeyCode)
 
-                // Optional logging for debugging
-                if (logInput) {
-                    Log.d(TAG, "Key ${keyEvent.key} UP → Button ${virtualButton.name} RELEASED")
-                }
+                logger?.d(TAG, "Key ${keyEvent.key} UP → Button ${virtualButton.name} RELEASED")
 
                 // Trigger the button action
                 handleButtonAction(virtualButton, ButtonAction.RELEASED)
@@ -406,10 +400,7 @@ class InputMapper(
             return
         }
 
-        // Debug: Log modifier states when any button is pressed
-        if (logInput) {
-            Log.d(TAG, "handleButtonAction: button=$button, isA=$isAPressed, isB=$isBPressed, isL=$isLPressed, isR=$isRPressed, isSEL=$isSelectPressed")
-        }
+        logger?.d(TAG, "handleButtonAction: button=$button, isA=$isAPressed, isB=$isBPressed, isL=$isLPressed, isR=$isRPressed, isSEL=$isSelectPressed")
 
         // =====================================================================
         // MODIFIER COMBINATION DETECTION
@@ -421,33 +412,33 @@ class InputMapper(
         // A + direction combinations (M8-style value editing)
         // When A is held, directions change values instead of moving cursor
         if (isAPressed && !isLPressed && !isRPressed) {
-            if (logInput) Log.d(TAG, "A is held, checking for combos with button=$button")
+            logger?.d(TAG, "A is held, checking for combos with button=$button")
             when (button) {
                 VirtualButton.B -> {
-                    if (logInput) Log.d(TAG, "A+B (delete)")
+                    logger?.d(TAG, "A+B (delete)")
                     buttonHandlers.onAB()
                     return
                 }
                 VirtualButton.DPAD_UP -> {
-                    if (logInput) Log.d(TAG, "A+UP (increment by small step)")
+                    logger?.d(TAG, "A+UP (increment by small step)")
                     buttonHandlers.onAUp()
                     startKeyRepeat { buttonHandlers.onAUp() }
                     return
                 }
                 VirtualButton.DPAD_DOWN -> {
-                    if (logInput) Log.d(TAG, "A+DOWN (decrement by small step)")
+                    logger?.d(TAG, "A+DOWN (decrement by small step)")
                     buttonHandlers.onADown()
                     startKeyRepeat { buttonHandlers.onADown() }
                     return
                 }
                 VirtualButton.DPAD_RIGHT -> {
-                    if (logInput) Log.d(TAG, "A+RIGHT (increment by large step)")
+                    logger?.d(TAG, "A+RIGHT (increment by large step)")
                     buttonHandlers.onARight()
                     startKeyRepeat { buttonHandlers.onARight() }
                     return
                 }
                 VirtualButton.DPAD_LEFT -> {
-                    if (logInput) Log.d(TAG, "A+LEFT (decrement by large step)")
+                    logger?.d(TAG, "A+LEFT (decrement by large step)")
                     buttonHandlers.onALeft()
                     startKeyRepeat { buttonHandlers.onALeft() }
                     return
@@ -461,25 +452,25 @@ class InputMapper(
         if (isBPressed && !isLPressed && !isRPressed && !isAPressed) {
             when (button) {
                 VirtualButton.DPAD_LEFT -> {
-                    if (logInput) Log.d(TAG, "B+LEFT (previous item)")
+                    logger?.d(TAG, "B+LEFT (previous item)")
                     buttonHandlers.onBLeft()
                     startKeyRepeat { buttonHandlers.onBLeft() }
                     return
                 }
                 VirtualButton.DPAD_RIGHT -> {
-                    if (logInput) Log.d(TAG, "B+RIGHT (next item)")
+                    logger?.d(TAG, "B+RIGHT (next item)")
                     buttonHandlers.onBRight()
                     startKeyRepeat { buttonHandlers.onBRight() }
                     return
                 }
                 VirtualButton.DPAD_UP -> {
-                    if (logInput) Log.d(TAG, "B+UP (page up)")
+                    logger?.d(TAG, "B+UP (page up)")
                     buttonHandlers.onBUp()
                     startKeyRepeat { buttonHandlers.onBUp() }
                     return
                 }
                 VirtualButton.DPAD_DOWN -> {
-                    if (logInput) Log.d(TAG, "B+DOWN (page down)")
+                    logger?.d(TAG, "B+DOWN (page down)")
                     buttonHandlers.onBDown()
                     startKeyRepeat { buttonHandlers.onBDown() }
                     return
@@ -494,23 +485,23 @@ class InputMapper(
             // Check for more specific L+R+button combos first
             when (button) {
                 VirtualButton.SELECT -> {
-                    if (logInput) Log.d(TAG, "L+R+SELECT (quit to project)")
+                    logger?.d(TAG, "L+R+SELECT (quit to project)")
                     // TODO: Add handler for L+R+SELECT
                     return
                 }
                 VirtualButton.A -> {
-                    if (logInput) Log.d(TAG, "L+R+A (save snapshot)")
+                    logger?.d(TAG, "L+R+A (save snapshot)")
                     // TODO: Add handler for L+R+A
                     return
                 }
                 VirtualButton.B -> {
-                    if (logInput) Log.d(TAG, "L+R+B (load snapshot)")
+                    logger?.d(TAG, "L+R+B (load snapshot)")
                     // TODO: Add handler for L+R+B
                     return
                 }
                 // L+R alone (when second button of the pair is pressed)
                 VirtualButton.L_SHIFT, VirtualButton.R_SHIFT -> {
-                    if (logInput) Log.d(TAG, "L+R (exit selection mode)")
+                    logger?.d(TAG, "L+R (exit selection mode)")
                     buttonHandlers.onLR()
                     return
                 }
@@ -521,52 +512,52 @@ class InputMapper(
         // L+B+A: Clone (A pressed while both L and B are held)
         // Must be checked BEFORE the L+button block to avoid firing onLA (paste) instead
         if (isLPressed && isBPressed && !isRPressed && button == VirtualButton.A) {
-            if (logInput) Log.d(TAG, "L+B+A (clone)")
+            logger?.d(TAG, "L+B+A (clone)")
             buttonHandlers.onLBA()
             return
         }
 
         // L + button combinations
         if (isLPressed && !isRPressed) {
-            if (logInput) Log.d(TAG, "L is held, checking L+button combo for button=$button")
+            logger?.d(TAG, "L is held, checking L+button combo for button=$button")
             when (button) {
                 VirtualButton.A -> {
-                    if (logInput) Log.d(TAG, "L+A (cut/paste)")
+                    logger?.d(TAG, "L+A (cut/paste)")
                     buttonHandlers.onLA()
                     return
                 }
                 VirtualButton.B -> {
-                    if (logInput) Log.d(TAG, "L+B (selection mode)")
+                    logger?.d(TAG, "L+B (selection mode)")
                     buttonHandlers.onLB()
                     return
                 }
                 VirtualButton.DPAD_UP -> {
-                    if (logInput) Log.d(TAG, "L+UP (sort mode up / jump to prev) → calling onLUp()")
+                    logger?.d(TAG, "L+UP (sort mode up / jump to prev) → calling onLUp()")
                     buttonHandlers.onLUp()
                     return
                 }
                 VirtualButton.DPAD_DOWN -> {
-                    if (logInput) Log.d(TAG, "L+DOWN (sort mode down / jump to next) → calling onLDown()")
+                    logger?.d(TAG, "L+DOWN (sort mode down / jump to next) → calling onLDown()")
                     buttonHandlers.onLDown()
                     return
                 }
                 VirtualButton.DPAD_LEFT -> {
-                    if (logInput) Log.d(TAG, "L+LEFT (prev chain/phrase) → calling onLLeft()")
+                    logger?.d(TAG, "L+LEFT (prev chain/phrase) → calling onLLeft()")
                     buttonHandlers.onLLeft()
                     return
                 }
                 VirtualButton.DPAD_RIGHT -> {
-                    if (logInput) Log.d(TAG, "L+RIGHT (next chain/phrase) → calling onLRight()")
+                    logger?.d(TAG, "L+RIGHT (next chain/phrase) → calling onLRight()")
                     buttonHandlers.onLRight()
                     return
                 }
                 VirtualButton.START -> {
-                    if (logInput) Log.d(TAG, "L+START (play all from beginning)")
+                    logger?.d(TAG, "L+START (play all from beginning)")
                     // TODO: Add handler for L+START
                     return
                 }
                 else -> {
-                    if (logInput) Log.d(TAG, "L held but button=$button not a combo target")
+                    logger?.d(TAG, "L held but button=$button not a combo target")
                 }
             }
         }
@@ -576,17 +567,17 @@ class InputMapper(
         if (isSelectPressed && !isLPressed && (!isRPressed || button == VirtualButton.R_SHIFT)) {
             when (button) {
                 VirtualButton.A -> {
-                    if (logInput) Log.d(TAG, "SELECT+A (rename)")
+                    logger?.d(TAG, "SELECT+A (rename)")
                     buttonHandlers.onSelectA()
                     return
                 }
                 VirtualButton.B -> {
-                    if (logInput) Log.d(TAG, "SELECT+B (delete)")
+                    logger?.d(TAG, "SELECT+B (delete)")
                     buttonHandlers.onSelectB()
                     return
                 }
                 VirtualButton.R_SHIFT -> {
-                    if (logInput) Log.d(TAG, "SELECT+R (create folder)")
+                    logger?.d(TAG, "SELECT+R (create folder)")
                     buttonHandlers.onSelectR()
                     return
                 }
@@ -598,37 +589,37 @@ class InputMapper(
         if (isRPressed && !isLPressed) {
             when (button) {
                 VirtualButton.DPAD_UP -> {
-                    if (logInput) Log.d(TAG, "R+UP (navigate screen up)")
+                    logger?.d(TAG, "R+UP (navigate screen up)")
                     buttonHandlers.onRUp()
                     return
                 }
                 VirtualButton.DPAD_DOWN -> {
-                    if (logInput) Log.d(TAG, "R+DOWN (navigate screen down)")
+                    logger?.d(TAG, "R+DOWN (navigate screen down)")
                     buttonHandlers.onRDown()
                     return
                 }
                 VirtualButton.DPAD_LEFT -> {
-                    if (logInput) Log.d(TAG, "R+LEFT (navigate screen left)")
+                    logger?.d(TAG, "R+LEFT (navigate screen left)")
                     buttonHandlers.onRLeft()
                     return
                 }
                 VirtualButton.DPAD_RIGHT -> {
-                    if (logInput) Log.d(TAG, "R+RIGHT (navigate screen right)")
+                    logger?.d(TAG, "R+RIGHT (navigate screen right)")
                     buttonHandlers.onRRight()
                     return
                 }
                 VirtualButton.A -> {
-                    if (logInput) Log.d(TAG, "R+A (clone)")
+                    logger?.d(TAG, "R+A (clone)")
                     // TODO: Add handler for R+A (clone)
                     return
                 }
                 VirtualButton.B -> {
-                    if (logInput) Log.d(TAG, "R+B (reset to default)")
+                    logger?.d(TAG, "R+B (reset to default)")
                     // TODO: Add handler for R+B
                     return
                 }
                 VirtualButton.START -> {
-                    if (logInput) Log.d(TAG, "R+START (play from cursor)")
+                    logger?.d(TAG, "R+START (play from cursor)")
                     // TODO: Add handler for R+START
                     return
                 }
@@ -644,35 +635,35 @@ class InputMapper(
             val now = System.currentTimeMillis()
             if (now - lastAPress < doubleTapWindow) {
                 // Double-tap detected!
-                if (logInput) Log.d(TAG, "A,A (insert next unused)")
+                logger?.d(TAG, "A,A (insert next unused)")
                 lastAPress = 0  // Reset to prevent triple-tap
                 buttonHandlers.onAA()
                 return
             }
             lastAPress = now
             // Single A press - execute action
-            if (logInput) Log.d(TAG, "Single A press")
+            logger?.d(TAG, "Single A press")
             buttonHandlers.onButtonA()
             return
         }
 
         // Handle B button alone (not as modifier)
         if (button == VirtualButton.B && !isLPressed && !isRPressed && !isAPressed) {
-            if (logInput) Log.d(TAG, "Single B press")
+            logger?.d(TAG, "Single B press")
             buttonHandlers.onButtonB()
             return
         }
 
         // Handle L button alone (not as modifier)
         if (button == VirtualButton.L_SHIFT && !isRPressed && !isAPressed && !isBPressed) {
-            if (logInput) Log.d(TAG, "Single L press")
+            logger?.d(TAG, "Single L press")
             buttonHandlers.onL()
             return
         }
 
         // Handle R button alone (not as modifier)
         if (button == VirtualButton.R_SHIFT && !isLPressed && !isAPressed && !isBPressed) {
-            if (logInput) Log.d(TAG, "Single R press")
+            logger?.d(TAG, "Single R press")
             buttonHandlers.onR()
             return
         }
@@ -685,14 +676,14 @@ class InputMapper(
         // This fixes the bug where SELECT handler was never called because isSelectPressed=true
         // skipped the basic buttons block
         if (button == VirtualButton.SELECT && !isLPressed && !isRPressed && !isAPressed && !isBPressed) {
-            if (logInput) Log.d(TAG, "Single SELECT press")
+            logger?.d(TAG, "Single SELECT press")
             buttonHandlers.onSelect()
             return
         }
 
         // Handle START button (check explicitly to ensure it's called)
         if (button == VirtualButton.START && !isLPressed && !isRPressed && !isAPressed && !isBPressed && !isSelectPressed) {
-            if (logInput) Log.d(TAG, "Single START press → calling onStart()")
+            logger?.d(TAG, "Single START press → calling onStart()")
             buttonHandlers.onStart()
             return
         }
