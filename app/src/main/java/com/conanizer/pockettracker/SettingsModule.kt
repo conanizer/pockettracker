@@ -14,13 +14,14 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
  *
  * Rows:
  *   0 — LAYOUT    (cycle: FULLSCREEN / TOUCH LANDSCAPE / AMIGA PORTRAIT)
- *   1 — SCALING   (cycle: INT / BILINEAR / NEAREST)
+ *   1 — SCALING   (cycle: INT / BILINEAR)
  *   2 — BTN SOUND (ON / OFF, cycling via A+DPAD up/down)
  *   3 — BTN VOL   (00-FF, hex byte via A+DPAD up/down)
  *   4 — BTN VIBRO (ON / OFF, cycling via A+DPAD up/down)
  *   5 — VIBRO POW (00-FF, hex byte via A+DPAD up/down)
  *   6 — KB INSERT (single cycling value: BEFORE=1 / AFTER=0)
  *   7 — CURSOR    (REMEMBER=1 / REFRESH=0) — whether cursor position is preserved on screen navigation
+ *   8 — NOTE PREV (ON / OFF) — play note at its pitch when inserting on phrase screen
  *
  * Size: 510×392 pixels (same as other screens)
  */
@@ -78,7 +79,6 @@ class SettingsModule : TrackerModule {
         val scalingText = when (s.scalingMode) {
             DeviceAdapter.ScalingMode.INTEGER  -> "INT"
             DeviceAdapter.ScalingMode.BILINEAR -> "BILINEAR"
-            DeviceAdapter.ScalingMode.NEAREST  -> "NEAREST"
         }
         drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
             "SCALING", scalingText,
@@ -128,6 +128,13 @@ class SettingsModule : TrackerModule {
         val cursorText = if (s.cursorRemember) "REMEMBER" else "REFRESH"
         drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
             "CURSOR", cursorText,
+            isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
+            isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
+        rowY += ROW_HEIGHT; currentRow++
+
+        // ── ROW 8: NOTE PREVIEW ────────────────────────────────────────
+        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
+            "NOTE PREV", if (s.notePreviewEnabled) "ON" else "OFF",
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
             isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
     }
@@ -221,6 +228,15 @@ class SettingsModule : TrackerModule {
                 currentValue = if (state.cursorRemember) 1 else 0,
                 minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
             )
+            8 -> CursorContext(                   // NOTE PREVIEW: ON(1) / OFF(0)
+                valueType = CursorValueType.HEX_BYTE,
+                capabilities = CursorCapabilities(
+                    canIncrement = true, canDecrement = true,
+                    canIncrementFast = false, canDecrementFast = false
+                ),
+                currentValue = if (state.notePreviewEnabled) 1 else 0,
+                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
+            )
             else -> CursorContextFactory.none()
         }
     }
@@ -264,6 +280,11 @@ class SettingsModule : TrackerModule {
                     return InputResult(modified = true, cursorRemember = action.value > 0)
                 }
             }
+            8 -> {  // NOTE PREVIEW
+                if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
+                    return InputResult(modified = true, notePreviewEnabled = action.value > 0)
+                }
+            }
         }
         return InputResult(modified = action !is com.conanizer.pockettracker.core.logic.InputAction.NONE)
     }
@@ -275,7 +296,8 @@ class SettingsModule : TrackerModule {
         val buttonVibroEnabled: Boolean? = null,
         val vibroPower: Int? = null,
         val insertBefore: Boolean? = null,
-        val cursorRemember: Boolean? = null
+        val cursorRemember: Boolean? = null,
+        val notePreviewEnabled: Boolean? = null
     )
 }
 
@@ -293,5 +315,6 @@ data class SettingsState(
     val buttonVibroEnabled: Boolean = false,
     val vibroPower: Int = 255,
     val insertBefore: Boolean = true,
-    val cursorRemember: Boolean = false
+    val cursorRemember: Boolean = false,
+    val notePreviewEnabled: Boolean = true
 )

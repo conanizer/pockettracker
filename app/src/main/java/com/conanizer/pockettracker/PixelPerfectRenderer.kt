@@ -122,6 +122,8 @@ fun PixelPerfectTracker(
     settingsCursorColumn: Int = 1,
     // Cursor remember setting (for settings screen display)
     cursorRemember: Boolean = false,
+    // Note preview setting (for settings screen display)
+    notePreviewEnabled: Boolean = true,
     // SoundFont preset navigation state
     soundfontPresetName: String = "",
     soundfontPresetCount: Int = 0,
@@ -290,6 +292,7 @@ fun PixelPerfectTracker(
                         settingsCursorRow = settingsCursorRow,
                         settingsCursorColumn = settingsCursorColumn,
                         cursorRemember = cursorRemember,
+                        notePreviewEnabled = notePreviewEnabled,
                         trackNotes = trackNotes,
                         soundfontPresetName  = soundfontPresetName,
                         soundfontPresetCount = soundfontPresetCount,
@@ -410,6 +413,8 @@ class TrackerLayout {
         settingsCursorColumn: Int = 1,
         // Cursor remember setting (passed through to SettingsState for display)
         cursorRemember: Boolean = false,
+        // Note preview setting (passed through to SettingsState for display)
+        notePreviewEnabled: Boolean = true,
         // Track note monitor
         trackNotes: List<Note> = List(8) { Note.EMPTY },
         // SoundFont preset navigation state
@@ -725,7 +730,8 @@ class TrackerLayout {
                                     buttonVibroEnabled = buttonVibroEnabled,
                                     vibroPower = vibroPower,
                                     insertBefore = qwertyKeyboardState.insertBefore,
-                                    cursorRemember = cursorRemember
+                                    cursorRemember = cursorRemember,
+                                    notePreviewEnabled = notePreviewEnabled
                                 )
                             )
                         }

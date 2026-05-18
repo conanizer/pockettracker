@@ -1,6 +1,6 @@
 # Development Status
 
-**Last Updated:** 2026-05-18 (rev 2)
+**Last Updated:** 2026-05-18 (rev 3)
 
 ## Current Phase
 
@@ -76,7 +76,7 @@ Week 16:     MVP Release
 - **Table Screen** - 16-row mini-sequencer per instrument
 - **Groove Screen** - Step-timing patterns for swing/shuffle (256 grooves)
 - **Modulation Screen** - 4-slot envelope/LFO editor per instrument
-- **Settings Screen** - Layout mode, scaling, button sound/volume, vibration, keyboard insert mode, cursor persistence
+- **Settings Screen** - Layout mode, scaling, button sound/volume, vibration, keyboard insert mode, cursor persistence, note preview (plays inserted note at its pitch on the phrase screen)
 
 ### Effects (All Complete)
 - **ARP/ARC** - Arpeggio with UP/DOWN/PINGPONG/RANDOM modes and speed control
@@ -166,6 +166,16 @@ Week 16:     MVP Release
 ---
 
 ## Completed Milestones
+
+### Polish & Fixes (Complete - 2026-05-18)
+
+- **NOTE PREV setting** (Settings row 8): playing a note at its inserted pitch on the phrase screen is now toggleable. Setting persisted via SharedPreferences. A button on the row cycles ON/OFF (consistent with LAYOUT/SCALING rows). Bug fix: `notePreviewEnabled` was missing from the `PixelPerfectRenderer` → `drawLayout` → `SettingsState` rendering chain, causing the row to always display ON.
+- **A-press toggles for boolean settings rows**: pressing A alone on BTN SOUND (row 2), BTN VIBRO (row 4), KB INSERT (row 6), CURSOR (row 7), NOTE PREV (row 8) now cycles the value, matching the UX of LAYOUT and SCALING rows.
+- **ScalingMode cleanup**: removed `NEAREST` mode — only `INTEGER` and `BILINEAR` remain. Default changed from NEAREST to BILINEAR.
+- **InputMapper.reset()**: new method clears all held-button state (isAPressed, isLPressed, etc.) and cancels key repeat. Called via `LaunchedEffect(layoutMode)` whenever the layout composable is rebuilt on a mode switch, preventing stuck modifier flags from mis-routing subsequent input.
+- **sample-editor.cpp split**: all sample-editor operations (`getSampleLength`, `getSampleWaveform`, `normalizeSample`, `cropSample`, `copyRegion`, `pasteRegion`, `pitchShiftSample`, `timeStretchSample`, `applySampleFx`, `findZeroCrossing`, EQ/reverb/delay setter helpers) extracted from `audio-engine.cpp` into a dedicated `sample-editor.cpp`. `CMakeLists.txt` updated. `audio-engine.cpp` now focuses solely on stream management, voice scheduling, and the DSP loop.
+
+---
 
 ### Sample Editor — TSTRETCH + DSP Guide (Complete - 2026-05-17)
 

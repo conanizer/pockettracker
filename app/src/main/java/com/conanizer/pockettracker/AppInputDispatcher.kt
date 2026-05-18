@@ -87,6 +87,7 @@ class AppStateRefs(
     val buttonVibroEnabled: MutableState<Boolean>,
     val vibroPower: MutableState<Int>,
     val cursorRemember: MutableState<Boolean>,
+    val notePreviewEnabled: MutableState<Boolean>,
     val trackPeakBuffer: FloatArray,
     val masterPeakBuffer: FloatArray,
     val sendPeakBuffer: FloatArray
@@ -154,6 +155,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     private var buttonVibroEnabled by refs.buttonVibroEnabled
     private var vibroPower by refs.vibroPower
     private var cursorRemember by refs.cursorRemember
+    private var notePreviewEnabled by refs.notePreviewEnabled
     private val trackPeakBuffer get() = refs.trackPeakBuffer
     private val masterPeakBuffer get() = refs.masterPeakBuffer
     private val sendPeakBuffer get() = refs.sendPeakBuffer
@@ -427,18 +429,20 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     buttonVibroEnabled = buttonVibroEnabled,
                     vibroPower = vibroPower,
                     insertBefore = insertBefore,
-                    cursorRemember = cursorRemember
+                    cursorRemember = cursorRemember,
+                    notePreviewEnabled = notePreviewEnabled
                 )
                 val context = settingsModule.getCursorContext(settingsState)
                 val action = handlerFunction(context)
                 val result = settingsModule.handleInput(settingsState, action)
                 if (result.modified) {
-                    result.buttonSoundEnabled?.let { buttonSoundEnabled = it }
-                    result.buttonSoundVolume?.let  { buttonSoundVolume  = it }
-                    result.buttonVibroEnabled?.let { buttonVibroEnabled = it }
-                    result.vibroPower?.let         { vibroPower         = it }
-                    result.insertBefore?.let       { insertBefore       = it }
-                    result.cursorRemember?.let     { cursorRemember     = it }
+                    result.buttonSoundEnabled?.let  { buttonSoundEnabled  = it }
+                    result.buttonSoundVolume?.let   { buttonSoundVolume   = it }
+                    result.buttonVibroEnabled?.let  { buttonVibroEnabled  = it }
+                    result.vibroPower?.let          { vibroPower          = it }
+                    result.insertBefore?.let        { insertBefore        = it }
+                    result.cursorRemember?.let      { cursorRemember      = it }
+                    result.notePreviewEnabled?.let  { notePreviewEnabled  = it }
                     trackerController.projectVersion++
                 }
             }
@@ -1030,10 +1034,14 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     1 -> {
                         scalingMode = when (scalingMode) {
                             DeviceAdapter.ScalingMode.INTEGER  -> DeviceAdapter.ScalingMode.BILINEAR
-                            DeviceAdapter.ScalingMode.BILINEAR -> DeviceAdapter.ScalingMode.NEAREST
-                            DeviceAdapter.ScalingMode.NEAREST  -> DeviceAdapter.ScalingMode.INTEGER
+                            DeviceAdapter.ScalingMode.BILINEAR -> DeviceAdapter.ScalingMode.INTEGER
                         }
                     }
+                    2 -> { buttonSoundEnabled = !buttonSoundEnabled }
+                    4 -> { buttonVibroEnabled = !buttonVibroEnabled }
+                    6 -> { insertBefore = !insertBefore }
+                    7 -> { cursorRemember = !cursorRemember }
+                    8 -> { notePreviewEnabled = !notePreviewEnabled }
                 }
             }
 
@@ -1303,6 +1311,13 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                         step.instrument = trackerController.lastEditedInstrument
                         step.volume = trackerController.lastEditedVolume
                         trackerController.projectVersion++
+                        if (notePreviewEnabled && step.note != com.conanizer.pockettracker.core.data.Note.EMPTY) {
+                            val instrument = trackerController.project.instruments[step.instrument.coerceIn(0, 255)]
+                            val sr = audioEngine.getDeviceSampleRate().toLong().coerceAtLeast(44100L)
+                            val msPerStep = 60000.0 / trackerController.project.tempo / 4.0
+                            val phraseDurationFrames = (msPerStep * sr / 1000.0 * 16).toLong()
+                            audioEngine.previewNoteWithTimeout(instrument, step.note, trackerController.project, phraseDurationFrames)
+                        }
                     }
                 }
             }

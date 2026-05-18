@@ -483,9 +483,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     }
     val initialScalingMode = remember {
         if (savedScalingName != null) {
-            DeviceAdapter.ScalingMode.entries.firstOrNull { it.name == savedScalingName } ?: DeviceAdapter.ScalingMode.NEAREST
+            DeviceAdapter.ScalingMode.entries.firstOrNull { it.name == savedScalingName } ?: DeviceAdapter.ScalingMode.BILINEAR
         } else {
-            DeviceAdapter.ScalingMode.NEAREST
+            DeviceAdapter.ScalingMode.BILINEAR
         }
     }
 
@@ -523,6 +523,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // REFRESH=false resets cursor to default on every screen switch (persisted)
     val _cursorRemember = remember { mutableStateOf(prefs.getBoolean("cursor_remember", false)) }
     var cursorRemember  by _cursorRemember
+
+    // Note preview: plays the inserted note at its pitch when adding to phrase screen (persisted)
+    val _notePreviewEnabled = remember { mutableStateOf(prefs.getBoolean("note_preview", true)) }
+    var notePreviewEnabled  by _notePreviewEnabled
 
     // QWERTY keyboard overlay state (transient — not persisted)
     val _qwertyKeyboardState = remember { mutableStateOf(QwertyKeyboardState()) }
@@ -563,6 +567,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     }
     LaunchedEffect(cursorRemember) {
         prefs.edit().putBoolean("cursor_remember", cursorRemember).apply()
+    }
+    LaunchedEffect(notePreviewEnabled) {
+        prefs.edit().putBoolean("note_preview", notePreviewEnabled).apply()
     }
 
     // Release SoundPool when the composable leaves composition
@@ -851,7 +858,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             _showCleanDialog, _cleanDialogTarget, _cleanDialogCursor,
             _lastAInsertPosition, _insertBefore, _instrumentFileBrowserAction,
             _previousScreen, _buttonSoundEnabled, _buttonSoundVolume,
-            _buttonVibroEnabled, _vibroPower, _cursorRemember,
+            _buttonVibroEnabled, _vibroPower, _cursorRemember, _notePreviewEnabled,
             trackPeakBuffer, masterPeakBuffer, sendPeakBuffer
         )
     }
@@ -883,6 +890,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         } catch (e: Exception) {
             // Ignore focus request errors
         }
+    }
+
+    // When the layout mode changes, Compose destroys the old layout composable and builds
+    // a new one. Any virtual button that was being held at that moment has its pointerInput
+    // coroutine cancelled without firing the RELEASED callback, leaving modifier flags
+    // (isAPressed, isLPressed, etc.) permanently stuck in InputMapper. Reset them here so
+    // the first input after a layout switch behaves correctly.
+    // Also re-request focus so keyboard/gamepad input works in the new layout composable.
+    LaunchedEffect(layoutMode) {
+        inputMapper.reset()
+        kotlinx.coroutines.delay(50)
+        try { focusRequester.requestFocus() } catch (e: Exception) { }
     }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -969,6 +988,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         settingsCursorRow       = stateVersion.let { trackerController.settingsCursorRow },
         settingsCursorColumn    = stateVersion.let { trackerController.settingsCursorColumn },
         cursorRemember          = cursorRemember,
+        notePreviewEnabled      = notePreviewEnabled,
         soundfontPresetName     = stateVersion.let {
             val inst = project.instruments[currentInstrument]
             val path = inst.soundfontPath

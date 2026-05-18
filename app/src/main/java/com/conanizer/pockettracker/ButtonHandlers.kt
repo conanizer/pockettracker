@@ -209,6 +209,25 @@ class InputMapper(
     }
 
     /**
+     * Reset all held-button state and cancel key repeat.
+     *
+     * Call this whenever the layout composable is rebuilt (e.g. on layout mode switch).
+     * When Compose destroys a layout, in-flight pointerInput coroutines are cancelled
+     * without firing their RELEASED callbacks, leaving isAPressed / isLPressed / etc. stuck.
+     * Stuck modifiers make all subsequent DPAD presses route to the wrong combo handlers.
+     */
+    fun reset() {
+        cancelKeyRepeat()
+        isLPressed = false
+        isRPressed = false
+        isAPressed = false
+        isBPressed = false
+        isSelectPressed = false
+        heldButtons.clear()
+        pressedKeys.clear()
+    }
+
+    /**
      * Keyboard to VirtualButton mapping
      *
      * This follows common emulator conventions:

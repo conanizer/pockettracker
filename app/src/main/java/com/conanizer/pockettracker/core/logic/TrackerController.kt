@@ -860,7 +860,7 @@ class TrackerController(
                 projectCursorColumn = 1  // Reset to first value column
             }
             ScreenType.SETTINGS -> {
-                settingsCursorRow = if (settingsCursorRow > 0) settingsCursorRow - 1 else 7
+                settingsCursorRow = if (settingsCursorRow > 0) settingsCursorRow - 1 else 8
                 settingsCursorColumn = 1
             }
             ScreenType.INSTRUMENT -> {
@@ -948,7 +948,7 @@ class TrackerController(
                 projectCursorColumn = 1  // Reset column
             }
             ScreenType.SETTINGS -> {
-                settingsCursorRow = if (settingsCursorRow < 7) settingsCursorRow + 1 else 0
+                settingsCursorRow = if (settingsCursorRow < 8) settingsCursorRow + 1 else 0
                 settingsCursorColumn = 1
             }
             ScreenType.INSTRUMENT -> {

@@ -34,8 +34,8 @@ class DeviceAdapter(private val context: Context) {
     /** User-selectable layout modes. Persisted as UI state in PocketTrackerApp. */
     enum class LayoutMode { FULL, TOUCH_PORTRAIT, TOUCH_LANDSCAPE, TOUCH_PORTRAIT2 }
 
-    /** Scaling mode for the game screen. INTEGER = crisp pixel-perfect, others = fill more screen. */
-    enum class ScalingMode { INTEGER, BILINEAR, NEAREST }
+    /** Scaling mode for the game screen. INTEGER = crisp pixel-perfect, BILINEAR = fill screen. */
+    enum class ScalingMode { INTEGER, BILINEAR }
 
     data class LayoutConfig(
         val needsVirtualButtons: Boolean,

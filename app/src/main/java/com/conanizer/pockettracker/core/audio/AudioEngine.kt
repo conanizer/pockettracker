@@ -390,6 +390,83 @@ class AudioEngine(
     }
 
     /**
+     * Preview a specific note on an instrument and hard-stop it after [durationFrames].
+     * Used for note preview when inserting a note on the phrase screen — plays at the
+     * inserted note's pitch rather than the instrument root, and kills after one phrase.
+     */
+    fun previewNoteWithTimeout(
+        instrument: Instrument,
+        note: Note,
+        project: Project?,
+        durationFrames: Long
+    ) {
+        if (note == Note.EMPTY) return
+
+        if (instrument.instrumentType == InstrumentType.SOUNDFONT && project != null) {
+            backend.resumeStream()
+            val targetFrame = backend.getCurrentFrame() + 100L
+            scheduleNote(
+                targetFrame = targetFrame,
+                note = note,
+                instrumentId = instrument.id,
+                trackId = 0,
+                volume = VolumeUtils.hexToFloat(instrument.volume),
+                phraseVol = 1.0f,
+                pan = VolumeUtils.hexToFloat(instrument.pan),
+                project = project,
+                tableIdOverride = -1
+            )
+            backend.scheduleKill(targetFrame + durationFrames, 0)
+            return
+        }
+
+        val sampleId = instrument.sampleId
+        val detuneSemitones = (instrument.detune shr 4).toFloat()
+        val detuneFraction = (instrument.detune and 0x0F) / 16.0f
+        val totalDetuneSemitones = detuneSemitones + detuneFraction - 8.0f
+        val detuneMultiplier = Math.pow(2.0, (totalDetuneSemitones / 12.0)).toFloat()
+        val targetFreq = note.toFrequency() * detuneMultiplier
+
+        val sampleRateRatio = sampleRateRatios[sampleId] ?: 1.0f
+        val compensatedBaseFreq = 261.63f * sampleRateRatio
+
+        backend.resumeStream()
+        val targetFrame = backend.getCurrentFrame() + 100L
+
+        val volume = VolumeUtils.hexToFloat(instrument.volume)
+        val pan = VolumeUtils.hexToFloat(instrument.pan)
+        val tableId = instrument.id
+        val tableTicRate = instrument.tableTicRate
+
+        if (project != null && tableId < 256) forceReloadTable(project.tables[tableId])
+
+        val tempo = project?.tempo ?: 120
+        pushInstrumentModulation(instrument, tempo)
+        if (project != null) pushInstrumentEqAndSends(instrument, project)
+
+        backend.scheduleNoteWithTable(
+            frame = targetFrame,
+            sampleId = sampleId,
+            trackId = 0,
+            freq = targetFreq,
+            baseFreq = compensatedBaseFreq,
+            vol = volume,
+            pan = pan,
+            startPointOverride = -1,
+            tableId = tableId,
+            tableTicRate = tableTicRate,
+            noteOctave = note.octave,
+            notePitch = note.pitch,
+            pslInitialOffset = 0f,
+            pslDuration = 0f,
+            pbnRate = 0f,
+            vibratoSpeed = 0f,
+            vibratoDepth = 0f
+        )
+        backend.scheduleKill(targetFrame + durationFrames, 0)
+    }
+
+    /**
      * Calculate the effective base frequency for an instrument.
      */
     fun calculateInstrumentBaseFrequency(instrument: Instrument): Float {

@@ -10,6 +10,7 @@ find_package(oboe REQUIRED CONFIG)
 # TSF_IMPLEMENTATION is defined in soundfont-voice.cpp only.
 add_library(pockettracker SHARED
         soundfont-voice.cpp
+        sample-editor.cpp
         audio-engine.cpp
         jni-bridge.cpp
         transient-detector.cpp

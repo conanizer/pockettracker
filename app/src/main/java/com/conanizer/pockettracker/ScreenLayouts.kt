@@ -94,6 +94,7 @@ data class TrackerScreenParams(
     val settingsCursorRow: Int = 0,
     val settingsCursorColumn: Int = 1,
     val cursorRemember: Boolean = false,
+    val notePreviewEnabled: Boolean = true,
     val soundfontPresetName: String = "",
     val soundfontPresetCount: Int = 0,
     val soundfontPresetIndex: Int = 0
@@ -161,6 +162,7 @@ private fun TrackerScreen(params: TrackerScreenParams, modifier: Modifier = Modi
         settingsCursorRow    = params.settingsCursorRow,
         settingsCursorColumn = params.settingsCursorColumn,
         cursorRemember       = params.cursorRemember,
+        notePreviewEnabled   = params.notePreviewEnabled,
         soundfontPresetName  = params.soundfontPresetName,
         soundfontPresetCount = params.soundfontPresetCount,
         soundfontPresetIndex = params.soundfontPresetIndex
@@ -193,7 +195,7 @@ fun FullScreenLayout(
             // INTEGER: PixelPerfectTracker auto-calculates integer scale from available space
             TrackerScreen(params)
         } else {
-            // BILINEAR / NEAREST: render at integer scale then apply fill factor via graphicsLayer
+            // BILINEAR: render at integer scale then apply fill factor via graphicsLayer
             val intScale = layoutConfig.screenScale
             val fillFactor = minOf(
                 layoutConfig.deviceWidth.toFloat() / (DESIGN_WIDTH_PX * intScale),
@@ -500,7 +502,7 @@ fun PortraitLayout2WithVirtualButtons(
                     TrackerScreen(params)
                 }
             } else {
-                // NEAREST / BILINEAR: render at integer-scale size, then stretch by fillFactor
+                // BILINEAR: render at integer-scale size, then stretch by fillFactor
                 // to fill the inner bezel area. Use TransformOrigin(0,0) + explicit pixel
                 // translation so there is no centering-rounding gap on left/top edges.
                 val scaledW = DESIGN_WIDTH_PX  * intScale * fillFactor  // ≈ innerW
