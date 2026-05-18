@@ -155,7 +155,7 @@ If it was supposed to be higher, restore and test.
 
 ---
 
-### ITEM 7 — Missing feature: Table playback row tracking (not a bug, future work)
+### ITEM 7 — ✅ Already implemented (stale TODO removed)
 **Priority:** LOW / POST-MVP  
 **File:** `MainActivity.kt:1351`
 ```kotlin

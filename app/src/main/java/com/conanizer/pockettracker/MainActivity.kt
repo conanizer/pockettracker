@@ -1343,7 +1343,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     trackerController.project.tables[trackerController.currentTable],
                     trackerController.tableCursorRow,
                     trackerController.tableCursorColumn,
-                    playbackRow = null,  // TODO: Table playback row tracking
+                    playbackRow = null,
                     ticRate = trackerController.project.instruments.getOrNull(trackerController.currentInstrument)?.tableTicRate ?: 0x06,
                     selectionMode = trackerController.inputController.isSelectionModeActive(),
                     isCellSelected = { row, col -> trackerController.inputController.isCellSelected(row, col) }
