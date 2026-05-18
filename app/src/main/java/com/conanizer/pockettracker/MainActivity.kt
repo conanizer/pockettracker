@@ -57,7 +57,6 @@ import kotlinx.coroutines.withContext
 import com.conanizer.pockettracker.platform.android.AndroidResourceLoader
 import com.conanizer.pockettracker.platform.android.AndroidFileSystem
 import com.conanizer.pockettracker.platform.android.ThemeLoader
-import com.conanizer.pockettracker.core.ui.DeviceTheme
 import com.conanizer.pockettracker.platform.android.AndroidVideoAudioExtractor
 import com.conanizer.pockettracker.platform.android.ButtonSoundManager
 import com.conanizer.pockettracker.platform.android.ButtonHapticManager
@@ -282,10 +281,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // Step 1: Create platform-specific file system backend
     val fileSystem = remember { AndroidFileSystem(context) }
 
-    // Step 2: Create platform-agnostic FileManager
-    // ✅ No more Context dependency - fully portable!
-    val fileManager = remember { FileManager(fileSystem) }
-
     // Video audio extractor — Android implementation (MediaExtractor + MediaCodec)
     val videoExtractor = remember { AndroidVideoAudioExtractor() }
 
@@ -307,8 +302,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
     }
 
-    // Step 3: Create FileController (coordinates save/load operations)
-    val fileController = remember { FileController(fileManager, logger) }
+    // Step 2/3: Create FileController (coordinates all file operations)
+    val fileController = remember { FileController(fileSystem, logger) }
 
     // ═══════════════════════════════════════════════════════════════════════
     // AUDIO ENGINE SETUP (REFACTORED ARCHITECTURE - Phase 1 COMPLETE!)
@@ -374,7 +369,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // RenderController: Handles offline rendering to WAV files
     // MVP EXPANSION Phase 6: WAV Export functionality
     val renderController = remember {
-        RenderController(audioEngine, playbackController, fileSystem)
+        RenderController(audioEngine, playbackController, fileSystem, logger)
     }
 
     // Render state for WAV export
@@ -663,7 +658,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     var fileBrowserState by remember {
         mutableStateOf(
             FileBrowserModule.State(
-                currentDirectory = File(fileManager.getProjectsDirectory()),
+                currentDirectory = File(fileController.getProjectsDirectory()),
                 items = emptyList(),
                 fileExtension = "ptp"  // Only show .ptp project files
             )
@@ -1899,7 +1894,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                 // Confirm delete
                                 val item = fileBrowserState.items.getOrNull(fileBrowserState.cursor)
                                 if (item != null && item !is FileBrowserModule.BrowserItem.Parent) {
-                                    val deleted = fileManager.deleteFileOrFolder(item.file.absolutePath)
+                                    val deleted = fileController.deleteFileOrFolder(item.file.absolutePath)
                                     if (deleted) {
                                         // Refresh list
                                         val newItems = fileBrowserModule.buildItemList(
@@ -1955,7 +1950,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                         previousScreen = trackerController.currentScreen
                                         trackerController.currentScreen = ScreenType.FILE_BROWSER
                                         // Navigate to folder directly so items list is always rebuilt
-                                        val projectsDir = File(fileManager.getProjectsDirectory())
+                                        val projectsDir = File(fileController.getProjectsDirectory())
                                         fileBrowserState = fileBrowserModule.navigateToFolder(
                                             fileBrowserState.copy(
                                                 fileExtension = "ptp",
@@ -2093,7 +2088,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                         instrumentFileBrowserAction = "LOAD_PRESET"
                                         previousScreen = trackerController.currentScreen
                                         trackerController.currentScreen = ScreenType.FILE_BROWSER
-                                        val instrumentsDir = File(fileManager.getInstrumentsDirectory())
+                                        val instrumentsDir = File(fileController.getInstrumentsDirectory())
                                         fileBrowserState = fileBrowserModule.navigateToFolder(
                                             fileBrowserState.copy(
                                                 fileExtensions = listOf("pti"),
@@ -2104,7 +2099,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                         )
                                     }
                                     3 -> {  // SAVE .pti — open QWERTY keyboard for filename
-                                        val instrumentsDir = fileManager.getInstrumentsDirectory()
+                                        val instrumentsDir = fileController.getInstrumentsDirectory()
                                         java.io.File(instrumentsDir).mkdirs()
                                         val defaultName = instrument.name.ifEmpty {
                                             "INST${instrument.id.toString(16).padStart(2,'0').uppercase()}"
@@ -2130,7 +2125,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                         previousScreen = trackerController.currentScreen
                                         trackerController.currentScreen = ScreenType.FILE_BROWSER
                                         if (instrument.instrumentType == InstrumentType.SOUNDFONT) {
-                                            val soundfontsDir = File(fileManager.getSoundfontsDirectory())
+                                            val soundfontsDir = File(fileController.getSoundfontsDirectory())
                                             fileBrowserState = fileBrowserModule.navigateToFolder(
                                                 fileBrowserState.copy(
                                                     fileExtensions = listOf("sf2", "sf3"),
@@ -2140,7 +2135,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                                 soundfontsDir
                                             )
                                         } else {
-                                            val samplesDir = File(fileManager.getSamplesDirectory())
+                                            val samplesDir = File(fileController.getSamplesDirectory())
                                             val sampleExtensions = listOf("wav") + FileBrowserModule.VIDEO_EXTENSIONS
                                             fileBrowserState = fileBrowserModule.navigateToFolder(
                                                 fileBrowserState.copy(
@@ -2353,7 +2348,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     originalText = currentName,
                                     insertBefore = insertBefore,
                                     context      = QwertyContext.SAMPLE_NAME,
-                                    contextExtra = fileManager.getSamplesDirectory()
+                                    contextExtra = fileController.getSamplesDirectory()
                                 )
                             }
                             19 -> when (s.cursorCol) {
@@ -2369,7 +2364,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                 }
                                 1 -> { // SAVE: direct save if name is free, QWERTY only on collision
                                     val baseName = s.sampleName.ifEmpty { "SAMPLE" }
-                                    val samplesDir = fileManager.getSamplesDirectory()
+                                    val samplesDir = fileController.getSamplesDirectory()
                                     java.io.File(samplesDir).mkdirs()
                                     val targetPath = "$samplesDir/$baseName.wav"
                                     // Apply pitch destructively before saving
@@ -2523,7 +2518,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                     if (sliceCount <= 0) return@buttonA
                                     val baseName = s.sampleName.ifEmpty { "SAMPLE" }
                                         .replace(Regex("[^A-Za-z0-9_-]"), "_")
-                                    val chopsDirPath = "${fileManager.getSamplesDirectory()}/Chops/$baseName"
+                                    val chopsDirPath = "${fileController.getSamplesDirectory()}/Chops/$baseName"
                                     coroutineScope.launch(Dispatchers.Default) {
                                         java.io.File(chopsDirPath).mkdirs()
                                         val floats   = audioEngine.getSampleData(instId)
@@ -2881,7 +2876,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                                 originalText = currentName,
                                 insertBefore = insertBefore,
                                 context      = QwertyContext.SAMPLE_NAME,
-                                contextExtra = fileManager.getSamplesDirectory()
+                                contextExtra = fileController.getSamplesDirectory()
                             )
                         }
                         return@selectHandler

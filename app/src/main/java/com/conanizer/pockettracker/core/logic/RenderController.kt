@@ -1,8 +1,8 @@
 package com.conanizer.pockettracker.core.logic
 
-import android.util.Log
 import com.conanizer.pockettracker.core.audio.AudioEngine
 import com.conanizer.pockettracker.core.data.Project
+import com.conanizer.pockettracker.core.logging.ILogger
 import com.conanizer.pockettracker.core.storage.IFileSystem
 import com.conanizer.pockettracker.core.storage.WavWriter
 
@@ -24,7 +24,8 @@ import com.conanizer.pockettracker.core.storage.WavWriter
 class RenderController(
     private val audioEngine: AudioEngine,
     private val playbackController: PlaybackController,
-    private val fileSystem: IFileSystem
+    private val fileSystem: IFileSystem,
+    private val logger: ILogger
 ) {
     private val audioBackend get() = audioEngine.backend
 
@@ -69,7 +70,7 @@ class RenderController(
 
             if (totalFrames <= 0L) return RenderResult.Error("Song produced no audio")
 
-            Log.d(TAG, "🎬 Scheduled $totalFrames frames (${totalFrames / audioBackend.getSampleRate()}s)")
+            logger.d(TAG, "🎬 Scheduled $totalFrames frames (${totalFrames / audioBackend.getSampleRate()}s)")
 
             progressCallback?.onProgress(0.3f, "Rendering audio...")
 
@@ -109,7 +110,7 @@ class RenderController(
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Render failed: ${e.message}", e)
+            logger.e(TAG, "❌ Render failed: ${e.message}")
             return RenderResult.Error(e.message ?: "Unknown error")
         } finally {
             audioBackend.stopAll()
@@ -154,7 +155,7 @@ class RenderController(
 
             if (totalFrames <= 0L) return RenderResult.Error("Selection produced no audio")
 
-            Log.d(TAG, "🎬 Selection render: $totalFrames frames, tracks=$selectedTrackIds")
+            logger.d(TAG, "🎬 Selection render: $totalFrames frames, tracks=$selectedTrackIds")
 
             progressCallback?.onProgress(0.3f, "Rendering audio...")
 
@@ -189,7 +190,7 @@ class RenderController(
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Selection render failed: ${e.message}", e)
+            logger.e(TAG, "❌ Selection render failed: ${e.message}")
             return RenderResult.Error(e.message ?: "Unknown error")
         } finally {
             audioBackend.stopAll()

@@ -15,7 +15,7 @@
 #  define LOGT(...)
 #endif
 
-const int MAX_VOICES = 8;  // Reduced for testing
+const int MAX_VOICES = 8;  // One voice per track (8 tracks); stereo samples use one slot with sampleDataRight
 const int DECLICK_SAMPLES = 64;  // ~1.45ms anti-click fade at 44100Hz
 
 // ===================================

@@ -1,11 +1,4 @@
-// ============================================================================
-// DeviceTheme.kt — core/ui/DeviceTheme.kt
-//
-// Holds ALL visual settings for the device skin (PORTRAIT2 layout).
-// No Android imports — platform-agnostic for future Linux port.
-// ============================================================================
-
-package com.conanizer.pockettracker.core.ui
+package com.conanizer.pockettracker
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap

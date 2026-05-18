@@ -12,7 +12,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import com.conanizer.pockettracker.R
-import com.conanizer.pockettracker.core.ui.DeviceTheme
+import com.conanizer.pockettracker.DeviceTheme
 
 object ThemeLoader {
 

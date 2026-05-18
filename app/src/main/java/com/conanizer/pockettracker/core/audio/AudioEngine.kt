@@ -9,6 +9,7 @@ import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.data.Table
 import com.conanizer.pockettracker.core.data.VolumeUtils
 import com.conanizer.pockettracker.core.logging.ILogger
+import com.conanizer.pockettracker.core.logic.PlaybackController
 import com.conanizer.pockettracker.core.resources.IResourceLoader
 import java.io.File
 import java.nio.ByteBuffer
@@ -536,7 +537,7 @@ class AudioEngine(
         val instrument = if (instrumentId in 0..255) {
             project.instruments[instrumentId]
         } else {
-            android.util.Log.w("AudioEngine", "❌ Invalid instrumentId=$instrumentId, skipping note")
+            logger.w(TAG, "❌ Invalid instrumentId=$instrumentId, skipping note")
             return
         }
 
@@ -611,7 +612,7 @@ class AudioEngine(
         }
 
         // Debug: Log what we're scheduling
-        android.util.Log.d("AudioEngine", "📋 scheduleNote: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, vol=${"%.4f".format(volume)}, pan=$pan, tableId=$tableId")
+        logger.d(TAG, "📋 scheduleNote: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, vol=${"%.4f".format(volume)}, pan=$pan, tableId=$tableId")
 
         val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
 
@@ -934,7 +935,7 @@ class AudioEngine(
 
         // Log first row for debugging
         val firstRow = table.rows[0]
-        android.util.Log.d(TAG, "📋 Loading table ${table.id}: row0=[transpose=${firstRow.transpose}, vol=${firstRow.volume}]")
+        logger.d(TAG, "📋 Loading table ${table.id}: row0=[transpose=${firstRow.transpose}, vol=${firstRow.volume}]")
 
         backend.loadTable(table.id, rowData)
         loadedTables.add(table.id)
@@ -971,7 +972,7 @@ class AudioEngine(
      */
     fun invalidateTable(tableId: Int) {
         loadedTables.remove(tableId)
-        android.util.Log.d(TAG, "🔄 Invalidated table $tableId cache")
+        logger.d(TAG, "🔄 Invalidated table $tableId cache")
     }
 
     /**
@@ -1023,7 +1024,7 @@ class AudioEngine(
         val instrument = if (instrumentId in 0..255) {
             project.instruments[instrumentId]
         } else {
-            android.util.Log.w("AudioEngine", "❌ Invalid instrumentId=$instrumentId, skipping note")
+            logger.w(TAG, "❌ Invalid instrumentId=$instrumentId, skipping note")
             return
         }
 
@@ -1052,7 +1053,7 @@ class AudioEngine(
         // Resume stream so audio callback can process the queue
         backend.resumeStream()
 
-        android.util.Log.d("AudioEngine", "📋 scheduleNoteWithTable: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, tableId=$tableId, ticRate=$tableTicRate")
+        logger.d(TAG, "📋 scheduleNoteWithTable: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, tableId=$tableId, ticRate=$tableTicRate")
 
         backend.scheduleNoteWithTable(
             targetFrame, sampleId, trackId, frequency, baseFreq, volume, 1.0f, pan,
@@ -1193,7 +1194,7 @@ class AudioEngine(
         // Frames per tic: at 120 BPM, 4 steps/beat, 12 tics/step → ~230 samples/tic
         val beatsPerSecond = tempo / 60.0f
         val stepsPerBeat = 4.0f
-        val ticsPerStep = 12.0f
+        val ticsPerStep = PlaybackController.TICS_PER_STEP.toFloat()
         val framesPerTic = sampleRate / (beatsPerSecond * stepsPerBeat * ticsPerStep)
 
         var anyActive = false

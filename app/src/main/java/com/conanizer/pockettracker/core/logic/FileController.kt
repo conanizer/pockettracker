@@ -1,44 +1,56 @@
 package com.conanizer.pockettracker.core.logic
 
-import com.conanizer.pockettracker.core.logging.ILogger
-import com.conanizer.pockettracker.FileManager
 import com.conanizer.pockettracker.core.data.Instrument
 import com.conanizer.pockettracker.core.data.InstrumentPreset
-import com.conanizer.pockettracker.core.data.TableRow
 import com.conanizer.pockettracker.core.data.Project
+import com.conanizer.pockettracker.core.data.TableRow
+import com.conanizer.pockettracker.core.logging.ILogger
 import com.conanizer.pockettracker.core.storage.FileInfo
+import com.conanizer.pockettracker.core.storage.FileSortMode
+import com.conanizer.pockettracker.core.storage.IFileSystem
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 /**
  * FILE CONTROLLER
  *
- * Coordinates project save/load operations.
+ * Coordinates all project save/load and file-browser operations.
  *
- * ✅ PLATFORM-AGNOSTIC - No Android dependencies (except Log which will be abstracted later)
- *
- * Architecture:
- * - FileController (this) - Business logic coordination
- * - FileManager - File operations
- * - IFileSystem - Platform abstraction
+ * ✅ PLATFORM-AGNOSTIC — No Android dependencies. Uses IFileSystem + ILogger interfaces.
  */
 class FileController(
-    private val fileManager: FileManager,
+    private val fileSystem: IFileSystem,
     private val logger: ILogger
 ) {
     private val TAG = "FileController"
 
-    /**
-     * Save project to file.
-     *
-     * @param project The project to save
-     * @param filename Filename without extension
-     * @return SaveResult indicating success or failure
-     */
+    private val json = Json {
+        prettyPrint = true
+        ignoreUnknownKeys = true
+    }
+
+    // ========================================
+    // DIRECTORY ACCESSORS
+    // ========================================
+
+    fun getProjectsDirectory(): String = fileSystem.getProjectsDirectory()
+    fun getSamplesDirectory(): String = fileSystem.getSamplesDirectory()
+    fun getInstrumentsDirectory(): String = fileSystem.getInstrumentsDirectory()
+    fun getSoundfontsDirectory(): String = fileSystem.getSoundfontsDirectory()
+
+    // ========================================
+    // PROJECT OPERATIONS
+    // ========================================
+
     fun saveProject(project: Project, filename: String): SaveResult {
         return try {
-            val success = fileManager.saveProject(project, filename)
-
+            val dirPath = fileSystem.getProjectsDirectory()
+            val safeName = filename.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+            val filePath = "$dirPath/$safeName.ptp"
+            val jsonString = json.encodeToString(project)
+            val success = fileSystem.writeFile(filePath, jsonString)
             if (success) {
-                logger.d(TAG, "✅ Project saved: $filename")
+                logger.d(TAG, "✅ Project saved: $filePath")
                 SaveResult.Success(filename)
             } else {
                 logger.e(TAG, "❌ Save failed: $filename")
@@ -50,113 +62,100 @@ class FileController(
         }
     }
 
-    /**
-     * Load project from filename.
-     *
-     * @param filename Filename without extension
-     * @return LoadResult with project or error
-     */
     fun loadProject(filename: String): LoadResult {
         return try {
-            val project = fileManager.loadProject(filename)
-
-            if (project != null) {
-                migrateProject(project)
-                logger.d(TAG, "✅ Project loaded: $filename")
-                LoadResult.Success(project)
-            } else {
-                logger.e(TAG, "❌ Load failed: $filename")
-                LoadResult.Error("Failed to load project")
+            val dirPath = fileSystem.getProjectsDirectory()
+            val filePath = "$dirPath/$filename.ptp"
+            if (!fileSystem.fileExists(filePath)) {
+                logger.e(TAG, "❌ File not found: $filePath")
+                return LoadResult.Error("File not found: $filename")
             }
+            val jsonString = fileSystem.readFile(filePath)
+            val project = json.decodeFromString<Project>(jsonString)
+            migrateProject(project)
+            logger.d(TAG, "✅ Project loaded: $filename")
+            LoadResult.Success(project)
         } catch (e: Exception) {
             logger.e(TAG, "❌ Load error: ${e.message}")
             LoadResult.Error(e.message ?: "Unknown error")
         }
     }
 
-    /**
-     * Load project from FileInfo.
-     *
-     * @param fileInfo File information from file browser
-     * @return LoadResult with project or error
-     */
     fun loadProject(fileInfo: FileInfo): LoadResult {
         return try {
-            val project = fileManager.loadProject(fileInfo)
-
-            if (project != null) {
-                migrateProject(project)
-                logger.d(TAG, "✅ Project loaded: ${fileInfo.name}")
-                LoadResult.Success(project)
-            } else {
-                logger.e(TAG, "❌ Load failed: ${fileInfo.name}")
-                LoadResult.Error("Failed to load project")
+            if (!fileSystem.fileExists(fileInfo.path)) {
+                logger.e(TAG, "❌ File not found: ${fileInfo.path}")
+                return LoadResult.Error("File not found: ${fileInfo.name}")
             }
+            val jsonString = fileSystem.readFile(fileInfo.path)
+            val project = json.decodeFromString<Project>(jsonString)
+            migrateProject(project)
+            logger.d(TAG, "✅ Project loaded: ${fileInfo.name}")
+            LoadResult.Success(project)
         } catch (e: Exception) {
             logger.e(TAG, "❌ Load error: ${e.message}")
             LoadResult.Error(e.message ?: "Unknown error")
         }
     }
 
-    /**
-     * List all project files.
-     *
-     * @return List of project files
-     */
     fun listProjects(): List<FileInfo> {
-        return fileManager.listProjects()
+        val dirPath = fileSystem.getProjectsDirectory()
+        val files = fileSystem.listFiles(dirPath, extension = "ptp")
+        return fileSystem.sortFiles(files, FileSortMode.DATE_DESC)
     }
 
-    /**
-     * Delete a project file.
-     *
-     * @param filename Filename without extension
-     * @return true if deleted successfully
-     */
     fun deleteProject(filename: String): Boolean {
-        return fileManager.deleteProject(filename)
+        return try {
+            val dirPath = fileSystem.getProjectsDirectory()
+            val filePath = "$dirPath/$filename.ptp"
+            val deleted = fileSystem.deleteFile(filePath)
+            if (deleted) logger.d(TAG, "✅ Deleted project: $filename")
+            deleted
+        } catch (e: Exception) {
+            logger.e(TAG, "❌ Failed to delete project: ${e.message}")
+            false
+        }
     }
+
+    // ========================================
+    // FILE BROWSER OPERATIONS
+    // ========================================
+
+    fun deleteFileOrFolder(path: String): Boolean = fileSystem.deleteFileOrFolder(path)
 
     // ========================================
     // INSTRUMENT PRESET (.pti) OPERATIONS
     // ========================================
 
-    fun getInstrumentsDirectory(): String = fileManager.getInstrumentsDirectory()
-
-    fun getSoundfontsDirectory(): String = fileManager.getSoundfontsDirectory()
-
-    /**
-     * Save instrument as a .pti preset file.
-     * Embeds table rows if the instrument has a table assigned.
-     */
     fun saveInstrumentPreset(instrument: Instrument, tableRows: Array<TableRow>?, path: String): Boolean {
-        val preset = InstrumentPreset(instrument = instrument, tableRows = tableRows)
-        return fileManager.saveInstrumentPreset(preset, path)
+        return try {
+            val preset = InstrumentPreset(instrument = instrument, tableRows = tableRows)
+            val jsonString = json.encodeToString(preset)
+            val success = fileSystem.writeFile(path, jsonString)
+            if (success) logger.d(TAG, "✅ Instrument preset saved: $path")
+            success
+        } catch (e: Exception) {
+            logger.e(TAG, "❌ Failed to save instrument preset: ${e.message}")
+            false
+        }
     }
 
-    /**
-     * Load a .pti preset file.
-     * Returns null on any failure.
-     */
     fun loadInstrumentPreset(path: String): InstrumentPreset? {
-        return fileManager.loadInstrumentPreset(path)
+        return try {
+            val jsonString = fileSystem.readFile(path)
+            json.decodeFromString<InstrumentPreset>(jsonString)
+        } catch (e: Exception) {
+            logger.e(TAG, "❌ Failed to load instrument preset: ${e.message}")
+            null
+        }
     }
 
     // ========================================
     // PROJECT MIGRATION
     // ========================================
 
-    /**
-     * Migrate old project data to current format.
-     * Called after deserialization to handle format changes.
-     */
     private fun migrateProject(project: Project) {
-        // Version 0 = pre-versioning format. Apply all legacy migrations.
-        // Version 1+ = current format, skip migrations that would corrupt valid data.
         if (project.version < 1) {
-            // Migration: Table volume 0xFF → -1 (Extension Pack 3)
-            // Old format used 0xFF as "no change" sentinel, new format uses -1.
-            // Only run on old files — on new files 0xFF is a valid volume value (full volume).
             var migrated = 0
             for (table in project.tables) {
                 for (row in table.rows) {
@@ -169,7 +168,7 @@ class FileController(
             if (migrated > 0) {
                 logger.d(TAG, "📦 Migrated $migrated table volume values (0xFF → -1)")
             }
-            project.version = 1  // Stamp so re-saves don't re-trigger migration
+            project.version = 1
             logger.d(TAG, "📦 Project migrated from version 0 → 1")
         }
     }
@@ -178,17 +177,11 @@ class FileController(
     // RESULT TYPES
     // ========================================
 
-    /**
-     * Result of save operation.
-     */
     sealed class SaveResult {
         data class Success(val filename: String) : SaveResult()
         data class Error(val message: String) : SaveResult()
     }
 
-    /**
-     * Result of load operation.
-     */
     sealed class LoadResult {
         data class Success(val project: Project) : LoadResult()
         data class Error(val message: String) : LoadResult()
