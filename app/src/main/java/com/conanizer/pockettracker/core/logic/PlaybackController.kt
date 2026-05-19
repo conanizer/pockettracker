@@ -12,90 +12,51 @@ import com.conanizer.pockettracker.core.data.Phrase
 import com.conanizer.pockettracker.core.logging.ILogger
 import com.conanizer.pockettracker.getEffectTypeName
 
-/**
- * Per-track state for persistent effects and note memory.
- *
- * Used to implement M8/LGPT-style persistent effects where an effect
- * continues until cancelled by specific conditions:
- * - REPEAT (RXY) persists until:
- *   1. A new note is triggered on this track
- *   2. Any effect in the same FX column where REPEAT was set
- *   3. KILL effect (K00) in any FX column
- */
+// Per-track state for persistent effects (REPEAT, ARPEGGIO, HOP, pitch, groove).
+// Effects persist until cancelled — e.g. REPEAT until new note, KILL, or same FX column override.
 data class TrackState(
-    /** Last played note on this track (for persistent REPEAT/ARPEGGIO retrigger) */
     var lastNote: Note = Note.EMPTY,
-    /** Last played instrument ID */
     var lastInstrument: Int = 0,
-    /** Last played volume (0.0-1.0) */
     var lastVolume: Float = 1.0f,
-    /** Last played pan (0.0=left, 0.5=center, 1.0=right) */
     var lastPan: Float = 0.5f,
-    /** Last played start point override (-1 = instrument default) */
     var lastStartPoint: Int = -1,
 
-    // Persistent REPEAT state
-    /** Which FX column (1, 2, or 3) the REPEAT was set in, or 0 if not active */
     var repeatActiveColumn: Int = 0,
-    /** Repeat tic interval (parsed from RXY) - max 15 ticks */
     var repeatTicInterval: Int = 0,
-    /** Repeat volume ramp (0-F): 0,8=none, 1-7=decrease, 9-F=increase */
+    // 0,8=none, 1-7=decrease, 9-F=increase
     var repeatVolRamp: Int = 0,
-    /** Audio frame where REPEAT was started (for cross-phrase persistence) */
     var repeatStartFrame: Long = 0,
-    /** Cumulative retrig count since repeat started (for cross-step volume ramp) */
     var repeatRetrigCount: Int = 0,
-    /** Base volume when repeat started (for additive ramp across steps) */
     var repeatBaseVolume: Float = 1.0f,
 
-    // Persistent ARPEGGIO state (ARP Axx and ARC Cxx)
-    /** Which FX column (1, 2, or 3) the ARPEGGIO (Axx) was set in, or 0 if not active */
     var arpeggioActiveColumn: Int = 0,
-    /** Arpeggio value (Axx) - high nibble = +semitone1, low nibble = +semitone2 */
+    // high nibble = +semitone1, low nibble = +semitone2
     var arpeggioValue: Int = 0,
-    /** Arpeggio mode from ARC (Cxx) - 0=UP, 1=DOWN, 2=PINGPONG, 3=RANDOM */
+    // 0=UP, 1=DOWN, 2=PINGPONG, 3=RANDOM
     var arpeggioMode: Int = 0,
-    /** Arpeggio speed in tics from ARC (Cxx) - default 4 (3 notes/step at 12 tics) */
+    // default 4 = 3 notes/step at 12 tics
     var arpeggioSpeed: Int = 4,
-    /** Audio frame where ARPEGGIO was started (for cross-step phase continuity) */
     var arpeggioStartFrame: Long = 0,
 
-    // HOP state (Phase 5)
-    /** Target row for NEXT phrase in chain (-1 = no hop, start at row 0) */
     var hopTargetRow: Int = -1,
-    /** Track is stopped by HOPFF (remains stopped until new chain starts) */
     var trackStopped: Boolean = false,
 
-    // Pitch effect state (Phase 7)
-    /** Whether pitch bend (PBN) is active */
     var pitchBendActive: Boolean = false,
-    /** Whether vibrato (PVB/PVX) is active */
     var vibratoActive: Boolean = false,
-    /** Last note MIDI for PSL (pitch slide) calculation */
     var lastNoteMidi: Int = -1,
 
-    // Table override state (TBL/THO effects)
-    /** Last table ID override from TBL effect (-1 = use instrument default) */
     var lastTableOverride: Int = -1,
-    /** Last table start row from THO effect (-1 = default) */
     var lastTableStartRow: Int = -1,
 
-    // Groove state (GRV effect)
-    /** Active groove ID (0 = default uniform timing, 1-255 = groove table) */
     var grooveId: Int = 0,
-    /** Current position within groove pattern (0-based) */
     var grooveStep: Int = 0,
 
-    // Per-column FX memory (for RND "previously active" command)
-    /** Last non-RND/RNL/CHA FX type per column (1-indexed: [0]=unused, [1]=FX1, [2]=FX2, [3]=FX3) */
+    // 1-indexed: [0]=unused, [1]=FX1, [2]=FX2, [3]=FX3
     var lastColFxType: IntArray = IntArray(4),
-    /** Last non-RND/RNL/CHA FX value per column */
     var lastColFxValue: IntArray = IntArray(4)
 ) {
-    /** Check if persistent REPEAT is active */
     fun hasActiveRepeat(): Boolean = repeatActiveColumn > 0 && repeatTicInterval > 0
 
-    /** Clear persistent REPEAT */
     fun clearRepeat() {
         repeatActiveColumn = 0
         repeatTicInterval = 0
@@ -132,44 +93,19 @@ data class TrackState(
         return target
     }
 
-    /** Clear HOP state (called when new chain starts) */
     fun clearHopState() {
         hopTargetRow = -1
         trackStopped = false
     }
 
-    /** Check if any pitch modulation is active */
     fun hasPitchMod(): Boolean = pitchBendActive || vibratoActive
 
-    /** Clear pitch modulation state */
     fun clearPitchMod() {
         pitchBendActive = false
         vibratoActive = false
     }
 }
 
-/**
- * PlaybackController
- *
- * Manages all playback operations including:
- * - Playback state (playing/stopped)
- * - Phrase/chain/song playback scheduling with continuous lookahead buffering
- * - Sample-accurate note queue management
- * - Playback cursors and position tracking
- * - Per-track persistent effect state (REPEAT, etc.)
- *
- * ✅ PLATFORM-AGNOSTIC - No Android dependencies!
- * ✅ SINGLE SOURCE OF TRUTH - All scheduling logic centralized here
- *
- * IMPORTANT: This controller handles ALL audio scheduling internally.
- * PixelPerfectRenderer ONLY reads playback position for UI updates.
- * This prevents duplicate note scheduling (the "playback doubling" bug).
- *
- * Updated in Phase 1 refactoring to use the new AudioEngine architecture.
- * Updated in Phase 5 to remove Compose state dependencies.
- * Updated Phase 6 to consolidate all scheduling logic (eliminate duplication).
- * Updated Phase 7 to add persistent REPEAT effect (LGPT/M8 style).
- */
 class PlaybackController(
     private val audioEngine: AudioEngine,
     private val effectProcessor: EffectProcessor,
@@ -189,103 +125,53 @@ class PlaybackController(
         audioEngine.sfSlotProvider = { path -> instrumentController?.sfSlotMap?.get(path) }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // STATE
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /** Is playback currently active */
     var isPlaying = false
         private set(value) {
             field = value
             stateObserver.onStateChanged()
         }
 
-    /** Current playback mode */
     var playbackMode = PlaybackMode.STOPPED
         private set(value) {
             field = value
             stateObserver.onStateChanged()
         }
 
-    /** Playback cursor position (for visual feedback) */
     var playbackCursor = 0
         private set(value) {
             field = value
             stateObserver.onStateChanged()
         }
 
-    /** Store current project for ongoing playback */
     private var currentProject: Project? = null
-
-    /** Track next frame position to schedule (for continuous buffering) */
     private var nextFrameToSchedule: Long = 0
-
-    /** Track next chain/song position to schedule (for continuous looping) */
     private var nextChainRowToSchedule: Int = 0
     private var nextSongRowToSchedule: Int = 0
-    private var nextSongChainRowToSchedule: Int = 0  // FIX: Track which chain row within song row
+    private var nextSongChainRowToSchedule: Int = 0
+    private val chainRowStartFrames = mutableMapOf<Int, Long>()
+    private val songPositionStartFrames = mutableMapOf<Pair<Int,Int>, Long>()
 
-    /** Track current playing position for UI cursor (chain mode) */
-    private val chainRowStartFrames = mutableMapOf<Int, Long>()  // Map chain row to start frame
-
-    /** Track current playing position for UI cursor (song mode) */
-    private val songPositionStartFrames = mutableMapOf<Pair<Int,Int>, Long>()  // Map (songRow, chainRow) to start frame
-
-    /**
-     * Scheduling checkpoint: the state just BEFORE a phrase was added to the C++ queue.
-     * Used by notifyDataChanged() to surgically roll back the buffer to the earliest
-     * future phrase boundary when the user edits data during playback.
-     */
+    // Snapshot taken just BEFORE scheduling a phrase, so notifyDataChanged() can roll back
+    // the buffer to the earliest future phrase boundary without disrupting the current phrase.
     private data class SchedulingCheckpoint(
-        val frame: Long,               // Frame at which this phrase starts (= nextFrameToSchedule at save time)
-        val chainRow: Int = 0,         // nextChainRowToSchedule before advancing (CHAIN mode)
-        val songRow: Int = 0,          // nextSongRowToSchedule before advancing (SONG mode)
-        val songChainRow: Int = 0      // nextSongChainRowToSchedule before advancing (SONG mode)
+        val frame: Long,
+        val chainRow: Int = 0,
+        val songRow: Int = 0,
+        val songChainRow: Int = 0
     )
 
-    // Bounded ring of checkpoints (1 per scheduled phrase, kept for up to 4 phrases ahead).
-    // The oldest entry corresponds to the earliest not-yet-played buffered phrase.
+    // Ring capped at 4 entries; oldest = earliest unplayed buffered phrase.
     private val schedulingCheckpoints = ArrayDeque<SchedulingCheckpoint>()
 
-    /** Per-track state for persistent effects (REPEAT, note memory) - 8 tracks */
     private val trackStates = Array(8) { TrackState() }
 
-    /** Lookahead configuration */
     companion object {
-        const val LOOKAHEAD_MS = 50L           // Minimal latency for responsive start
-        const val BUFFER_PHRASES = 2           // Keep 2+ phrases queued ahead
-
-        // ═══════════════════════════════════════════════════════════════════════════
-        // TIC SYSTEM - Subdivisions within a step for precise effect timing
-        // ═══════════════════════════════════════════════════════════════════════════
-        // Tics are the smallest timing unit in tracker music.
-        // A step is divided into TICS_PER_STEP tics.
-        // Effects like REPEAT and ARPEGGIO operate at tic resolution.
-        //
-        // 12 tics/step is a good default because it's divisible by:
-        // - 2 (half-step subdivisions)
-        // - 3 (triplets!)
-        // - 4 (quarter-step subdivisions)
-        // - 6 (sextuplets)
-        //
-        // Future: This will be configurable via Groove screen (post-MVP)
-        // Common values: 6 (classic), 12 (default), 24 (high resolution)
+        const val LOOKAHEAD_MS = 50L
+        const val BUFFER_PHRASES = 2
+        // 12 tics/step: divisible by 2 (half), 3 (triplets), 4 (quarter), 6 (sextuplets)
         const val TICS_PER_STEP = 12
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // PLAYBACK CONTROL
-    // ═══════════════════════════════════════════════════════════════════════════
-    // ═══════════════════════════════════════════════════════════════════════════
-    // PLAYBACK POSITION FOR UI
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * Get current playback position for UI updates
-     * Returns: (row, chainRow, phraseStep, songRow) based on current mode
-     *
-     * This is READ-ONLY for the UI layer. All scheduling happens internally.
-     */
     fun getPlaybackPosition(): PlaybackPosition {
         if (!isPlaying) return PlaybackPosition(0, 0, 0, 0)
 
@@ -303,7 +189,6 @@ class PlaybackController(
                 PlaybackPosition(step, 0, 0, 0)
             }
             PlaybackMode.CHAIN -> {
-                // Find which chain row is currently playing based on audio frame
                 var chainRow = 0
                 var phraseStep = 0
                 for ((row, startFrame) in chainRowStartFrames) {
@@ -317,7 +202,6 @@ class PlaybackController(
                 PlaybackPosition(phraseStep, chainRow, phraseStep, 0)
             }
             PlaybackMode.SONG -> {
-                // Find which song position is currently playing
                 var songRow = 0
                 var chainRow = 0
                 var phraseStep = 0
@@ -336,36 +220,22 @@ class PlaybackController(
         }
     }
 
-    /** Returns the last played note per track (Note.EMPTY = never triggered on this track) */
     fun getTrackNotes(): List<Note> = trackStates.map { it.lastNote }
 
-    /**
-     * Returns the note currently playing on each track, derived from the actual playback
-     * position in the project data. This is accurate (not schedule-ahead like getTrackNotes).
-     *
-     * Looks backward from the current phrase step to find the last triggered note,
-     * so notes persist visually until a new note fires on that track.
-     */
     fun getCurrentPlayingNotes(): List<Note> {
         if (!isPlaying) return List(8) { Note.EMPTY }
-        // Read directly from the C++ voice pool — this reflects the actual playing note
-        // for each track, including when a long sample sustains past the end of its chain.
+        // Read directly from the C++ voice pool — reflects actual playing note
+        // including long samples that sustain past the end of their chain.
         return audioEngine.getActiveTrackNotes()
     }
 
-    /**
-     * Playback position data class for UI rendering
-     */
     data class PlaybackPosition(
         val row: Int,
         val chainRow: Int,
         val phraseStep: Int,
         val songRow: Int
     )
-    /**
-     * Toggle playback on/off
-     * Simple toggle for START button
-     */
+
     fun togglePlayback(project: Project, currentScreen: ScreenType, currentPhrase: Int = 0, currentChain: Int = 0) {
         if (isPlaying) {
             stop()
@@ -380,38 +250,23 @@ class PlaybackController(
         logger.d(TAG, if (isPlaying) "▶️ Playback started" else "⏸️ Playback stopped")
     }
 
-    /**
-     * Start playback
-     */
     fun play() {
         isPlaying = true
         logger.d(TAG, "▶️ Playback started")
     }
 
-    /**
-     * Notify that project data (phrase/instrument) was changed during playback.
-     *
-     * Clears the ahead-scheduled note queue and resets the scheduling pointer to the
-     * current audio frame so that the very next updatePlaybackBuffer() call reschedules
-     * fresh content from current position. There may be a brief gap of at most one step
-     * at the edit moment, which is acceptable.
-     */
     fun notifyDataChanged() {
         if (!isPlaying) return
         val currentFrame = audioEngine.getCurrentFrame()
 
-        // Find the earliest checkpoint whose phrase hasn't started playing yet.
-        // That's the "next phrase boundary" — we'll clear only from there, keeping
-        // the currently-playing phrase intact and just refreshing what comes next.
+        // Find the earliest unplayed buffered phrase boundary; clear only from there
+        // so the currently-playing phrase is untouched.
         val checkpoint = schedulingCheckpoints.firstOrNull { it.frame > currentFrame }
-            ?: return  // Nothing buffered yet; change will be picked up naturally
+            ?: return
 
-        // Clear only future-scheduled notes (from the phrase boundary onward)
         audioEngine.clearScheduledNotesFrom(checkpoint.frame)
         nextFrameToSchedule = checkpoint.frame
 
-        // Restore scheduling indices to before that phrase was scheduled, so
-        // updatePlaybackBuffer() re-schedules it with fresh data on the next tick
         when (playbackMode) {
             PlaybackMode.CHAIN -> {
                 nextChainRowToSchedule = checkpoint.chainRow
@@ -420,10 +275,9 @@ class PlaybackController(
                 nextSongRowToSchedule = checkpoint.songRow
                 nextSongChainRowToSchedule = checkpoint.songChainRow
             }
-            else -> { /* PHRASE: no index to restore, nextFrameToSchedule is enough */ }
+            else -> { /* PHRASE: nextFrameToSchedule reset is enough */ }
         }
 
-        // Drop all checkpoints at or after this one (they're now stale)
         while (schedulingCheckpoints.isNotEmpty() && schedulingCheckpoints.last().frame >= checkpoint.frame) {
             schedulingCheckpoints.removeLast()
         }
@@ -431,9 +285,6 @@ class PlaybackController(
         logger.d(TAG, "🔄 Data changed — rolled back buffer to frame ${checkpoint.frame} (was at $currentFrame)")
     }
 
-    /**
-     * Stop playback and clear queue
-     */
     fun stop() {
         isPlaying = false
         playbackMode = PlaybackMode.STOPPED
@@ -444,7 +295,6 @@ class PlaybackController(
         songPositionStartFrames.clear()
         nextSongChainRowToSchedule = 0
         schedulingCheckpoints.clear()
-        // Clear all track states (persistent effects, note memory, HOP, groove)
         trackStates.forEach {
             it.clearRepeat()
             it.clearAllArpeggioState()
@@ -455,29 +305,11 @@ class PlaybackController(
         logger.d(TAG, "⏹️ Playback stopped")
     }
 
-    /** Save a scheduling checkpoint, keeping at most 4 entries to bound memory. */
     private fun saveCheckpoint(cp: SchedulingCheckpoint) {
         schedulingCheckpoints.addLast(cp)
         if (schedulingCheckpoints.size > 4) schedulingCheckpoints.removeFirst()
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // LOOKAHEAD BUFFER MAINTENANCE
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * Update playback buffer by scheduling more notes if needed.
-     *
-     * CRITICAL: This is called by the UI layer (PixelPerfectRenderer) to maintain
-     * the lookahead buffer during playback. This is the ONLY place where continuous
-     * scheduling should happen for Phrase/Chain/Song playback.
-     *
-     * IMPORTANT: This method prevents the "playback doubling" bug by centralizing
-     * all scheduling logic in PlaybackController. PixelPerfectRenderer only calls
-     * this method and reads playback position via getPlaybackPosition().
-     *
-     * Call this regularly (e.g., 60 Hz) when playback is active.
-     */
     fun updatePlaybackBuffer() {
         if (!isPlaying || currentProject == null) return
 
@@ -489,22 +321,17 @@ class PlaybackController(
         val framesPerPhrase = framesPerStep * 16
         val currentFrame = audioEngine.getCurrentFrame()
 
-        // Check if we need more notes in the buffer
-        val lookaheadFrames = (LOOKAHEAD_MS * sampleRate / 1000.0).toLong()
         val bufferRemaining = nextFrameToSchedule - currentFrame
         val minBuffer = (BUFFER_PHRASES * framesPerPhrase)
 
         if (bufferRemaining < minBuffer) {
             when (playbackMode) {
                 PlaybackMode.PHRASE -> {
-                    // For phrase: reschedule the same phrase (looping)
                     val phrase = project.phrases[currentPhraseId]
                     val trackState = trackStates[0]
 
-                    // Save checkpoint BEFORE scheduling (frame = start of the next iteration)
                     saveCheckpoint(SchedulingCheckpoint(frame = nextFrameToSchedule))
 
-                    // Check if HOP target row is set from previous iteration
                     val hopStartRow = trackState.consumeHopTarget()
                     val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
 
@@ -513,14 +340,10 @@ class PlaybackController(
                 }
 
                 PlaybackMode.CHAIN -> {
-                    // For chain: schedule next non-empty phrase in chain
                     val chain = project.chains[currentChainId]
-                    val trackState = trackStates[0]  // Chain mode uses track 0
+                    val trackState = trackStates[0]
 
-                    // Check if track is stopped by HOPFF
                     if (trackState.trackStopped) {
-                        // Track is stopped, don't schedule more phrases
-                        // Keep playback running but silent until chain ends
                         nextChainRowToSchedule = (nextChainRowToSchedule + 1) % 16
                         nextFrameToSchedule += framesPerPhrase
                         return
@@ -531,44 +354,33 @@ class PlaybackController(
                         val phraseId = chain.phraseRefs[nextRow]
                         val transposeSemitones = chain.getTransposeSemitones(nextRow)
 
-                        // Save checkpoint BEFORE scheduling (indices are still pointing at nextRow)
                         saveCheckpoint(SchedulingCheckpoint(
                             frame = nextFrameToSchedule,
-                            chainRow = nextRow  // = nextChainRowToSchedule resolved to actual row
+                            chainRow = nextRow
                         ))
 
-                        // Check if HOP target row is set from previous phrase
                         val hopStartRow = trackState.consumeHopTarget()
                         val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
 
-                        // Schedule phrase starting from HOP target row (or 0 if no HOP)
                         val result = schedulePhrase(project.phrases[phraseId], nextFrameToSchedule, 0, transposeSemitones, project, framesPerStep, effectiveStartRow)
-                        chainRowStartFrames[nextRow] = nextFrameToSchedule  // Track start frame for cursor
-
-                        // Advance frame by actual frames scheduled (accounts for groove timing + HOP)
+                        chainRowStartFrames[nextRow] = nextFrameToSchedule
                         nextFrameToSchedule += result.framesScheduled
 
                         nextChainRowToSchedule = (nextRow + 1) % 16
                     } else {
-                        // Chain is empty, stop playback
                         stop()
                     }
                 }
 
                 PlaybackMode.SONG -> {
-                    // For song: schedule next phrases across all tracks
-                    val song = project.tracks  // 8 tracks
-
-                    // Compute song length (max number of song rows across tracks)
+                    val song = project.tracks
                     val songLength = (0..7).map { trackId ->
                         song[trackId].chainRefs.size
                     }.maxOrNull() ?: 0
 
-                    // If song has no rows, stop playback
                     if (songLength == 0) {
                         stop()
                     } else {
-                        // Find max chain length in current song row (determines how many phrase-rows we need)
                         var maxChainLength = 0
                         for (trackId in 0..7) {
                             if (nextSongRowToSchedule < song[trackId].chainRefs.size) {
@@ -581,30 +393,25 @@ class PlaybackController(
                             }
                         }
 
-                        // If no chains in this song row, advance to next song row and wrap at songLength
                         if (maxChainLength == 0) {
                             nextSongRowToSchedule++
                             nextSongChainRowToSchedule = 0
-                            // Clear trackStopped when new chain starts (new song row)
                             trackStates.forEach { it.trackStopped = false }
                             if (nextSongRowToSchedule >= songLength) {
-                                nextSongRowToSchedule = 0  // Loop song
+                                nextSongRowToSchedule = 0
                             }
                         } else if (nextSongChainRowToSchedule < maxChainLength) {
-                            // Save checkpoint BEFORE scheduling this chain-row slot
                             saveCheckpoint(SchedulingCheckpoint(
                                 frame = nextFrameToSchedule,
                                 songRow = nextSongRowToSchedule,
                                 songChainRow = nextSongChainRowToSchedule
                             ))
 
-                            // Schedule this chain row for all 8 tracks
                             var scheduledAny = false
-                            var maxFramesScheduled = 0L  // Track max frames for frame advancement (groove-accurate)
+                            var maxFramesScheduled = 0L
                             for (trackId in 0..7) {
                                 val trackState = trackStates[trackId]
 
-                                // Skip if track is stopped by HOPFF
                                 if (trackState.trackStopped) {
                                     continue
                                 }
@@ -617,16 +424,13 @@ class PlaybackController(
                                             val phraseId = chain.phraseRefs[nextSongChainRowToSchedule]
                                             val transposeSemitones = chain.getTransposeSemitones(nextSongChainRowToSchedule)
 
-                                            // Check if HOP target row is set from previous phrase
                                             val hopStartRow = trackState.consumeHopTarget()
                                             val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
 
-                                            // Schedule phrase with HOP start row
                                             val result = schedulePhrase(project.phrases[phraseId], nextFrameToSchedule, trackId, transposeSemitones, project, framesPerStep, effectiveStartRow)
                                             songPositionStartFrames[Pair(nextSongRowToSchedule, nextSongChainRowToSchedule)] = nextFrameToSchedule
                                             scheduledAny = true
 
-                                            // Track max frames scheduled across all tracks (groove-accurate)
                                             if (result.framesScheduled > maxFramesScheduled) {
                                                 maxFramesScheduled = result.framesScheduled
                                             }
@@ -636,8 +440,8 @@ class PlaybackController(
                             }
 
                             if (scheduledAny) {
-                                // Advance by max frames scheduled (so all tracks stay in sync)
-                                // Tracks with HOP will have empty time before their next phrase
+                                // Advance by the longest track's scheduled duration to keep all tracks in sync.
+                                // Tracks stopped by HOP will just have silence before their next phrase.
                                 nextFrameToSchedule += maxFramesScheduled
                                 nextSongChainRowToSchedule++
                             } else {
@@ -645,42 +449,22 @@ class PlaybackController(
                                 nextSongChainRowToSchedule++
                             }
                         } else {
-                            // Reached end of all chain rows in this song row, move to next song row
                             nextSongRowToSchedule++
                             nextSongChainRowToSchedule = 0
-                            // Clear trackStopped when new chain starts (new song row)
                             trackStates.forEach { it.trackStopped = false }
                             if (nextSongRowToSchedule >= songLength) {
-                                nextSongRowToSchedule = 0  // Loop song
+                                nextSongRowToSchedule = 0
                             }
                         }
                     }
                 }
 
-                else -> {
-                    // Not playing, do nothing
-                }
+                else -> {}
             }
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // PHRASE PLAYBACK
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * Play a phrase (16 steps)
-     *
-     * Initializes playback with lookahead buffer.
-     * Continuous scheduling is NOT done here - PixelPerfectRenderer will call
-     * updatePlaybackBuffer() periodically to maintain the buffer.
-     *
-     * @param project Project containing phrase data
-     * @param phraseId Which phrase to play (0-255)
-     * @param loop Whether to loop playback
-     */
     fun playPhrase(project: Project, phraseId: Int, loop: Boolean = true) {
-        // Stop any current playback first
         stop()
 
         currentProject = project
@@ -703,48 +487,20 @@ class PlaybackController(
 
         logger.d(TAG, "▶️ Playing phrase $phraseId (tempo: $tempo BPM)")
 
-        // Initialize scheduling state
         nextFrameToSchedule = playbackStartFrame
-
-        // Schedule first phrase immediately
         val result = schedulePhrase(phrase, playbackStartFrame, 0, 0, project, framesPerStep)
         nextFrameToSchedule += result.framesScheduled
 
         logger.d(TAG, "✅ Phrase playback initialized")
     }
 
-    /**
-     * Schedule a single phrase for playback
-     * Helper used by playPhrase and updatePlaybackBuffer
-     *
-     * Now handles persistent REPEAT effect:
-     * - Passes track state to each step for persistence tracking
-     * - REPEAT continues until cancelled by note, same-column FX, or KILL
-     * - Supports multi-step intervals (R0C+ = every N steps)
-     */
-    /**
-     * Result of scheduling a phrase, including how many rows were actually played.
-     * Used to calculate correct frame advancement when HOP cuts phrase short.
-     */
     data class SchedulePhraseResult(
-        val rowsScheduled: Int,      // How many rows were actually scheduled (may be < 16 due to HOP)
-        val hopTriggered: Boolean,   // Whether HOP effect ended phrase early
-        val trackStopped: Boolean,   // Whether HOPFF stopped the track
-        val framesScheduled: Long = 0L  // Actual frames used (accounts for groove timing)
+        val rowsScheduled: Int,
+        val hopTriggered: Boolean,
+        val trackStopped: Boolean,
+        val framesScheduled: Long = 0L
     )
 
-    /**
-     * Schedule a single phrase for playback.
-     *
-     * @param phrase The phrase to schedule
-     * @param startFrame When this phrase should start (audio frame)
-     * @param trackId Which track (0-7)
-     * @param transposeSemitones Semitones to transpose
-     * @param project Project containing instrument data
-     * @param framesPerStep Duration of each step in frames
-     * @param startRow Row to start from (0-15), used for HOP effect (default 0)
-     * @return SchedulePhraseResult with info about rows scheduled and HOP status
-     */
     private fun schedulePhrase(
         phrase: Phrase,
         startFrame: Long,
@@ -758,28 +514,24 @@ class PlaybackController(
         var rowsScheduled = 0
         val trackState = trackStates[trackId.coerceIn(0, 7)]
 
-        // If track is stopped by HOPFF, don't schedule anything
         if (trackState.trackStopped) {
             logger.d(TAG, "  Track $trackId stopped by HOP FF, skipping phrase")
             return SchedulePhraseResult(0, hopTriggered = false, trackStopped = true, framesScheduled = 0L)
         }
 
-        // framesPerTic = base frame duration per tic (constant at any tempo).
-        // Step durations are groove-controlled: each step may have a different tic count.
         val framesPerTic = framesPerStep / TICS_PER_STEP
         var localGrooveStep = trackState.grooveStep
-        var anyGrooveActive = false  // Becomes true if any step uses a groove (for post-loop persistence)
+        var anyGrooveActive = false
 
-        // Schedule steps starting from startRow
         val effectiveStartRow = startRow.coerceIn(0, 15)
-        var frameOffset = 0L  // Accumulates actual frame count (may differ from stepIndex * framesPerStep with groove)
+        var frameOffset = 0L
 
         for (stepIndex in effectiveStartRow until 16) {
             val step = phrase.steps[stepIndex]
 
-            // Pre-scan for GRV effect BEFORE computing step duration so the new groove
-            // takes effect immediately on the step that triggers it, not on the next phrase.
-            // scheduleStepWithEffects will also process GRV (idempotent — same values).
+            // Pre-scan GRV before computing step duration so the new groove takes effect
+            // immediately on the triggering step, not deferred to the next phrase.
+            // scheduleStepWithEffects also processes GRV (idempotent — same result).
             for (fxSlot in 1..3) {
                 val fxType = when (fxSlot) { 1 -> step.fx1Type; 2 -> step.fx2Type; else -> step.fx3Type }
                 val fxValue = when (fxSlot) { 1 -> step.fx1Value; 2 -> step.fx2Value; else -> step.fx3Value }
@@ -790,9 +542,7 @@ class PlaybackController(
                 }
             }
 
-            // Look up current groove per-step (grooveId may have changed via GRV above).
-            // Fall back to exact framesPerStep when groove has no active steps to avoid
-            // integer rounding drift in the common case.
+            // Fall back to exact framesPerStep (no groove) to avoid rounding drift.
             val currentGroove = project.grooves[trackState.grooveId.coerceIn(0, 255)]
             val currentGrooveActive = currentGroove.activeLength() > 0
 
@@ -804,7 +554,6 @@ class PlaybackController(
                 framesPerStep
             }
 
-            // Groove value 00: skip this phrase step entirely (no note, no effects, no time advance)
             if (stepDuration == 0L) {
                 rowsScheduled++
                 localGrooveStep++
@@ -845,7 +594,6 @@ class PlaybackController(
             }
         }
 
-        // Persist groove position for the next phrase (if groove was active at any point this phrase)
         if (anyGrooveActive) trackState.grooveStep = localGrooveStep
 
         if (scheduledNotes > 0) {
@@ -859,19 +607,7 @@ class PlaybackController(
         return SchedulePhraseResult(rowsScheduled, hopTriggered = false, trackStopped = false, framesScheduled = frameOffset)
     }
 
-    /**
-     * Play a chain (16 phrase slots with transpose)
-     *
-     * Initializes playback with lookahead buffer.
-     * Continuous scheduling is NOT done here - PixelPerfectRenderer will call
-     * updatePlaybackBuffer() periodically to maintain the buffer.
-     *
-     * @param project Project containing chain data
-     * @param chainId Which chain to play (0-255)
-     * @param loop Whether to loop playback
-     */
     fun playChain(project: Project, chainId: Int, loop: Boolean = true) {
-        // Stop any current playback first
         stop()
 
         currentProject = project
@@ -891,22 +627,19 @@ class PlaybackController(
         val sampleRate = audioEngine.getDeviceSampleRate()
         val msPerStep = (60000.0 / tempo / 4.0)
         val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
-        val framesPerPhrase = framesPerStep * 16
 
         logger.d(TAG, "▶️ Playing chain $chainId (tempo: $tempo BPM)")
 
-        // Initialize scheduling state
         nextFrameToSchedule = playbackStartFrame
         nextChainRowToSchedule = 0
         chainRowStartFrames.clear()
 
-        // Find and schedule first non-empty phrase
         val firstRow = findNextNonEmptyChainRow(0, chain)
         if (firstRow != null) {
             val phraseId = chain.phraseRefs[firstRow]
             val transposeSemitones = chain.getTransposeSemitones(firstRow)
             val result = schedulePhrase(project.phrases[phraseId], playbackStartFrame, 0, transposeSemitones, project, framesPerStep)
-            chainRowStartFrames[firstRow] = playbackStartFrame  // Track start frame for cursor
+            chainRowStartFrames[firstRow] = playbackStartFrame
             nextFrameToSchedule += result.framesScheduled
             nextChainRowToSchedule = firstRow + 1
         }
@@ -914,9 +647,6 @@ class PlaybackController(
         logger.d(TAG, "✅ Chain playback initialized")
     }
 
-    /**
-     * Find next non-empty chain row (circular, wrapping at 16)
-     */
     private fun findNextNonEmptyChainRow(startRow: Int, chain: Chain): Int? {
         var row = startRow
         var attempts = 0
@@ -927,19 +657,7 @@ class PlaybackController(
         return if (attempts >= 16) null else row
     }
 
-    /**
-     * Play song (8 tracks polyphonic)
-     *
-     * Initializes playback with lookahead buffer.
-     * Continuous scheduling is NOT done here - PixelPerfectRenderer will call
-     * updatePlaybackBuffer() periodically to maintain the buffer.
-     *
-     * @param project Project containing song data
-     * @param startRow Which song row to start from
-     * @param loop Whether to loop playback
-     */
     fun playSong(project: Project, startRow: Int = 0, loop: Boolean = true) {
-        // Stop any current playback first
         stop()
 
         currentProject = project
@@ -954,7 +672,6 @@ class PlaybackController(
 
         logger.d(TAG, "▶️ Playing song from row $startRow (tempo: $tempo BPM)")
 
-        // Initialize scheduling state
         nextFrameToSchedule = playbackStartFrame
         nextSongRowToSchedule = startRow
         nextSongChainRowToSchedule = 0
@@ -963,29 +680,8 @@ class PlaybackController(
         logger.d(TAG, "✅ Song playback initialized")
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // OFFLINE RENDER SCHEDULING
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * Schedule the entire song synchronously for offline WAV rendering.
-     *
-     * Uses the exact same [schedulePhrase] logic as live song playback, so groove,
-     * DEL, arpeggio, HOP, pitch effects — everything — behaves identically.
-     *
-     * Call order:
-     *   1. audioBackend.resetFrameCounter()
-     *   2. audioBackend.clearScheduledNotes()
-     *   3. scheduleSongForRender(project, startRow, endRow)  ← fills note queue at frames 0..N
-     *   4. audioBackend.renderFrames(totalFrames, sampleRate)
-     *
-     * @param project  Project to render
-     * @param startRow First song row to render (inclusive)
-     * @param endRow   Last song row to render (inclusive)
-     * @return Total audio frames scheduled (pass directly to renderFrames)
-     */
+    // Uses the same schedulePhrase logic as live playback — groove, HOP, pitch, etc. all identical.
     fun scheduleSongForRender(project: Project, startRow: Int, endRow: Int): Long {
-        // Fresh track state — no carry-over from live playback
         for (i in trackStates.indices) trackStates[i] = TrackState()
 
         val sampleRate = audioEngine.getDeviceSampleRate()
@@ -995,10 +691,8 @@ class PlaybackController(
         var currentFrame = 0L
 
         for (songRow in startRow..endRow) {
-            // Clear per-row stop flags (mirrors updatePlaybackBuffer SONG logic)
             trackStates.forEach { it.trackStopped = false }
 
-            // Max non-empty chain slots across all tracks determines phrase count for this row
             var maxChainLength = 0
             for (trackId in 0..7) {
                 val track = project.tracks[trackId]
@@ -1051,18 +745,6 @@ class PlaybackController(
         return currentFrame
     }
 
-    /**
-     * Schedule only the selected tracks in a song row range for offline rendering.
-     *
-     * Identical to [scheduleSongForRender] but skips tracks not in [selectedTrackIds].
-     * This allows rendering just the selected tracks from a song selection to a WAV.
-     *
-     * @param project  Project to render
-     * @param startRow First song row (inclusive)
-     * @param endRow   Last song row (inclusive)
-     * @param selectedTrackIds  0-indexed track IDs to include (0-7)
-     * @return Total audio frames scheduled
-     */
     fun scheduleSelectionForRender(
         project: Project,
         startRow: Int,
@@ -1134,53 +816,9 @@ class PlaybackController(
         return currentFrame
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // STEP SCHEDULING HELPER
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * Schedule a single phrase step with all effects applied.
-     *
-     * This is the unified helper for scheduling notes across all playback modes
-     * (Phrase, Chain, Song). It handles:
-     * - Note scheduling with optional transposition
-     * - OFFSET effect (Oxx) - modifies sample start point
-     * - VOLUME effect (Vxx) - overrides step volume
-     * - KILL effect (K00) - stops sample and clears persistent REPEAT
-     * - REPEAT effect (RXY) - M8-style retrigger with volume ramping
-     *
-     * ## REPEAT (RXY) - M8-style format:
-     * - R00 = cancel persistent REPEAT
-     * - RX0 (Y=0): retrig every X ticks, no vol ramp
-     * - RXY (Y!=0): retrig every Y ticks, vol ramp X
-     *   - X=0,8: no volume change
-     *   - X=1-7: decrease volume per retrig
-     *   - X=9-F: increase volume per retrig
-     *
-     * REPEAT persists until cancelled by:
-     * 1. A new note on this track
-     * 2. Any effect in the same FX column where REPEAT was set
-     * 3. KILL effect (K00) in any FX column
-     *
-     * When persistent REPEAT is active and step has no note, the last played
-     * note/instrument is retriggered at the REPEAT interval.
-     *
-     * @param step The phrase step to schedule
-     * @param targetFrame When this step should trigger (audio frame)
-     * @param stepDuration Duration of step in frames (for time-based effects)
-     * @param trackId Which track (0-7)
-     * @param transposeSemitones Semitones to transpose (0 for Phrase, varies for Chain/Song)
-     * @param project Project containing instrument data
-     * @param trackState Per-track state for persistent effects (modified in place)
-     * @param stepIndex Current step index in phrase (0-15), for multi-step REPEAT
-     * @return true if a note was scheduled, false if step was empty
-     */
-    /**
-     * Result of scheduling a single step.
-     */
     data class ScheduleStepResult(
-        val noteScheduled: Boolean,  // Whether a note was scheduled
-        val hopTriggered: Boolean    // Whether HOP effect was triggered (phrase should end)
+        val noteScheduled: Boolean,
+        val hopTriggered: Boolean
     )
 
     fun scheduleStepWithEffects(
@@ -1682,7 +1320,7 @@ class PlaybackController(
         }
 
         // ═══════════════════════════════════════════════════════════════════════════
-        // STEP 2.5: Handle HOP effect (Phase 5)
+        // STEP 2.5: Handle HOP effect
         // ═══════════════════════════════════════════════════════════════════════════
         // HOP in phrase context:
         // - HOPFF (0xFF) = Stop track playback (until new chain starts)
@@ -1984,29 +1622,6 @@ class PlaybackController(
         return ScheduleStepResult(noteScheduled = noteScheduled, hopTriggered = hopTriggered)
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // ARPEGGIO HELPERS
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * Schedule arpeggio notes for the current step.
-     *
-     * Generates a sequence of notes based on the arpeggio value (Axx) and config (Cxx),
-     * then schedules them at regular tic intervals within the step.
-     *
-     * @param targetFrame When this step starts (audio frame)
-     * @param stepDuration Duration of step in frames
-     * @param trackId Which track (0-7)
-     * @param trackState Per-track state (contains arpeggio config)
-     * @param project Project containing instrument data
-     * @param hasNote Whether this step has a note
-     * @param step The phrase step
-     * @param params Resolved step parameters
-     * @param transposeSemitones Semitones to transpose
-     * @param instrVol Instrument volume (0.0–1.0)
-     * @param phraseVol Phrase step volume (0.0–1.0); track × master applied in C++
-     * @param finalPan Pre-calculated pan (0.0=left, 0.5=center, 1.0=right)
-     */
     private fun scheduleArpeggioNotes(
         targetFrame: Long,
         stepDuration: Long,
@@ -2116,16 +1731,6 @@ class PlaybackController(
         }
     }
 
-    /**
-     * Get the MIDI note for a specific position in the arpeggio pattern.
-     *
-     * @param baseMidi Base note MIDI number
-     * @param semi1 First semitone offset
-     * @param semi2 Second semitone offset
-     * @param mode Arpeggio mode (0=UP, 1=DOWN, 2=PINGPONG, 3=RANDOM)
-     * @param position Position in the pattern (0, 1, 2, or 3 for PINGPONG)
-     * @return MIDI note number
-     */
     private fun getArpeggioNote(baseMidi: Int, semi1: Int, semi2: Int, mode: Int, position: Int): Int {
         val note0 = baseMidi            // Root
         val note1 = baseMidi + semi1    // +semi1
@@ -2172,40 +1777,15 @@ class PlaybackController(
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // TIMING HELPERS
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * Calculate target frame for a step based on tempo
-     *
-     * @param startFrame Frame when playback started
-     * @param stepNumber Which step (0-15 for phrase, 0+ for song)
-     * @param tempo Project tempo in BPM
-     * @return Target frame number for this step
-     */
     fun calculateStepFrame(startFrame: Long, stepNumber: Int, tempo: Int): Long {
         return audioEngine.calculateTargetFrame(startFrame, stepNumber, tempo)
     }
 
-    /**
-     * Get current audio frame (for scheduling)
-     */
     fun getCurrentFrame(): Long {
         return audioEngine.getCurrentFrame()
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// TYPES
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Playback mode enumeration
- */
 enum class PlaybackMode {
-    STOPPED,    // No playback
-    PHRASE,     // Playing single phrase
-    CHAIN,      // Playing chain (sequence of phrases)
-    SONG        // Playing full song (8 tracks)
+    STOPPED, PHRASE, CHAIN, SONG
 }

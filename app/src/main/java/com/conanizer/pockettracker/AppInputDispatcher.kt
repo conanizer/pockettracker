@@ -27,10 +27,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-// ═══════════════════════════════════════════════════════════════════════════
-// SUPPORT TYPES
-// ═══════════════════════════════════════════════════════════════════════════
-
 /** Tracks where a single A-press inserted into an empty cell (screen, row, col). */
 data class InsertPosition(val screen: ScreenType, val row: Int, val col: Int)
 
@@ -93,14 +89,6 @@ class AppStateRefs(
     val sendPeakBuffer: FloatArray
 )
 
-// ═══════════════════════════════════════════════════════════════════════════
-// APP INPUT DISPATCHER
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Contains all button handler logic extracted from PocketTrackerApp.
- * Call createButtonHandlers() to get a ButtonHandlers instance for InputMapper.
- */
 class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
 
     // ── Controller shortcuts ─────────────────────────────────────────────────
@@ -159,10 +147,6 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     private val trackPeakBuffer get() = refs.trackPeakBuffer
     private val masterPeakBuffer get() = refs.masterPeakBuffer
     private val sendPeakBuffer get() = refs.sendPeakBuffer
-
-    // ═════════════════════════════════════════════════════════════════════════
-    // SMALL HELPERS
-    // ═════════════════════════════════════════════════════════════════════════
 
     private fun computeSliceCuePoints(state: SampleEditorState): IntArray = when (state.sliceMethod) {
         0 -> state.transientMarkers.filter { it > 0 && it < state.totalFrames }.toIntArray()
@@ -315,10 +299,6 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         }
         trackerController.projectVersion++
     }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    // GENERIC INPUT HELPERS
-    // ═════════════════════════════════════════════════════════════════════════
 
     fun handleGenericInput(handlerFunction: (CursorContext) -> InputAction) {
         if (eqEditorState.isOpen) {
@@ -765,10 +745,6 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         applyInputAction(action)
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // DPAD HANDLERS
-    // ═════════════════════════════════════════════════════════════════════════
-
     fun handleDPadUp() {
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorUp() }
         else if (showCleanDialog) { cleanDialogCursor = 0 }
@@ -806,10 +782,6 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         }
         else handleDPadNavigation { trackerController.inputController.handleDPadRight() }
     }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    // PLACEHOLDER: large handlers added by subsequent edits
-    // ═════════════════════════════════════════════════════════════════════════
 
     fun handleButtonA() {
         if (qwertyKeyboardState.isOpen) {
@@ -2077,10 +2049,6 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             fxHelperState = FxHelperState()
         }
     }
-
-    // ═════════════════════════════════════════════════════════════════════════
-    // FACTORY
-    // ═════════════════════════════════════════════════════════════════════════
 
     fun createButtonHandlers(): ButtonHandlers = ButtonHandlers(
         onDPadUp    = { handleDPadUp() },

@@ -50,24 +50,6 @@ fun rowBgColor(
     else                              -> Color(0xFF0a0a0a)
 }
 
-/**
- * EDITOR HELPERS
- *
- * Helper functions for all editor screens (Phrase, Chain, Song, Project).
- * Migrated from MainActivity during Phase 4 cleanup (January 2025).
- *
- * This file contains UI-specific data manipulation functions that don't belong
- * in controllers (too UI-specific) but were cluttering MainActivity.
- */
-
-// ═══════════════════════════════════════════════════════════════════════════
-// PHRASE EDITOR HELPERS
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Clear effect (set to NONE) - A+B shortcut
- * @param fxSlot Which FX slot (1, 2, or 3)
- */
 fun clearEffect(step: PhraseStep, fxSlot: Int) {
     when (fxSlot) {
         1 -> {
@@ -106,7 +88,6 @@ fun getEffectTypeName(effectType: Int): String {
         0x14 -> "TBL"  // Table assign
         0x15 -> "THO"  // Table Hop
         0x16 -> "VOL"  // Volume
-        // Pitch effects (Phase 7)
         0x19 -> "PSL"  // Pitch Slide (portamento)
         0x1A -> "PBN"  // Pitch Bend
         0x1B -> "PVB"  // Vibrato
@@ -115,25 +96,13 @@ fun getEffectTypeName(effectType: Int): String {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// CHAIN EDITOR HELPERS
-// ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * Clear chain slot (set to empty)
- */
+
 fun clearChainSlot(chain: Chain, row: Int) {
     chain.phraseRefs[row] = -1  // -1 = empty
     chain.transposeValues[row] = 0x00  // Reset transpose to default
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// SONG EDITOR HELPERS
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Clear chain reference in song track (set to empty)
- */
 fun clearSongChainRef(track: Track, row: Int) {
     if (row < track.chainRefs.size) {
         track.chainRefs[row] = -1

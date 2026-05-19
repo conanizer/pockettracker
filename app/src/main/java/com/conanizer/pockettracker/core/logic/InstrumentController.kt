@@ -11,20 +11,6 @@ import com.conanizer.pockettracker.core.media.IVideoAudioExtractor
 import com.conanizer.pockettracker.core.storage.IFileSystem
 import com.conanizer.pockettracker.core.storage.WavWriter
 
-/**
- * InstrumentController
- *
- * Manages all instrument-related operations including:
- * - Instrument selection and navigation
- * - Sample loading from files
- * - Sample/instrument preview
- * - Instrument parameter updates
- *
- * ✅ PLATFORM-AGNOSTIC - No Android dependencies!
- *
- * Updated in Phase 1 refactoring to use the new AudioEngine architecture.
- * Updated in Phase 5 to remove Compose state dependencies.
- */
 class InstrumentController(
     private val audioEngine: AudioEngine,
     private val logger: ILogger,
@@ -723,10 +709,6 @@ class InstrumentController(
             frame, 0, slot, midiNote, 100, 1.0f, 0.5f, instrument.sfBank, instrument.sfPreset
         )
     }
-
-    // ─────────────────────────────────────────────────────────────────────────────
-    // SF2 Override Parameters (Phase 8)
-    // ─────────────────────────────────────────────────────────────────────────────
 
     fun updateSfAttack(instrument: Instrument, value: Int) {
         instrument.sfOverrides = instrument.sfOverrides.copy(ampAttack = value)

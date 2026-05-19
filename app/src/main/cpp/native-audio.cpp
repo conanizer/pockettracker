@@ -1,4 +1,4 @@
-// native-audio.cpp — STUB (Phase 0 file split complete)
+// native-audio.cpp — STUB
 //
 // This file has been split into focused modules:
 //   filter.h          — Biquad coefficient math (kept as reference; SVF used by effects/)

@@ -3,7 +3,7 @@
 #include "note-queue.h"
 
 // ===================================
-// PARAM BUS — unified parameter + modulation accumulator (UAA Phase 2a)
+// PARAM BUS — unified parameter + modulation accumulator
 // ===================================
 // Every continuously-controllable value is a slot in the bus.
 // Each slot has a base value (set at trigger or by effect setters) and a mod
@@ -19,7 +19,7 @@
 // TABLE_VOL × phraseVol × instrVol IS accumulated via the fixed VOL route into modDestValues[].
 
 enum ParamId {
-    PARAM_VOL          = 0,  // Volume: 0.0–1.0 (base only in Phase 2a; mod done per-sample)
+    PARAM_VOL          = 0,  // Volume: 0.0–1.0
     PARAM_PAN          = 1,  // Pan: 0.0=left, 0.5=center, 1.0=right
     PARAM_PITCH        = 2,  // Pitch offset in semitones from envelope/LFO mods (not PSL/PBN state)
     PARAM_FILTER_CUT   = 3,  // Filter cutoff: 0–255 param units
@@ -58,7 +58,7 @@ struct ParamBus {
 };
 
 // ===================================
-// MODULE SYSTEM — Source/Destination arrays (Phase 1)
+// MODULE SYSTEM — Source/Destination arrays
 // ===================================
 // Two-array pattern (Polyhedrus / Surge XT):
 //   modSourceValues[] — every modulation source writes its current value here once per block.
@@ -81,7 +81,7 @@ enum ModSourceId {
     MOD_SRC_KEYTRACK,  // (midiNote − 60) / 12.0, bipolar
     MOD_SRC_RANDOM,    // random 0.0–1.0 sampled at note-on
 
-    // Sequencer-driven sources — written each block by table/pitch state machines (Phase 2)
+    // Sequencer-driven sources — written each block by table/pitch state machines
     MOD_SRC_TABLE_VOL,    // 0.0–1.0 from table row Vxx column
     MOD_SRC_TABLE_PITCH,  // semitones from table row transpose column
     MOD_SRC_PITCH_SLIDE,  // semitones from PSL / PBN state machine
@@ -97,7 +97,7 @@ enum ModSourceId {
 // VOICEMODSLOT — per-voice modulation state machine (one per instrument mod slot)
 // ===================================
 // Moved from Voice (sampler-voice.h) to IAudioVoice so updateVoiceModulation()
-// can run identically for sampler, SF, and any future voice type (Phase 5).
+// can run identically for sampler, SF, and any future voice type.
 struct VoiceModSlot {
     int type;          // 0=NONE, 1=AHD, 2=ADSR, 3=LFO, 4=DRUM, 5=TRIG, 6=SCALAR
     int dest;          // 0=NONE, 1=VOL, 2=PAN, 3=PITCH, 4=FINE_PITCH, 5=CUT, 6=RES, 7=STA, 8=MOD_AMT, 9=MOD_RATE, 10=MOD_BOTH
@@ -164,7 +164,7 @@ inline void processRoutes(
 }
 
 // ===================================
-// IAUDIOVOICE — unified voice interface (UAA Phase 1)
+// IAUDIOVOICE — unified voice interface
 // ===================================
 // All concrete voice types (sampler, soundfont, future synths) implement this.
 // The mixer loop and effect helpers operate on IAudioVoice* so they are
@@ -178,7 +178,7 @@ public:
     // Mix-loop code reads params.get()/params.mod[] for PAN and FILTER; VOL is per-sample.
     ParamBus params;
 
-    // Module-system arrays (Phase 1 / Phase 5 — shared across sampler and SF voices).
+    // Module-system arrays — shared across sampler and SF voices.
     // voiceMods[]       — per-note state machines copied from instrumentModSlots[] at trigger.
     // modSourceValues[] — each state machine writes its output here once per block.
     // modDestValues[]   — processRoutes() accumulates weighted source values here.

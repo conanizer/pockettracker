@@ -1,4 +1,4 @@
-// jni-bridge.cpp — JNI EXPORT functions (Phase 0 file split)
+// jni-bridge.cpp — JNI EXPORT functions
 // All JNI entry points from Kotlin/Java into the AudioEngine.
 // TSF_IMPLEMENTATION lives in soundfont-voice.cpp; tsf* is opaque here (no struct member access).
 #include <jni.h>
@@ -92,10 +92,6 @@ Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1setInstrumentParams(
                                     drive, crush, downsample, filterType, filterCut, filterRes);
     }
 }
-
-// ===================================
-// PHASE 1: NOTE QUEUE JNI METHODS
-// ===================================
 
 JNIEXPORT jlong JNICALL
 Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1getCurrentFrame(JNIEnv *env, jobject thiz) {
@@ -382,10 +378,6 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getFr
     return 0;
 }
 
-// ===================================
-// PHASE 1 BUG FIXES: DECAY AND REAL-TIME VOLUME
-// ===================================
-
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1decayPeaks(JNIEnv *env, jobject thiz) {
     if (engine) {
@@ -514,10 +506,6 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setMa
     if (engine) engine->setMasterEqSlot(slot);
 }
 
-// ===================================
-// TABLE JNI METHODS (Phase 3.5)
-// ===================================
-
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadTable(
         JNIEnv *env, jobject thiz, jint tableId, jbyteArray rowData) {
@@ -585,10 +573,6 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getVo
     }
     return -1;
 }
-
-// ===================================
-// PITCH MODULATION JNI METHODS (Phase 6)
-// ===================================
 
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setPitchSlide(

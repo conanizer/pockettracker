@@ -23,13 +23,8 @@ struct SoundfontEntry {
 
 extern SoundfontEntry soundfonts[MAX_SOUNDFONTS];
 
-// ===================================
-// PHASE 1: NOTE QUEUE INFRASTRUCTURE
-// ===================================
-// Sample-accurate note scheduling system
-// Notes are scheduled with exact target frame numbers
-// Audio callback triggers notes at precise moments
-
+// Sample-accurate note scheduling: notes carry exact target frame numbers;
+// the audio callback triggers them at precise moments.
 struct ScheduledNote {
     int64_t targetFrame;     // Exact audio frame to trigger this note
     int sampleId;            // Which sample to play (0-255)
@@ -42,15 +37,14 @@ struct ScheduledNote {
     int startPointOverride;  // Optional start point override (-1 = use instrument default)
     int endPointOverride;    // Optional end point override for CUT slice mode (-1 = use instrument default)
 
-    // Table parameters (Phase 3.5)
     int tableId;             // Table to use (-1 = no table)
     int tableTicRate;        // Ticks per table row advance (default 6)
 
-    // Note info for special TIC modes (Phase 4)
+    // Note info for special TIC modes
     int noteOctave;          // Octave of note (0-9) for TICFC mode
     int notePitch;           // Pitch of note (0-11, C=0) for TICFE mode
 
-    // Pitch modulation parameters (Phase 7)
+    // Pitch modulation parameters — applied at note trigger
     // These are applied when the note triggers, allowing per-note pitch effects
     float pslInitialOffset;  // PSL: Initial pitch offset in semitones (0 = no PSL)
     float pslDuration;       // PSL: Slide duration in ticks (0 = no slide)
@@ -58,7 +52,7 @@ struct ScheduledNote {
     float vibratoSpeed;      // PVB/PVX: LFO speed in Hz (0 = no vibrato)
     float vibratoDepth;      // PVB/PVX: Depth in semitones (0 = no vibrato)
 
-    // Table start row override (Phase 8 - THO effect from phrase)
+    // Table start row override (THO effect from phrase)
     int tableStartRow;       // -1 = default (0 or TIC00 continuity), 0-15 = forced start row
 
     // SoundFont fields (only used when isSoundfont == true)
@@ -295,9 +289,6 @@ struct InstrumentParams {
                          eqActive(false), reverbSend(0.0f), delaySend(0.0f) {}
 };
 
-// ===================================
-// INSTRUMENT MODULATION PARAMS (Phase 4)
-// ===================================
 // Per-slot modulation configuration set from Kotlin.
 // Copied to VoiceModSlot when a note triggers on that instrument.
 struct InstrumentModSlot {
@@ -317,11 +308,8 @@ struct InstrumentModSlot {
                           sustainLevel(0.5f), lfoHz(4.0f), oscShape(0), releaseSamples(0) {}
 };
 
-// ===================================
-// TABLE DATA STRUCTURES (Phase 3.5)
-// ===================================
-// Tables are mini-sequencers that run alongside playing voices
-// Each table has 16 rows with transpose, volume, and 3 FX columns
+// Tables are mini-sequencers that run alongside playing voices.
+// Each table has 16 rows with transpose, volume, and 3 FX columns.
 
 struct TableRow {
     int8_t transpose;       // Semitones: 00=0, 01-7F=+1 to +127, 80-FF=-128 to -1

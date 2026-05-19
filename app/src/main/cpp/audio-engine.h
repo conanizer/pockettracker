@@ -141,10 +141,6 @@ public:
     // Clear only notes/kills at or after fromFrame (leaves the current phrase intact)
     void clearScheduledNotesFrom(int64_t fromFrame);
 
-    // ===================================
-    // TABLE METHODS (Phase 3.5)
-    // ===================================
-
     // Load table data from Kotlin
     // rowData format: 16 rows × 8 bytes = 128 bytes
     // Each row: [transpose, volume, fx1Type, fx1Value, fx2Type, fx2Value, fx3Type, fx3Value]
@@ -243,10 +239,6 @@ public:
     void setDustDepthForRender(int depth);
 
 
-    // ===================================
-    // PITCH MODULATION METHODS (Phase 6)
-    // ===================================
-
     // Returns the active voice for a given track, checking SF voices first.
     IAudioVoice* findActiveVoiceForTrack(int trackId);
 
@@ -264,10 +256,6 @@ public:
 
     // Set initial pitch offset (PSL setup: call before setPitchSlide).
     void setInitialPitchOffset(int trackId, float semitones);
-
-    // ===================================
-    // MODULATION METHODS (Phase 4 — AHD)
-    // ===================================
 
     // Set per-instrument modulation slot (called from Kotlin before scheduling each note)
     void setInstrumentModulation(int sampleId, int slotIndex,
@@ -324,11 +312,9 @@ private:
     InstrumentParams instrumentParams[256];
     InstrumentModSlot instrumentModSlots[256][4]; // [sampleId][slotIndex]
 
-    // Table data (Phase 3.5)
     Table tables[256];             // 256 tables, each with 16 rows
     std::mutex tableMutex;         // Protect table data during load/access
 
-    // PHASE 1: Sample-accurate timing infrastructure
     NoteQueue noteQueue;             // Thread-safe queue of scheduled notes
     KillQueue killQueue;             // Thread-safe queue of scheduled kill events
     ParamUpdateQueue paramUpdateQueue; // Thread-safe queue of scheduled parameter updates

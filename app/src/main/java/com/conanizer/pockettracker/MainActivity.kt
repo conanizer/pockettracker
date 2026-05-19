@@ -58,14 +58,6 @@ import com.conanizer.pockettracker.platform.android.ButtonHapticManager
 import com.conanizer.pockettracker.core.storage.FileInfo
 import java.io.File
 
-// ═══════════════════════════════════════════════════════════════════════════
-// HELPER FUNCTIONS
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Convert java.io.File to platform-agnostic FileInfo.
- * Temporary helper during refactoring - FileBrowserModule will eventually use FileInfo directly.
- */
 fun File.toFileInfo(): FileInfo = FileInfo(
     path = absolutePath,
     name = name,
@@ -75,21 +67,6 @@ fun File.toFileInfo(): FileInfo = FileInfo(
     lastModified = lastModified()
 )
 
-// ═══════════════════════════════════════════════════════════════════════════
-// MAIN ACTIVITY
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * MAIN ACTIVITY
- *
- * This is the entry point of the app. It runs ONCE when the app starts.
- *
- * What it does:
- * 1. Creates a DeviceAdapter to detect what kind of device we're on
- * 2. Calculates the best layout (full screen vs virtual buttons, portrait vs landscape)
- * 3. Logs the detection results so we can see them in Logcat
- * 4. Passes the layout configuration to PocketTrackerApp
- */
 class MainActivity : ComponentActivity() {
 
     /** Hide status bar + navigation bar (immersive sticky). Called on create and focus regain.
@@ -141,7 +118,6 @@ class MainActivity : ComponentActivity() {
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
 
-        // Your existing code...
         val deviceAdapter = DeviceAdapter(this)
         val layout = deviceAdapter.calculateLayout()
 
@@ -165,36 +141,11 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// POCKET TRACKER APP
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * POCKET TRACKER APP
- *
- * This is the main composable function that contains all the app logic.
- * A "composable" is a function that creates UI elements.
- *
- * @param layoutConfig - Information about the device (from DeviceAdapter)
- *                       This tells us if we need virtual buttons and what orientation
- *
- * What it does:
- * 1. Sets up all the app state (cursor position, current screen, etc.)
- * 2. Creates button handlers (what happens when each button is pressed)
- * 3. Chooses which layout to show based on layoutConfig
- */
-
 @Composable
 fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: DeviceAdapter) {
-    // Get Android context (needed for file access, audio, etc.)
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // STORAGE PERMISSIONS REQUEST
-    // ═══════════════════════════════════════════════════════════════════════
-
-    // Request storage permissions for reading WAV files from Documents folder
     val permissionsToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         // Android 13+ (API 33+): Use granular media permissions
         arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
@@ -217,8 +168,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
     }
 
-    // Check and request permissions on first composition
-    //*
     LaunchedEffect(Unit) {
         val hasPermission = permissionsToRequest.all { permission ->
             ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
@@ -252,25 +201,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             }
         }
     }
-    // ═══════════════════════════════════════════════════════════════════════
-    // FILE SYSTEM SETUP (REFACTORED ARCHITECTURE - Phase 2 COMPLETE!)
-    // ═══════════════════════════════════════════════════════════════════════
-
-    // Step 1: Create platform-specific file system backend
     val fileSystem = remember { AndroidFileSystem(context) }
-
-    // Video audio extractor — Android implementation (MediaExtractor + MediaCodec)
     val videoExtractor = remember { AndroidVideoAudioExtractor() }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // PLATFORM BACKENDS (Phase 5: Complete Portability)
-    // ═══════════════════════════════════════════════════════════════════════
-
-    // Create logger (used by all controllers)
     val logger = remember { com.conanizer.pockettracker.platform.android.AndroidLogger() }
 
-    // Create state observer (triggers UI recomposition when controller state changes)
-    // This is the bridge between platform-agnostic controllers and Compose's reactive UI
+    // stateVersion.let { } creates a Compose dependency so reads recompose when controllers mutate state.
     var stateVersion by remember { mutableIntStateOf(0) }
     val stateObserver = remember {
         object : com.conanizer.pockettracker.core.logic.StateObserver {
@@ -280,21 +216,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
     }
 
-    // Step 2/3: Create FileController (coordinates all file operations)
     val fileController = remember { FileController(fileSystem, logger) }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // AUDIO ENGINE SETUP (REFACTORED ARCHITECTURE - Phase 1 COMPLETE!)
-    // ═══════════════════════════════════════════════════════════════════════
-
-    // Step 1: Create platform-specific backends
     val audioBackend = remember { OboeAudioBackend() }
     val resourceLoader = remember { AndroidResourceLoader(context) }
-
-    // Step 2: Create platform-agnostic AudioEngine (object only — stream opens below)
     val audioEngine = remember { AudioEngine(audioBackend, resourceLoader, logger) }
 
-    // Step 3: Cleanup when app closes (important to prevent memory leaks)
     DisposableEffect(Unit) {
         onDispose {
             audioEngine.close()
@@ -313,50 +240,34 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         audioReady = true
     }
 
-    // InstrumentController: Manages all instrument operations
-    // PHASE 4: Extracted from MainActivity to separate business logic
-    // PHASE 5: Uses StateObserver for UI reactivity
     val instrumentController = remember {
         InstrumentController(audioEngine, logger, stateObserver, fileController)
     }
 
-    // EffectProcessor: Processes effects (Milestone 2 - Kill effect implemented!)
-    // PHASE 4: Extracted from MainActivity to separate business logic
     val effectProcessor = remember {
         com.conanizer.pockettracker.core.logic.EffectProcessor(audioBackend, logger)
     }
 
-    // PlaybackController: Manages all playback operations
-    // PHASE 4: Extracted from MainActivity to separate business logic
-    // PHASE 5: Uses StateObserver for UI reactivity
-    // MILESTONE 2: Now includes EffectProcessor for effects support
     val playbackController = remember {
         PlaybackController(audioEngine, effectProcessor, logger, stateObserver)
     }
-    // Wire InstrumentController into PlaybackController for soundfont slot lookups
     LaunchedEffect(playbackController, instrumentController) {
         playbackController.instrumentController = instrumentController
     }
 
-    // ClipboardManager: Handles copy/paste (stub for now, implementation in Milestone 2.5)
-    // PHASE 4: Extracted from MainActivity to separate business logic
     val clipboardManager = remember {
         com.conanizer.pockettracker.core.logic.ClipboardManager(logger)
     }
 
-    // RenderController: Handles offline rendering to WAV files
-    // MVP EXPANSION Phase 6: WAV Export functionality
     val renderController = remember {
         RenderController(audioEngine, playbackController, fileSystem, logger)
     }
 
-    // Render state for WAV export
     val _isRendering = remember { mutableStateOf(false) }
     var isRendering by _isRendering
     val _renderProgress = remember { mutableFloatStateOf(0f) }
     var renderProgress by _renderProgress
 
-    // Clean dialog state (triggered by A on row 5 in PROJECT screen)
     val _showCleanDialog = remember { mutableStateOf(false) }
     var showCleanDialog by _showCleanDialog
     val _cleanDialogTarget = remember { mutableStateOf("") }  // "SEQ" or "INST"
@@ -368,16 +279,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // Used by A+A to decide whether to insert next-unused (only allowed on same cell)
     val _lastAInsertPosition = remember { mutableStateOf<InsertPosition?>(null) }
     var lastAInsertPosition by _lastAInsertPosition
-    // InputController: Handles button input
-    // PHASE 4: Extracted from MainActivity to separate business logic
-    // PHASE 5: Uses StateObserver for UI reactivity
+
     val inputController = remember {
         com.conanizer.pockettracker.core.logic.InputController(logger, stateObserver)
     }
 
-    // TrackerController: Main coordinator that owns state and delegates to controllers
-    // PHASE 4: This is the MAIN COORDINATOR for all tracker logic
-    // PHASE 5: Uses StateObserver for UI reactivity
     val trackerController = remember {
         com.conanizer.pockettracker.core.logic.TrackerController(
             fileController = fileController,
@@ -389,9 +295,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             stateObserver = stateObserver
         )
     }
-
-    // NOTE: GenericInputHandler has been migrated to InputController (Phase 4)
-    // All input handling now goes through trackerController.inputController
 
     // Sync mixer volumes to audio backend once the stream is open.
     // (setTrackVolume/setMasterVolume are no-ops if native engine is null, so this must
@@ -409,57 +312,29 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         Log.d("VolumeSync", "Initial volume sync to audio backend complete")
     }
 
-    // ChainEditorModule: Used to get cursor context for chain editing
     val chainEditorModule = remember { ChainEditorModule() }
-
-    // PhraseEditorModule: Used to get cursor context for phrase editing
     val phraseEditorModule = remember { PhraseEditorModule() }
-
-    // SongEditorModule: Used to get cursor context for song editing
     val songEditorModule = remember { SongEditorModule() }
-
-    // ProjectModule: Used to get cursor context for project editing
     val projectModule = remember { ProjectModule() }
-
-    // SettingsModule: Used for SETTINGS side menu
     val settingsModule = remember { SettingsModule() }
-
-    // InstrumentModule: Used for instrument editing screen
     val instrumentModule = remember { InstrumentModule() }
-
-    // MixerModule: Used for mixer screen (8 tracks + master)
     val mixerModule = remember { MixerModule() }
-
-    // EffectModule: Used for effects screen (reverb, delay, master EQ)
     val effectModule = remember { EffectModule() }
     val eqModule     = remember { EqModule() }
-
-    // TableModule: Used for table editing screen
     val tableModule = remember { TableModule() }
-
-    // GrooveModule: Used for groove pattern editing screen
     val grooveModule = remember { GrooveModule() }
-
-    // ModulationModule: Used for modulation editing screen
     val modulationModule = remember { ModulationModule() }
 
-    // Peak level buffers for mixer meters (updated periodically)
     val trackPeakBuffer = remember { FloatArray(16) }
     val masterPeakBuffer = remember { FloatArray(2) }
     val sendPeakBuffer = remember { FloatArray(4) }  // [revL, revR, delL, delR]
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // LAYOUT MODE — user-selectable, overrides DeviceAdapter auto-detection
-    // ═══════════════════════════════════════════════════════════════════════
-
-    // Derive initial mode from the auto-detected layoutConfig (fallback if no saved pref)
     val autoLayoutMode = when {
         !layoutConfig.needsVirtualButtons -> DeviceAdapter.LayoutMode.FULL
         layoutConfig.isLandscape          -> DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
         else                              -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
     }
 
-    // Load saved preferences (SharedPreferences, persists across app restarts)
     val prefs = remember { context.getSharedPreferences("pockettracker_ui", android.content.Context.MODE_PRIVATE) }
 
     val savedLayoutName  = remember { prefs.getString("layout_mode", null) }
@@ -494,17 +369,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val _scalingMode = remember { mutableStateOf(initialScalingMode) }
     var scalingMode  by _scalingMode
 
-    // Persist whenever either setting changes
     LaunchedEffect(layoutMode) {
         prefs.edit().putString("layout_mode", layoutMode.name).apply()
     }
     LaunchedEffect(scalingMode) {
         prefs.edit().putString("scaling_mode", scalingMode.name).apply()
     }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // BUTTON SOUND & VIBRO — app-level settings persisted in SharedPreferences
-    // ═══════════════════════════════════════════════════════════════════════
 
     val _buttonSoundEnabled = remember { mutableStateOf(prefs.getBoolean("button_sound", true)) }
     var buttonSoundEnabled  by _buttonSoundEnabled
@@ -515,7 +385,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val _vibroPower         = remember { mutableStateOf(prefs.getInt("vibro_power", 255)) }
     var vibroPower          by _vibroPower
 
-    // QWERTY keyboard insert mode (persisted in SharedPreferences)
     val _insertBefore = remember { mutableStateOf(prefs.getBoolean("kb_insert_before", true)) }
     var insertBefore  by _insertBefore
 
@@ -524,19 +393,13 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val _cursorRemember = remember { mutableStateOf(prefs.getBoolean("cursor_remember", false)) }
     var cursorRemember  by _cursorRemember
 
-    // Note preview: plays the inserted note at its pitch when adding to phrase screen (persisted)
     val _notePreviewEnabled = remember { mutableStateOf(prefs.getBoolean("note_preview", true)) }
     var notePreviewEnabled  by _notePreviewEnabled
 
-    // QWERTY keyboard overlay state (transient — not persisted)
     val _qwertyKeyboardState = remember { mutableStateOf(QwertyKeyboardState()) }
     var qwertyKeyboardState  by _qwertyKeyboardState
-
-    // FX helper overlay state (transient — not persisted)
     val _fxHelperState = remember { mutableStateOf(FxHelperState()) }
     var fxHelperState  by _fxHelperState
-
-    // EQ editor overlay state (transient — not persisted)
     val _eqEditorState  = remember { mutableStateOf(EqEditorState()) }
     var eqEditorState   by _eqEditorState
     val _eqSpectrumData = remember { mutableStateOf<FloatArray?>(null) }
@@ -545,7 +408,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val buttonSoundManager = remember { ButtonSoundManager(context) }
     val buttonHapticManager = remember { ButtonHapticManager(context) }
 
-    // Sync enabled flags into managers whenever they change
     LaunchedEffect(buttonSoundEnabled) {
         buttonSoundManager.enabled = buttonSoundEnabled
         prefs.edit().putBoolean("button_sound", buttonSoundEnabled).apply()
@@ -572,7 +434,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         prefs.edit().putBoolean("note_preview", notePreviewEnabled).apply()
     }
 
-    // Release SoundPool when the composable leaves composition
     DisposableEffect(Unit) {
         onDispose { buttonSoundManager.release() }
     }
@@ -591,7 +452,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // swap so we need a fresh LayoutConfig).
     val configuration = LocalConfiguration.current
 
-    // Recompute layout config whenever the user changes the mode OR device flips
     val effectiveLayoutConfig = remember(layoutMode, configuration.orientation) {
         deviceAdapter.calculateLayout(layoutMode)
     }
@@ -610,16 +470,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // STATE ALIASES (read from TrackerController, triggered by stateVersion)
-    // ═══════════════════════════════════════════════════════════════════════
-    //
-    // All core state is now owned by TrackerController. These aliases create
-    // a dependency on stateVersion so Compose recomposes when state changes.
-    // For writes, use trackerController.xxx = value directly.
-
-    // Core state aliases (depend on stateVersion for recomposition)
-    // The stateVersion.let { } pattern creates a dependency on stateVersion
     val project = stateVersion.let { trackerController.project }
     val currentScreen = stateVersion.let { trackerController.currentScreen }
     val previousColumn = stateVersion.let { trackerController.previousColumn }
@@ -636,7 +486,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val lastEditedTranspose = stateVersion.let { trackerController.lastEditedTranspose }
     val projectVersion = stateVersion.let { trackerController.projectVersion }
 
-    // Status message aliases - use TrackerController's unified status
     val projectStatusMessage = stateVersion.let { trackerController.statusMessage }
     val projectStatusSuccess = stateVersion.let { trackerController.statusSuccess }
 
@@ -648,7 +497,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
     }
 
-    // Auto-dismiss instrument status (from InstrumentController)
     LaunchedEffect(instrumentController.statusMessage) {
         if (instrumentController.statusMessage.isNotEmpty()) {
             kotlinx.coroutines.delay(5000)
@@ -656,7 +504,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
     }
 
-    // File browser module and state
     val fileBrowserModule = remember { FileBrowserModule() }
     val _fileBrowserState = remember {
         mutableStateOf(
@@ -675,7 +522,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val _instrumentFileBrowserAction = remember { mutableStateOf("") }
     var instrumentFileBrowserAction  by _instrumentFileBrowserAction
 
-    // Sample editor module and state
     val sampleEditorModule = remember { SampleEditorModule() }
     val _sampleEditorState = remember { mutableStateOf(SampleEditorState(sampleId = 0, instrumentId = 0)) }
     var sampleEditorState  by _sampleEditorState
@@ -692,7 +538,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         wasPhraseScreen = isPhrase
     }
 
-    // Initialize file browser item list when directory changes
     LaunchedEffect(fileBrowserState.currentDirectory, fileBrowserState.sortMode) {
         val items = fileBrowserModule.buildItemList(
             fileBrowserState.currentDirectory,
@@ -704,7 +549,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         )
     }
 
-    // Load waveform data whenever the sample editor becomes the active screen or instrument changes
     LaunchedEffect(trackerController.currentScreen, sampleEditorState.instrumentId) {
         if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR) {
             val instId      = sampleEditorState.instrumentId
@@ -740,7 +584,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
     }
 
-    // Reload zoomed waveform when zoom level, view window, or source mode changes
     val sampleEditorZoom       = sampleEditorState.zoomLevel
     val sampleEditorViewStart  = sampleEditorState.viewStart
     val sampleEditorSourceMode = sampleEditorState.sourceMode
@@ -766,7 +609,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
     }
 
-    // Run transient detection when TRANSIENT mode is active and sensitivity or sample changes
     val seSliceMethod      = sampleEditorState.sliceMethod
     val seSliceSensitivity = sampleEditorState.sliceSensitivity
     val seTotalFrames      = sampleEditorState.totalFrames
@@ -802,8 +644,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
     }
 
-    // (Audio engine cleanup moved to line 168-172 with new architecture)
-
     // Poll spectrum magnitudes for EQ visualizer (~20fps while EQ screen is open)
     LaunchedEffect(eqEditorState.isOpen) {
         if (eqEditorState.isOpen) {
@@ -816,17 +656,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
     }
 
-    // Update peak levels for mixer meters (every ~60ms = ~16fps update rate)
-    // When not playing, manually decay peaks and waveform (fixes freeze on stop bug)
+    // Decay peaks manually when not playing — audio callback is not running so peaks freeze on stop.
     LaunchedEffect(currentScreen) {
         if (currentScreen == ScreenType.MIXER) {
             while (true) {
-                // When not playing, manually decay peaks (audio callback not running)
                 if (!trackerController.isPlaying()) {
                     audioBackend.decayPeaks()
                     audioBackend.decayWaveform()
                 }
-                // Always read current peak values for display
                 audioBackend.getTrackPeaks(trackPeakBuffer)
                 audioBackend.getMasterPeaks(masterPeakBuffer)
                 audioBackend.getSendPeaks(sendPeakBuffer)
@@ -835,10 +672,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             }
         }
     }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // DISPATCHER WIRING
-    // ═══════════════════════════════════════════════════════════════════════
 
     val appCtrl = remember {
         AppControllers(
@@ -864,32 +697,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     }
     val dispatcher = remember { AppInputDispatcher(appCtrl, appState) }
 
-    // (All input helpers and button handlers are in AppInputDispatcher)
-
     val buttonHandlers = remember { dispatcher.createButtonHandlers() }
 
-// ═══════════════════════════════════════════════════════════════════════
-// KEYBOARD INPUT MAPPING
-// ═══════════════════════════════════════════════════════════════════════
-
-// Create the input mapper to handle keyboard input
-// This maps WASD/JK/UI/Shift/Space to game buttons
     val inputMapper = remember(buttonHandlers) {
         InputMapper(buttonHandlers)
     }
-
-// Focus requester to auto-focus the app for keyboard input
     val focusRequester = remember { FocusRequester() }
 
-    //Auto-focus when app starts so keyboard works immediately
     LaunchedEffect(Unit) {
-        // Small delay to ensure view is ready before requesting focus
         kotlinx.coroutines.delay(100)
         try {
             focusRequester.requestFocus()
-        } catch (e: Exception) {
-            // Ignore focus request errors
-        }
+        } catch (e: Exception) { }
     }
 
     // When the layout mode changes, Compose destroys the old layout composable and builds
@@ -904,15 +723,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         try { focusRequester.requestFocus() } catch (e: Exception) { }
     }
 
-// ═══════════════════════════════════════════════════════════════════════
-// CHOOSE LAYOUT BASED ON DEVICE DETECTION
-// ═══════════════════════════════════════════════════════════════════════
-
-// This is where the magic happens!
-// Based on what DeviceAdapter detected, we show different layouts:
-
-// Re-read controller properties when stateVersion changes
-// This ensures layout functions recompose when controller state changes
     val isPlaying = stateVersion.let { trackerController.isPlaying() }
     val currentInstrument = stateVersion.let { trackerController.currentInstrument }
     val instrumentCursorRow = stateVersion.let { trackerController.instrumentCursorRow }
@@ -920,7 +730,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val instrumentStatusMessage = stateVersion.let { trackerController.statusMessage }
     val instrumentStatusSuccess = stateVersion.let { trackerController.statusSuccess }
 
-    // Selection/clipboard state for copy/paste
     val selectionInfo = stateVersion.let { trackerController.inputController.getSelectionInfo() }
     val clipboardInfo = stateVersion.let { clipboardManager.getClipboardInfo() }
     val selectionModeActive = stateVersion.let { trackerController.inputController.selectionMode }
@@ -928,7 +737,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         trackerController.inputController.isCellSelected(row, col)
     }
 
-    // Build the shared tracker params bundle once — all layout modes use the same values.
     val trackerParams = TrackerScreenParams(
         currentScreen           = currentScreen,
         project                 = project,
@@ -1038,7 +846,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
     ) {
         if (!effectiveLayoutConfig.needsVirtualButtons) {
-            // FULL SCREEN — physical buttons or user-selected FULL mode
             FullScreenLayout(
                 layoutConfig  = effectiveLayoutConfig,
                 scalingMode   = scalingMode,
@@ -1076,14 +883,3 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     } // CompositionLocalProvider
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// NAVIGATION HELPER FUNCTIONS
-// ═══════════════════════════════════════════════════════════════════════════
-// NOTE: Navigation functions migrated to TrackerController (Phase 4 cleanup - January 2025)
-// All navigation logic now in core/logic/TrackerController.kt
-
-// ═══════════════════════════════════════════════════════════════════════════
-// EDITOR HELPER FUNCTIONS
-// ═══════════════════════════════════════════════════════════════════════════
-// NOTE: Editor helpers migrated to EditorHelpers.kt (Phase 4 cleanup - January 2025)
-// All phrase/chain/song/project editing helpers now in EditorHelpers.kt

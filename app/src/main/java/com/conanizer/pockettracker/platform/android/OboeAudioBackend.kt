@@ -220,10 +220,6 @@ class OboeAudioBackend : IAudioBackend {
         return native_getFrameCounter()
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // PHASE 1 BUG FIXES: DECAY AND REAL-TIME VOLUME
-    // ═══════════════════════════════════════════════════════════════════════════
-
     override fun decayPeaks() {
         native_decayPeaks()
     }
@@ -302,10 +298,6 @@ class OboeAudioBackend : IAudioBackend {
         native_setMasterEqSlot(slot)
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // TABLE METHODS (Phase 3.5)
-    // ═══════════════════════════════════════════════════════════════════════════
-
     override fun loadTable(tableId: Int, rowData: ByteArray) {
         if (rowData.size != 128) {
             Log.e(TAG, "❌ loadTable: Invalid rowData size ${rowData.size} (expected 128)")
@@ -359,10 +351,6 @@ class OboeAudioBackend : IAudioBackend {
         native_scheduleTrackPhraseVol(targetFrame, trackId, phraseVol)
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // PITCH MODULATION METHODS (Phase 6)
-    // ═══════════════════════════════════════════════════════════════════════════
-
     override fun setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int) {
         native_setPitchSlide(trackId, targetSemitones, durationTicks, tempo)
         Log.d(TAG, "🎵 Pitch slide: track=$trackId, target=$targetSemitones, duration=$durationTicks ticks")
@@ -395,10 +383,6 @@ class OboeAudioBackend : IAudioBackend {
         native_setInitialPitchOffset(trackId, semitones)
         Log.d(TAG, "🎵 Pitch offset set: track=$trackId, offset=$semitones semitones")
     }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // MODULATION METHODS (Phase 4 — AHD)
-    // ═══════════════════════════════════════════════════════════════════════════
 
     override fun setInstrumentModulation(
         sampleId: Int,
@@ -534,7 +518,6 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_resetFrameCounter()
     private external fun native_getFrameCounter(): Long
 
-    // Phase 1 bug fixes
     private external fun native_decayPeaks()
     private external fun native_decayWaveform()
     private external fun native_getSpectrumMagnitudes(numBins: Int): FloatArray
@@ -557,7 +540,6 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_setDelayInputEq(slot: Int)
     private external fun native_setMasterEqSlot(slot: Int)
 
-    // Phase 3.5 table methods
     private external fun native_loadTable(tableId: Int, rowData: ByteArray)
     private external fun native_scheduleNoteWithTable(
         targetFrame: Long,
@@ -586,14 +568,12 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_setVoiceTableRow(trackId: Int, row: Int)
     private external fun native_scheduleTrackPhraseVol(targetFrame: Long, trackId: Int, phraseVol: Float)
 
-    // Phase 6 pitch modulation methods
     private external fun native_setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int)
     private external fun native_setPitchBend(trackId: Int, semitonesPerTick: Float, tempo: Int)
     private external fun native_setVibrato(trackId: Int, speed: Float, depth: Float)
     private external fun native_clearPitchMod(trackId: Int)
     private external fun native_setInitialPitchOffset(trackId: Int, semitones: Float)
 
-    // Phase 4 modulation methods
     private external fun native_setInstrumentModulation(
         sampleId: Int, slotIndex: Int, type: Int, dest: Int, amount: Float,
         attackSamples: Int, holdSamples: Int, decaySamples: Int,

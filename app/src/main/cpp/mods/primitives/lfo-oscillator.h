@@ -7,7 +7,7 @@
 //           (EXP+/EXP-/RND/DRUNK not yet implemented — fall back to SIN)
 // Returns −1.0 to +1.0 for bipolar shapes (SIN, TRI, RMP, SQU).
 // TRI ranges −1..+1 across the full cycle matching the switch block in
-// updateVoiceModulation before the Phase 1 split.
+// updateVoiceModulation before extraction into this header.
 inline float lfoShape(float phase, int shape) {
     float norm = phase / (2.0f * (float)M_PI);
     switch (shape) {

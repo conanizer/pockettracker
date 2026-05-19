@@ -170,7 +170,7 @@ void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
     }
 
     // pitchOffset: PSL/PBN pitch slide state (semitones, advanced above)
-    // modDestValues[PARAM_PITCH]: accumulated from LFO/AHD routes targeting PITCH (Phase 5)
+    // modDestValues[PARAM_PITCH]: accumulated from LFO/AHD routes targeting PITCH
     float pitchMod = pitchOffset + modDestValues[PARAM_PITCH];
     if (vibratoActive) pitchMod += sinf(vibratoPhase) * vibratoDepth;
 

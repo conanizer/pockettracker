@@ -15,21 +15,6 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-/**
- * Platform-agnostic audio engine.
- *
- * This wraps the IAudioBackend interface to provide high-level audio functionality
- * without depending on Android-specific code.
- *
- * ✅ FULLY PLATFORM-AGNOSTIC - No Android dependencies!
- * - Uses interfaces for all platform-specific operations
- * - No Context dependency
- * - Pure Kotlin business logic
- *
- * @param backend Platform-specific audio backend (e.g., OboeAudioBackend on Android)
- * @param resourceLoader Platform-specific resource loader (e.g., AndroidResourceLoader on Android)
- * @param logger Platform-specific logger (e.g., AndroidLogger on Android)
- */
 class AudioEngine(
     internal val backend: IAudioBackend,
     private val resourceLoader: IResourceLoader,
@@ -46,17 +31,9 @@ class AudioEngine(
     // Original ratios cached for non-destructive RATE mode (cleared when new sample is loaded)
     private val originalSampleRateRatios = mutableMapOf<Int, Float>()
 
-    /**
-     * Provider for SoundFont slot lookup — injected by PlaybackController so that
-     * scheduleNote() can route SF instruments without an Android dependency in AudioEngine.
-     * Maps soundfontPath → sfSlot index. Set once after engine creation.
-     */
+    // Injected by PlaybackController so scheduleNote() can route SF instruments without Android dependency.
     var sfSlotProvider: ((soundfontPath: String) -> Int?)? = null
 
-    /**
-     * Initialize audio engine and load default samples.
-     * @return true if successful
-     */
     fun create(): Boolean {
         val success = backend.create()
         if (success) {
@@ -68,31 +45,13 @@ class AudioEngine(
         return success
     }
 
-    /**
-     * Load default samples from resources.
-     *
-     * Currently disabled - app starts with empty instrument slots.
-     * Users load samples via the file browser.
-     *
-     * This method can be re-enabled in the future if we want to include
-     * default samples for quick start or demo purposes.
-     */
     private fun loadAllSamples() {
         // No default samples loaded - users load their own via file browser
         logger.d(TAG, "✅ Audio engine initialized (no default samples)")
     }
 
-    /**
-     * Get device sample rate.
-     */
     fun getDeviceSampleRate(): Int = backend.getSampleRate()
 
-    /**
-     * Load WAV file from external path (for user samples).
-     * @param instrumentId Which instrument slot (0-255)
-     * @param filePath Absolute path to WAV file
-     * @return True if successful
-     */
     fun loadSampleFromFile(instrumentId: Int, filePath: String): Boolean {
         try {
             val file = File(filePath)
@@ -120,10 +79,6 @@ class AudioEngine(
         }
     }
 
-    /**
-     * Load WAV file from external path.
-     * Returns Triple(left, right-or-null, baseFreq). right is null for mono WAVs.
-     */
     private fun loadWavFileFromPath(filePath: String): Triple<FloatArray, FloatArray?, Float> {
         File(filePath).inputStream().use { inputStream ->
             val fileSize = inputStream.available()
@@ -134,18 +89,6 @@ class AudioEngine(
         }
     }
 
-    /**
-     * Parse WAV file buffer into float samples and base frequency.
-     * Handles stereo -> mono conversion and sample rate compensation.
-     *
-     * Supported formats:
-     *   - PCM 16-bit (most common)
-     *   - PCM 24-bit
-     *   - PCM 32-bit integer
-     *   - IEEE float 32-bit
-     * Supported sample rates: any (48000, 44100, etc. all compensated automatically).
-     * Non-44-byte headers: scans for "data" chunk instead of assuming fixed offset.
-     */
     private fun parseWavBuffer(buffer: ByteArray): Triple<FloatArray, FloatArray?, Float> {
         if (buffer.size < 12) throw IllegalArgumentException("WAV buffer too small: ${buffer.size}")
 
@@ -243,10 +186,6 @@ class AudioEngine(
         }
     }
 
-    /**
-     * Preview a WAV file without permanently loading it.
-     * Uses temporary slot 255 for preview playback.
-     */
     fun previewSampleFile(filePath: String): Boolean {
         try {
             val file = File(filePath)
@@ -255,7 +194,6 @@ class AudioEngine(
                 return false
             }
 
-            // Stop all audio before loading new sample
             backend.stopAll()
 
             val (left, right, adjustedBaseFreq) = loadWavFileFromPath(filePath)
@@ -268,10 +206,8 @@ class AudioEngine(
             // CRITICAL: Resume stream so audio callback processes the scheduled note
             backend.resumeStream()
 
-            // Play at C-4 as reference pitch
-            // Schedule slightly in the future to avoid race conditions
             val c4Freq = 261.63f
-            val targetFrame = backend.getCurrentFrame() + 100  // Small buffer
+            val targetFrame = backend.getCurrentFrame() + 100
             backend.scheduleNote(
                 frame = targetFrame,
                 sampleId = 255,
@@ -279,7 +215,7 @@ class AudioEngine(
                 freq = c4Freq,
                 baseFreq = adjustedBaseFreq,
                 vol = 1.0f,
-                pan = 0.5f  // Center
+                pan = 0.5f
             )
 
             logger.d(TAG, "🔊 Preview sample at C-4: $filePath (baseFreq=$adjustedBaseFreq)")
@@ -290,15 +226,6 @@ class AudioEngine(
         }
     }
 
-    /**
-     * Preview current instrument with all parameters applied.
-     * If project is provided, table processing will be applied.
-     * Each instrument uses the table with the same ID (instrument 03 → table 03).
-     *
-     * @param instrument Instrument to preview
-     * @param project Project for table data (optional)
-     * @param tableIdOverride Override the table ID (-1 = use instrument's ID as table ID)
-     */
     fun previewInstrument(
         instrument: Instrument,
         project: Project? = null,
@@ -327,32 +254,24 @@ class AudioEngine(
 
         val sampleId = instrument.sampleId
 
-        // Calculate target frequency from ROOT + DETUNE
         val rootFreq = instrument.root.toFrequency()
-
-        // Apply detune
         val detuneSemitones = (instrument.detune shr 4).toFloat()
         val detuneFraction = (instrument.detune and 0x0F) / 16.0f
         val totalDetuneSemitones = detuneSemitones + detuneFraction - 8.0f
         val detuneMultiplier = Math.pow(2.0, (totalDetuneSemitones / 12.0)).toFloat()
-
         val targetFreq = rootFreq * detuneMultiplier
 
-        // Get compensated base frequency
         val sampleRateRatio = sampleRateRatios[sampleId] ?: 1.0f
         val compensatedBaseFreq = 261.63f * sampleRateRatio
 
         // CRITICAL: Resume stream so audio callback processes the scheduled note
         backend.resumeStream()
 
-        // Schedule slightly in the future to avoid race conditions
-        val targetFrame = backend.getCurrentFrame() + 100  // Small buffer
+        val targetFrame = backend.getCurrentFrame() + 100
 
-        // Apply instrument volume and pan
         val volume = VolumeUtils.hexToFloat(instrument.volume)
-        val pan = VolumeUtils.hexToFloat(instrument.pan)  // 0x00=left, 0x80=center, 0xFF=right
+        val pan = VolumeUtils.hexToFloat(instrument.pan)
 
-        // Use override if provided, otherwise use instrument's ID as table ID
         val tableId = if (tableIdOverride >= 0) tableIdOverride else instrument.id
         val tableTicRate = instrument.tableTicRate
 
@@ -389,11 +308,6 @@ class AudioEngine(
         logger.d(TAG, "🔊 Preview instrument ${instrument.id.toString(16).padStart(2,'0').uppercase()}: freq=$targetFreq Hz, vol=$volume, pan=$pan, tableId=$tableId")
     }
 
-    /**
-     * Preview a specific note on an instrument and hard-stop it after [durationFrames].
-     * Used for note preview when inserting a note on the phrase screen — plays at the
-     * inserted note's pitch rather than the instrument root, and kills after one phrase.
-     */
     fun previewNoteWithTimeout(
         instrument: Instrument,
         note: Note,
@@ -466,36 +380,22 @@ class AudioEngine(
         backend.scheduleKill(targetFrame + durationFrames, 0)
     }
 
-    /**
-     * Calculate the effective base frequency for an instrument.
-     */
     fun calculateInstrumentBaseFrequency(instrument: Instrument): Float {
         val rootFreq = instrument.root.toFrequency()
-
-        // Apply detune
         val detuneSemitones = (instrument.detune shr 4).toFloat()
         val detuneFraction = (instrument.detune and 0x0F) / 16.0f
         val totalDetuneSemitones = detuneSemitones + detuneFraction - 8.0f
         val detuneMultiplier = Math.pow(2.0, (totalDetuneSemitones / 12.0)).toFloat()
-
-        // Apply sample rate compensation
         val sampleRateRatio = sampleRateRatios[instrument.sampleId] ?: 1.0f
-
         return rootFreq * detuneMultiplier * sampleRateRatio
     }
 
-    /**
-     * Update the base frequency for an instrument based on its ROOT and DETUNE.
-     */
     fun updateInstrumentBaseFrequency(instrument: Instrument) {
         val baseFreq = calculateInstrumentBaseFrequency(instrument)
         sampleBaseFrequencies[instrument.sampleId] = baseFreq
         logger.d(TAG, "📝 Updated base frequency for instrument ${instrument.id}: $baseFreq Hz")
     }
 
-    /**
-     * Play a note on a specific track.
-     */
     fun playNote(note: Note, instrumentId: Int, trackId: Int, volume: Float = 1.0f, pan: Float = 0.5f, project: Project? = null) {
         if (note == Note.EMPTY) return
 
@@ -519,33 +419,18 @@ class AudioEngine(
         )
     }
 
-    /**
-     * Update waveform buffer from audio output.
-     */
     fun updateWaveform() {
         backend.updateWaveform(waveformBuffer)
     }
 
-    /**
-     * Decay waveform buffer (call when playback is stopped).
-     * This smoothly fades out the oscilloscope display.
-     */
     fun decayWaveform() {
         backend.decayWaveform()
     }
 
-    /**
-     * Decay peak meters (call when playback is stopped).
-     * This smoothly fades out the mixer meter display.
-     */
     fun decayPeaks() {
         backend.decayPeaks()
     }
 
-    /**
-     * Update waveform with automatic decay when not playing.
-     * @param isPlaying Whether playback is currently active
-     */
     fun updateWaveformWithDecay(isPlaying: Boolean) {
         if (!isPlaying) {
             backend.decayWaveform()
@@ -553,61 +438,38 @@ class AudioEngine(
         backend.updateWaveform(waveformBuffer)
     }
 
-    /**
-     * Stop all playback.
-     */
     fun stopAll() {
         backend.stopAll()
         waveformBuffer.fill(0f)
     }
 
-    /**
-     * Kill a specific track's voice immediately (for K00 Kill effect).
-     */
     fun killTrack(trackId: Int) {
         backend.killTrack(trackId)
     }
 
-    /**
-     * Schedule a kill event at a specific frame (for sample-accurate Kill effect).
-     */
     fun scheduleKill(frame: Long, trackId: Int) {
         backend.scheduleKill(frame, trackId)
     }
 
-    /**
-     * Get current audio frame counter (for sample-accurate scheduling).
-     */
     fun getCurrentFrame(): Long = backend.getCurrentFrame()
 
-    /**
-     * Schedule a note to be played at exact audio frame.
-     * Automatically handles table processing - each instrument uses the table with the same ID.
-     * Supports per-note pitch modulation effects (PSL, PBN, PVB, PVX).
-     *
-     * @param pslInitialOffset PSL initial pitch offset in semitones (0 = no PSL)
-     * @param pslDuration PSL slide duration in ticks (0 = no slide)
-     * @param pbnRate PBN pitch bend rate in semitones/tick (0 = no bend)
-     * @param vibratoSpeed PVB/PVX vibrato speed in Hz (0 = no vibrato)
-     * @param vibratoDepth PVB/PVX vibrato depth in semitones (0 = no vibrato)
-     */
     fun scheduleNote(
         targetFrame: Long,
         note: Note,
         instrumentId: Int,
         trackId: Int,
-        volume: Float = 1.0f,      // Instrument volume (0.0–1.0)
-        phraseVol: Float = 1.0f,   // Phrase step volume (0.0–1.0)
-        pan: Float = 0.5f,  // 0.0=left, 0.5=center, 1.0=right
+        volume: Float = 1.0f,
+        phraseVol: Float = 1.0f,
+        pan: Float = 0.5f,
         project: Project,
-        startPointOverride: Int = -1,  // -1 = use instrument default, 0-255 = Offset effect override
+        startPointOverride: Int = -1,
         pslInitialOffset: Float = 0f,
         pslDuration: Float = 0f,
         pbnRate: Float = 0f,
         vibratoSpeed: Float = 0f,
         vibratoDepth: Float = 0f,
-        tableIdOverride: Int = -1,  // TBL effect: override table ID (-1 = use instrument default)
-        tableStartRow: Int = -1     // THO effect: force table start row (-1 = default)
+        tableIdOverride: Int = -1,
+        tableStartRow: Int = -1
     ) {
         if (note == Note.EMPTY) return
 
@@ -679,16 +541,13 @@ class AudioEngine(
 
         val sampleId = instrument.sampleId
 
-        // Use TBL override if provided, otherwise use instrument ID as table ID
         val tableId = if (tableIdOverride >= 0) tableIdOverride else instrumentId
         val tableTicRate = instrument.tableTicRate
 
-        // Ensure table is loaded
         if (tableId in 0..255) {
             ensureTableLoaded(project.tables[tableId])
         }
 
-        // Debug: Log what we're scheduling
         logger.d(TAG, "📋 scheduleNote: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, vol=${"%.4f".format(volume)}, pan=$pan, tableId=$tableId")
 
         val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
@@ -745,9 +604,6 @@ class AudioEngine(
         )
     }
 
-    /**
-     * Clear all scheduled notes.
-     */
     fun clearScheduledNotes() {
         backend.clearScheduledNotes()
     }
@@ -756,10 +612,6 @@ class AudioEngine(
         backend.clearScheduledNotesFrom(fromFrame)
     }
 
-    /**
-     * Unload all samples from all instrument slots.
-     * Call this when creating a new project to prevent stale samples from playing.
-     */
     fun clearAllSamples() {
         sampleBaseFrequencies.clear()
         sampleRateRatios.clear()
@@ -767,13 +619,11 @@ class AudioEngine(
         backend.clearAllSamples()
     }
 
-    // Sample editor operations — thin wrappers over IAudioBackend
     fun getSampleLength(instrumentId: Int): Int = backend.getSampleLength(instrumentId)
     fun getSampleWaveform(instrumentId: Int, numBins: Int): FloatArray = backend.getSampleWaveform(instrumentId, numBins)
     fun getSampleWaveformRange(instrumentId: Int, startFrame: Int, endFrame: Int, numBins: Int): FloatArray = backend.getSampleWaveformRange(instrumentId, startFrame, endFrame, numBins)
     fun getSampleData(instrumentId: Int): FloatArray = backend.getSampleData(instrumentId)
 
-    // Stereo sample support
     fun getSpectrumMagnitudes(numBins: Int): FloatArray = backend.getSpectrumMagnitudes(numBins)
 
     fun hasStereoData(instrumentId: Int): Boolean = backend.hasStereoData(instrumentId)
@@ -783,12 +633,6 @@ class AudioEngine(
         backend.getSampleWaveformRangeSource(instrumentId, startFrame, endFrame, numBins, channel)
 
     /**
-     * Prepare the correct source channel for sample editor preview playback.
-     *
-     * For non-STEREO source modes on a stereo sample, copies the appropriate
-     * mono data into temporary slot 254 so it plays without the right channel.
-     * Returns the slot to use for scheduling the preview note.
-     *
      * @param instId Instrument/sample ID to prepare from
      * @param sourceMode 0=LEFT, 1=RIGHT, 2=STEREO, 3=MONO
      * @return instId if no special handling needed, or 254 for the temp mono slot
@@ -866,18 +710,12 @@ class AudioEngine(
     fun findZeroCrossing(instrumentId: Int, frame: Int): Int = backend.findZeroCrossing(instrumentId, frame)
     fun detectTransients(instrumentId: Int, sensitivity: Int): IntArray = backend.detectTransients(instrumentId, sensitivity)
 
-    // Recover the original WAV sample rate from the stored rate ratio
     fun getOriginalSampleRate(instrumentId: Int): Int {
         val ratio = sampleRateRatios[instrumentId] ?: return 44100
         val deviceRate = getDeviceSampleRate()
         return (deviceRate / ratio).toInt().coerceAtLeast(8000)
     }
 
-    /**
-     * Returns per-track active note from the C++ voice pool.
-     * Each element is Note.EMPTY if no voice is playing on that track,
-     * or the actual Note being played (based on what was triggered).
-     */
     fun getActiveTrackNotes(): List<Note> {
         val encoded = backend.getTrackActiveNotes()  // int[8], -1 or octave*12+pitch
         return encoded.map { enc ->
@@ -885,9 +723,6 @@ class AudioEngine(
         }
     }
 
-    /**
-     * Calculate target frame for a note based on tempo and step number.
-     */
     fun calculateTargetFrame(startFrame: Long, stepNumber: Int, tempo: Int): Long {
         val sampleRate = getDeviceSampleRate()
         val msPerStep = (60000.0 / tempo / 4.0)
@@ -895,9 +730,6 @@ class AudioEngine(
         return startFrame + (stepNumber * framesPerStep)
     }
 
-    /**
-     * Set playback parameters for an instrument.
-     */
     fun setInstrumentParams(
         instrumentId: Int,
         startPoint: Int,
@@ -918,9 +750,6 @@ class AudioEngine(
         )
     }
 
-    /**
-     * Update instrument parameters from Instrument data class.
-     */
     fun updateInstrumentPlaybackParams(instrument: Instrument) {
         val loopModeInt = when (instrument.loopMode) {
             "fwd" -> 1
@@ -951,14 +780,6 @@ class AudioEngine(
         )
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // SF2 OVERRIDE HELPERS (Phase 8)
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * Apply SFOverrides.ampAttack/Decay/Sustain/Release to TSF regions.
-     * Call after SF2 loads or when any override field changes.
-     */
     fun applySoundfontEnvelopeOverrides(instrument: Instrument) {
         val path = instrument.soundfontPath ?: return
         val slot = sfSlotProvider?.invoke(path) ?: return  // sfSlot (0-7), not instrument index
@@ -967,10 +788,6 @@ class AudioEngine(
             ov.ampAttack, ov.ampDecay, ov.ampSustain, ov.ampRelease)
     }
 
-    /**
-     * Apply SFOverrides.filterCut/filterRes to the instrument's instrParams in C++.
-     * -1 = bypass Phase-7 filter (filterType=off). 0-255 = LP filter at that value.
-     */
     fun applySoundfontFilterOverrides(instrument: Instrument) {
         val ov = instrument.sfOverrides
         val filterType = if (ov.filterCut >= 0) 1 else 0  // 1=LP, 0=off
@@ -979,22 +796,8 @@ class AudioEngine(
         backend.setSoundfontFilterOverrides(instrument.sampleId, filterType, filterCut, filterRes)
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // TABLE SUPPORT (Phase 3.5)
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /** Track which tables have been loaded to native layer */
     private val loadedTables = mutableSetOf<Int>()
 
-    /**
-     * Load a table to the native audio engine.
-     *
-     * Serializes the table data into the format expected by C++:
-     * 16 rows × 8 bytes per row = 128 bytes
-     * Each row: [transpose, volume, fx1Type, fx1Value, fx2Type, fx2Value, fx3Type, fx3Value]
-     *
-     * @param table The table to load
-     */
     fun loadTable(table: Table) {
         val rowData = ByteArray(128)
         for (rowIndex in 0 until 16) {
@@ -1010,7 +813,6 @@ class AudioEngine(
             rowData[offset + 7] = row.fx3Value.toByte()
         }
 
-        // Log first row for debugging
         val firstRow = table.rows[0]
         logger.d(TAG, "📋 Loading table ${table.id}: row0=[transpose=${firstRow.transpose}, vol=${firstRow.volume}]")
 
@@ -1019,66 +821,27 @@ class AudioEngine(
         logger.d(TAG, "📋 Loaded table ${table.id} to native layer")
     }
 
-    /**
-     * Ensure a table is loaded to the native layer.
-     * Only loads if not already loaded.
-     *
-     * @param table The table to ensure is loaded
-     */
     fun ensureTableLoaded(table: Table) {
         if (table.id !in loadedTables) {
             loadTable(table)
         }
     }
 
-    /**
-     * Force reload a table to the native layer.
-     * Use this after editing table data to ensure changes take effect.
-     *
-     * @param table The table to reload
-     */
     fun forceReloadTable(table: Table) {
         loadedTables.remove(table.id)
         loadTable(table)
     }
 
-    /**
-     * Mark a table as needing reload (call after editing table data).
-     *
-     * @param tableId The table ID that was modified
-     */
     fun invalidateTable(tableId: Int) {
         loadedTables.remove(tableId)
         logger.d(TAG, "🔄 Invalidated table $tableId cache")
     }
 
-    /**
-     * Clear loaded table tracking (call when project changes).
-     */
     fun clearLoadedTables() {
         loadedTables.clear()
         logger.d(TAG, "🗑️ Cleared loaded tables tracking")
     }
 
-    /**
-     * Schedule a note with explicit table control.
-     * Use this when you need to override the default table (instrument ID = table ID).
-     *
-     * @param targetFrame When this note should trigger (audio frame)
-     * @param note The note to play
-     * @param instrumentId Instrument ID (0-255)
-     * @param trackId Track ID (0-7)
-     * @param volume Note volume (0.0-1.0)
-     * @param pan Pan position (0.0=left, 0.5=center, 1.0=right)
-     * @param project Project for instrument lookup
-     * @param startPointOverride Optional start point override (-1 = use instrument default)
-     * @param tableIdOverride Override table ID (-1 = use instrument ID as table ID)
-     * @param pslInitialOffset PSL initial pitch offset in semitones (0 = no PSL)
-     * @param pslDuration PSL slide duration in ticks (0 = no slide)
-     * @param pbnRate PBN pitch bend rate in semitones/tick (0 = no bend)
-     * @param vibratoSpeed PVB/PVX vibrato speed in Hz (0 = no vibrato)
-     * @param vibratoDepth PVB/PVX vibrato depth in semitones (0 = no vibrato)
-     */
     fun scheduleNoteWithTable(
         targetFrame: Long,
         note: Note,
@@ -1106,12 +869,9 @@ class AudioEngine(
         }
 
         val sampleId = instrument.sampleId
-
-        // Use override if provided, otherwise use instrument ID as table ID
         val tableId = if (tableIdOverride >= 0) tableIdOverride else instrumentId
         val tableTicRate = instrument.tableTicRate
 
-        // Ensure table is loaded
         if (tableId >= 0 && tableId < 256) {
             ensureTableLoaded(project.tables[tableId])
         }
@@ -1140,130 +900,48 @@ class AudioEngine(
         )
     }
 
-    /**
-     * Get the current table row for a voice on a specific track.
-     * Used for UI feedback (highlighting current table row during playback).
-     *
-     * @param trackId Which track to query (0-7)
-     * @return Current table row (0-15), or -1 if no active voice or no table
-     */
-    fun getVoiceTableRow(trackId: Int): Int {
-        return backend.getVoiceTableRow(trackId)
-    }
+    fun getVoiceTableRow(trackId: Int): Int = backend.getVoiceTableRow(trackId)
 
-    /**
-     * Get the table ID being used by a voice on a specific track.
-     *
-     * @param trackId Which track to query (0-7)
-     * @return Table ID (0-255), or -1 if no active voice or no table
-     */
-    fun getVoiceTableId(trackId: Int): Int {
-        return backend.getVoiceTableId(trackId)
-    }
+    fun getVoiceTableId(trackId: Int): Int = backend.getVoiceTableId(trackId)
 
-    /**
-     * Set table row for a voice (THO effect from phrase on empty step).
-     * Jumps the currently playing voice's table to the specified row.
-     */
     fun setVoiceTableRow(trackId: Int, row: Int) {
         backend.setVoiceTableRow(trackId, row)
     }
 
-    /**
-     * Schedule a phraseVol update at exact frame (Vxx effect on empty steps).
-     * Uses the same sample-accurate queue as notes so the change fires at the
-     * correct step boundary, not when the PlaybackController runs ahead.
-     */
+    // Uses sample-accurate queue so the Vxx change fires at the correct step boundary.
     fun scheduleTrackPhraseVol(targetFrame: Long, trackId: Int, phraseVol: Float) {
         backend.scheduleTrackPhraseVol(targetFrame, trackId, phraseVol)
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // PITCH MODULATION (Phase 7)
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * Set pitch slide for a voice (PSL effect).
-     *
-     * @param trackId Which track (0-7)
-     * @param targetSemitones Target pitch offset in semitones
-     * @param durationTicks Duration in ticks
-     * @param tempo Current tempo in BPM
-     */
     fun setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int) {
         backend.setPitchSlide(trackId, targetSemitones, durationTicks, tempo)
     }
 
-    /**
-     * Set continuous pitch bend for a voice (PBN effect).
-     *
-     * @param trackId Which track (0-7)
-     * @param semitonesPerTick Rate of pitch change per tick
-     * @param tempo Current tempo in BPM
-     */
     fun setPitchBend(trackId: Int, semitonesPerTick: Float, tempo: Int) {
         backend.setPitchBend(trackId, semitonesPerTick, tempo)
     }
 
-    /**
-     * Set vibrato for a voice (PVB/PVX effect).
-     *
-     * @param trackId Which track (0-7)
-     * @param speed LFO frequency in Hz
-     * @param depth Modulation depth in semitones
-     */
     fun setVibrato(trackId: Int, speed: Float, depth: Float) {
         backend.setVibrato(trackId, speed, depth)
     }
 
-    /**
-     * Clear all pitch modulation for a voice.
-     *
-     * @param trackId Which track (0-7)
-     */
     fun clearPitchMod(trackId: Int) {
         backend.clearPitchMod(trackId)
     }
 
-    /**
-     * Set initial pitch offset for a voice (used by PSL portamento effect).
-     *
-     * @param trackId Which track (0-7)
-     * @param semitones Pitch offset in semitones
-     */
     fun setInitialPitchOffset(trackId: Int, semitones: Float) {
         backend.setInitialPitchOffset(trackId, semitones)
     }
 
-    /**
-     * Trigger note-off for ADSR/TRIG modulators on a track.
-     * Transitions sustain (stage 3) → release (stage 4), allowing a smooth fade-out.
-     * Called on KILL effect so looped samples with ADSR mod fade rather than cut hard.
-     *
-     * @param trackId Which track (0-7)
-     */
+    // KILL effect: triggers ADSR release (sustain → release) so looped samples fade rather than cut hard.
     fun triggerNoteOff(trackId: Int) {
         backend.triggerNoteOff(trackId)
     }
 
-    /**
-     * Schedule a note-off event at a specific audio frame.
-     * Triggers ADSR release (sustain → release) at sample-accurate timing.
-     * Used to implement step-end note-off for ADSR envelopes.
-     *
-     * @param frame When to trigger note-off (absolute audio frame)
-     * @param trackId Which track (0-7)
-     */
     fun scheduleNoteOff(frame: Long, trackId: Int) {
         backend.scheduleNoteOff(frame, trackId)
     }
 
-    /**
-     * Push instrument modulation slots to the C++ engine before scheduling a note.
-     *
-     * Converts AHD tick values → audio samples using current tempo + sample rate,
-     * then calls setInstrumentModulation for each active slot.
-     */
     fun pushInstrumentModulation(instrument: Instrument, tempo: Int) {
         val sampleId = instrument.sampleId
         val sampleRate = getDeviceSampleRate().toFloat()
@@ -1369,19 +1047,12 @@ class AudioEngine(
         }
     }
 
-    /**
-     * Push EQ slot and send levels for an instrument to the C++ engine.
-     * Call before scheduleNote so the note trigger picks up current values.
-     */
     fun pushInstrumentEqAndSends(instrument: Instrument, project: com.conanizer.pockettracker.core.data.Project) {
         val sampleId = instrument.sampleId
         backend.setInstrumentEqSlot(sampleId, instrument.eqSlot)
         backend.setInstrumentSendLevels(sampleId, instrument.reverbSend, instrument.delaySend)
     }
 
-    /**
-     * Close audio engine and release resources.
-     */
     fun close() {
         backend.close()
     }

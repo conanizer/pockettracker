@@ -302,22 +302,10 @@ interface IAudioBackend {
      */
     fun getFrameCounter(): Long
 
-    // ===================================
-    // PHASE 1 BUG FIXES: DECAY AND REAL-TIME VOLUME
-    // ===================================
-
-    /**
-     * Manually decay peak levels.
-     * Call this periodically when audio stream is not running (playback stopped)
-     * to smoothly fade out the mixer meters.
-     */
+    // Call periodically when stream is stopped to fade mixer meters smoothly.
     fun decayPeaks()
 
-    /**
-     * Manually decay waveform buffer.
-     * Call this periodically when audio stream is not running (playback stopped)
-     * to smoothly fade out the oscilloscope display.
-     */
+    // Call periodically when stream is stopped to fade oscilloscope display smoothly.
     fun decayWaveform()
 
     /** Returns numBins log-spaced (20Hz–20kHz) magnitude values in 0-1 range from master output FFT. */
@@ -384,10 +372,6 @@ interface IAudioBackend {
     fun setDelayInputEq(slot: Int)
     // Set master EQ from the global preset bank (-1 = off).
     fun setMasterEqSlot(slot: Int)
-
-    // ===================================
-    // TABLE METHODS (Phase 3.5)
-    // ===================================
 
     /**
      * Load table data into the audio engine.
@@ -483,10 +467,6 @@ interface IAudioBackend {
      */
     fun scheduleTrackPhraseVol(targetFrame: Long, trackId: Int, phraseVol: Float)
 
-    // ===================================
-    // PITCH MODULATION METHODS (Phase 6)
-    // ===================================
-
     /**
      * Set pitch slide for a voice (PSL effect).
      *
@@ -545,10 +525,6 @@ interface IAudioBackend {
      * @param semitones Pitch offset in semitones (can be negative)
      */
     fun setInitialPitchOffset(trackId: Int, semitones: Float)
-
-    // ===================================
-    // MODULATION METHODS (Phase 4 — AHD)
-    // ===================================
 
     /**
      * Set a modulation slot for an instrument.

@@ -1,5 +1,4 @@
-﻿// audio-engine.cpp — AudioEngine method bodies (Phase 0 file split)
-// TSF API declarations only — TSF_IMPLEMENTATION lives in soundfont-voice.cpp
+﻿// TSF API declarations only — TSF_IMPLEMENTATION lives in soundfont-voice.cpp
 #include "audio-engine.h"
 #include "kissfft/kiss_fftr.h"
 #include "tsf.h"
@@ -10,10 +9,6 @@
 
 // Definition of the per-track soundfont voice array (extern declared in audio-engine.h)
 SoundfontVoice sfVoices[8];
-
-// ============================================================
-// CONSTRUCTOR / DESTRUCTOR
-// ============================================================
 
 AudioEngine::AudioEngine() {
     for (int i = 0; i < 256; i++) {
@@ -52,10 +47,6 @@ AudioEngine::~AudioEngine() {
     }
     delete[] sampleClipboard;
 }
-
-// ============================================================
-// STREAM MANAGEMENT
-// ============================================================
 
 bool AudioEngine::openStream() {
     // OpenSL ES does NOT trigger CCodec/C2 codec enumeration that spams 2000+ log lines
@@ -130,10 +121,6 @@ void AudioEngine::closeStream() {
         stream.reset();
     }
 }
-
-// ============================================================
-// SAMPLE MANAGEMENT
-// ============================================================
 
 void AudioEngine::loadSample(int id, const float* data, int length) {
     if (id < 0 || id >= 256) return;
@@ -213,24 +200,17 @@ void AudioEngine::clearAllSamples() {
 
 // Sample editor operations live in sample-editor.cpp.
 
-// ============================================================
-// IMMEDIATE NOTE TRIGGER (no scheduling)
-// ============================================================
-
 void AudioEngine::triggerNote(int sampleId, int trackId, float freq, float baseFreq, float vol, float pan) {
     if (sampleId < 0 || sampleId >= 256 || !samples[sampleId]) return;
 
-    // Resume stream if paused (prevents hum when not playing)
     resumeStream();
 
-    // Stop track
     for (int i = 0; i < MAX_VOICES; i++) {
         if (voices[i].trackId == trackId) {
             voices[i].stop();
         }
     }
 
-    // Find free voice
     for (int i = 0; i < MAX_VOICES; i++) {
         if (!voices[i].isActive) {
             float rate = freq / baseFreq;
@@ -244,13 +224,11 @@ void AudioEngine::triggerNote(int sampleId, int trackId, float freq, float baseF
 }
 
 void AudioEngine::stopTrack(int trackId) {
-    // Stop all sampler voices on this track
     for (int i = 0; i < MAX_VOICES; i++) {
         if (voices[i].trackId == trackId && voices[i].isActive) {
             voices[i].stop();
         }
     }
-    // Stop any active soundfont note on this track
     if (trackId >= 0 && trackId < 8) {
         sfVoices[trackId].hardStop();
     }
@@ -264,8 +242,6 @@ void AudioEngine::stopAll() {
     for (int t = 0; t < 8; t++) {
         sfVoices[t].hardStop();
     }
-    // Keep stream running so preview notes and future playback work immediately.
-    // With all voices stopped and queue cleared, the callback outputs silence.
     LOGD("stopAll: voices and SF notes cleared, stream stays running");
 }
 
@@ -304,14 +280,9 @@ void AudioEngine::resumeStream() {
     }
 }
 
-// ============================================================
-// CORE AUDIO PROCESSING BLOCK
 // ALL audio DSP lives here. onAudioReady and renderOffline are thin wrappers.
 // Rule: NEVER add audio processing logic directly to onAudioReady or renderOffline.
-// ============================================================
-
 void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCount, float sampleRate) {
-    // Zero per-track and per-send peak accumulators for this block
     for (int t = 0; t < 8; t++) { framePeaksPerTrackL[t] = 0.0f; framePeaksPerTrackR[t] = 0.0f; }
     frameSendPeakRevL = frameSendPeakRevR = frameSendPeakDelL = frameSendPeakDelR = 0.0f;
 
@@ -320,7 +291,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     float revSendBufL[MAX_BLOCK] = {}, revSendBufR[MAX_BLOCK] = {};
     float dlySendBufL[MAX_BLOCK] = {}, dlySendBufR[MAX_BLOCK] = {};
 
-    // PHASE 1: Process note queue at sample-accurate timing
     for (int32_t frame = 0; frame < numFrames; frame++) {
         int64_t currentFrame = globalFrameCounter + frame;
 
@@ -334,7 +304,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     break;
                 }
             }
-            // Apply to SF voices (Phase 5)
             if (upd.trackId >= 0 && upd.trackId < 8 && sfVoices[upd.trackId].isActive) {
                 sfVoices[upd.trackId].modSourceValues[(ModSourceId)upd.sourceId] = upd.value;
             }
@@ -405,7 +374,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     sv.resetTableState(note.tableId, effectiveTicRate,
                                        note.noteOctave, note.notePitch, note.tableStartRow);
 
-                    // Copy instrument effects params and modulation slots (Phase 5 / 7).
                     // Only valid when sampleId >= 0 (phrase playback); previews pass -1.
                     if (note.sampleId >= 0 && note.sampleId < 256) {
                         sv.instrParams = instrumentParams[note.sampleId];
@@ -449,7 +417,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         }
                     }
 
-                    // Initialize modulation state (Phase 5).
                     sv.params.setBase(PARAM_VOL,   note.volume);
                     sv.params.setBase(PARAM_PAN,   note.pan);
                     sv.params.setBase(PARAM_PITCH, 0.0f);
@@ -557,7 +524,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 if (note.sampleId >= 0 && note.sampleId < 256 && samples[note.sampleId]) {
                     float rate = note.frequency / note.baseFrequency;
 
-                    // M8-style: Check if table's last row has TIC effect
                     int effectiveTicRate = note.tableTicRate;
                     if (note.tableId >= 0 && note.tableId < 256) {
                         std::lock_guard<std::mutex> lock(tableMutex);
@@ -583,7 +549,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         }
                     }
 
-                    // Determine table start row
                     int startRow;
                     if (note.tableStartRow >= 0) {
                         startRow = note.tableStartRow % 16;
@@ -598,7 +563,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                                       sampleRate, note.startPointOverride, note.endPointOverride,
                                       note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
 
-                    // PSL: Set initial pitch offset and start slide to note pitch.
                     // pslDuration is already in audio frames (converted by AudioEngine.kt).
                     if (fabsf(note.pslInitialOffset) > 0.001f && note.pslDuration > 0.0f) {
                         voices[v].pitchOffset = note.pslInitialOffset;
@@ -609,7 +573,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         LOGT("🎵 PSL applied: offset=%.2f, duration=%.0f ticks, rate=%.6f",
                              note.pslInitialOffset, note.pslDuration, voices[v].pitchSlideRate);
                     }
-                    // PBN: Set continuous pitch bend rate.
                     // pbnRate is already in semitones/frame (converted by AudioEngine.kt).
                     if (fabsf(note.pbnRate) > 0.0001f) {
                         voices[v].pitchSlideRate = note.pbnRate;
@@ -617,7 +580,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         voices[v].pitchSliding = true;
                         LOGT("🎵 PBN applied: rate=%.4f semitones/tick", note.pbnRate);
                     }
-                    // PVB/PVX: Set vibrato
                     if (note.vibratoDepth > 0.01f) {
                         voices[v].vibratoSpeed = note.vibratoSpeed;
                         voices[v].vibratoDepth = note.vibratoDepth;
@@ -626,7 +588,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                              note.vibratoSpeed, note.vibratoDepth);
                     }
 
-                    // Initialize modulation state from instrument mod slots.
                     for (int m = 0; m < 4; m++) {
                         const InstrumentModSlot& src = instrumentModSlots[note.sampleId][m];
                         VoiceModSlot& dst = voices[v].voiceMods[m];
@@ -671,21 +632,15 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
     }
 
-    // ===================================
-    // TABLE PROCESSING (Phase 3.5 + Phase 4 special modes)
-    // ===================================
-    // Process table ticks for each active voice once per callback
-    // Special TIC modes (Phase 4):
-    //   TIC00 (0x00): Trigger mode - table doesn't advance automatically
-    //   TIC01-FB: Standard tic rate (1 tic = 1 audio callback ~6ms)
-    //   TICFC (0xFC): Octave map - row = triggered note's octave (0-9)
-    //   TICFE (0xFE): Note map - row = triggered note's pitch (0-11)
-    //   TICFF (0xFF): 200Hz mode - advance ~1 row per 5ms
+    // Special TIC modes:
+    //   TIC00 (0x00): Trigger mode — table row set by note, doesn't advance automatically
+    //   TICFC (0xFC): Octave map — row = triggered note's octave (0-9)
+    //   TICFE (0xFE): Note map — row = triggered note's pitch (0-11)
+    //   TICFF (0xFF): 200Hz mode — advance ~1 row per 5ms
     for (int v = 0; v < MAX_VOICES; v++) {
         Voice& voice = voices[v];
         if (!voice.isActive || voice.tableId < 0) continue;
 
-        // Check if table is loaded
         bool tableLoaded = false;
         {
             std::lock_guard<std::mutex> lock(tableMutex);
@@ -693,7 +648,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
         if (!tableLoaded) continue;
 
-        // Handle special TIC modes
         bool shouldProcessRow = false;
         bool shouldAdvance = false;
 
@@ -724,24 +678,19 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
         }
 
-        // Process current table row if needed
         if (shouldProcessRow) {
-
-            // Get current table row data
             TableRow row;
             {
                 std::lock_guard<std::mutex> lock(tableMutex);
                 row = tables[voice.tableId].rows[voice.tableRow];
             }
 
-            // Apply transpose — write semitones to source array (Phase 2).
             // playbackRate no longer has transpose baked in; getModulatedPlaybackRate reads
             // modDestValues[PARAM_PITCH] which processRoutes accumulates from TABLE_PITCH.
             int semitones = transposeToSemitones(row.transpose);
             voice.tableTranspose = (float)semitones;  // kept for debug log
             voice.modSourceValues[MOD_SRC_TABLE_PITCH] = (float)semitones;
 
-            // Apply volume — write to source array (Phase 2).
             // Mix loop reads modDestValues[PARAM_VOL] instead of voice.tableVolume.
             if (row.volume == 0xFF) {
                 voice.tableVolume = 1.0f;  // kept for debug log
@@ -750,15 +699,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
             voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume;
 
-            // Process table effects (3 effect slots per row)
             bool hopExecuted = false;
             int hopTarget = -1;
 
-            // Helper lambda to process a single effect
             auto processEffect = [&](uint8_t fxType, uint8_t fxValue) {
                 switch (fxType) {
                     case FX_KILL:
-                        // K00 - Kill voice immediately
                         if (fxValue == 0x00) {
                             voice.isActive = false;
                             LOGT("📋 Table effect: KILL voice %d", v);
@@ -766,13 +712,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         break;
 
                     case FX_HOP:
-                        // Hxx - HOP effect (Phase 5: repeat count support)
-                        // Format: HOP XY where X = repeat count, Y = target row
-                        // HOP FF = stop table processing
-                        // HOP 0Y = infinite loop to row Y
-                        // HOP XY (X>0) = jump to row Y exactly X times, then continue
+                        // HOP XY: X=repeat count (0=infinite), Y=target row; FF=stop table
                         if (fxValue == 0xFF) {
-                            // Stop table processing for this voice
                             voice.tableId = -1;
                             voice.hopTargetRow = -1;
                             voice.hopRepeatCount = 0;
@@ -811,13 +752,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         break;
 
                     case FX_VOLUME:
-                        // Vxx - Set volume (overrides volume column)
                         voice.tableVolume = fxValue / 255.0f;
                         voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume;
                         break;
 
                     case FX_OFFSET:
-                        // Oxx - Change sample position (relative to current)
                         if (voice.sampleLength > 0) {
                             float normalizedPos = fxValue / 255.0f;
                             voice.position = normalizedPos * (voice.sampleLength - 1);
@@ -825,7 +764,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         break;
 
                     case FX_TIC:
-                        // Txx - Set table tick rate (tics per row advance)
                         if (fxValue >= 0x01 && fxValue <= 0xFB) {
                             voice.tableTicRate = fxValue;
                             voice.tableTicCounter = 0;
@@ -834,28 +772,22 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         break;
 
                     case FX_THO:
-                        // THO 0X - Table hop to row X (simple unconditional jump)
                         hopExecuted = true;
                         hopTarget = fxValue & 0x0F;
                         LOGT("📋 Table THO %02X: hop to row %d, voice %d", fxValue, hopTarget, v);
                         break;
 
                     default:
-                        // Unknown or unimplemented effect - ignore
                         break;
                 }
             };
 
-            // Process all 3 effect slots
             processEffect(row.fx1Type, row.fx1Value);
             processEffect(row.fx2Type, row.fx2Value);
             processEffect(row.fx3Type, row.fx3Value);
 
-            // Mark this row as processed (before any jumps change tableRow)
-            int processedRow = voice.tableRow;
-            voice.lastProcessedRow = processedRow;
+            voice.lastProcessedRow = voice.tableRow;
 
-            // Handle row advancement
             if (hopExecuted && hopTarget >= 0) {
                 voice.tableRow = hopTarget % 16;
                 LOGT("📋 Table HOP: voice %d jumped to row %d", v, voice.tableRow);
@@ -870,12 +802,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
     }
 
-    // ===================================
-    // TABLE PROCESSING — SF VOICES
-    // ===================================
-    // Mirrors the sampler table loop above.  Effects that write to modSourceValues[]
-    // (transpose, volume) are automatically picked up by updateVoiceModulation / applyPitchMod.
-    // Sampler-only effects (FX_OFFSET) are silently skipped.
+    // SF table processing: mirrors sampler loop above. Effects writing to modSourceValues[]
+    // are picked up by updateVoiceModulation/applyPitchMod. FX_OFFSET silently skipped.
     for (int t = 0; t < 8; t++) {
         SoundfontVoice& sv = sfVoices[t];
         if (!sv.isActive || sv.tableId < 0) continue;
@@ -995,18 +923,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
     }
 
-    // ===================================
-    // PITCH MODULATION PROCESSING (Phase 6)
-    // ===================================
     for (int v = 0; v < MAX_VOICES; v++) {
         Voice& voice = voices[v];
         if (!voice.isActive) continue;
         updateVoicePitchMod(voice, numFrames, sampleRate);
     }
 
-    // ===================================
-    // MODULATION PROCESSING (Phase 4 — AHD/ADSR/LFO)
-    // ===================================
     // Snapshot envValues before advancing so the mix loop can interpolate
     // per-sample (eliminates block-rate staircase artifacts on short envelopes).
     for (int v = 0; v < MAX_VOICES; v++) {
@@ -1066,14 +988,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         Voice& voice = voices[v];
         if (!voice.isActive || !voice.sampleData) continue;
 
-        // Get modulated playback rate (includes pitch slide + vibrato)
         float modulatedRate = getModulatedPlaybackRate(voice);
 
-        // Effective distortion and sample-bound params (base + mod, clamped)
         int effDrive      = std::max(0, std::min(255, (int)(voice.params.base[PARAM_DRIVE]      + voice.modDestValues[PARAM_DRIVE])));
         int effCrush      = std::max(0, std::min(15,  (int)(voice.params.base[PARAM_CRUSH]      + voice.modDestValues[PARAM_CRUSH])));
         int effDownsample = std::max(0, std::min(15,  (int)(voice.params.base[PARAM_DOWNSAMPLE] + voice.modDestValues[PARAM_DOWNSAMPLE])));
-        // Push effective values into the chain so processMono() picks them up this block.
         voice.chain.drive.setDrive(effDrive);
         voice.chain.crush.setParams(effCrush, 0);   // sampler: downsample=0, pre-interp handles it
         {
@@ -1227,7 +1146,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             output[i * channelCount] += sampleL;
             output[i * channelCount + 1] += sampleR;
 
-            // Track peak for metering
             if (!voice.isFadingOut && voice.trackId >= 0 && voice.trackId < 8) {
                 framePeaksPerTrackL[voice.trackId] = fmaxf(framePeaksPerTrackL[voice.trackId], fabsf(sampleL));
                 framePeaksPerTrackR[voice.trackId] = fmaxf(framePeaksPerTrackR[voice.trackId], fabsf(sampleR));
@@ -1235,9 +1153,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
             if (!voice.isActive) break;
 
-            // Update position based on playback mode
             if (voice.loopMode == 2) {
-                // Ping-pong loop
                 if (voice.loopingBack) {
                     voice.position -= modulatedRate;
                     if (voice.position <= voice.actualLoopStart) {
@@ -1252,7 +1168,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     }
                 }
             } else if (voice.reverse) {
-                // Reverse playback
                 voice.position -= modulatedRate;
                 if (voice.position <= voice.actualStart) {
                     if (voice.loopMode == 1) {
@@ -1263,7 +1178,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     }
                 }
             } else {
-                // Forward playback
                 voice.position += modulatedRate;
                 if (voice.position >= voice.actualEnd) {
                     if (voice.loopMode == 1) {
@@ -1279,24 +1193,17 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     } // if (editLock.owns_lock())
     } // sampleEditMutex try_lock scope
 
-    // ===================================
-    // SOUNDFONT RENDERING — per-track channel renders (Phase 6)
-    // ===================================
     {
         float sfBuf[2048];  // 1024 frames * 2 channels — safe for any Oboe buffer size
         float masterVol;
         { std::lock_guard<std::mutex> vlock(volumeMutex); masterVol = masterVolume; }
 
-        // 1. Advance modulation state machines and apply volume/pitch (audio thread, no lock needed).
         for (int t = 0; t < 8; t++) {
             SoundfontVoice& sv = sfVoices[t];
             if (!sv.isActive) continue;
 
-            // Run the shared modulation engine (envelopes, LFOs, routes) — same as sampler path.
             updateVoiceModulation(sv, numFrames, (float)sampleRate);
 
-            // Apply modulated volume: modDestValues[PARAM_VOL] = instrVol × phraseVol × tableVol.
-            // LFO/AHD VOL (dest=1) are block-rate for SF — apply directly to channel volume.
             float noteVol = sv.modDestValues[PARAM_VOL];
             for (int m = 0; m < 4; m++) {
                 VoiceModSlot& mod = sv.voiceMods[m];
@@ -1311,7 +1218,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     noteVol = fmaxf(0.0f, noteVol + (mod.envValue - 1.0f) * mod.effectiveAmt);
                 }
             }
-            // Audio-thread path: no mutex needed (consistent with triggerNote / applyPitchMod).
             if (sv.sfSlot >= 0) {
                 float trkVol;
                 { std::lock_guard<std::mutex> vlock(volumeMutex); trkVol = trackVolumes[t]; }
@@ -1350,14 +1256,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 }
             }
 
-            // Advance pitch slide/vibrato and write MIDI pitch wheel.
-            // applyPitchMod now also adds modDestValues[PARAM_PITCH] (LFO/AHD → PITCH routes).
             sv.applyPitchMod((float)sampleRate, numFrames);
         }
 
-        // 2. Render each active track into its own per-channel buffer, then mix.
-        // tsf_render_float_channel() filters by MIDI channel (= trackId), so each track
-        // gets an independent buffer — enabling per-track effects in Phase 7.
         for (int t = 0; t < 8; t++) {
             SoundfontVoice& sv = sfVoices[t];
             if (!sv.isActive || sv.sfSlot < 0) continue;
@@ -1370,9 +1271,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 tsf_render_float_channel(h, t, sfBuf, numFrames, 0 /* overwrite */);
             }
 
-            // Phase 7: apply instrument effects to this track's buffer before mixing.
-            // Signal chain via InstrumentChain: Downsample+Crush → Drive → Filter.
-            // Downsample and crush are both handled by BitcrushModule (Decimator).
             for (int i = 0; i < numFrames; i++) {
                 float L = sfBuf[i * 2];
                 float R = sfBuf[i * 2 + 1];
@@ -1453,10 +1351,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     globalFrameCounter += numFrames;
 }
 
-// ============================================================
-// LIVE AUDIO CALLBACK (thin wrapper — no DSP here!)
-// ============================================================
-
 oboe::DataCallbackResult AudioEngine::onAudioReady(
         oboe::AudioStream *audioStream,
         void *audioData,
@@ -1481,7 +1375,6 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
     float *output = static_cast<float*>(audioData);
     int channelCount = audioStream->getChannelCount();
 
-    // Silence output
     for (int i = 0; i < numFrames * channelCount; i++) {
         output[i] = 0.0f;
     }
@@ -1494,7 +1387,6 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
     float sampleRate = (float)audioStream->getSampleRate();
     processAudioBlock(output, numFrames, channelCount, sampleRate);
 
-    // Capture waveform for oscilloscope (left channel only, with downsampling)
     {
         std::lock_guard<std::mutex> lock(waveformMutex);
         for (int i = 0; i < numFrames; i++) {
@@ -1507,7 +1399,6 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
         }
     }
 
-    // Capture undownsampled master output for EQ spectrum visualizer
     {
         std::lock_guard<std::mutex> lock(spectrumMutex);
         for (int i = 0; i < numFrames; i++) {
@@ -1552,10 +1443,6 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
 
     return oboe::DataCallbackResult::Continue;
 }
-
-// ============================================================
-// NOTE SCHEDULING
-// ============================================================
 
 int64_t AudioEngine::getCurrentFrame() {
     return globalFrameCounter;
@@ -1659,10 +1546,6 @@ void AudioEngine::clearScheduledNotesFrom(int64_t fromFrame) {
     paramUpdateQueue.clearFrom(fromFrame);
 }
 
-// ============================================================
-// TABLE METHODS
-// ============================================================
-
 void AudioEngine::loadTable(int tableId, const uint8_t* rowData) {
     if (tableId < 0 || tableId >= 256) return;
 
@@ -1729,10 +1612,6 @@ void AudioEngine::scheduleTrackPhraseVol(int64_t targetFrame, int trackId, float
     paramUpdateQueue.schedule({ targetFrame, trackId, (int)MOD_SRC_PHRASE_VOL, phraseVol });
 }
 
-// ============================================================
-// WAVEFORM / METERS
-// ============================================================
-
 void AudioEngine::getSpectrumMagnitudes(int numBins, float* out) {
     static const int FFT_SIZE = 2048;
     kiss_fft_scalar input[FFT_SIZE];
@@ -1746,7 +1625,6 @@ void AudioEngine::getSpectrumMagnitudes(int numBins, float* out) {
         }
     }
 
-    // Hann window
     for (int i = 0; i < FFT_SIZE; i++) {
         float w = 0.5f * (1.0f - cosf(2.0f * M_PI * i / (FFT_SIZE - 1)));
         input[i] *= w;
@@ -1772,7 +1650,6 @@ void AudioEngine::getSpectrumMagnitudes(int numBins, float* out) {
         float im  = cpx_out[bin].i;
         float mag = sqrtf(re*re + im*im) / (FFT_SIZE * 0.5f);
 
-        // Map -80dB..0dB → 0..1
         float db         = 20.0f * log10f(mag + 1e-9f);
         float normalized = (db + 80.0f) / 80.0f;
         out[bi] = fmaxf(0.0f, fminf(1.0f, normalized));
@@ -1841,10 +1718,6 @@ void AudioEngine::decayWaveform() {
     }
 }
 
-// ============================================================
-// VOLUME CONTROL
-// ============================================================
-
 void AudioEngine::setTrackVolume(int trackId, float volume) {
     if (trackId < 0 || trackId >= 8) return;
     { std::lock_guard<std::mutex> lock(volumeMutex); trackVolumes[trackId] = volume; }
@@ -1885,10 +1758,6 @@ void AudioEngine::setDustDepth(int depth) {
 void AudioEngine::setDustDepthForRender(int depth) {
     masterChain.setDustDepthForRender(depth / 255.0f);
 }
-
-// ============================================================
-// PITCH MODULATION METHODS
-// ============================================================
 
 IAudioVoice* AudioEngine::findActiveVoiceForTrack(int trackId) {
     if (trackId >= 0 && trackId < 8 && sfVoices[trackId].isActive) {
@@ -1952,10 +1821,6 @@ void AudioEngine::setInitialPitchOffset(int trackId, float semitones) {
     LOGD("🎵 Pitch offset set: track=%d, offset=%.2f semitones", trackId, semitones);
 }
 
-// ============================================================
-// MODULATION METHODS
-// ============================================================
-
 void AudioEngine::setInstrumentModulation(int sampleId, int slotIndex,
                                           int type, int dest, float amount,
                                           int attackSamples, int holdSamples, int decaySamples,
@@ -2014,18 +1879,11 @@ void AudioEngine::updateVoicePitchMod(Voice& voice, int numFrames, float sampleR
 }
 
 float AudioEngine::getModulatedPlaybackRate(Voice& voice) {
-    // modDestValues[PARAM_PITCH] accumulates all pitch sources via processRoutes:
-    //   TABLE_PITCH (table row transpose) + PITCH_SLIDE (PSL/PBN) +
-    //   VIBRATO (PVB/PVX) + user mod slots targeting PARAM_PITCH.
-    // voice.playbackRate = basePlaybackRate (no transpose baked in after Phase 2),
-    //   or arpeggio-adjusted rate from setMidiNote().
+    // modDestValues[PARAM_PITCH] accumulates: TABLE_PITCH + PITCH_SLIDE + VIBRATO + user mod slots.
+    // voice.playbackRate has no transpose baked in; arpeggio adjusts it via setMidiNote().
     float rateMod = powf(2.0f, voice.modDestValues[PARAM_PITCH] / 12.0f);
     return voice.playbackRate * rateMod;
 }
-
-// ============================================================
-// OFFLINE RENDER
-// ============================================================
 
 void AudioEngine::renderOffline(int numFrames, float* output, int sampleRate) {
     for (int i = 0; i < numFrames * 2; i++) output[i] = 0.0f;

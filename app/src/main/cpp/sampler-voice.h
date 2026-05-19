@@ -30,7 +30,6 @@ struct Voice : public IAudioVoice {
     // Per-voice effect chain (filter, and future drive/crush modules)
     InstrumentChain chain;
 
-    // Table state (Phase 3.5)
     int tableId;             // -1 = no table, 0-255 = table ID
     int tableRow;            // Current table row (0-15)
     int lastProcessedRow;    // Last row that had effects processed (-1 = none)
@@ -43,22 +42,16 @@ struct Voice : public IAudioVoice {
     int noteOctave;          // Octave of the triggered note (0-9), -1 = none
     int notePitch;           // Pitch of the triggered note (0-11, C=0)
 
-    // Special TIC mode support (Phase 4)
+    // Special TIC mode support
     int triggerOctave;       // Octave of triggered note (0-9) for TICFC mode
     int triggerPitch;        // Pitch of triggered note (0-11, C=0) for TICFE mode
     float tic200HzAccum;     // Accumulator for 200Hz mode (TICFF)
 
-    // HOP repeat counter (Phase 5)
     // HOP XY: X = repeat count (0 = infinite), Y = target row
     int hopRepeatCount;      // Number of times left to jump (0 = done or infinite mode)
     int hopTargetRow;        // Target row for active HOP (-1 = no active HOP)
 
-    // ===================================
-    // PITCH MODULATION (Phase 6)
-    // ===================================
-    // Real-time pitch modulation for PSL, PBN, PVB, PVX effects
-
-    // Pitch slide state
+    // Pitch slide state (PSL, PBN, PVB, PVX)
     float pitchOffset;           // Current semitones offset from base pitch (can be fractional)
     float pitchSlideTarget;      // Target semitones for pitch slide (PSL effect)
     float pitchSlideRate;        // Semitones per sample (for smooth interpolation)
@@ -69,14 +62,6 @@ struct Voice : public IAudioVoice {
     float vibratoSpeed;          // LFO frequency in Hz (2-20 Hz typical)
     float vibratoDepth;          // Modulation depth in semitones (0-2 typical, up to 8 for PVX)
     bool vibratoActive;          // Whether vibrato is active
-
-    // ===================================
-    // MODULATION STATE (Phase 4 / Phase 5)
-    // ===================================
-    // VoiceModSlot, voiceMods[4], modSourceValues[], modDestValues[], prevModDestValues[]
-    // are in IAudioVoice (mod-system.h) so updateVoiceModulation() runs for all voice types.
-    // modPitchOffset, basePan, modPanOffset, modCutOffset, modResOffset, baseVolume removed.
-    // Volume flows through params.base[PARAM_VOL] + VOL route → modDestValues[PARAM_VOL].
 
     // Static note-on sources (captured at trigger, constant for note's lifetime)
     float noteVelocity = 0.0f;  // 0.0–1.0 (note volume proxies velocity)
@@ -170,7 +155,6 @@ struct Voice : public IAudioVoice {
         reverbSend = instrParams.reverbSend;
         delaySend  = instrParams.delaySend;
 
-        // Initialize table state (Phase 3.5)
         tableId = tblId;
         tableRow = startRow % 16;  // Use provided start row, wrap to 0-15
         lastProcessedRow = -1;     // Reset so first row gets processed
@@ -179,11 +163,9 @@ struct Voice : public IAudioVoice {
         tableTranspose = 0.0f;
         tableVolume = 1.0f;
 
-        // Reset HOP state (Phase 5)
         hopRepeatCount = 0;
         hopTargetRow = -1;
 
-        // Reset pitch modulation state (Phase 6)
         // New notes clear all pitch effects (PSL, PBN, PVB, PVX)
         pitchOffset = 0.0f;
         pitchSlideTarget = 0.0f;
@@ -340,7 +322,7 @@ struct Voice : public IAudioVoice {
 
     // render() is intentionally not implemented on Voice — the mixer loop in
     // processAudioBlock handles Voice rendering inline for cache efficiency.
-    // SoundfontVoice (Phase 2) will implement render() fully.
+    // SoundfontVoice will implement render() fully.
     float render(float* /*buf*/, int /*numFrames*/) override { return 0.0f; }
 
     // ── Pitch effect interface (IAudioVoice) ────────────────────────────────
