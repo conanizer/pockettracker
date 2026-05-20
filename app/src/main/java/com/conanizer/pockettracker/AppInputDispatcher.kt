@@ -1986,15 +1986,15 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         when (currentScreen) {
             ScreenType.SONG -> {
                 val track = trackerController.project.tracks[trackerController.cursorColumn - 1]
-                val usedChains = trackerController.project.tracks.flatMap { it.chainRefs }.filter { it != -1 }.toSet()
-                val nextUnused = (0..255).firstOrNull { it !in usedChains }
-                if (nextUnused != null) { track.chainRefs[trackerController.cursorRow] = nextUnused; trackerController.lastEditedChain = nextUnused; trackerController.projectVersion++ }
+                val start = trackerController.lastEditedChain + 1
+                val nextEmpty = ((start..255) + (0 until start)).firstOrNull { trackerController.project.chains[it].phraseRefs.all { ref -> ref == -1 } }
+                if (nextEmpty != null) { track.chainRefs[trackerController.cursorRow] = nextEmpty; trackerController.lastEditedChain = nextEmpty; trackerController.projectVersion++ }
             }
             ScreenType.CHAIN -> {
                 val chain = trackerController.project.chains[trackerController.currentChain]
-                val usedPhrases = chain.phraseRefs.filter { it != -1 }.toSet()
-                val nextUnused = (0..255).firstOrNull { it !in usedPhrases }
-                if (nextUnused != null) { chain.phraseRefs[trackerController.cursorRow] = nextUnused; chain.transposeValues[trackerController.cursorRow] = trackerController.lastEditedTranspose; trackerController.lastEditedPhrase = nextUnused; trackerController.projectVersion++ }
+                val start = trackerController.lastEditedPhrase + 1
+                val nextEmpty = ((start..255) + (0 until start)).firstOrNull { trackerController.project.phrases[it].steps.all { step -> step.isEmpty() } }
+                if (nextEmpty != null) { chain.phraseRefs[trackerController.cursorRow] = nextEmpty; chain.transposeValues[trackerController.cursorRow] = trackerController.lastEditedTranspose; trackerController.lastEditedPhrase = nextEmpty; trackerController.projectVersion++ }
             }
             else -> {}
         }
@@ -2006,12 +2006,12 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val track = trackerController.project.tracks[trackerController.cursorColumn - 1]
                 val currentChainId = track.chainRefs.getOrNull(trackerController.cursorRow) ?: -1
                 if (currentChainId != -1) {
-                    val usedChains = trackerController.project.tracks.flatMap { it.chainRefs }.filter { it != -1 }.toSet()
-                    val nextUnused = (0..255).firstOrNull { it !in usedChains }
-                    if (nextUnused != null) {
-                        val src = trackerController.project.chains[currentChainId]; val dst = trackerController.project.chains[nextUnused]
+                    val start = currentChainId + 1
+                    val nextEmpty = ((start..255) + (0 until start)).firstOrNull { trackerController.project.chains[it].phraseRefs.all { ref -> ref == -1 } }
+                    if (nextEmpty != null) {
+                        val src = trackerController.project.chains[currentChainId]; val dst = trackerController.project.chains[nextEmpty]
                         src.phraseRefs.copyInto(dst.phraseRefs); src.transposeValues.copyInto(dst.transposeValues)
-                        track.chainRefs[trackerController.cursorRow] = nextUnused; trackerController.lastEditedChain = nextUnused; trackerController.projectVersion++
+                        track.chainRefs[trackerController.cursorRow] = nextEmpty; trackerController.lastEditedChain = nextEmpty; trackerController.projectVersion++
                     }
                 }
             }
@@ -2019,23 +2019,23 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val chain = trackerController.project.chains[trackerController.currentChain]
                 val currentPhraseId = chain.phraseRefs[trackerController.cursorRow]
                 if (currentPhraseId != -1) {
-                    val usedPhrases = chain.phraseRefs.filter { it != -1 }.toSet()
-                    val nextUnused = (0..255).firstOrNull { it !in usedPhrases }
-                    if (nextUnused != null) {
-                        val src = trackerController.project.phrases[currentPhraseId]; val dst = trackerController.project.phrases[nextUnused]
+                    val start = currentPhraseId + 1
+                    val nextEmpty = ((start..255) + (0 until start)).firstOrNull { trackerController.project.phrases[it].steps.all { step -> step.isEmpty() } }
+                    if (nextEmpty != null) {
+                        val src = trackerController.project.phrases[currentPhraseId]; val dst = trackerController.project.phrases[nextEmpty]
                         src.steps.forEachIndexed { i, step -> dst.steps[i] = step.copy() }
-                        chain.phraseRefs[trackerController.cursorRow] = nextUnused; trackerController.lastEditedPhrase = nextUnused; trackerController.projectVersion++
+                        chain.phraseRefs[trackerController.cursorRow] = nextEmpty; trackerController.lastEditedPhrase = nextEmpty; trackerController.projectVersion++
                     }
                 }
             }
             ScreenType.PHRASE -> {
                 val srcPhraseId = trackerController.currentPhrase
-                val usedPhrases = trackerController.project.chains.flatMap { it.phraseRefs.toList() }.filter { it != -1 }.toSet()
-                val nextUnused = (0..255).firstOrNull { it !in usedPhrases }
-                if (nextUnused != null) {
-                    val src = trackerController.project.phrases[srcPhraseId]; val dst = trackerController.project.phrases[nextUnused]
+                val start = srcPhraseId + 1
+                val nextEmpty = ((start..255) + (0 until start)).firstOrNull { trackerController.project.phrases[it].steps.all { step -> step.isEmpty() } }
+                if (nextEmpty != null) {
+                    val src = trackerController.project.phrases[srcPhraseId]; val dst = trackerController.project.phrases[nextEmpty]
                     src.steps.forEachIndexed { i, step -> dst.steps[i] = step.copy() }
-                    trackerController.currentPhrase = nextUnused; trackerController.projectVersion++
+                    trackerController.currentPhrase = nextEmpty; trackerController.projectVersion++
                 }
             }
             else -> {}
