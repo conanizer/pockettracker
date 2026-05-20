@@ -8,8 +8,8 @@
 static constexpr size_t DELAY_MAX_SAMPLES = 88200;
 
 // Subdivision beat fractions (in quarter-note beats) for sync mode.
-// Index: 00=1/1  01=1/2  02=1/4  03=1/8  04=1/16  05=1/32
-//        06=1/2T 07=1/4T 08=1/8T 09=1/4D 10=1/8D  11=1/16D
+// Index: 00=1/1  01=1/2   02=1/4   03=1/8   04=1/16  05=1/32
+//        06=1/4T 07=1/8T  08=1/16T 09=1/4.  10=1/8.  11=1/16.
 static const float kDelaySyncBeats[] = {
     4.0f, 2.0f, 1.0f, 0.5f, 0.25f, 0.125f,
     2.0f / 3.0f, 1.0f / 3.0f, 1.0f / 6.0f,
@@ -36,8 +36,8 @@ struct DelayModule {
         delR.Init();
         inputEq.reset(sr);
         feedback = 0x60 / 255.0f;
-        // Default: 1/8 note at 120 BPM = 125 ms
-        float defaultSamples = 0.125f * (60.0f / 120.0f) * sr;
+        // Default: 1/4 note at 120 BPM = 500 ms (index 2)
+        float defaultSamples = 1.0f * (60.0f / 120.0f) * sr;
         delL.SetDelay(defaultSamples);
         delR.SetDelay(defaultSamples);
     }

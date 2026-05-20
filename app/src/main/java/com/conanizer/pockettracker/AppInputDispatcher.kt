@@ -396,7 +396,13 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val context = projectModule.getCursorContext(projectState)
                 val action = handlerFunction(context)
                 val result = projectModule.handleInput(projectState, action)
-                if (result.modified) trackerController.projectVersion++
+                if (result.modified) {
+                    trackerController.projectVersion++
+                    val proj = trackerController.project
+                    if (trackerController.projectCursorRow == 0 && proj.delaySync) {
+                        audioBackend.setDelayParams(proj.delayTime, proj.delayFeedback, proj.delaySync, proj.tempo.toFloat(), proj.delayWet)
+                    }
+                }
             }
             ScreenType.SETTINGS -> {
                 val settingsState = SettingsState(

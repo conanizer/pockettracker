@@ -335,7 +335,7 @@ class PlaybackController(
                     val hopStartRow = trackState.consumeHopTarget()
                     val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
 
-                    val result = schedulePhrase(phrase, nextFrameToSchedule, 0, 0, project, framesPerStep, effectiveStartRow)
+                    val result = schedulePhrase(phrase, nextFrameToSchedule, 0, project.getTransposeSemitones(), project, framesPerStep, effectiveStartRow)
                     nextFrameToSchedule += result.framesScheduled
                 }
 
@@ -352,7 +352,7 @@ class PlaybackController(
                     val nextRow = findNextNonEmptyChainRow(nextChainRowToSchedule, chain)
                     if (nextRow != null) {
                         val phraseId = chain.phraseRefs[nextRow]
-                        val transposeSemitones = chain.getTransposeSemitones(nextRow)
+                        val transposeSemitones = chain.getTransposeSemitones(nextRow) + project.getTransposeSemitones()
 
                         saveCheckpoint(SchedulingCheckpoint(
                             frame = nextFrameToSchedule,
@@ -422,7 +422,7 @@ class PlaybackController(
                                         val chain = project.chains[chainId]
                                         if (!chain.isEmpty(nextSongChainRowToSchedule)) {
                                             val phraseId = chain.phraseRefs[nextSongChainRowToSchedule]
-                                            val transposeSemitones = chain.getTransposeSemitones(nextSongChainRowToSchedule)
+                                            val transposeSemitones = chain.getTransposeSemitones(nextSongChainRowToSchedule) + project.getTransposeSemitones()
 
                                             val hopStartRow = trackState.consumeHopTarget()
                                             val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
@@ -488,7 +488,7 @@ class PlaybackController(
         logger.d(TAG, "▶️ Playing phrase $phraseId (tempo: $tempo BPM)")
 
         nextFrameToSchedule = playbackStartFrame
-        val result = schedulePhrase(phrase, playbackStartFrame, 0, 0, project, framesPerStep)
+        val result = schedulePhrase(phrase, playbackStartFrame, 0, project.getTransposeSemitones(), project, framesPerStep)
         nextFrameToSchedule += result.framesScheduled
 
         logger.d(TAG, "✅ Phrase playback initialized")
@@ -638,7 +638,7 @@ class PlaybackController(
         if (firstRow != null) {
             val phraseId = chain.phraseRefs[firstRow]
             val transposeSemitones = chain.getTransposeSemitones(firstRow)
-            val result = schedulePhrase(project.phrases[phraseId], playbackStartFrame, 0, transposeSemitones, project, framesPerStep)
+            val result = schedulePhrase(project.phrases[phraseId], playbackStartFrame, 0, transposeSemitones + project.getTransposeSemitones(), project, framesPerStep)
             chainRowStartFrames[firstRow] = playbackStartFrame
             nextFrameToSchedule += result.framesScheduled
             nextChainRowToSchedule = firstRow + 1
@@ -725,7 +725,7 @@ class PlaybackController(
                     val phraseId = chain.phraseRefs[chainRow]
                     if (phraseId < 0 || phraseId >= 256) continue
 
-                    val transposeSemitones = chain.getTransposeSemitones(chainRow)
+                    val transposeSemitones = chain.getTransposeSemitones(chainRow) + project.getTransposeSemitones()
                     val hopStartRow = trackState.consumeHopTarget()
                     val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
 
@@ -796,7 +796,7 @@ class PlaybackController(
                     val phraseId = chain.phraseRefs[chainRow]
                     if (phraseId < 0 || phraseId >= 256) continue
 
-                    val transposeSemitones = chain.getTransposeSemitones(chainRow)
+                    val transposeSemitones = chain.getTransposeSemitones(chainRow) + project.getTransposeSemitones()
                     val hopStartRow = trackState.consumeHopTarget()
                     val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
 

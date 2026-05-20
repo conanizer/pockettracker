@@ -54,9 +54,10 @@ class EffectModule : TrackerModule {
 
         // Subdivision names matching kDelaySyncBeats[] in delay-module.h
         val DELAY_SYNC_NAMES = listOf(
-            "4/1", "3/1", "2/1", "3/2",
-            "1/1", "3/4", "1/2", "3/8",
-            "1/4", "3/16", "1/8", "3/32"
+            "1/1",  "1/2",  "1/4",   "1/8",
+            "1/16", "1/32",
+            "1/4T", "1/8T", "1/16T",
+            "1/4.", "1/8.", "1/16."
         )
 
         // Maps effectsCursorRow → visual row index used for background highlight
@@ -164,7 +165,6 @@ class EffectModule : TrackerModule {
         drawBitmapText(timeText, x + VALUE_X, rowY(11), scale, valueColor(dlyTimeSel), CHAR_SPACING, FONT_SCALE)
         if (proj.delaySync) {
             val suffixX = x + VALUE_X + timeText.length * (5 * FONT_SCALE + CHAR_SPACING)
-            drawBitmapText("S", suffixX, rowY(11), scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
         }
 
         val dlyFdbkSel = s.cursorRow == ROW_DLY_FDBK

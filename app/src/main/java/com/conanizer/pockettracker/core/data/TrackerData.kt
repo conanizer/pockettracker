@@ -561,6 +561,14 @@ data class Project(
     // Grooves (256 slots)
     val grooves: Array<Groove> = Array(256) { Groove(it) }
 ) {
+    /**
+     * Convert project transpose byte to semitones.
+     * Same encoding as Chain.getTransposeSemitones: 0x00=0, 0x01-0x7F=+1 to +127, 0x81-0xFF=-127 to -1.
+     */
+    fun getTransposeSemitones(): Int {
+        return if (transpose <= 0x80) transpose else transpose - 256
+    }
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (javaClass != other?.javaClass) return false

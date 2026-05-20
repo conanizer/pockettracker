@@ -557,12 +557,12 @@ class ProjectModule : TrackerModule {
                 if (state.cursorColumn == 0) {
                     return CursorContextFactory.readOnly()
                 }
-                // Transpose value (00-FF)
+                // Transpose value (00-FF): same signed encoding as chain transpose
                 return CursorContextFactory.hexByte(
                     currentValue = state.project.transpose,
                     min = 0,
                     max = 255
-                )
+                ).copy(largeStep = 12)  // A+LEFT/RIGHT = octave jump
             }
             2 -> {
                 // NAME row - per-character editing
