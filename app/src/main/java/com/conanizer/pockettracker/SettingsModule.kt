@@ -36,16 +36,17 @@ class SettingsModule : TrackerModule {
 
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val s = state as? SettingsState ?: return
+        val t = s.appTheme
 
         // Background
         drawRect(
-            color = Color(0xFF0a0a0a),
+            color = Color(t.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
 
         val nameColumnX = x + 10
-        val valueColumnX = x + 170
+        val valueColumnX = x + 190
 
         // Header
         var rowY = y + TEXT_PADDING
@@ -54,7 +55,7 @@ class SettingsModule : TrackerModule {
             x = nameColumnX,
             y = rowY,
             scale = scale,
-            color = Color.Cyan,
+            color = Color(t.textTitle),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
@@ -69,7 +70,7 @@ class SettingsModule : TrackerModule {
             DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE -> "TOUCH LANDSCAPE"
             DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 -> "AMIGA PORTRAIT"
         }
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
+        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
             "LAYOUT", layoutText,
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
             isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
@@ -80,14 +81,14 @@ class SettingsModule : TrackerModule {
             DeviceAdapter.ScalingMode.INTEGER  -> "INT"
             DeviceAdapter.ScalingMode.BILINEAR -> "BILINEAR"
         }
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
+        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
             "SCALING", scalingText,
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
             isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
         rowY += ROW_HEIGHT; currentRow++
 
         // ── ROW 2: BTN SOUND ───────────────────────────────────────────
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
+        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
             "BTN SOUND", if (s.buttonSoundEnabled) "ON" else "OFF",
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
             isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
@@ -95,14 +96,14 @@ class SettingsModule : TrackerModule {
 
         // ── ROW 3: BTN VOL ─────────────────────────────────────────────
         val btnVolHex = s.buttonSoundVolume.toHex2()
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
+        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
             "BTN VOL", btnVolHex,
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
             isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
         rowY += ROW_HEIGHT; currentRow++
 
         // ── ROW 4: BTN VIBRO ───────────────────────────────────────────
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
+        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
             "BTN VIBRO", if (s.buttonVibroEnabled) "ON" else "OFF",
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
             isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
@@ -110,7 +111,7 @@ class SettingsModule : TrackerModule {
 
         // ── ROW 5: VIBRO POW ───────────────────────────────────────────
         val vibroPowHex = s.vibroPower.toHex2()
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
+        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
             "VIBRO POW", vibroPowHex,
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
             isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
@@ -118,7 +119,7 @@ class SettingsModule : TrackerModule {
 
         // ── ROW 6: KB INSERT ───────────────────────────────────────────
         val kbInsertText = if (s.insertBefore) "BEFORE" else "AFTER"
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
+        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
             "KB INSERT", kbInsertText,
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
             isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
@@ -126,15 +127,36 @@ class SettingsModule : TrackerModule {
 
         // ── ROW 7: CURSOR ──────────────────────────────────────────────
         val cursorText = if (s.cursorRemember) "REMEMBER" else "REFRESH"
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
+        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
             "CURSOR", cursorText,
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
             isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
         rowY += ROW_HEIGHT; currentRow++
 
         // ── ROW 8: NOTE PREVIEW ────────────────────────────────────────
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
+        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
             "NOTE PREV", if (s.notePreviewEnabled) "ON" else "OFF",
+            isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
+            isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
+        rowY += ROW_HEIGHT; currentRow++
+
+        // ── ROW 9: VISUALIZER ─────────────────────────────────────────
+        val vizText = when (s.visualizerType) {
+            VisualizerType.SCOPE  -> "SCOPE"
+            VisualizerType.BARS   -> "BARS"
+            VisualizerType.PEAKS  -> "PEAKS"
+            VisualizerType.MIRROR -> "MIRROR"
+            VisualizerType.FLAT   -> "FLAT"
+        }
+        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
+            "VISUALIZER", vizText,
+            isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
+            isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
+        rowY += ROW_HEIGHT; currentRow++
+
+        // ── ROW 10: THEME EDITOR ───────────────────────────────────────
+        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
+            "THEME", "${s.currentThemeName} >",
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
             isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
     }
@@ -142,6 +164,7 @@ class SettingsModule : TrackerModule {
     private fun DrawScope.drawParameterRow(
         x: Int, y: Int, scale: Int,
         nameColumnX: Int, valueColumnX: Int,
+        t: AppTheme,
         parameterName: String, parameterValue: String,
         isCursorOnName: Boolean, isCursorOnValue: Boolean
     ) {
@@ -149,7 +172,7 @@ class SettingsModule : TrackerModule {
 
         if (isCursorOnName || isCursorOnValue) {
             drawRect(
-                color = Color(0xFF333333),
+                color = Color(t.rowCursor),
                 topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
                 size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
             )
@@ -160,7 +183,7 @@ class SettingsModule : TrackerModule {
             x = nameColumnX,
             y = textY,
             scale = scale,
-            color = if (isCursorOnName || isCursorOnValue) Color.Yellow else Color.Gray,
+            color = if (isCursorOnName || isCursorOnValue) Color(t.textCursor) else Color(t.textParam),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
@@ -170,7 +193,7 @@ class SettingsModule : TrackerModule {
             x = valueColumnX,
             y = textY,
             scale = scale,
-            color = if (isCursorOnValue) Color.Yellow else Color.White,
+            color = if (isCursorOnValue) Color(t.textCursor) else Color(t.textValue),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
@@ -237,6 +260,8 @@ class SettingsModule : TrackerModule {
                 currentValue = if (state.notePreviewEnabled) 1 else 0,
                 minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
             )
+            9  -> CursorContextFactory.readOnly()  // VISUALIZER: A cycles type
+            10 -> CursorContextFactory.readOnly()  // THEME: A opens editor
             else -> CursorContextFactory.none()
         }
     }
@@ -316,5 +341,8 @@ data class SettingsState(
     val vibroPower: Int = 255,
     val insertBefore: Boolean = true,
     val cursorRemember: Boolean = false,
-    val notePreviewEnabled: Boolean = true
+    val notePreviewEnabled: Boolean = true,
+    val visualizerType: VisualizerType = VisualizerType.SCOPE,
+    val currentThemeName: String = "CLASSIC",
+    val appTheme: AppTheme = AppTheme.CLASSIC
 )

@@ -29,7 +29,7 @@ class PhraseEditorModule : TrackerModule {
         val phraseState = state as? PhraseEditorState ?: return
 
         drawRect(
-            color   = Color(0xFF0a0a0a),
+            color   = Color(phraseState.appTheme.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
@@ -46,20 +46,21 @@ class PhraseEditorModule : TrackerModule {
         val fx3NameX  = colX; colX += 45 + 10
         val fx3ValueX = colX
 
+        val t = phraseState.appTheme
         var rowY = y + TEXT_PADDING
         drawBitmapText(
             text = "PHRASE ${phraseState.phrase.id.toHex2()}",
             x = x + 10, y = rowY, scale = scale,
-            color = Color.Cyan, spacing = CHAR_SPACING, fontScale = FONT_SCALE
+            color = Color(t.textTitle), spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
 
         rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING
-        drawBitmapText("N",   noteX,    rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("V",   volX,     rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("I",   instX,    rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("FX1", fx1NameX, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("FX2", fx2NameX, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("FX3", fx3NameX, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("N",   noteX,    rowY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("V",   volX,     rowY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("I",   instX,    rowY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("FX1", fx1NameX, rowY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("FX2", fx2NameX, rowY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("FX3", fx3NameX, rowY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
 
         phraseState.phrase.steps.forEachIndexed { index, step ->
             drawPhraseRow(
@@ -84,8 +85,9 @@ class PhraseEditorModule : TrackerModule {
         val dataRowY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (index * ROW_HEIGHT)
         val isRowSelected = state.selectionMode && (1..9).any { col -> state.isCellSelected(index, col) }
 
+        val t = state.appTheme
         drawRect(
-            color   = rowBgColor(index, state.cursorRow, state.playbackRow, state.isPlaying, isRowSelected),
+            color   = rowBgColor(index, state.cursorRow, state.playbackRow, state.isPlaying, isRowSelected, t),
             topLeft = Offset((x * scale).toFloat(), (dataRowY * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
         )
@@ -97,9 +99,9 @@ class PhraseEditorModule : TrackerModule {
             text = index.toString(16).uppercase(),
             x = stepX, y = textY, scale = scale,
             color = when {
-                index == state.cursorRow && state.cursorColumn == 0 -> Color.Yellow
-                index % 4 == 0 -> Color(0xFFAAAAAA)
-                else -> Color(0xFF666666)
+                index == state.cursorRow && state.cursorColumn == 0 -> Color(t.textCursor)
+                index % 4 == 0 -> Color(t.textParam)
+                else -> Color(t.textEmpty)
             },
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
@@ -108,10 +110,10 @@ class PhraseEditorModule : TrackerModule {
             text = step.note.toString(),
             x = noteX, y = textY, scale = scale,
             color = when {
-                index == state.cursorRow && state.cursorColumn == 1 -> Color.Yellow
+                index == state.cursorRow && state.cursorColumn == 1 -> Color(t.textCursor)
                 state.selectionMode && state.isCellSelected(index, 1) -> Color(0xFF00DD00)
-                step.note == Note.EMPTY -> Color(0xFF444444)
-                else -> Color.White
+                step.note == Note.EMPTY -> Color(t.textEmpty)
+                else -> Color(t.textValue)
             },
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
@@ -120,10 +122,10 @@ class PhraseEditorModule : TrackerModule {
             text = step.volume.toHex2(),
             x = volX, y = textY, scale = scale,
             color = when {
-                index == state.cursorRow && state.cursorColumn == 2 -> Color.Yellow
+                index == state.cursorRow && state.cursorColumn == 2 -> Color(t.textCursor)
                 state.selectionMode && state.isCellSelected(index, 2) -> Color(0xFF00DD00)
-                step.note == Note.EMPTY -> Color(0xFF444444)
-                else -> Color(0xFFaaaaaa)
+                step.note == Note.EMPTY -> Color(t.textEmpty)
+                else -> Color(t.textParam)
             },
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
@@ -132,10 +134,10 @@ class PhraseEditorModule : TrackerModule {
             text = step.instrument.toHex2(),
             x = instX, y = textY, scale = scale,
             color = when {
-                index == state.cursorRow && state.cursorColumn == 3 -> Color.Yellow
+                index == state.cursorRow && state.cursorColumn == 3 -> Color(t.textCursor)
                 state.selectionMode && state.isCellSelected(index, 3) -> Color(0xFF00DD00)
-                step.note == Note.EMPTY -> Color(0xFF444444)
-                else -> Color(0xFFaaaaaa)
+                step.note == Note.EMPTY -> Color(t.textEmpty)
+                else -> Color(t.textParam)
             },
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
@@ -144,10 +146,10 @@ class PhraseEditorModule : TrackerModule {
             text = getEffectTypeName(step.fx1Type),
             x = fx1NameX, y = textY, scale = scale,
             color = when {
-                index == state.cursorRow && state.cursorColumn == 4 -> Color.Yellow
+                index == state.cursorRow && state.cursorColumn == 4 -> Color(t.textCursor)
                 state.selectionMode && state.isCellSelected(index, 4) -> Color(0xFF00DD00)
-                step.fx1Type == 0x00 -> Color(0xFF444444)
-                else -> Color.Cyan
+                step.fx1Type == 0x00 -> Color(t.textEmpty)
+                else -> Color(t.textTitle)
             },
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
@@ -156,10 +158,10 @@ class PhraseEditorModule : TrackerModule {
             text = step.fx1Value.toHex2(),
             x = fx1ValueX, y = textY, scale = scale,
             color = when {
-                index == state.cursorRow && state.cursorColumn == 5 -> Color.Yellow
+                index == state.cursorRow && state.cursorColumn == 5 -> Color(t.textCursor)
                 state.selectionMode && state.isCellSelected(index, 5) -> Color(0xFF00DD00)
-                step.fx1Type == 0x00 -> Color(0xFF444444)
-                else -> Color(0xFFaaaaaa)
+                step.fx1Type == 0x00 -> Color(t.textEmpty)
+                else -> Color(t.textParam)
             },
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
@@ -168,10 +170,10 @@ class PhraseEditorModule : TrackerModule {
             text = getEffectTypeName(step.fx2Type),
             x = fx2NameX, y = textY, scale = scale,
             color = when {
-                index == state.cursorRow && state.cursorColumn == 6 -> Color.Yellow
+                index == state.cursorRow && state.cursorColumn == 6 -> Color(t.textCursor)
                 state.selectionMode && state.isCellSelected(index, 6) -> Color(0xFF00DD00)
-                step.fx2Type == 0x00 -> Color(0xFF444444)
-                else -> Color.Cyan
+                step.fx2Type == 0x00 -> Color(t.textEmpty)
+                else -> Color(t.textTitle)
             },
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
@@ -180,10 +182,10 @@ class PhraseEditorModule : TrackerModule {
             text = step.fx2Value.toHex2(),
             x = fx2ValueX, y = textY, scale = scale,
             color = when {
-                index == state.cursorRow && state.cursorColumn == 7 -> Color.Yellow
+                index == state.cursorRow && state.cursorColumn == 7 -> Color(t.textCursor)
                 state.selectionMode && state.isCellSelected(index, 7) -> Color(0xFF00DD00)
-                step.fx2Type == 0x00 -> Color(0xFF444444)
-                else -> Color(0xFFaaaaaa)
+                step.fx2Type == 0x00 -> Color(t.textEmpty)
+                else -> Color(t.textParam)
             },
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
@@ -192,10 +194,10 @@ class PhraseEditorModule : TrackerModule {
             text = getEffectTypeName(step.fx3Type),
             x = fx3NameX, y = textY, scale = scale,
             color = when {
-                index == state.cursorRow && state.cursorColumn == 8 -> Color.Yellow
+                index == state.cursorRow && state.cursorColumn == 8 -> Color(t.textCursor)
                 state.selectionMode && state.isCellSelected(index, 8) -> Color(0xFF00DD00)
-                step.fx3Type == 0x00 -> Color(0xFF444444)
-                else -> Color.Cyan
+                step.fx3Type == 0x00 -> Color(t.textEmpty)
+                else -> Color(t.textTitle)
             },
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
@@ -204,10 +206,10 @@ class PhraseEditorModule : TrackerModule {
             text = step.fx3Value.toHex2(),
             x = fx3ValueX, y = textY, scale = scale,
             color = when {
-                index == state.cursorRow && state.cursorColumn == 9 -> Color.Yellow
+                index == state.cursorRow && state.cursorColumn == 9 -> Color(t.textCursor)
                 state.selectionMode && state.isCellSelected(index, 9) -> Color(0xFF00DD00)
-                step.fx3Type == 0x00 -> Color(0xFF444444)
-                else -> Color(0xFFaaaaaa)
+                step.fx3Type == 0x00 -> Color(t.textEmpty)
+                else -> Color(t.textParam)
             },
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
@@ -303,5 +305,6 @@ data class PhraseEditorState(
     val playbackRow: Int,
     val isPlaying: Boolean,
     val selectionMode: Boolean = false,
-    val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }
+    val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
+    val appTheme: AppTheme = AppTheme.CLASSIC
 )

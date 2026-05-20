@@ -73,8 +73,9 @@ class InstrumentModule : TrackerModule {
         val isSoundFont     = instrument.instrumentType == InstrumentType.SOUNDFONT
         val sfOffset        = if (isSoundFont) 1 else 0
 
+        val t = instrumentState.appTheme
         drawRect(
-            color   = Color(0xFF0a0a0a),
+            color   = Color(t.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
@@ -87,7 +88,7 @@ class InstrumentModule : TrackerModule {
 
         drawBitmapText(
             "INSTRUMENT ${instrument.id.toHex2()}",
-            nameColumnX, rowY, scale, Color.Cyan, CHAR_SPACING, FONT_SCALE
+            nameColumnX, rowY, scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE
         )
         rowY += ROW_HEIGHT + 14
 
@@ -95,12 +96,12 @@ class InstrumentModule : TrackerModule {
         drawTypeLoadRow(
             x, rowY, scale, nameColumnX, valueColumnX,
             instrument,
-            instrumentState.cursorRow, instrumentState.cursorColumn, currentRow
+            instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
         )
         rowY += ROW_HEIGHT; currentRow++
 
         // ── ROW 1: INSTRUMENT NAME ───────────────────────────────────────────
-        drawNameRow(x, rowY, scale, nameColumnX, valueColumnX, instrumentState, currentRow)
+        drawNameRow(x, rowY, scale, nameColumnX, valueColumnX, instrumentState, currentRow, t)
         rowY += ROW_HEIGHT; currentRow++
 
         // ── ROW 2: SPACER ────────────────────────────────────────────────────
@@ -111,7 +112,7 @@ class InstrumentModule : TrackerModule {
             x, rowY, scale, nameColumnX,
             instrument,
             instrumentState.cursorRow, instrumentState.cursorColumn, currentRow,
-            isSoundFont
+            isSoundFont, t
         )
         rowY += ROW_HEIGHT; currentRow++
 
@@ -123,11 +124,11 @@ class InstrumentModule : TrackerModule {
             val presetName   = instrumentState.soundfontPresetName.ifEmpty { "" }
             val presetValStr = if (presetName.isEmpty()) presetNumStr else "$presetNumStr $presetName"
             val isCursor     = instrumentState.cursorRow == currentRow
-            if (isCursor) drawRowBg(x, rowY, scale)
+            if (isCursor) drawRowBg(x, rowY, scale, t)
             drawBitmapText("PRESET", nameColumnX, rowY + TEXT_PADDING, scale,
-                if (isCursor) Color.Yellow else Color.Gray, CHAR_SPACING, FONT_SCALE)
+                if (isCursor) Color(t.textCursor) else Color(t.textParam), CHAR_SPACING, FONT_SCALE)
             drawBitmapText(presetValStr, valueColumnX, rowY + TEXT_PADDING, scale,
-                if (isCursor) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+                if (isCursor) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
             rowY += ROW_HEIGHT; currentRow++
         }
 
@@ -137,7 +138,7 @@ class InstrumentModule : TrackerModule {
             "ROOT",   instrument.root.toString(),
             "DETUNE", instrument.detune.toHex2(),
             "TIC",    instrument.tableTicRate.toHex2(),
-            instrumentState.cursorRow, instrumentState.cursorColumn, currentRow
+            instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
         )
         rowY += ROW_HEIGHT; currentRow++
 
@@ -146,7 +147,7 @@ class InstrumentModule : TrackerModule {
             x, rowY, scale, nameColumnX, valueColumnX,
             "VOL", instrument.volume.toHex2(),
             "PAN", instrument.pan.toHex2(),
-            instrumentState.cursorRow, instrumentState.cursorColumn, currentRow
+            instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
         )
         rowY += ROW_HEIGHT; currentRow++
 
@@ -158,7 +159,7 @@ class InstrumentModule : TrackerModule {
             x, rowY, scale, nameColumnX, valueColumnX,
             "DRIVE", instrument.drive.toHex2(),
             "FILTER", instrument.filterType,
-            instrumentState.cursorRow, instrumentState.cursorColumn, currentRow
+            instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
         )
         rowY += ROW_HEIGHT; currentRow++
 
@@ -167,7 +168,7 @@ class InstrumentModule : TrackerModule {
             x, rowY, scale, nameColumnX, valueColumnX,
             "CRUSH", instrument.crush.toHex1(),
             "FREQ", instrument.filterCut.toHex2(),
-            instrumentState.cursorRow, instrumentState.cursorColumn, currentRow
+            instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
         )
         rowY += ROW_HEIGHT; currentRow++
 
@@ -176,7 +177,7 @@ class InstrumentModule : TrackerModule {
             x, rowY, scale, nameColumnX, valueColumnX,
             "DWNSMPL", instrument.downsample.toHex1(),
             "RES", instrument.filterRes.toHex2(),
-            instrumentState.cursorRow, instrumentState.cursorColumn, currentRow
+            instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
         )
         rowY += ROW_HEIGHT; currentRow++
 
@@ -189,14 +190,16 @@ class InstrumentModule : TrackerModule {
             drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
                 "REV", instrument.reverbSend.toHex2(),
                 isCursorOnName  = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
-                isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1)
+                isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1,
+                t = t)
             rowY += ROW_HEIGHT; currentRow++
 
             // ROW 13: DEL
             drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
                 "DEL", instrument.delaySend.toHex2(),
                 isCursorOnName  = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
-                isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1)
+                isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1,
+                t = t)
             rowY += ROW_HEIGHT; currentRow++
 
             // ROW 14: EQ
@@ -204,14 +207,15 @@ class InstrumentModule : TrackerModule {
             drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
                 "EQ", eqStr,
                 isCursorOnName  = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
-                isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1)
+                isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1,
+                t = t)
         } else {
             // ROW 11: START + REV
             drawDualParameterRow(
                 x, rowY, scale, nameColumnX, valueColumnX,
                 "START", instrument.sampleStart.toHex2(),
                 "REV",   instrument.reverbSend.toHex2(),
-                instrumentState.cursorRow, instrumentState.cursorColumn, currentRow
+                instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
             )
             rowY += ROW_HEIGHT; currentRow++
 
@@ -220,7 +224,7 @@ class InstrumentModule : TrackerModule {
                 x, rowY, scale, nameColumnX, valueColumnX,
                 "END", instrument.sampleEnd.toHex2(),
                 "DEL", instrument.delaySend.toHex2(),
-                instrumentState.cursorRow, instrumentState.cursorColumn, currentRow
+                instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
             )
             rowY += ROW_HEIGHT; currentRow++
 
@@ -230,7 +234,7 @@ class InstrumentModule : TrackerModule {
                 x, rowY, scale, nameColumnX, valueColumnX,
                 "REVERSE", if (instrument.reverse) "on" else "off",
                 "EQ",      eqStr,
-                instrumentState.cursorRow, instrumentState.cursorColumn, currentRow
+                instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
             )
             rowY += ROW_HEIGHT; currentRow++
 
@@ -240,7 +244,7 @@ class InstrumentModule : TrackerModule {
                 x, rowY, scale, nameColumnX, valueColumnX,
                 "LOOP", instrument.loopMode,
                 "SLICE", sliceModeStr,
-                instrumentState.cursorRow, instrumentState.cursorColumn, currentRow
+                instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
             )
             rowY += ROW_HEIGHT; currentRow++
 
@@ -248,7 +252,8 @@ class InstrumentModule : TrackerModule {
             drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
                 "LOOP ST", instrument.loopStart.toHex2(),
                 isCursorOnName  = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
-                isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1)
+                isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1,
+                t = t)
         }
 
         // ── Status message ────────────────────────────────────────────────────
@@ -267,8 +272,8 @@ class InstrumentModule : TrackerModule {
     // DRAW HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    private fun DrawScope.drawRowBg(x: Int, y: Int, scale: Int) {
-        drawRect(Color(0xFF333333),
+    private fun DrawScope.drawRowBg(x: Int, y: Int, scale: Int, t: AppTheme) {
+        drawRect(Color(t.rowCursor),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat()))
     }
@@ -277,15 +282,16 @@ class InstrumentModule : TrackerModule {
         x: Int, y: Int, scale: Int,
         nameColumnX: Int, valueColumnX: Int,
         parameterName: String, parameterValue: String,
-        isCursorOnName: Boolean, isCursorOnValue: Boolean
+        isCursorOnName: Boolean, isCursorOnValue: Boolean,
+        t: AppTheme
     ) {
         val textY = y + TEXT_PADDING
-        if (isCursorOnName || isCursorOnValue) drawRowBg(x, y, scale)
+        if (isCursorOnName || isCursorOnValue) drawRowBg(x, y, scale, t)
         drawBitmapText(parameterName, nameColumnX, textY, scale,
-            if (isCursorOnName || isCursorOnValue) Color.Yellow else Color.Gray,
+            if (isCursorOnName || isCursorOnValue) Color(t.textCursor) else Color(t.textParam),
             CHAR_SPACING, FONT_SCALE)
         drawBitmapText(parameterValue, valueColumnX, textY, scale,
-            if (isCursorOnValue) Color.Yellow else Color.White,
+            if (isCursorOnValue) Color(t.textCursor) else Color(t.textValue),
             CHAR_SPACING, FONT_SCALE)
     }
 
@@ -294,26 +300,27 @@ class InstrumentModule : TrackerModule {
         nameColumnX: Int, valueColumnX: Int,
         param1Name: String, param1Value: String,
         param2Name: String, param2Value: String,
-        cursorRow: Int, cursorColumn: Int, currentRow: Int
+        cursorRow: Int, cursorColumn: Int, currentRow: Int,
+        t: AppTheme
     ) {
         val textY          = y + TEXT_PADDING
         val isCursorOnRow  = cursorRow == currentRow
-        if (isCursorOnRow) drawRowBg(x, y, scale)
+        if (isCursorOnRow) drawRowBg(x, y, scale, t)
 
         val name2X  = nameColumnX + 230
         val value2X = valueColumnX + 220
 
         drawBitmapText(param1Name, nameColumnX, textY, scale,
-            if (isCursorOnRow && cursorColumn == 1) Color.Yellow else Color.Gray,
+            if (isCursorOnRow && cursorColumn == 1) Color(t.textCursor) else Color(t.textParam),
             CHAR_SPACING, FONT_SCALE)
         drawBitmapText(param1Value, valueColumnX, textY, scale,
-            if (isCursorOnRow && cursorColumn == 1) Color.Yellow else Color.White,
+            if (isCursorOnRow && cursorColumn == 1) Color(t.textCursor) else Color(t.textValue),
             CHAR_SPACING, FONT_SCALE)
         drawBitmapText(param2Name, name2X, textY, scale,
-            if (isCursorOnRow && cursorColumn == 3) Color.Yellow else Color.Gray,
+            if (isCursorOnRow && cursorColumn == 3) Color(t.textCursor) else Color(t.textParam),
             CHAR_SPACING, FONT_SCALE)
         drawBitmapText(param2Value, value2X, textY, scale,
-            if (isCursorOnRow && cursorColumn == 3) Color.Yellow else Color.White,
+            if (isCursorOnRow && cursorColumn == 3) Color(t.textCursor) else Color(t.textValue),
             CHAR_SPACING, FONT_SCALE)
     }
 
@@ -324,11 +331,12 @@ class InstrumentModule : TrackerModule {
         param1Name: String, param1Value: String,
         param2Name: String, param2Value: String,
         param3Name: String, param3Value: String,
-        cursorRow: Int, cursorColumn: Int, currentRow: Int
+        cursorRow: Int, cursorColumn: Int, currentRow: Int,
+        t: AppTheme
     ) {
         val textY         = y + TEXT_PADDING
         val isCursorOnRow = cursorRow == currentRow
-        if (isCursorOnRow) drawRowBg(x, y, scale)
+        if (isCursorOnRow) drawRowBg(x, y, scale, t)
 
         val v1X = x + TRIPLE_V1_OFFSET
         val n2X = x + TRIPLE_N2_OFFSET
@@ -337,24 +345,24 @@ class InstrumentModule : TrackerModule {
         val v3X = x + TRIPLE_V3_OFFSET
 
         drawBitmapText(param1Name, nameColumnX, textY, scale,
-            if (isCursorOnRow && cursorColumn == 1) Color.Yellow else Color.Gray,
+            if (isCursorOnRow && cursorColumn == 1) Color(t.textCursor) else Color(t.textParam),
             CHAR_SPACING, FONT_SCALE)
         drawBitmapText(param1Value, v1X, textY, scale,
-            if (isCursorOnRow && cursorColumn == 1) Color.Yellow else Color.White,
+            if (isCursorOnRow && cursorColumn == 1) Color(t.textCursor) else Color(t.textValue),
             CHAR_SPACING, FONT_SCALE)
 
         drawBitmapText(param2Name, n2X, textY, scale,
-            if (isCursorOnRow && cursorColumn == 3) Color.Yellow else Color.Gray,
+            if (isCursorOnRow && cursorColumn == 3) Color(t.textCursor) else Color(t.textParam),
             CHAR_SPACING, FONT_SCALE)
         drawBitmapText(param2Value, v2X, textY, scale,
-            if (isCursorOnRow && cursorColumn == 3) Color.Yellow else Color.White,
+            if (isCursorOnRow && cursorColumn == 3) Color(t.textCursor) else Color(t.textValue),
             CHAR_SPACING, FONT_SCALE)
 
         drawBitmapText(param3Name, n3X, textY, scale,
-            if (isCursorOnRow && cursorColumn == 5) Color.Yellow else Color.Gray,
+            if (isCursorOnRow && cursorColumn == 5) Color(t.textCursor) else Color(t.textParam),
             CHAR_SPACING, FONT_SCALE)
         drawBitmapText(param3Value, v3X, textY, scale,
-            if (isCursorOnRow && cursorColumn == 5) Color.Yellow else Color.White,
+            if (isCursorOnRow && cursorColumn == 5) Color(t.textCursor) else Color(t.textValue),
             CHAR_SPACING, FONT_SCALE)
     }
 
@@ -363,27 +371,28 @@ class InstrumentModule : TrackerModule {
         x: Int, y: Int, scale: Int,
         nameColumnX: Int, valueColumnX: Int,
         instrument: Instrument,
-        cursorRow: Int, cursorColumn: Int, currentRow: Int
+        cursorRow: Int, cursorColumn: Int, currentRow: Int,
+        t: AppTheme
     ) {
         val textY          = y + TEXT_PADDING
         val isCursorOnRow  = cursorRow == currentRow
-        if (isCursorOnRow) drawRowBg(x, y, scale)
+        if (isCursorOnRow) drawRowBg(x, y, scale, t)
 
         val loadX = nameColumnX + 325
         val saveX = valueColumnX + 270
 
         val typeText = if (instrument.instrumentType == InstrumentType.SOUNDFONT) "soundfont" else "sampler"
         drawBitmapText("TYPE", nameColumnX, textY, scale,
-            if (isCursorOnRow && cursorColumn == 1) Color.Yellow else Color.Gray,
+            if (isCursorOnRow && cursorColumn == 1) Color(t.textCursor) else Color(t.textParam),
             CHAR_SPACING, FONT_SCALE)
         drawBitmapText(typeText, valueColumnX, textY, scale,
-            if (isCursorOnRow && cursorColumn == 1) Color.Yellow else Color.White,
+            if (isCursorOnRow && cursorColumn == 1) Color(t.textCursor) else Color(t.textValue),
             CHAR_SPACING, FONT_SCALE)
         drawBitmapText("LOAD", loadX, textY, scale,
-            if (isCursorOnRow && cursorColumn == 2) Color.Yellow else Color.White,
+            if (isCursorOnRow && cursorColumn == 2) Color(t.textCursor) else Color(t.textValue),
             CHAR_SPACING, FONT_SCALE)
         drawBitmapText("SAVE", saveX, textY, scale,
-            if (isCursorOnRow && cursorColumn == 3) Color.Yellow else Color.White,
+            if (isCursorOnRow && cursorColumn == 3) Color(t.textCursor) else Color(t.textValue),
             CHAR_SPACING, FONT_SCALE)
     }
 
@@ -392,15 +401,16 @@ class InstrumentModule : TrackerModule {
         x: Int, y: Int, scale: Int,
         nameColumnX: Int, valueColumnX: Int,
         instrumentState: InstrumentState,
-        currentRow: Int
+        currentRow: Int,
+        t: AppTheme
     ) {
         val textY          = y + TEXT_PADDING
         val isCursorOnRow  = instrumentState.cursorRow == currentRow
-        if (isCursorOnRow) drawRowBg(x, y, scale)
+        if (isCursorOnRow) drawRowBg(x, y, scale, t)
         drawBitmapText("NAME", nameColumnX, textY, scale,
-            if (isCursorOnRow) Color.Yellow else Color.Gray, CHAR_SPACING, FONT_SCALE)
+            if (isCursorOnRow) Color(t.textCursor) else Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(instrumentState.instrument.name, valueColumnX, textY, scale,
-            if (isCursorOnRow) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+            if (isCursorOnRow) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
     }
 
     /**
@@ -413,11 +423,12 @@ class InstrumentModule : TrackerModule {
         nameColumnX: Int,
         instrument: Instrument,
         cursorRow: Int, cursorColumn: Int, currentRow: Int,
-        isSoundFont: Boolean
+        isSoundFont: Boolean,
+        t: AppTheme
     ) {
         val textY          = y + TEXT_PADDING
         val isCursorOnRow  = cursorRow == currentRow
-        if (isCursorOnRow) drawRowBg(x, y, scale)
+        if (isCursorOnRow) drawRowBg(x, y, scale, t)
 
         val header    = if (isSoundFont) "SF" else "SMPL"
         val sourcePath = if (isSoundFont) instrument.soundfontPath else instrument.sampleFilePath
@@ -426,14 +437,14 @@ class InstrumentModule : TrackerModule {
         val editX     = x + SRC_EDIT_OFFSET
         val fileX     = x + SRC_FILENAME_OFFSET
 
-        drawBitmapText(header, nameColumnX, textY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(filename, fileX - 15, textY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText(header, nameColumnX, textY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText(filename, fileX - 15, textY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText("LOAD", loadX - 5, textY, scale,
-            if (isCursorOnRow && cursorColumn == 2) Color.Yellow else Color.White,
+            if (isCursorOnRow && cursorColumn == 2) Color(t.textCursor) else Color(t.textValue),
             CHAR_SPACING, FONT_SCALE)
         if (!isSoundFont) {
             drawBitmapText("EDIT", editX - 20, textY, scale,
-                if (isCursorOnRow && cursorColumn == 3) Color.Yellow else Color.White,
+                if (isCursorOnRow && cursorColumn == 3) Color(t.textCursor) else Color(t.textValue),
                 CHAR_SPACING, FONT_SCALE)
         }
     }
@@ -763,5 +774,6 @@ data class InstrumentState(
     val isSuccess: Boolean = true,
     val soundfontPresetName: String = "",
     val soundfontPresetCount: Int = 0,
-    val soundfontPresetIndex: Int = 0
+    val soundfontPresetIndex: Int = 0,
+    val appTheme: AppTheme = AppTheme.CLASSIC
 )

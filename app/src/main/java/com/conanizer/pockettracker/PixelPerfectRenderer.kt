@@ -43,6 +43,13 @@ const val DESIGN_WIDTH_PX = 640
  * so it reaches drawLayout without threading through every intermediate composable.
  */
 val LocalLayoutMode = compositionLocalOf { DeviceAdapter.LayoutMode.FULL }
+
+/**
+ * CompositionLocal that carries the active AppTheme down the composition tree.
+ * Set via CompositionLocalProvider in PocketTrackerApp; read in PixelPerfectTracker
+ * and forwarded to drawLayout so all modules can access theme colors.
+ */
+val LocalAppTheme = compositionLocalOf { AppTheme.CLASSIC }
 const val DESIGN_HEIGHT_PX = 480
 const val SCREEN_SPACER = 6      // Space between modules
 const val SIDE_SPACER = 10       // Space on sides
@@ -117,6 +124,8 @@ fun PixelPerfectTracker(
     // EQ editor overlay state
     eqEditorState: EqEditorState = EqEditorState(),
     eqSpectrumData: FloatArray? = null,
+    // Theme editor overlay state
+    themeEditorState: ThemeEditorState = ThemeEditorState(),
     // Settings screen cursor
     settingsCursorRow: Int = 0,
     settingsCursorColumn: Int = 1,
@@ -206,6 +215,7 @@ fun PixelPerfectTracker(
     // objects per frame causes GC pressure that can crash the RenderThread on Android 11
     // (Snapdragon GPU drivers can't safely be paused mid-frame by the JVM GC).
     val layoutMode = LocalLayoutMode.current
+    val appTheme   = LocalAppTheme.current
     val layout = remember { TrackerLayout() }
     Canvas(
         modifier = Modifier
@@ -296,7 +306,9 @@ fun PixelPerfectTracker(
                         trackNotes = trackNotes,
                         soundfontPresetName  = soundfontPresetName,
                         soundfontPresetCount = soundfontPresetCount,
-                        soundfontPresetIndex = soundfontPresetIndex
+                        soundfontPresetIndex = soundfontPresetIndex,
+                        appTheme             = appTheme,
+                        themeEditorState     = themeEditorState
                     )
                 }
             }
@@ -329,6 +341,7 @@ class TrackerLayout {
     private val settingsModule = SettingsModule()
     private val effectModule = EffectModule()
     private val eqModule     = EqModule()
+    private val themeEditorModule = ThemeEditorModule()
     /**
      * Main layout drawing function
      * This arranges all modules on the 640×480 screen
@@ -420,13 +433,15 @@ class TrackerLayout {
         // SoundFont preset navigation state
         soundfontPresetName: String = "",
         soundfontPresetCount: Int = 0,
-        soundfontPresetIndex: Int = 0
+        soundfontPresetIndex: Int = 0,
+        appTheme: AppTheme = AppTheme.CLASSIC,
+        themeEditorState: ThemeEditorState = ThemeEditorState()
     ) {
         // ===================================
         // DRAW BACKGROUND
         // ===================================
         drawRect(
-            color = Color(0xFF0a0a0a),  // Dark background
+            color = Color(appTheme.background),
             topLeft = Offset.Zero,
             size = Size(
                 (DESIGN_WIDTH_PX * scale).toFloat(),
@@ -454,7 +469,7 @@ class TrackerLayout {
                 x = moduleX,
                 y = currentY,
                 scale = scale,
-                state = audioEngine.waveformBuffer  // Pass audio waveform data
+                state = OscilloscopeState(audioEngine.waveformBuffer, appTheme)
             )
         }
 
@@ -517,7 +532,17 @@ class TrackerLayout {
             }
         } else {
             clipRect(right = editorClipRight) {
-                if (eqEditorState.isOpen) {
+                if (themeEditorState.isOpen) {
+                    with(themeEditorModule) {
+                        draw(
+                            x = moduleX, y = currentY, scale = scale,
+                            state = ThemeEditorDrawState(
+                                theme = appTheme,
+                                editorState = themeEditorState
+                            )
+                        )
+                    }
+                } else if (eqEditorState.isOpen) {
                     with(eqModule) {
                         draw(
                             x = moduleX, y = currentY, scale = scale,
@@ -545,7 +570,8 @@ class TrackerLayout {
                                     statusMessage = projectStatusMessage,
                                     isSuccess = projectStatusSuccess,
                                     isRendering = isRendering,
-                                    renderProgress = renderProgress
+                                    renderProgress = renderProgress,
+                                    appTheme = appTheme
                                 )
                             )
                         }
@@ -566,7 +592,8 @@ class TrackerLayout {
                                     playbackRow = playbackRow,
                                     isPlaying = isPlaying,
                                     selectionMode = selectionMode,
-                                    isCellSelected = isCellSelected
+                                    isCellSelected = isCellSelected,
+                                    appTheme = appTheme
                                 )
                             )
                         }
@@ -588,7 +615,8 @@ class TrackerLayout {
                                     playbackRow = playbackChainRow,
                                     isPlaying = isPlaying,
                                     selectionMode = selectionMode,
-                                    isCellSelected = isCellSelected
+                                    isCellSelected = isCellSelected,
+                                    appTheme = appTheme
                                 )
                             )
                         }
@@ -606,12 +634,13 @@ class TrackerLayout {
                                 state = SongEditorState(
                                     project = project,
                                     cursorRow = cursorRow,
-                                    cursorTrack = cursorColumn,  // Use cursorColumn as track selector
+                                    cursorTrack = cursorColumn,
                                     isPlaying = isPlaying && currentScreen == ScreenType.SONG,
                                     playbackRow = playbackSongRow,
                                     selectionMode = selectionMode,
                                     isCellSelected = isCellSelected,
-                                    scrollPosition = songScrollPosition
+                                    scrollPosition = songScrollPosition,
+                                    appTheme = appTheme
                                 )
                             )
                         }
@@ -634,7 +663,8 @@ class TrackerLayout {
                                     isSuccess = instrumentStatusSuccess,
                                     soundfontPresetName  = soundfontPresetName,
                                     soundfontPresetCount = soundfontPresetCount,
-                                    soundfontPresetIndex = soundfontPresetIndex
+                                    soundfontPresetIndex = soundfontPresetIndex,
+                                    appTheme = appTheme
                                 )
                             )
                         }
@@ -668,7 +698,8 @@ class TrackerLayout {
                                     playbackRow = tablePlaybackRow,
                                     ticRate = project.instruments.getOrNull(currentInstrument)?.tableTicRate ?: 0x06,
                                     selectionMode = selectionMode,
-                                    isCellSelected = isCellSelected
+                                    isCellSelected = isCellSelected,
+                                    appTheme = appTheme
                                 )
                             )
                         }
@@ -686,7 +717,8 @@ class TrackerLayout {
                                 state = GrooveState(
                                     groove = project.grooves[currentGroove],
                                     cursorRow = grooveCursorRow,
-                                    cursorColumn = 1
+                                    cursorColumn = 1,
+                                    appTheme = appTheme
                                 )
                             )
                         }
@@ -705,7 +737,8 @@ class TrackerLayout {
                                     instrument = project.instruments[currentInstrument],
                                     cursorRow = modCursorRow,
                                     cursorPair = modCursorPair,
-                                    cursorSide = modCursorSide
+                                    cursorSide = modCursorSide,
+                                    appTheme = appTheme
                                 )
                             )
                         }
@@ -731,7 +764,10 @@ class TrackerLayout {
                                     vibroPower = vibroPower,
                                     insertBefore = qwertyKeyboardState.insertBefore,
                                     cursorRemember = cursorRemember,
-                                    notePreviewEnabled = notePreviewEnabled
+                                    notePreviewEnabled = notePreviewEnabled,
+                                    visualizerType = appTheme.visualizerType,
+                                    currentThemeName = appTheme.name,
+                                    appTheme = appTheme
                                 )
                             )
                         }
@@ -753,7 +789,8 @@ class TrackerLayout {
                                     trackPeaks     = trackPeaks,
                                     masterPeaks    = masterPeaks,
                                     reverbPeaks    = floatArrayOf(sendPeaks[0], sendPeaks[1]),
-                                    delayPeaks     = floatArrayOf(sendPeaks[2], sendPeaks[3])
+                                    delayPeaks     = floatArrayOf(sendPeaks[2], sendPeaks[3]),
+                                    appTheme       = appTheme
                                 )
                             )
                         }
@@ -770,7 +807,8 @@ class TrackerLayout {
                                 scale = scale,
                                 state = EffectState(
                                     project = project,
-                                    cursorRow = effectsCursorRow
+                                    cursorRow = effectsCursorRow,
+                                    appTheme = appTheme
                                 )
                             )
                         }
@@ -811,8 +849,8 @@ class TrackerLayout {
             // ===================================
             // RIGHT BAR: BPM row
             // ===================================
-            drawBitmapText("T>", rightBarX + 2, bpmTextY, scale, Color(0xFF666666), spacing = 2, fontScale = 3)
-            drawBitmapText(project.tempo.toString(), rightBarX + 2 + 34, bpmTextY, scale, Color.White, spacing = 2, fontScale = 3)
+            drawBitmapText("T>", rightBarX + 2, bpmTextY, scale, Color(appTheme.textEmpty), spacing = 2, fontScale = 3)
+            drawBitmapText(project.tempo.toString(), rightBarX + 2 + 34, bpmTextY, scale, Color(appTheme.textValue), spacing = 2, fontScale = 3)
 
             // ===================================
             // RIGHT BAR: Track Note Monitor
@@ -823,9 +861,8 @@ class TrackerLayout {
             for (i in 0..7) {
                 val textY = trackRowsStartY + (i * 21) + 3
                 val note = trackNotes.getOrElse(i) { Note.EMPTY }
-                val noteColor = if (note == Note.EMPTY) Color(0xFF333333) else Color.White
-                // Track number + space + note: "1 " = 2 char-widths (34px) before note
-                drawBitmapText((i + 1).toString(), rightBarX + 2, textY, scale, Color(0xFF666666), spacing = 2, fontScale = 3)
+                val noteColor = if (note == Note.EMPTY) Color(appTheme.textEmpty) else Color(appTheme.textValue)
+                drawBitmapText((i + 1).toString(), rightBarX + 2, textY, scale, Color(appTheme.textParam), spacing = 2, fontScale = 3)
                 drawBitmapText(note.toString(), rightBarX + 2 + 34, textY, scale, noteColor, spacing = 2, fontScale = 3)
             }
 
@@ -842,7 +879,8 @@ class TrackerLayout {
                     scale = scale,
                     state = NavigationMapState(
                         currentScreen = currentScreen,
-                        sourceColumn = previousColumn
+                        sourceColumn = previousColumn,
+                        appTheme = appTheme
                     )
                 )
             }

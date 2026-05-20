@@ -28,20 +28,19 @@ class OscilloscopeModule(
     }
 
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
-        // Cast state to waveform data
-        val waveformData = state as? FloatArray ?: FloatArray(width)
+        val oscState = state as? OscilloscopeState
+        val waveformData = oscState?.waveformBuffer ?: (state as? FloatArray) ?: FloatArray(width)
+        val theme = oscState?.appTheme ?: AppTheme.CLASSIC
 
-        // Module background
         drawRect(
-            color = Color(0xFF0a0a0a),
+            color = Color(theme.vizBackground),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
 
-        // Center reference line
         val centerY = y + height / 2
         drawLine(
-            color = Color(0xFF333333),
+            color = Color(theme.vizCenterLine),
             start = Offset((x * scale).toFloat(), (centerY * scale).toFloat()),
             end = Offset(((x + width) * scale).toFloat(), (centerY * scale).toFloat()),
             strokeWidth = scale.toFloat()
@@ -50,7 +49,7 @@ class OscilloscopeModule(
         // Draw waveform as a single path — one draw call instead of 619.
         // 619 individual drawLine calls caused RenderThread stack overflow on Android 11
         // (Adreno GPU driver consumes more native stack per draw command than Android 13).
-        val maxAmplitude = (height / 2) - 8  // 8px margin top/bottom
+        val maxAmplitude = (height / 2) - 8
 
         val path = Path()
         for (i in 0 until width) {
@@ -61,8 +60,20 @@ class OscilloscopeModule(
         }
         drawPath(
             path = path,
-            color = Color(0xFF00ff00),  // Bright green
+            color = Color(theme.vizWave),
             style = Stroke(width = scale.toFloat())
         )
     }
+}
+
+data class OscilloscopeState(
+    val waveformBuffer: FloatArray,
+    val appTheme: AppTheme = AppTheme.CLASSIC
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is OscilloscopeState) return false
+        return waveformBuffer.contentEquals(other.waveformBuffer) && appTheme == other.appTheme
+    }
+    override fun hashCode(): Int = 31 * waveformBuffer.contentHashCode() + appTheme.hashCode()
 }

@@ -37,6 +37,7 @@ class FileController(
     fun getSamplesDirectory(): String = fileSystem.getSamplesDirectory()
     fun getInstrumentsDirectory(): String = fileSystem.getInstrumentsDirectory()
     fun getSoundfontsDirectory(): String = fileSystem.getSoundfontsDirectory()
+    fun getThemesDirectory(): String = fileSystem.getThemesDirectory()
 
     // ========================================
     // PROJECT OPERATIONS

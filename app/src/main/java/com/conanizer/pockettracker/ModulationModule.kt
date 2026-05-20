@@ -27,7 +27,8 @@ data class ModulationState(
     val instrument: Instrument,
     val cursorRow: Int,     // row within current pair (0=TYPE, 1=DEST, ...)
     val cursorPair: Int,    // 0=MOD1+MOD2, 1=MOD3+MOD4
-    val cursorSide: Int     // 0=left (MOD1/MOD3), 1=right (MOD2/MOD4)
+    val cursorSide: Int,    // 0=left (MOD1/MOD3), 1=right (MOD2/MOD4)
+    val appTheme: AppTheme = AppTheme.CLASSIC
 ) {
     val activeSlotIndex get() = cursorPair * 2 + cursorSide
     val activeSlot get() = instrument.modSlots[activeSlotIndex]
@@ -112,10 +113,11 @@ class ModulationModule : TrackerModule {
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val modState = state as? ModulationState ?: return
         val inst = modState.instrument
+        val t    = modState.appTheme
 
         // Module background
         drawRect(
-            color = Color(0xFF0A0A0A),
+            color = Color(t.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
@@ -125,7 +127,7 @@ class ModulationModule : TrackerModule {
         drawBitmapText(
             text = "MOD $instIdStr",
             x = x + nameX1, y = y + TEXT_PADDING,
-            scale = scale, color = Color.Cyan,
+            scale = scale, color = Color(t.textTitle),
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
 
@@ -142,7 +144,7 @@ class ModulationModule : TrackerModule {
             val rightSlotNum = pair * 2 + 2
 
             // Pair header (MOD1/MOD3 | MOD2/MOD4)
-            val headerColor = if (pair == modState.cursorPair) Color(0xFF888888) else Color(0xFF444444)
+            val headerColor = if (pair == modState.cursorPair) Color(t.textParam) else Color(t.textEmpty)
             drawBitmapText(
                 text = "MOD$leftSlotNum",
                 x = x + nameX1, y = pairTopY,
@@ -164,7 +166,7 @@ class ModulationModule : TrackerModule {
 
                 if (isCursorRow) {
                     drawRect(
-                        color = Color(0xFF1a1a1a),
+                        color = Color(t.rowCursor),
                         topLeft = Offset(
                             (x * scale).toFloat(),
                             ((dataStartY + rowIdx * ROW_HEIGHT - TEXT_PADDING) * scale).toFloat()
@@ -181,8 +183,8 @@ class ModulationModule : TrackerModule {
                     val label       = labels.getOrElse(rowIdx) { "" }
                     val value       = rowValue(leftSlot, rowIdx, pair * 2)
                     val isActive    = isActivePair && modState.cursorSide == 0
-                    val labelColor  = if (isCursorRow && isActive) Color.Yellow else Color(0xFF888888)
-                    val valueColor  = if (isCursorRow && isActive) Color.Yellow else Color.White
+                    val labelColor  = if (isCursorRow && isActive) Color(t.textCursor) else Color(t.textParam)
+                    val valueColor  = if (isCursorRow && isActive) Color(t.textCursor) else Color(t.textValue)
 
                     drawBitmapText(label, x + nameX1, dataStartY + rowIdx * ROW_HEIGHT, scale, labelColor, CHAR_SPACING, FONT_SCALE)
                     drawBitmapText(value, x + valX1,  dataStartY + rowIdx * ROW_HEIGHT, scale, valueColor, CHAR_SPACING, FONT_SCALE)
@@ -194,8 +196,8 @@ class ModulationModule : TrackerModule {
                     val label       = labels.getOrElse(rowIdx) { "" }
                     val value       = rowValue(rightSlot, rowIdx, pair * 2 + 1)
                     val isActive    = isActivePair && modState.cursorSide == 1
-                    val labelColor  = if (isCursorRow && isActive) Color.Yellow else Color(0xFF888888)
-                    val valueColor  = if (isCursorRow && isActive) Color.Yellow else Color.White
+                    val labelColor  = if (isCursorRow && isActive) Color(t.textCursor) else Color(t.textParam)
+                    val valueColor  = if (isCursorRow && isActive) Color(t.textCursor) else Color(t.textValue)
 
                     drawBitmapText(label, x + nameX2, dataStartY + rowIdx * ROW_HEIGHT, scale, labelColor, CHAR_SPACING, FONT_SCALE)
                     drawBitmapText(value, x + valX2,  dataStartY + rowIdx * ROW_HEIGHT, scale, valueColor, CHAR_SPACING, FONT_SCALE)

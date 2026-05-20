@@ -61,7 +61,8 @@ enum class QwertyContext {
     RESAMPLE,       // Render selection to WAV with typed name as base name
     INSTRUMENT_SAVE, // Save instrument as .pti with typed name; contextExtra = instruments directory
     SAMPLE_NAME,     // Rename sample in sample editor; contextExtra = samplesDirectory
-    SAMPLE_SAVE      // Save sample editor buffer to WAV; contextExtra = samples directory
+    SAMPLE_SAVE,     // Save sample editor buffer to WAV; contextExtra = samples directory
+    THEME_SAVE       // Save current theme as .ptt; contextExtra = themes directory
 }
 
 // ============================================================================

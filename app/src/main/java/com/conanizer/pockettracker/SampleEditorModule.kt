@@ -344,8 +344,8 @@ class SampleEditorModule : TrackerModule {
         drawRect(Color(0xFF555555),
             topLeft = Offset((dX * scale).toFloat(), (dY * scale).toFloat()),
             size    = Size((dW * scale).toFloat(),   (2 * scale).toFloat()))
-        drawBitmapText("ARE YOU SURE?", dX + 75, dY + 15, scale, Color.White,  CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("A=YES  B=NO",   dX + 85, dY + 45, scale, Color.Yellow, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("ARE YOU SURE?", dX + 55, dY + 15, scale, Color.White,  CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("A=YES  B=NO",   dX + 65, dY + 45, scale, Color.Yellow, CHAR_SPACING, FONT_SCALE)
     }
 
     // ─── Cursor context ───────────────────────────────────────────────────────

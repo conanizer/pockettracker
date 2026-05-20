@@ -27,8 +27,9 @@ class SongEditorModule : TrackerModule {
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val songState = state as? SongEditorState ?: return
 
+        val t = songState.appTheme
         drawRect(
-            color   = Color(0xFF0A0A0A),
+            color   = Color(t.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
@@ -39,11 +40,11 @@ class SongEditorModule : TrackerModule {
         for (i in 0..7) { trackColumns[i] = colX; colX += 30 + 20 }
 
         var rowY = y + TEXT_PADDING
-        drawBitmapText("SONG: ${songState.project.name.take(20)}", x + 10, rowY, scale, Color.Cyan, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("SONG: ${songState.project.name.take(20)}", x + 10, rowY, scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
 
         rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING
         for (trackId in 0..7) {
-            drawBitmapText("${trackId + 1}", trackColumns[trackId], rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+            drawBitmapText("${trackId + 1}", trackColumns[trackId], rowY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         }
 
         for (rowIndex in 0 until VISIBLE_ROWS) {
@@ -63,8 +64,9 @@ class SongEditorModule : TrackerModule {
         val dataRowY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + (rowIndex * ROW_HEIGHT)
         val isRowSelected = state.selectionMode && (1..8).any { col -> state.isCellSelected(absoluteRow, col) }
 
+        val t = state.appTheme
         drawRect(
-            color   = rowBgColor(absoluteRow, state.cursorRow, state.playbackRow, state.isPlaying, isRowSelected),
+            color   = rowBgColor(absoluteRow, state.cursorRow, state.playbackRow, state.isPlaying, isRowSelected, t),
             topLeft = Offset((x * scale).toFloat(), (dataRowY * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
         )
@@ -74,23 +76,23 @@ class SongEditorModule : TrackerModule {
         drawBitmapText(
             text = absoluteRow.toHex2(),
             x = stepX, y = textY, scale = scale,
-            color = if (absoluteRow % 4 == 0) Color(0xFFAAAAAA) else Color(0xFF666666),
+            color = if (absoluteRow % 4 == 0) Color(t.textParam) else Color(t.textEmpty),
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
 
         for (trackId in 0..7) {
             val track   = state.project.tracks[trackId]
             val chainId = if (absoluteRow < track.chainRefs.size) track.chainRefs[absoluteRow] else -1
-            val selectionCol = trackId + 1  // selection columns are 1-8, track array is 0-7
+            val selectionCol = trackId + 1
 
             drawBitmapText(
                 text = if (chainId == -1) "--" else chainId.toHex2(),
                 x = trackColumns[trackId], y = textY, scale = scale,
                 color = when {
-                    absoluteRow == state.cursorRow && trackId == (state.cursorTrack - 1) -> Color.Yellow
+                    absoluteRow == state.cursorRow && trackId == (state.cursorTrack - 1) -> Color(t.textCursor)
                     state.selectionMode && state.isCellSelected(absoluteRow, selectionCol) -> Color(0xFF00DD00)
-                    chainId == -1 -> Color(0xFF444444)
-                    else -> Color.White
+                    chainId == -1 -> Color(t.textEmpty)
+                    else -> Color(t.textValue)
                 },
                 spacing = CHAR_SPACING, fontScale = FONT_SCALE
             )
@@ -151,5 +153,6 @@ data class SongEditorState(
     val isPlaying: Boolean = false,
     val playbackRow: Int = 0,
     val selectionMode: Boolean = false,
-    val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }
+    val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
+    val appTheme: AppTheme = AppTheme.CLASSIC
 )

@@ -362,6 +362,20 @@ class AndroidFileSystem(
     }
 
     /**
+     * Get the themes directory.
+     * Location: Documents/PocketTracker/Themes/
+     */
+    override fun getThemesDirectory(): String {
+        val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+        val dir = File(documentsDir, "PocketTracker/Themes")
+        if (!dir.exists()) {
+            val created = dir.mkdirs()
+            if (!created) throw IOException("Cannot create themes directory. Check storage permissions.")
+        }
+        return dir.absolutePath
+    }
+
+    /**
      * Write binary data to file (overwrites if exists).
      */
     override fun writeBytes(path: String, data: ByteArray): Boolean {

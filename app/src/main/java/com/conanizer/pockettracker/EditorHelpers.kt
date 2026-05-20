@@ -50,6 +50,21 @@ fun rowBgColor(
     else                              -> Color(0xFF0a0a0a)
 }
 
+fun rowBgColor(
+    index: Int,
+    cursorRow: Int,
+    playbackRow: Int,
+    isPlaying: Boolean,
+    isSelected: Boolean,
+    theme: AppTheme
+): Color = when {
+    isPlaying && index == playbackRow -> Color(theme.rowPlayback)
+    isSelected                        -> Color(theme.rowSelection)
+    index == cursorRow                -> Color(theme.rowCursor)
+    index % 4 == 0                    -> Color(theme.rowEvery4th)
+    else                              -> Color(theme.background)
+}
+
 fun clearEffect(step: PhraseStep, fxSlot: Int) {
     when (fxSlot) {
         1 -> {

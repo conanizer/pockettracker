@@ -49,6 +49,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import com.conanizer.pockettracker.platform.android.AndroidResourceLoader
 import com.conanizer.pockettracker.platform.android.AndroidFileSystem
 import com.conanizer.pockettracker.platform.android.ThemeLoader
@@ -400,10 +403,22 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     var qwertyKeyboardState  by _qwertyKeyboardState
     val _fxHelperState = remember { mutableStateOf(FxHelperState()) }
     var fxHelperState  by _fxHelperState
-    val _eqEditorState  = remember { mutableStateOf(EqEditorState()) }
-    var eqEditorState   by _eqEditorState
+    val _eqEditorState      = remember { mutableStateOf(EqEditorState()) }
+    var eqEditorState       by _eqEditorState
+    val _themeEditorState   = remember { mutableStateOf(ThemeEditorState()) }
+    var themeEditorState    by _themeEditorState
     val _eqSpectrumData = remember { mutableStateOf<FloatArray?>(null) }
     var eqSpectrumData  by _eqSpectrumData
+
+    val _appTheme = remember {
+        val savedJson = prefs.getString("app_theme", null)
+        val initial = if (savedJson != null) {
+            try { Json { ignoreUnknownKeys = true }.decodeFromString<AppTheme>(savedJson) }
+            catch (_: Exception) { AppTheme.CLASSIC }
+        } else { AppTheme.CLASSIC }
+        mutableStateOf(initial)
+    }
+    var appTheme  by _appTheme
 
     val buttonSoundManager = remember { ButtonSoundManager(context) }
     val buttonHapticManager = remember { ButtonHapticManager(context) }
@@ -432,6 +447,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     }
     LaunchedEffect(notePreviewEnabled) {
         prefs.edit().putBoolean("note_preview", notePreviewEnabled).apply()
+    }
+    LaunchedEffect(appTheme) {
+        prefs.edit().putString("app_theme", Json { prettyPrint = false }.encodeToString(appTheme)).apply()
     }
 
     DisposableEffect(Unit) {
@@ -692,7 +710,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             _lastAInsertPosition, _insertBefore, _instrumentFileBrowserAction,
             _previousScreen, _buttonSoundEnabled, _buttonSoundVolume,
             _buttonVibroEnabled, _vibroPower, _cursorRemember, _notePreviewEnabled,
-            trackPeakBuffer, masterPeakBuffer, sendPeakBuffer
+            trackPeakBuffer, masterPeakBuffer, sendPeakBuffer, _appTheme, _themeEditorState
         )
     }
     val dispatcher = remember { AppInputDispatcher(appCtrl, appState) }
@@ -793,6 +811,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         fxHelperState           = fxHelperState,
         eqEditorState           = eqEditorState,
         eqSpectrumData          = eqSpectrumData,
+        themeEditorState        = themeEditorState,
         settingsCursorRow       = stateVersion.let { trackerController.settingsCursorRow },
         settingsCursorColumn    = stateVersion.let { trackerController.settingsCursorColumn },
         cursorRemember          = cursorRemember,
@@ -835,6 +854,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val hapticView = LocalView.current
     CompositionLocalProvider(
         LocalLayoutMode provides layoutMode,
+        LocalAppTheme   provides appTheme,
         LocalButtonEventCallback provides { button, isPress ->
             if (isPress) {
                 buttonSoundManager.onPress(button)

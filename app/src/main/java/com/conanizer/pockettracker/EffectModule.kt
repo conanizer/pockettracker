@@ -9,7 +9,8 @@ import com.conanizer.pockettracker.core.logic.InputAction
 
 data class EffectState(
     val project: Project,
-    val cursorRow: Int  // 0-9
+    val cursorRow: Int,  // 0-9
+    val appTheme: AppTheme = AppTheme.CLASSIC
 )
 
 /**
@@ -92,19 +93,18 @@ class EffectModule : TrackerModule {
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val s    = state as? EffectState ?: return
         val proj = s.project
+        val t    = s.appTheme
 
-        // Background
         drawRect(
-            color    = Color(0xFF0a0a0a),
+            color    = Color(t.background),
             topLeft  = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size     = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
 
-        // Row highlight for selected cursor row
         val selVis = CURSOR_TO_VIS.getOrElse(s.cursorRow) { -1 }
         if (selVis >= 0) {
             drawRect(
-                color    = Color(0xFF333333),
+                color    = Color(t.rowCursor),
                 topLeft  = Offset((x * scale).toFloat(), ((y + selVis * ROW_HEIGHT) * scale).toFloat()),
                 size     = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
             )
@@ -113,50 +113,43 @@ class EffectModule : TrackerModule {
         fun rowY(vis: Int) = y + TEXT_PADDING + vis * ROW_HEIGHT
 
         fun valueColor(isSel: Boolean, isEmpty: Boolean = false): Color = when {
-            isEmpty -> Color(0xFF555555)
-            isSel   -> Color.Yellow
-            else    -> Color.White
+            isEmpty -> Color(t.textEmpty)
+            isSel   -> Color(t.textCursor)
+            else    -> Color(t.textValue)
         }
 
         fun eqText(slot: Int) = if (slot < 0) "--" else slot.toHex2()
 
-        // ── Header ───────────────────────────────────────────────────────────
-        drawBitmapText("EFFECTS", x + LABEL_X, rowY(0), scale, Color.Cyan, CHAR_SPACING, FONT_SCALE)
-        // vis row 1 is a spacer
+        drawBitmapText("EFFECTS", x + LABEL_X, rowY(0), scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
 
-        // ── MASTER FX section ─────────────────────────────────────────────────
-        drawBitmapText("MASTER FX", x + LABEL_X, rowY(2), scale, Color.Cyan, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("MASTER FX", x + LABEL_X, rowY(2), scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
 
         val typeSel = s.cursorRow == ROW_MASTER_TYPE
-        drawBitmapText("TYPE", x + LABEL_X, rowY(3), scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("TYPE", x + LABEL_X, rowY(3), scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(
             if (proj.masterBusFx == 0) "OTT" else "DUST",
             x + VALUE_X, rowY(3), scale, valueColor(typeSel), CHAR_SPACING, FONT_SCALE
         )
-        // vis row 4 is a spacer
 
-        // ── REVERB section ────────────────────────────────────────────────────
-        drawBitmapText("REVERB", x + LABEL_X, rowY(5), scale, Color.Cyan, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("REVERB", x + LABEL_X, rowY(5), scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
 
         val revSizeSel = s.cursorRow == ROW_REV_SIZE
-        drawBitmapText("SIZE",   x + LABEL_X, rowY(6), scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("SIZE",   x + LABEL_X, rowY(6), scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(proj.reverbFeedback.toHex2(), x + VALUE_X, rowY(6), scale, valueColor(revSizeSel), CHAR_SPACING, FONT_SCALE)
 
         val revDampSel = s.cursorRow == ROW_REV_DAMP
-        drawBitmapText("DAMP",   x + LABEL_X, rowY(7), scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("DAMP",   x + LABEL_X, rowY(7), scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(proj.reverbDamp.toHex2(),     x + VALUE_X, rowY(7), scale, valueColor(revDampSel), CHAR_SPACING, FONT_SCALE)
 
         val revEqSel = s.cursorRow == ROW_REV_EQ
-        drawBitmapText("INP EQ", x + LABEL_X, rowY(8), scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("INP EQ", x + LABEL_X, rowY(8), scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(eqText(proj.reverbInputEq), x + VALUE_X, rowY(8), scale,
             valueColor(revEqSel, proj.reverbInputEq < 0), CHAR_SPACING, FONT_SCALE)
-        // vis row 9 is a spacer
 
-        // ── DELAY section ─────────────────────────────────────────────────────
-        drawBitmapText("DELAY",  x + LABEL_X, rowY(10), scale, Color.Cyan, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("DELAY",  x + LABEL_X, rowY(10), scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
 
         val dlyTimeSel = s.cursorRow == ROW_DLY_TIME
-        drawBitmapText("TIME",   x + LABEL_X, rowY(11), scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("TIME",   x + LABEL_X, rowY(11), scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         val timeText = if (proj.delaySync) {
             DELAY_SYNC_NAMES.getOrElse(proj.delayTime.coerceIn(0, 11)) { "??" }
         } else {
@@ -168,15 +161,15 @@ class EffectModule : TrackerModule {
         }
 
         val dlyFdbkSel = s.cursorRow == ROW_DLY_FDBK
-        drawBitmapText("FDBK",   x + LABEL_X, rowY(12), scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("FDBK",   x + LABEL_X, rowY(12), scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(proj.delayFeedback.toHex2(),  x + VALUE_X, rowY(12), scale, valueColor(dlyFdbkSel), CHAR_SPACING, FONT_SCALE)
 
         val dlyRevSel = s.cursorRow == ROW_DLY_REV
-        drawBitmapText("REV",    x + LABEL_X, rowY(13), scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("REV",    x + LABEL_X, rowY(13), scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(proj.delayReverbSend.toHex2(), x + VALUE_X, rowY(13), scale, valueColor(dlyRevSel), CHAR_SPACING, FONT_SCALE)
 
         val dlyEqSel = s.cursorRow == ROW_DLY_EQ
-        drawBitmapText("INP EQ", x + LABEL_X, rowY(14), scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("INP EQ", x + LABEL_X, rowY(14), scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(eqText(proj.delayInputEq), x + VALUE_X, rowY(14), scale,
             valueColor(dlyEqSel, proj.delayInputEq < 0), CHAR_SPACING, FONT_SCALE)
     }

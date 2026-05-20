@@ -203,68 +203,45 @@ class EqModule : TrackerModule {
         val curParam = s.cursorRow % 4
         val preset   = s.project.eqPresets.getOrNull(s.slotIndex)
 
-        // Band column x-offsets (label col + 3 value cols)
         val bandX = intArrayOf(
             x + LABEL_COL_W,
             x + LABEL_COL_W + BAND_COL_W,
             x + LABEL_COL_W + 2 * BAND_COL_W
         )
 
-        // Header row: "BAND 1/2/3" labels in each value column
+        // Header row: active band = cyan, inactive = grey; no column backgrounds
         for (bi in 0..2) {
-            val bx = bandX[bi]
-            val isBandSel = bi == curBand
-            if (isBandSel) {
-                drawRect(
-                    color   = Color(0xFF1A1A2A),
-                    topLeft = Offset((bx * scale).toFloat(), (edY * scale).toFloat()),
-                    size    = Size((BAND_COL_W * scale).toFloat(), (ROW_H * scale).toFloat())
-                )
-            }
-            val hdrCol = if (isBandSel) Color.Cyan else Color(0xFF555555)
-            drawBitmapText("BAND ${bi + 1}", bx + 6, edY + 3, scale, hdrCol, CHAR_SPACING, FONT_SCALE)
+            val hdrCol = if (bi == curBand) Color.Cyan else Color(0xFF555555)
+            drawBitmapText("BAND ${bi + 1}", bandX[bi] + 6, edY + 3, scale, hdrCol, CHAR_SPACING, FONT_SCALE)
         }
 
-        // 4 param rows — shared label on left, one value per band column
+        // 4 param rows
         for (pi in 0..3) {
             val rowY     = edY + ROW_H + pi * ROW_H
             val isParSel = pi == curParam
 
-            // Left label column
+            // Full-row background when cursor is on this row — matches all other screens
             if (isParSel) {
                 drawRect(
-                    color   = Color(0xFF161620),
+                    color   = Color(0xFF333333),
                     topLeft = Offset((x * scale).toFloat(), (rowY * scale).toFloat()),
-                    size    = Size((LABEL_COL_W * scale).toFloat(), (ROW_H * scale).toFloat())
+                    size    = Size((width * scale).toFloat(), (ROW_H * scale).toFloat())
                 )
             }
-            val lblCol = if (isParSel) Color(0xFFAAAAAA) else Color(0xFF666666)
+
+            // Label: yellow on cursor row, grey otherwise — matches all other screens
+            val lblCol = if (isParSel) Color.Yellow else Color(0xFF666666)
             drawBitmapText(PARAM_LABELS[pi], x + 6, rowY + 3, scale, lblCol, CHAR_SPACING, FONT_SCALE)
 
-            // Value cells — one per band
+            // Values: yellow on cursor cell, white for active band non-cursor, grey for inactive bands
             for (bi in 0..2) {
-                val bx        = bandX[bi]
-                val isBandSel = bi == curBand
-                val isCursor  = isBandSel && isParSel
+                val isCursor  = bi == curBand && isParSel
                 val band: EqBand? = preset?.bands?.getOrNull(bi)
 
-                when {
-                    isCursor  -> drawRect(
-                        color   = Color(0xFF2A2A3A),
-                        topLeft = Offset((bx * scale).toFloat(), (rowY * scale).toFloat()),
-                        size    = Size((BAND_COL_W * scale).toFloat(), (ROW_H * scale).toFloat())
-                    )
-                    isBandSel -> drawRect(
-                        color   = Color(0xFF161620),
-                        topLeft = Offset((bx * scale).toFloat(), (rowY * scale).toFloat()),
-                        size    = Size((BAND_COL_W * scale).toFloat(), (ROW_H * scale).toFloat())
-                    )
-                }
-
                 val valueCol = when {
-                    isCursor  -> Color.Yellow
-                    isBandSel -> Color.White
-                    else      -> Color(0xFF666666)
+                    isCursor       -> Color.Yellow
+                    bi == curBand  -> Color.White
+                    else           -> Color(0xFF666666)
                 }
 
                 val valText = when {
@@ -274,7 +251,7 @@ class EqModule : TrackerModule {
                     pi == 2      -> formatGainDb((band.gain - 128f) / 128f * 12f)
                     else         -> band.q.toHex2()
                 }
-                drawBitmapText(valText, bx + 6, rowY + 3, scale, valueCol, CHAR_SPACING, FONT_SCALE)
+                drawBitmapText(valText, bandX[bi] + 6, rowY + 3, scale, valueCol, CHAR_SPACING, FONT_SCALE)
             }
         }
     }

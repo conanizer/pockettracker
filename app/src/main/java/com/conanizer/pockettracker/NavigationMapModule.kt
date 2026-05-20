@@ -49,12 +49,13 @@ class NavigationMapModule : TrackerModule {
 
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val navState = state as? NavigationMapState ?: return
+        val t = navState.appTheme
 
         // ===================================
         // STEP 1: Draw background
         // ===================================
         drawRect(
-            color = Color(0xFF0a0a0a),
+            color = Color(t.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
@@ -100,7 +101,8 @@ class NavigationMapModule : TrackerModule {
                     screen = screenAtCell,
                     isCurrentScreen = (screenAtCell == navState.currentScreen),
                     row = row,
-                    col = col
+                    col = col,
+                    t = t
                 )
             }
         }
@@ -155,14 +157,15 @@ class NavigationMapModule : TrackerModule {
         screen: ScreenType?,
         isCurrentScreen: Boolean,
         row: Int,
-        col: Int
+        col: Int,
+        t: AppTheme
     ) {
         // ===================================
         // Empty cell - draw very dark background
         // ===================================
         if (screen == null) {
             drawRect(
-                color = Color(0xFF0a0a0a),
+                color = Color(t.background),
                 topLeft = Offset((cellX * scale).toFloat(), (cellY * scale).toFloat()),
                 size = Size((CELL_WIDTH * scale).toFloat(), (CELL_HEIGHT * scale).toFloat())
             )
@@ -172,26 +175,14 @@ class NavigationMapModule : TrackerModule {
         // ===================================
         // Cell has a screen - draw it
         // ===================================
-
-        // Background color (darker if current position)
-        val bgColor = if (isCurrentScreen) {
-            Color(0xFF0A0A0A)  // Darker = you are here
-        } else {
-            Color(0xFF0A0A0A)  // Normal dark
-        }
-
         drawRect(
-            color = bgColor,
+            color = Color(t.background),
             topLeft = Offset((cellX * scale).toFloat(), (cellY * scale).toFloat()),
             size = Size((CELL_WIDTH * scale).toFloat(), (CELL_HEIGHT * scale).toFloat())
         )
 
-        // ===================================
-        // Text color - SIMPLE RULE:
-        // Yellow = current position
-        // White = other visible screens
-        // ===================================
-        val textColor = if (isCurrentScreen) Color.Yellow else Color.White
+        // Yellow = current position, White = other visible screens
+        val textColor = if (isCurrentScreen) Color(t.textCursor) else Color(t.textValue)
 
         // Get label and draw it
         val label = getScreenLabel(screen)
@@ -243,5 +234,6 @@ class NavigationMapModule : TrackerModule {
  */
 data class NavigationMapState(
     val currentScreen: ScreenType,
-    val sourceColumn: Int  // Which column we came from (0-4)
+    val sourceColumn: Int,  // Which column we came from (0-4)
+    val appTheme: AppTheme = AppTheme.CLASSIC
 )

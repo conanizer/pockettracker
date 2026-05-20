@@ -83,15 +83,16 @@ class MixerModule : TrackerModule {
 
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val s = state as? MixerState ?: return
+        val th = s.appTheme
 
         // Background
         drawRect(
-            color   = Color(0xFF0a0a0a),
+            color   = Color(th.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
 
-        drawBitmapText("MIXER", x + 10, y + TEXT_PADDING, scale, Color.Cyan, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("MIXER", x + 10, y + TEXT_PADDING, scale, Color(th.textTitle), CHAR_SPACING, FONT_SCALE)
 
         // ── Track stereo meters + volumes (active only at row 0) ───────────
         for (t in 0..7) {
@@ -101,11 +102,11 @@ class MixerModule : TrackerModule {
             val peakR = s.trackPeaks.getOrElse(t * 2 + 1) { 0f }
 
             drawStereoMeter(mX, y + TRACK_METER_TOP, TRACK_METER_H,
-                peakL, peakR, scale, isSel, s.project.tracks[t].mute)
+                peakL, peakR, scale, isSel, s.project.tracks[t].mute, th)
 
             drawBitmapText(s.project.tracks[t].volume.toHex2(),
                 mX + 5, y + TRACK_VOL_Y, scale,
-                if (isSel) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+                if (isSel) Color(th.textCursor) else Color(th.textValue), CHAR_SPACING, FONT_SCALE)
         }
 
         // ── Master stereo meter (same width as tracks, original height) ────
@@ -114,39 +115,38 @@ class MixerModule : TrackerModule {
             x + MASTER_X, y + TRACK_METER_TOP, MASTER_METER_H,
             s.masterPeaks.getOrElse(0) { 0f },
             s.masterPeaks.getOrElse(1) { 0f },
-            scale, masterSel, false)
+            scale, masterSel, false, th)
 
         // ── Send return meters: REV left, DEL right ────────────────────────
         val revSendSel = s.mixerMasterRow == 1 && s.cursorColumn == 0
         val delSendSel = s.mixerMasterRow == 2 && s.cursorColumn == 0
-        // REV at left (aligns with REV+EQ value row), DEL at right (aligns with DEL+OTT row)
         drawStereoMeter(
             x + FIRST_METER_X, y + SEND_METER_TOP, SEND_METER_H,
             s.reverbPeaks.getOrElse(0) { 0f }, s.reverbPeaks.getOrElse(1) { 0f },
-            scale, revSendSel, false)
+            scale, revSendSel, false, th)
         drawStereoMeter(
             x + FIRST_METER_X + METER_SPACING, y + SEND_METER_TOP, SEND_METER_H,
             s.delayPeaks.getOrElse(0) { 0f }, s.delayPeaks.getOrElse(1) { 0f },
-            scale, delSendSel, false)
+            scale, delSendSel, false, th)
 
         // Send channel labels below meters
         val charW = 5 * FONT_SCALE + CHAR_SPACING
         val revCX = x + FIRST_METER_X + (BAR_W + BAR_SEP + BAR_W) / 2
         val delCX = x + FIRST_METER_X + METER_SPACING + (BAR_W + BAR_SEP + BAR_W) / 2
         drawBitmapText("REV", revCX - (3 * charW) / 2, y + SEND_LABEL_Y,
-            scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+            scale, Color(th.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText("DEL", delCX - (3 * charW) / 2, y + SEND_LABEL_Y,
-            scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+            scale, Color(th.textParam), CHAR_SPACING, FONT_SCALE)
 
         // ── Send return volume: REV and DEL (left of master values) ──────────
         drawBitmapText("REV", x + SEND_VAL_LABEL_X, y + MROW0_Y,
-            scale, if (revSendSel) Color.Yellow else Color.Gray, CHAR_SPACING, FONT_SCALE)
+            scale, if (revSendSel) Color(th.textCursor) else Color(th.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(s.project.reverbWet.toHex2(), x + SEND_VAL_VALUE_X, y + MROW0_Y,
-            scale, if (revSendSel) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+            scale, if (revSendSel) Color(th.textCursor) else Color(th.textValue), CHAR_SPACING, FONT_SCALE)
         drawBitmapText("DEL", x + SEND_VAL_LABEL_X, y + MROW1_Y,
-            scale, if (delSendSel) Color.Yellow else Color.Gray, CHAR_SPACING, FONT_SCALE)
+            scale, if (delSendSel) Color(th.textCursor) else Color(th.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(s.project.delayWet.toHex2(), x + SEND_VAL_VALUE_X, y + MROW1_Y,
-            scale, if (delSendSel) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+            scale, if (delSendSel) Color(th.textCursor) else Color(th.textValue), CHAR_SPACING, FONT_SCALE)
 
         // ── Master value rows (at original position, aligned with send section) ──
         val eqSlot     = s.project.masterEqSlot
@@ -161,36 +161,37 @@ class MixerModule : TrackerModule {
 
         // Row 0: MIX vol editable (right)
         drawBitmapText("MIX", x + MSTR_LABEL_X, y + MROW0_Y,
-            scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+            scale, Color(th.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(s.project.masterVolume.toHex2(), x + MSTR_VALUE_X, y + MROW0_Y,
-            scale, if (mixSel) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+            scale, if (mixSel) Color(th.textCursor) else Color(th.textValue), CHAR_SPACING, FONT_SCALE)
 
         // Row 1: EQ slot editable (right)
         drawBitmapText("EQ", x + MSTR_LABEL_X, y + MROW1_Y,
-            scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+            scale, Color(th.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(eqText, x + MSTR_VALUE_X, y + MROW1_Y,
-            scale, if (eqSel) Color.Yellow else if (eqSlot < 0) Color(0xFF555555) else Color.White,
+            scale, if (eqSel) Color(th.textCursor) else if (eqSlot < 0) Color(th.textEmpty) else Color(th.textValue),
             CHAR_SPACING, FONT_SCALE)
 
         // Row 2: OTT/DUST depth editable (right only)
         drawBitmapText(depthLabel, x + MSTR_LABEL_X, y + MROW2_Y,
-            scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+            scale, Color(th.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(depthText, x + MSTR_VALUE_X, y + MROW2_Y,
-            scale, if (depthSel) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+            scale, if (depthSel) Color(th.textCursor) else Color(th.textValue), CHAR_SPACING, FONT_SCALE)
     }
 
     /**
      * Draws a stereo pair (L bar | separator | R bar) with a single outer border.
-     * Border color: yellow when selected, grey otherwise. Separator is same color as border.
+     * Border color: theme cursor color when selected, grey otherwise.
      */
     private fun DrawScope.drawStereoMeter(
         x: Int, y: Int, h: Int,
         levelL: Float, levelR: Float,
         scale: Int,
         isSelected: Boolean,
-        isMuted: Boolean
+        isMuted: Boolean,
+        theme: AppTheme
     ) {
-        val borderColor = if (isSelected) Color.Yellow else COLOR_METER_BORDER
+        val borderColor = if (isSelected) Color(theme.textCursor) else COLOR_METER_BORDER
         val rX = x + BAR_W + BAR_SEP
 
         // Outer border (covers L + 1px separator strip + R)
@@ -356,7 +357,8 @@ data class MixerState(
     val trackPeaks:    FloatArray = FloatArray(16),
     val masterPeaks:   FloatArray = FloatArray(2),
     val reverbPeaks:   FloatArray = FloatArray(2),
-    val delayPeaks:    FloatArray = FloatArray(2)
+    val delayPeaks:    FloatArray = FloatArray(2),
+    val appTheme:      AppTheme   = AppTheme.CLASSIC
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -369,6 +371,7 @@ data class MixerState(
             && masterPeaks.contentEquals(other.masterPeaks)
             && reverbPeaks.contentEquals(other.reverbPeaks)
             && delayPeaks.contentEquals(other.delayPeaks)
+            && appTheme       == other.appTheme
     }
 
     override fun hashCode(): Int {
@@ -379,6 +382,7 @@ data class MixerState(
         result = 31 * result + masterPeaks.contentHashCode()
         result = 31 * result + reverbPeaks.contentHashCode()
         result = 31 * result + delayPeaks.contentHashCode()
+        result = 31 * result + appTheme.hashCode()
         return result
     }
 }

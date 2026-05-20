@@ -136,6 +136,13 @@ interface IFileSystem {
     fun getSoundfontsDirectory(): String
 
     /**
+     * Get the themes directory path (for .ptt files).
+     * Creates the directory if it doesn't exist.
+     * @return Absolute path to Documents/PocketTracker/Themes/
+     */
+    fun getThemesDirectory(): String
+
+    /**
      * Write binary data to file (overwrites if exists).
      * @param path Absolute path to file
      * @param data Byte array to write

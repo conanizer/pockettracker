@@ -37,27 +37,17 @@ class ProjectModule : TrackerModule {
      */
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val projectState = state as? ProjectState ?: return
+        val t = projectState.appTheme
 
-        // ===================================
-        // STEP 1: Draw background
-        // ===================================
         drawRect(
-            color = Color(0xFF0a0a0a),
+            color = Color(t.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
 
-        // ===================================
-        // STEP 2: Calculate column positions
-        // Column 1: Parameter names (left aligned at x=10)
-        // Column 2: Parameter values (starts at x=140)
-        // ===================================
-        val nameColumnX = x + 10      // Left side: parameter names
-        val valueColumnX = x + 170    // Right side: parameter values
+        val nameColumnX = x + 10
+        val valueColumnX = x + 170
 
-        // ===================================
-        // STEP 3: Draw header "PROJECT"
-        // ===================================
         var rowY = y + TEXT_PADDING
 
         drawBitmapText(
@@ -65,7 +55,7 @@ class ProjectModule : TrackerModule {
             x = nameColumnX,
             y = rowY,
             scale = scale,
-            color = Color.Cyan,  // Header always cyan
+            color = Color(t.textTitle),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
@@ -92,14 +82,12 @@ class ProjectModule : TrackerModule {
             parameterName = "TEMPO",
             parameterValue = projectState.project.tempo.toString().padStart(3, '0'),
             isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
-            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
+            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1,
+            t = t
         )
         rowY += ROW_HEIGHT
         currentRow++
 
-        // ─────────────────────────────────────
-        // ROW 1: TRANSPOSE (00-FF, default 00)
-        // ─────────────────────────────────────
         val transposeHex = projectState.project.transpose
             .toString(16)
             .padStart(2, '0')
@@ -114,7 +102,8 @@ class ProjectModule : TrackerModule {
             parameterName = "TRANSPOSE",
             parameterValue = transposeHex,
             isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
-            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
+            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1,
+            t = t
         )
         rowY += ROW_HEIGHT
         currentRow++
@@ -191,7 +180,8 @@ class ProjectModule : TrackerModule {
             parameterName = "SYSTEM",
             parameterValue = "SETTINGS",
             isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
-            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1
+            isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1,
+            t = t
         )
         // ===================================
         // STEP 5: Draw status message at bottom (if any)
@@ -204,8 +194,7 @@ class ProjectModule : TrackerModule {
                 x = nameColumnX,
                 y = messageY,
                 scale = scale,
-                color = if (projectState.isSuccess)
-                    Color(0xFF00ff00) else Color(0xFFff0000),
+                color = if (projectState.isSuccess) Color(0xFF00ff00) else Color(0xFFff0000),
                 spacing = CHAR_SPACING,
                 fontScale = FONT_SCALE
             )
@@ -225,42 +214,35 @@ class ProjectModule : TrackerModule {
         parameterName: String,
         parameterValue: String,
         isCursorOnName: Boolean,
-        isCursorOnValue: Boolean
+        isCursorOnValue: Boolean,
+        t: AppTheme
     ) {
-        // Calculate Y position for text
         val textY = y + TEXT_PADDING
 
-        // Draw row background if cursor is on this row
         if (isCursorOnName || isCursorOnValue) {
             drawRect(
-                color = Color(0xFF333333),  // Dark gray background
+                color = Color(t.rowCursor),
                 topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
                 size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
             )
         }
 
-        // COLUMN 1: Parameter name
-        // Yellow if cursor on name, gray otherwise
         drawBitmapText(
             text = parameterName,
             x = nameColumnX,
             y = textY,
             scale = scale,
-            color = if (isCursorOnName || isCursorOnValue)
-                Color.Yellow else Color.Gray,
+            color = if (isCursorOnName || isCursorOnValue) Color(t.textCursor) else Color(t.textParam),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
 
-        // COLUMN 2: Parameter value
-        // Yellow if cursor on value, white otherwise
         drawBitmapText(
             text = parameterValue,
             x = valueColumnX,
             y = textY,
             scale = scale,
-            color = if (isCursorOnValue)
-                Color.Yellow else Color.White,
+            color = if (isCursorOnValue) Color(t.textCursor) else Color(t.textValue),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
@@ -279,68 +261,56 @@ class ProjectModule : TrackerModule {
         projectState: ProjectState,
         currentRow: Int
     ) {
+        val t = projectState.appTheme
         val textY = y + TEXT_PADDING
         val isCursorOnThisRow = projectState.cursorRow == currentRow
 
-        // Draw row background if cursor is here
         if (isCursorOnThisRow) {
             drawRect(
-                color = Color(0xFF333333),
+                color = Color(t.rowCursor),
                 topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
                 size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
             )
         }
 
-        // COLUMN 1: "NAME" label
         drawBitmapText(
             text = "NAME",
             x = nameColumnX,
             y = textY,
             scale = scale,
-            // Yellow if cursor is anywhere on this row
-            color = if (isCursorOnThisRow) Color.Yellow else Color.Gray,
+            color = if (isCursorOnThisRow) Color(t.textCursor) else Color(t.textParam),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
 
-        // COLUMN 2: Name characters (20 characters max)
-        // Show actual name characters only; no placeholder for empty slots.
         val projectName = projectState.project.name.take(20)
 
-        // Draw each character separately
         var charX = valueColumnX
         for (charIndex in 0..19) {
             val hasChar = charIndex < projectName.length
-
-            // Is cursor on THIS specific character?
-            // cursorColumn: 0=name label, 1=first char, 2=second char, etc.
             val isCursorOnThisChar = isCursorOnThisRow &&
                     projectState.cursorColumn == charIndex + 1
 
-            // Draw cursor highlight (visible even on empty slots)
             if (isCursorOnThisChar) {
                 drawRect(
-                    color = Color(0xFF555500),  // Visible yellow-green, clearly different from row bg
+                    color = Color(0xFF555500),
                     topLeft = Offset((charX * scale).toFloat(), (y * scale).toFloat()),
                     size = Size(((5 * FONT_SCALE) * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
                 )
             }
 
-            // Only draw actual characters — no dash for empty slots
             if (hasChar) {
                 drawBitmapText(
                     text = projectName[charIndex].toString(),
                     x = charX,
                     y = textY,
                     scale = scale,
-                    color = if (isCursorOnThisChar) Color.Yellow else Color.White,
+                    color = if (isCursorOnThisChar) Color(t.textCursor) else Color(t.textValue),
                     spacing = CHAR_SPACING,
                     fontScale = FONT_SCALE
                 )
             }
 
-            // Move to next character position
-            // Each char is 5px * 3 (scale) + 2px spacing = 17px
             charX += (5 * FONT_SCALE) + CHAR_SPACING
         }
     }
@@ -358,38 +328,33 @@ class ProjectModule : TrackerModule {
         projectState: ProjectState,
         currentRow: Int
     ) {
+        val t = projectState.appTheme
         val textY = y + TEXT_PADDING
         val isCursorOnThisRow = projectState.cursorRow == currentRow
 
-        // Draw row background if cursor is here
         if (isCursorOnThisRow) {
             drawRect(
-                color = Color(0xFF333333),
+                color = Color(t.rowCursor),
                 topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
                 size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
             )
         }
 
-        // COLUMN 1: "PROJECT" label
         drawBitmapText(
             text = "PROJECT",
             x = nameColumnX,
             y = textY,
             scale = scale,
-            color = if (isCursorOnThisRow) Color.Yellow else Color.Gray,
+            color = if (isCursorOnThisRow) Color(t.textCursor) else Color(t.textParam),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
 
-        // COLUMN 2: Options (LOAD, SAVE, NEW)
         val options = listOf("LOAD", "SAVE", "NEW")
         var optionX = valueColumnX
 
         for (optionIndex in options.indices) {
             val optionText = options[optionIndex]
-
-            // Is cursor on THIS option?
-            // cursorColumn: 0=label, 1=LOAD, 2=SAVE, 3=NEW
             val isCursorOnThisOption = isCursorOnThisRow &&
                     projectState.cursorColumn == optionIndex + 1
 
@@ -398,13 +363,10 @@ class ProjectModule : TrackerModule {
                 x = optionX,
                 y = textY,
                 scale = scale,
-                color = if (isCursorOnThisOption) Color.Yellow else Color.White,
+                color = if (isCursorOnThisOption) Color(t.textCursor) else Color(t.textValue),
                 spacing = CHAR_SPACING,
                 fontScale = FONT_SCALE
             )
-
-            // Move to next option position
-            // Leave ~40px between options
             optionX += 80
         }
     }
@@ -422,33 +384,30 @@ class ProjectModule : TrackerModule {
         projectState: ProjectState,
         currentRow: Int
     ) {
+        val t = projectState.appTheme
         val textY = y + TEXT_PADDING
         val isCursorOnThisRow = projectState.cursorRow == currentRow
 
-        // Draw row background if cursor is here
         if (isCursorOnThisRow) {
             drawRect(
-                color = Color(0xFF333333),
+                color = Color(t.rowCursor),
                 topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
                 size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
             )
         }
 
-        // COLUMN 1: "EXPORT" label
         drawBitmapText(
             text = "EXPORT",
             x = nameColumnX,
             y = textY,
             scale = scale,
-            color = if (isCursorOnThisRow) Color.Yellow else Color.Gray,
+            color = if (isCursorOnThisRow) Color(t.textCursor) else Color(t.textParam),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
 
-        // COLUMN 2: WAV MIX option
         val isCursorOnWavMix = isCursorOnThisRow && projectState.cursorColumn == 1
 
-        // Show render status or "WAV MIX" button
         val buttonText = if (projectState.isRendering) {
             "RENDERING ${(projectState.renderProgress * 100).toInt()}%"
         } else {
@@ -461,9 +420,9 @@ class ProjectModule : TrackerModule {
             y = textY,
             scale = scale,
             color = when {
-                projectState.isRendering -> Color.Cyan
-                isCursorOnWavMix -> Color.Yellow
-                else -> Color.White
+                projectState.isRendering -> Color(t.textTitle)
+                isCursorOnWavMix -> Color(t.textCursor)
+                else -> Color(t.textValue)
             },
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
@@ -483,12 +442,13 @@ class ProjectModule : TrackerModule {
         projectState: ProjectState,
         currentRow: Int
     ) {
+        val t = projectState.appTheme
         val textY = y + TEXT_PADDING
         val isCursorOnThisRow = projectState.cursorRow == currentRow
 
         if (isCursorOnThisRow) {
             drawRect(
-                color = Color(0xFF333333),
+                color = Color(t.rowCursor),
                 topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
                 size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
             )
@@ -499,7 +459,7 @@ class ProjectModule : TrackerModule {
             x = nameColumnX,
             y = textY,
             scale = scale,
-            color = if (isCursorOnThisRow) Color.Yellow else Color.Gray,
+            color = if (isCursorOnThisRow) Color(t.textCursor) else Color(t.textParam),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
@@ -513,7 +473,7 @@ class ProjectModule : TrackerModule {
                 x = optionX,
                 y = textY,
                 scale = scale,
-                color = if (isCursorOnThis) Color.Yellow else Color.White,
+                color = if (isCursorOnThis) Color(t.textCursor) else Color(t.textValue),
                 spacing = CHAR_SPACING,
                 fontScale = FONT_SCALE
             )
@@ -695,5 +655,6 @@ data class ProjectState(
     val statusMessage: String = "",
     val isSuccess: Boolean = true,
     val isRendering: Boolean = false,
-    val renderProgress: Float = 0f
+    val renderProgress: Float = 0f,
+    val appTheme: AppTheme = AppTheme.CLASSIC
 )

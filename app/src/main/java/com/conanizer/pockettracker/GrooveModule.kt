@@ -28,7 +28,8 @@ import com.conanizer.pockettracker.core.data.Groove
 data class GrooveState(
     val groove: Groove,
     val cursorRow: Int,      // 0-15
-    val cursorColumn: Int = 1  // 0=step(RO), 1=tick value
+    val cursorColumn: Int = 1,  // 0=step(RO), 1=tick value
+    val appTheme: AppTheme = AppTheme.CLASSIC
 )
 
 class GrooveModule : TrackerModule {
@@ -43,10 +44,11 @@ class GrooveModule : TrackerModule {
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val grooveState = state as? GrooveState ?: return
         val groove = grooveState.groove
+        val t = grooveState.appTheme
 
         // Module background
         drawRect(
-            color = Color(0xFF0a0a0a),
+            color = Color(t.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
@@ -65,23 +67,23 @@ class GrooveModule : TrackerModule {
             x = x + 10,
             y = headerY,
             scale = scale,
-            color = Color.Cyan,
+            color = Color(t.textTitle),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
         drawBitmapText(
             text = "LEN:${activeLen.toString().padStart(2, ' ')}",
-            x = x + width - 100,
+            x = x + width - 130,
             y = headerY,
             scale = scale,
-            color = Color.Gray,
+            color = Color(t.textParam),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
 
         // ─── ROW 1: COLUMN HEADERS ───
         val colHeaderY = y + ROW_HEIGHT + 14 + TEXT_PADDING
-        drawBitmapText("TIC", tickX, colHeaderY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("TIC", tickX, colHeaderY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
 
         // ─── ROWS 2-17: 16 DATA ROWS ───
         val dataStartY = y + ROW_HEIGHT + 14 + ROW_HEIGHT + TEXT_PADDING
@@ -97,7 +99,7 @@ class GrooveModule : TrackerModule {
             // Cursor row background highlight
             if (isCursor) {
                 drawRect(
-                    color = Color(0xFF1a1a1a),
+                    color = Color(t.rowCursor),
                     topLeft = Offset(
                         (x * scale).toFloat(),
                         ((rowY - TEXT_PADDING) * scale).toFloat()
@@ -108,9 +110,9 @@ class GrooveModule : TrackerModule {
 
             // Step number (read-only)
             val stepColor = when {
-                isCursor -> Color.Yellow
-                isPastEnd -> Color(0xFF333333)
-                else -> Color(0xFF666666)
+                isCursor  -> Color(t.textCursor)
+                isPastEnd -> Color(t.textEmpty)
+                else      -> Color(t.textEmpty)
             }
             drawBitmapText(
                 text = index.toString(16).uppercase(),
@@ -125,9 +127,9 @@ class GrooveModule : TrackerModule {
             // Tick value (-1 = "--", otherwise show hex)
             val tickText = if (isEndMarker) "--" else tickValue.toHex2()
             val tickColor = when {
-                isCursor && grooveState.cursorColumn == 1 -> Color.Yellow
-                isEndMarker || isPastEnd -> Color(0xFF333333)
-                else -> Color.White
+                isCursor && grooveState.cursorColumn == 1 -> Color(t.textCursor)
+                isEndMarker || isPastEnd                  -> Color(t.textEmpty)
+                else                                      -> Color(t.textValue)
             }
             drawBitmapText(
                 text = tickText,

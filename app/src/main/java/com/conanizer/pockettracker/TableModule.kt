@@ -29,10 +29,11 @@ class TableModule : TrackerModule {
 
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val tableState = state as? TableState ?: return
+        val t = tableState.appTheme
 
         // Module background
         drawRect(
-            color = Color(0xFF0a0a0a),
+            color = Color(t.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
@@ -56,7 +57,7 @@ class TableModule : TrackerModule {
             x = x + 10,
             y = rowY,
             scale = scale,
-            color = Color.Cyan,
+            color = Color(t.textTitle),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
@@ -68,7 +69,7 @@ class TableModule : TrackerModule {
             x = x + width - 120,
             y = rowY,
             scale = scale,
-            color = Color.Gray,
+            color = Color(t.textParam),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
@@ -77,11 +78,11 @@ class TableModule : TrackerModule {
         rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING
 
         // ROW 1: COLUMN HEADERS
-        drawBitmapText("N", transposeX, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("V", volX, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("FX1", fx1NameX, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("FX2", fx2NameX, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("FX3", fx3NameX, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("N",   transposeX, rowY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("V",   volX,       rowY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("FX1", fx1NameX,   rowY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("FX2", fx2NameX,   rowY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("FX3", fx3NameX,   rowY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
 
         // ROWS 2-17: 16 DATA ROWS
         tableState.table.rows.forEachIndexed { index, row ->
@@ -92,6 +93,7 @@ class TableModule : TrackerModule {
                 index = index,
                 row = row,
                 state = tableState,
+                t = t,
                 stepX = stepX,
                 transposeX = transposeX,
                 volX = volX,
@@ -115,6 +117,7 @@ class TableModule : TrackerModule {
         index: Int,
         row: TableRow,
         state: TableState,
+        t: AppTheme,
         stepX: Int,
         transposeX: Int,
         volX: Int,
@@ -132,7 +135,7 @@ class TableModule : TrackerModule {
         val isRowSelected = state.selectionMode && (1..8).any { col -> state.isCellSelected(index, col) }
 
         drawRect(
-            color = rowBgColor(index, state.cursorRow, state.playbackRow ?: -1, state.playbackRow != null, isRowSelected),
+            color = rowBgColor(index, state.cursorRow, state.playbackRow ?: -1, state.playbackRow != null, isRowSelected, t),
             topLeft = Offset((x * scale).toFloat(), (dataRowY * scale).toFloat()),
             size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
         )
@@ -146,7 +149,7 @@ class TableModule : TrackerModule {
             y = textY,
             scale = scale,
             color = if (index == state.cursorRow && state.cursorColumn == 0)
-                Color.Yellow else Color(0xFF666666),
+                Color(t.textCursor) else Color(t.textEmpty),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
@@ -159,10 +162,10 @@ class TableModule : TrackerModule {
             y = textY,
             scale = scale,
             color = when {
-                index == state.cursorRow && state.cursorColumn == 1 -> Color.Yellow
-                state.selectionMode && state.isCellSelected(index, 1) -> Color(0xFF00DD00)  // Selection green
-                row.transpose == 0x00 -> Color(0xFF444444)  // Dim if no transpose
-                else -> Color.White
+                index == state.cursorRow && state.cursorColumn == 1 -> Color(t.textCursor)
+                state.selectionMode && state.isCellSelected(index, 1) -> Color(0xFF00DD00)
+                row.transpose == 0x00 -> Color(t.textEmpty)
+                else -> Color(t.textValue)
             },
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
@@ -176,10 +179,10 @@ class TableModule : TrackerModule {
             y = textY,
             scale = scale,
             color = when {
-                index == state.cursorRow && state.cursorColumn == 2 -> Color.Yellow
-                state.selectionMode && state.isCellSelected(index, 2) -> Color(0xFF00DD00)  // Selection green
-                row.volume == -1 -> Color(0xFF444444)  // Dim if no volume change
-                else -> Color(0xFFaaaaaa)
+                index == state.cursorRow && state.cursorColumn == 2 -> Color(t.textCursor)
+                state.selectionMode && state.isCellSelected(index, 2) -> Color(0xFF00DD00)
+                row.volume == -1 -> Color(t.textEmpty)
+                else -> Color(t.textValue)
             },
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
@@ -187,7 +190,7 @@ class TableModule : TrackerModule {
 
         // COLUMNS 3-4: FX1
         drawFxColumn(
-            fx1NameX, fx1ValueX, textY, scale,
+            fx1NameX, fx1ValueX, textY, scale, t,
             row.fx1Type, row.fx1Value,
             index == state.cursorRow && state.cursorColumn == 3,
             index == state.cursorRow && state.cursorColumn == 4,
@@ -197,7 +200,7 @@ class TableModule : TrackerModule {
 
         // COLUMNS 5-6: FX2
         drawFxColumn(
-            fx2NameX, fx2ValueX, textY, scale,
+            fx2NameX, fx2ValueX, textY, scale, t,
             row.fx2Type, row.fx2Value,
             index == state.cursorRow && state.cursorColumn == 5,
             index == state.cursorRow && state.cursorColumn == 6,
@@ -207,7 +210,7 @@ class TableModule : TrackerModule {
 
         // COLUMNS 7-8: FX3
         drawFxColumn(
-            fx3NameX, fx3ValueX, textY, scale,
+            fx3NameX, fx3ValueX, textY, scale, t,
             row.fx3Type, row.fx3Value,
             index == state.cursorRow && state.cursorColumn == 7,
             index == state.cursorRow && state.cursorColumn == 8,
@@ -224,6 +227,7 @@ class TableModule : TrackerModule {
         valueX: Int,
         textY: Int,
         scale: Int,
+        t: AppTheme,
         fxType: Int,
         fxValue: Int,
         cursorOnName: Boolean,
@@ -241,10 +245,10 @@ class TableModule : TrackerModule {
             y = textY,
             scale = scale,
             color = when {
-                cursorOnName -> Color.Yellow
-                nameSelected -> Color(0xFF00DD00)  // Selection green
-                fxType == 0 -> Color(0xFF444444)
-                else -> Color(0xFFaaaaaa)
+                cursorOnName -> Color(t.textCursor)
+                nameSelected -> Color(0xFF00DD00)
+                fxType == 0  -> Color(t.textEmpty)
+                else         -> Color(t.textValue)
             },
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
@@ -257,10 +261,10 @@ class TableModule : TrackerModule {
             y = textY,
             scale = scale,
             color = when {
-                cursorOnValue -> Color.Yellow
-                valueSelected -> Color(0xFF00DD00)  // Selection green
-                fxType == 0 -> Color(0xFF444444)
-                else -> Color(0xFFaaaaaa)
+                cursorOnValue -> Color(t.textCursor)
+                valueSelected -> Color(0xFF00DD00)
+                fxType == 0   -> Color(t.textEmpty)
+                else          -> Color(t.textValue)
             },
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
@@ -451,5 +455,6 @@ data class TableState(
     val playbackRow: Int? = null,
     val ticRate: Int = 0x06,  // Default: 6 tics per row
     val selectionMode: Boolean = false,
-    val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }
+    val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
+    val appTheme: AppTheme = AppTheme.CLASSIC
 )

@@ -26,8 +26,9 @@ class ChainEditorModule : TrackerModule {
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val chainState = state as? ChainEditorState ?: return
 
+        val t = chainState.appTheme
         drawRect(
-            color   = Color(0xFF0a0a0a),
+            color   = Color(t.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
@@ -38,11 +39,11 @@ class ChainEditorModule : TrackerModule {
         val tspX  = colX
 
         var rowY = y + TEXT_PADDING
-        drawBitmapText("CHAIN ${chainState.chain.id.toHex2()}", x + 10, rowY, scale, Color.Cyan, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("CHAIN ${chainState.chain.id.toHex2()}", x + 10, rowY, scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
 
         rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING
-        drawBitmapText("PH",  phX,  rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("TSP", tspX, rowY, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("PH",  phX,  rowY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("TSP", tspX, rowY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
 
         for (index in 0..15) {
             drawChainRow(x, y, scale, index, chainState, stepX, phX, tspX)
@@ -60,8 +61,9 @@ class ChainEditorModule : TrackerModule {
         val isEmpty   = phraseRef == -1
         val isRowSelected = state.selectionMode && (1..2).any { col -> state.isCellSelected(index, col) }
 
+        val t = state.appTheme
         drawRect(
-            color   = rowBgColor(index, state.cursorRow, state.playbackRow, state.isPlaying, isRowSelected),
+            color   = rowBgColor(index, state.cursorRow, state.playbackRow, state.isPlaying, isRowSelected, t),
             topLeft = Offset((x * scale).toFloat(), (dataRowY * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
         )
@@ -72,9 +74,9 @@ class ChainEditorModule : TrackerModule {
             text = index.toString(16).uppercase(),
             x = stepX, y = textY, scale = scale,
             color = when {
-                index == state.cursorRow && state.cursorColumn == 0 -> Color.Yellow
-                index % 4 == 0 -> Color(0xFFAAAAAA)
-                else -> Color(0xFF666666)
+                index == state.cursorRow && state.cursorColumn == 0 -> Color(t.textCursor)
+                index % 4 == 0 -> Color(t.textParam)
+                else -> Color(t.textEmpty)
             },
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
@@ -83,10 +85,10 @@ class ChainEditorModule : TrackerModule {
             text = if (isEmpty) "--" else phraseRef.toHex2(),
             x = phX, y = textY, scale = scale,
             color = when {
-                index == state.cursorRow && state.cursorColumn == 1 -> Color.Yellow
+                index == state.cursorRow && state.cursorColumn == 1 -> Color(t.textCursor)
                 state.selectionMode && state.isCellSelected(index, 1) -> Color(0xFF00DD00)
-                isEmpty -> Color(0xFF444444)
-                else -> Color.White
+                isEmpty -> Color(t.textEmpty)
+                else -> Color(t.textValue)
             },
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
@@ -96,11 +98,11 @@ class ChainEditorModule : TrackerModule {
             text = if (isEmpty) "--" else transposeValue.toHex2(),
             x = tspX, y = textY, scale = scale,
             color = when {
-                index == state.cursorRow && state.cursorColumn == 2 -> Color.Yellow
+                index == state.cursorRow && state.cursorColumn == 2 -> Color(t.textCursor)
                 state.selectionMode && state.isCellSelected(index, 2) -> Color(0xFF00DD00)
-                isEmpty -> Color(0xFF444444)
-                transposeValue == 0x80 -> Color(0xFF888888)  // 0x80 = no transpose, dim it
-                else -> Color(0xFFaaaaaa)
+                isEmpty -> Color(t.textEmpty)
+                transposeValue == 0x80 -> Color(t.textParam)
+                else -> Color(t.textParam)
             },
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
@@ -168,5 +170,6 @@ data class ChainEditorState(
     val playbackRow: Int = 0,
     val isPlaying: Boolean = false,
     val selectionMode: Boolean = false,
-    val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false }
+    val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
+    val appTheme: AppTheme = AppTheme.CLASSIC
 )
