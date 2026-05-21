@@ -135,6 +135,7 @@ Everything here is intentionally out of scope for v1.0.
 ### Sequencing
 - Scales screen — lock notes to a musical scale, see note names in context
 - More sequence effects — additional FX commands beyond the current set
+- Groove presets — built-in swing/shuffle patterns to choose from, plus save and load custom grooves as preset files
 
 ### Editing
 - Undo/redo across the whole session
