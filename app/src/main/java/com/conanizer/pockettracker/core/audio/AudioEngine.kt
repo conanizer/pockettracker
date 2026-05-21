@@ -240,10 +240,14 @@ class AudioEngine(
         }
     }
 
-    fun previewSampleData(samples: FloatArray, sampleRate: Int): Boolean {
+    fun previewSampleData(samples: FloatArray, sampleRate: Int, samplesRight: FloatArray? = null): Boolean {
         return try {
             backend.stopAll()
-            backend.loadSample(255, samples)
+            if (samplesRight != null) {
+                backend.loadSampleStereo(255, samples, samplesRight)
+            } else {
+                backend.loadSample(255, samples)
+            }
             backend.resumeStream()
             val adjustedBaseFreq = 261.63f * (getDeviceSampleRate().toFloat() / sampleRate.toFloat())
             backend.scheduleNote(

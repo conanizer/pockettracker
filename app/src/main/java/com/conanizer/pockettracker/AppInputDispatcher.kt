@@ -1725,7 +1725,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                 withContext(Dispatchers.Main) {
                                     if (result.isSuccess) {
                                         val audio = result.getOrThrow()
-                                        audioEngine.previewSampleData(audio.samples, audio.sampleRate)
+                                        audioEngine.previewSampleData(audio.samples, audio.sampleRate, audio.samplesRight)
                                         fileBrowserState = fileBrowserState.copy(statusMessage = "", statusSuccess = true)
                                     } else {
                                         fileBrowserState = fileBrowserState.copy(statusMessage = "PREVIEW FAILED", statusSuccess = false)

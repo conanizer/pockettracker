@@ -11,10 +11,11 @@ package com.conanizer.pockettracker.core.media
 interface IVideoAudioExtractor {
 
     data class ExtractionResult(
-        val samples: FloatArray,    // mono, normalized -1.0..1.0
-        val sampleRate: Int,        // e.g. 48000
-        val durationMs: Long,       // total audio duration
-        val sourceFormat: String    // e.g. "AAC 48000Hz stereo"
+        val samples: FloatArray,            // left channel (or mono), normalized -1.0..1.0
+        val samplesRight: FloatArray?,      // right channel if stereo, null if mono
+        val sampleRate: Int,                // e.g. 48000
+        val durationMs: Long,               // total audio duration
+        val sourceFormat: String            // e.g. "AAC 48000Hz stereo"
     )
 
     sealed class ExtractionError : Exception() {

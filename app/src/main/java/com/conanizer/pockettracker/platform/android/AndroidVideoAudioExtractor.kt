@@ -61,14 +61,15 @@ class AndroidVideoAudioExtractor : IVideoAudioExtractor {
             val sourceFormat = "$mime ${sampleRate}Hz ${if (channelCount == 1) "mono" else "stereo"}"
 
             // Decode
-            val pcmSamples = decode(extractor, format, mime, sampleRate, channelCount, maxDurationSec)
+            val (left, right) = decode(extractor, format, mime, sampleRate, channelCount, maxDurationSec)
                 ?: return Result.failure(
                     IVideoAudioExtractor.ExtractionError.DecodeFailed("MediaCodec decode failed for: $path")
                 )
 
             return Result.success(
                 IVideoAudioExtractor.ExtractionResult(
-                    samples = pcmSamples,
+                    samples = left,
+                    samplesRight = right,
                     sampleRate = sampleRate,
                     durationMs = durationMs,
                     sourceFormat = sourceFormat
@@ -85,7 +86,8 @@ class AndroidVideoAudioExtractor : IVideoAudioExtractor {
 
     /**
      * Run the MediaCodec decode loop.
-     * Returns mono FloatArray normalized to -1.0..1.0, or null on failure.
+     * Returns Pair(left, right?) normalized to -1.0..1.0, or null on failure.
+     * Stereo sources return separate left/right channels; mono returns Pair(mono, null).
      */
     private fun decode(
         extractor: MediaExtractor,
@@ -94,7 +96,7 @@ class AndroidVideoAudioExtractor : IVideoAudioExtractor {
         sampleRate: Int,
         channelCount: Int,
         maxDurationSec: Int
-    ): FloatArray? {
+    ): Pair<FloatArray, FloatArray?>? {
         val codec = try {
             MediaCodec.createDecoderByType(mime)
         } catch (e: Exception) {
@@ -172,8 +174,8 @@ class AndroidVideoAudioExtractor : IVideoAudioExtractor {
 
         if (accumulator.isEmpty()) return null
 
-        // Convert interleaved shorts → mono float
-        return stereoShortsToMonoFloat(accumulator, channelCount)
+        // Split interleaved shorts into separate channels
+        return interleavedShortsToChannels(accumulator, channelCount)
     }
 
     /**
@@ -202,19 +204,18 @@ class AndroidVideoAudioExtractor : IVideoAudioExtractor {
     }
 
     /**
-     * Convert interleaved 16-bit PCM (any channel count) to mono FloatArray.
-     * Uses simple average mix for stereo/multi-channel downmix.
+     * Split interleaved 16-bit PCM into separate channel FloatArrays.
+     * Mono → Pair(mono, null). Stereo → Pair(left, right).
+     * 3+ channels: left = ch0, right = ch1 (extras discarded).
      */
-    private fun stereoShortsToMonoFloat(shorts: List<Short>, channelCount: Int): FloatArray {
-        val monoCount = shorts.size / channelCount
-        val result = FloatArray(monoCount)
-        for (i in 0 until monoCount) {
-            var sum = 0f
-            for (ch in 0 until channelCount) {
-                sum += shorts[i * channelCount + ch] / 32768f
-            }
-            result[i] = (sum / channelCount).coerceIn(-1f, 1f)
+    private fun interleavedShortsToChannels(shorts: List<Short>, channelCount: Int): Pair<FloatArray, FloatArray?> {
+        val frameCount = shorts.size / channelCount
+        val left = FloatArray(frameCount) { i -> (shorts[i * channelCount] / 32768f).coerceIn(-1f, 1f) }
+        val right = if (channelCount >= 2) {
+            FloatArray(frameCount) { i -> (shorts[i * channelCount + 1] / 32768f).coerceIn(-1f, 1f) }
+        } else {
+            null
         }
-        return result
+        return Pair(left, right)
     }
 }

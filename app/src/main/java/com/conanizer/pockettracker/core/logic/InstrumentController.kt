@@ -208,7 +208,11 @@ class InstrumentController(
         val wavPath = "${fileSystem.getSamplesDirectory()}/$wavFilename"
 
         setStatus("Saving WAV...", success = true)
-        val written = WavWriter.writeWavMono(fileSystem, wavPath, audio.samples, audio.sampleRate)
+        val written = if (audio.samplesRight != null) {
+            WavWriter.writeWav(fileSystem, wavPath, audio.samples, audio.samplesRight, audio.sampleRate)
+        } else {
+            WavWriter.writeWavMono(fileSystem, wavPath, audio.samples, audio.sampleRate)
+        }
         if (!written) {
             setStatus("Failed to save WAV", success = false)
             logger.e(TAG, "❌ Failed to write WAV: $wavPath")
