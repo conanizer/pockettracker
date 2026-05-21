@@ -28,7 +28,8 @@
       "WebFetch(domain:www-mmsp.ece.mcgill.ca)",
       "WebFetch(domain:www.recordingblogs.com)",
       "WebFetch(domain:www.digitizationguidelines.gov)",
-      "WebFetch(domain:forum.1010music.com)"
+      "WebFetch(domain:forum.1010music.com)",
+      "Bash(xargs wc -l)"
     ]
   }
 }

@@ -433,7 +433,7 @@ class FileBrowserModule : TrackerModule {
                 val sizeText = formatFileSize(item.file.length())
                 drawBitmapText(
                     text = sizeText,
-                    x = x + 330,
+                    x = x + 370,
                     y = rowY + TEXT_PADDING,
                     scale = scale,
                     color = Color(t.textEmpty),
@@ -445,7 +445,7 @@ class FileBrowserModule : TrackerModule {
                 val dateText = dateFormat.format(Date(item.file.lastModified()))
                 drawBitmapText(
                     text = dateText,
-                    x = x + 440,
+                    x = x + 480,
                     y = rowY + TEXT_PADDING,
                     scale = scale,
                     color = Color(t.textEmpty),
