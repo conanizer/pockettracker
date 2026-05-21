@@ -115,6 +115,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 These are not yet in the app but are targeted for v1.0:
 
 - **Per-track WAV export** — export each track as its own separate stereo WAV file instead of only a full mix
+- **File move** — move files and folders to a different location from within the browser
 - **Limiter settings on the mixer screen** — expose threshold, ceiling, or similar limiter parameters where it's easy to reach during a session
 - **Default project template** — load the app with a usable starting state (some instruments, a tempo) instead of a blank project
 
@@ -138,7 +139,7 @@ Everything here is intentionally out of scope for v1.0.
 ### Editing
 - Undo/redo across the whole session
 - Copy/paste individual instrument settings between instruments
-- File copy in the browser (rename and delete are in; copy is not yet)
+- File copy in the browser
 
 ### Audio
 - Mic input for recording samples directly into the app
@@ -156,13 +157,3 @@ Everything here is intentionally out of scope for v1.0.
 ### Platform
 - Linux port
 
----
-
-## Things Not On Your List That Are Already In
-
-A few features from the technical docs that don't appear in your list above — you may just know them by a different name:
-
-- **Instrument tables** — this is the big one. Each instrument has its own 16-row sequencer that runs independently per note. Huge for rhythmic effects and programmed arpeggios. Worth calling out separately since it's one of the most LSDJ-like features in the app.
-- **File copy in the browser** — rename and delete are in, but copy is not implemented yet. You listed it as something you want — it would need to go in the "before release" or "after release" section depending on priority.
-- **Horizontal touch layout** — TOUCH_LANDSCAPE mode exists, though it may differ from what you have in mind for the proper post-release landscape layout.
-- **OCTA visualizer** — you listed "octascope" in the visualizer list but used the M8 term; it's labelled OCTA in the app.
