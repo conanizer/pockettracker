@@ -115,7 +115,11 @@ class FileBrowserModule : TrackerModule {
         val statusSuccess: Boolean = true,
         val fileExtension: String? = null,          // Single-extension filter (legacy)
         val fileExtensions: List<String>? = null,   // Multi-extension filter (null = all files)
-        val appTheme: AppTheme = AppTheme.CLASSIC
+        val appTheme: AppTheme = AppTheme.CLASSIC,
+        val selectionMode: Boolean = false,
+        val selectionAnchor: Int = -1,
+        val fileClipboard: List<File> = emptyList(),
+        val fileClipboardIsCut: Boolean = false
     ) {
         /** Effective extension set: fileExtensions wins over fileExtension */
         val activeExtensions: Set<String>?
@@ -123,6 +127,25 @@ class FileBrowserModule : TrackerModule {
                 fileExtensions != null -> fileExtensions.map { it.lowercase() }.toSet()
                 fileExtension != null  -> setOf(fileExtension.lowercase())
                 else                   -> null
+            }
+
+        /** Selected index range (anchor..cursor), excluding parent entry. Null when not in selection mode. */
+        val selectedRange: IntRange?
+            get() {
+                if (!selectionMode || selectionAnchor < 0) return null
+                val firstSelectable = if (items.firstOrNull() is BrowserItem.Parent) 1 else 0
+                val lo = minOf(selectionAnchor, cursor).coerceAtLeast(firstSelectable)
+                val hi = maxOf(selectionAnchor, cursor)
+                return lo..hi
+            }
+
+        /** Clipboard status line, e.g. "CPY 3 FILES" or "CUT 1 FILE". Empty when clipboard is empty. */
+        val clipboardInfo: String
+            get() {
+                if (fileClipboard.isEmpty()) return ""
+                val verb = if (fileClipboardIsCut) "CUT" else "CPY"
+                val n = fileClipboard.size
+                return "$verb $n ${if (n == 1) "FILE" else "FILES"}"
             }
     }
 
@@ -276,13 +299,17 @@ class FileBrowserModule : TrackerModule {
         // Line 1: SEL+ combos or status messages
         when (browserState.mode) {
             BrowserMode.NORMAL -> {
-                // Normal mode: Show SEL+ combo controls
+                val (hint, hintColor) = when {
+                    browserState.selectionMode -> "B=COPY L+A=CUT L+B=ALL L+R=CANCEL" to Color(t.rowSelection)
+                    browserState.fileClipboard.isNotEmpty() -> "L+A=PASTE  ${browserState.clipboardInfo}" to Color(t.textTitle)
+                    else -> "SEL+A=RENAME SEL+B=DEL SEL+R=NEW" to Color(t.textParam)
+                }
                 drawBitmapText(
-                    text = "SEL+A=RENAME SEL+B=DEL SEL+R=NEW",
+                    text = hint,
                     x = x + 10,
                     y = topBarY1 + TEXT_PADDING,
                     scale = scale,
-                    color = Color(t.textParam),
+                    color = hintColor,
                     spacing = CHAR_SPACING,
                     fontScale = FONT_SCALE
                 )
@@ -348,10 +375,12 @@ class FileBrowserModule : TrackerModule {
         visibleItems.forEachIndexed { index, item ->
             val itemIndex = browserState.scroll + index
             val isCursor = itemIndex == browserState.cursor
+            val isSelected = browserState.selectedRange?.contains(itemIndex) == true
 
-            // Row background (zebra striping)
+            // Row background
             val bgColor = when {
                 isCursor -> Color(t.rowCursor)
+                isSelected -> Color(t.rowSelection)
                 index % 2 == 0 -> Color(t.background)
                 else -> Color(0xFF111111)
             }

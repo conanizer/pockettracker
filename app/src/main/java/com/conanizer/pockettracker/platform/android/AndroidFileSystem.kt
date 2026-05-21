@@ -191,6 +191,24 @@ class AndroidFileSystem(
         return File(path).exists()
     }
 
+    override fun moveFile(sourcePath: String, destPath: String): Boolean {
+        return try {
+            val src = File(sourcePath)
+            val dst = File(destPath)
+            dst.parentFile?.mkdirs()
+            // renameTo works cross-directory on the same filesystem (internal storage)
+            val moved = src.renameTo(dst)
+            if (!moved) {
+                // Fallback: copy then delete (handles cross-filesystem moves)
+                src.copyTo(dst, overwrite = false)
+                src.delete()
+            } else true
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to move file: ${e.message}")
+            false
+        }
+    }
+
     /**
      * Create a new folder.
      */

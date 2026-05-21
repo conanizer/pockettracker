@@ -158,6 +158,9 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     // Dedicated return target for SETTINGS — set when entering, never overwritten by FILE_BROWSER navigation
     private var settingsReturnScreen: ScreenType = ScreenType.PROJECT
 
+    // L+B double-tap timer for file browser select-all
+    private var lastFileBrowserLBTime: Long = 0L
+
     private fun computeSliceCuePoints(state: SampleEditorState): IntArray = when (state.sliceMethod) {
         0 -> state.transientMarkers.filter { it > 0 && it < state.totalFrames }.toIntArray()
         1 -> {
@@ -1436,6 +1439,18 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             trackerController.currentScreen = settingsReturnScreen
             return
         }
+        if (trackerController.currentScreen == ScreenType.FILE_BROWSER && fileBrowserState.selectionMode) {
+            val files = getFileBrowserSelectedFiles()
+            if (files.isNotEmpty()) {
+                val n = files.size
+                fileBrowserState = fileBrowserState.copy(
+                    selectionMode = false, selectionAnchor = -1,
+                    fileClipboard = files, fileClipboardIsCut = false,
+                    statusMessage = "CPY $n ${if (n == 1) "FILE" else "FILES"}", statusSuccess = true
+                )
+            }
+            return
+        }
         if (trackerController.inputController.isSelectionModeActive()) {
             val bounds = trackerController.inputController.getSelectionBounds()
             if (bounds != null) {
@@ -2090,6 +2105,22 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     else -> { }
                 }
             }
+            ScreenType.FILE_BROWSER -> {
+                if (fileBrowserState.mode != FileBrowserModule.BrowserMode.NORMAL) return
+                if (fileBrowserState.selectionMode) {
+                    val files = getFileBrowserSelectedFiles()
+                    if (files.isNotEmpty()) {
+                        val n = files.size
+                        fileBrowserState = fileBrowserState.copy(
+                            selectionMode = false, selectionAnchor = -1,
+                            fileClipboard = files, fileClipboardIsCut = true,
+                            statusMessage = "CUT $n ${if (n == 1) "FILE" else "FILES"}", statusSuccess = true
+                        )
+                    }
+                } else if (fileBrowserState.fileClipboard.isNotEmpty()) {
+                    pasteBrowserFiles()
+                }
+            }
             else -> { }
         }
     }
@@ -2100,8 +2131,68 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             ScreenType.CHAIN   -> trackerController.inputController.handleSelectB(trackerController.cursorRow, trackerController.cursorColumn, 2)
             ScreenType.SONG    -> trackerController.inputController.handleSelectB(trackerController.cursorRow, trackerController.cursorColumn, 8)
             ScreenType.TABLE   -> trackerController.inputController.handleSelectB(trackerController.tableCursorRow, trackerController.tableCursorColumn, 8)
+            ScreenType.FILE_BROWSER -> {
+                if (fileBrowserState.mode != FileBrowserModule.BrowserMode.NORMAL) return
+                val now = System.currentTimeMillis()
+                if (!fileBrowserState.selectionMode) {
+                    fileBrowserState = fileBrowserState.copy(selectionMode = true, selectionAnchor = fileBrowserState.cursor)
+                    lastFileBrowserLBTime = now
+                } else if (now - lastFileBrowserLBTime <= 500L) {
+                    // Select all (skipping the ".." parent entry)
+                    val firstSelectable = if (fileBrowserState.items.firstOrNull() is FileBrowserModule.BrowserItem.Parent) 1 else 0
+                    val lastIdx = (fileBrowserState.items.size - 1).coerceAtLeast(firstSelectable)
+                    val newScroll = maxOf(0, lastIdx - FileBrowserModule.VISIBLE_ROWS + 1)
+                    fileBrowserState = fileBrowserState.copy(selectionAnchor = firstSelectable, cursor = lastIdx, scroll = newScroll)
+                    lastFileBrowserLBTime = 0L
+                } else {
+                    fileBrowserState = fileBrowserState.copy(selectionAnchor = fileBrowserState.cursor)
+                    lastFileBrowserLBTime = now
+                }
+            }
             else -> { }
         }
+    }
+
+    private fun getFileBrowserSelectedFiles(): List<java.io.File> {
+        val state = fileBrowserState
+        val range = state.selectedRange ?: return emptyList()
+        return range.mapNotNull { idx ->
+            val item = state.items.getOrNull(idx)
+            if (item != null && item !is FileBrowserModule.BrowserItem.Parent) item.file else null
+        }
+    }
+
+    private fun pasteBrowserFiles() {
+        val state = fileBrowserState
+        if (state.fileClipboard.isEmpty()) return
+        val destDir = state.currentDirectory
+        var doneCount = 0; var failCount = 0
+        for (srcFile in state.fileClipboard) {
+            if (!srcFile.exists()) { failCount++; continue }
+            var destFile = java.io.File(destDir, srcFile.name)
+            if (destFile.absolutePath == srcFile.absolutePath) { doneCount++; continue }
+            if (destFile.exists()) {
+                var counter = 2
+                val ext = srcFile.extension
+                val base = srcFile.nameWithoutExtension
+                do {
+                    val newName = if (ext.isEmpty()) "${base}_$counter" else "${base}_$counter.$ext"
+                    destFile = java.io.File(destDir, newName)
+                    counter++
+                } while (destFile.exists())
+            }
+            val ok = if (state.fileClipboardIsCut) fileSystem.moveFile(srcFile.absolutePath, destFile.absolutePath)
+                     else srcFile.copyTo(destFile, overwrite = false).exists()
+            if (ok) doneCount++ else failCount++
+        }
+        val verb = if (state.fileClipboardIsCut) "MOVED" else "COPIED"
+        val newClipboard = if (state.fileClipboardIsCut) emptyList() else state.fileClipboard
+        val msg = if (failCount == 0) "$verb $doneCount ${if (doneCount == 1) "FILE" else "FILES"}"
+                  else "$verb $doneCount, FAILED $failCount"
+        fileBrowserState = fileBrowserModule.navigateToFolder(
+            state.copy(fileClipboard = newClipboard, statusMessage = msg, statusSuccess = failCount == 0),
+            destDir
+        )
     }
 
     fun handleSelectA() {
@@ -2201,7 +2292,13 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         }
         if (trackerController.inputController.isSelectionModeActive()) trackerController.inputController.exitSelectionMode()
     }
-    fun handleLR()     { if (trackerController.inputController.isSelectionModeActive()) trackerController.inputController.exitSelectionMode() }
+    fun handleLR() {
+        if (trackerController.currentScreen == ScreenType.FILE_BROWSER && fileBrowserState.selectionMode) {
+            fileBrowserState = fileBrowserState.copy(selectionMode = false, selectionAnchor = -1)
+            return
+        }
+        if (trackerController.inputController.isSelectionModeActive()) trackerController.inputController.exitSelectionMode()
+    }
     fun handleAReleased() {
         if (fxHelperState.isOpen) {
             applyFxTypeChange(fxHelperState.selectedEffectCode())

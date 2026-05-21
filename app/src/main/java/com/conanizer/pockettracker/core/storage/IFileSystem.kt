@@ -143,6 +143,14 @@ interface IFileSystem {
     fun getThemesDirectory(): String
 
     /**
+     * Move a file or folder to a new path (cross-directory).
+     * @param sourcePath Absolute path to source file/folder
+     * @param destPath Absolute path to destination (full path including filename)
+     * @return true if successful
+     */
+    fun moveFile(sourcePath: String, destPath: String): Boolean
+
+    /**
      * Write binary data to file (overwrites if exists).
      * @param path Absolute path to file
      * @param data Byte array to write
