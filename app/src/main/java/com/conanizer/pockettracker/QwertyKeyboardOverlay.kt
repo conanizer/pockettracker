@@ -62,7 +62,8 @@ enum class QwertyContext {
     INSTRUMENT_SAVE, // Save instrument as .pti with typed name; contextExtra = instruments directory
     SAMPLE_NAME,     // Rename sample in sample editor; contextExtra = samplesDirectory
     SAMPLE_SAVE,     // Save sample editor buffer to WAV; contextExtra = samples directory
-    THEME_SAVE       // Save current theme as .ptt; contextExtra = themes directory
+    THEME_SAVE,      // Save current theme as .ptt; contextExtra = themes directory
+    VIDEO_EXTRACT    // Extract audio from video; contextExtra = source video file path
 }
 
 // ============================================================================

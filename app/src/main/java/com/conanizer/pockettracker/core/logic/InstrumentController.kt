@@ -185,7 +185,8 @@ class InstrumentController(
         project: Project,
         videoPath: String,
         extractor: IVideoAudioExtractor,
-        fileSystem: IFileSystem
+        fileSystem: IFileSystem,
+        outputName: String? = null
     ): LoadResult {
         setStatus("Extracting audio...", success = true)
         logger.d(TAG, "🎬 Extracting audio from video: $videoPath")
@@ -202,8 +203,8 @@ class InstrumentController(
         logger.d(TAG, "✅ Extracted ${audio.samples.size} samples at ${audio.sampleRate}Hz (${audio.sourceFormat})")
 
         // Save extracted audio as WAV in Samples/ so the existing load pipeline handles it
-        val baseName = videoPath.substringAfterLast('/').substringBeforeLast('.')
-        val wavFilename = "${baseName}_audio.wav"
+        val baseName = outputName ?: (videoPath.substringAfterLast('/').substringBeforeLast('.') + "_audio")
+        val wavFilename = "$baseName.wav"
         val wavPath = "${fileSystem.getSamplesDirectory()}/$wavFilename"
 
         setStatus("Saving WAV...", success = true)

@@ -942,20 +942,20 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                                     instrumentController.loadSoundfont(trackerController.project, item.file.absolutePath)
                                                     trackerController.projectVersion++
                                                     trackerController.currentScreen = previousScreen
-                                                } else {
-                                                    val result = if (ext == "wav") {
-                                                        instrumentController.loadSampleFromFile(trackerController.project, item.file.absolutePath)
-                                                    } else if (videoExtractor.isSupportedVideo(item.file.absolutePath)) {
-                                                        instrumentController.loadSampleFromVideo(trackerController.project, item.file.absolutePath, videoExtractor, fileSystem)
-                                                    } else {
-                                                        com.conanizer.pockettracker.core.logic.LoadResult.Error("Unsupported format")
-                                                    }
+                                                } else if (ext == "wav") {
+                                                    val result = instrumentController.loadSampleFromFile(trackerController.project, item.file.absolutePath)
                                                     if (result is com.conanizer.pockettracker.core.logic.LoadResult.Success) {
                                                         trackerController.projectVersion++
                                                         trackerController.currentScreen = previousScreen
                                                     } else {
                                                         fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
                                                     }
+                                                } else if (videoExtractor.isSupportedVideo(item.file.absolutePath)) {
+                                                    val suggestedName = item.file.nameWithoutExtension + "_audio"
+                                                    val insertBefore = trackerController.inputController.isInsertBeforeMode
+                                                    qwertyKeyboardState = QwertyKeyboardState(isOpen = true, text = suggestedName, maxLength = 40, textCursor = suggestedName.length, fieldLabel = "SAVE AS:", originalText = suggestedName, insertBefore = insertBefore, clearOnFirstB = true, context = QwertyContext.VIDEO_EXTRACT, contextExtra = item.file.absolutePath)
+                                                } else {
+                                                    fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
                                                 }
                                             }
                                             "LOAD_SAMPLE_EDITOR" -> {
@@ -972,16 +972,18 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                             }
                                             else -> {
                                                 val ext = item.file.extension.lowercase()
-                                                val result = if (ext == "wav") {
-                                                    instrumentController.loadSampleFromFile(trackerController.project, item.file.absolutePath)
+                                                if (ext == "wav") {
+                                                    val result = instrumentController.loadSampleFromFile(trackerController.project, item.file.absolutePath)
+                                                    if (result is com.conanizer.pockettracker.core.logic.LoadResult.Success) {
+                                                        trackerController.projectVersion++
+                                                        trackerController.currentScreen = previousScreen
+                                                    } else {
+                                                        fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
+                                                    }
                                                 } else if (videoExtractor.isSupportedVideo(item.file.absolutePath)) {
-                                                    instrumentController.loadSampleFromVideo(trackerController.project, item.file.absolutePath, videoExtractor, fileSystem)
-                                                } else {
-                                                    com.conanizer.pockettracker.core.logic.LoadResult.Error("Unsupported format")
-                                                }
-                                                if (result is com.conanizer.pockettracker.core.logic.LoadResult.Success) {
-                                                    trackerController.projectVersion++
-                                                    trackerController.currentScreen = previousScreen
+                                                    val suggestedName = item.file.nameWithoutExtension + "_audio"
+                                                    val insertBefore = trackerController.inputController.isInsertBeforeMode
+                                                    qwertyKeyboardState = QwertyKeyboardState(isOpen = true, text = suggestedName, maxLength = 40, textCursor = suggestedName.length, fieldLabel = "SAVE AS:", originalText = suggestedName, insertBefore = insertBefore, clearOnFirstB = true, context = QwertyContext.VIDEO_EXTRACT, contextExtra = item.file.absolutePath)
                                                 } else {
                                                     fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
                                                 }
@@ -1260,7 +1262,8 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     19 -> when (s.cursorCol) {
                         0 -> {
                             instrumentFileBrowserAction = "LOAD_SAMPLE_EDITOR"
-                            fileBrowserState = fileBrowserState.copy(fileExtension = "wav", fileExtensions = listOf("wav"))
+                            val samplesDir = java.io.File(fileController.getSamplesDirectory())
+                            fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtension = "wav", fileExtensions = listOf("wav"), mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), samplesDir)
                             trackerController.currentScreen = ScreenType.FILE_BROWSER
                         }
                         1 -> {
@@ -1639,6 +1642,22 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     val themeToSave = appTheme.copy(name = typedText.ifEmpty { appTheme.name })
                     fileSystem.writeFile(filePath, Json { prettyPrint = true }.encodeToString(themeToSave))
                     themeEditorState = ThemeEditorState(isOpen = true)
+                }
+                QwertyContext.VIDEO_EXTRACT -> {
+                    val videoPath = qwertyKeyboardState.contextExtra ?: ""
+                    val outputName = typedText.ifEmpty { java.io.File(videoPath).nameWithoutExtension + "_audio" }
+                    coroutineScope.launch(Dispatchers.Default) {
+                        val result = instrumentController.loadSampleFromVideo(trackerController.project, videoPath, videoExtractor, fileSystem, outputName)
+                        withContext(Dispatchers.Main) {
+                            if (result is com.conanizer.pockettracker.core.logic.LoadResult.Success) {
+                                trackerController.projectVersion++
+                                fileBrowserState = fileBrowserState.copy(statusMessage = "CONVERTED: $outputName.WAV", statusSuccess = true)
+                                trackerController.currentScreen = previousScreen
+                            } else {
+                                fileBrowserState = fileBrowserState.copy(statusMessage = "CONVERT FAILED", statusSuccess = false)
+                            }
+                        }
+                    }
                 }
                 QwertyContext.RESAMPLE -> {
                     val customName = typedText.ifEmpty { null }

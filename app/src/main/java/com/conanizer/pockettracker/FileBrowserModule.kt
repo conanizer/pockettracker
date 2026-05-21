@@ -64,7 +64,7 @@ class FileBrowserModule : TrackerModule {
     private val TEXT_PADDING = 3
 
     // Date formatter
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    private val dateFormat = SimpleDateFormat("yy-MM-dd", Locale.US)
 
     /**
      * Browser item types - what can appear in the file list
@@ -108,7 +108,7 @@ class FileBrowserModule : TrackerModule {
         val cursor: Int = 0,
         val scroll: Int = 0,
         val mode: BrowserMode = BrowserMode.NORMAL,
-        val sortMode: FileSortMode = FileSortMode.DATE_DESC,
+        val sortMode: FileSortMode = FileSortMode.NAME_ASC,
         val renameBuffer: String = "",      // For RENAME/CREATE modes
         val renameCursor: Int = 0,          // Character position in rename buffer
         val statusMessage: String = "",
