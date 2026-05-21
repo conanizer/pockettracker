@@ -155,6 +155,9 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     private var appTheme by refs.appTheme
     private var themeEditorState by refs.themeEditorState
 
+    // Dedicated return target for SETTINGS — set when entering, never overwritten by FILE_BROWSER navigation
+    private var settingsReturnScreen: ScreenType = ScreenType.PROJECT
+
     private fun computeSliceCuePoints(state: SampleEditorState): IntArray = when (state.sliceMethod) {
         0 -> state.transientMarkers.filter { it > 0 && it < state.totalFrames }.toIntArray()
         1 -> {
@@ -307,13 +310,13 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     private fun cycleNextBuiltinTheme() {
         val idx = AppTheme.BUILTINS.indexOfFirst { it.name == appTheme.name }
         val next = if (idx >= 0) (idx + 1) % AppTheme.BUILTINS.size else 0
-        appTheme = AppTheme.BUILTINS[next]
+        appTheme = AppTheme.BUILTINS[next].copy(visualizerType = appTheme.visualizerType)
     }
 
     private fun cyclePrevBuiltinTheme() {
         val idx = AppTheme.BUILTINS.indexOfFirst { it.name == appTheme.name }
         val prev = if (idx > 0) idx - 1 else AppTheme.BUILTINS.size - 1
-        appTheme = AppTheme.BUILTINS[prev]
+        appTheme = AppTheme.BUILTINS[prev].copy(visualizerType = appTheme.visualizerType)
     }
 
     fun openEqEditor(slot: Int, caller: EqCallerContext) {
@@ -468,6 +471,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     result.insertBefore?.let        { insertBefore        = it }
                     result.cursorRemember?.let      { cursorRemember      = it }
                     result.notePreviewEnabled?.let  { notePreviewEnabled  = it }
+                    result.visualizerType?.let      { appTheme = appTheme.copy(visualizerType = it) }
                     trackerController.projectVersion++
                 }
             }
@@ -988,7 +992,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                         if (instrumentFileBrowserAction == "LOAD_THEME" && item.file.extension.lowercase() == "ptt") {
                                             try {
                                                 val loaded = Json { ignoreUnknownKeys = true }.decodeFromString<AppTheme>(item.file.readText())
-                                                appTheme = loaded
+                                                appTheme = loaded.copy(visualizerType = appTheme.visualizerType)
                                                 instrumentFileBrowserAction = ""
                                                 trackerController.currentScreen = previousScreen
                                                 themeEditorState = ThemeEditorState(isOpen = true)
@@ -1082,7 +1086,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                         val col = trackerController.projectCursorColumn
                         if (col == 1 || col == 2) { cleanDialogTarget = if (col == 1) "SEQ" else "INST"; cleanDialogCursor = 0; showCleanDialog = true }
                     }
-                    6 -> { previousScreen = trackerController.currentScreen; trackerController.currentScreen = ScreenType.SETTINGS }
+                    6 -> { previousScreen = trackerController.currentScreen; settingsReturnScreen = trackerController.currentScreen; trackerController.currentScreen = ScreenType.SETTINGS }
                 }
             }
 
@@ -1108,11 +1112,6 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     6 -> { insertBefore = !insertBefore }
                     7 -> { cursorRemember = !cursorRemember }
                     8 -> { notePreviewEnabled = !notePreviewEnabled }
-                    9 -> {
-                        val types = VisualizerType.values()
-                        val idx = types.indexOf(appTheme.visualizerType)
-                        appTheme = appTheme.copy(visualizerType = types[(idx + 1) % types.size])
-                    }
                     10 -> {
                         themeEditorState = ThemeEditorState(isOpen = true)
                     }
@@ -1429,6 +1428,11 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.deleteChar(); return }
         if (showCleanDialog) { showCleanDialog = false; return }
         if (themeEditorState.isOpen) { themeEditorState = ThemeEditorState(); return }
+        if (trackerController.currentScreen == ScreenType.SETTINGS) {
+            trackerController.inputController.exitSelectionMode()
+            trackerController.currentScreen = settingsReturnScreen
+            return
+        }
         if (trackerController.inputController.isSelectionModeActive()) {
             val bounds = trackerController.inputController.getSelectionBounds()
             if (bounds != null) {
@@ -1729,7 +1733,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     when (trackerController.currentScreen) {
                         ScreenType.PHRASE  -> trackerController.playPhrase(trackerController.currentPhrase)
                         ScreenType.CHAIN   -> trackerController.playChain(trackerController.currentChain)
-                        ScreenType.SONG, ScreenType.MIXER, ScreenType.EFFECTS, ScreenType.PROJECT -> trackerController.playSong()
+                        ScreenType.SONG, ScreenType.MIXER, ScreenType.EFFECTS, ScreenType.PROJECT, ScreenType.SETTINGS -> trackerController.playSong()
                         else -> trackerController.togglePlayback()
                     }
                 }
@@ -1741,7 +1745,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     fun handleAUp() {
         if (themeEditorState.isOpen) {
             if (themeEditorState.cursorRow == 0) cyclePrevBuiltinTheme()
-            else adjustThemeColor(themeEditorState.cursorChannel, +0x10)
+            else adjustThemeColor(themeEditorState.cursorChannel, +0x01)
             return
         }
         if (eqEditorState.isOpen) {
@@ -1770,7 +1774,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     fun handleADown() {
         if (themeEditorState.isOpen) {
             if (themeEditorState.cursorRow == 0) cycleNextBuiltinTheme()
-            else adjustThemeColor(themeEditorState.cursorChannel, -0x10)
+            else adjustThemeColor(themeEditorState.cursorChannel, -0x01)
             return
         }
         if (eqEditorState.isOpen) {
@@ -1797,7 +1801,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
 
     fun handleALeft() {
         if (themeEditorState.isOpen) {
-            if (themeEditorState.cursorRow >= 1) adjustThemeColor(themeEditorState.cursorChannel, -0x01)
+            if (themeEditorState.cursorRow >= 1) adjustThemeColor(themeEditorState.cursorChannel, -0x10)
             return
         }
         if (eqEditorState.isOpen) {
@@ -1821,7 +1825,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
 
     fun handleARight() {
         if (themeEditorState.isOpen) {
-            if (themeEditorState.cursorRow >= 1) adjustThemeColor(themeEditorState.cursorChannel, +0x01)
+            if (themeEditorState.cursorRow >= 1) adjustThemeColor(themeEditorState.cursorChannel, +0x10)
             return
         }
         if (eqEditorState.isOpen) {
@@ -1910,7 +1914,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     fun handleRUp() {
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.copy(layout = 0).withClampedCol(); return }
         if (themeEditorState.isOpen) return
-        if (eqEditorState.isOpen || trackerController.currentScreen == ScreenType.SAMPLE_EDITOR) return
+        if (eqEditorState.isOpen || trackerController.currentScreen == ScreenType.SAMPLE_EDITOR || trackerController.currentScreen == ScreenType.SETTINGS) return
         if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
             val modes = FileSortMode.values()
             val currentIndex = modes.indexOf(fileBrowserState.sortMode)
@@ -1930,7 +1934,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     fun handleRDown() {
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.copy(layout = 1).withClampedCol(); return }
         if (themeEditorState.isOpen) return
-        if (eqEditorState.isOpen || trackerController.currentScreen == ScreenType.SAMPLE_EDITOR) return
+        if (eqEditorState.isOpen || trackerController.currentScreen == ScreenType.SAMPLE_EDITOR || trackerController.currentScreen == ScreenType.SETTINGS) return
         if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
             val modes = FileSortMode.values()
             val currentIndex = modes.indexOf(fileBrowserState.sortMode)
@@ -1950,7 +1954,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     fun handleRLeft() {
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveTextCursorLeft(); return }
         if (themeEditorState.isOpen) return
-        if (eqEditorState.isOpen || trackerController.currentScreen == ScreenType.SAMPLE_EDITOR) return
+        if (eqEditorState.isOpen || trackerController.currentScreen == ScreenType.SAMPLE_EDITOR || trackerController.currentScreen == ScreenType.SETTINGS) return
         if (trackerController.currentScreen == ScreenType.FILE_BROWSER) {
             fileBrowserState = fileBrowserModule.navigateToParent(fileBrowserState)
         } else {
@@ -1983,7 +1987,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     fun handleRRight() {
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveTextCursorRight(); return }
         if (themeEditorState.isOpen) return
-        if (eqEditorState.isOpen || trackerController.currentScreen == ScreenType.FILE_BROWSER || trackerController.currentScreen == ScreenType.SAMPLE_EDITOR) return
+        if (eqEditorState.isOpen || trackerController.currentScreen == ScreenType.FILE_BROWSER || trackerController.currentScreen == ScreenType.SAMPLE_EDITOR || trackerController.currentScreen == ScreenType.SETTINGS) return
         val (newScreen, newCol) = trackerController.navigateRight(trackerController.currentScreen, trackerController.previousColumn)
         if (newScreen != trackerController.currentScreen) {
             when (trackerController.currentScreen) {

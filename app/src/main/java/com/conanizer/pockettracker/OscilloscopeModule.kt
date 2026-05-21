@@ -36,6 +36,9 @@ class OscilloscopeModule(
         const val SEG_GAP   = 1
         const val SEG_STEP  = SEGMENT_H + SEG_GAP  // 3px per LED cell
 
+        // BARS/PEAKS smoothing: instant attack, exponential decay (~333ms fall at 60fps)
+        const val BAR_DECAY = 0.90f
+
         // OCTA: gap between track scopes (in pixels)
         const val OCTA_TRACK_GAP = 3
     }
@@ -43,6 +46,8 @@ class OscilloscopeModule(
     // PEAKS mode state — persists between frames (module instance lives in TrackerLayout)
     private val peakValues = FloatArray(NUM_BARS)
     private val peakDecayCounters = IntArray(NUM_BARS)
+    // Smoothed bar amplitudes for BARS/PEAKS/SPECTRUM/SPECTRUM_PEAKS (instant attack, slow fall)
+    private val barSmoothed = FloatArray(NUM_BARS)
 
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val oscState = state as? OscilloscopeState
@@ -56,12 +61,14 @@ class OscilloscopeModule(
         )
 
         when (t.visualizerType) {
-            VisualizerType.SCOPE  -> drawScope(x, y, scale, waveformData, t)
-            VisualizerType.BARS   -> drawBars(x, y, scale, waveformData, t, peakMode = false)
-            VisualizerType.PEAKS  -> drawBars(x, y, scale, waveformData, t, peakMode = true)
-            VisualizerType.MIRROR -> drawMirror(x, y, scale, waveformData, t)
-            VisualizerType.FLAT   -> drawFlat(x, y, scale, t)
-            VisualizerType.OCTA   -> drawOcta(x, y, scale, oscState?.trackWaveforms, oscState?.activeTrackMask ?: 0, t)
+            VisualizerType.SCOPE          -> drawScope(x, y, scale, waveformData, t)
+            VisualizerType.BARS           -> drawBarAmps(x, y, scale, waveformToBarAmps(waveformData), t, peakMode = false)
+            VisualizerType.PEAKS          -> drawBarAmps(x, y, scale, waveformToBarAmps(waveformData), t, peakMode = true)
+            VisualizerType.MIRROR         -> drawMirror(x, y, scale, waveformData, t)
+            VisualizerType.FLAT           -> drawFlat(x, y, scale, t)
+            VisualizerType.OCTA           -> drawOcta(x, y, scale, oscState?.trackWaveforms, oscState?.activeTrackMask ?: 0, t)
+            VisualizerType.SPECTRUM       -> drawBarAmps(x, y, scale, oscState?.spectrumData ?: FloatArray(NUM_BARS), t, peakMode = false)
+            VisualizerType.SPECTRUM_PEAKS -> drawBarAmps(x, y, scale, oscState?.spectrumData ?: FloatArray(NUM_BARS), t, peakMode = true)
         }
     }
 
@@ -87,27 +94,35 @@ class OscilloscopeModule(
         drawPath(path = path, color = Color(t.vizWave), style = Stroke(width = scale.toFloat()))
     }
 
-    private fun DrawScope.drawBars(
+    private fun waveformToBarAmps(waveformData: FloatArray): FloatArray {
+        val samplesPerBar = waveformData.size.toFloat() / NUM_BARS
+        return FloatArray(NUM_BARS) { i ->
+            val startSample = (i * samplesPerBar).toInt()
+            val endSample = ((i + 1) * samplesPerBar).toInt().coerceAtMost(waveformData.size)
+            var sum = 0f
+            for (s in startSample until endSample) sum += kotlin.math.abs(waveformData[s])
+            ((sum / (endSample - startSample).coerceAtLeast(1)) * WAVEFORM_GAIN).coerceIn(0f, 1f)
+        }
+    }
+
+    private fun DrawScope.drawBarAmps(
         x: Int, y: Int, scale: Int,
-        waveformData: FloatArray,
+        rawAmps: FloatArray,
         t: AppTheme,
         peakMode: Boolean
     ) {
         val barBottom = y + height - 2           // 2px margin at bottom
         val maxAmp = (height - 4).toFloat()      // full usable height (2px top + 2px bottom margin)
-        val samplesPerBar = waveformData.size.toFloat() / NUM_BARS
 
         for (i in 0 until NUM_BARS) {
             val barX = x + BAR_START_OFFSET + i * (BAR_W + BAR_GAP)
+            val raw = if (i < rawAmps.size) rawAmps[i] else 0f
 
-            // Average absolute amplitude over this bar's sample chunk
-            val startSample = (i * samplesPerBar).toInt()
-            val endSample = ((i + 1) * samplesPerBar).toInt().coerceAtMost(waveformData.size)
-            var sum = 0f
-            for (s in startSample until endSample) sum += kotlin.math.abs(waveformData[s])
-            val barAmp = ((sum / (endSample - startSample).coerceAtLeast(1)) * WAVEFORM_GAIN).coerceIn(0f, 1f)
+            // Instant attack, exponential decay
+            if (raw > barSmoothed[i]) barSmoothed[i] = raw
+            else barSmoothed[i] = (barSmoothed[i] * BAR_DECAY).coerceAtLeast(0f)
 
-            val barH = (barAmp * maxAmp).toInt()
+            val barH = (barSmoothed[i] * maxAmp).toInt()
 
             // Draw LED-style segments from bottom up
             val barColor = Color(t.vizWave)
@@ -123,8 +138,8 @@ class OscilloscopeModule(
             }
 
             if (peakMode) {
-                if (barAmp > peakValues[i]) {
-                    peakValues[i] = barAmp
+                if (barSmoothed[i] > peakValues[i]) {
+                    peakValues[i] = barSmoothed[i]
                     peakDecayCounters[i] = 0
                 } else {
                     peakDecayCounters[i]++
@@ -248,7 +263,8 @@ data class OscilloscopeState(
     val waveformBuffer: FloatArray,
     val appTheme: AppTheme = AppTheme.CLASSIC,
     val trackWaveforms: Array<FloatArray>? = null,
-    val activeTrackMask: Int = 0
+    val activeTrackMask: Int = 0,
+    val spectrumData: FloatArray? = null  // 40 log-spaced bins (0-1) for SPECTRUM modes
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -258,7 +274,10 @@ data class OscilloscopeState(
                activeTrackMask == other.activeTrackMask &&
                (trackWaveforms === other.trackWaveforms ||
                 (trackWaveforms != null && other.trackWaveforms != null &&
-                 trackWaveforms.indices.all { trackWaveforms[it].contentEquals(other.trackWaveforms[it]) }))
+                 trackWaveforms.indices.all { trackWaveforms[it].contentEquals(other.trackWaveforms[it]) })) &&
+               (spectrumData === other.spectrumData ||
+                (spectrumData != null && other.spectrumData != null &&
+                 spectrumData.contentEquals(other.spectrumData)))
     }
     override fun hashCode(): Int = 31 * waveformBuffer.contentHashCode() + appTheme.hashCode()
 }

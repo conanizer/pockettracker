@@ -462,7 +462,10 @@ class TrackerLayout {
         // When not playing, decay waveform to smoothly fade out oscilloscope
         audioEngine.updateWaveformWithDecay(isPlaying)
         val isOcta = appTheme.visualizerType == VisualizerType.OCTA
+        val isSpectrum = appTheme.visualizerType == VisualizerType.SPECTRUM ||
+                         appTheme.visualizerType == VisualizerType.SPECTRUM_PEAKS
         if (isOcta) audioEngine.updateTrackWaveforms()
+        if (isSpectrum) audioEngine.updateSpectrum()
 
         // MODULE 1: OSCILLOSCOPE (waveform display)
         // Position: Top of screen
@@ -476,7 +479,8 @@ class TrackerLayout {
                     waveformBuffer = audioEngine.waveformBuffer,
                     appTheme = appTheme,
                     trackWaveforms = if (isOcta) audioEngine.trackWaveformBuffers else null,
-                    activeTrackMask = if (isOcta) audioEngine.phraseTrackMask else 0
+                    activeTrackMask = if (isOcta) audioEngine.phraseTrackMask else 0,
+                    spectrumData = if (isSpectrum) audioEngine.spectrumBuffer else null
                 )
             )
         }

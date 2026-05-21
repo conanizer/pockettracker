@@ -1,6 +1,6 @@
 # Development Status
 
-**Last Updated:** 2026-05-21 (rev 4)
+**Last Updated:** 2026-05-21 (rev 5)
 
 ## Current Phase
 
@@ -76,7 +76,7 @@ Week 16:     MVP Release
 - **Table Screen** - 16-row mini-sequencer per instrument
 - **Groove Screen** - Step-timing patterns for swing/shuffle (256 grooves)
 - **Modulation Screen** - 4-slot envelope/LFO editor per instrument
-- **Settings Screen** - Layout mode, scaling, button sound/volume, vibration, keyboard insert mode, cursor persistence, note preview (plays inserted note at its pitch on the phrase screen)
+- **Settings Screen** - Layout mode, scaling, button sound/volume, vibration, keyboard insert mode, cursor persistence, note preview; VISUALIZER row (A+dpad cycles all 8 modes: SCOPE/BARS/PEAKS/MIRROR/FLAT/OCTA/SPECT/SPCT.P); THEME row (A opens theme editor)
 
 ### Effects (All Complete)
 - **ARP/ARC** - Arpeggio with UP/DOWN/PINGPONG/RANDOM modes and speed control
@@ -247,6 +247,28 @@ All slice-related features from plan-sample-editor-v2.md §6–§7.5 are now ful
   - N markers define N+1 slices; slice 0 always starts at frame 0. Pitch locked to root (rate = 1.0×) while slicing is active.
 - **Slice cursor on instrument screen**: SLICE value (col 3, row 14) navigable via left/right; row 14 added to `dualParamRows` in `TrackerController`.
 - **Preset load**: `slicingMode` copied in `loadPreset()`; `sliceMarkers` intentionally excluded (WAV-specific).
+
+### Visualizer Overhaul + Settings/Theme Fixes (Complete - 2026-05-21)
+
+**New visualizer modes:**
+- **OCTA** — ProTracker-style quadrascope. Shows per-track waveforms for all tracks that have notes scheduled in the current phrase (phraseTrackMask), stretching to fill full width. Scopes are separated by pixel gaps; each scope draws individual pixel dots with integer-quantized y (no interpolation). Layout updates at phrase boundary, not voice-by-voice, so one-shot notes don't cause flicker.
+- **BARS / PEAKS** — LED-style vertical bars driven from waveform amplitude. Bars rendered as stacked 2-px segments with 1-px gaps from bottom up (SEGMENT_H=2, SEG_STEP=3). Instant-attack / exponential-decay smoothing (BAR_DECAY=0.90 per frame, ~333ms fall) prevents eye-straining rapid changes. PEAKS mode adds a peak-hold marker (holds 30 frames, then decays one LED at a time).
+- **SPECTRUM / SPECTRUM_PEAKS** — Same LED bar rendering but driven by FFT frequency data (40 log-spaced bins, 20 Hz–20 kHz). Left bars = low frequencies, right = high. Same smoothing and peak-hold as BARS/PEAKS.
+
+**Visualizer control change:** VISUALIZER row in settings now uses A+dpad (up/down) to cycle modes instead of bare A press. Cursor context changed to incremental HEX_BYTE 0–7.
+
+**Bug fixes — settings screen:**
+- R+dpad no longer navigates screens while SETTINGS is the active screen
+- START in SETTINGS/THEME screens now starts song playback (was falling through to phrase play)
+- B to exit SETTINGS now works reliably in all cases — SETTINGS exit is handled before the selection-mode check (selection mode left active from a previous screen no longer blocks B)
+- New `settingsReturnScreen` private field in `AppInputDispatcher` captures the pre-SETTINGS screen; `previousScreen` was being overwritten by LOAD_THEME → FILE_BROWSER navigation, causing B to "exit" SETTINGS to itself
+
+**Bug fixes — theme editor:**
+- Switching built-in themes (A+up/down on theme row) no longer resets the visualizer type; `cycleNextBuiltinTheme` / `cyclePrevBuiltinTheme` now `.copy(visualizerType = appTheme.visualizerType)` before applying
+- Loading a `.ptt` theme file also preserves the current visualizer type
+- RGB channel controls corrected: A+up/down = fine step (±0x01), A+left/right = coarse step (±0x10) — was reversed
+
+---
 
 ### Theme System & Color Consistency (Complete - 2026-05-21)
 

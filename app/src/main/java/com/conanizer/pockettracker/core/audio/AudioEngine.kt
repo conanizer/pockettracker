@@ -30,6 +30,9 @@ class AudioEngine(
     private val activeTrackFlags = BooleanArray(8)
     val trackWaveformBuffers: Array<FloatArray> = Array(8) { FloatArray(620) }
 
+    // Spectrum buffer for SPECTRUM/SPECTRUM_PEAKS visualizer (40 log-spaced bins, 0-1)
+    val spectrumBuffer = FloatArray(40)
+
     // Bitmask of tracks that had notes scheduled in the current phrase.
     // Set per-track when a note is scheduled; cleared on clearScheduledNotes().
     // Used by OCTA visualizer so the layout stays stable for the full phrase duration.
@@ -462,6 +465,11 @@ class AudioEngine(
             if (activeTrackFlags[t]) mask = mask or (1 shl t)
         }
         return mask
+    }
+
+    fun updateSpectrum() {
+        val result = backend.getSpectrumMagnitudes(spectrumBuffer.size)
+        result.copyInto(spectrumBuffer, 0, 0, minOf(result.size, spectrumBuffer.size))
     }
 
     fun stopAll() {

@@ -142,12 +142,14 @@ class SettingsModule : TrackerModule {
 
         // ── ROW 9: VISUALIZER ─────────────────────────────────────────
         val vizText = when (s.visualizerType) {
-            VisualizerType.SCOPE  -> "SCOPE"
-            VisualizerType.BARS   -> "BARS"
-            VisualizerType.PEAKS  -> "PEAKS"
-            VisualizerType.MIRROR -> "MIRROR"
-            VisualizerType.FLAT   -> "FLAT"
-            VisualizerType.OCTA   -> "OCTA"
+            VisualizerType.SCOPE          -> "SCOPE"
+            VisualizerType.BARS           -> "BARS"
+            VisualizerType.PEAKS          -> "PEAKS"
+            VisualizerType.MIRROR         -> "MIRROR"
+            VisualizerType.FLAT           -> "FLAT"
+            VisualizerType.OCTA           -> "OCTA"
+            VisualizerType.SPECTRUM       -> "SPECT"
+            VisualizerType.SPECTRUM_PEAKS -> "SPCT.P"
         }
         drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
             "VISUALIZER", vizText,
@@ -261,7 +263,16 @@ class SettingsModule : TrackerModule {
                 currentValue = if (state.notePreviewEnabled) 1 else 0,
                 minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
             )
-            9  -> CursorContextFactory.readOnly()  // VISUALIZER: A cycles type
+            9  -> CursorContext(                   // VISUALIZER: A+dpad cycles type
+                valueType = CursorValueType.HEX_BYTE,
+                capabilities = CursorCapabilities(
+                    canIncrement = true, canDecrement = true,
+                    canIncrementFast = false, canDecrementFast = false
+                ),
+                currentValue = VisualizerType.values().indexOf(state.visualizerType).coerceAtLeast(0),
+                minValue = 0, maxValue = VisualizerType.values().size - 1,
+                smallStep = 1, largeStep = 1, emptyValue = -1
+            )
             10 -> CursorContextFactory.readOnly()  // THEME: A opens editor
             else -> CursorContextFactory.none()
         }
@@ -311,6 +322,13 @@ class SettingsModule : TrackerModule {
                     return InputResult(modified = true, notePreviewEnabled = action.value > 0)
                 }
             }
+            9 -> {  // VISUALIZER
+                if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
+                    val types = VisualizerType.values()
+                    val vizType = types.getOrNull(action.value) ?: types[0]
+                    return InputResult(modified = true, visualizerType = vizType)
+                }
+            }
         }
         return InputResult(modified = action !is com.conanizer.pockettracker.core.logic.InputAction.NONE)
     }
@@ -323,7 +341,8 @@ class SettingsModule : TrackerModule {
         val vibroPower: Int? = null,
         val insertBefore: Boolean? = null,
         val cursorRemember: Boolean? = null,
-        val notePreviewEnabled: Boolean? = null
+        val notePreviewEnabled: Boolean? = null,
+        val visualizerType: VisualizerType? = null
     )
 }
 
