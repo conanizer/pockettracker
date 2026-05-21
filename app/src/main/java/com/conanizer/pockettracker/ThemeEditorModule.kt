@@ -60,7 +60,7 @@ class ThemeEditorModule : TrackerModule {
         val es = s.editorState
 
         drawRect(
-            color = Color(0xFF0A0A0AL),
+            color = Color(theme.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
@@ -80,7 +80,7 @@ class ThemeEditorModule : TrackerModule {
         var rowY = y + TEXT_PADDING
         drawBitmapText(
             text = "THEME EDIT", x = nameColumnX, y = rowY, scale = scale,
-            color = Color.Cyan, spacing = CHAR_SPACING, fontScale = FONT_SCALE
+            color = Color(theme.textTitle), spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
         rowY += ROW_HEIGHT + 14
 
@@ -88,21 +88,21 @@ class ThemeEditorModule : TrackerModule {
         val isCursorTheme = es.cursorRow == 0
         if (isCursorTheme) {
             drawRect(
-                color = Color(0xFF333333L),
+                color = Color(theme.rowCursor),
                 topLeft = Offset((x * scale).toFloat(), (rowY * scale).toFloat()),
                 size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
             )
         }
         drawBitmapText(
             text = "THEME", x = nameColumnX, y = rowY + TEXT_PADDING, scale = scale,
-            color = if (isCursorTheme) Color.Yellow else Color.Gray,
+            color = if (isCursorTheme) Color(theme.textCursor) else Color(theme.textParam),
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
         // Theme name (position ch=0)
         val nameColor = when {
-            isCursorTheme && es.cursorChannel == 0 -> Color.Yellow
-            isCursorTheme -> Color.White
-            else -> Color(0xFF888888L)
+            isCursorTheme && es.cursorChannel == 0 -> Color(theme.textCursor)
+            isCursorTheme -> Color(theme.textValue)
+            else -> Color(theme.textParam)
         }
         drawBitmapText(
             text = theme.name, x = themeNameX, y = rowY + TEXT_PADDING, scale = scale,
@@ -110,9 +110,9 @@ class ThemeEditorModule : TrackerModule {
         )
         // SAVE button (position ch=1)
         val saveColor = when {
-            isCursorTheme && es.cursorChannel == 1 -> Color.Yellow
-            isCursorTheme -> Color.White
-            else -> Color(0xFF888888L)
+            isCursorTheme && es.cursorChannel == 1 -> Color(theme.textCursor)
+            isCursorTheme -> Color(theme.textValue)
+            else -> Color(theme.textParam)
         }
         drawBitmapText(
             text = "SAVE", x = saveLabelX, y = rowY + TEXT_PADDING, scale = scale,
@@ -120,9 +120,9 @@ class ThemeEditorModule : TrackerModule {
         )
         // LOAD button (position ch=2)
         val loadColor = when {
-            isCursorTheme && es.cursorChannel == 2 -> Color.Yellow
-            isCursorTheme -> Color.White
-            else -> Color(0xFF888888L)
+            isCursorTheme && es.cursorChannel == 2 -> Color(theme.textCursor)
+            isCursorTheme -> Color(theme.textValue)
+            else -> Color(theme.textParam)
         }
         drawBitmapText(
             text = "LOAD", x = loadLabelX, y = rowY + TEXT_PADDING, scale = scale,
@@ -138,7 +138,7 @@ class ThemeEditorModule : TrackerModule {
 
             if (isCursor) {
                 drawRect(
-                    color = Color(0xFF333333L),
+                    color = Color(theme.rowCursor),
                     topLeft = Offset((x * scale).toFloat(), (rowY * scale).toFloat()),
                     size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
                 )
@@ -146,7 +146,7 @@ class ThemeEditorModule : TrackerModule {
 
             drawBitmapText(
                 text = colorRow.label, x = nameColumnX, y = rowY + TEXT_PADDING, scale = scale,
-                color = if (isCursor) Color.Yellow else Color.Gray,
+                color = if (isCursor) Color(theme.textCursor) else Color(theme.textParam),
                 spacing = CHAR_SPACING, fontScale = FONT_SCALE
             )
 
@@ -155,19 +155,19 @@ class ThemeEditorModule : TrackerModule {
             val b = ( colorValue         and 0xFFL).toInt()
 
             val rColor = when {
-                isCursor && es.cursorChannel == 0 -> Color.Yellow
-                isCursor -> Color.White
-                else -> Color(0xFF888888L)
+                isCursor && es.cursorChannel == 0 -> Color(theme.textCursor)
+                isCursor -> Color(theme.textValue)
+                else -> Color(theme.textParam)
             }
             val gColor = when {
-                isCursor && es.cursorChannel == 1 -> Color.Yellow
-                isCursor -> Color.White
-                else -> Color(0xFF888888L)
+                isCursor && es.cursorChannel == 1 -> Color(theme.textCursor)
+                isCursor -> Color(theme.textValue)
+                else -> Color(theme.textParam)
             }
             val bColor = when {
-                isCursor && es.cursorChannel == 2 -> Color.Yellow
-                isCursor -> Color.White
-                else -> Color(0xFF888888L)
+                isCursor && es.cursorChannel == 2 -> Color(theme.textCursor)
+                isCursor -> Color(theme.textValue)
+                else -> Color(theme.textParam)
             }
 
             drawBitmapText(r.toHex2(), rColumnX, rowY + TEXT_PADDING, scale, rColor, CHAR_SPACING, FONT_SCALE)

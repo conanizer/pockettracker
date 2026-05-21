@@ -1,6 +1,6 @@
 # Development Status
 
-**Last Updated:** 2026-05-18 (rev 3)
+**Last Updated:** 2026-05-21 (rev 4)
 
 ## Current Phase
 
@@ -247,6 +247,35 @@ All slice-related features from plan-sample-editor-v2.md §6–§7.5 are now ful
   - N markers define N+1 slices; slice 0 always starts at frame 0. Pitch locked to root (rate = 1.0×) while slicing is active.
 - **Slice cursor on instrument screen**: SLICE value (col 3, row 14) navigable via left/right; row 14 added to `dualParamRows` in `TrackerController`.
 - **Preset load**: `slicingMode` copied in `loadPreset()`; `sliceMarkers` intentionally excluded (WAV-specific).
+
+### Theme System & Color Consistency (Complete - 2026-05-21)
+
+Full `AppTheme` integration across all UI modules. Every hardcoded color replaced with theme fields. Color darkening helper added.
+
+**Theme fields used:**
+- `background` — module fill
+- `rowEvery4th / rowCursor / rowPlayback / rowSelection` — row backgrounds
+- `textTitle / textParam / textValue / textCursor / textEmpty` — all text
+- `vizBackground / vizCenterLine / vizWave` — oscilloscope + selection highlight
+- `meterBackground / meterBorder / meterLow / meterMid / meterHigh` — mixer meters + dialog backgrounds
+
+**Modules updated:**
+- `QwertyKeyboardState` overlay — key/space cursor bg, border, text colors
+- `SampleEditorModule` — waveform display, parameter rows, confirm dialog
+- `EqModule` — spectrum viz, grid lines, band editor
+- `FileBrowserModule` — bars, cursor row, file text; navigation type colors (`COLOR_FOLDER`/`VIDEO`/`PARENT`) intentionally kept as fixed semantic colors
+- `ThemeEditorModule`, `MixerModule`, `SettingsModule`, `EffectModule`, `NavigationMapModule` — all status/param/cursor colors
+- `PixelPerfectRenderer` overlays (`drawCleanDialog`, `drawQwertyKeyboard`, `drawFxHelper`, `drawPlaceholderScreen`) — all dialog chrome
+
+**`darken()` extension (EditorHelpers.kt):**
+```kotlin
+fun Long.darken(factor: Float): Long
+```
+Multiplies RGB channels of an ARGB Long by `factor`, preserving alpha. Used for cursor shadow backgrounds (e.g. `textCursor.darken(0.27f)` → dark yellow key highlight in CLASSIC, adapts to any theme).
+
+**Naming convention unified:** All draw functions now use `val t = <state>.appTheme` / `t.field` consistently. Prior variants (`th.`, `s.appTheme.`, `theme.`, `appTheme.` in function bodies) eliminated.
+
+---
 
 ### Module Code Style Unification (Complete - 2026-05-05)
 

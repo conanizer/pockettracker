@@ -75,38 +75,33 @@ class MixerModule : TrackerModule {
     private val MSTR_LABEL_X = MASTER_X - 65
     private val MSTR_VALUE_X = MASTER_X + 5
 
-    private val COLOR_METER_BG     = Color(0xFF1a1a1a)
-    private val COLOR_METER_GREEN  = Color(0xFF00cc00)
-    private val COLOR_METER_YELLOW = Color(0xFFcccc00)
-    private val COLOR_METER_RED    = Color(0xFFcc0000)
-    private val COLOR_METER_BORDER = Color(0xFF444444)
 
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val s = state as? MixerState ?: return
-        val th = s.appTheme
+        val t = s.appTheme
 
         // Background
         drawRect(
-            color   = Color(th.background),
+            color   = Color(t.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
 
-        drawBitmapText("MIXER", x + 10, y + TEXT_PADDING, scale, Color(th.textTitle), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("MIXER", x + 10, y + TEXT_PADDING, scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
 
         // ── Track stereo meters + volumes (active only at row 0) ───────────
-        for (t in 0..7) {
-            val mX    = x + FIRST_METER_X + t * METER_SPACING
-            val isSel = s.mixerMasterRow == 0 && s.cursorColumn == t
-            val peakL = s.trackPeaks.getOrElse(t * 2) { 0f }
-            val peakR = s.trackPeaks.getOrElse(t * 2 + 1) { 0f }
+        for (i in 0..7) {
+            val mX    = x + FIRST_METER_X + i * METER_SPACING
+            val isSel = s.mixerMasterRow == 0 && s.cursorColumn == i
+            val peakL = s.trackPeaks.getOrElse(i * 2) { 0f }
+            val peakR = s.trackPeaks.getOrElse(i * 2 + 1) { 0f }
 
             drawStereoMeter(mX, y + TRACK_METER_TOP, TRACK_METER_H,
-                peakL, peakR, scale, isSel, s.project.tracks[t].mute, th)
+                peakL, peakR, scale, isSel, s.project.tracks[i].mute, t)
 
-            drawBitmapText(s.project.tracks[t].volume.toHex2(),
+            drawBitmapText(s.project.tracks[i].volume.toHex2(),
                 mX + 5, y + TRACK_VOL_Y, scale,
-                if (isSel) Color(th.textCursor) else Color(th.textValue), CHAR_SPACING, FONT_SCALE)
+                if (isSel) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
         }
 
         // ── Master stereo meter (same width as tracks, original height) ────
@@ -115,7 +110,7 @@ class MixerModule : TrackerModule {
             x + MASTER_X, y + TRACK_METER_TOP, MASTER_METER_H,
             s.masterPeaks.getOrElse(0) { 0f },
             s.masterPeaks.getOrElse(1) { 0f },
-            scale, masterSel, false, th)
+            scale, masterSel, false, t)
 
         // ── Send return meters: REV left, DEL right ────────────────────────
         val revSendSel = s.mixerMasterRow == 1 && s.cursorColumn == 0
@@ -123,30 +118,30 @@ class MixerModule : TrackerModule {
         drawStereoMeter(
             x + FIRST_METER_X, y + SEND_METER_TOP, SEND_METER_H,
             s.reverbPeaks.getOrElse(0) { 0f }, s.reverbPeaks.getOrElse(1) { 0f },
-            scale, revSendSel, false, th)
+            scale, revSendSel, false, t)
         drawStereoMeter(
             x + FIRST_METER_X + METER_SPACING, y + SEND_METER_TOP, SEND_METER_H,
             s.delayPeaks.getOrElse(0) { 0f }, s.delayPeaks.getOrElse(1) { 0f },
-            scale, delSendSel, false, th)
+            scale, delSendSel, false, t)
 
         // Send channel labels below meters
         val charW = 5 * FONT_SCALE + CHAR_SPACING
         val revCX = x + FIRST_METER_X + (BAR_W + BAR_SEP + BAR_W) / 2
         val delCX = x + FIRST_METER_X + METER_SPACING + (BAR_W + BAR_SEP + BAR_W) / 2
         drawBitmapText("REV", revCX - (3 * charW) / 2, y + SEND_LABEL_Y,
-            scale, Color(th.textParam), CHAR_SPACING, FONT_SCALE)
+            scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText("DEL", delCX - (3 * charW) / 2, y + SEND_LABEL_Y,
-            scale, Color(th.textParam), CHAR_SPACING, FONT_SCALE)
+            scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
 
         // ── Send return volume: REV and DEL (left of master values) ──────────
         drawBitmapText("REV", x + SEND_VAL_LABEL_X, y + MROW0_Y,
-            scale, if (revSendSel) Color(th.textCursor) else Color(th.textParam), CHAR_SPACING, FONT_SCALE)
+            scale, if (revSendSel) Color(t.textCursor) else Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(s.project.reverbWet.toHex2(), x + SEND_VAL_VALUE_X, y + MROW0_Y,
-            scale, if (revSendSel) Color(th.textCursor) else Color(th.textValue), CHAR_SPACING, FONT_SCALE)
+            scale, if (revSendSel) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
         drawBitmapText("DEL", x + SEND_VAL_LABEL_X, y + MROW1_Y,
-            scale, if (delSendSel) Color(th.textCursor) else Color(th.textParam), CHAR_SPACING, FONT_SCALE)
+            scale, if (delSendSel) Color(t.textCursor) else Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(s.project.delayWet.toHex2(), x + SEND_VAL_VALUE_X, y + MROW1_Y,
-            scale, if (delSendSel) Color(th.textCursor) else Color(th.textValue), CHAR_SPACING, FONT_SCALE)
+            scale, if (delSendSel) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
 
         // ── Master value rows (at original position, aligned with send section) ──
         val eqSlot     = s.project.masterEqSlot
@@ -161,22 +156,22 @@ class MixerModule : TrackerModule {
 
         // Row 0: MIX vol editable (right)
         drawBitmapText("MIX", x + MSTR_LABEL_X, y + MROW0_Y,
-            scale, Color(th.textParam), CHAR_SPACING, FONT_SCALE)
+            scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(s.project.masterVolume.toHex2(), x + MSTR_VALUE_X, y + MROW0_Y,
-            scale, if (mixSel) Color(th.textCursor) else Color(th.textValue), CHAR_SPACING, FONT_SCALE)
+            scale, if (mixSel) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
 
         // Row 1: EQ slot editable (right)
         drawBitmapText("EQ", x + MSTR_LABEL_X, y + MROW1_Y,
-            scale, Color(th.textParam), CHAR_SPACING, FONT_SCALE)
+            scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(eqText, x + MSTR_VALUE_X, y + MROW1_Y,
-            scale, if (eqSel) Color(th.textCursor) else if (eqSlot < 0) Color(th.textEmpty) else Color(th.textValue),
+            scale, if (eqSel) Color(t.textCursor) else if (eqSlot < 0) Color(t.textEmpty) else Color(t.textValue),
             CHAR_SPACING, FONT_SCALE)
 
         // Row 2: OTT/DUST depth editable (right only)
         drawBitmapText(depthLabel, x + MSTR_LABEL_X, y + MROW2_Y,
-            scale, Color(th.textParam), CHAR_SPACING, FONT_SCALE)
+            scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(depthText, x + MSTR_VALUE_X, y + MROW2_Y,
-            scale, if (depthSel) Color(th.textCursor) else Color(th.textValue), CHAR_SPACING, FONT_SCALE)
+            scale, if (depthSel) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
     }
 
     /**
@@ -189,9 +184,9 @@ class MixerModule : TrackerModule {
         scale: Int,
         isSelected: Boolean,
         isMuted: Boolean,
-        theme: AppTheme
+        t: AppTheme
     ) {
-        val borderColor = if (isSelected) Color(theme.textCursor) else COLOR_METER_BORDER
+        val borderColor = if (isSelected) Color(t.textCursor) else Color(t.meterBorder)
         val rX = x + BAR_W + BAR_SEP
 
         // Outer border (covers L + 1px separator strip + R)
@@ -200,22 +195,22 @@ class MixerModule : TrackerModule {
             size    = Size(((BAR_W + BAR_SEP + BAR_W + 2) * scale).toFloat(), ((h + 2) * scale).toFloat()))
 
         // L background
-        drawRect(COLOR_METER_BG,
+        drawRect(Color(t.meterBackground),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size    = Size((BAR_W * scale).toFloat(), (h * scale).toFloat()))
         // R background
-        drawRect(COLOR_METER_BG,
+        drawRect(Color(t.meterBackground),
             topLeft = Offset((rX * scale).toFloat(), (y * scale).toFloat()),
             size    = Size((BAR_W * scale).toFloat(), (h * scale).toFloat()))
 
         if (!isMuted) {
             val lh = levelToHeight(levelL, h, scale)
-            if (lh > 0f) drawRect(levelToColor(levelL),
+            if (lh > 0f) drawRect(levelToColor(levelL, t),
                 topLeft = Offset((x * scale).toFloat(), (y + h) * scale - lh),
                 size    = Size((BAR_W * scale).toFloat(), lh))
 
             val rh = levelToHeight(levelR, h, scale)
-            if (rh > 0f) drawRect(levelToColor(levelR),
+            if (rh > 0f) drawRect(levelToColor(levelR, t),
                 topLeft = Offset((rX * scale).toFloat(), (y + h) * scale - rh),
                 size    = Size((BAR_W * scale).toFloat(), rh))
         }
@@ -225,8 +220,8 @@ class MixerModule : TrackerModule {
         val segH = (h * scale).toFloat() / segs
         for (i in 1 until segs) {
             val segY = y * scale + i * segH
-            drawRect(COLOR_METER_BG, Offset((x  * scale).toFloat(), segY), Size((BAR_W * scale).toFloat(), scale.toFloat()))
-            drawRect(COLOR_METER_BG, Offset((rX * scale).toFloat(), segY), Size((BAR_W * scale).toFloat(), scale.toFloat()))
+            drawRect(Color(t.meterBackground), Offset((x  * scale).toFloat(), segY), Size((BAR_W * scale).toFloat(), scale.toFloat()))
+            drawRect(Color(t.meterBackground), Offset((rX * scale).toFloat(), segY), Size((BAR_W * scale).toFloat(), scale.toFloat()))
         }
     }
 
@@ -236,12 +231,12 @@ class MixerModule : TrackerModule {
         return meterH * scale * pos
     }
 
-    private fun levelToColor(level: Float): Color {
+    private fun levelToColor(level: Float, t: AppTheme): Color {
         val db = 20f * kotlin.math.log10(level.coerceAtLeast(0.00001f))
         return when {
-            db >= 0f  -> COLOR_METER_RED
-            db >= -6f -> COLOR_METER_YELLOW
-            else      -> COLOR_METER_GREEN
+            db >= 0f  -> Color(t.meterHigh)
+            db >= -6f -> Color(t.meterMid)
+            else      -> Color(t.meterLow)
         }
     }
 

@@ -437,11 +437,12 @@ class TrackerLayout {
         appTheme: AppTheme = AppTheme.CLASSIC,
         themeEditorState: ThemeEditorState = ThemeEditorState()
     ) {
+        val t = appTheme
         // ===================================
         // DRAW BACKGROUND
         // ===================================
         drawRect(
-            color = Color(appTheme.background),
+            color = Color(t.background),
             topLeft = Offset.Zero,
             size = Size(
                 (DESIGN_WIDTH_PX * scale).toFloat(),
@@ -485,13 +486,13 @@ class TrackerLayout {
                     x = indicatorX,
                     y = indicatorY,
                     scale = scale,
-                    color = Color(0xFF00DD00),
+                    color = Color(t.vizWave),
                     spacing = 2,
                     fontScale = 3
                 )
             }
 
-            // Show clipboard info (cyan) below selection info
+            // Show clipboard info below selection info
             if (clipboardInfo.isNotEmpty()) {
                 val clipY = if (selectionInfo.isNotEmpty()) indicatorY + 21 else indicatorY
                 drawBitmapText(
@@ -499,7 +500,7 @@ class TrackerLayout {
                     x = indicatorX,
                     y = clipY,
                     scale = scale,
-                    color = Color.Cyan,
+                    color = Color(t.textTitle),
                     spacing = 2,
                     fontScale = 3
                 )
@@ -519,7 +520,7 @@ class TrackerLayout {
         if (currentScreen == ScreenType.FILE_BROWSER) {
             if (fileBrowserState != null) {
                 with(fileBrowser) {
-                    draw(x = 0, y = 0, scale = scale, state = fileBrowserState)
+                    draw(x = 0, y = 0, scale = scale, state = fileBrowserState.copy(appTheme = appTheme))
                 }
             } else {
                 android.util.Log.e("FileBrowser", "fileBrowserState is NULL - cannot render!")
@@ -527,7 +528,7 @@ class TrackerLayout {
         } else if (currentScreen == ScreenType.SAMPLE_EDITOR && !eqEditorState.isOpen) {
             if (sampleEditorState != null) {
                 with(sampleEditorModule) {
-                    draw(x = 0, y = 0, scale = scale, state = sampleEditorState)
+                    draw(x = 0, y = 0, scale = scale, state = sampleEditorState.copy(appTheme = appTheme))
                 }
             }
         } else {
@@ -551,7 +552,8 @@ class TrackerLayout {
                                 slotIndex     = eqEditorState.slotIndex,
                                 cursorRow     = eqEditorState.cursorRow,
                                 callerContext = eqEditorState.callerContext,
-                                spectrumData  = eqSpectrumData
+                                spectrumData  = eqSpectrumData,
+                                appTheme      = appTheme
                             )
                         )
                     }
@@ -765,8 +767,8 @@ class TrackerLayout {
                                     insertBefore = qwertyKeyboardState.insertBefore,
                                     cursorRemember = cursorRemember,
                                     notePreviewEnabled = notePreviewEnabled,
-                                    visualizerType = appTheme.visualizerType,
-                                    currentThemeName = appTheme.name,
+                                    visualizerType = t.visualizerType,
+                                    currentThemeName = t.name,
                                     appTheme = appTheme
                                 )
                             )
@@ -822,7 +824,8 @@ class TrackerLayout {
                             x = moduleX,
                             y = currentY,
                             scale = scale,
-                            screenType = currentScreen
+                            screenType = currentScreen,
+                            t = appTheme
                         )
                     }
                 }
@@ -849,8 +852,8 @@ class TrackerLayout {
             // ===================================
             // RIGHT BAR: BPM row
             // ===================================
-            drawBitmapText("T>", rightBarX + 2, bpmTextY, scale, Color(appTheme.textEmpty), spacing = 2, fontScale = 3)
-            drawBitmapText(project.tempo.toString(), rightBarX + 2 + 34, bpmTextY, scale, Color(appTheme.textValue), spacing = 2, fontScale = 3)
+            drawBitmapText("T>", rightBarX + 2, bpmTextY, scale, Color(t.textEmpty), spacing = 2, fontScale = 3)
+            drawBitmapText(project.tempo.toString(), rightBarX + 2 + 34, bpmTextY, scale, Color(t.textValue), spacing = 2, fontScale = 3)
 
             // ===================================
             // RIGHT BAR: Track Note Monitor
@@ -861,8 +864,8 @@ class TrackerLayout {
             for (i in 0..7) {
                 val textY = trackRowsStartY + (i * 21) + 3
                 val note = trackNotes.getOrElse(i) { Note.EMPTY }
-                val noteColor = if (note == Note.EMPTY) Color(appTheme.textEmpty) else Color(appTheme.textValue)
-                drawBitmapText((i + 1).toString(), rightBarX + 2, textY, scale, Color(appTheme.textParam), spacing = 2, fontScale = 3)
+                val noteColor = if (note == Note.EMPTY) Color(t.textEmpty) else Color(t.textValue)
+                drawBitmapText((i + 1).toString(), rightBarX + 2, textY, scale, Color(t.textParam), spacing = 2, fontScale = 3)
                 drawBitmapText(note.toString(), rightBarX + 2 + 34, textY, scale, noteColor, spacing = 2, fontScale = 3)
             }
 
@@ -891,7 +894,7 @@ class TrackerLayout {
         // Drawn on top of everything when active
         // ===================================
         if (showCleanDialog) {
-            drawCleanDialog(scale, cleanDialogTarget, cleanDialogCursor)
+            drawCleanDialog(scale, cleanDialogTarget, cleanDialogCursor, appTheme)
         }
 
         // ===================================
@@ -899,7 +902,7 @@ class TrackerLayout {
         // Drawn on top of everything when active
         // ===================================
         if (qwertyKeyboardState.isOpen) {
-            drawQwertyKeyboard(qwertyKeyboardState, scale)
+            drawQwertyKeyboard(qwertyKeyboardState, scale, appTheme)
         }
 
         // ===================================
@@ -907,7 +910,7 @@ class TrackerLayout {
         // Drawn on top of everything when active
         // ===================================
         if (fxHelperState.isOpen) {
-            drawFxHelper(fxHelperState, scale)
+            drawFxHelper(fxHelperState, scale, appTheme)
         }
 
         // ===================================
@@ -921,7 +924,7 @@ class TrackerLayout {
      * Draw the "CLEAN SEQ/INST?" confirmation dialog as a pixel-art overlay.
      * Centered on the 640×480 canvas.
      */
-    private fun DrawScope.drawCleanDialog(scale: Int, target: String, cursor: Int) {
+    private fun DrawScope.drawCleanDialog(scale: Int, target: String, cursor: Int, t: AppTheme) {
         val boxW = 200
         val boxH = 70
         val boxX = (DESIGN_WIDTH_PX - boxW) / 2
@@ -936,14 +939,14 @@ class TrackerLayout {
 
         // Dialog background
         drawRect(
-            color = Color(0xFF1a1a1a),
+            color = Color(t.meterBackground),
             topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
             size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat())
         )
 
         // Border
         drawRect(
-            color = Color(0xFF00CCCC),
+            color = Color(t.textTitle),
             topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
             size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat()),
             style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
@@ -959,7 +962,7 @@ class TrackerLayout {
             x = textX,
             y = boxY + 6,
             scale = scale,
-            color = Color.Cyan,
+            color = Color(t.textTitle),
             spacing = cs,
             fontScale = fs
         )
@@ -970,7 +973,7 @@ class TrackerLayout {
             x = textX,
             y = boxY + 27,
             scale = scale,
-            color = if (cursor == 0) Color.Yellow else Color.White,
+            color = if (cursor == 0) Color(t.textCursor) else Color(t.textValue),
             spacing = cs,
             fontScale = fs
         )
@@ -981,7 +984,7 @@ class TrackerLayout {
             x = textX,
             y = boxY + 48,
             scale = scale,
-            color = if (cursor == 1) Color.Yellow else Color.White,
+            color = if (cursor == 1) Color(t.textCursor) else Color(t.textValue),
             spacing = cs,
             fontScale = fs
         )
@@ -1005,7 +1008,7 @@ class TrackerLayout {
      *
      * Box: 470×195, top-left at (85, 142)
      */
-    private fun DrawScope.drawQwertyKeyboard(state: QwertyKeyboardState, scale: Int) {
+    private fun DrawScope.drawQwertyKeyboard(state: QwertyKeyboardState, scale: Int, t: AppTheme) {
         val fs = 4          // font scale for keys (20×20px chars)
         val cs = 3          // char spacing (slightly wider than before)
         val charW = 5 * fs + cs  // 23px per char slot
@@ -1029,18 +1032,18 @@ class TrackerLayout {
 
         // ── Dialog box ────────────────────────────────────────────────────────
         drawRect(
-            color = Color(0xFF1a1a1a),
+            color = Color(t.meterBackground),
             topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
             size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat())
         )
         drawRect(
-            color = Color(0xFF00CCCC),
+            color = Color(t.textTitle),
             topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
             size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat()),
             style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
         )
 
-        // ── Context-sensitive header (centered, grey) ─────────────────────────
+        // ── Context-sensitive header (centered) ───────────────────────────────
         val labelW = state.fieldLabel.length * charW
         val labelX = boxX + (boxW - labelW) / 2
         drawBitmapText(
@@ -1048,7 +1051,7 @@ class TrackerLayout {
             x = labelX,
             y = boxY + 5 + 3,  // +3 for text baseline padding
             scale = scale,
-            color = Color(0xFF888888),
+            color = Color(t.textParam),
             spacing = cs,
             fontScale = fs
         )
@@ -1073,7 +1076,7 @@ class TrackerLayout {
             // Cursor highlight box: full cellH tall, charWidth wide, aligned with character
             if (isCursor) {
                 drawRect(
-                    color = Color(0xFF444400),
+                    color = Color(t.textCursor.darken(0.27f)),
                     topLeft = Offset((charPixelX * scale).toFloat(), (textRowY * scale).toFloat()),
                     size = Size(((5 * fs) * scale).toFloat(), (cellH * scale).toFloat())
                 )
@@ -1086,7 +1089,7 @@ class TrackerLayout {
                     x = charPixelX,
                     y = textRowY + 3,  // baseline padding inside cell
                     scale = scale,
-                    color = if (isCursor) Color.Yellow else Color.White,
+                    color = if (isCursor) Color(t.textCursor) else Color(t.textValue),
                     spacing = cs,
                     fontScale = fs
                 )
@@ -1110,13 +1113,13 @@ class TrackerLayout {
                 val isSpaceCursor = (state.keyCursorRow == rowIdx)
 
                 drawRect(
-                    color = if (isSpaceCursor) Color(0xFF444400) else Color(0xFF2a2a2a),
+                    color = if (isSpaceCursor) Color(t.textCursor.darken(0.27f)) else Color(t.meterBackground),
                     topLeft = Offset((spaceX * scale).toFloat(), (rowY * scale).toFloat()),
                     size = Size((spaceW * scale).toFloat(), (cellH * scale).toFloat())
                 )
                 if (isSpaceCursor) {
                     drawRect(
-                        color = Color.Yellow,
+                        color = Color(t.textCursor),
                         topLeft = Offset((spaceX * scale).toFloat(), (rowY * scale).toFloat()),
                         size = Size((spaceW * scale).toFloat(), (cellH * scale).toFloat()),
                         style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
@@ -1127,7 +1130,7 @@ class TrackerLayout {
                     x = spaceX + (spaceW - 5 * charW) / 2,
                     y = rowY + 3,
                     scale = scale,
-                    color = if (isSpaceCursor) Color.Yellow else Color(0xFF888888),
+                    color = if (isSpaceCursor) Color(t.textCursor) else Color(t.textParam),
                     spacing = cs,
                     fontScale = fs
                 )
@@ -1144,7 +1147,7 @@ class TrackerLayout {
 
                     // Key background
                     drawRect(
-                        color = if (isCursor) Color(0xFF444400) else Color(0xFF2a2a2a),
+                        color = if (isCursor) Color(t.textCursor.darken(0.27f)) else Color(t.meterBackground),
                         topLeft = Offset((cellX * scale).toFloat(), (rowY * scale).toFloat()),
                         size = Size(((cellW - 1) * scale).toFloat(), (cellH * scale).toFloat())
                     )
@@ -1152,7 +1155,7 @@ class TrackerLayout {
                     // Cursor border
                     if (isCursor) {
                         drawRect(
-                            color = Color.Yellow,
+                            color = Color(t.textCursor),
                             topLeft = Offset((cellX * scale).toFloat(), (rowY * scale).toFloat()),
                             size = Size(((cellW - 1) * scale).toFloat(), (cellH * scale).toFloat()),
                             style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
@@ -1166,7 +1169,7 @@ class TrackerLayout {
                         x = charX,
                         y = rowY + 3,
                         scale = scale,
-                        color = if (isCursor) Color.Yellow else Color.White,
+                        color = if (isCursor) Color(t.textCursor) else Color(t.textValue),
                         spacing = cs,
                         fontScale = fs
                     )
@@ -1191,7 +1194,7 @@ class TrackerLayout {
      *
      * Box: 580×222, top-left at (30, 129)
      */
-    private fun DrawScope.drawFxHelper(state: FxHelperState, scale: Int) {
+    private fun DrawScope.drawFxHelper(state: FxHelperState, scale: Int, t: AppTheme) {
         val fs = 3          // font scale (15px chars)
         val cs = 2          // char spacing
         val charW = 5 * fs + cs  // 17px per char slot
@@ -1213,12 +1216,12 @@ class TrackerLayout {
 
         // ── Dialog box ────────────────────────────────────────────────────────
         drawRect(
-            color = Color(0xFF1a1a1a),
+            color = Color(t.meterBackground),
             topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
             size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat())
         )
         drawRect(
-            color = Color(0xFF00CCCC),
+            color = Color(t.textTitle),
             topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
             size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat()),
             style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
@@ -1234,14 +1237,14 @@ class TrackerLayout {
                 x = innerX,
                 y = textY + 3,
                 scale = scale,
-                color = Color(0xFFCCCCCC),
+                color = Color(t.textValue),
                 spacing = cs,
                 fontScale = fs
             )
             textY += rowH
         }
 
-        // ── "EFFECT" header (centered, cyan) ──────────────────────────────────
+        // ── "EFFECT" header (centered) ────────────────────────────────────────
         val headerY = boxY + 8 + 4 * rowH + 8   // 8 + 84 + 8 = 100px from top
         val headerText = "EFFECT"
         val headerW = headerText.length * charW
@@ -1251,7 +1254,7 @@ class TrackerLayout {
             x = headerX,
             y = headerY + 3,
             scale = scale,
-            color = Color.Cyan,
+            color = Color(t.textTitle),
             spacing = cs,
             fontScale = fs
         )
@@ -1276,12 +1279,12 @@ class TrackerLayout {
             // Cursor highlight background
             if (isCursor) {
                 drawRect(
-                    color = Color(0xFF444400),
+                    color = Color(t.textCursor.darken(0.27f)),
                     topLeft = Offset((cellX * scale).toFloat(), (cellY * scale).toFloat()),
                     size = Size((cellW * scale).toFloat(), (rowH * scale).toFloat())
                 )
                 drawRect(
-                    color = Color.Yellow,
+                    color = Color(t.textCursor),
                     topLeft = Offset((cellX * scale).toFloat(), (cellY * scale).toFloat()),
                     size = Size((cellW * scale).toFloat(), (rowH * scale).toFloat()),
                     style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
@@ -1297,9 +1300,9 @@ class TrackerLayout {
                 y = cellY + 3,
                 scale = scale,
                 color = when {
-                    isCursor -> Color.Yellow
-                    effectTypes[i] == EffectProcessor.FX_NONE -> Color(0xFF666666)
-                    else -> Color(0xFFaaaaaa)
+                    isCursor -> Color(t.textCursor)
+                    effectTypes[i] == EffectProcessor.FX_NONE -> Color(t.textEmpty)
+                    else -> Color(t.textValue)
                 },
                 spacing = cs,
                 fontScale = fs
@@ -1315,11 +1318,12 @@ class TrackerLayout {
         x: Int,
         y: Int,
         scale: Int,
-        screenType: ScreenType
+        screenType: ScreenType,
+        t: AppTheme = AppTheme.CLASSIC
     ) {
         // Draw background (same size as phrase editor: 620×392)
         drawRect(
-            color = Color(0xFF0a0a0a),
+            color = Color(t.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size = Size((620 * scale).toFloat(), (392 * scale).toFloat())
         )
@@ -1331,7 +1335,7 @@ class TrackerLayout {
             x = x + 20,  // 20px from left edge
             y = titleY,
             scale = scale,
-            color = Color.Cyan,
+            color = Color(t.textTitle),
             spacing = 2,
             fontScale = 3  // 15×15 font
         )
@@ -1351,7 +1355,7 @@ class TrackerLayout {
             x = messageX,
             y = messageY,
             scale = scale,
-            color = Color(0xFF666666),  // Dark gray
+            color = Color(t.textEmpty),
             spacing = 2,
             fontScale = 3
         )

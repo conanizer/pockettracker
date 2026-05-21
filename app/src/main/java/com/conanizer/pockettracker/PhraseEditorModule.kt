@@ -111,7 +111,7 @@ class PhraseEditorModule : TrackerModule {
             x = noteX, y = textY, scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 1 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 1) -> Color(0xFF00DD00)
+                state.selectionMode && state.isCellSelected(index, 1) -> Color(t.vizWave)
                 step.note == Note.EMPTY -> Color(t.textEmpty)
                 else -> Color(t.textValue)
             },
@@ -123,7 +123,7 @@ class PhraseEditorModule : TrackerModule {
             x = volX, y = textY, scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 2 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 2) -> Color(0xFF00DD00)
+                state.selectionMode && state.isCellSelected(index, 2) -> Color(t.vizWave)
                 step.note == Note.EMPTY -> Color(t.textEmpty)
                 else -> Color(t.textParam)
             },
@@ -135,7 +135,7 @@ class PhraseEditorModule : TrackerModule {
             x = instX, y = textY, scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 3 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 3) -> Color(0xFF00DD00)
+                state.selectionMode && state.isCellSelected(index, 3) -> Color(t.vizWave)
                 step.note == Note.EMPTY -> Color(t.textEmpty)
                 else -> Color(t.textParam)
             },
@@ -147,7 +147,7 @@ class PhraseEditorModule : TrackerModule {
             x = fx1NameX, y = textY, scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 4 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 4) -> Color(0xFF00DD00)
+                state.selectionMode && state.isCellSelected(index, 4) -> Color(t.vizWave)
                 step.fx1Type == 0x00 -> Color(t.textEmpty)
                 else -> Color(t.textTitle)
             },
@@ -159,7 +159,7 @@ class PhraseEditorModule : TrackerModule {
             x = fx1ValueX, y = textY, scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 5 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 5) -> Color(0xFF00DD00)
+                state.selectionMode && state.isCellSelected(index, 5) -> Color(t.vizWave)
                 step.fx1Type == 0x00 -> Color(t.textEmpty)
                 else -> Color(t.textParam)
             },
@@ -171,7 +171,7 @@ class PhraseEditorModule : TrackerModule {
             x = fx2NameX, y = textY, scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 6 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 6) -> Color(0xFF00DD00)
+                state.selectionMode && state.isCellSelected(index, 6) -> Color(t.vizWave)
                 step.fx2Type == 0x00 -> Color(t.textEmpty)
                 else -> Color(t.textTitle)
             },
@@ -183,7 +183,7 @@ class PhraseEditorModule : TrackerModule {
             x = fx2ValueX, y = textY, scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 7 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 7) -> Color(0xFF00DD00)
+                state.selectionMode && state.isCellSelected(index, 7) -> Color(t.vizWave)
                 step.fx2Type == 0x00 -> Color(t.textEmpty)
                 else -> Color(t.textParam)
             },
@@ -195,7 +195,7 @@ class PhraseEditorModule : TrackerModule {
             x = fx3NameX, y = textY, scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 8 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 8) -> Color(0xFF00DD00)
+                state.selectionMode && state.isCellSelected(index, 8) -> Color(t.vizWave)
                 step.fx3Type == 0x00 -> Color(t.textEmpty)
                 else -> Color(t.textTitle)
             },
@@ -207,7 +207,7 @@ class PhraseEditorModule : TrackerModule {
             x = fx3ValueX, y = textY, scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 9 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 9) -> Color(0xFF00DD00)
+                state.selectionMode && state.isCellSelected(index, 9) -> Color(t.vizWave)
                 step.fx3Type == 0x00 -> Color(t.textEmpty)
                 else -> Color(t.textParam)
             },

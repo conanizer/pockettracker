@@ -262,7 +262,7 @@ class InstrumentModule : TrackerModule {
                 instrumentState.statusMessage,
                 nameColumnX, y + height - 40,
                 scale,
-                if (instrumentState.isSuccess) Color(0xFF00ff00) else Color(0xFFff0000),
+                if (instrumentState.isSuccess) Color(t.vizWave) else Color(0xFFff0000),
                 CHAR_SPACING, FONT_SCALE
             )
         }

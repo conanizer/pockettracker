@@ -163,7 +163,7 @@ class TableModule : TrackerModule {
             scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 1 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 1) -> Color(0xFF00DD00)
+                state.selectionMode && state.isCellSelected(index, 1) -> Color(t.vizWave)
                 row.transpose == 0x00 -> Color(t.textEmpty)
                 else -> Color(t.textValue)
             },
@@ -180,7 +180,7 @@ class TableModule : TrackerModule {
             scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 2 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 2) -> Color(0xFF00DD00)
+                state.selectionMode && state.isCellSelected(index, 2) -> Color(t.vizWave)
                 row.volume == -1 -> Color(t.textEmpty)
                 else -> Color(t.textValue)
             },
@@ -246,7 +246,7 @@ class TableModule : TrackerModule {
             scale = scale,
             color = when {
                 cursorOnName -> Color(t.textCursor)
-                nameSelected -> Color(0xFF00DD00)
+                nameSelected -> Color(t.vizWave)
                 fxType == 0  -> Color(t.textEmpty)
                 else         -> Color(t.textValue)
             },
@@ -262,7 +262,7 @@ class TableModule : TrackerModule {
             scale = scale,
             color = when {
                 cursorOnValue -> Color(t.textCursor)
-                valueSelected -> Color(0xFF00DD00)
+                valueSelected -> Color(t.vizWave)
                 fxType == 0   -> Color(t.textEmpty)
                 else          -> Color(t.textValue)
             },

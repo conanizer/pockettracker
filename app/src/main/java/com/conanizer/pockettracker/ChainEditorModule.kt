@@ -86,7 +86,7 @@ class ChainEditorModule : TrackerModule {
             x = phX, y = textY, scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 1 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 1) -> Color(0xFF00DD00)
+                state.selectionMode && state.isCellSelected(index, 1) -> Color(t.vizWave)
                 isEmpty -> Color(t.textEmpty)
                 else -> Color(t.textValue)
             },
@@ -99,7 +99,7 @@ class ChainEditorModule : TrackerModule {
             x = tspX, y = textY, scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 2 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 2) -> Color(0xFF00DD00)
+                state.selectionMode && state.isCellSelected(index, 2) -> Color(t.vizWave)
                 isEmpty -> Color(t.textEmpty)
                 transposeValue == 0x80 -> Color(t.textParam)
                 else -> Color(t.textParam)

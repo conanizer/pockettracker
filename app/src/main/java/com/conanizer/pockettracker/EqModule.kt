@@ -17,6 +17,7 @@ data class EqState(
     val cursorRow:     Int,
     val callerContext: EqCallerContext,
     val spectrumData:  FloatArray? = null,
+    val appTheme:      AppTheme = AppTheme.CLASSIC,
 )
 
 /**
@@ -66,10 +67,11 @@ class EqModule : TrackerModule {
 
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val s = state as? EqState ?: return
+        val t = s.appTheme
 
         // Background for whole module
         drawRect(
-            color   = Color(0xFF0a0a0a),
+            color   = Color(t.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
@@ -84,7 +86,8 @@ class EqModule : TrackerModule {
     private fun DrawScope.drawHeader(x: Int, y: Int, scale: Int, s: EqState) {
         val charW = 5 * FONT_SCALE + CHAR_SPACING
         val hY    = y + 3
-        drawBitmapText("EQ ${s.slotIndex.toHex2()}", x + 10, hY, scale, Color.Cyan, CHAR_SPACING, FONT_SCALE)
+        val t     = s.appTheme
+        drawBitmapText("EQ ${s.slotIndex.toHex2()}", x + 10, hY, scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
         val callerLabel = when (val ctx = s.callerContext) {
             is EqCallerContext.MasterEq       -> "MASTER"
             is EqCallerContext.ReverbInputEq  -> "REV IN"
@@ -92,8 +95,8 @@ class EqModule : TrackerModule {
             is EqCallerContext.InstrumentEq   -> "INST ${ctx.instrId.toHex2()}"
             is EqCallerContext.SampleEditorFx -> "SAMPLE"
         }
-        drawBitmapText(callerLabel, x + 10 + 8 * charW, hY, scale, Color(0xFF666666), CHAR_SPACING, FONT_SCALE)
-        }
+        drawBitmapText(callerLabel, x + 10 + 8 * charW, hY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+    }
 
     // ── Visualization ─────────────────────────────────────────────────────────
 
@@ -101,10 +104,11 @@ class EqModule : TrackerModule {
         val vx      = x
         val vy      = y + HEADER_H + ROW_H
         val bottomY = ((vy + VIS_H) * scale).toFloat()
+        val t       = s.appTheme
 
         // Background
         drawRect(
-            color   = Color(0xFF0a0a0a),
+            color   = Color(t.vizBackground),
             topLeft = Offset((vx * scale).toFloat(), (vy * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (VIS_H * scale).toFloat())
         )
@@ -129,14 +133,14 @@ class EqModule : TrackerModule {
                 lineTo((vx * scale).toFloat(), bottomY)
                 close()
             }
-            drawPath(fillPath, Color(0xFF161620))
+            drawPath(fillPath, Color(t.textParam.darken(0.27f)))
         }
 
         // dB grid lines (horizontal) at -12, -6, 0, +6, +12
         val dbLevels = listOf(-12, -6, 0, 6, 12)
         for (db in dbLevels) {
             val lineY = vy + dbToPixel(db.toFloat())
-            val gridColor = if (db == 0) Color(0xFF303050) else Color(0xFF1A1A1A)
+            val gridColor = if (db == 0) Color(t.vizCenterLine) else Color(t.rowEvery4th)
             drawLine(
                 color       = gridColor,
                 start       = Offset((vx * scale).toFloat(), (lineY * scale).toFloat()),
@@ -151,12 +155,12 @@ class EqModule : TrackerModule {
         for ((freq, label) in freqMarkers) {
             val fx = vx + freqToPixel(freq)
             drawLine(
-                color       = Color(0xFF1A1A28),
+                color       = Color(t.rowEvery4th),
                 start       = Offset((fx * scale).toFloat(), (vy * scale).toFloat()),
                 end         = Offset((fx * scale).toFloat(), ((vy + VIS_H) * scale).toFloat()),
                 strokeWidth = scale.toFloat()
             )
-            drawBitmapText(label, fx + 2, vy + 3, scale, Color(0xFF333355), CHAR_SPACING, 2)
+            drawBitmapText(label, fx + 2, vy + 3, scale, Color(t.vizCenterLine), CHAR_SPACING, 2)
         }
 
         // Spectrum curve stroke — drawn after grid lines so it sits above them
@@ -165,7 +169,7 @@ class EqModule : TrackerModule {
                 moveTo((vx * scale).toFloat(), cy[0])
                 for (xi in 1 until width) lineTo(((vx + xi) * scale).toFloat(), cy[xi])
             }
-            drawPath(curvePath, Color(0xFF888888), style = Stroke(width = scale.toFloat()))
+            drawPath(curvePath, Color(t.textParam), style = Stroke(width = scale.toFloat()))
         }
 
         // EQ band response curve (yellow, always on top of spectrum)
@@ -174,21 +178,21 @@ class EqModule : TrackerModule {
             val path = Path()
             var started = false
             for (xi in 0 until width) {
-                val t    = xi.toFloat() / (width - 1)
-                val freq = 20f * (1000f).pow(t)
+                val normX = xi.toFloat() / (width - 1)
+                val freq  = 20f * (1000f).pow(normX)
                 val db   = computeCombinedGainDb(preset.bands, freq)
                 val py   = vy + dbToPixel(db)
                 val px   = vx + xi
                 if (!started) { path.moveTo((px * scale).toFloat(), (py * scale).toFloat()); started = true }
                 else          { path.lineTo((px * scale).toFloat(), (py * scale).toFloat()) }
             }
-            drawPath(path, Color(0xFFFFDD00), style = Stroke(width = (scale * 2).toFloat()))
+            drawPath(path, Color(t.textCursor), style = Stroke(width = (scale * 2).toFloat()))
         }
 
         // Separator line
         val sepY = vy + VIS_H
         drawLine(
-            color       = Color(0xFF333333),
+            color       = Color(t.vizCenterLine),
             start       = Offset((vx * scale).toFloat(), (sepY * scale).toFloat()),
             end         = Offset(((vx + width) * scale).toFloat(), (sepY * scale).toFloat()),
             strokeWidth = scale.toFloat()
@@ -202,6 +206,7 @@ class EqModule : TrackerModule {
         val curBand  = s.cursorRow / 4
         val curParam = s.cursorRow % 4
         val preset   = s.project.eqPresets.getOrNull(s.slotIndex)
+        val t        = s.appTheme
 
         val bandX = intArrayOf(
             x + LABEL_COL_W,
@@ -209,9 +214,9 @@ class EqModule : TrackerModule {
             x + LABEL_COL_W + 2 * BAND_COL_W
         )
 
-        // Header row: active band = cyan, inactive = grey; no column backgrounds
+        // Header row: active band = textTitle, inactive = textEmpty
         for (bi in 0..2) {
-            val hdrCol = if (bi == curBand) Color.Cyan else Color(0xFF555555)
+            val hdrCol = if (bi == curBand) Color(t.textTitle) else Color(t.textEmpty)
             drawBitmapText("BAND ${bi + 1}", bandX[bi] + 6, edY + 3, scale, hdrCol, CHAR_SPACING, FONT_SCALE)
         }
 
@@ -220,28 +225,28 @@ class EqModule : TrackerModule {
             val rowY     = edY + ROW_H + pi * ROW_H
             val isParSel = pi == curParam
 
-            // Full-row background when cursor is on this row — matches all other screens
+            // Full-row background when cursor is on this row
             if (isParSel) {
                 drawRect(
-                    color   = Color(0xFF333333),
+                    color   = Color(t.rowCursor),
                     topLeft = Offset((x * scale).toFloat(), (rowY * scale).toFloat()),
                     size    = Size((width * scale).toFloat(), (ROW_H * scale).toFloat())
                 )
             }
 
-            // Label: yellow on cursor row, grey otherwise — matches all other screens
-            val lblCol = if (isParSel) Color.Yellow else Color(0xFF666666)
+            // Label: textCursor on cursor row, textEmpty otherwise
+            val lblCol = if (isParSel) Color(t.textCursor) else Color(t.textEmpty)
             drawBitmapText(PARAM_LABELS[pi], x + 6, rowY + 3, scale, lblCol, CHAR_SPACING, FONT_SCALE)
 
-            // Values: yellow on cursor cell, white for active band non-cursor, grey for inactive bands
+            // Values: textCursor on cursor cell, textValue for active band, textEmpty for inactive
             for (bi in 0..2) {
                 val isCursor  = bi == curBand && isParSel
                 val band: EqBand? = preset?.bands?.getOrNull(bi)
 
                 val valueCol = when {
-                    isCursor       -> Color.Yellow
-                    bi == curBand  -> Color.White
-                    else           -> Color(0xFF666666)
+                    isCursor       -> Color(t.textCursor)
+                    bi == curBand  -> Color(t.textValue)
+                    else           -> Color(t.textEmpty)
                 }
 
                 val valText = when {

@@ -30,17 +30,17 @@ class OscilloscopeModule(
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val oscState = state as? OscilloscopeState
         val waveformData = oscState?.waveformBuffer ?: (state as? FloatArray) ?: FloatArray(width)
-        val theme = oscState?.appTheme ?: AppTheme.CLASSIC
+        val t = oscState?.appTheme ?: AppTheme.CLASSIC
 
         drawRect(
-            color = Color(theme.vizBackground),
+            color = Color(t.vizBackground),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
 
         val centerY = y + height / 2
         drawLine(
-            color = Color(theme.vizCenterLine),
+            color = Color(t.vizCenterLine),
             start = Offset((x * scale).toFloat(), (centerY * scale).toFloat()),
             end = Offset(((x + width) * scale).toFloat(), (centerY * scale).toFloat()),
             strokeWidth = scale.toFloat()
@@ -60,7 +60,7 @@ class OscilloscopeModule(
         }
         drawPath(
             path = path,
-            color = Color(theme.vizWave),
+            color = Color(t.vizWave),
             style = Stroke(width = scale.toFloat())
         )
     }

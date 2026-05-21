@@ -3,8 +3,8 @@
 ## Document Purpose
 This document defines **HOW** PocketTracker is built technically. It covers current architecture, planned refactoring for portability, and technical decisions.
 
-**Last Updated:** 2026-05-18
-**Version:** 2.4
+**Last Updated:** 2026-05-21
+**Version:** 2.5
 **Audience:** Developers, Contributors, Claude Code AI
 
 ---
@@ -89,7 +89,7 @@ PocketTracker/
 │   └── DeviceAdapter.kt            Android InputDevice API
 │
 ├── (root package — com.conanizer.pockettracker)
-│   ├── EditorHelpers.kt            ✅ Shared rendering utilities (toHex2, rowBgColor, clearEffect…)
+│   ├── EditorHelpers.kt            ✅ Shared rendering utilities (toHex2, toHex8, rowBgColor, darken(), clearEffect…)
 │   ├── PhraseEditorModule.kt       ✅ Portable rendering
 │   ├── ChainEditorModule.kt        ✅
 │   ├── SongEditorModule.kt         ✅
@@ -567,6 +567,38 @@ object RenderingConstants {
     const val CHAR_HEIGHT = FONT_HEIGHT * FONT_SCALE  // 15px
 }
 ```
+
+### Theme System
+
+**`AppTheme`** (`AppTheme.kt`) — `@Serializable data class` holding 19 ARGB `Long` color fields + `visualizerType`. Serialized to/from `.ptt` theme files.
+
+```kotlin
+data class AppTheme(
+    val background: Long,       // module fill
+    val rowEvery4th: Long,      // beat accent rows
+    val rowCursor: Long,        // cursor row highlight
+    val rowPlayback: Long,      // playback row highlight
+    val rowSelection: Long,     // selection mode highlight
+    val textTitle: Long,        // cyan headers
+    val textParam: Long,        // inactive labels
+    val textValue: Long,        // inactive values
+    val textCursor: Long,       // cursor yellow
+    val textEmpty: Long,        // dim placeholder text
+    val vizBackground: Long,    // oscilloscope / waveform bg
+    val vizCenterLine: Long,    // center line in visualizers
+    val vizWave: Long,          // waveform + selection highlight
+    val meterBackground: Long,  // dialog bg + meter bg
+    val meterLow/Mid/High: Long,// dBFS meter colors
+    val meterBorder: Long,      // meter border
+    val visualizerType: VisualizerType
+)
+```
+
+**Injection pattern:** `AppTheme` flows top-down via `LocalAppTheme` CompositionLocal → `drawLayout(appTheme)` → each module state `copy(appTheme = appTheme)`. Inside every draw function: `val t = <state>.appTheme` → `Color(t.fieldName)`.
+
+**`darken()` extension (`EditorHelpers.kt`):** `fun Long.darken(factor: Float): Long` — multiplies RGB channels by factor, preserves alpha. Used for cursor shadow backgrounds (e.g. `Color(t.textCursor.darken(0.27f))`).
+
+**Bundled themes:** CLASSIC (green-on-black), AMBER, BLUE, MONO — defined as companion constants on `AppTheme`.
 
 ---
 

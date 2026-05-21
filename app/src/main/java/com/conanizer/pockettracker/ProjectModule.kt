@@ -194,7 +194,7 @@ class ProjectModule : TrackerModule {
                 x = nameColumnX,
                 y = messageY,
                 scale = scale,
-                color = if (projectState.isSuccess) Color(0xFF00ff00) else Color(0xFFff0000),
+                color = if (projectState.isSuccess) Color(t.vizWave) else Color(0xFFff0000),
                 spacing = CHAR_SPACING,
                 fontScale = FONT_SCALE
             )
@@ -293,7 +293,7 @@ class ProjectModule : TrackerModule {
 
             if (isCursorOnThisChar) {
                 drawRect(
-                    color = Color(0xFF555500),
+                    color = Color(t.textCursor.darken(0.27f)),
                     topLeft = Offset((charX * scale).toFloat(), (y * scale).toFloat()),
                     size = Size(((5 * FONT_SCALE) * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
                 )

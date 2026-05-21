@@ -17,8 +17,8 @@ class SampleEditorModule : TrackerModule {
     private fun contentY(row: Int) = (row - 8) * ROW_HEIGHT + 228  // rows 8-19
 
     // Row-background highlight for the full 640px width
-    private fun DrawScope.rowBg(x: Int, y: Int, scale: Int) = drawRect(
-        Color(0xFF333333),
+    private fun DrawScope.rowBg(x: Int, y: Int, scale: Int, theme: AppTheme) = drawRect(
+        Color(theme.rowCursor),
         topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
         size    = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
     )
@@ -28,7 +28,8 @@ class SampleEditorModule : TrackerModule {
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val s = state as? SampleEditorState ?: return
 
-        drawRect(Color(0xFF0a0a0a),
+        val t = s.appTheme
+        drawRect(Color(t.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (height * scale).toFloat()))
 
@@ -40,29 +41,30 @@ class SampleEditorModule : TrackerModule {
         drawRow8Sel   (x, y + contentY(8),           scale, s)
         drawRow10Slice(x, y + contentY(10),          scale, s)
         drawRow11SliceDetail(x, y + contentY(11),    scale, s)
-        drawOpsRow    (x, y + contentY(13), scale, OPS_ROW1, s.cursorRow == 13, s.cursorCol)
-        drawOpsRow    (x, y + contentY(14), scale, OPS_ROW2, s.cursorRow == 14, s.cursorCol)
+        drawOpsRow    (x, y + contentY(13), scale, OPS_ROW1, s.cursorRow == 13, s.cursorCol, t)
+        drawOpsRow    (x, y + contentY(14), scale, OPS_ROW2, s.cursorRow == 14, s.cursorCol, t)
         drawRow16Fx   (x, y + contentY(16),          scale, s)
         drawRow18Name (x, y + contentY(18),          scale, s)
         drawRow19Save (x, y + contentY(19),          scale, s)
 
-        if (s.showConfirmClose) drawConfirmDialog(x, y, scale)
+        if (s.showConfirmClose) drawConfirmDialog(x, y, scale, t)
     }
 
     // ─── Row draw helpers ─────────────────────────────────────────────────────
 
     private fun DrawScope.drawRow0Header(x: Int, y: Int, scale: Int, s: SampleEditorState) {
         val ty = y + TEXT_PADDING
-        drawBitmapText("SAMPLE EDITOR", x + 10, ty, scale, Color.Cyan,     CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("${s.sampleRate}Hz",  x + 360, ty, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(s.durationDisplay,    x + 492, ty, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        val t = s.appTheme
+        drawBitmapText("SAMPLE EDITOR", x + 10, ty, scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("${s.sampleRate}Hz",  x + 360, ty, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText(s.durationDisplay,    x + 492, ty, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
     }
 
     private fun DrawScope.drawRow1View(x: Int, y: Int, scale: Int, s: SampleEditorState) {
         val ty  = y + TEXT_PADDING
         val cur = s.cursorRow == 1
-        if (cur) rowBg(x, y, scale)
-        drawLabel3val(x, ty, scale, cur, s.cursorCol,
+        if (cur) rowBg(x, y, scale, s.appTheme)
+        drawLabel3val(x, ty, scale, cur, s.cursorCol, s.appTheme,
             "ZOOM",   "${1 shl s.zoomLevel}X",        0,
             "SOURCE", SOURCE_VALUES[s.sourceMode],     1,
             "RATE",   RATE_VALUES[s.rateMode],         2)
@@ -71,9 +73,9 @@ class SampleEditorModule : TrackerModule {
     private fun DrawScope.drawRow2Edit(x: Int, y: Int, scale: Int, s: SampleEditorState) {
         val ty  = y + TEXT_PADDING
         val cur = s.cursorRow == 2
-        if (cur) rowBg(x, y, scale)
+        if (cur) rowBg(x, y, scale, s.appTheme)
         val pitchStr = if (s.pitchSemitones >= 0) "+${s.pitchSemitones}" else "${s.pitchSemitones}"
-        drawLabel3val(x, ty, scale, cur, s.cursorCol,
+        drawLabel3val(x, ty, scale, cur, s.cursorCol, s.appTheme,
             "PITCH",    pitchStr,                          0,
             "DURATION", DURATION_VALUES[s.durationIndex], 1,
             "SNAP",     if (s.snapEnabled) "ON" else "OFF", 2)
@@ -81,13 +83,13 @@ class SampleEditorModule : TrackerModule {
 
     /** Helper: draw three label/value pairs across one row. */
     private fun DrawScope.drawLabel3val(
-        x: Int, ty: Int, scale: Int, isCurRow: Boolean, curCol: Int,
+        x: Int, ty: Int, scale: Int, isCurRow: Boolean, curCol: Int, theme: AppTheme,
         l1: String, v1: String, c1: Int,
         l2: String, v2: String, c2: Int,
         l3: String, v3: String, c3: Int
     ) {
-        fun labelColor(col: Int) = if (isCurRow && curCol == col) Color.Yellow else Color.Gray
-        fun valueColor(col: Int) = if (isCurRow && curCol == col) Color.Yellow else Color.White
+        fun labelColor(col: Int) = if (isCurRow && curCol == col) Color(theme.textCursor) else Color(theme.textParam)
+        fun valueColor(col: Int) = if (isCurRow && curCol == col) Color(theme.textCursor) else Color(theme.textValue)
         drawBitmapText(l1, x + 10,  ty, scale, labelColor(c1), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(v1, x + 110,  ty, scale, valueColor(c1), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(l2, x + 180, ty, scale, labelColor(c2), CHAR_SPACING, FONT_SCALE)
@@ -97,14 +99,15 @@ class SampleEditorModule : TrackerModule {
     }
 
     private fun DrawScope.drawWaveform(x: Int, y: Int, scale: Int, s: SampleEditorState) {
-        val bgCol = Color(0xFF111111)
+        val t = s.appTheme
+        val bgCol = Color(t.vizBackground)
         drawRect(bgCol,
             topLeft = Offset(((x + 10) * scale).toFloat(), (y * scale).toFloat()),
             size    = Size((620 * scale).toFloat(),          (WAVEFORM_H * scale).toFloat()))
 
         val midY = y + WAVEFORM_H / 2
         // Center line
-        drawLine(Color(0xFF444444),
+        drawLine(Color(t.vizCenterLine),
             start       = Offset(((x + 10) * scale).toFloat(), (midY * scale).toFloat()),
             end         = Offset(((x + 630) * scale).toFloat(), (midY * scale).toFloat()),
             strokeWidth = scale.toFloat())
@@ -125,18 +128,18 @@ class SampleEditorModule : TrackerModule {
                 // Bin frame position in full-sample coords
                 val binFrame = s.viewStart + (i.toLong() * viewLen / bins)
                 val inSel = binFrame in s.selectionStart until s.selectionEnd
-                drawLine(if (inSel) Color.White else Color(0xFF666666),
+                drawLine(if (inSel) Color(t.textValue) else Color(t.textEmpty),
                     start       = Offset((cx * scale).toFloat(), (top * scale).toFloat()),
                     end         = Offset((cx * scale).toFloat(), (bot * scale).toFloat()),
                     strokeWidth = scale.toFloat())
             }
         } else {
-            drawBitmapText("WAVEFORM", x + 265, midY - 6, scale, Color(0xFF444444), CHAR_SPACING, FONT_SCALE)
+            drawBitmapText("WAVEFORM", x + 265, midY - 6, scale, Color(t.textEmpty), CHAR_SPACING, FONT_SCALE)
         }
 
         // Selection S/E markers — clipped to visible window
         if (s.totalFrames > 0) {
-            val mc = Color(0xFF00AAAA)
+            val mc = Color(t.textTitle)
             val wfLeft  = x + 10
             val wfRight = x + 630
             val sXf = wfLeft + ((s.selectionStart - s.viewStart).toFloat() / viewLenF) * 620f
@@ -170,7 +173,7 @@ class SampleEditorModule : TrackerModule {
                 val sX  = sXf.toInt().coerceIn(wfLeft, wfRight)
                 val eX  = eXf.toInt().coerceIn(wfLeft, wfRight)
                 if (eX > sX) {
-                    drawRect(Color(0x22FFAA00),
+                    drawRect(Color(t.textCursor).copy(alpha = 0.1f),
                         topLeft = Offset((sX * scale).toFloat(), (y * scale).toFloat()),
                         size    = Size(((eX - sX) * scale).toFloat(), (WAVEFORM_H * scale).toFloat()))
                 }
@@ -183,7 +186,7 @@ class SampleEditorModule : TrackerModule {
                 val mXf = wfLeft + ((markerFrame - s.viewStart).toFloat() / viewLenF) * 620f
                 if (mXf >= wfLeft && mXf <= wfRight) {
                     val isActiveBound = onSliceRow && (idx == s.sliceIndex - 1 || idx == s.sliceIndex)
-                    drawLine(if (isActiveBound) Color(0xFFFFAA00) else Color(0xFF664400),
+                    drawLine(if (isActiveBound) Color(t.textEmpty) else Color(t.textParam),
                         start       = Offset((mXf * scale).toFloat(), (y * scale).toFloat()),
                         end         = Offset((mXf * scale).toFloat(), ((y + WAVEFORM_H) * scale).toFloat()),
                         strokeWidth = scale.toFloat())
@@ -207,7 +210,7 @@ class SampleEditorModule : TrackerModule {
                 val sX  = sXf.toInt().coerceIn(wfLeft, wfRight)
                 val eX  = eXf.toInt().coerceIn(wfLeft, wfRight)
                 if (eX > sX) {
-                    drawRect(Color(0x22FFAA00),
+                    drawRect(Color(t.textCursor).copy(alpha = 0.1f),
                         topLeft = Offset((sX * scale).toFloat(), (y * scale).toFloat()),
                         size    = Size(((eX - sX) * scale).toFloat(), (WAVEFORM_H * scale).toFloat()))
                 }
@@ -219,7 +222,7 @@ class SampleEditorModule : TrackerModule {
                 val mXf = wfLeft + ((markerFrame - s.viewStart).toFloat() / viewLenF) * 620f
                 if (mXf >= wfLeft && mXf <= wfRight) {
                     val isActiveBound = onSliceRow && (i == s.sliceIndex || i == s.sliceIndex + 1)
-                    drawLine(if (isActiveBound) Color(0xFFFFAA00) else Color(0xFF664400),
+                    drawLine(if (isActiveBound) Color(t.textEmpty) else Color(t.textParam),
                         start       = Offset((mXf * scale).toFloat(), (y * scale).toFloat()),
                         end         = Offset((mXf * scale).toFloat(), ((y + WAVEFORM_H) * scale).toFloat()),
                         strokeWidth = scale.toFloat())
@@ -232,7 +235,7 @@ class SampleEditorModule : TrackerModule {
             val playFrame = s.playbackPosition * s.totalFrames
             val mXf = x + 10 + ((playFrame - s.viewStart.toFloat()) / viewLenF) * 620f
             if (mXf >= x + 10 && mXf <= x + 630) {
-                drawLine(Color(0xFF00FF44),
+                drawLine(Color(t.vizWave),
                     start       = Offset((mXf * scale).toFloat(), (y * scale).toFloat()),
                     end         = Offset((mXf * scale).toFloat(), ((y + WAVEFORM_H) * scale).toFloat()),
                     strokeWidth = (scale * 2).toFloat())
@@ -243,30 +246,30 @@ class SampleEditorModule : TrackerModule {
     private fun DrawScope.drawRow8Sel(x: Int, y: Int, scale: Int, s: SampleEditorState) {
         val ty  = y + TEXT_PADDING
         val cur = s.cursorRow == 8
-        if (cur) rowBg(x, y, scale)
-        drawBitmapText("SELECTION",               x + 10,  ty, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        val t   = s.appTheme
+        if (cur) rowBg(x, y, scale, t)
+        drawBitmapText("SELECTION",               x + 10,  ty, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(s.selectionStart.toHex8(), x + 180, ty, scale,
-            if (cur && s.cursorCol == 0) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+            if (cur && s.cursorCol == 0) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(s.selectionEnd.toHex8(),   x + 335, ty, scale,
-            if (cur && s.cursorCol == 1) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
-        //drawBitmapText("LENGTH",                  x + 430, ty, scale, Color.Gray,  CHAR_SPACING, FONT_SCALE)
-        //drawBitmapText((s.selectionEnd - s.selectionStart).toHex8(), x + 525, ty, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+            if (cur && s.cursorCol == 1) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
     }
 
     private fun DrawScope.drawRow10Slice(x: Int, y: Int, scale: Int, s: SampleEditorState) {
         val ty  = y + TEXT_PADDING
         val cur = s.cursorRow == 10
-        if (cur) rowBg(x, y, scale)
-        drawBitmapText("SLICE", x + 10, ty, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        val t   = s.appTheme
+        if (cur) rowBg(x, y, scale, t)
+        drawBitmapText("SLICE", x + 10, ty, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(SLICE_METHODS[s.sliceMethod], x + 175, ty, scale,
-            if (cur && s.cursorCol == 0) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+            if (cur && s.cursorCol == 0) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
         if (s.sliceMethod != 2) {  // not OFF
             val (lbl, valStr) = when (s.sliceMethod) {
                 0 -> "SENS" to s.sliceSensitivity.toHex2()
                 else -> "BY"   to s.sliceDivisions.toHex2()
             }
-            drawBitmapText(lbl,    x + 335, ty, scale, if (cur && s.cursorCol == 1) Color.Yellow else Color.Gray,  CHAR_SPACING, FONT_SCALE)
-            drawBitmapText(valStr, x + 410, ty, scale, if (cur && s.cursorCol == 1) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+            drawBitmapText(lbl,    x + 335, ty, scale, if (cur && s.cursorCol == 1) Color(t.textCursor) else Color(t.textParam),  CHAR_SPACING, FONT_SCALE)
+            drawBitmapText(valStr, x + 410, ty, scale, if (cur && s.cursorCol == 1) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
         }
     }
 
@@ -274,78 +277,82 @@ class SampleEditorModule : TrackerModule {
         if (s.sliceMethod == 2) return
         val ty  = y + TEXT_PADDING
         val cur = s.cursorRow == 11
-        if (cur) rowBg(x, y, scale)
-        val idxColor = if (cur && s.cursorCol == 0) Color.Yellow else Color.White
-        val posColor = if (cur && s.cursorCol == 1) Color.Yellow else Color.White
+        val t   = s.appTheme
+        if (cur) rowBg(x, y, scale, t)
+        val idxColor = if (cur && s.cursorCol == 0) Color(t.textCursor) else Color(t.textValue)
+        val posColor = if (cur && s.cursorCol == 1) Color(t.textCursor) else Color(t.textValue)
         if (s.sliceMethod == 0) {
             // TRANSIENT: N markers → N+1 slices; show "idx/total"
             val total = s.transientMarkers.size + 1
-            drawBitmapText(s.sliceIndex.toHex2(), x + 90,  ty, scale, idxColor,    CHAR_SPACING, FONT_SCALE)
-            drawBitmapText("/${total.toHex2()}",  x + 120, ty, scale, Color.Gray,  CHAR_SPACING, FONT_SCALE)
+            drawBitmapText(s.sliceIndex.toHex2(), x + 90,  ty, scale, idxColor,           CHAR_SPACING, FONT_SCALE)
+            drawBitmapText("/${total.toHex2()}",  x + 120, ty, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         } else {
-            drawBitmapText(s.sliceIndex.toHex2(), x + 90,  ty, scale, idxColor,    CHAR_SPACING, FONT_SCALE)
+            drawBitmapText(s.sliceIndex.toHex2(), x + 90,  ty, scale, idxColor, CHAR_SPACING, FONT_SCALE)
         }
         drawBitmapText(s.effectiveSlicePosition.toHex8(), x + 175, ty, scale, posColor, CHAR_SPACING, FONT_SCALE)
     }
 
-    private fun DrawScope.drawOpsRow(x: Int, y: Int, scale: Int, ops: List<String>, isCur: Boolean, curCol: Int) {
+    private fun DrawScope.drawOpsRow(x: Int, y: Int, scale: Int, ops: List<String>, isCur: Boolean, curCol: Int, theme: AppTheme) {
         val ty   = y + TEXT_PADDING
-        if (isCur) rowBg(x, y, scale)
+        if (isCur) rowBg(x, y, scale, theme)
         val colW = width / ops.size   // ~106px per column
         ops.forEachIndexed { i, label ->
             val lx = x + i * colW + 15
             drawBitmapText(label, lx, ty, scale,
-                if (isCur && curCol == i) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+                if (isCur && curCol == i) Color(theme.textCursor) else Color(theme.textValue), CHAR_SPACING, FONT_SCALE)
         }
     }
 
     private fun DrawScope.drawRow16Fx(x: Int, y: Int, scale: Int, s: SampleEditorState) {
         val ty  = y + TEXT_PADDING
         val cur = s.cursorRow == 16
-        if (cur) rowBg(x, y, scale)
-        drawBitmapText("EFFECT",               x + 10,  ty, scale, Color.Gray, CHAR_SPACING, FONT_SCALE)
+        val t   = s.appTheme
+        if (cur) rowBg(x, y, scale, t)
+        drawBitmapText("EFFECT",               x + 10,  ty, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(FX_TYPES[s.fxType],     x + 180, ty, scale,
-            if (cur && s.cursorCol == 0) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+            if (cur && s.cursorCol == 0) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
         val valStr = if (s.fxType == 4) SYNC_TYPES[s.syncType] else s.fxValue.toHex2()
         drawBitmapText(valStr,                 x + 290, ty, scale,
-            if (cur && s.cursorCol == 1) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+            if (cur && s.cursorCol == 1) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
         drawBitmapText("APPLY",                x + 440, ty, scale,
-            if (cur && s.cursorCol == 2) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+            if (cur && s.cursorCol == 2) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
     }
 
     private fun DrawScope.drawRow18Name(x: Int, y: Int, scale: Int, s: SampleEditorState) {
         val ty  = y + TEXT_PADDING
         val cur = s.cursorRow == 18
-        if (cur) rowBg(x, y, scale)
-        drawBitmapText("NAME",        x + 10,  ty, scale, if (cur) Color.Yellow else Color.Gray,  CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(s.sampleName,  x + 120, ty, scale, if (cur) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+        val t   = s.appTheme
+        if (cur) rowBg(x, y, scale, t)
+        drawBitmapText("NAME",        x + 10,  ty, scale, if (cur) Color(t.textCursor) else Color(t.textParam),  CHAR_SPACING, FONT_SCALE)
+        drawBitmapText(s.sampleName,  x + 120, ty, scale, if (cur) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
     }
 
     private fun DrawScope.drawRow19Save(x: Int, y: Int, scale: Int, s: SampleEditorState) {
         val ty  = y + TEXT_PADDING
         val cur = s.cursorRow == 19
-        if (cur) rowBg(x, y, scale)
-        drawBitmapText("LOAD",      x + 120, ty, scale, if (cur && s.cursorCol == 0) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("SAVE",      x + 230, ty, scale, if (cur && s.cursorCol == 1) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("OVERWRITE", x + 335, ty, scale, if (cur && s.cursorCol == 2) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+        val t   = s.appTheme
+        if (cur) rowBg(x, y, scale, t)
+        drawBitmapText("LOAD",      x + 120, ty, scale, if (cur && s.cursorCol == 0) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("SAVE",      x + 230, ty, scale, if (cur && s.cursorCol == 1) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("OVERWRITE", x + 335, ty, scale, if (cur && s.cursorCol == 2) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
         if (s.sliceMethod != 2) {
-            drawBitmapText("CHOP", x + 510, ty, scale, if (cur && s.cursorCol == 3) Color.Yellow else Color.White, CHAR_SPACING, FONT_SCALE)
+            drawBitmapText("CHOP", x + 510, ty, scale, if (cur && s.cursorCol == 3) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
         }
     }
 
-    private fun DrawScope.drawConfirmDialog(x: Int, y: Int, scale: Int) {
-        drawRect(Color(0xAA000000),
+    private fun DrawScope.drawConfirmDialog(x: Int, y: Int, scale: Int, theme: AppTheme = AppTheme.CLASSIC) {
+        drawRect(Color(theme.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (height * scale).toFloat()))
         val dX = x + 160; val dY = y + 200; val dW = 320; val dH = 80
-        drawRect(Color(0xFF222222),
+        drawRect(Color(theme.meterBackground),
             topLeft = Offset((dX * scale).toFloat(), (dY * scale).toFloat()),
             size    = Size((dW * scale).toFloat(),   (dH * scale).toFloat()))
-        drawRect(Color(0xFF555555),
+        drawRect(Color(theme.textEmpty),
             topLeft = Offset((dX * scale).toFloat(), (dY * scale).toFloat()),
             size    = Size((dW * scale).toFloat(),   (2 * scale).toFloat()))
-        drawBitmapText("ARE YOU SURE?", dX + 55, dY + 15, scale, Color.White,  CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("A=YES  B=NO",   dX + 65, dY + 45, scale, Color.Yellow, CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("ARE YOU SURE?", dX + 55, dY + 15, scale, Color(theme.textValue),  CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("A=YES  B=NO",   dX + 65, dY + 45, scale, Color(theme.textCursor), CHAR_SPACING, FONT_SCALE)
     }
 
     // ─── Cursor context ───────────────────────────────────────────────────────
@@ -548,7 +555,8 @@ data class SampleEditorState(
     val isModified:       Boolean = false,
     val showConfirmClose: Boolean = false,
     // Real-time playback position (0.0-1.0 fraction, or -1 if not playing)
-    val playbackPosition: Float = -1f
+    val playbackPosition: Float = -1f,
+    val appTheme: AppTheme = AppTheme.CLASSIC
 ) {
     /** Returns (sliceStart, sliceEnd) frame pair for the given slice index in the current mode. */
     fun getSliceBounds(idx: Int): Pair<Long, Long> = when (sliceMethod) {

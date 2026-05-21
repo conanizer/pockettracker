@@ -88,7 +88,7 @@ data class AppTheme(
             rowSelection  = 0xFF333333L,
             textTitle     = 0xFFFFFFFFL,
             textParam     = 0xFF888888L,
-            textValue     = 0xFFFFFFFFL,
+            textValue     = 0xFF8F8F8FL,
             textCursor    = 0xFFFFFFFFL,
             textEmpty     = 0xFF444444L,
             vizCenterLine = 0xFF222222L,

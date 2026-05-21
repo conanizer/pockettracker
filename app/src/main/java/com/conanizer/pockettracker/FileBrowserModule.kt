@@ -45,17 +45,13 @@ class FileBrowserModule : TrackerModule {
         const val WIDTH = 640
         const val HEIGHT = 480  // Full screen height (covers oscilloscope)
 
-        // Colors
-        val COLOR_CURSOR = Color.Yellow
+        // Navigation item colors (kept distinct from theme for clear visual hierarchy)
         val COLOR_FOLDER = Color(0xFF88CCFF)  // Light blue for folders
-        val COLOR_FILE = Color(0xFFCCCCCC)    // Light gray for files
         val COLOR_VIDEO = Color(0xFFFFBB55)   // Amber for video/audio container files
         val COLOR_PARENT = Color(0xFFFFAA88)  // Orange for ".."
-        val COLOR_INACTIVE = Color(0xFF666666)
 
         // Video/audio container extensions shown alongside WAV in instrument browser
         val VIDEO_EXTENSIONS = listOf("mp4", "mkv", "webm", "3gp", "m4a", "mov")
-        val COLOR_BACKGROUND = Color(0xFF0a0a0a)
     }
 
     override val width = WIDTH
@@ -118,7 +114,8 @@ class FileBrowserModule : TrackerModule {
         val statusMessage: String = "",
         val statusSuccess: Boolean = true,
         val fileExtension: String? = null,          // Single-extension filter (legacy)
-        val fileExtensions: List<String>? = null    // Multi-extension filter (null = all files)
+        val fileExtensions: List<String>? = null,   // Multi-extension filter (null = all files)
+        val appTheme: AppTheme = AppTheme.CLASSIC
     ) {
         /** Effective extension set: fileExtensions wins over fileExtension */
         val activeExtensions: Set<String>?
@@ -254,10 +251,11 @@ class FileBrowserModule : TrackerModule {
 
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val browserState = state as? State ?: return
+        val t = browserState.appTheme
 
         // Draw background
         drawRect(
-            color = COLOR_BACKGROUND,
+            color = Color(t.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size = Size((WIDTH * scale).toFloat(), (HEIGHT * scale).toFloat())
         )
@@ -270,7 +268,7 @@ class FileBrowserModule : TrackerModule {
 
         // Draw background for both top bars
         drawRect(
-            color = Color(0xFF1a1a1a),
+            color = Color(t.meterBackground),
             topLeft = Offset((x * scale).toFloat(), (topBarY1 * scale).toFloat()),
             size = Size((WIDTH * scale).toFloat(), (ROW_HEIGHT * 2 * scale).toFloat())
         )
@@ -284,7 +282,7 @@ class FileBrowserModule : TrackerModule {
                     x = x + 10,
                     y = topBarY1 + TEXT_PADDING,
                     scale = scale,
-                    color = Color(0xFFaaaaaa),
+                    color = Color(t.textParam),
                     spacing = CHAR_SPACING,
                     fontScale = FONT_SCALE
                 )
@@ -307,7 +305,7 @@ class FileBrowserModule : TrackerModule {
                     x = x + 10,
                     y = topBarY1 + TEXT_PADDING,
                     scale = scale,
-                    color = Color.Cyan,
+                    color = Color(t.textTitle),
                     spacing = CHAR_SPACING,
                     fontScale = FONT_SCALE
                 )
@@ -318,7 +316,7 @@ class FileBrowserModule : TrackerModule {
                     x = x + 10,
                     y = topBarY1 + TEXT_PADDING,
                     scale = scale,
-                    color = Color.Cyan,
+                    color = Color(t.textTitle),
                     spacing = CHAR_SPACING,
                     fontScale = FONT_SCALE
                 )
@@ -334,7 +332,7 @@ class FileBrowserModule : TrackerModule {
             x = x + 10,
             y = topBarY2 + TEXT_PADDING,
             scale = scale,
-            color = Color(0xFF888888),
+            color = Color(t.textEmpty),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
@@ -353,8 +351,8 @@ class FileBrowserModule : TrackerModule {
 
             // Row background (zebra striping)
             val bgColor = when {
-                isCursor -> Color(0xFF333333)
-                index % 2 == 0 -> COLOR_BACKGROUND
+                isCursor -> Color(t.rowCursor)
+                index % 2 == 0 -> Color(t.background)
                 else -> Color(0xFF111111)
             }
 
@@ -366,13 +364,13 @@ class FileBrowserModule : TrackerModule {
 
             // Choose color based on item type and cursor
             val textColor = when {
-                isCursor -> COLOR_CURSOR
+                isCursor -> Color(t.textCursor)
                 item is BrowserItem.Parent -> COLOR_PARENT
                 item is BrowserItem.Folder -> COLOR_FOLDER
                 item is BrowserItem.FileItem &&
                     item.extension.lowercase() in VIDEO_EXTENSIONS -> COLOR_VIDEO
-                item is BrowserItem.FileItem -> COLOR_FILE
-                else -> COLOR_INACTIVE
+                item is BrowserItem.FileItem -> Color(t.textValue)
+                else -> Color(t.textEmpty)
             }
 
             // Draw cursor indicator
@@ -382,7 +380,7 @@ class FileBrowserModule : TrackerModule {
                     x = x + 10,
                     y = rowY + TEXT_PADDING,
                     scale = scale,
-                    color = COLOR_CURSOR,
+                    color = Color(t.textCursor),
                     spacing = CHAR_SPACING,
                     fontScale = FONT_SCALE
                 )
@@ -409,7 +407,7 @@ class FileBrowserModule : TrackerModule {
                     x = x + 330,
                     y = rowY + TEXT_PADDING,
                     scale = scale,
-                    color = Color(0xFF666666),
+                    color = Color(t.textEmpty),
                     spacing = CHAR_SPACING,
                     fontScale = FONT_SCALE
                 )
@@ -421,7 +419,7 @@ class FileBrowserModule : TrackerModule {
                     x = x + 440,
                     y = rowY + TEXT_PADDING,
                     scale = scale,
-                    color = Color(0xFF666666),
+                    color = Color(t.textEmpty),
                     spacing = CHAR_SPACING,
                     fontScale = FONT_SCALE
                 )
@@ -438,7 +436,7 @@ class FileBrowserModule : TrackerModule {
 
         // Draw background
         drawRect(
-            color = Color(0xFF1a1a1a),
+            color = Color(t.meterBackground),
             topLeft = Offset((x * scale).toFloat(), (bottomBarY * scale).toFloat()),
             size = Size((WIDTH * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
         )
@@ -449,7 +447,7 @@ class FileBrowserModule : TrackerModule {
             x = x + 10,
             y = bottomBarY + TEXT_PADDING,
             scale = scale,
-            color = Color(0xFFaaaaaa),
+            color = Color(t.textParam),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
@@ -462,7 +460,7 @@ class FileBrowserModule : TrackerModule {
                 x = x + 560,
                 y = bottomBarY + TEXT_PADDING,
                 scale = scale,
-                color = Color(0xFFaaaaaa),
+                color = Color(t.textParam),
                 spacing = CHAR_SPACING,
                 fontScale = FONT_SCALE
             )

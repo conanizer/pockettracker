@@ -27,6 +27,15 @@ fun Int.toHex1(): String = (this and 0x0F).toString(16).uppercase()
 /** Format as 8-digit uppercase hex (e.g. 65536L → "00010000"). */
 fun Long.toHex8(): String = this.toString(16).uppercase().padStart(8, '0')
 
+/** Multiply RGB channels by [factor] (0..1 = darker, 1+ = brighter). Alpha is preserved. */
+fun Long.darken(factor: Float): Long {
+    val a = (this shr 24) and 0xFFL
+    val r = (((this shr 16) and 0xFFL) * factor).toLong().coerceIn(0, 255)
+    val g = (((this shr 8) and 0xFFL) * factor).toLong().coerceIn(0, 255)
+    val b = ((this and 0xFFL) * factor).toLong().coerceIn(0, 255)
+    return (a shl 24) or (r shl 16) or (g shl 8) or b
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ROW BACKGROUND COLOR
 // ═══════════════════════════════════════════════════════════════════════════
@@ -36,19 +45,6 @@ fun Long.toHex8(): String = this.toString(16).uppercase().padStart(8, '0')
  *
  * Priority: playing > selected > cursor > every-4th-row accent > default
  */
-fun rowBgColor(
-    index: Int,
-    cursorRow: Int,
-    playbackRow: Int,
-    isPlaying: Boolean,
-    isSelected: Boolean
-): Color = when {
-    isPlaying && index == playbackRow -> Color(0xFF004400)
-    isSelected                        -> Color(0xFF1a3a1a)
-    index == cursorRow                -> Color(0xFF333333)
-    index % 4 == 0                    -> Color(0xFF151515)
-    else                              -> Color(0xFF0a0a0a)
-}
 
 fun rowBgColor(
     index: Int,

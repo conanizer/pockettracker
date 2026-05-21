@@ -90,7 +90,7 @@ class SongEditorModule : TrackerModule {
                 x = trackColumns[trackId], y = textY, scale = scale,
                 color = when {
                     absoluteRow == state.cursorRow && trackId == (state.cursorTrack - 1) -> Color(t.textCursor)
-                    state.selectionMode && state.isCellSelected(absoluteRow, selectionCol) -> Color(0xFF00DD00)
+                    state.selectionMode && state.isCellSelected(absoluteRow, selectionCol) -> Color(t.vizWave)
                     chainId == -1 -> Color(t.textEmpty)
                     else -> Color(t.textValue)
                 },
