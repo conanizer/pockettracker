@@ -955,7 +955,6 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                                     }
                                                 } else if (videoExtractor.isSupportedVideo(item.file.absolutePath)) {
                                                     val suggestedName = item.file.nameWithoutExtension + "_audio"
-                                                    val insertBefore = trackerController.inputController.isInsertBeforeMode
                                                     qwertyKeyboardState = QwertyKeyboardState(isOpen = true, text = suggestedName, maxLength = 40, textCursor = suggestedName.length, fieldLabel = "SAVE AS:", originalText = suggestedName, insertBefore = insertBefore, clearOnFirstB = true, context = QwertyContext.VIDEO_EXTRACT, contextExtra = item.file.absolutePath)
                                                 } else {
                                                     fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
@@ -985,7 +984,6 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                                     }
                                                 } else if (videoExtractor.isSupportedVideo(item.file.absolutePath)) {
                                                     val suggestedName = item.file.nameWithoutExtension + "_audio"
-                                                    val insertBefore = trackerController.inputController.isInsertBeforeMode
                                                     qwertyKeyboardState = QwertyKeyboardState(isOpen = true, text = suggestedName, maxLength = 40, textCursor = suggestedName.length, fieldLabel = "SAVE AS:", originalText = suggestedName, insertBefore = insertBefore, clearOnFirstB = true, context = QwertyContext.VIDEO_EXTRACT, contextExtra = item.file.absolutePath)
                                                 } else {
                                                     fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
