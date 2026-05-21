@@ -154,6 +154,10 @@ class OboeAudioBackend : IAudioBackend {
         native_getWaveform(buffer)
     }
 
+    override fun getTrackWaveforms(buffer: FloatArray, activeTracks: BooleanArray) {
+        native_getTrackWaveforms(buffer, activeTracks)
+    }
+
     override fun setInstrumentParams(
         instrumentId: Int,
         startPoint: Int,
@@ -520,6 +524,7 @@ class OboeAudioBackend : IAudioBackend {
 
     private external fun native_decayPeaks()
     private external fun native_decayWaveform()
+    private external fun native_getTrackWaveforms(outArray: FloatArray, activeFlags: BooleanArray)
     private external fun native_getSpectrumMagnitudes(numBins: Int): FloatArray
     private external fun native_setTrackVolume(trackId: Int, volume: Float)
     private external fun native_setMasterVolume(volume: Float)

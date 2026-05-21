@@ -147,6 +147,7 @@ class SettingsModule : TrackerModule {
             VisualizerType.PEAKS  -> "PEAKS"
             VisualizerType.MIRROR -> "MIRROR"
             VisualizerType.FLAT   -> "FLAT"
+            VisualizerType.OCTA   -> "OCTA"
         }
         drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
             "VISUALIZER", vizText,

@@ -392,6 +392,21 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1decay
     }
 }
 
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getTrackWaveforms(
+        JNIEnv *env, jobject thiz, jfloatArray outArray, jbooleanArray activeFlags) {
+    if (!engine || outArray == nullptr || activeFlags == nullptr) return;
+    jsize length = env->GetArrayLength(outArray);
+    float* buf = new float[length];
+    bool flags[8];
+    engine->getTrackWaveforms(buf, flags);
+    env->SetFloatArrayRegion(outArray, 0, length, buf);
+    delete[] buf;
+    jboolean jflags[8];
+    for (int i = 0; i < 8; i++) jflags[i] = flags[i] ? JNI_TRUE : JNI_FALSE;
+    env->SetBooleanArrayRegion(activeFlags, 0, 8, jflags);
+}
+
 JNIEXPORT jfloatArray JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSpectrumMagnitudes(JNIEnv *env, jobject thiz, jint numBins) {
     jfloatArray result = env->NewFloatArray(numBins);

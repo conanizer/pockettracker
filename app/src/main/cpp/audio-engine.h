@@ -161,6 +161,11 @@ public:
     // Get waveform data for oscilloscope display
     void getWaveform(float* outBuffer, int bufferSize);
 
+    // Get per-track waveform data for OCTA visualizer.
+    // outBuffer: 8 * WAVEFORM_SIZE floats (track0[0..619], track1[0..619], ...).
+    // activeFlags: bool[8] — true if track had active (non-fading) voices last block.
+    void getTrackWaveforms(float* outBuffer, bool* activeFlags);
+
     // Get log-spaced frequency-domain magnitude spectrum for EQ visualizer (0-1 per bin)
     void getSpectrumMagnitudes(int numBins, float* out);
 
@@ -366,6 +371,11 @@ private:
     struct EqPresetBank {
         EqBandData bands[3];
     } eqPresets[128];
+
+    // Per-track waveform buffers for OCTA visualizer
+    float trackWaveformBuffer[8][WAVEFORM_SIZE] = {};
+    int   trackWaveformIndex = 0;
+    bool  trackHasVoice[8] = {};
 
     // Downsampling for oscilloscope (capture every Nth sample)
     // Lower = faster scrolling (more zoomed in), Higher = slower scrolling (more time visible)

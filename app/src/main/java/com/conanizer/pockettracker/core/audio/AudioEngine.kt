@@ -25,6 +25,11 @@ class AudioEngine(
     // Waveform buffer for visualization (620 samples for 620px width oscilloscope)
     val waveformBuffer = FloatArray(620) { 0f }
 
+    // Per-track waveform buffers for OCTA visualizer
+    private val trackWaveformBufferFlat = FloatArray(8 * 620)
+    private val activeTrackFlags = BooleanArray(8)
+    val trackWaveformBuffers: Array<FloatArray> = Array(8) { FloatArray(620) }
+
     // Sample metadata (base frequencies and sample rate compensation ratios)
     private val sampleBaseFrequencies = mutableMapOf<Int, Float>()
     private val sampleRateRatios = mutableMapOf<Int, Float>()
@@ -436,6 +441,21 @@ class AudioEngine(
             backend.decayWaveform()
         }
         backend.updateWaveform(waveformBuffer)
+    }
+
+    fun updateTrackWaveforms() {
+        backend.getTrackWaveforms(trackWaveformBufferFlat, activeTrackFlags)
+        for (t in 0 until 8) {
+            trackWaveformBufferFlat.copyInto(trackWaveformBuffers[t], 0, t * 620, (t + 1) * 620)
+        }
+    }
+
+    fun getActiveTrackMask(): Int {
+        var mask = 0
+        for (t in 0 until 8) {
+            if (activeTrackFlags[t]) mask = mask or (1 shl t)
+        }
+        return mask
     }
 
     fun stopAll() {

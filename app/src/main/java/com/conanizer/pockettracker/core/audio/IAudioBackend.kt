@@ -211,6 +211,14 @@ interface IAudioBackend {
     fun updateWaveform(buffer: FloatArray)
 
     /**
+     * Get per-track waveform data for the OCTA visualizer.
+     *
+     * @param buffer FloatArray of size 8 * 620 (track0[0..619], track1[0..619], ...)
+     * @param activeTracks BooleanArray[8] — true if track had active voices last block
+     */
+    fun getTrackWaveforms(buffer: FloatArray, activeTracks: BooleanArray)
+
+    /**
      * Set playback parameters for an instrument.
      *
      * This configures how a sample is played back (start/end points, looping, effects).

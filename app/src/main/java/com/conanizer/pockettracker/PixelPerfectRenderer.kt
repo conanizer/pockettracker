@@ -461,6 +461,8 @@ class TrackerLayout {
         // Update waveform data from native audio engine (every frame)
         // When not playing, decay waveform to smoothly fade out oscilloscope
         audioEngine.updateWaveformWithDecay(isPlaying)
+        val isOcta = appTheme.visualizerType == VisualizerType.OCTA
+        if (isOcta) audioEngine.updateTrackWaveforms()
 
         // MODULE 1: OSCILLOSCOPE (waveform display)
         // Position: Top of screen
@@ -470,7 +472,12 @@ class TrackerLayout {
                 x = moduleX,
                 y = currentY,
                 scale = scale,
-                state = OscilloscopeState(audioEngine.waveformBuffer, appTheme)
+                state = OscilloscopeState(
+                    waveformBuffer = audioEngine.waveformBuffer,
+                    appTheme = appTheme,
+                    trackWaveforms = if (isOcta) audioEngine.trackWaveformBuffers else null,
+                    activeTrackMask = if (isOcta) audioEngine.getActiveTrackMask() else 0
+                )
             )
         }
 

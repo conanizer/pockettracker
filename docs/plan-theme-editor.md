@@ -1,406 +1,171 @@
-# THEME_EDITOR_PLAN.md
-# Theme Editor — Implementation Plan
+# plan-theme-editor.md
+# Theme Editor — Implementation Plan (Updated)
 
-**Status:** Planned (post-Extension-Pack-2)
-**Created:** 2026-02-27
-
----
-
-## Overview
-
-A two-level settings overlay accessible from the PROJECT screen via the `SYSTEM`
-row. Provides a unified color scheme system, visualizer selector, and theme
-save/load as shareable `.ptt` files.
-
-Three overlays, stacked like M8:
-
-```
-PROJECT screen
-    └─► SYSTEM SETTINGS  (full screen overlay, level 1)
-            ├── FONT       — stubbed, post-MVP
-            ├── VISUALIZER — cycles inline
-            └── THEME ──►  THEME EDITOR  (full screen overlay, level 2)
-```
-
-B button always pops one level back. A new `overlayStack: List<OverlayType>`
-replaces the current single `activeOverlay` flag so multi-level navigation is
-clean and extensible.
+**Original:** 2026-02-27
+**Reviewed + revised:** 2026-05-21 (3 months after original; approach updated to match actual codebase)
+**Status:** Phases 1-3 and 5-9 COMPLETE. Phase 4 (visualizer modes) in progress.
 
 ---
 
-## Part 1: Color Centralization
-
-All modules currently hardcode colors inline. Before the editor can exist, extract
-them into a single `AppTheme` object that flows top-down through all rendering.
-
-**New file: `AppTheme.kt`**
-
-```kotlin
-@Serializable
-data class AppTheme(
-    val name: String = "CLASSIC",
-
-    // Backgrounds
-    val background: Long    = 0xFF0A0A0A,  // module bg
-    val rowCursor: Long     = 0xFF333333,  // cursor row highlight
-    val rowPlayback: Long   = 0xFF004400,  // current playback row
-    val rowSelection: Long  = 0xFF1A3A1A,  // selection region
-
-    // Text roles
-    val textTitle: Long     = 0xFF00FFFF,  // screen headers
-    val textParam: Long     = 0xFF888888,  // inactive param names
-    val textValue: Long     = 0xFFFFFFFF,  // default values
-    val textCursor: Long    = 0xFFFFFF00,  // cursor-highlighted text
-    val textEmpty: Long     = 0xFF666666,  // empty/placeholder
-
-    // Visualizer bar
-    val vizBackground: Long = 0xFF0A0A0A,
-    val vizCenterLine: Long = 0xFF333333,
-    val vizWave: Long       = 0xFF00FF00,  // waveform / bars / peaks
-
-    // Mixer meters
-    val meterBackground: Long = 0xFF1A1A1A,
-    val meterLow: Long        = 0xFF00CC00,
-    val meterMid: Long        = 0xFFCCCC00,
-    val meterHigh: Long       = 0xFFCC0000,
-
-    // Options
-    val visualizerType: VisualizerType = VisualizerType.SCOPE
-)
-
-enum class VisualizerType { SCOPE, BARS, PEAKS, MIRROR, FLAT }
-```
-
-`TrackerModule.draw()` gains a `theme: AppTheme` parameter. Every hardcoded color
-in every module becomes a theme lookup. This is mechanical but essential — it's
-what makes live preview work as you edit colors.
-
-### Bundled themes
-
-Defined as constants in `AppTheme` companion object (no files required — they work
-even with no Themes folder present):
-
-| Name      | Description                          |
-|-----------|--------------------------------------|
-| `CLASSIC` | Current green-on-black (default)     |
-| `AMBER`   | Orange/brown tones, warm CRT feel    |
-| `BLUE`    | Cyan/blue palette                    |
-| `MONO`    | Pure white-on-black, no color        |
-
-User-saved themes live in `Documents/PocketTracker/Themes/*.ptt`.
-File format: JSON via the existing Kotlinx Serialization + `IFileSystem` pipeline
-(same as `.ptp` project files — no new infrastructure needed).
-
----
-
-## Part 2: Font System
-
-**Decision: bitmap fonts only, font changing is post-MVP.**
-
-The 5×5 pixel grid is already the minimum needed to draw readable Latin glyphs.
-There is no viable "slim" or "narrow" variant at this resolution — going narrower
-breaks legibility. A full font-switching system would require rethinking the
-renderer's column math across every module, which is a large refactor that does
-not belong in this feature.
-
-**What ships with this feature:**
-- The current `BitmapFont5x5.kt` (CLASSIC), unchanged
-- A `FONT` row in the System Settings screen that is visible but inactive,
-  labelled to signal future expansion:
-
-```
-FONT        CLASSIC  [POST-MVP]
-```
-
-The row is non-interactive (cursor skips over it, or lands but does nothing on
-A press). This keeps the System Settings menu honest — the slot exists — without
-shipping a broken or misleading feature.
-
-**Post-MVP font work (separate plan, separate branch):**
-- Research alternative bitmap font formats (e.g. 6×8 or 8×8) that allow
-  meaningful stylistic variation
-- Evaluate switching from custom bitmap renderer to Android `Paint.setTypeface()`
-  for the non-tracker-critical screens
-- Implement per-font column width constants so layout reflows automatically
-
----
-
-## Part 3: Visualizer System
-
-Refactor `OscilloscopeModule` → `VisualizerModule`. Same 620×70px slot, same
-position in `TrackerLayout`. Dispatches to one of five render functions based on
-`theme.visualizerType`. All modes receive the same `FloatArray` waveform data
-from the audio engine — no new audio-side work needed.
-
-### VIZ 1: SCOPE (existing oscilloscope)
-
-Connected line segments across the full 620px width. No changes beyond color
-substitution (`Color(0xFF00ff00)` → `Color(theme.vizWave)`).
-
-```
-╔══════════════════════════════════════╗
-║  ╭─╮     ╭──╮    ╭─╮                ║
-║──╯  ╰─────╯  ╰────╯  ╰──────────────║
-╚══════════════════════════════════════╝
-```
-
-### VIZ 2: BARS
-
-Divide the 620px width into **40 vertical bars** (~15px wide, 1px gap). For each
-bar, average the absolute amplitude of its waveform chunk and draw a filled
-rectangle from the center outward, symmetrically up and down. Color = `vizWave`.
-
-```
-╔══════════════════════════════════════╗
-║   ▄  ▄▄  ▄   ▄▄▄ ▄  ▄               ║
-║  ██ ███ ██  ████ ██ ██              ║
-║  ██ ███ ██  ████ ██ ██              ║
-║   ▀  ▀▀  ▀   ▀▀▀ ▀  ▀               ║
-╚══════════════════════════════════════╝
-```
-
-### VIZ 3: PEAKS
-
-Same as BARS but with a 1px peak-hold indicator line per bar. Each peak line
-holds for ~30 frames then decays 1px toward center per frame.
-
-Requires `VisualizerModule` to own state between frames:
-- `FloatArray(40)` — current peak heights
-- `IntArray(40)` — frames since peak was set
-
-```
-╔══════════════════════════════════════╗
-║  ─  ──  ─   ─── ─  ─                ║  ← peak hold lines
-║   ▄  ▄▄  ▄   ▄▄▄ ▄  ▄               ║
-║  ██ ███ ██  ████ ██ ██              ║
-╚══════════════════════════════════════╝
-```
-
-### VIZ 4: MIRROR
-
-Draw the waveform line in the top half (35px), then again reflected vertically in
-the bottom half. Creates a symmetric butterfly shape. Especially interesting with
-sustained synth audio. Implementation: render the waveform twice; second pass
-mirrors Y coordinates around the center line.
-
-```
-╔══════════════════════════════════════╗
-║  ╭─╮     ╭──╮    ╭─╮                ║  ← top half
-║──╯  ╰─────╯  ╰────╯  ╰──────────────║  ← center
-║──╮  ╭─────╮  ╭────╮  ╭──────────────║  ← reflected
-║  ╰─╯     ╰──╯    ╰─╯                ║
-╚══════════════════════════════════════╝
-```
-
-### VIZ 5: FLAT
-
-Background fill + a single 1px separator line at the bottom of the 70px slot.
-No audio computation whatsoever. For users who find the visualizer distracting.
-
-```
-╔══════════════════════════════════════╗
-║                                      ║
-║                                      ║
-║──────────────────────────────────────║
-╚══════════════════════════════════════╝
-```
-
----
-
-## Part 4: System Settings Screen
-
-**New file: `SystemSettingsModule.kt`**
-
-Full screen: **620×392px** (same width as MixerModule to use the full canvas
-width — System Settings is a global overlay, not tied to a specific column).
-
-Opened from PROJECT screen → `SYSTEM` row → A press.
-
-### Screen layout
-
-```
-SYSTEM                              ← cyan header
-
-FONT        CLASSIC  [POST-MVP]     ← non-interactive, placeholder only
-VISUALIZER  SCOPE                   ← cycles: SCOPE / BARS / PEAKS / MIRROR / FLAT
-THEME       CLASSIC  >              ← current theme name, > = sub-screen entry
-```
-
-The `>` chevron on THEME signals a sub-screen entry point, matching M8 convention.
-
-**FONT row:** Cursor can land here. A press does nothing (or shows a brief
-`[POST-MVP]` flash in the status area). Makes the intent clear without misleading
-the user.
-
-**VISUALIZER row:** A+UP / A+DOWN cycles through `VisualizerType` values. The
-visualizer bar at the top of the screen updates immediately (live preview).
-
-**THEME row:**
-- A → push `THEME_EDITOR` onto overlay stack, open Theme Editor
-- A+UP / A+DOWN → cycle through built-in themes without entering the editor
-  (quick preview mode)
-
-**Navigation:**
-- Cursor: UP/DOWN across 3 rows
-- B → pop overlay stack → return to PROJECT screen
-
----
-
-## Part 5: Theme Editor Screen
-
-**New file: `ThemeEditorModule.kt`**
-
-Full screen: **620×392px**. Pushed onto overlay stack from System Settings.
-
-### Screen layout
-
-```
-THEME                               ← cyan header
-
-BACKGROUND    0A0A0A
-ROW CURSOR    333333
-ROW PLAYBACK  004400
-ROW SELECT    1A3A1A
-TEXT TITLE    00FFFF
-TEXT PARAM    888888
-TEXT VALUE    FFFFFF
-TEXT CURSOR   FFFF00
-TEXT EMPTY    666666
-VIZ BG        0A0A0A
-VIZ LINE      333333
-VIZ WAVE      00FF00
-METER LOW     00CC00
-METER MID     CCCC00
-METER HIGH    CC0000
-
-THEME         LOAD   SAVE           ← same pattern as PROJECT / LOAD / SAVE
-```
-
-15 color rows + 1 action row. At 21px per row + header (35px) = 386px total.
-Fits in 392px with a 6px bottom margin.
-
-### Color editing controls
-
-Values are displayed and stored as 24-bit RGB hex (6 characters, no alpha prefix
-shown to user — alpha is always FF).
-
-| Input | Effect |
-|-------|--------|
-| A + UP / DOWN | Red component +/- 0x10 (large step) |
-| A + LEFT / RIGHT | Green component +/- 0x10 (large step) |
-| L + A + UP / DOWN | Red component +/- 0x01 (fine step) |
-| L + A + LEFT / RIGHT | Green component +/- 0x01 (fine step) |
-| SELECT + A + UP / DOWN | Blue component +/- 0x10 (large step) |
-| SELECT + A + LEFT / RIGHT | Blue component +/- 0x01 (fine step) |
-
-All components wrap 0x00–0xFF. Changes are visible in real-time across all
-currently rendered modules (the oscilloscope wave color, row highlights, text
-colors all update as you move the value).
-
-### THEME row
-
-- Cursor on `LOAD` → A → opens `FILE_BROWSER` filtered to `*.ptt` files in
-  `Documents/PocketTracker/Themes/`
-- Cursor on `SAVE` → A → saves current `AppTheme` to
-  `Documents/PocketTracker/Themes/{theme.name}.ptt`
-- To rename before saving: edit `theme.name` — add a NAME row above LOAD/SAVE
-  if needed (same per-character editing as PROJECT / NAME row)
-
-**Navigation:**
-- Cursor scrolls: when cursor reaches top or bottom row, the list scrolls
-- B → pop overlay stack → return to System Settings
-
----
-
-## Part 6: ThemeManager
-
-**New file: `core/logic/ThemeManager.kt`** (no Android imports — portable):
-
-```kotlin
-class ThemeManager(private val fileManager: FileManager) {
-    private val themesPath = "Themes/"
-
-    fun saveTheme(theme: AppTheme, filename: String): Boolean
-    fun loadTheme(filename: String): AppTheme?
-    fun listThemes(): List<String>          // returns .ptt filenames
-    fun getBuiltinThemes(): List<AppTheme>  // CLASSIC, AMBER, BLUE, MONO
-}
-```
-
-`.ptt` files are JSON, serialized via the existing `Json { prettyPrint = true }`
-instance in `FileManager`. No new infrastructure — just a new call site.
-
----
-
-## Part 7: ProjectModule Change
-
-Replace the `SYSTEM` placeholder (currently renders `"---"` as value):
-
-```
-SYSTEM       >                      ← > = sub-screen indicator, always white
-```
-
-Input handling in the controller: when cursor is on SYSTEM row and A is pressed,
-push `OverlayType.SYSTEM_SETTINGS` onto the overlay stack. System Settings does
-not appear in the navigation grid — it is always entered from PROJECT.
-
----
-
-## Overlay Stack
-
-Replace the current `activeOverlay: OverlayType?` with a proper stack:
-
-```kotlin
-// In TrackerController (or InputController)
-val overlayStack = mutableStateListOf<OverlayType>()
-
-fun pushOverlay(type: OverlayType) { overlayStack.add(type) }
-fun popOverlay() { if (overlayStack.isNotEmpty()) overlayStack.removeLast() }
-fun currentOverlay(): OverlayType? = overlayStack.lastOrNull()
-```
-
-`TrackerLayout.drawLayout()` renders based on `currentOverlay()`:
-- `null` → render the normal screen (PHRASE, CHAIN, etc.)
-- `SYSTEM_SETTINGS` → render `SystemSettingsModule`
-- `THEME_EDITOR` → render `ThemeEditorModule`
-- `FILE_BROWSER` → existing behavior (unchanged)
-
-B input: when any overlay is active, B pops the stack instead of its normal function.
+## What Changed vs. the Original Plan
+
+| Original plan | Actual approach (implemented) |
+|---|---|
+| `overlayStack: List<OverlayType>` | EqEditorOverlay pattern: `ThemeEditorState(isOpen=Bool)` |
+| New "System Settings" screen | Rows 9-10 added to existing SettingsModule |
+| Add `theme: AppTheme` to `TrackerModule.draw()` interface | `LocalAppTheme` CompositionLocal → state objects |
+| `ThemeManager` class | SAVE/LOAD inlined in AppInputDispatcher via IFileSystem |
+| Rename `OscilloscopeModule` → `VisualizerModule` | Keep filename; dispatch on `appTheme.visualizerType` |
+| "System Settings" FONT row | Skipped (post-MVP, no stub added) |
+| MainActivity | AppInputDispatcher — all new handlers live here |
 
 ---
 
 ## Implementation Phases
 
-| # | Phase | Tasks | Risk |
-|---|-------|-------|------|
-| 1 | **Color centralization** | Create `AppTheme.kt`; add `theme` param to `TrackerModule.draw()`; replace all hardcoded colors in all modules | Low — pure substitution, no logic changes |
-| 2 | **Visualizer system** | Rename `OscilloscopeModule` → `VisualizerModule`; implement BARS, PEAKS, MIRROR, FLAT | Low — all use existing waveform data |
-| 3 | **Overlay stack** | Replace `activeOverlay` flag with stack in `TrackerController`; update B-button handling | Low — small refactor |
-| 4 | **System Settings** | Create `SystemSettingsModule.kt`; wire SYSTEM row in `ProjectModule` | Low — simple module |
-| 5 | **Theme Editor** | Create `ThemeEditorModule.kt`; implement color editing input; scrolling cursor | Medium — input combos need care |
-| 6 | **ThemeManager + file I/O** | Create `ThemeManager.kt`; `.ptt` save/load; wire LOAD/SAVE buttons | Low — follows existing patterns |
-| 7 | **Bundled themes** | Define CLASSIC, AMBER, BLUE, MONO constants; test all four | Low |
-| 8 | **Integration + polish** | Live preview verification; edge cases (missing Themes folder, corrupt .ptt); status messages | Medium |
+| # | Phase | Status | Notes |
+|---|-------|--------|-------|
+| 1 | Create `AppTheme.kt` + `VisualizerType` enum | ✅ DONE | 19 fields, ARGB Long, `@Serializable` |
+| 2 | Thread theme: `LocalAppTheme` → `drawLayout` → state objects | ✅ DONE | Every module state has `appTheme: AppTheme` |
+| 3 | Replace all hardcoded colors in all modules | ✅ DONE | `val t = state.appTheme` / `t.field` everywhere; `darken()` helper in EditorHelpers.kt |
+| 4 | Visualizer modes in OscilloscopeModule (BARS, PEAKS, MIRROR, FLAT, OCTA) | ✅ DONE | Dispatch on `t.visualizerType`; PEAKS uses instance-level peak state; OCTA uses per-track C++ waveform buffers |
+| 5 | Add VISUALIZER + THEME rows to SettingsModule (rows 9-10) | ✅ DONE | Rows 9=VISUALIZER, 10=THEME; cursor limit 0-10 in TrackerController |
+| 6 | `ThemeEditorState` + `ThemeEditorModule` full-screen overlay | ✅ DONE | 16 color rows + THEME/SAVE/LOAD row; same overlay pattern as EqModule |
+| 7 | Wire in AppInputDispatcher + AppStateRefs | ✅ DONE | `adjustThemeColor()`, `cycleNextBuiltinTheme()`, SAVE→QWERTY, LOAD→FileBrowser |
+| 8 | Theme file I/O using IFileSystem | ✅ DONE | `getThemesDirectory()` on IFileSystem; save: `fileSystem.writeFile(path, Json.encode(theme))`; load: FileBrowser → `LOAD_THEME` action decodes JSON |
+| 9 | Bundled themes | ✅ DONE | `AppTheme.BUILTINS = listOf(CLASSIC, AMBER, BLUE, MONO)` |
 
 ---
 
-## What This Delivers (Definition of Done)
+## Phase 4: Visualizer Modes — Spec
 
-- [ ] All module colors driven by `AppTheme`, no hardcoded color values remain
-- [ ] PROJECT → SYSTEM → A opens System Settings (full screen)
-- [ ] System Settings shows FONT (stub), VISUALIZER (functional), THEME (functional)
-- [ ] Cycling VISUALIZER changes the top bar in real-time (all 5 modes work)
-- [ ] THEME → A opens Theme Editor (full screen)
-- [ ] All 15 color parameters editable with live preview
-- [ ] SAVE writes a `.ptt` file; LOAD reads one back correctly
-- [ ] 4 bundled themes available via A+UP/DOWN on THEME row in System Settings
-- [ ] B pops overlays correctly at both levels
-- [ ] FONT row is visible, non-interactive, clearly labelled as post-MVP
+`OscilloscopeModule` dispatches on `appTheme.visualizerType`. All modes share the same background rect draw. SCOPE is the existing mode. PEAKS requires instance-level state (stored as module fields — the module instance lives inside `TrackerLayout` which is `remember`ed).
 
-## Out of Scope (Post-MVP, Separate Plan)
+### Layout constants
 
-- Multiple bitmap font designs / font style switching
+```
+width = 620, height = 70
+NUM_BARS = 40
+BAR_W = 14      // (620 - 39 gaps) / 40 = 14px, bars centered with 10px margin each side
+BAR_GAP = 1
+MAX_AMP = height/2 - 2   // = 33px, headroom for 1px center line + 1px edge
+PEAK_HOLD_FRAMES = 30
+PEAK_DECAY_PX = 1
+```
+
+### VIZ 1: SCOPE (existing)
+Center line + connected waveform path. Already implemented.
+
+### VIZ 2: BARS
+40 bars, symmetric around center. Each bar = average |sample| × WAVEFORM_GAIN over its chunk.
+
+```
+barAmp = avg(abs(chunk)) * WAVEFORM_GAIN  clamped 0..1
+barH   = (barAmp * MAX_AMP * 2).toInt()   // full height
+draw filled rect: centerY - barH/2 .. centerY + barH/2
+```
+
+Color = `vizWave`. No center line (bars cover it).
+
+### VIZ 3: PEAKS
+Same as BARS, plus:
+- Per-bar peak track: if `barAmp > peakValues[i]` → update + reset decay
+- Else: increment `peakDecayCounters[i]`; after PEAK_HOLD_FRAMES frames, `peakValues[i] -= PEAK_DECAY_PX / MAX_AMP` per frame
+- Draw 1px horizontal line at peak position above AND below center: `color = vizWave` (same color, slightly dimmed via `darken(0.5f)`)
+
+State stored as module instance fields (`private val peakValues = FloatArray(NUM_BARS)` etc.).
+
+### VIZ 4: MIRROR
+Top half: waveform mapped to y ∈ [y, centerY].
+Bottom half: same waveform reflected (sample negated), mapped to y ∈ [centerY, y+height].
+Both halves share a 1px center line. One `Path` per half.
+
+```
+topY    = centerY + sample * MAX_AMP   // normal
+bottomY = centerY - sample * MAX_AMP   // reflected
+```
+
+### VIZ 5: FLAT
+Background rect only (already drawn). Add a single 1px horizontal separator at `y + height - 1`.
+Color = `vizCenterLine`. No waveform computation.
+
+---
+
+## Architecture Notes (current state)
+
+### AppTheme flow
+
+```
+PocketTrackerApp
+  └─ CompositionLocalProvider(LocalAppTheme = appTheme)
+       └─ PixelPerfectTracker
+            └─ drawLayout(appTheme = appTheme)          ← TrackerLayout.drawLayout()
+                 ├─ OscilloscopeState(waveformBuffer, appTheme)
+                 ├─ PhraseEditorState(..., appTheme = appTheme)
+                 ├─ ... (all module states)
+                 └─ ThemeEditorDrawState(theme = appTheme, editorState = themeEditorState)
+```
+
+Every draw function: `val t = <state>.appTheme` → `Color(t.fieldName)`.
+
+### ThemeEditorModule input controls
+
+| Input | Effect |
+|---|---|
+| DPAD UP/DOWN | Move cursor row (wraps 0 ↔ MAX_ROW=16) |
+| DPAD LEFT/RIGHT | Move cursor channel (0=R, 1=G, 2=B; on row 0: 0=theme name, 1=SAVE, 2=LOAD) |
+| A + DPAD UP | Red/G/B component +0x10 (large step) — via `adjustThemeColor()` |
+| A + DPAD DOWN | − large step |
+| A + DPAD LEFT/RIGHT | ± fine step (0x01) |
+| A (on row 0, ch=0) | Cycle next builtin theme |
+| A (on row 0, ch=1) | Open QWERTY to name + SAVE .ptt |
+| A (on row 0, ch=2) | Open FileBrowser in Themes dir |
+| B | Close ThemeEditorState |
+
+### SettingsModule rows
+
+```
+Row 0:  LAYOUT      FULLSCREEN / T.PORT / T.LAND / AMIGA PORTRAIT
+Row 1:  SCALING     INT / BILINEAR
+Row 2:  BTN SOUND   ON / OFF
+Row 3:  BTN VOL     00-FF
+Row 4:  BTN VIBRO   ON / OFF
+Row 5:  VIBRO POW   00-FF
+Row 6:  KB INSERT   BEFORE / AFTER
+Row 7:  CURSOR      REMEMBER / REFRESH
+Row 8:  NOTE PREV   ON / OFF
+Row 9:  VISUALIZER  SCOPE / BARS / PEAKS / MIRROR / FLAT   ← A cycles
+Row 10: THEME       <name> >                                ← A opens ThemeEditorModule
+```
+
+Cursor limit: `settingsCursorRow ∈ 0..10` (TrackerController).
+
+### File I/O
+
+- **Save:** SAVE on ThemeEditorModule row 0 → QWERTY for filename → `QwertyContext.THEME_SAVE` → `fileSystem.writeFile("$themesDir/$name.ptt", Json.encode(theme))`
+- **Load:** LOAD on row 0 → FileBrowser filtered to `.ptt` → `instrumentFileBrowserAction = "LOAD_THEME"` → on confirm: `Json.decode<AppTheme>(fileSystem.readFile(path))` → `appTheme = loaded`
+- **Directory:** `IFileSystem.getThemesDirectory()` → `Documents/PocketTracker/Themes/`
+
+---
+
+## Definition of Done
+
+- [x] All module colors driven by AppTheme, no hardcoded colors
+- [x] SETTINGS → row 9 VISUALIZER cycles types
+- [x] SETTINGS → row 10 THEME opens ThemeEditorModule
+- [x] All 16 color parameters editable with live preview
+- [x] SAVE writes .ptt; LOAD reads one back correctly
+- [x] 4 bundled themes cycle via A on THEME row in Settings
+- [x] B closes ThemeEditorModule
+- [x] BARS visualizer mode
+- [x] PEAKS visualizer mode (with peak hold/decay)
+- [x] MIRROR visualizer mode
+- [x] FLAT visualizer mode
+- [x] OCTA visualizer mode (per-track ProTracker-style quadrascope; active tracks stretch to fill width)
+- [x] Visualizer switches immediately on A-press in Settings row 9
+
+## Out of Scope (Post-MVP)
+
+- Font switching (FONT row stub not added — skipped)
 - Per-track colors
-- Animated or beat-reactive visualizers
 - Theme inheritance or partial overrides
-- Font face loading from file

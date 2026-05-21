@@ -291,6 +291,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     float revSendBufL[MAX_BLOCK] = {}, revSendBufR[MAX_BLOCK] = {};
     float dlySendBufL[MAX_BLOCK] = {}, dlySendBufR[MAX_BLOCK] = {};
 
+    // Per-track waveform accumulators for OCTA visualizer
+    float trackWaveAccumL[8][MAX_BLOCK] = {};
+    float trackWaveAccumR[8][MAX_BLOCK] = {};
+    bool  trackWasActive[8] = {};
+
     for (int32_t frame = 0; frame < numFrames; frame++) {
         int64_t currentFrame = globalFrameCounter + frame;
 
@@ -1149,6 +1154,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             if (!voice.isFadingOut && voice.trackId >= 0 && voice.trackId < 8) {
                 framePeaksPerTrackL[voice.trackId] = fmaxf(framePeaksPerTrackL[voice.trackId], fabsf(sampleL));
                 framePeaksPerTrackR[voice.trackId] = fmaxf(framePeaksPerTrackR[voice.trackId], fabsf(sampleR));
+                trackWasActive[voice.trackId] = true;
+            }
+            if (voice.trackId >= 0 && voice.trackId < 8) {
+                trackWaveAccumL[voice.trackId][i] += sampleL;
+                trackWaveAccumR[voice.trackId][i] += sampleR;
             }
 
             if (!voice.isActive) break;
@@ -1290,13 +1300,18 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
 
             float trackPeakL = 0.0f, trackPeakR = 0.0f;
+            trackWasActive[t] = true;
             for (int i = 0; i < numFrames; i++) {
                 float sL = sfBuf[i * 2];
                 float sR = sfBuf[i * 2 + 1];
                 trackPeakL = fmaxf(trackPeakL, fabsf(sL));
                 trackPeakR = fmaxf(trackPeakR, fabsf(sR));
-                output[i * 2]     += sL * masterVol;
-                output[i * 2 + 1] += sR * masterVol;
+                float outL = sL * masterVol;
+                float outR = sR * masterVol;
+                output[i * 2]     += outL;
+                output[i * 2 + 1] += outR;
+                trackWaveAccumL[t][i] += outL;
+                trackWaveAccumR[t][i] += outR;
             }
             float trackPeak = fmaxf(trackPeakL, trackPeakR);
             framePeaksPerTrackL[t] = fmaxf(framePeaksPerTrackL[t], trackPeakL);
@@ -1316,6 +1331,19 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 }
                 if (!adsrReleasing) sv.hardStop();
             }
+        }
+    }
+
+    // Per-track waveform capture for OCTA visualizer
+    {
+        std::lock_guard<std::mutex> lock(waveformMutex);
+        for (int t = 0; t < 8; t++) trackHasVoice[t] = trackWasActive[t];
+        for (int i = 0; i < numFrames; i++) {
+            for (int t = 0; t < 8; t++) {
+                trackWaveformBuffer[t][trackWaveformIndex] =
+                    (trackWaveAccumL[t][i] + trackWaveAccumR[t][i]) * 0.5f;
+            }
+            trackWaveformIndex = (trackWaveformIndex + 1) % WAVEFORM_SIZE;
         }
     }
 
@@ -1715,6 +1743,23 @@ void AudioEngine::decayWaveform() {
     for (int i = 0; i < WAVEFORM_SIZE; i++) {
         waveformBuffer[i] *= WAVEFORM_DECAY;
         if (fabsf(waveformBuffer[i]) < 0.001f) waveformBuffer[i] = 0.0f;
+    }
+    for (int t = 0; t < 8; t++) {
+        for (int i = 0; i < WAVEFORM_SIZE; i++) {
+            trackWaveformBuffer[t][i] *= WAVEFORM_DECAY;
+            if (fabsf(trackWaveformBuffer[t][i]) < 0.001f) trackWaveformBuffer[t][i] = 0.0f;
+        }
+    }
+}
+
+void AudioEngine::getTrackWaveforms(float* outBuffer, bool* activeFlags) {
+    std::lock_guard<std::mutex> lock(waveformMutex);
+    for (int t = 0; t < 8; t++) {
+        activeFlags[t] = trackHasVoice[t];
+        for (int i = 0; i < WAVEFORM_SIZE; i++) {
+            int readIdx = (trackWaveformIndex + i) % WAVEFORM_SIZE;
+            outBuffer[t * WAVEFORM_SIZE + i] = trackWaveformBuffer[t][readIdx];
+        }
     }
 }
 
