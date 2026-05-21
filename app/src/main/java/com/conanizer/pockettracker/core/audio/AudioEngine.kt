@@ -30,6 +30,12 @@ class AudioEngine(
     private val activeTrackFlags = BooleanArray(8)
     val trackWaveformBuffers: Array<FloatArray> = Array(8) { FloatArray(620) }
 
+    // Bitmask of tracks that had notes scheduled in the current phrase.
+    // Set per-track when a note is scheduled; cleared on clearScheduledNotes().
+    // Used by OCTA visualizer so the layout stays stable for the full phrase duration.
+    var phraseTrackMask: Int = 0
+        private set
+
     // Sample metadata (base frequencies and sample rate compensation ratios)
     private val sampleBaseFrequencies = mutableMapOf<Int, Float>()
     private val sampleRateRatios = mutableMapOf<Int, Float>()
@@ -461,6 +467,7 @@ class AudioEngine(
     fun stopAll() {
         backend.stopAll()
         waveformBuffer.fill(0f)
+        phraseTrackMask = 0
     }
 
     fun killTrack(trackId: Int) {
@@ -492,6 +499,7 @@ class AudioEngine(
         tableStartRow: Int = -1
     ) {
         if (note == Note.EMPTY) return
+        if (trackId in 0..7) phraseTrackMask = phraseTrackMask or (1 shl trackId)
 
         val instrument = if (instrumentId in 0..255) {
             project.instruments[instrumentId]
@@ -626,6 +634,7 @@ class AudioEngine(
 
     fun clearScheduledNotes() {
         backend.clearScheduledNotes()
+        phraseTrackMask = 0
     }
 
     fun clearScheduledNotesFrom(fromFrame: Long) {
@@ -880,6 +889,7 @@ class AudioEngine(
         tableStartRow: Int = -1
     ) {
         if (note == Note.EMPTY) return
+        if (trackId in 0..7) phraseTrackMask = phraseTrackMask or (1 shl trackId)
 
         val instrument = if (instrumentId in 0..255) {
             project.instruments[instrumentId]

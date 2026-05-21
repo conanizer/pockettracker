@@ -476,7 +476,7 @@ class TrackerLayout {
                     waveformBuffer = audioEngine.waveformBuffer,
                     appTheme = appTheme,
                     trackWaveforms = if (isOcta) audioEngine.trackWaveformBuffers else null,
-                    activeTrackMask = if (isOcta) audioEngine.getActiveTrackMask() else 0
+                    activeTrackMask = if (isOcta) audioEngine.phraseTrackMask else 0
                 )
             )
         }

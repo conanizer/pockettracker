@@ -30,6 +30,14 @@ class OscilloscopeModule(
         const val BAR_START_OFFSET = 10
 
         const val PEAK_HOLD_FRAMES = 30
+
+        // BARS/PEAKS: LED-style segment height and gap (in pixels)
+        const val SEGMENT_H = 2
+        const val SEG_GAP   = 1
+        const val SEG_STEP  = SEGMENT_H + SEG_GAP  // 3px per LED cell
+
+        // OCTA: gap between track scopes (in pixels)
+        const val OCTA_TRACK_GAP = 3
     }
 
     // PEAKS mode state — persists between frames (module instance lives in TrackerLayout)
@@ -85,8 +93,8 @@ class OscilloscopeModule(
         t: AppTheme,
         peakMode: Boolean
     ) {
-        val centerY = y + height / 2f
-        val maxAmp = (height / 2 - 2).toFloat()
+        val barBottom = y + height - 2           // 2px margin at bottom
+        val maxAmp = (height - 4).toFloat()      // full usable height (2px top + 2px bottom margin)
         val samplesPerBar = waveformData.size.toFloat() / NUM_BARS
 
         for (i in 0 until NUM_BARS) {
@@ -99,13 +107,20 @@ class OscilloscopeModule(
             for (s in startSample until endSample) sum += kotlin.math.abs(waveformData[s])
             val barAmp = ((sum / (endSample - startSample).coerceAtLeast(1)) * WAVEFORM_GAIN).coerceIn(0f, 1f)
 
-            val barHalfH = (barAmp * maxAmp).toInt().coerceAtLeast(1)
+            val barH = (barAmp * maxAmp).toInt()
 
-            drawRect(
-                color = Color(t.vizWave),
-                topLeft = Offset((barX * scale).toFloat(), ((centerY - barHalfH) * scale).toFloat()),
-                size = Size((BAR_W * scale).toFloat(), (barHalfH * 2 * scale).toFloat())
-            )
+            // Draw LED-style segments from bottom up
+            val barColor = Color(t.vizWave)
+            var dy = 0
+            while (dy + SEGMENT_H <= barH) {
+                val segTop = barBottom - dy - SEGMENT_H + 1
+                drawRect(
+                    color = barColor,
+                    topLeft = Offset((barX * scale).toFloat(), (segTop * scale).toFloat()),
+                    size = Size((BAR_W * scale).toFloat(), (SEGMENT_H * scale).toFloat())
+                )
+                dy += SEG_STEP
+            }
 
             if (peakMode) {
                 if (barAmp > peakValues[i]) {
@@ -114,24 +129,19 @@ class OscilloscopeModule(
                 } else {
                     peakDecayCounters[i]++
                     if (peakDecayCounters[i] > PEAK_HOLD_FRAMES) {
-                        peakValues[i] = (peakValues[i] - 1f / maxAmp).coerceAtLeast(0f)
+                        peakValues[i] = (peakValues[i] - SEG_STEP.toFloat() / maxAmp).coerceAtLeast(0f)
                     }
                 }
 
-                val peakHalfH = (peakValues[i] * maxAmp).toInt()
-                if (peakHalfH > barHalfH) {
-                    val peakColor = Color(t.vizWave.darken(0.55f))
-                    // Top peak line
+                val peakH = (peakValues[i] * maxAmp).toInt()
+                // Snap peak to nearest segment boundary
+                val peakDy = (peakH / SEG_STEP) * SEG_STEP
+                if (peakDy > barH) {
+                    val peakTop = barBottom - peakDy - SEGMENT_H + 1
                     drawRect(
-                        color = peakColor,
-                        topLeft = Offset((barX * scale).toFloat(), ((centerY - peakHalfH - 1) * scale).toFloat()),
-                        size = Size((BAR_W * scale).toFloat(), scale.toFloat())
-                    )
-                    // Bottom peak line (mirrored)
-                    drawRect(
-                        color = peakColor,
-                        topLeft = Offset((barX * scale).toFloat(), ((centerY + peakHalfH) * scale).toFloat()),
-                        size = Size((BAR_W * scale).toFloat(), scale.toFloat())
+                        color = Color(t.vizWave.darken(0.55f)),
+                        topLeft = Offset((barX * scale).toFloat(), (peakTop * scale).toFloat()),
+                        size = Size((BAR_W * scale).toFloat(), (SEGMENT_H * scale).toFloat())
                     )
                 }
             }
@@ -186,42 +196,48 @@ class OscilloscopeModule(
         t: AppTheme
     ) {
         val centerY = y + height / 2
-        val maxAmplitude = (height / 2) - 8
+        val maxAmplitude = (height / 2) - 4
 
-        drawLine(
-            color = Color(t.vizCenterLine),
-            start = Offset((x * scale).toFloat(), (centerY * scale).toFloat()),
-            end = Offset(((x + width) * scale).toFloat(), (centerY * scale).toFloat()),
-            strokeWidth = scale.toFloat()
-        )
-
-        if (trackWaveforms == null) return
+        if (trackWaveforms == null || activeTrackMask == 0) {
+            // Nothing scheduled — draw center line only
+            drawLine(
+                color = Color(t.vizCenterLine),
+                start = Offset((x * scale).toFloat(), (centerY * scale).toFloat()),
+                end = Offset(((x + width) * scale).toFloat(), (centerY * scale).toFloat()),
+                strokeWidth = scale.toFloat()
+            )
+            return
+        }
 
         val activeTracks = (0 until 8).filter { (activeTrackMask shr it) and 1 == 1 }
-        val count = activeTracks.size.coerceAtLeast(1)
-        val trackWidth = width / count
+        val count = activeTracks.size
+        // Each track scope gets an equal share of the width, minus gaps between them
+        val totalGap = OCTA_TRACK_GAP * (count - 1)
+        val trackW = (width - totalGap) / count
+        val waveColor = Color(t.vizWave)
+        val centerColor = Color(t.vizCenterLine)
 
         activeTracks.forEachIndexed { idx, trackId ->
-            val startX = x + idx * trackWidth
+            val scopeX = x + idx * (trackW + OCTA_TRACK_GAP)
             val waveData = trackWaveforms[trackId]
-            val path = Path()
-            for (i in 0 until trackWidth) {
-                val waveIdx = (i.toLong() * waveData.size / trackWidth).toInt().coerceIn(0, waveData.size - 1)
-                val sample = (waveData[waveIdx] * WAVEFORM_GAIN).coerceIn(-1f, 1f)
-                val px = ((startX + i) * scale).toFloat()
-                val py = ((centerY + sample * maxAmplitude) * scale).toFloat()
-                if (i == 0) path.moveTo(px, py) else path.lineTo(px, py)
-            }
-            drawPath(path = path, color = Color(t.vizWave), style = Stroke(width = scale.toFloat()))
 
-            // Divider line between tracks (skip after last track)
-            if (idx < activeTracks.size - 1) {
-                val divX = startX + trackWidth
-                drawLine(
-                    color = Color(t.vizCenterLine),
-                    start = Offset((divX * scale).toFloat(), (y * scale).toFloat()),
-                    end = Offset((divX * scale).toFloat(), ((y + height) * scale).toFloat()),
-                    strokeWidth = scale.toFloat()
+            // Center line for this scope
+            drawLine(
+                color = centerColor,
+                start = Offset((scopeX * scale).toFloat(), (centerY * scale).toFloat()),
+                end = Offset(((scopeX + trackW) * scale).toFloat(), (centerY * scale).toFloat()),
+                strokeWidth = scale.toFloat()
+            )
+
+            // ProTracker-style: individual pixel dots, no interpolation between samples
+            for (i in 0 until trackW) {
+                val waveIdx = (i.toLong() * waveData.size / trackW).toInt().coerceIn(0, waveData.size - 1)
+                val sample = (waveData[waveIdx] * WAVEFORM_GAIN).coerceIn(-1f, 1f)
+                val dotY = centerY + (sample * maxAmplitude).toInt()
+                drawRect(
+                    color = waveColor,
+                    topLeft = Offset(((scopeX + i) * scale).toFloat(), (dotY * scale).toFloat()),
+                    size = Size(scale.toFloat(), scale.toFloat())
                 )
             }
         }
