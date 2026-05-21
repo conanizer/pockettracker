@@ -1712,10 +1712,28 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
 
         when (trackerController.currentScreen) {
             ScreenType.FILE_BROWSER -> {
-                if (previousScreen == ScreenType.INSTRUMENT && fileBrowserState.items.isNotEmpty()) {
+                if (fileBrowserState.items.isNotEmpty()) {
                     val selectedFile = fileBrowserState.items[fileBrowserState.cursor].file
-                    if (selectedFile.isFile && selectedFile.extension.lowercase() == "wav")
-                        trackerController.previewSampleFile(selectedFile.absolutePath)
+                    if (selectedFile.isFile) {
+                        val ext = selectedFile.extension.lowercase()
+                        if (ext == "wav" && previousScreen == ScreenType.INSTRUMENT) {
+                            trackerController.previewSampleFile(selectedFile.absolutePath)
+                        } else if (videoExtractor.isSupportedVideo(selectedFile.absolutePath)) {
+                            fileBrowserState = fileBrowserState.copy(statusMessage = "EXTRACTING PREVIEW...", statusSuccess = true)
+                            coroutineScope.launch(Dispatchers.Default) {
+                                val result = videoExtractor.extractAudio(selectedFile.absolutePath, maxDurationSec = 30)
+                                withContext(Dispatchers.Main) {
+                                    if (result.isSuccess) {
+                                        val audio = result.getOrThrow()
+                                        audioEngine.previewSampleData(audio.samples, audio.sampleRate)
+                                        fileBrowserState = fileBrowserState.copy(statusMessage = "", statusSuccess = true)
+                                    } else {
+                                        fileBrowserState = fileBrowserState.copy(statusMessage = "PREVIEW FAILED", statusSuccess = false)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             ScreenType.SAMPLE_EDITOR -> {

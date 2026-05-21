@@ -240,6 +240,28 @@ class AudioEngine(
         }
     }
 
+    fun previewSampleData(samples: FloatArray, sampleRate: Int): Boolean {
+        return try {
+            backend.stopAll()
+            backend.loadSample(255, samples)
+            backend.resumeStream()
+            val adjustedBaseFreq = 261.63f * (getDeviceSampleRate().toFloat() / sampleRate.toFloat())
+            backend.scheduleNote(
+                frame = backend.getCurrentFrame() + 100,
+                sampleId = 255,
+                trackId = 0,
+                freq = 261.63f,
+                baseFreq = adjustedBaseFreq,
+                vol = 1.0f,
+                pan = 0.5f
+            )
+            true
+        } catch (e: Exception) {
+            logger.e(TAG, "❌ Error previewing sample data: ${e.message}")
+            false
+        }
+    }
+
     fun previewInstrument(
         instrument: Instrument,
         project: Project? = null,
