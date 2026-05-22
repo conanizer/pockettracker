@@ -75,6 +75,25 @@ class MixerModule : TrackerModule {
     private val MSTR_LABEL_X = MASTER_X - 65
     private val MSTR_VALUE_X = MASTER_X + 5
 
+    // LED-style segment dimensions — larger than the visualizer's 2px so they aren't tiny
+    private val SEG_H    = 4
+    private val SEG_GAP  = 1
+    private val SEG_STEP = SEG_H + SEG_GAP  // 5px per LED cell
+
+    private val PEAK_HOLD_FRAMES = 45
+
+    // Color zone thresholds as fraction of meter height from bottom.
+    // Meter range: -42 dB to +6 dB = 48 dB total.
+    //   -12 dB → 30/48 of range from bottom (LOW / MID boundary)
+    //     0 dB → 42/48 of range from bottom (MID / HIGH boundary)
+    private val LOW_TO_MID_FRAC  = 30f / 48f
+    private val MID_TO_HIGH_FRAC = 42f / 48f
+
+    // Peak hold state per channel (heights in unscaled pixels).
+    // Indices: 0..15 = track L/R (i*2, i*2+1), 16..17 = master L/R,
+    //          18..19 = reverb L/R, 20..21 = delay L/R.
+    private val peakHoldPx   = FloatArray(22)
+    private val peakCounters = IntArray(22)
 
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val s = state as? MixerState ?: return
@@ -97,7 +116,8 @@ class MixerModule : TrackerModule {
             val peakR = s.trackPeaks.getOrElse(i * 2 + 1) { 0f }
 
             drawStereoMeter(mX, y + TRACK_METER_TOP, TRACK_METER_H,
-                peakL, peakR, scale, isSel, s.project.tracks[i].mute, t)
+                peakL, peakR, scale, isSel, s.project.tracks[i].mute, t,
+                i * 2, i * 2 + 1)
 
             drawBitmapText(s.project.tracks[i].volume.toHex2(),
                 mX + 5, y + TRACK_VOL_Y, scale,
@@ -110,7 +130,7 @@ class MixerModule : TrackerModule {
             x + MASTER_X, y + TRACK_METER_TOP, MASTER_METER_H,
             s.masterPeaks.getOrElse(0) { 0f },
             s.masterPeaks.getOrElse(1) { 0f },
-            scale, masterSel, false, t)
+            scale, masterSel, false, t, 16, 17)
 
         // ── Send return meters: REV left, DEL right ────────────────────────
         val revSendSel = s.mixerMasterRow == 1 && s.cursorColumn == 0
@@ -118,11 +138,11 @@ class MixerModule : TrackerModule {
         drawStereoMeter(
             x + FIRST_METER_X, y + SEND_METER_TOP, SEND_METER_H,
             s.reverbPeaks.getOrElse(0) { 0f }, s.reverbPeaks.getOrElse(1) { 0f },
-            scale, revSendSel, false, t)
+            scale, revSendSel, false, t, 18, 19)
         drawStereoMeter(
             x + FIRST_METER_X + METER_SPACING, y + SEND_METER_TOP, SEND_METER_H,
             s.delayPeaks.getOrElse(0) { 0f }, s.delayPeaks.getOrElse(1) { 0f },
-            scale, delSendSel, false, t)
+            scale, delSendSel, false, t, 20, 21)
 
         // Send channel labels below meters
         val charW = 5 * FONT_SCALE + CHAR_SPACING
@@ -175,8 +195,8 @@ class MixerModule : TrackerModule {
     }
 
     /**
-     * Draws a stereo pair (L bar | separator | R bar) with a single outer border.
-     * Border color: theme cursor color when selected, grey otherwise.
+     * Draws a stereo pair (L bar | separator | R bar) with segmented LED-style bars,
+     * fixed zone colors, and a floating peak-hold marker per channel.
      */
     private fun DrawScope.drawStereoMeter(
         x: Int, y: Int, h: Int,
@@ -184,7 +204,9 @@ class MixerModule : TrackerModule {
         scale: Int,
         isSelected: Boolean,
         isMuted: Boolean,
-        t: AppTheme
+        t: AppTheme,
+        peakIdxL: Int,
+        peakIdxR: Int
     ) {
         val borderColor = if (isSelected) Color(t.textCursor) else Color(t.meterBorder)
         val rX = x + BAR_W + BAR_SEP
@@ -203,41 +225,90 @@ class MixerModule : TrackerModule {
             topLeft = Offset((rX * scale).toFloat(), (y * scale).toFloat()),
             size    = Size((BAR_W * scale).toFloat(), (h * scale).toFloat()))
 
-        if (!isMuted) {
-            val lh = levelToHeight(levelL, h, scale)
-            if (lh > 0f) drawRect(levelToColor(levelL, t),
-                topLeft = Offset((x * scale).toFloat(), (y + h) * scale - lh),
-                size    = Size((BAR_W * scale).toFloat(), lh))
+        val lhPx = levelToHeightPx(levelL, h)
+        val rhPx = levelToHeightPx(levelR, h)
 
-            val rh = levelToHeight(levelR, h, scale)
-            if (rh > 0f) drawRect(levelToColor(levelR, t),
-                topLeft = Offset((rX * scale).toFloat(), (y + h) * scale - rh),
-                size    = Size((BAR_W * scale).toFloat(), rh))
+        updatePeak(peakIdxL, lhPx, isMuted)
+        updatePeak(peakIdxR, rhPx, isMuted)
+
+        if (!isMuted) {
+            drawSegmentedBar(x,  y, h, lhPx, scale, t)
+            drawSegmentedBar(rX, y, h, rhPx, scale, t)
         }
 
-        // Segment gap lines (16 segments)
-        val segs = 16
-        val segH = (h * scale).toFloat() / segs
-        for (i in 1 until segs) {
-            val segY = y * scale + i * segH
-            drawRect(Color(t.meterBackground), Offset((x  * scale).toFloat(), segY), Size((BAR_W * scale).toFloat(), scale.toFloat()))
-            drawRect(Color(t.meterBackground), Offset((rX * scale).toFloat(), segY), Size((BAR_W * scale).toFloat(), scale.toFloat()))
+        // Peak markers drawn after bars so they appear on top of the background
+        drawPeakMarker(x,  y, h, peakIdxL, scale, t)
+        drawPeakMarker(rX, y, h, peakIdxR, scale, t)
+    }
+
+    private fun DrawScope.drawSegmentedBar(
+        x: Int, y: Int, h: Int,
+        barHpx: Int,
+        scale: Int,
+        t: AppTheme
+    ) {
+        val barBottom = y + h
+        var dy = 0
+        while (dy + SEG_H <= barHpx) {
+            val segTop = barBottom - dy - SEG_H
+            drawRect(
+                color   = segmentColor(dy, h, t),
+                topLeft = Offset((x * scale).toFloat(), (segTop * scale).toFloat()),
+                size    = Size((BAR_W * scale).toFloat(), (SEG_H * scale).toFloat())
+            )
+            dy += SEG_STEP
         }
     }
 
-    private fun levelToHeight(level: Float, meterH: Int, scale: Int): Float {
+    private fun updatePeak(idx: Int, levelPx: Int, isMuted: Boolean) {
+        val px = if (isMuted) 0 else levelPx
+        if (px > peakHoldPx[idx]) {
+            peakHoldPx[idx] = px.toFloat()
+            peakCounters[idx] = 0
+        } else {
+            peakCounters[idx]++
+            if (peakCounters[idx] > PEAK_HOLD_FRAMES) {
+                peakHoldPx[idx] = (peakHoldPx[idx] - SEG_STEP).coerceAtLeast(0f)
+            }
+        }
+    }
+
+    private fun DrawScope.drawPeakMarker(
+        x: Int, y: Int, h: Int,
+        peakIdx: Int,
+        scale: Int,
+        t: AppTheme
+    ) {
+        val peakPx = peakHoldPx[peakIdx]
+        if (peakPx <= 0f) return
+
+        // Snap to nearest segment boundary so peak always aligns with LED grid
+        val peakDy = (peakPx.toInt() / SEG_STEP) * SEG_STEP
+        val peakTop = y + h - peakDy - SEG_H
+        if (peakTop < y) return  // clamp: never draw above meter bounds
+
+        drawRect(
+            color   = segmentColor(peakDy, h, t),
+            topLeft = Offset((x * scale).toFloat(), (peakTop * scale).toFloat()),
+            size    = Size((BAR_W * scale).toFloat(), (SEG_H * scale).toFloat())
+        )
+    }
+
+    // Color based on segment position in the meter, not on current signal level.
+    // Zones are fixed: low (green) → mid (yellow, from -12 dB) → high (red, from 0 dB).
+    private fun segmentColor(dyFromBottom: Int, totalH: Int, t: AppTheme): Color {
+        val frac = dyFromBottom.toFloat() / totalH
+        return when {
+            frac >= MID_TO_HIGH_FRAC -> Color(t.meterHigh)
+            frac >= LOW_TO_MID_FRAC  -> Color(t.meterMid)
+            else                      -> Color(t.meterLow)
+        }
+    }
+
+    private fun levelToHeightPx(level: Float, meterH: Int): Int {
         val db  = 20f * kotlin.math.log10(level.coerceAtLeast(0.00001f))
         val pos = (db.coerceIn(-42f, 6f) + 42f) / 48f
-        return meterH * scale * pos
-    }
-
-    private fun levelToColor(level: Float, t: AppTheme): Color {
-        val db = 20f * kotlin.math.log10(level.coerceAtLeast(0.00001f))
-        return when {
-            db >= 0f  -> Color(t.meterHigh)
-            db >= -6f -> Color(t.meterMid)
-            else      -> Color(t.meterLow)
-        }
+        return (meterH * pos).toInt()
     }
 
     fun getCursorContext(state: MixerState): CursorContext {
