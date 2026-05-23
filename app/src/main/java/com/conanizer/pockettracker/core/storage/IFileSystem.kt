@@ -157,6 +157,13 @@ interface IFileSystem {
      * @return true if successful
      */
     fun writeBytes(path: String, data: ByteArray): Boolean
+
+    /**
+     * Get the path for the default template project file.
+     * Stored in app-private storage (not in Documents), so it does not appear in the file browser.
+     * @return Absolute path to the template .ptp file
+     */
+    fun getTemplateProjectPath(): String
 }
 
 /**

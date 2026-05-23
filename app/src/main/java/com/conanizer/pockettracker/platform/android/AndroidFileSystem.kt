@@ -394,6 +394,14 @@ class AndroidFileSystem(
     }
 
     /**
+     * Get the template project path.
+     * Stored in app-private internal storage (not exposed to the file browser).
+     */
+    override fun getTemplateProjectPath(): String {
+        return File(context.filesDir, "template.ptp").absolutePath
+    }
+
+    /**
      * Write binary data to file (overwrites if exists).
      */
     override fun writeBytes(path: String, data: ByteArray): Boolean {

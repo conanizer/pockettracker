@@ -162,6 +162,54 @@ class SettingsModule : TrackerModule {
             "THEME", "${s.currentThemeName} >",
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
             isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
+        rowY += ROW_HEIGHT; currentRow++
+
+        // ── ROW 11: SONG TEMPLATE ─────────────────────────────────────
+        drawTemplateRow(x, rowY, scale, nameColumnX, valueColumnX, s, currentRow)
+    }
+
+    private fun DrawScope.drawTemplateRow(
+        x: Int, y: Int, scale: Int,
+        nameColumnX: Int, valueColumnX: Int,
+        s: SettingsState, currentRow: Int
+    ) {
+        val t = s.appTheme
+        val textY = y + TEXT_PADDING
+        val isCursorOnThisRow = s.cursorRow == currentRow
+
+        if (isCursorOnThisRow) {
+            drawRect(
+                color = Color(t.rowCursor),
+                topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
+                size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
+            )
+        }
+
+        drawBitmapText(
+            text = "TEMPLATE",
+            x = nameColumnX,
+            y = textY,
+            scale = scale,
+            color = if (isCursorOnThisRow) Color(t.textCursor) else Color(t.textParam),
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        val options = listOf("SAVE", "CLEAR")
+        var optionX = valueColumnX
+        for (optionIndex in options.indices) {
+            val isCursorOnThis = isCursorOnThisRow && s.cursorColumn == optionIndex + 1
+            drawBitmapText(
+                text = options[optionIndex],
+                x = optionX,
+                y = textY,
+                scale = scale,
+                color = if (isCursorOnThis) Color(t.textCursor) else Color(t.textValue),
+                spacing = CHAR_SPACING,
+                fontScale = FONT_SCALE
+            )
+            optionX += 80
+        }
     }
 
     private fun DrawScope.drawParameterRow(
@@ -274,6 +322,7 @@ class SettingsModule : TrackerModule {
                 smallStep = 1, largeStep = 1, emptyValue = -1
             )
             10 -> CursorContextFactory.readOnly()  // THEME: A opens editor
+            11 -> CursorContextFactory.readOnly()  // TEMPLATE: A triggers save/clear
             else -> CursorContextFactory.none()
         }
     }

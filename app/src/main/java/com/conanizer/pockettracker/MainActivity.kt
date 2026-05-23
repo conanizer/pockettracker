@@ -299,6 +299,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         )
     }
 
+    // Load saved template project on startup (data only; samples loaded after audio is ready below)
+    val templateLoaded = remember {
+        val result = fileController.loadTemplate()
+        if (result is FileController.LoadResult.Success) {
+            trackerController.project = result.project
+            true
+        } else false
+    }
+
     // Sync mixer volumes to audio backend once the stream is open.
     // (setTrackVolume/setMasterVolume are no-ops if native engine is null, so this must
     // run after audioReady — i.e., after LaunchedEffect(Unit) above finishes create().)
@@ -716,6 +725,13 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val dispatcher = remember { AppInputDispatcher(appCtrl, appState) }
 
     val buttonHandlers = remember { dispatcher.createButtonHandlers() }
+
+    // Load template samples after audio engine is ready
+    LaunchedEffect(audioReady) {
+        if (!audioReady || !templateLoaded) return@LaunchedEffect
+        dispatcher.reloadProjectSamples()
+        dispatcher.syncVolumesToAudioBackend()
+    }
 
     val inputMapper = remember(buttonHandlers) {
         InputMapper(buttonHandlers)

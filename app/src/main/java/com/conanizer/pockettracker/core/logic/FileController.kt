@@ -125,6 +125,51 @@ class FileController(
     fun deleteFileOrFolder(path: String): Boolean = fileSystem.deleteFileOrFolder(path)
 
     // ========================================
+    // TEMPLATE PROJECT OPERATIONS
+    // ========================================
+
+    fun hasTemplate(): Boolean = fileSystem.fileExists(fileSystem.getTemplateProjectPath())
+
+    fun saveTemplate(project: Project): Boolean {
+        return try {
+            val path = fileSystem.getTemplateProjectPath()
+            val jsonString = json.encodeToString(project)
+            val success = fileSystem.writeFile(path, jsonString)
+            if (success) logger.d(TAG, "✅ Template saved: $path")
+            success
+        } catch (e: Exception) {
+            logger.e(TAG, "❌ Template save error: ${e.message}")
+            false
+        }
+    }
+
+    fun loadTemplate(): LoadResult {
+        return try {
+            val path = fileSystem.getTemplateProjectPath()
+            if (!fileSystem.fileExists(path)) return LoadResult.Error("No template")
+            val jsonString = fileSystem.readFile(path)
+            val project = json.decodeFromString<Project>(jsonString)
+            migrateProject(project)
+            logger.d(TAG, "✅ Template loaded")
+            LoadResult.Success(project)
+        } catch (e: Exception) {
+            logger.e(TAG, "❌ Template load error: ${e.message}")
+            LoadResult.Error(e.message ?: "Unknown error")
+        }
+    }
+
+    fun clearTemplate(): Boolean {
+        val path = fileSystem.getTemplateProjectPath()
+        return if (fileSystem.fileExists(path)) {
+            val deleted = fileSystem.deleteFile(path)
+            if (deleted) logger.d(TAG, "✅ Template cleared")
+            deleted
+        } else {
+            true
+        }
+    }
+
+    // ========================================
     // INSTRUMENT PRESET (.pti) OPERATIONS
     // ========================================
 

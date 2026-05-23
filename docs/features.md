@@ -93,6 +93,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 - Projects saved as .ptp files in /Documents/PocketTracker/Projects/
 - Instruments saved as .pti files in /Documents/PocketTracker/Instruments/
 - Samples stored wherever you put them; paths stored in the project
+- File move — move files and folders to a different location from within the browser
 
 ### Look & Feel
 
@@ -115,9 +116,8 @@ Record what's currently playing in the sequencer into a new sample — capture a
 These are not yet in the app but are targeted for v1.0:
 
 - **Per-track WAV export** — export each track as its own separate stereo WAV file instead of only a full mix
-- **File move** — move files and folders to a different location from within the browser
 - **Limiter settings on the mixer screen** — expose threshold, ceiling, or similar limiter parameters where it's easy to reach during a session
-- **Default project template** — load the app with a usable starting state (some instruments, a tempo) instead of a blank project
+- ~~**Default project template**~~ ✅ — SETTINGS > TEMPLATE: press SAVE to make the current song the default that opens on launch, CLEAR to reset to blank
 
 ---
 

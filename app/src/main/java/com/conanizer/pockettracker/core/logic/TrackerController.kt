@@ -653,7 +653,7 @@ class TrackerController(
                 projectCursorColumn = 1  // Reset to first value column
             }
             ScreenType.SETTINGS -> {
-                settingsCursorRow = if (settingsCursorRow > 0) settingsCursorRow - 1 else 10
+                settingsCursorRow = if (settingsCursorRow > 0) settingsCursorRow - 1 else 11
                 settingsCursorColumn = 1
             }
             ScreenType.INSTRUMENT -> {
@@ -733,7 +733,7 @@ class TrackerController(
                 projectCursorColumn = 1
             }
             ScreenType.SETTINGS -> {
-                settingsCursorRow = if (settingsCursorRow < 10) settingsCursorRow + 1 else 0
+                settingsCursorRow = if (settingsCursorRow < 11) settingsCursorRow + 1 else 0
                 settingsCursorColumn = 1
             }
             ScreenType.INSTRUMENT -> {
@@ -855,7 +855,7 @@ class TrackerController(
                 projectCursorColumn = getProjectCursorRightColumn(projectCursorRow, projectCursorColumn)
             }
             ScreenType.SETTINGS -> {
-                settingsCursorColumn = 1
+                settingsCursorColumn = if (settingsCursorRow == 11) 2 else 1
             }
             ScreenType.INSTRUMENT -> {
                 val maxColumn = getInstrumentCursorRightColumn(instrumentCursorRow, instrumentCursorColumn)

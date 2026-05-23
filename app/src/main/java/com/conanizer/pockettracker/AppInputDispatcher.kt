@@ -1118,6 +1118,20 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     10 -> {
                         themeEditorState = ThemeEditorState(isOpen = true)
                     }
+                    11 -> {
+                        when (trackerController.settingsCursorColumn) {
+                            1 -> {
+                                val saved = fileController.saveTemplate(trackerController.project)
+                                trackerController.statusMessage = if (saved) "TEMPLATE SAVED" else "SAVE FAILED"
+                                trackerController.statusSuccess = saved
+                            }
+                            2 -> {
+                                fileController.clearTemplate()
+                                trackerController.statusMessage = "TEMPLATE CLEARED"
+                                trackerController.statusSuccess = true
+                            }
+                        }
+                    }
                 }
             }
 
