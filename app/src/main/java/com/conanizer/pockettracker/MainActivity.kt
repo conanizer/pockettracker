@@ -194,10 +194,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     }
                     context.startActivity(intent)
                 } catch (e: Exception) {
-                    // Fallback for devices that don't support the app-specific intent
                     Log.w("Permissions", "App-specific intent failed, trying general intent: ${e.message}")
-                    val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-                    context.startActivity(intent)
+                    try {
+                        val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                        context.startActivity(intent)
+                    } catch (e2: Exception) {
+                        // Some custom ROMs (e.g. /e/OS) may not expose this settings page at all.
+                        // The user will see the "NO STORAGE PERMISSION" message in the file browser instead.
+                        Log.e("Permissions", "All Files Access settings unavailable: ${e2.message}")
+                    }
                 }
             } else {
                 Log.d("Permissions", "✅ MANAGE_EXTERNAL_STORAGE already granted")

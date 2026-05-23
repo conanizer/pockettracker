@@ -113,6 +113,7 @@ class FileBrowserModule : TrackerModule {
         val renameCursor: Int = 0,          // Character position in rename buffer
         val statusMessage: String = "",
         val statusSuccess: Boolean = true,
+        val permissionError: Boolean = false,
         val fileExtension: String? = null,          // Single-extension filter (legacy)
         val fileExtensions: List<String>? = null,   // Multi-extension filter (null = all files)
         val appTheme: AppTheme = AppTheme.CLASSIC,
@@ -228,14 +229,16 @@ class FileBrowserModule : TrackerModule {
      * Navigate into a folder
      */
     fun navigateToFolder(state: State, folder: File): State {
-        val newItems = buildItemList(folder, state.fileExtension, state.fileExtensions)
+        val canRead = folder.canRead()
+        val newItems = if (canRead) buildItemList(folder, state.fileExtension, state.fileExtensions) else emptyList()
         return state.copy(
             currentDirectory = folder,
             items = sortItems(newItems, state.sortMode),
             cursor = 0,
             scroll = 0,
-            statusMessage = "",  // Don't show "Opened" messages
-            statusSuccess = true
+            statusMessage = "",
+            statusSuccess = canRead,
+            permissionError = !canRead
         )
     }
 
@@ -366,6 +369,33 @@ class FileBrowserModule : TrackerModule {
 
         // Add spacer after top bars (where header was)
         var rowY = topBarY2 + ROW_HEIGHT + 5  // 5px spacer
+
+        // ===================================
+        // PERMISSION ERROR OVERLAY
+        // ===================================
+        if (browserState.permissionError) {
+            drawBitmapText(
+                text = "NO STORAGE PERMISSION",
+                x = x + 10, y = rowY + ROW_HEIGHT * 2, scale = scale,
+                color = Color(0xFFFF4444), spacing = CHAR_SPACING, fontScale = FONT_SCALE
+            )
+            drawBitmapText(
+                text = "Grant \"All Files Access\" for",
+                x = x + 10, y = rowY + ROW_HEIGHT * 4, scale = scale,
+                color = Color(t.textParam), spacing = CHAR_SPACING, fontScale = FONT_SCALE
+            )
+            drawBitmapText(
+                text = "PocketTracker in System Settings,",
+                x = x + 10, y = rowY + ROW_HEIGHT * 5, scale = scale,
+                color = Color(t.textParam), spacing = CHAR_SPACING, fontScale = FONT_SCALE
+            )
+            drawBitmapText(
+                text = "then reopen this screen.",
+                x = x + 10, y = rowY + ROW_HEIGHT * 6, scale = scale,
+                color = Color(t.textParam), spacing = CHAR_SPACING, fontScale = FONT_SCALE
+            )
+            return
+        }
 
         // ===================================
         // FILE/FOLDER LIST

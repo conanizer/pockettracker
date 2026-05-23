@@ -7,7 +7,6 @@ import com.conanizer.pockettracker.core.storage.IFileSystem
 import com.conanizer.pockettracker.core.storage.FileInfo
 import com.conanizer.pockettracker.core.storage.FileSortMode
 import java.io.File
-import java.io.IOException
 
 /**
  * Android implementation of IFileSystem using scoped storage.
@@ -36,14 +35,11 @@ class AndroidFileSystem(
         val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
         val projectsDir = File(documentsDir, "PocketTracker/Projects")
 
-        // Create directory if it doesn't exist
         if (!projectsDir.exists()) {
-            val created = projectsDir.mkdirs()
-            if (created) {
+            if (projectsDir.mkdirs()) {
                 Log.d(TAG, "✅ Created projects directory: ${projectsDir.absolutePath}")
             } else {
-                Log.e(TAG, "❌ Failed to create projects directory on external storage")
-                throw IOException("Cannot create projects directory. Check storage permissions.")
+                Log.w(TAG, "⚠️ Could not create projects directory — storage permission may be missing")
             }
         }
 
@@ -61,12 +57,10 @@ class AndroidFileSystem(
         val samplesDir = File(documentsDir, "PocketTracker/Samples")
 
         if (!samplesDir.exists()) {
-            val created = samplesDir.mkdirs()
-            if (created) {
+            if (samplesDir.mkdirs()) {
                 Log.d(TAG, "✅ Created samples directory: ${samplesDir.absolutePath}")
             } else {
-                Log.e(TAG, "❌ Failed to create samples directory on external storage")
-                throw IOException("Cannot create samples directory. Check storage permissions.")
+                Log.w(TAG, "⚠️ Could not create samples directory — storage permission may be missing")
             }
         }
 
@@ -316,12 +310,10 @@ class AndroidFileSystem(
         val rendersDir = File(documentsDir, "PocketTracker/Renders")
 
         if (!rendersDir.exists()) {
-            val created = rendersDir.mkdirs()
-            if (created) {
+            if (rendersDir.mkdirs()) {
                 Log.d(TAG, "Created renders directory: ${rendersDir.absolutePath}")
             } else {
-                Log.e(TAG, "Failed to create renders directory on external storage")
-                throw IOException("Cannot create renders directory. Check storage permissions.")
+                Log.w(TAG, "⚠️ Could not create renders directory — storage permission may be missing")
             }
         }
 
@@ -339,12 +331,10 @@ class AndroidFileSystem(
         val resampledDir = File(documentsDir, "PocketTracker/Samples/Resampled")
 
         if (!resampledDir.exists()) {
-            val created = resampledDir.mkdirs()
-            if (created) {
+            if (resampledDir.mkdirs()) {
                 Log.d(TAG, "Created resampled directory: ${resampledDir.absolutePath}")
             } else {
-                Log.e(TAG, "Failed to create resampled directory on external storage")
-                throw IOException("Cannot create resampled directory. Check storage permissions.")
+                Log.w(TAG, "⚠️ Could not create resampled directory — storage permission may be missing")
             }
         }
 
@@ -358,38 +348,24 @@ class AndroidFileSystem(
     override fun getInstrumentsDirectory(): String {
         val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
         val dir = File(documentsDir, "PocketTracker/Instruments")
-        if (!dir.exists()) {
-            val created = dir.mkdirs()
-            if (!created) throw IOException("Cannot create instruments directory. Check storage permissions.")
-        }
+        if (!dir.exists() && !dir.mkdirs())
+            Log.w(TAG, "⚠️ Could not create instruments directory — storage permission may be missing")
         return dir.absolutePath
     }
 
-    /**
-     * Get the soundfonts directory.
-     * Location: Documents/PocketTracker/Soundfonts/
-     */
     override fun getSoundfontsDirectory(): String {
         val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
         val dir = File(documentsDir, "PocketTracker/Soundfonts")
-        if (!dir.exists()) {
-            val created = dir.mkdirs()
-            if (!created) throw IOException("Cannot create soundfonts directory. Check storage permissions.")
-        }
+        if (!dir.exists() && !dir.mkdirs())
+            Log.w(TAG, "⚠️ Could not create soundfonts directory — storage permission may be missing")
         return dir.absolutePath
     }
 
-    /**
-     * Get the themes directory.
-     * Location: Documents/PocketTracker/Themes/
-     */
     override fun getThemesDirectory(): String {
         val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
         val dir = File(documentsDir, "PocketTracker/Themes")
-        if (!dir.exists()) {
-            val created = dir.mkdirs()
-            if (!created) throw IOException("Cannot create themes directory. Check storage permissions.")
-        }
+        if (!dir.exists() && !dir.mkdirs())
+            Log.w(TAG, "⚠️ Could not create themes directory — storage permission may be missing")
         return dir.absolutePath
     }
 
