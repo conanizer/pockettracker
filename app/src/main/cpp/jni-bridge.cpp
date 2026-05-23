@@ -1056,8 +1056,8 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1timeS
 
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1applySampleFx(
-        JNIEnv*, jobject, jint id, jint fxType, jint fxValue, jfloat sampleRate) {
-    if (engine) engine->applySampleFx((int)id, (int)fxType, (int)fxValue, (float)sampleRate);
+        JNIEnv*, jobject, jint id, jint fxType, jint fxValue, jfloat sampleRate, jint limiterPreGain) {
+    if (engine) engine->applySampleFx((int)id, (int)fxType, (int)fxValue, (float)sampleRate, (int)limiterPreGain);
 }
 
 JNIEXPORT jintArray JNICALL

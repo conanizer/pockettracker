@@ -403,7 +403,7 @@ void AudioEngine::timeStretchSample(int id, float ratio) {
     }
 }
 
-void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRate) {
+void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRate, int limiterPreGain) {
     if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] <= 0) return;
 
     for (int v = 0; v < MAX_VOICES; v++) {
@@ -462,6 +462,15 @@ void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRat
         if (eq.active) {
             for (int i = 0; i < len; i++) buf[i] = eq.processMono(buf[i]);
         }
+    }
+
+    // Limiter pass: clamp the result to ±1 using the same pre-gain as the master limiter.
+    // Prevents waveform from exceeding the visible area after saturation/compression effects.
+    LimiterModule lim;
+    lim.reset();
+    lim.setPreGain(1.0f + (limiterPreGain / 255.0f) * 3.0f);
+    for (int i = 0; i < len; i++) {
+        lim.limL.ProcessBlock(&buf[i], 1, lim.preGain);
     }
 }
 

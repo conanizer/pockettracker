@@ -83,7 +83,7 @@ public:
     // Destructive time-stretch: ratio > 1 = longer/slower, < 1 = shorter/faster. SOLA algorithm.
     void timeStretchSample(int id, float ratio);
     // Destructive whole-sample DSP: fxType 0=OTT, 1=DUST, 2=DRIVE. fxValue 0-255.
-    void applySampleFx(int id, int fxType, int fxValue, float sampleRate);
+    void applySampleFx(int id, int fxType, int fxValue, float sampleRate, int limiterPreGain = 0);
     // Returns the nearest zero-crossing frame within ±searchRadius of `frame`, or `frame` if none found.
     int  findZeroCrossing(int id, int frame, int searchRadius = 512);
     // Spectral-flux transient detection. Returns count; outMarkers[] filled with frame positions.

@@ -766,8 +766,8 @@ class AudioEngine(
         backend.timeStretchSample(instrumentId, ratio)
     }
 
-    fun applySampleFx(instrumentId: Int, fxType: Int, fxValue: Int, sampleRate: Float) {
-        backend.applySampleFx(instrumentId, fxType, fxValue, sampleRate)
+    fun applySampleFx(instrumentId: Int, fxType: Int, fxValue: Int, sampleRate: Float, limiterPreGain: Int = 0) {
+        backend.applySampleFx(instrumentId, fxType, fxValue, sampleRate, limiterPreGain)
     }
 
     fun findZeroCrossing(instrumentId: Int, frame: Int): Int = backend.findZeroCrossing(instrumentId, frame)

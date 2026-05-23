@@ -1230,7 +1230,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                             s.fxType in 0..3 -> {
                                 if (s.fxValue > 0 || s.fxType == 3) {
                                     audioEngine.restoreFxPreviewBackup(); audioEngine.backupSample(instId)
-                                    audioEngine.applySampleFx(instId, s.fxType, s.fxValue, s.sampleRate.toFloat())
+                                    audioEngine.applySampleFx(instId, s.fxType, s.fxValue, s.sampleRate.toFloat(), trackerController.project.limiterPreGain)
                                     sampleEditorState = sampleEditorState.copy(waveformData = audioEngine.getSampleWaveform(instId, 620), isModified = true)
                                 }
                             }
@@ -1761,7 +1761,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 audioEngine.restoreFxPreviewBackup()
                 if (hasFxPreview) {
                     audioEngine.saveFxPreviewBackup(instId)
-                    audioEngine.applySampleFx(instId, sampleEditorState.fxType, sampleEditorState.fxValue, sampleEditorState.sampleRate.toFloat())
+                    audioEngine.applySampleFx(instId, sampleEditorState.fxType, sampleEditorState.fxValue, sampleEditorState.sampleRate.toFloat(), trackerController.project.limiterPreGain)
                 }
                 if (total > 0 && sampleEditorState.selectionEnd > sampleEditorState.selectionStart) {
                     inst.sampleStart = ((sampleEditorState.selectionStart * 255L) / total).toInt().coerceIn(0, 255)

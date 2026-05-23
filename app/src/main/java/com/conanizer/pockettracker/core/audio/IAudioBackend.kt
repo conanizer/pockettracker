@@ -91,7 +91,7 @@ interface IAudioBackend {
     // Destructive time-stretch: ratio > 1 = longer/slower, < 1 = shorter/faster.
     fun timeStretchSample(id: Int, ratio: Float)
     // Destructive whole-sample DSP: fxType 0=OTT, 1=DUST, 2=DRIVE. fxValue 0-255.
-    fun applySampleFx(id: Int, fxType: Int, fxValue: Int, sampleRate: Float)
+    fun applySampleFx(id: Int, fxType: Int, fxValue: Int, sampleRate: Float, limiterPreGain: Int = 0)
     // Returns nearest zero-crossing frame within ±512 frames, or `frame` if none found.
     fun findZeroCrossing(id: Int, frame: Int): Int
     // Spectral-flux transient detection. Returns frame positions of detected onsets.
