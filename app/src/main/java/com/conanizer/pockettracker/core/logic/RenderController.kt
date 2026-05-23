@@ -201,6 +201,137 @@ class RenderController(
         }
     }
 
+    /**
+     * Render each active track as a separate stereo WAV stem, plus reverb and delay send returns.
+     *
+     * Output folder: Renders/{project_name}/
+     * Files: {name}_1..N (sequential, not track-index), {name}_reverb, {name}_delay
+     *
+     * Track stems: dry signal only (no OTT/DUST/masterEQ, limiter applied).
+     * Send stems: all tracks feed their sends; OTT/DUST/masterEQ bypassed, limiter applied.
+     */
+    fun renderStemsToWav(
+        project: Project,
+        progressCallback: ProgressCallback? = null
+    ): RenderResult {
+        audioBackend.setOfflineRendering(true)
+        try {
+            progressCallback?.onProgress(0f, "Analyzing song...")
+
+            val (startRow, endRow) = findSongBounds(project)
+            if (startRow < 0) return RenderResult.Error("Song is empty")
+
+            audioBackend.stopAll()
+            audioBackend.clearScheduledNotes()
+
+            setupInstrumentParams(project, startRow, endRow)
+            audioBackend.setLimiterPreGain(project.limiterPreGain)
+
+            val sampleRate = audioBackend.getSampleRate()
+
+            // Active = non-muted and has at least one chain reference in the song
+            val activeTracks = (0..7).filter { trackId ->
+                val track = project.tracks.getOrNull(trackId) ?: return@filter false
+                !track.mute && (0 until 256).any { row ->
+                    row < track.chainRefs.size && track.chainRefs[row] in 0..255
+                }
+            }
+            if (activeTracks.isEmpty()) return RenderResult.Error("No active tracks")
+
+            val safeProjectName = project.name
+                .replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+                .take(32)
+                .ifEmpty { "project" }
+            val rendersDir = fileSystem.getRendersDirectory()
+            val stemDir = if (fileSystem.fileExists("$rendersDir/$safeProjectName")) {
+                "$rendersDir/$safeProjectName"
+            } else {
+                fileSystem.createFolder(rendersDir, safeProjectName) ?: "$rendersDir/$safeProjectName"
+            }
+
+            val totalPasses = activeTracks.size + 2  // tracks + reverb + delay
+            var passIndex = 0
+
+            for ((stemIdx, trackId) in activeTracks.withIndex()) {
+                progressCallback?.onProgress(passIndex.toFloat() / totalPasses, "Rendering track ${stemIdx + 1}/${activeTracks.size}...")
+
+                audioBackend.stopAll()
+                audioBackend.clearScheduledNotes()
+                audioBackend.resetFrameCounter()
+
+                val totalFrames = playbackController.scheduleSongForRender(project, startRow, endRow)
+                if (totalFrames > 0L) {
+                    audioBackend.setStemsMode(trackId + 1)
+                    val audio = audioBackend.renderFrames(totalFrames.toInt(), sampleRate)
+                    audioBackend.setStemsMode(0)
+
+                    val n = totalFrames.toInt()
+                    WavWriter.writeWav(
+                        fileSystem   = fileSystem,
+                        path         = "$stemDir/${safeProjectName}_${stemIdx + 1}.wav",
+                        leftChannel  = FloatArray(n) { audio[it * 2] },
+                        rightChannel = FloatArray(n) { audio[it * 2 + 1] },
+                        sampleRate   = sampleRate
+                    )
+                }
+                passIndex++
+            }
+
+            // Reverb stem
+            progressCallback?.onProgress(passIndex.toFloat() / totalPasses, "Rendering reverb stem...")
+            audioBackend.stopAll()
+            audioBackend.clearScheduledNotes()
+            audioBackend.resetFrameCounter()
+            val reverbFrames = playbackController.scheduleSongForRender(project, startRow, endRow)
+            if (reverbFrames > 0L) {
+                audioBackend.setStemsMode(9)
+                val audio = audioBackend.renderFrames(reverbFrames.toInt(), sampleRate)
+                audioBackend.setStemsMode(0)
+                val n = reverbFrames.toInt()
+                WavWriter.writeWav(
+                    fileSystem   = fileSystem,
+                    path         = "$stemDir/${safeProjectName}_reverb.wav",
+                    leftChannel  = FloatArray(n) { audio[it * 2] },
+                    rightChannel = FloatArray(n) { audio[it * 2 + 1] },
+                    sampleRate   = sampleRate
+                )
+            }
+            passIndex++
+
+            // Delay stem
+            progressCallback?.onProgress(passIndex.toFloat() / totalPasses, "Rendering delay stem...")
+            audioBackend.stopAll()
+            audioBackend.clearScheduledNotes()
+            audioBackend.resetFrameCounter()
+            val delayFrames = playbackController.scheduleSongForRender(project, startRow, endRow)
+            if (delayFrames > 0L) {
+                audioBackend.setStemsMode(10)
+                val audio = audioBackend.renderFrames(delayFrames.toInt(), sampleRate)
+                audioBackend.setStemsMode(0)
+                val n = delayFrames.toInt()
+                WavWriter.writeWav(
+                    fileSystem   = fileSystem,
+                    path         = "$stemDir/${safeProjectName}_delay.wav",
+                    leftChannel  = FloatArray(n) { audio[it * 2] },
+                    rightChannel = FloatArray(n) { audio[it * 2 + 1] },
+                    sampleRate   = sampleRate
+                )
+            }
+
+            progressCallback?.onProgress(1f, "Done!")
+            return RenderResult.Success(stemDir, 0L)
+
+        } catch (e: Exception) {
+            logger.e(TAG, "❌ Stems render failed: ${e.message}")
+            return RenderResult.Error(e.message ?: "Unknown error")
+        } finally {
+            audioBackend.setStemsMode(0)
+            audioBackend.stopAll()
+            audioBackend.clearScheduledNotes()
+            audioBackend.setOfflineRendering(false)
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun findSongBounds(project: Project): Pair<Int, Int> {

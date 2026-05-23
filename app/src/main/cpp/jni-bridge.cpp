@@ -677,6 +677,12 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setOf
     if (engine) engine->setOfflineRendering(rendering == JNI_TRUE);
 }
 
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setStemsMode(
+        JNIEnv *env, jobject thiz, jint mode) {
+    if (engine) engine->setStemsMode((int)mode);
+}
+
 // ===================================
 // SOUNDFONT JNI FUNCTIONS
 // ===================================

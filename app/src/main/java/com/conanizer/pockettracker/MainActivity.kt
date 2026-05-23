@@ -273,6 +273,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
 
     val _isRendering = remember { mutableStateOf(false) }
     var isRendering by _isRendering
+    val _isStemsRendering = remember { mutableStateOf(false) }
+    var isStemsRendering by _isStemsRendering
     val _renderProgress = remember { mutableFloatStateOf(0f) }
     var renderProgress by _renderProgress
 
@@ -720,7 +722,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         AppStateRefs(
             _fileBrowserState, _sampleEditorState, _qwertyKeyboardState,
             _fxHelperState, _eqEditorState, _eqSpectrumData,
-            _layoutMode, _scalingMode, _isRendering, _renderProgress,
+            _layoutMode, _scalingMode, _isRendering, _isStemsRendering, _renderProgress,
             _showCleanDialog, _cleanDialogTarget, _cleanDialogCursor,
             _lastAInsertPosition, _insertBefore, _instrumentFileBrowserAction,
             _previousScreen, _buttonSoundEnabled, _buttonSoundVolume,

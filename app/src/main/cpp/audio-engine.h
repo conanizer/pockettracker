@@ -300,6 +300,10 @@ public:
     // Offline rendering flag: when true, onAudioReady outputs silence instead of audio.
     void setOfflineRendering(bool offline);
 
+    // Stems render mode: 0=normal full mix, 1-8=track N (0-indexed N-1),
+    // 9=reverb-return-only, 10=delay-return-only. OTT/DUST/masterEQ are bypassed for non-zero modes.
+    void setStemsMode(int mode) { stemsMode = mode; }
+
 private:
     std::shared_ptr<oboe::AudioStream> stream;
     Voice voices[MAX_VOICES];
@@ -327,6 +331,7 @@ private:
     ParamUpdateQueue paramUpdateQueue; // Thread-safe queue of scheduled parameter updates
     int64_t globalFrameCounter;    // Total frames processed since start
     std::atomic<bool> isOfflineRendering{false};  // True during WAV export → onAudioReady outputs silence
+    int stemsMode = 0;  // 0=normal, 1-8=track stem, 9=reverb, 10=delay
 
     // Oscilloscope waveform buffer (circular buffer for recent output)
     static const int WAVEFORM_SIZE = 620;

@@ -372,8 +372,8 @@ class ProjectModule : TrackerModule {
     }
 
     /**
-     * Draw EXPORT row with WAV MIX option
-     * Example: EXPORT   WAV MIX
+     * Draw EXPORT row with MIX and STEMS buttons.
+     * Example: EXPORT   MIX  STEMS
      */
     private fun DrawScope.drawExportRow(
         x: Int,
@@ -406,22 +406,42 @@ class ProjectModule : TrackerModule {
             fontScale = FONT_SCALE
         )
 
-        val isCursorOnWavMix = isCursorOnThisRow && projectState.cursorColumn == 1
+        val isCursorOnMix   = isCursorOnThisRow && projectState.cursorColumn == 1
+        val isCursorOnStems = isCursorOnThisRow && projectState.cursorColumn == 2
 
-        val buttonText = if (projectState.isRendering) {
-            "RENDERING ${(projectState.renderProgress * 100).toInt()}%"
-        } else {
-            "WAV MIX"
+        val mixText = when {
+            projectState.isRendering && !projectState.isStemsRendering ->
+                "MIX ${(projectState.renderProgress * 100).toInt()}%"
+            else -> "MIX"
+        }
+        val stemsText = when {
+            projectState.isRendering && projectState.isStemsRendering ->
+                "STEMS ${(projectState.renderProgress * 100).toInt()}%"
+            else -> "STEMS"
         }
 
         drawBitmapText(
-            text = buttonText,
+            text = mixText,
             x = valueColumnX,
             y = textY,
             scale = scale,
             color = when {
-                projectState.isRendering -> Color(t.textTitle)
-                isCursorOnWavMix -> Color(t.textCursor)
+                projectState.isRendering && !projectState.isStemsRendering -> Color(t.textTitle)
+                isCursorOnMix -> Color(t.textCursor)
+                else -> Color(t.textValue)
+            },
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
+        drawBitmapText(
+            text = stemsText,
+            x = valueColumnX + 80,
+            y = textY,
+            scale = scale,
+            color = when {
+                projectState.isRendering && projectState.isStemsRendering -> Color(t.textTitle)
+                isCursorOnStems -> Color(t.textCursor)
                 else -> Color(t.textValue)
             },
             spacing = CHAR_SPACING,
@@ -655,6 +675,7 @@ data class ProjectState(
     val statusMessage: String = "",
     val isSuccess: Boolean = true,
     val isRendering: Boolean = false,
+    val isStemsRendering: Boolean = false,
     val renderProgress: Float = 0f,
     val appTheme: AppTheme = AppTheme.CLASSIC
 )

@@ -1083,11 +1083,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 procL *= scalar;
                 procR *= scalar;
 
-                if (voice.reverbSend > 0.0f) {
+                if ((stemsMode == 0 || stemsMode >= 9) && voice.reverbSend > 0.0f) {
                     revSendBufL[i] += procL * voice.panLeft  * voice.reverbSend;
                     revSendBufR[i] += procR * voice.panRight * voice.reverbSend;
                 }
-                if (voice.delaySend > 0.0f) {
+                if ((stemsMode == 0 || stemsMode >= 9) && voice.delaySend > 0.0f) {
                     dlySendBufL[i] += procL * voice.panLeft  * voice.delaySend;
                     dlySendBufR[i] += procR * voice.panRight * voice.delaySend;
                 }
@@ -1125,11 +1125,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
                 float sample = processedSample * finalVol * volRoute;
 
-                if (voice.reverbSend > 0.0f) {
+                if ((stemsMode == 0 || stemsMode >= 9) && voice.reverbSend > 0.0f) {
                     revSendBufL[i] += sample * voice.panLeft  * voice.reverbSend;
                     revSendBufR[i] += sample * voice.panRight * voice.reverbSend;
                 }
-                if (voice.delaySend > 0.0f) {
+                if ((stemsMode == 0 || stemsMode >= 9) && voice.delaySend > 0.0f) {
                     dlySendBufL[i] += sample * voice.panLeft  * voice.delaySend;
                     dlySendBufR[i] += sample * voice.panRight * voice.delaySend;
                 }
@@ -1148,8 +1148,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 sampleR = sample * voice.panRight;
             }
 
-            output[i * channelCount] += sampleL;
-            output[i * channelCount + 1] += sampleR;
+            if (stemsMode == 0 || voice.trackId == stemsMode - 1) {
+                output[i * channelCount] += sampleL;
+                output[i * channelCount + 1] += sampleR;
+            }
 
             if (!voice.isFadingOut && voice.trackId >= 0 && voice.trackId < 8) {
                 framePeaksPerTrackL[voice.trackId] = fmaxf(framePeaksPerTrackL[voice.trackId], fabsf(sampleL));
@@ -1290,7 +1292,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
 
             // SEND TAP: stereo post-chain SF buffer into reverb/delay buses
-            if (sv.instrParams.reverbSend > 0.0f || sv.instrParams.delaySend > 0.0f) {
+            if ((stemsMode == 0 || stemsMode >= 9) && (sv.instrParams.reverbSend > 0.0f || sv.instrParams.delaySend > 0.0f)) {
                 for (int i = 0; i < numFrames; i++) {
                     revSendBufL[i] += sfBuf[i * 2]     * sv.instrParams.reverbSend;
                     revSendBufR[i] += sfBuf[i * 2 + 1] * sv.instrParams.reverbSend;
@@ -1308,8 +1310,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 trackPeakR = fmaxf(trackPeakR, fabsf(sR));
                 float outL = sL * masterVol;
                 float outR = sR * masterVol;
-                output[i * 2]     += outL;
-                output[i * 2 + 1] += outR;
+                if (stemsMode == 0 || t == stemsMode - 1) {
+                    output[i * 2]     += outL;
+                    output[i * 2 + 1] += outR;
+                }
                 trackWaveAccumL[t][i] += outL;
                 trackWaveAccumR[t][i] += outR;
             }
@@ -1364,8 +1368,17 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             float rvR = revWetR[i] * reverbReturnGain;
             float dl  = dlyWetL[i] * delayReturnGain;
             float dlR = dlyWetR[i] * delayReturnGain;
-            output[i * channelCount]     += rv + dl;
-            output[i * channelCount + 1] += rvR + dlR;
+            if (stemsMode == 0) {
+                output[i * channelCount]     += rv + dl;
+                output[i * channelCount + 1] += rvR + dlR;
+            } else if (stemsMode == 9) {
+                output[i * channelCount]     += rv;
+                output[i * channelCount + 1] += rvR;
+            } else if (stemsMode == 10) {
+                output[i * channelCount]     += dl;
+                output[i * channelCount + 1] += dlR;
+            }
+            // modes 1-8: no send returns (dry track stems)
             frameSendPeakRevL = fmaxf(frameSendPeakRevL, fabsf(rv));
             frameSendPeakRevR = fmaxf(frameSendPeakRevR, fabsf(rvR));
             frameSendPeakDelL = fmaxf(frameSendPeakDelL, fabsf(dl));
@@ -1374,7 +1387,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     }
 
     // Master chain: master EQ → bus FX (OTT or DUST) → limiter
-    masterChain.process(output, numFrames, channelCount);
+    // Stems mode bypasses EQ and bus FX; only limiter is applied.
+    if (stemsMode == 0)
+        masterChain.process(output, numFrames, channelCount);
+    else
+        masterChain.limiter.process(output, numFrames, channelCount);
 
     globalFrameCounter += numFrames;
 }

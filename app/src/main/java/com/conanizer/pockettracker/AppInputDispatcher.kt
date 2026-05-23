@@ -73,6 +73,7 @@ class AppStateRefs(
     val layoutMode: MutableState<DeviceAdapter.LayoutMode>,
     val scalingMode: MutableState<DeviceAdapter.ScalingMode>,
     val isRendering: MutableState<Boolean>,
+    val isStemsRendering: MutableState<Boolean>,
     val renderProgress: MutableState<Float>,
     val showCleanDialog: MutableState<Boolean>,
     val cleanDialogTarget: MutableState<String>,
@@ -135,6 +136,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     private var layoutMode by refs.layoutMode
     private var scalingMode by refs.scalingMode
     private var isRendering by refs.isRendering
+    private var isStemsRendering by refs.isStemsRendering
     private var renderProgress by refs.renderProgress
     private var showCleanDialog by refs.showCleanDialog
     private var cleanDialogTarget by refs.cleanDialogTarget
@@ -435,6 +437,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     statusMessage = trackerController.statusMessage,
                     isSuccess = trackerController.statusSuccess,
                     isRendering = isRendering,
+                    isStemsRendering = isStemsRendering,
                     renderProgress = renderProgress
                 )
                 val context = projectModule.getCursorContext(projectState)
@@ -1064,6 +1067,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                         1 -> {
                             if (!isRendering) {
                                 isRendering = true
+                                isStemsRendering = false
                                 renderProgress = 0f
                                 trackerController.statusMessage = "RENDERING..."
                                 trackerController.statusSuccess = true
@@ -1077,10 +1081,38 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                     )
                                     withContext(Dispatchers.Main) {
                                         isRendering = false
+                                        isStemsRendering = false
                                         renderProgress = 0f
                                         when (result) {
                                             is RenderController.RenderResult.Success -> { trackerController.statusMessage = "EXPORTED!"; trackerController.statusSuccess = true }
                                             is RenderController.RenderResult.Error   -> { trackerController.statusMessage = "EXPORT FAILED"; trackerController.statusSuccess = false }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        2 -> {
+                            if (!isRendering) {
+                                isRendering = true
+                                isStemsRendering = true
+                                renderProgress = 0f
+                                trackerController.statusMessage = "RENDERING STEMS..."
+                                trackerController.statusSuccess = true
+                                trackerController.stopPlayback()
+                                coroutineScope.launch(Dispatchers.Default) {
+                                    val result = renderController.renderStemsToWav(
+                                        project = trackerController.project,
+                                        progressCallback = object : RenderController.ProgressCallback {
+                                            override fun onProgress(progress: Float, message: String) { renderProgress = progress }
+                                        }
+                                    )
+                                    withContext(Dispatchers.Main) {
+                                        isRendering = false
+                                        isStemsRendering = false
+                                        renderProgress = 0f
+                                        when (result) {
+                                            is RenderController.RenderResult.Success -> { trackerController.statusMessage = "STEMS EXPORTED!"; trackerController.statusSuccess = true }
+                                            is RenderController.RenderResult.Error   -> { trackerController.statusMessage = "STEMS FAILED"; trackerController.statusSuccess = false }
                                         }
                                     }
                                 }

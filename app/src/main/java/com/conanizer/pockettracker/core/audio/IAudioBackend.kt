@@ -349,6 +349,9 @@ interface IAudioBackend {
     // Set limiter pre-gain (0=unity 1.0x, 255=max drive 4.0x).
     fun setLimiterPreGain(depth: Int)
 
+    // Set stems render mode: 0=normal, 1-8=track stem (track 0-7), 9=reverb-only, 10=delay-only.
+    fun setStemsMode(mode: Int)
+
     // ===================================
     // EQ PRESET METHODS
     // ===================================

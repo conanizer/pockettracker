@@ -994,6 +994,7 @@ class TrackerController(
         val maxColumn = when (row) {
             2 -> 20  // NAME: up to column 20 (one per character)
             3 -> 3   // LOAD/SAVE/NEW buttons: up to column 3
+            4 -> 2   // MIX/STEMS buttons: up to column 2
             5 -> 2   // CLEAN SEQ/INST buttons: up to column 2
             else -> 1
         }
