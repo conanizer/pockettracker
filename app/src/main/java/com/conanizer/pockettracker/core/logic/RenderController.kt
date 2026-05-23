@@ -80,6 +80,7 @@ class RenderController(
                 audioBackend.setOttDepthForRender(project.ottDepth)
             else
                 audioBackend.setDustDepthForRender(project.dustDepth)
+            audioBackend.setLimiterPreGain(project.limiterPreGain)
 
             val sampleRate = audioBackend.getSampleRate()
             val audio = audioBackend.renderFrames(totalFrames.toInt(), sampleRate)
@@ -160,6 +161,7 @@ class RenderController(
             progressCallback?.onProgress(0.3f, "Rendering audio...")
 
             audioBackend.setOttDepthForRender(project.ottDepth)
+            audioBackend.setLimiterPreGain(project.limiterPreGain)
 
             val sampleRate = audioBackend.getSampleRate()
             val audio = audioBackend.renderFrames(totalFrames.toInt(), sampleRate)

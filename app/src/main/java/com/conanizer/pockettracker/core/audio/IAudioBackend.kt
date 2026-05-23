@@ -346,6 +346,8 @@ interface IAudioBackend {
     fun setDustDepth(depth: Int)
     // Reset DUST for offline render: clears delay/envelope state before export.
     fun setDustDepthForRender(depth: Int)
+    // Set limiter pre-gain (0=unity 1.0x, 255=max drive 4.0x).
+    fun setLimiterPreGain(depth: Int)
 
     // ===================================
     // EQ PRESET METHODS

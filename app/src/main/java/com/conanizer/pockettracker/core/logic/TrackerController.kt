@@ -781,11 +781,13 @@ class TrackerController(
                 // At pair 1, last row — stay at bottom (no wrap)
             }
             ScreenType.MIXER -> {
-                if (mixerMasterRow < 2) {
+                if (mixerMasterRow < 3) {
                     mixerMasterRow++
                     // Send rows (1-2) only have col 0 (REV/DEL) and col 8 (master).
                     // Track cols 1-7 snap to col 0 (send); col 8 stays on master.
                     if (mixerMasterRow > 0 && mixerCursorColumn in 1..7) mixerCursorColumn = 0
+                    // LIM row (3) is master-only: col 0 has no send, snap to master.
+                    if (mixerMasterRow == 3 && mixerCursorColumn == 0) mixerCursorColumn = 8
                 }
             }
             ScreenType.EFFECTS -> {

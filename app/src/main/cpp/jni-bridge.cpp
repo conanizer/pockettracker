@@ -461,6 +461,11 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setDu
     if (engine) engine->setDustDepthForRender(depth);
 }
 
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setLimiterPreGain(JNIEnv *env, jobject thiz, jint depth) {
+    if (engine) engine->setLimiterPreGain(depth);
+}
+
 // ===================================
 // EQ / SEND / REVERB / DELAY JNI METHODS
 // ===================================

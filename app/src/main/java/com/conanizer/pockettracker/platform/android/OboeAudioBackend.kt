@@ -262,6 +262,10 @@ class OboeAudioBackend : IAudioBackend {
         native_setDustDepthForRender(depth)
     }
 
+    override fun setLimiterPreGain(depth: Int) {
+        native_setLimiterPreGain(depth)
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // EQ / SEND / REVERB / DELAY METHODS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -533,6 +537,7 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_setMasterFx(fx: Int)
     private external fun native_setDustDepth(depth: Int)
     private external fun native_setDustDepthForRender(depth: Int)
+    private external fun native_setLimiterPreGain(depth: Int)
 
     // EQ / send / reverb / delay methods
     private external fun native_setEqBand(slot: Int, band: Int, type: Int, freqHex: Int, gainHex: Int, qHex: Int)

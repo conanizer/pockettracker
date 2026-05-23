@@ -49,6 +49,8 @@ struct MasterChain {
         dust.setDustAmount(d);
     }
 
+    void setLimiterPreGain(float g) { limiter.setPreGain(g); }
+
     // Process interleaved stereo buffer in-place. buf layout: [L0, R0, L1, R1, ...]
     void process(float* buf, int numFrames, int channelCount) {
         // Master EQ (before bus FX)

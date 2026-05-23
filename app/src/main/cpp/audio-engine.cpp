@@ -1804,6 +1804,10 @@ void AudioEngine::setDustDepthForRender(int depth) {
     masterChain.setDustDepthForRender(depth / 255.0f);
 }
 
+void AudioEngine::setLimiterPreGain(int depth) {
+    masterChain.setLimiterPreGain(1.0f + (depth / 255.0f) * 3.0f);
+}
+
 IAudioVoice* AudioEngine::findActiveVoiceForTrack(int trackId) {
     if (trackId >= 0 && trackId < 8 && sfVoices[trackId].isActive) {
         return &sfVoices[trackId];

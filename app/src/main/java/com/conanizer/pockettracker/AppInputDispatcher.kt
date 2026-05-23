@@ -179,6 +179,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         audioBackend.setOttDepth(project.ottDepth)
         audioBackend.setMasterFx(project.masterBusFx)
         audioBackend.setDustDepth(project.dustDepth)
+        audioBackend.setLimiterPreGain(project.limiterPreGain)
         Log.d("VolumeSync", "Synced all track/master volumes to audio backend")
     }
 
@@ -554,10 +555,11 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     val masterRow = trackerController.mixerMasterRow
                     when {
                         result.masterEqChanged   -> { val slot = proj.masterEqSlot; if (slot >= 0) audioBackend.setMasterEqSlot(slot); trackerController.projectVersion++ }
-                        result.ottDepthChanged   -> { audioBackend.setOttDepth(proj.ottDepth); trackerController.projectVersion++ }
-                        result.dustDepthChanged  -> { audioBackend.setDustDepth(proj.dustDepth); trackerController.projectVersion++ }
-                        result.reverbWetChanged  -> { audioBackend.setReverbParams(proj.reverbFeedback, proj.reverbDamp, proj.reverbWet); trackerController.projectVersion++ }
-                        result.delayWetChanged   -> { audioBackend.setDelayParams(proj.delayTime, proj.delayFeedback, proj.delaySync, proj.tempo.toFloat(), proj.delayWet); trackerController.projectVersion++ }
+                        result.ottDepthChanged        -> { audioBackend.setOttDepth(proj.ottDepth); trackerController.projectVersion++ }
+                        result.dustDepthChanged       -> { audioBackend.setDustDepth(proj.dustDepth); trackerController.projectVersion++ }
+                        result.limiterPreGainChanged  -> { audioBackend.setLimiterPreGain(proj.limiterPreGain); trackerController.projectVersion++ }
+                        result.reverbWetChanged       -> { audioBackend.setReverbParams(proj.reverbFeedback, proj.reverbDamp, proj.reverbWet); trackerController.projectVersion++ }
+                        result.delayWetChanged        -> { audioBackend.setDelayParams(proj.delayTime, proj.delayFeedback, proj.delaySync, proj.tempo.toFloat(), proj.delayWet); trackerController.projectVersion++ }
                         masterRow == 0 && cursorCol < 8 -> audioBackend.setTrackVolume(cursorCol, VolumeUtils.hexToFloat(proj.tracks[cursorCol].volume))
                         masterRow == 0 -> audioBackend.setMasterVolume(VolumeUtils.hexToFloat(proj.masterVolume))
                     }

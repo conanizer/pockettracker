@@ -27,7 +27,7 @@ import com.conanizer.pockettracker.core.logic.InputAction
  *
  * Cursor:  columns 0-7 = tracks (active only at mixerMasterRow==0)
  *          column 8 = master (active at any row)
- * Master rows: 0=MIX vol, 1=EQ slot, 2=OTT/DUST depth
+ * Master rows: 0=MIX vol, 1=EQ slot, 2=OTT/DUST depth, 3=LIM pre-gain
  * DPAD DOWN from track col auto-jumps to master col row 1 (EQ).
  */
 class MixerModule : TrackerModule {
@@ -66,6 +66,7 @@ class MixerModule : TrackerModule {
     private val MROW0_Y = TRACK_METER_TOP + MASTER_METER_H + 10  // = 234... actually 260
     private val MROW1_Y = MROW0_Y + ROW_HEIGHT
     private val MROW2_Y = MROW1_Y + ROW_HEIGHT
+    private val MROW3_Y = MROW2_Y + ROW_HEIGHT
 
     // Send value display (REV wet / DEL wet — read-only, between send meters and master)
     private val SEND_VAL_LABEL_X = FIRST_METER_X + 2 * METER_SPACING + 8   // = 124
@@ -173,6 +174,7 @@ class MixerModule : TrackerModule {
         val mixSel   = masterSel && s.mixerMasterRow == 0
         val eqSel    = masterSel && s.mixerMasterRow == 1
         val depthSel = masterSel && s.mixerMasterRow == 2
+        val limSel   = masterSel && s.mixerMasterRow == 3
 
         // Row 0: MIX vol editable (right)
         drawBitmapText("MIX", x + MSTR_LABEL_X, y + MROW0_Y,
@@ -192,6 +194,12 @@ class MixerModule : TrackerModule {
             scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(depthText, x + MSTR_VALUE_X, y + MROW2_Y,
             scale, if (depthSel) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
+
+        // Row 3: LIM pre-gain editable (right only)
+        drawBitmapText("LIM", x + MSTR_LABEL_X, y + MROW3_Y,
+            scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText(s.project.limiterPreGain.toHex2(), x + MSTR_VALUE_X, y + MROW3_Y,
+            scale, if (limSel) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
     }
 
     /**
@@ -325,7 +333,7 @@ class MixerModule : TrackerModule {
             2 -> CursorContextFactory.hexByte(state.project.delayWet,  0, 255)
             else -> CursorContextFactory.none()
         }
-        // Col 8 (master): EQ or OTT/DUST
+        // Col 8 (master): EQ, OTT/DUST, or LIM
         return when (state.mixerMasterRow) {
             1 -> CursorContextFactory.hexByte(
                 currentValue = if (state.project.masterEqSlot < 0) -1 else state.project.masterEqSlot,
@@ -335,6 +343,7 @@ class MixerModule : TrackerModule {
                 val depth = if (state.project.masterBusFx == 0) state.project.ottDepth else state.project.dustDepth
                 CursorContextFactory.hexByte(depth, 0, 255)
             }
+            3 -> CursorContextFactory.hexByte(state.project.limiterPreGain, 0, 255)
             else -> CursorContextFactory.none()
         }
     }
@@ -399,6 +408,12 @@ class MixerModule : TrackerModule {
                         onProjectModified()
                         return InputResult(modified = true, ottDepthChanged = isOtt, dustDepthChanged = !isOtt)
                     }
+                    // Master col (col 8): LIM pre-gain
+                    state.mixerMasterRow == 3 -> {
+                        state.project.limiterPreGain = action.value.coerceIn(0, 255)
+                        onProjectModified()
+                        return InputResult(modified = true, limiterPreGainChanged = true)
+                    }
                 }
             }
             else -> {}
@@ -408,11 +423,12 @@ class MixerModule : TrackerModule {
 
     data class InputResult(
         val modified: Boolean,
-        val ottDepthChanged: Boolean  = false,
-        val dustDepthChanged: Boolean = false,
-        val masterEqChanged: Boolean  = false,
-        val reverbWetChanged: Boolean = false,
-        val delayWetChanged: Boolean  = false
+        val ottDepthChanged: Boolean       = false,
+        val dustDepthChanged: Boolean      = false,
+        val masterEqChanged: Boolean       = false,
+        val reverbWetChanged: Boolean      = false,
+        val delayWetChanged: Boolean       = false,
+        val limiterPreGainChanged: Boolean = false
     )
 }
 

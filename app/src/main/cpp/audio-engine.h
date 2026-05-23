@@ -242,6 +242,8 @@ public:
     void setDustDepth(int depth);
     // Reset DUST for offline render: clears delay/envelope state before export.
     void setDustDepthForRender(int depth);
+    // Set limiter pre-gain (0=unity 1.0x, 255=max 4.0x drive into limiter).
+    void setLimiterPreGain(int depth);
 
 
     // Returns the active voice for a given track, checking SF voices first.

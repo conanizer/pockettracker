@@ -513,6 +513,7 @@ data class Project(
     var ottDepth: Int = 0,         // 00=bypass, FF=full OTT wet
     var masterBusFx: Int = 0,     // 0=OTT, 1=DUST
     var dustDepth: Int = 0,       // 00=bypass, FF=full DUST (only active when masterBusFx==1)
+    var limiterPreGain: Int = 0,  // 00=unity(1.0x), FF=max drive(4.0x) into limiter
 
     // EQ preset bank (128 shared slots, referenced by instruments/sends/master)
     val eqPresets: Array<EqPreset> = Array(128) { EqPreset(it) },

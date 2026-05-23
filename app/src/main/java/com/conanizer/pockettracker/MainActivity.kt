@@ -321,6 +321,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         audioBackend.setOttDepth(trackerController.project.ottDepth)
         audioBackend.setMasterFx(trackerController.project.masterBusFx)
         audioBackend.setDustDepth(trackerController.project.dustDepth)
+        audioBackend.setLimiterPreGain(trackerController.project.limiterPreGain)
         Log.d("VolumeSync", "Initial volume sync to audio backend complete")
     }
 
