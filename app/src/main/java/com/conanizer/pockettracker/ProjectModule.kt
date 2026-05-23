@@ -409,44 +409,37 @@ class ProjectModule : TrackerModule {
         val isCursorOnMix   = isCursorOnThisRow && projectState.cursorColumn == 1
         val isCursorOnStems = isCursorOnThisRow && projectState.cursorColumn == 2
 
-        val mixText = when {
-            projectState.isRendering && !projectState.isStemsRendering ->
-                "MIX ${(projectState.renderProgress * 100).toInt()}%"
-            else -> "MIX"
-        }
-        val stemsText = when {
-            projectState.isRendering && projectState.isStemsRendering ->
-                "STEMS ${(projectState.renderProgress * 100).toInt()}%"
-            else -> "STEMS"
-        }
-
         drawBitmapText(
-            text = mixText,
+            text = "MIX",
             x = valueColumnX,
             y = textY,
             scale = scale,
-            color = when {
-                projectState.isRendering && !projectState.isStemsRendering -> Color(t.textTitle)
-                isCursorOnMix -> Color(t.textCursor)
-                else -> Color(t.textValue)
-            },
+            color = if (isCursorOnMix) Color(t.textCursor) else Color(t.textValue),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
 
         drawBitmapText(
-            text = stemsText,
+            text = "STEMS",
             x = valueColumnX + 80,
             y = textY,
             scale = scale,
-            color = when {
-                projectState.isRendering && projectState.isStemsRendering -> Color(t.textTitle)
-                isCursorOnStems -> Color(t.textCursor)
-                else -> Color(t.textValue)
-            },
+            color = if (isCursorOnStems) Color(t.textCursor) else Color(t.textValue),
             spacing = CHAR_SPACING,
             fontScale = FONT_SCALE
         )
+
+        if (projectState.isRendering) {
+            drawBitmapText(
+                text = "${(projectState.renderProgress * 100).toInt()}%",
+                x = valueColumnX + 170,
+                y = textY,
+                scale = scale,
+                color = Color(t.textTitle),
+                spacing = CHAR_SPACING,
+                fontScale = FONT_SCALE
+            )
+        }
     }
 
     /**

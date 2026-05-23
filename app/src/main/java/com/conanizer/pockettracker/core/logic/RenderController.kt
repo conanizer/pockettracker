@@ -238,6 +238,28 @@ class RenderController(
             }
             if (activeTracks.isEmpty()) return RenderResult.Error("No active tracks")
 
+            // Collect instruments used in the song range to check send routing
+            val usedInstrIds = mutableSetOf<Int>()
+            for (row in startRow..endRow) {
+                for (track in project.tracks) {
+                    if (track.mute) continue
+                    if (row >= track.chainRefs.size) continue
+                    val chainId = track.chainRefs[row]
+                    if (chainId !in 0..255) continue
+                    val chain = project.chains[chainId]
+                    for (slot in 0..15) {
+                        val phraseId = chain.phraseRefs[slot]
+                        if (phraseId !in 0..255) continue
+                        for (step in project.phrases[phraseId].steps) {
+                            if (!step.isEmpty() && step.instrument in 0..255)
+                                usedInstrIds.add(step.instrument)
+                        }
+                    }
+                }
+            }
+            val hasReverbSend = usedInstrIds.any { (project.instruments.getOrNull(it)?.reverbSend ?: 0) > 0 }
+            val hasDelaySend  = usedInstrIds.any { (project.instruments.getOrNull(it)?.delaySend  ?: 0) > 0 }
+
             val safeProjectName = project.name
                 .replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
                 .take(32)
@@ -249,7 +271,8 @@ class RenderController(
                 fileSystem.createFolder(rendersDir, safeProjectName) ?: "$rendersDir/$safeProjectName"
             }
 
-            val totalPasses = activeTracks.size + 2  // tracks + reverb + delay
+            val sendPasses = (if (hasReverbSend) 1 else 0) + (if (hasDelaySend) 1 else 0)
+            val totalPasses = activeTracks.size + sendPasses
             var passIndex = 0
 
             for ((stemIdx, trackId) in activeTracks.withIndex()) {
@@ -277,45 +300,49 @@ class RenderController(
                 passIndex++
             }
 
-            // Reverb stem
-            progressCallback?.onProgress(passIndex.toFloat() / totalPasses, "Rendering reverb stem...")
-            audioBackend.stopAll()
-            audioBackend.clearScheduledNotes()
-            audioBackend.resetFrameCounter()
-            val reverbFrames = playbackController.scheduleSongForRender(project, startRow, endRow)
-            if (reverbFrames > 0L) {
-                audioBackend.setStemsMode(9)
-                val audio = audioBackend.renderFrames(reverbFrames.toInt(), sampleRate)
-                audioBackend.setStemsMode(0)
-                val n = reverbFrames.toInt()
-                WavWriter.writeWav(
-                    fileSystem   = fileSystem,
-                    path         = "$stemDir/${safeProjectName}_reverb.wav",
-                    leftChannel  = FloatArray(n) { audio[it * 2] },
-                    rightChannel = FloatArray(n) { audio[it * 2 + 1] },
-                    sampleRate   = sampleRate
-                )
+            // Reverb stem (only if instruments use reverb send)
+            if (hasReverbSend) {
+                progressCallback?.onProgress(passIndex.toFloat() / totalPasses, "Rendering reverb stem...")
+                audioBackend.stopAll()
+                audioBackend.clearScheduledNotes()
+                audioBackend.resetFrameCounter()
+                val reverbFrames = playbackController.scheduleSongForRender(project, startRow, endRow)
+                if (reverbFrames > 0L) {
+                    audioBackend.setStemsMode(9)
+                    val audio = audioBackend.renderFrames(reverbFrames.toInt(), sampleRate)
+                    audioBackend.setStemsMode(0)
+                    val n = reverbFrames.toInt()
+                    WavWriter.writeWav(
+                        fileSystem   = fileSystem,
+                        path         = "$stemDir/${safeProjectName}_reverb.wav",
+                        leftChannel  = FloatArray(n) { audio[it * 2] },
+                        rightChannel = FloatArray(n) { audio[it * 2 + 1] },
+                        sampleRate   = sampleRate
+                    )
+                }
+                passIndex++
             }
-            passIndex++
 
-            // Delay stem
-            progressCallback?.onProgress(passIndex.toFloat() / totalPasses, "Rendering delay stem...")
-            audioBackend.stopAll()
-            audioBackend.clearScheduledNotes()
-            audioBackend.resetFrameCounter()
-            val delayFrames = playbackController.scheduleSongForRender(project, startRow, endRow)
-            if (delayFrames > 0L) {
-                audioBackend.setStemsMode(10)
-                val audio = audioBackend.renderFrames(delayFrames.toInt(), sampleRate)
-                audioBackend.setStemsMode(0)
-                val n = delayFrames.toInt()
-                WavWriter.writeWav(
-                    fileSystem   = fileSystem,
-                    path         = "$stemDir/${safeProjectName}_delay.wav",
-                    leftChannel  = FloatArray(n) { audio[it * 2] },
-                    rightChannel = FloatArray(n) { audio[it * 2 + 1] },
-                    sampleRate   = sampleRate
-                )
+            // Delay stem (only if instruments use delay send)
+            if (hasDelaySend) {
+                progressCallback?.onProgress(passIndex.toFloat() / totalPasses, "Rendering delay stem...")
+                audioBackend.stopAll()
+                audioBackend.clearScheduledNotes()
+                audioBackend.resetFrameCounter()
+                val delayFrames = playbackController.scheduleSongForRender(project, startRow, endRow)
+                if (delayFrames > 0L) {
+                    audioBackend.setStemsMode(10)
+                    val audio = audioBackend.renderFrames(delayFrames.toInt(), sampleRate)
+                    audioBackend.setStemsMode(0)
+                    val n = delayFrames.toInt()
+                    WavWriter.writeWav(
+                        fileSystem   = fileSystem,
+                        path         = "$stemDir/${safeProjectName}_delay.wav",
+                        leftChannel  = FloatArray(n) { audio[it * 2] },
+                        rightChannel = FloatArray(n) { audio[it * 2 + 1] },
+                        sampleRate   = sampleRate
+                    )
+                }
             }
 
             progressCallback?.onProgress(1f, "Done!")
