@@ -137,10 +137,10 @@ class TrackerController(
         }
 
     // Mixer master sub-row (reachable from any column via DPAD UP/DOWN)
-    // 0 = volume row, 1 = MASTER FX selector, 2 = effect depth
+    // 0 = volume row, 1 = MASTER FX selector, 2 = effect depth, 3 = LIM pre-gain
     var mixerMasterRow = 0
         set(value) {
-            field = value.coerceIn(0, 2)
+            field = value.coerceIn(0, 3)
             stateObserver.onStateChanged()
         }
 
