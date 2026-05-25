@@ -29,7 +29,9 @@
       "WebFetch(domain:www.recordingblogs.com)",
       "WebFetch(domain:www.digitizationguidelines.gov)",
       "WebFetch(domain:forum.1010music.com)",
-      "Bash(xargs wc -l)"
+      "Bash(xargs wc -l)",
+      "Bash(Get-ChildItem -Recurse \"C:\\\\Users\\\\conan\\\\AndroidStudioProjects\\\\Pockettracker\\\\app\\\\src\\\\main\\\\cpp\" -Filter \"*.h\")",
+      "Bash(Select-Object -ExpandProperty FullName)"
     ]
   }
 }

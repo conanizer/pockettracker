@@ -93,7 +93,7 @@ git push
 ### Build Full APK
 ```bash
 ./build.sh
-# Output: app/build/outputs/apk/debug/app-debug.apk
+# Output: app/build/outputs/apk/debug/pockettracker-debug.apk
 ```
 
 ### Quick Compile Check (Fastest)
