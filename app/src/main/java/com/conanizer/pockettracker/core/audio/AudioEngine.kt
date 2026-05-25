@@ -852,11 +852,7 @@ class AudioEngine(
     }
 
     fun applySoundfontFilterOverrides(instrument: Instrument) {
-        val ov = instrument.sfOverrides
-        val filterType = if (ov.filterCut >= 0) 1 else 0  // 1=LP, 0=off
-        val filterCut  = if (ov.filterCut >= 0) ov.filterCut else 255
-        val filterRes  = if (ov.filterRes >= 0) ov.filterRes else 0
-        backend.setSoundfontFilterOverrides(instrument.sampleId, filterType, filterCut, filterRes)
+        updateInstrumentPlaybackParams(instrument)
     }
 
     private val loadedTables = mutableSetOf<Int>()
