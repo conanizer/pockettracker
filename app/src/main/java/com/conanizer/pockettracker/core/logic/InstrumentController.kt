@@ -155,6 +155,10 @@ class InstrumentController(
             // Read cue points from WAV so slice playback works without opening the sample editor
             val cuePoints = WavWriter.readCuePoints(filePath)
             instrument.sliceMarkers = cuePoints.map { it.toLong() }
+            // Auto-enable TRU slice mode when the WAV carries cue/slice data
+            if (cuePoints.isNotEmpty() && instrument.slicingMode == 0) {
+                instrument.slicingMode = 2
+            }
 
             // Extract filename from path (last segment after last slash)
             val filename = filePath.substringAfterLast('/').substringBeforeLast('.')

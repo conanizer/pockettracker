@@ -28,7 +28,7 @@ class TrackerController(
             stateObserver.onStateChanged()
         }
 
-    var currentScreen = ScreenType.PHRASE
+    var currentScreen = ScreenType.SONG
         set(value) {
             field = value
             stateObserver.onStateChanged()
@@ -541,12 +541,23 @@ class TrackerController(
     }
 
     fun navigateLeft(currentScreen: ScreenType, previousColumn: Int): Pair<ScreenType, Int> {
-        // Shared rooms have no side doors!
-        if (currentScreen in listOf(ScreenType.PROJECT, ScreenType.MIXER, ScreenType.EFFECTS)) {
-            return Pair(currentScreen, previousColumn)
+        // EFFECTS has no side doors
+        if (currentScreen == ScreenType.EFFECTS) return Pair(currentScreen, previousColumn)
+
+        // Row 1 (PROJECT, GROOVE, MODS) and Row 3 (MIXER): jump to row-2 screen one column left
+        val contextCol = when (currentScreen) {
+            ScreenType.PROJECT -> previousColumn
+            ScreenType.GROOVE  -> 2
+            ScreenType.MODS    -> 3
+            ScreenType.MIXER   -> 2
+            else -> -1
+        }
+        if (contextCol >= 0) {
+            val targetCol = (contextCol - 1).coerceAtLeast(0)
+            return Pair(getMainScreenForColumn(targetCol), targetCol)
         }
 
-        // If in a context screen, go to main row first
+        // Other non-main-row screens (SCALE, INST_POOL): drop to main row in same column
         if (currentScreen !in MAIN_ROW_SCREENS) {
             val mainScreen = getMainScreenForColumn(getScreenColumn(currentScreen))
             return Pair(mainScreen, getScreenColumn(currentScreen))
@@ -564,12 +575,23 @@ class TrackerController(
     }
 
     fun navigateRight(currentScreen: ScreenType, previousColumn: Int): Pair<ScreenType, Int> {
-        // Shared rooms have no side doors!
-        if (currentScreen in listOf(ScreenType.PROJECT, ScreenType.MIXER, ScreenType.EFFECTS)) {
-            return Pair(currentScreen, previousColumn)
+        // EFFECTS has no side doors
+        if (currentScreen == ScreenType.EFFECTS) return Pair(currentScreen, previousColumn)
+
+        // Row 1 (PROJECT, GROOVE, MODS) and Row 3 (MIXER): jump to row-2 screen one column right
+        val contextCol = when (currentScreen) {
+            ScreenType.PROJECT -> previousColumn
+            ScreenType.GROOVE  -> 2
+            ScreenType.MODS    -> 3
+            ScreenType.MIXER   -> 2
+            else -> -1
+        }
+        if (contextCol >= 0) {
+            val targetCol = (contextCol + 1).coerceAtMost(4)
+            return Pair(getMainScreenForColumn(targetCol), targetCol)
         }
 
-        // If in a context screen, go to main row first
+        // Other non-main-row screens (SCALE, INST_POOL): drop to main row in same column
         if (currentScreen !in MAIN_ROW_SCREENS) {
             val mainScreen = getMainScreenForColumn(getScreenColumn(currentScreen))
             return Pair(mainScreen, getScreenColumn(currentScreen))
