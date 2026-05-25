@@ -808,7 +808,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
 
     fun handleDPadUp() {
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorUp() }
-        else if (showCleanDialog) { cleanDialogCursor = 0 }
+        else if (showCleanDialog) { return }
         else if (themeEditorState.isOpen) {
             val row = themeEditorState.cursorRow
             themeEditorState = themeEditorState.copy(cursorRow = if (row > 0) row - 1 else ThemeEditorModule.MAX_ROW)
@@ -822,7 +822,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
 
     fun handleDPadDown() {
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorDown() }
-        else if (showCleanDialog) { cleanDialogCursor = 1 }
+        else if (showCleanDialog) { return }
         else if (themeEditorState.isOpen) {
             val row = themeEditorState.cursorRow
             themeEditorState = themeEditorState.copy(cursorRow = if (row < ThemeEditorModule.MAX_ROW) row + 1 else 0)
@@ -866,13 +866,9 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             return
         }
         if (showCleanDialog) {
-            if (cleanDialogCursor == 0) {
-                val target = cleanDialogTarget
-                showCleanDialog = false
-                if (target == "SEQ") trackerController.cleanUnusedSeq() else trackerController.cleanUnusedInst()
-            } else {
-                showCleanDialog = false
-            }
+            val target = cleanDialogTarget
+            showCleanDialog = false
+            if (target == "SEQ") trackerController.cleanUnusedSeq() else trackerController.cleanUnusedInst()
             return
         }
         if (showNewProjectDialog) {

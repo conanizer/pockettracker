@@ -945,74 +945,8 @@ class TrackerLayout {
         // Right corner: Navigation Map
     }
 
-    /**
-     * Draw the "CLEAN SEQ/INST?" confirmation dialog as a pixel-art overlay.
-     * Centered on the 640×480 canvas.
-     */
-    private fun DrawScope.drawCleanDialog(scale: Int, target: String, cursor: Int, t: AppTheme) {
-        val boxW = 200
-        val boxH = 70
-        val boxX = (DESIGN_WIDTH_PX - boxW) / 2
-        val boxY = (DESIGN_HEIGHT_PX - boxH) / 2
-
-        // Semi-transparent backdrop
-        drawRect(
-            color = Color(0xCC000000),
-            topLeft = Offset.Zero,
-            size = Size((DESIGN_WIDTH_PX * scale).toFloat(), (DESIGN_HEIGHT_PX * scale).toFloat())
-        )
-
-        // Dialog background
-        drawRect(
-            color = Color(t.meterBackground),
-            topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
-            size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat())
-        )
-
-        // Border
-        drawRect(
-            color = Color(t.textTitle),
-            topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
-            size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat()),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
-        )
-
-        val textX = boxX + 10
-        val fs = 3
-        val cs = 2
-
-        // Title: "CLEAN SEQ?" or "CLEAN INST?"
-        drawBitmapText(
-            text = "CLEAN $target?",
-            x = textX,
-            y = boxY + 6,
-            scale = scale,
-            color = Color(t.textTitle),
-            spacing = cs,
-            fontScale = fs
-        )
-
-        val yesPrefix = if (cursor == 0) ">" else " "
-        drawBitmapText(
-            text = "$yesPrefix YES",
-            x = textX,
-            y = boxY + 27,
-            scale = scale,
-            color = if (cursor == 0) Color(t.textCursor) else Color(t.textValue),
-            spacing = cs,
-            fontScale = fs
-        )
-
-        val noPrefix = if (cursor == 1) ">" else " "
-        drawBitmapText(
-            text = "$noPrefix NO",
-            x = textX,
-            y = boxY + 48,
-            scale = scale,
-            color = if (cursor == 1) Color(t.textCursor) else Color(t.textValue),
-            spacing = cs,
-            fontScale = fs
-        )
+    private fun DrawScope.drawCleanDialog(scale: Int, target: String, @Suppress("UNUSED_PARAMETER") cursor: Int, t: AppTheme) {
+        drawSimpleConfirmDialog(scale, "CLEAN $target?", t)
     }
 
     private fun DrawScope.drawSimpleConfirmDialog(scale: Int, title: String, t: AppTheme) {
