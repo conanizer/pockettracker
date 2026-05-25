@@ -101,6 +101,7 @@ dependencies {
     val acraVersion = "5.11.3"
     implementation("ch.acra:acra-core:$acraVersion")
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))

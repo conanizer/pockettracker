@@ -3,4 +3,11 @@
 
     <style name="Theme.Pockettracker" parent="android:Theme.Material.Light.NoActionBar" />
 
+    <style name="Theme.Pockettracker.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/splash_bg</item>
+        <item name="postSplashScreenTheme">@style/Theme.Pockettracker</item>
+    </style>
+
 </resources>
