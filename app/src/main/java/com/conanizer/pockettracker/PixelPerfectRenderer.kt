@@ -1016,10 +1016,13 @@ class TrackerLayout {
     }
 
     private fun DrawScope.drawSimpleConfirmDialog(scale: Int, title: String, t: AppTheme) {
-        val boxW = 200
+        val boxW = 260
         val boxH = 55
         val boxX = (DESIGN_WIDTH_PX - boxW) / 2
         val boxY = (DESIGN_HEIGHT_PX - boxH) / 2
+        val fs = 3; val cs = 2
+        // char slot width at fs=3, cs=2 is 17px; textWidth = n*17-2
+        fun tw(s: String) = if (s.isEmpty()) 0 else s.length * 17 - 2
 
         drawRect(
             color = Color(0xCC000000),
@@ -1037,9 +1040,9 @@ class TrackerLayout {
             size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat()),
             style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
         )
-        val fs = 3; val cs = 2
-        drawBitmapText(title,        boxX + 10, boxY + 8,  scale, Color(t.textTitle),  cs, fs)
-        drawBitmapText("A=YES  B=NO", boxX + 10, boxY + 30, scale, Color(t.textCursor), cs, fs)
+        val instruction = "A=YES  B=NO"
+        drawBitmapText(title,       boxX + (boxW - tw(title))       / 2, boxY + 8,  scale, Color(t.textTitle),  cs, fs)
+        drawBitmapText(instruction, boxX + (boxW - tw(instruction)) / 2, boxY + 30, scale, Color(t.textCursor), cs, fs)
     }
 
     // ============================================================================
