@@ -109,6 +109,9 @@ fun PixelPerfectTracker(
     showCleanDialog: Boolean = false,
     cleanDialogTarget: String = "",  // "SEQ" or "INST"
     cleanDialogCursor: Int = 0,      // 0 = YES, 1 = NO
+    // Simple confirm dialogs
+    showNewProjectDialog: Boolean = false,
+    showInstrTypeDialog: Boolean = false,
     // Song scroll position
     songScrollPosition: Int = 0,
     // Scaling mode (for project screen display)
@@ -288,6 +291,8 @@ fun PixelPerfectTracker(
                         showCleanDialog = showCleanDialog,
                         cleanDialogTarget = cleanDialogTarget,
                         cleanDialogCursor = cleanDialogCursor,
+                        showNewProjectDialog = showNewProjectDialog,
+                        showInstrTypeDialog = showInstrTypeDialog,
                         layoutMode = layoutMode,
                         songScrollPosition = songScrollPosition,
                         scalingMode = scalingMode,
@@ -404,6 +409,9 @@ class TrackerLayout {
         showCleanDialog: Boolean = false,
         cleanDialogTarget: String = "",  // "SEQ" or "INST"
         cleanDialogCursor: Int = 0,      // 0 = YES, 1 = NO
+        // Simple confirm dialogs (A=YES, B=NO)
+        showNewProjectDialog: Boolean = false,
+        showInstrTypeDialog: Boolean = false,
         // Layout mode (from CompositionLocal, for display in project screen)
         layoutMode: DeviceAdapter.LayoutMode = DeviceAdapter.LayoutMode.FULL,
         // Song scroll position (viewport start row for 256-row song)
@@ -907,6 +915,12 @@ class TrackerLayout {
         if (showCleanDialog) {
             drawCleanDialog(scale, cleanDialogTarget, cleanDialogCursor, appTheme)
         }
+        if (showNewProjectDialog) {
+            drawSimpleConfirmDialog(scale, "NEW PROJECT?", appTheme)
+        }
+        if (showInstrTypeDialog) {
+            drawSimpleConfirmDialog(scale, "CHANGE TYPE?", appTheme)
+        }
 
         // ===================================
         // QWERTY KEYBOARD OVERLAY
@@ -999,6 +1013,33 @@ class TrackerLayout {
             spacing = cs,
             fontScale = fs
         )
+    }
+
+    private fun DrawScope.drawSimpleConfirmDialog(scale: Int, title: String, t: AppTheme) {
+        val boxW = 200
+        val boxH = 55
+        val boxX = (DESIGN_WIDTH_PX - boxW) / 2
+        val boxY = (DESIGN_HEIGHT_PX - boxH) / 2
+
+        drawRect(
+            color = Color(0xCC000000),
+            topLeft = Offset.Zero,
+            size = Size((DESIGN_WIDTH_PX * scale).toFloat(), (DESIGN_HEIGHT_PX * scale).toFloat())
+        )
+        drawRect(
+            color = Color(t.meterBackground),
+            topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
+            size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat())
+        )
+        drawRect(
+            color = Color(t.textTitle),
+            topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
+            size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat()),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
+        )
+        val fs = 3; val cs = 2
+        drawBitmapText(title,        boxX + 10, boxY + 8,  scale, Color(t.textTitle),  cs, fs)
+        drawBitmapText("A=YES  B=NO", boxX + 10, boxY + 30, scale, Color(t.textCursor), cs, fs)
     }
 
     // ============================================================================

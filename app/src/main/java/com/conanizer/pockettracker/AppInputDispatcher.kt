@@ -92,7 +92,9 @@ class AppStateRefs(
     val masterPeakBuffer: FloatArray,
     val sendPeakBuffer: FloatArray,
     val appTheme: MutableState<AppTheme>,
-    val themeEditorState: MutableState<ThemeEditorState>
+    val themeEditorState: MutableState<ThemeEditorState>,
+    val showNewProjectDialog: MutableState<Boolean>,
+    val showInstrTypeDialog: MutableState<Boolean>
 )
 
 class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
@@ -156,6 +158,8 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     private val sendPeakBuffer get() = refs.sendPeakBuffer
     private var appTheme by refs.appTheme
     private var themeEditorState by refs.themeEditorState
+    private var showNewProjectDialog by refs.showNewProjectDialog
+    private var showInstrTypeDialog by refs.showInstrTypeDialog
 
     // Dedicated return target for SETTINGS — set when entering, never overwritten by FILE_BROWSER navigation
     private var settingsReturnScreen: ScreenType = ScreenType.PROJECT
@@ -871,6 +875,21 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             }
             return
         }
+        if (showNewProjectDialog) {
+            showNewProjectDialog = false
+            trackerController.newProject()
+            audioEngine.clearLoadedTables()
+            return
+        }
+        if (showInstrTypeDialog) {
+            showInstrTypeDialog = false
+            instrumentController.currentInstrument = trackerController.currentInstrument
+            val inst = trackerController.project.instruments[trackerController.currentInstrument]
+            val newType = if (inst.instrumentType == InstrumentType.SOUNDFONT) InstrumentType.SAMPLER else InstrumentType.SOUNDFONT
+            instrumentController.setInstrumentType(trackerController.project, newType)
+            trackerController.projectVersion++
+            return
+        }
         if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.showConfirmClose) {
             audioEngine.restoreFxPreviewBackup()
             sampleEditorState = sampleEditorState.copy(showConfirmClose = false, isModified = false)
@@ -1050,18 +1069,25 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 when (trackerController.projectCursorRow) {
                     3 -> when (trackerController.projectCursorColumn) {
                         1 -> {
-                            previousScreen = trackerController.currentScreen
-                            trackerController.currentScreen = ScreenType.FILE_BROWSER
-                            val projectsDir = java.io.File(fileController.getProjectsDirectory())
-                            fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtension = "ptp", fileExtensions = null, mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), projectsDir)
-                        }
-                        2 -> {
                             when (val result = trackerController.saveProject(trackerController.project.name)) {
                                 is FileController.SaveResult.Success -> { trackerController.statusMessage = "SAVED"; trackerController.statusSuccess = true }
                                 is FileController.SaveResult.Error   -> { trackerController.statusMessage = "SAVE FAILED"; trackerController.statusSuccess = false }
                             }
                         }
-                        3 -> { trackerController.newProject(); audioEngine.clearLoadedTables() }
+                        2 -> {
+                            previousScreen = trackerController.currentScreen
+                            trackerController.currentScreen = ScreenType.FILE_BROWSER
+                            val projectsDir = java.io.File(fileController.getProjectsDirectory())
+                            fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtension = "ptp", fileExtensions = null, mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), projectsDir)
+                        }
+                        3 -> {
+                            if (trackerController.isProjectDirty) {
+                                showNewProjectDialog = true
+                            } else {
+                                trackerController.newProject()
+                                audioEngine.clearLoadedTables()
+                            }
+                        }
                     }
                     4 -> when (trackerController.projectCursorColumn) {
                         1 -> {
@@ -1174,11 +1200,6 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val instrument = trackerController.project.instruments[trackerController.currentInstrument]
                 when (trackerController.instrumentCursorRow) {
                     0 -> when (trackerController.instrumentCursorColumn) {
-                        1 -> {
-                            val newType = if (instrument.instrumentType == InstrumentType.SOUNDFONT) InstrumentType.SAMPLER else InstrumentType.SOUNDFONT
-                            instrumentController.setInstrumentType(trackerController.project, newType)
-                            trackerController.projectVersion++
-                        }
                         2 -> {
                             instrumentFileBrowserAction = "LOAD_PRESET"
                             previousScreen = trackerController.currentScreen
@@ -1479,6 +1500,8 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     fun handleButtonB() {
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.deleteChar(); return }
         if (showCleanDialog) { showCleanDialog = false; return }
+        if (showNewProjectDialog) { showNewProjectDialog = false; return }
+        if (showInstrTypeDialog) { showInstrTypeDialog = false; return }
         if (themeEditorState.isOpen) { themeEditorState = ThemeEditorState(); return }
         if (trackerController.currentScreen == ScreenType.SETTINGS) {
             trackerController.inputController.exitSelectionMode()
@@ -1864,6 +1887,19 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         } else if (isOnFxTypeColumn()) {
             val idx = getCurrentFxTypeIndex()
             fxHelperState = FxHelperState(isOpen = true, cursorRow = idx / 5, cursorCol = idx % 5)
+        } else if (trackerController.currentScreen == ScreenType.INSTRUMENT &&
+                   trackerController.instrumentCursorRow == 0 &&
+                   trackerController.instrumentCursorColumn == 1) {
+            val inst = trackerController.project.instruments[trackerController.currentInstrument]
+            val hasSource = inst.sampleFilePath != null || inst.soundfontPath != null
+            if (hasSource) {
+                showInstrTypeDialog = true
+            } else {
+                instrumentController.currentInstrument = trackerController.currentInstrument
+                val newType = if (inst.instrumentType == InstrumentType.SOUNDFONT) InstrumentType.SAMPLER else InstrumentType.SOUNDFONT
+                instrumentController.setInstrumentType(trackerController.project, newType)
+                trackerController.projectVersion++
+            }
         } else {
             handleSelectionOrSingleIncrement { ctx -> trackerController.inputController.handleAButton(ctx) }
         }
@@ -1892,6 +1928,19 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         } else if (isOnFxTypeColumn()) {
             val idx = getCurrentFxTypeIndex()
             fxHelperState = FxHelperState(isOpen = true, cursorRow = idx / 5, cursorCol = idx % 5)
+        } else if (trackerController.currentScreen == ScreenType.INSTRUMENT &&
+                   trackerController.instrumentCursorRow == 0 &&
+                   trackerController.instrumentCursorColumn == 1) {
+            val inst = trackerController.project.instruments[trackerController.currentInstrument]
+            val hasSource = inst.sampleFilePath != null || inst.soundfontPath != null
+            if (hasSource) {
+                showInstrTypeDialog = true
+            } else {
+                instrumentController.currentInstrument = trackerController.currentInstrument
+                val newType = if (inst.instrumentType == InstrumentType.SOUNDFONT) InstrumentType.SAMPLER else InstrumentType.SOUNDFONT
+                instrumentController.setInstrumentType(trackerController.project, newType)
+                trackerController.projectVersion++
+            }
         } else {
             handleSelectionOrSingleIncrement { ctx -> trackerController.inputController.handleBButton(ctx) }
         }

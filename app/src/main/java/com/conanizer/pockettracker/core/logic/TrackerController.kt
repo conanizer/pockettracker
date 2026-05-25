@@ -47,6 +47,10 @@ class TrackerController(
             stateObserver.onStateChanged()
         }
 
+    // Set to match projectVersion after save/load/new so isProjectDirty works correctly.
+    var savedProjectVersion = 0
+    val isProjectDirty get() = projectVersion != savedProjectVersion
+
     var statusMessage = ""
         set(value) {
             field = value
@@ -239,6 +243,7 @@ class TrackerController(
 
         when (result) {
             is FileController.SaveResult.Success -> {
+                savedProjectVersion = projectVersion
                 statusMessage = "SAVED"
                 statusSuccess = true
             }
@@ -258,6 +263,7 @@ class TrackerController(
             is FileController.LoadResult.Success -> {
                 project = result.project
                 projectVersion++
+                savedProjectVersion = projectVersion
                 statusMessage = "LOADED: $filename"
                 statusSuccess = true
                 resetEditingContext()
@@ -280,6 +286,7 @@ class TrackerController(
             is FileController.LoadResult.Success -> {
                 project = result.project
                 projectVersion++
+                savedProjectVersion = projectVersion
                 statusMessage = "LOADED: ${fileInfo.nameWithoutExtension}"
                 statusSuccess = true
                 resetEditingContext()
@@ -301,6 +308,7 @@ class TrackerController(
 
         project = Project(version = 1)
         projectVersion++
+        savedProjectVersion = projectVersion
         statusMessage = "NEW PROJECT"
         statusSuccess = true
 

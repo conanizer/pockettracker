@@ -350,7 +350,7 @@ class ProjectModule : TrackerModule {
             fontScale = FONT_SCALE
         )
 
-        val options = listOf("LOAD", "SAVE", "NEW")
+        val options = listOf("SAVE", "LOAD", "NEW")
         var optionX = valueColumnX
 
         for (optionIndex in options.indices) {
@@ -657,7 +657,7 @@ class ProjectModule : TrackerModule {
  *   - 0 = Parameter name (left column)
  *   - 1+ = Value columns (specific to each row)
  *   For NAME row: 1-20 = character position
- *   For PROJECT row: 1=LOAD, 2=SAVE, 3=NEW
+ *   For PROJECT row: 1=SAVE, 2=LOAD, 3=NEW
  * @param statusMessage Status message to show at bottom
  * @param isSuccess True if status is success, false if error
  */

@@ -284,6 +284,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     var cleanDialogTarget by _cleanDialogTarget
     val _cleanDialogCursor = remember { mutableIntStateOf(0) }  // 0=YES, 1=NO
     var cleanDialogCursor by _cleanDialogCursor
+    val _showNewProjectDialog = remember { mutableStateOf(false) }
+    var showNewProjectDialog by _showNewProjectDialog
+    val _showInstrTypeDialog = remember { mutableStateOf(false) }
+    var showInstrTypeDialog by _showInstrTypeDialog
 
     // Tracks where the last single A-press inserted into an empty cell (screen, row, col)
     // Used by A+A to decide whether to insert next-unused (only allowed on same cell)
@@ -727,7 +731,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             _lastAInsertPosition, _insertBefore, _instrumentFileBrowserAction,
             _previousScreen, _buttonSoundEnabled, _buttonSoundVolume,
             _buttonVibroEnabled, _vibroPower, _cursorRemember, _notePreviewEnabled,
-            trackPeakBuffer, masterPeakBuffer, sendPeakBuffer, _appTheme, _themeEditorState
+            trackPeakBuffer, masterPeakBuffer, sendPeakBuffer, _appTheme, _themeEditorState,
+            _showNewProjectDialog, _showInstrTypeDialog
         )
     }
     val dispatcher = remember { AppInputDispatcher(appCtrl, appState) }
@@ -825,6 +830,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         showCleanDialog         = showCleanDialog,
         cleanDialogTarget       = cleanDialogTarget,
         cleanDialogCursor       = cleanDialogCursor,
+        showNewProjectDialog    = showNewProjectDialog,
+        showInstrTypeDialog     = showInstrTypeDialog,
         songScrollPosition      = stateVersion.let { trackerController.songScrollPosition },
         scalingMode             = scalingMode,
         buttonSoundEnabled      = buttonSoundEnabled,
