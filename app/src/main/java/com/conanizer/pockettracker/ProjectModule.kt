@@ -46,7 +46,7 @@ class ProjectModule : TrackerModule {
         )
 
         val nameColumnX = x + 10
-        val valueColumnX = x + 170
+        val valueColumnX = x + 210
 
         var rowY = y + TEXT_PADDING
 
@@ -105,7 +105,7 @@ class ProjectModule : TrackerModule {
             isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1,
             t = t
         )
-        rowY += ROW_HEIGHT
+        rowY += ROW_HEIGHT * 2  // extra spacer after TRANSPOSE
         currentRow++
 
         // ─────────────────────────────────────
@@ -154,7 +154,7 @@ class ProjectModule : TrackerModule {
         currentRow++
 
         // ─────────────────────────────────────
-        // ROW 5: CLEAN (SEQ / INST buttons)
+        // ROW 5: COMPACT (SEQ / INST buttons)
         // ─────────────────────────────────────
         drawCleanRow(
             x = x,
@@ -165,7 +165,7 @@ class ProjectModule : TrackerModule {
             projectState = projectState,
             currentRow = currentRow
         )
-        rowY += ROW_HEIGHT
+        rowY += ROW_HEIGHT * 2  // extra spacer after COMPACT
         currentRow++
 
         // ─────────────────────────────────────
@@ -443,8 +443,8 @@ class ProjectModule : TrackerModule {
     }
 
     /**
-     * Draw CLEAN row with SEQ / INST options
-     * Example: CLEAN    SEQ  INST
+     * Draw COMPACT row with SEQ / INST options
+     * Example: COMPACT  SEQ  INST
      */
     private fun DrawScope.drawCleanRow(
         x: Int,
@@ -468,7 +468,7 @@ class ProjectModule : TrackerModule {
         }
 
         drawBitmapText(
-            text = "CLEAN",
+            text = "COMPACT",
             x = nameColumnX,
             y = textY,
             scale = scale,
