@@ -85,7 +85,7 @@ class SettingsModule : TrackerModule {
             "SCALING", scalingText,
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
             isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
-        rowY += ROW_HEIGHT; currentRow++
+        rowY += ROW_HEIGHT * 2; currentRow++
 
         // ── ROW 2: BTN SOUND ───────────────────────────────────────────
         drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
@@ -115,7 +115,7 @@ class SettingsModule : TrackerModule {
             "VIBRO POW", vibroPowHex,
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
             isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
-        rowY += ROW_HEIGHT; currentRow++
+        rowY += ROW_HEIGHT * 2; currentRow++
 
         // ── ROW 6: KB INSERT ───────────────────────────────────────────
         val kbInsertText = if (s.insertBefore) "BEFORE" else "AFTER"
@@ -138,7 +138,7 @@ class SettingsModule : TrackerModule {
             "NOTE PREV", if (s.notePreviewEnabled) "ON" else "OFF",
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
             isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
-        rowY += ROW_HEIGHT; currentRow++
+        rowY += ROW_HEIGHT * 2; currentRow++
 
         // ── ROW 9: VISUALIZER ─────────────────────────────────────────
         val vizText = when (s.visualizerType) {
@@ -162,7 +162,7 @@ class SettingsModule : TrackerModule {
             "THEME", "${s.currentThemeName} >",
             isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
             isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
-        rowY += ROW_HEIGHT; currentRow++
+        rowY += ROW_HEIGHT * 2; currentRow++
 
         // ── ROW 11: SONG TEMPLATE ─────────────────────────────────────
         drawTemplateRow(x, rowY, scale, nameColumnX, valueColumnX, s, currentRow)
