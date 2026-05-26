@@ -40,7 +40,7 @@ class OscilloscopeModule(
         const val BAR_DECAY = 0.90f
 
         // OCTA: gap between track scopes (in pixels)
-        const val OCTA_TRACK_GAP = 3
+        const val OCTA_TRACK_GAP = 10
     }
 
     // PEAKS mode state — persists between frames (module instance lives in TrackerLayout)
