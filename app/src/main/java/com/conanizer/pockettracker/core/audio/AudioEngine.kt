@@ -633,7 +633,7 @@ class AudioEngine(
             val resolvedSliceIndex = if (sliIndex >= 0) {
                 sliIndex.coerceAtMost(markers.size)
             } else {
-                (note.toMidi() - transposeSemitones - 48).coerceAtLeast(0).coerceAtMost(markers.size)
+                (note.toMidi() - transposeSemitones - 60).coerceAtLeast(0).coerceAtMost(markers.size)
             }
             val totalFrames = backend.getSampleLength(sampleId).toLong()
             if (totalFrames > 0) {
