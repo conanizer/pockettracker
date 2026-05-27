@@ -622,13 +622,14 @@ class AudioEngine(
         // Pitch is always ROOT + chain/master transpose; phrase note never affects pitch in slice mode.
         // PIT FX is applied after this block so it shifts pitch without touching slice selection.
         var effectiveNote = note
+        var effectiveBaseFreq = baseFreq  // may be overridden below for slice mode
         var effectiveStartOverride = startPointOverride
         var effectiveEndOverride = -1
         val useSliceLogic = (instrument.slicingMode != 0 || sliIndex >= 0) && instrument.sliceMarkers.isNotEmpty()
         if (useSliceLogic) {
             val markers = instrument.sliceMarkers
             // SLI explicit index takes priority; otherwise derive from raw phrase note (before transpose).
-            // C-4 (MIDI 48 in this system) = slice 0; C#4 = slice 1; etc.
+            // C-4 (MIDI 60 in standard MIDI) = slice 0; C#4 = slice 1; etc.
             // ROOT has no effect on slice mapping — it only affects playback pitch.
             val resolvedSliceIndex = if (sliIndex >= 0) {
                 sliIndex.coerceAtMost(markers.size)
@@ -639,8 +640,18 @@ class AudioEngine(
             if (totalFrames > 0) {
                 val sliceStart = if (resolvedSliceIndex == 0) 0L else markers[resolvedSliceIndex - 1]
                 effectiveStartOverride = ((sliceStart * 255L) / totalFrames).toInt().coerceIn(0, 255)
-                // Pitch = ROOT + chain/master transpose; phrase note column only selects slice
+                // Pitch = ROOT + chain/master transpose; phrase note column only selects slice.
                 effectiveNote = Note.fromMidi((instrument.root.toMidi() + transposeSemitones).coerceIn(0, 127))
+                // The standard baseFreq includes ROOT (= ROOT × detune × sampleRateRatio), so when
+                // effectiveNote is also ROOT-based the C++ rate calculation (freq/baseFreq) would
+                // cancel ROOT out and ROOT would have no effect on pitch. Fix: strip ROOT from baseFreq
+                // so it only carries detune × sampleRateRatio, letting ROOT appear only in the numerator.
+                val sampleRateRatio = sampleRateRatios[sampleId] ?: 1.0f
+                val detuneSemitones = (instrument.detune shr 4).toFloat()
+                val detuneFraction = (instrument.detune and 0x0F) / 16.0f
+                val totalDetuneSemitones = detuneSemitones + detuneFraction - 8.0f
+                val detuneMultiplier = Math.pow(2.0, (totalDetuneSemitones / 12.0)).toFloat()
+                effectiveBaseFreq = 261.63f * detuneMultiplier * sampleRateRatio
                 // CUT end boundary only when slicingMode=CUT; OFF+SLI or TRU play to sample end
                 if (instrument.slicingMode == 1) {
                     val sliceEnd = if (resolvedSliceIndex < markers.size) markers[resolvedSliceIndex] else totalFrames
@@ -676,7 +687,7 @@ class AudioEngine(
 
         // Always use scheduleNoteWithTable - C++ handles tableId=-1 as "no table"
         backend.scheduleNoteWithTable(
-            targetFrame, sampleId, trackId, frequency, baseFreq, volume, phraseVol, pan,
+            targetFrame, sampleId, trackId, frequency, effectiveBaseFreq, volume, phraseVol, pan,
             effectiveStartOverride, effectiveEndOverride, tableId, tableTicRate, effectiveNote.octave, effectiveNote.pitch,
             pslInitialOffset, pslDurationFrames, pbnRatePerFrame, vibratoSpeed, vibratoDepth,
             tableStartRow
