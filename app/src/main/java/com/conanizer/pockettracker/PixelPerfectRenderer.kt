@@ -1179,7 +1179,7 @@ class TrackerLayout {
      *   8px spacer
      *   "EFFECT" header (21px), centered
      *   8px spacer
-     *   4 rows × 5 cols effect grid (84px)
+     *   4 rows × 6 cols effect grid (84px)
      *
      * Box: 580×222, top-left at (30, 129)
      */
@@ -1248,10 +1248,10 @@ class TrackerLayout {
             fontScale = fs
         )
 
-        // ── Effect grid (5 cols × 4 rows) ─────────────────────────────────────
+        // ── Effect grid (6 cols × 4 rows) ─────────────────────────────────────
         val gridY = headerY + rowH + 8           // after header + spacer
-        val cellW = 96
-        val gridCols = 5
+        val cellW = 80
+        val gridCols = 6
         val gridW = gridCols * cellW             // 480px
         val gridX = boxX + (boxW - gridW) / 2   // center in box
 

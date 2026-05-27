@@ -49,22 +49,24 @@ val EFFECT_DESCRIPTIONS: List<List<String>> = listOf(
     /* 16  PSL  PITCH SLIDE  */ listOf("PSL: Pitch slide",                "xx=duration(01=fast FF=slow)", "slides pitch from previous note"),
     /* 17  PBN  PITCH BEND   */ listOf("PBN: Pitch bend",                 "01-7F=bend up  80-FF=bend down", "00=stop bending"),
     /* 18  PVB  VIBRATO      */ listOf("PVB: Vibrato",                    "x=speed(0-F Hz)", "y=depth(0-F in 1/8 semitone)"),
-    /* 19  PVX  EXT VIBRATO  */ listOf("PVX: Extreme vibrato",            "4x depth and 2x speed", "same format as PVB")
+    /* 19  PVX  EXT VIBRATO  */ listOf("PVX: Extreme vibrato",            "4x depth and 2x speed", "same format as PVB"),
+    /* 20  PIT  PITCH OFFSET */ listOf("PIT: Pitch semitone offset",      "00-7F=+0..+127 semitones", "80-FF=-128..-1 semitones", "does not affect slice index"),
+    /* 21  SLI  SLICE INDEX  */ listOf("SLI: Slice index override",       "xx=slice index (00-FF)", "works even when SLICE=OFF")
 )
 
 // ============================================================================
 // STATE
 // ============================================================================
 
-private const val FX_GRID_COLS = 5
-private const val FX_GRID_ROWS = 4   // 20 effects total → 5 × 4
+private const val FX_GRID_COLS = 6
+private const val FX_GRID_ROWS = 4   // 22 effects total → 6 × 4 (last 2 cells empty)
 
 /**
  * All state needed to display and operate the FX helper overlay.
  *
  * @param isOpen      Whether the overlay is visible
- * @param cursorRow   Row in the 5×4 effect grid (0–3)
- * @param cursorCol   Column in the 5×4 effect grid (0–4)
+ * @param cursorRow   Row in the 6×4 effect grid (0–3)
+ * @param cursorCol   Column in the 6×4 effect grid (0–5)
  */
 data class FxHelperState(
     val isOpen: Boolean = false,
