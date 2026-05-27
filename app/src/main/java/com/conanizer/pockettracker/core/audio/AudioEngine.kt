@@ -628,10 +628,12 @@ class AudioEngine(
         if (useSliceLogic) {
             val markers = instrument.sliceMarkers
             // SLI explicit index takes priority; otherwise derive from raw phrase note (before transpose).
+            // C-4 (MIDI 48 in this system) = slice 0; C#4 = slice 1; etc.
+            // ROOT has no effect on slice mapping — it only affects playback pitch.
             val resolvedSliceIndex = if (sliIndex >= 0) {
                 sliIndex.coerceAtMost(markers.size)
             } else {
-                (note.toMidi() - transposeSemitones).coerceAtLeast(0).coerceAtMost(markers.size)
+                (note.toMidi() - transposeSemitones - 48).coerceAtLeast(0).coerceAtMost(markers.size)
             }
             val totalFrames = backend.getSampleLength(sampleId).toLong()
             if (totalFrames > 0) {
