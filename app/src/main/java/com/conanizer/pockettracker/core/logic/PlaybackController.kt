@@ -1212,7 +1212,9 @@ class PlaybackController(
                 vibratoDepth = vibratoDepth,
                 tableIdOverride = tableIdOverride,
                 tableStartRow = tableStartRow,
-                transposeSemitones = transposeSemitones
+                transposeSemitones = transposeSemitones,
+                pitSemitones = params.pitSemitones ?: 0,
+                sliIndex = params.sliIndex ?: -1
             )
             noteScheduled = true
 
@@ -1473,7 +1475,9 @@ class PlaybackController(
                         project = project,
                         startPointOverride = retrigStartPoint,
                         tableIdOverride = trackState.lastTableOverride,
-                        transposeSemitones = transposeSemitones
+                        transposeSemitones = transposeSemitones,
+                        pitSemitones = params.pitSemitones ?: 0,
+                        sliIndex = params.sliIndex ?: -1
                     )
                     logger.d(TAG, "🔁 retrig[${trackState.repeatRetrigCount}] vol=${"%.4f".format(retrigVolume)} " +
                             "(base=${"%.4f".format(trackState.repeatBaseVolume)}, delta=$rampDelta)")
@@ -1515,7 +1519,9 @@ class PlaybackController(
                                     project = project,
                                     startPointOverride = retrigStartPoint,
                                     tableIdOverride = trackState.lastTableOverride,
-                                    transposeSemitones = transposeSemitones
+                                    transposeSemitones = transposeSemitones,
+                                    pitSemitones = params.pitSemitones ?: 0,
+                                    sliIndex = params.sliIndex ?: -1
                                 )
                                 triggersInStep++
                             }
@@ -1715,7 +1721,9 @@ class PlaybackController(
                         project = project,
                         startPointOverride = startPoint,
                         tableIdOverride = trackState.lastTableOverride,
-                        transposeSemitones = transposeSemitones
+                        transposeSemitones = transposeSemitones,
+                        pitSemitones = params.pitSemitones ?: 0,
+                        sliIndex = params.sliIndex ?: -1
                     )
                     notesScheduled++
                 }

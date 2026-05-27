@@ -42,7 +42,11 @@ data class ResolvedStepParams(
     val tableOverride: Int? = null,
     val tableHopTarget: Int? = null,
     // 00=disable groove, 01-FF=groove table ID
-    val grooveId: Int? = null
+    val grooveId: Int? = null,
+    // PIT xx: signed semitone offset applied to pitch (never affects slice index); null = no PIT FX
+    val pitSemitones: Int? = null,
+    // SLI xx: explicit slice index (0-255); overrides note-based selection; works with SLICE=OFF
+    val sliIndex: Int? = null
 )
 
 class EffectProcessor(
@@ -74,11 +78,13 @@ class EffectProcessor(
         const val FX_PBN = 0x1A       // PBN xx - Pitch Bend, 00-7F = up, 80-FF = down, 00 = stop
         const val FX_PVB = 0x1B       // PVB xy - Vibrato, x = speed (0-F), y = depth (0-F)
         const val FX_PVX = 0x1C       // PVX xy - Extreme Vibrato (4x depth, 2x speed)
+        const val FX_PIT = 0x1D       // PIT xx - Pitch offset in semitones (00-7F=+0..+127, 80-FF=-128..-1); never affects slice index
+        const val FX_SLI = 0x1E       // SLI xx - Slice index override (00-FF); works even when SLICE mode is OFF
 
         val EFFECT_TYPES = listOf(
             FX_NONE, FX_ARC, FX_CHA, FX_DEL, FX_GRV, FX_HOP, FX_TIC, FX_ARPEGGIO, FX_KILL, FX_OFFSET,
             FX_RND, FX_RNL, FX_REPEAT, FX_TBL, FX_THO, FX_VOLUME,
-            FX_PSL, FX_PBN, FX_PVB, FX_PVX
+            FX_PSL, FX_PBN, FX_PVB, FX_PVX, FX_PIT, FX_SLI
         )
     }
 
@@ -108,6 +114,8 @@ class EffectProcessor(
         var tableOverride: Int? = null
         var tableHopTarget: Int? = null
         var grooveId: Int? = null
+        var pitSemitones: Int? = null
+        var sliIndex: Int? = null
 
         for (fxSlot in 1..3) {
             val (type, value) = when (fxSlot) {
@@ -273,6 +281,16 @@ class EffectProcessor(
                         logger.d(TAG, "🥁 GRV effect: assign groove table ${value.toString(16).uppercase().padStart(2, '0')}")
                     }
                 }
+
+                FX_PIT -> {
+                    pitSemitones = if (value < 0x80) value else value - 256
+                    logger.d(TAG, "🎵 PIT effect: pitch offset=$pitSemitones semitones")
+                }
+
+                FX_SLI -> {
+                    sliIndex = value
+                    logger.d(TAG, "🎵 SLI effect: slice index=$value")
+                }
             }
         }
 
@@ -296,7 +314,9 @@ class EffectProcessor(
             rnlValue = rnlValue,
             tableOverride = tableOverride,
             tableHopTarget = tableHopTarget,
-            grooveId = grooveId
+            grooveId = grooveId,
+            pitSemitones = pitSemitones,
+            sliIndex = sliIndex
         )
     }
 }
