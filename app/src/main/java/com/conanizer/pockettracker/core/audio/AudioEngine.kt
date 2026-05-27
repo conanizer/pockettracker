@@ -533,7 +533,8 @@ class AudioEngine(
         tableStartRow: Int = -1,
         transposeSemitones: Int = 0,
         pitSemitones: Int = 0,
-        sliIndex: Int = -1
+        sliIndex: Int = -1,
+        arpSemitoneOffset: Int = 0
     ) {
         if (note == Note.EMPTY) return
         if (trackId in 0..7) phraseTrackMask = phraseTrackMask or (1 shl trackId)
@@ -550,7 +551,7 @@ class AudioEngine(
         if (instrument.instrumentType == InstrumentType.SOUNDFONT) {
             val path = instrument.soundfontPath ?: return
             val slot = sfSlotProvider?.invoke(path) ?: return
-            val baseMidi = (note.octave + 1) * 12 + note.pitch
+            val baseMidi = (note.octave + 1) * 12 + note.pitch + arpSemitoneOffset
             val transpose = instrument.root.toMidi() - 60
             val midiNote = (baseMidi + transpose).coerceIn(0, 127)
             val velocity = (volume * 127).toInt().coerceIn(1, 127)
@@ -663,6 +664,10 @@ class AudioEngine(
         // PIT FX: shift pitch by semitones after slice logic so it never affects slice selection
         if (pitSemitones != 0) {
             effectiveNote = Note.fromMidi((effectiveNote.toMidi() + pitSemitones).coerceIn(0, 127))
+        }
+        // ARP offset: applied to pitch only — slice index was already resolved from the base note
+        if (arpSemitoneOffset != 0) {
+            effectiveNote = Note.fromMidi((effectiveNote.toMidi() + arpSemitoneOffset).coerceIn(0, 127))
         }
 
         val frequency = effectiveNote.toFrequency()

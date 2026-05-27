@@ -1708,11 +1708,10 @@ class PlaybackController(
                     // Calculate which note in the pattern this is
                     val patternPosition = (triggerIndex % patternLength).toInt()
                     val arpMidi = getArpeggioNote(baseMidi, semi1, semi2, trackState.arpeggioMode, patternPosition)
-                    val arpNote = Note.fromMidi(arpMidi.coerceIn(0, 127))
 
                     audioEngine.scheduleNote(
                         targetFrame = triggerFrame,
-                        note = arpNote,
+                        note = baseNote,
                         instrumentId = instrumentId,
                         trackId = trackId,
                         volume = arpInstrVol,
@@ -1723,7 +1722,8 @@ class PlaybackController(
                         tableIdOverride = trackState.lastTableOverride,
                         transposeSemitones = transposeSemitones,
                         pitSemitones = params.pitSemitones ?: 0,
-                        sliIndex = params.sliIndex ?: -1
+                        sliIndex = params.sliIndex ?: -1,
+                        arpSemitoneOffset = arpMidi - baseMidi
                     )
                     notesScheduled++
                 }
