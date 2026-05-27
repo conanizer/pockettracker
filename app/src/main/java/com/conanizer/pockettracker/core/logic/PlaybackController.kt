@@ -1211,7 +1211,8 @@ class PlaybackController(
                 vibratoSpeed = vibratoSpeed,
                 vibratoDepth = vibratoDepth,
                 tableIdOverride = tableIdOverride,
-                tableStartRow = tableStartRow
+                tableStartRow = tableStartRow,
+                transposeSemitones = transposeSemitones
             )
             noteScheduled = true
 
@@ -1471,7 +1472,8 @@ class PlaybackController(
                         pan = retrigPan,
                         project = project,
                         startPointOverride = retrigStartPoint,
-                        tableIdOverride = trackState.lastTableOverride
+                        tableIdOverride = trackState.lastTableOverride,
+                        transposeSemitones = transposeSemitones
                     )
                     logger.d(TAG, "🔁 retrig[${trackState.repeatRetrigCount}] vol=${"%.4f".format(retrigVolume)} " +
                             "(base=${"%.4f".format(trackState.repeatBaseVolume)}, delta=$rampDelta)")
@@ -1512,7 +1514,8 @@ class PlaybackController(
                                     pan = retrigPan,
                                     project = project,
                                     startPointOverride = retrigStartPoint,
-                                    tableIdOverride = trackState.lastTableOverride
+                                    tableIdOverride = trackState.lastTableOverride,
+                                    transposeSemitones = transposeSemitones
                                 )
                                 triggersInStep++
                             }
@@ -1711,7 +1714,8 @@ class PlaybackController(
                         pan = arpPan,
                         project = project,
                         startPointOverride = startPoint,
-                        tableIdOverride = trackState.lastTableOverride
+                        tableIdOverride = trackState.lastTableOverride,
+                        transposeSemitones = transposeSemitones
                     )
                     notesScheduled++
                 }

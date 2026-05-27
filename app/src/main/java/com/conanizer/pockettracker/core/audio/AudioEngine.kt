@@ -530,7 +530,8 @@ class AudioEngine(
         vibratoSpeed: Float = 0f,
         vibratoDepth: Float = 0f,
         tableIdOverride: Int = -1,
-        tableStartRow: Int = -1
+        tableStartRow: Int = -1,
+        transposeSemitones: Int = 0
     ) {
         if (note == Note.EMPTY) return
         if (trackId in 0..7) phraseTrackMask = phraseTrackMask or (1 shl trackId)
@@ -614,21 +615,24 @@ class AudioEngine(
 
         val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
 
-        // Handle slice playback (CUT/TRU mode): note selects slice, pitch stays at root.
+        // Handle slice playback (CUT/TRU mode): note selects slice, pitch comes from ROOT + transpose.
+        // Slice index uses the raw phrase note (before transpose) so ROOT and chain/master transpose
+        // only affect playback pitch, not which slice gets triggered.
         var effectiveNote = note
         var effectiveStartOverride = startPointOverride
         var effectiveEndOverride = -1
         if (instrument.slicingMode != 0 && instrument.sliceMarkers.isNotEmpty()) {
             val markers = instrument.sliceMarkers
-            val rootMidi = instrument.root.toMidi()
-            val noteMidi = note.toMidi()
-            // N markers define N+1 slices: slice 0 starts at frame 0, slice 1 at markers[0], etc.
-            val sliceIndex = (noteMidi - rootMidi).coerceAtLeast(0).coerceAtMost(markers.size)
+            // Raw phrase note (undo transpose baked in by PlaybackController)
+            val rawNoteMidi = note.toMidi() - transposeSemitones
+            // N markers define N+1 slices: C-0=slice0, C#0=slice1, etc.
+            val sliceIndex = rawNoteMidi.coerceAtLeast(0).coerceAtMost(markers.size)
             val totalFrames = backend.getSampleLength(sampleId).toLong()
             if (totalFrames > 0) {
                 val sliceStart = if (sliceIndex == 0) 0L else markers[sliceIndex - 1]
                 effectiveStartOverride = ((sliceStart * 255L) / totalFrames).toInt().coerceIn(0, 255)
-                effectiveNote = instrument.root  // play at 1.0x rate; note just selects slice
+                // Pitch = ROOT + chain/master transpose (phrase note has no effect on pitch)
+                effectiveNote = Note.fromMidi((instrument.root.toMidi() + transposeSemitones).coerceIn(0, 127))
                 if (instrument.slicingMode == 1) { // CUT: stop at next slice boundary
                     val sliceEnd = if (sliceIndex < markers.size) markers[sliceIndex] else totalFrames
                     effectiveEndOverride = ((sliceEnd * 255L) / totalFrames).toInt().coerceIn(0, 255)
