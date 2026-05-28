@@ -418,6 +418,17 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSp
     return result;
 }
 
+JNIEXPORT jfloatArray JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSpectrumMagnitudesForSource(JNIEnv *env, jobject thiz, jint source, jint instrId, jint numBins) {
+    jfloatArray result = env->NewFloatArray(numBins);
+    if (!engine || numBins <= 0) return result;
+    auto* buf = new float[numBins];
+    engine->getSpectrumMagnitudesForSource(source, instrId, numBins, buf);
+    env->SetFloatArrayRegion(result, 0, numBins, buf);
+    delete[] buf;
+    return result;
+}
+
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setTrackVolume(JNIEnv *env, jobject thiz, jint trackId, jfloat volume) {
     if (engine) {

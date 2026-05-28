@@ -13,6 +13,7 @@ struct Voice : public IAudioVoice {
     int sampleLength;
     float position;
     int trackId;
+    int instrId = -1;        // Instrument index (= sampleId); used for per-instrument spectrum capture
     float playbackRate;
     float basePlaybackRate;  // Original rate without table transpose
     float volume;

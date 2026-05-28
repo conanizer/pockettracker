@@ -685,11 +685,20 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
     }
 
-    // Poll spectrum magnitudes for EQ visualizer (~20fps while EQ screen is open)
+    // Poll spectrum magnitudes for EQ visualizer (~20fps while EQ screen is open).
+    // The source depends on which EQ context is open so the spectrum reflects the actual signal path.
     LaunchedEffect(eqEditorState.isOpen) {
         if (eqEditorState.isOpen) {
             while (true) {
-                eqSpectrumData = audioEngine.getSpectrumMagnitudes(620)
+                val ctx = eqEditorState.callerContext
+                val source = when (ctx) {
+                    is EqCallerContext.DelayInputEq  -> 1
+                    is EqCallerContext.ReverbInputEq -> 2
+                    is EqCallerContext.InstrumentEq  -> 3
+                    else                             -> 0  // MasterEq, SampleEditorFx → master bus
+                }
+                val instrId = if (ctx is EqCallerContext.InstrumentEq) ctx.instrId else -1
+                eqSpectrumData = audioEngine.getSpectrumMagnitudesForSource(source, instrId, 620)
                 delay(50)
             }
         } else {

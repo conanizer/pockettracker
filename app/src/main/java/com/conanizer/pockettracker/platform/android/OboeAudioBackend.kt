@@ -233,6 +233,8 @@ class OboeAudioBackend : IAudioBackend {
     }
 
     override fun getSpectrumMagnitudes(numBins: Int): FloatArray = native_getSpectrumMagnitudes(numBins)
+    override fun getSpectrumMagnitudesForSource(source: Int, instrId: Int, numBins: Int): FloatArray =
+        native_getSpectrumMagnitudesForSource(source, instrId, numBins)
 
     override fun setTrackVolume(trackId: Int, volume: Float) {
         native_setTrackVolume(trackId, volume)
@@ -534,6 +536,7 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_decayWaveform()
     private external fun native_getTrackWaveforms(outArray: FloatArray, activeFlags: BooleanArray)
     private external fun native_getSpectrumMagnitudes(numBins: Int): FloatArray
+    private external fun native_getSpectrumMagnitudesForSource(source: Int, instrId: Int, numBins: Int): FloatArray
     private external fun native_setTrackVolume(trackId: Int, volume: Float)
     private external fun native_setMasterVolume(volume: Float)
     private external fun native_setOttDepth(depth: Int)

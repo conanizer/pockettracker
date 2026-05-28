@@ -30,8 +30,11 @@ AudioEngine::AudioEngine() {
     waveformDownsampleCounter = 0;
     for (int i = 0; i < SPECTRUM_SIZE; i++) {
         spectrumBuffer[i] = 0.0f;
+        delaySpectrumBuffer[i] = 0.0f;
+        reverbSpectrumBuffer[i] = 0.0f;
+        instrSpectrumBuffer[i] = 0.0f;
     }
-    spectrumWriteIdx = 0;
+    spectrumWriteIdx = delaySpectrumWriteIdx = reverbSpectrumWriteIdx = instrSpectrumWriteIdx = 0;
     reverbSend.reset(44100.0f);
     delaySend.reset(44100.0f);
     masterChain.reset();
@@ -217,6 +220,7 @@ void AudioEngine::triggerNote(int sampleId, int trackId, float freq, float baseF
             float sampleRate = stream ? (float)stream->getSampleRate() : 44100.0f;
             voices[i].trigger(samples[sampleId], samplesRight[sampleId], sampleLengths[sampleId], trackId, rate, vol, 1.0f, pan,
                               instrumentParams[sampleId], sampleRate);
+            voices[i].instrId = sampleId;
             LOGD("Note: track=%d, sampleId=%d, rate=%.3f, pan=%.2f", trackId, sampleId, rate, pan);
             return;
         }
@@ -295,6 +299,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     float trackWaveAccumL[8][MAX_BLOCK] = {};
     float trackWaveAccumR[8][MAX_BLOCK] = {};
     bool  trackWasActive[8] = {};
+
+    // Per-instrument spectrum accumulator (mono, summed across all active voices of one instrument)
+    float instrSpectrumTempL[MAX_BLOCK] = {};
+    int   monitoredInstrId = instrSpectrumInstrId.load(std::memory_order_relaxed);
 
     for (int32_t frame = 0; frame < numFrames; frame++) {
         int64_t currentFrame = globalFrameCounter + frame;
@@ -567,6 +575,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                                       note.trackId, rate, note.volume, note.phraseVolume, note.pan, instrumentParams[note.sampleId],
                                       sampleRate, note.startPointOverride, note.endPointOverride,
                                       note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
+                    voices[v].instrId = note.sampleId;
 
                     // pslDuration is already in audio frames (converted by AudioEngine.kt).
                     if (fabsf(note.pslInitialOffset) > 0.001f && note.pslDuration > 0.0f) {
@@ -1162,6 +1171,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 trackWaveAccumL[voice.trackId][i] += sampleL;
                 trackWaveAccumR[voice.trackId][i] += sampleR;
             }
+            if (monitoredInstrId >= 0 && voice.instrId == monitoredInstrId) {
+                instrSpectrumTempL[i] += sampleL;
+            }
 
             if (!voice.isActive) break;
 
@@ -1363,6 +1375,15 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
         }
         reverbSend.process(revSendBufL, revSendBufR, revWetL, revWetR, numFrames);
+        {
+            std::lock_guard<std::mutex> lock(spectrumMutex);
+            for (int i = 0; i < numFrames; i++) {
+                delaySpectrumBuffer[delaySpectrumWriteIdx] = dlyWetL[i];
+                delaySpectrumWriteIdx = (delaySpectrumWriteIdx + 1) % SPECTRUM_SIZE;
+                reverbSpectrumBuffer[reverbSpectrumWriteIdx] = revWetL[i];
+                reverbSpectrumWriteIdx = (reverbSpectrumWriteIdx + 1) % SPECTRUM_SIZE;
+            }
+        }
         for (int i = 0; i < numFrames; i++) {
             float rv  = revWetL[i] * reverbReturnGain;
             float rvR = revWetR[i] * reverbReturnGain;
@@ -1392,6 +1413,14 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         masterChain.process(output, numFrames, channelCount);
     else
         masterChain.limiter.process(output, numFrames, channelCount);
+
+    {
+        std::lock_guard<std::mutex> lock(spectrumMutex);
+        for (int i = 0; i < numFrames; i++) {
+            instrSpectrumBuffer[instrSpectrumWriteIdx] = instrSpectrumTempL[i];
+            instrSpectrumWriteIdx = (instrSpectrumWriteIdx + 1) % SPECTRUM_SIZE;
+        }
+    }
 
     globalFrameCounter += numFrames;
 }
@@ -1657,26 +1686,18 @@ void AudioEngine::scheduleTrackPhraseVol(int64_t targetFrame, int trackId, float
     paramUpdateQueue.schedule({ targetFrame, trackId, (int)MOD_SRC_PHRASE_VOL, phraseVol });
 }
 
-void AudioEngine::getSpectrumMagnitudes(int numBins, float* out) {
-    static const int FFT_SIZE = 2048;
-    kiss_fft_scalar input[FFT_SIZE];
+static const int SPECTRUM_FFT_SIZE = 2048;
 
-    {
-        std::lock_guard<std::mutex> lock(spectrumMutex);
-        int readEnd = spectrumWriteIdx;
-        for (int i = 0; i < FFT_SIZE; i++) {
-            int idx = (readEnd - FFT_SIZE + i + SPECTRUM_SIZE) % SPECTRUM_SIZE;
-            input[i] = spectrumBuffer[idx];
-        }
-    }
-
-    for (int i = 0; i < FFT_SIZE; i++) {
-        float w = 0.5f * (1.0f - cosf(2.0f * M_PI * i / (FFT_SIZE - 1)));
+// Shared FFT helper — takes FFT_SIZE samples already copied from the circular buffer by the caller
+// (under mutex), applies Hann window + FFT, maps to numBins log-spaced magnitude values [0,1].
+static void computeSpectrumFFT(kiss_fft_scalar* input, int numBins, float* out) {
+    for (int i = 0; i < SPECTRUM_FFT_SIZE; i++) {
+        float w = 0.5f * (1.0f - cosf(2.0f * M_PI * i / (SPECTRUM_FFT_SIZE - 1)));
         input[i] *= w;
     }
 
-    kiss_fftr_cfg cfg = kiss_fftr_alloc(FFT_SIZE, 0, nullptr, nullptr);
-    kiss_fft_cpx cpx_out[FFT_SIZE / 2 + 1];
+    kiss_fftr_cfg cfg = kiss_fftr_alloc(SPECTRUM_FFT_SIZE, 0, nullptr, nullptr);
+    kiss_fft_cpx cpx_out[SPECTRUM_FFT_SIZE / 2 + 1];
     kiss_fftr(cfg, input, cpx_out);
     kiss_fftr_free(cfg);
 
@@ -1687,18 +1708,51 @@ void AudioEngine::getSpectrumMagnitudes(int numBins, float* out) {
     for (int bi = 0; bi < numBins; bi++) {
         float t    = (float)bi / (numBins - 1);
         float freq = fMin * expf(t * logRange);
-        int bin    = (int)(freq * FFT_SIZE / sampleRate + 0.5f);
-        if (bin < 1)          bin = 1;
-        if (bin >= FFT_SIZE/2) bin = FFT_SIZE/2 - 1;
+        int bin    = (int)(freq * SPECTRUM_FFT_SIZE / sampleRate + 0.5f);
+        if (bin < 1)                      bin = 1;
+        if (bin >= SPECTRUM_FFT_SIZE / 2) bin = SPECTRUM_FFT_SIZE / 2 - 1;
 
         float re  = cpx_out[bin].r;
         float im  = cpx_out[bin].i;
-        float mag = sqrtf(re*re + im*im) / (FFT_SIZE * 0.5f);
+        float mag = sqrtf(re*re + im*im) / (SPECTRUM_FFT_SIZE * 0.5f);
 
         float db         = 20.0f * log10f(mag + 1e-9f);
         float normalized = (db + 80.0f) / 80.0f;
         out[bi] = fmaxf(0.0f, fminf(1.0f, normalized));
     }
+}
+
+// Read SPECTRUM_FFT_SIZE contiguous samples from a circular buffer of size bufSize.
+static void readCircularBuffer(const float* buf, int writeIdx, int bufSize, kiss_fft_scalar* input) {
+    for (int i = 0; i < SPECTRUM_FFT_SIZE; i++) {
+        int idx = (writeIdx - SPECTRUM_FFT_SIZE + i + bufSize) % bufSize;
+        input[i] = buf[idx];
+    }
+}
+
+void AudioEngine::getSpectrumMagnitudes(int numBins, float* out) {
+    kiss_fft_scalar input[SPECTRUM_FFT_SIZE];
+    {
+        std::lock_guard<std::mutex> lock(spectrumMutex);
+        readCircularBuffer(spectrumBuffer, spectrumWriteIdx, SPECTRUM_SIZE, input);
+    }
+    computeSpectrumFFT(input, numBins, out);
+}
+
+void AudioEngine::getSpectrumMagnitudesForSource(int source, int instrId, int numBins, float* out) {
+    if (source == 3) instrSpectrumInstrId.store(instrId, std::memory_order_relaxed);
+
+    kiss_fft_scalar input[SPECTRUM_FFT_SIZE];
+    {
+        std::lock_guard<std::mutex> lock(spectrumMutex);
+        switch (source) {
+            case 1:  readCircularBuffer(delaySpectrumBuffer,  delaySpectrumWriteIdx,  SPECTRUM_SIZE, input); break;
+            case 2:  readCircularBuffer(reverbSpectrumBuffer, reverbSpectrumWriteIdx, SPECTRUM_SIZE, input); break;
+            case 3:  readCircularBuffer(instrSpectrumBuffer,  instrSpectrumWriteIdx,  SPECTRUM_SIZE, input); break;
+            default: readCircularBuffer(spectrumBuffer,       spectrumWriteIdx,       SPECTRUM_SIZE, input); break;
+        }
+    }
+    computeSpectrumFFT(input, numBins, out);
 }
 
 void AudioEngine::getWaveform(float* outBuffer, int bufferSize) {

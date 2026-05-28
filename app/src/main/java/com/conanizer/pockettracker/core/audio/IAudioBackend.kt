@@ -320,6 +320,12 @@ interface IAudioBackend {
     fun getSpectrumMagnitudes(numBins: Int): FloatArray
 
     /**
+     * Returns spectrum magnitudes from a specific audio bus.
+     * source: 0=master, 1=delay-wet, 2=reverb-wet, 3=instrument (instrId used for source==3).
+     */
+    fun getSpectrumMagnitudesForSource(source: Int, instrId: Int, numBins: Int): FloatArray
+
+    /**
      * Set real-time track volume.
      * This affects playback immediately without needing to reschedule notes.
      *

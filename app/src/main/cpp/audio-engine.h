@@ -169,6 +169,10 @@ public:
     // Get log-spaced frequency-domain magnitude spectrum for EQ visualizer (0-1 per bin)
     void getSpectrumMagnitudes(int numBins, float* out);
 
+    // Per-context spectrum for EQ visualizer.
+    // source: 0=master, 1=delay-wet, 2=reverb-wet, 3=instrument (instrId used when source==3)
+    void getSpectrumMagnitudesForSource(int source, int instrId, int numBins, float* out);
+
     // Get per-track peak levels for mixer meters
     void getTrackPeaks(float* outBuffer);
 
@@ -339,10 +343,17 @@ private:
     int waveformIndex = 0;
     std::mutex waveformMutex;
 
-    // Spectrum capture buffer for EQ visualizer (undownsampled, master left channel)
+    // Spectrum capture buffers for EQ visualizer (per-context)
     static const int SPECTRUM_SIZE = 4096;
-    float spectrumBuffer[SPECTRUM_SIZE];
-    int spectrumWriteIdx = 0;
+    float spectrumBuffer[SPECTRUM_SIZE];       // master left channel
+    int   spectrumWriteIdx = 0;
+    float delaySpectrumBuffer[SPECTRUM_SIZE];  // delay wet left
+    int   delaySpectrumWriteIdx = 0;
+    float reverbSpectrumBuffer[SPECTRUM_SIZE]; // reverb wet left
+    int   reverbSpectrumWriteIdx = 0;
+    float instrSpectrumBuffer[SPECTRUM_SIZE];  // single instrument (mono sum of all its voices)
+    int   instrSpectrumWriteIdx = 0;
+    std::atomic<int> instrSpectrumInstrId{-1}; // which instrId to monitor (-1 = none)
     std::mutex spectrumMutex;
 
     // Per-block per-track peaks: written by processAudioBlock, read by onAudioReady for meters

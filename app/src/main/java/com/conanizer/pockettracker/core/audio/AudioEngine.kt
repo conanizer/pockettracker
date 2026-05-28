@@ -721,6 +721,8 @@ class AudioEngine(
     fun getSampleData(instrumentId: Int): FloatArray = backend.getSampleData(instrumentId)
 
     fun getSpectrumMagnitudes(numBins: Int): FloatArray = backend.getSpectrumMagnitudes(numBins)
+    fun getSpectrumMagnitudesForSource(source: Int, instrId: Int, numBins: Int): FloatArray =
+        backend.getSpectrumMagnitudesForSource(source, instrId, numBins)
 
     fun hasStereoData(instrumentId: Int): Boolean = backend.hasStereoData(instrumentId)
     fun getSampleDataRight(instrumentId: Int): FloatArray = backend.getSampleDataRight(instrumentId)
