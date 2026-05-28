@@ -21,7 +21,7 @@ static constexpr int kDelaySyncCount = 12;
 // DelayModule — stereo tap-delay send (DaisySP DelayLine).
 //
 // Takes a mono send-bus sum, writes identical delayed signal to L and R.
-// inputEq is applied to the send input before writing to the delay line.
+// inputEq is applied to the stereo send input (independent L/R biquads) before writing to the delay line.
 // ===========================================================================
 struct DelayModule {
     daisysp::DelayLine<float, DELAY_MAX_SAMPLES> delL;
@@ -67,9 +67,7 @@ struct DelayModule {
         for (int i = 0; i < numFrames; i++) {
             float l = inL[i], r = inR[i];
             if (inputEq.active) {
-                float mid = (l + r) * 0.5f;
-                float eqMid = inputEq.processMono(mid);
-                if (fabsf(mid) > 1e-7f) { float g = eqMid / mid; l *= g; r *= g; }
+                inputEq.processStereo(l, r);
             }
             float readL = delL.Read();
             float readR = delR.Read();

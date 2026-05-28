@@ -29,14 +29,12 @@ struct ReverbModule {
     }
 
     // Process stereo send bus into stereo wet output. Always 100% wet. Writes to outL/outR.
-    // inputEq applied to mid (L+R)*0.5 for tonal shaping; stereo imaging preserved via ratio.
+    // inputEq applied stereo (independent L/R biquads) before the reverb algorithm.
     void process(const float* inL, const float* inR, float* outL, float* outR, int numFrames) {
         for (int i = 0; i < numFrames; i++) {
             float l = inL[i], r = inR[i];
             if (inputEq.active) {
-                float mid = (l + r) * 0.5f;
-                float eqMid = inputEq.processMono(mid);
-                if (fabsf(mid) > 1e-7f) { float g = eqMid / mid; l *= g; r *= g; }
+                inputEq.processStereo(l, r);
             }
             float wl, wr;
             reverb.Process(l, r, &wl, &wr);
