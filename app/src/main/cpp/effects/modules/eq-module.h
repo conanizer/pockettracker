@@ -1,72 +1,77 @@
 #pragma once
 #include <cmath>
 #include "../soundpipe/soundpipe.h"
+#include "../primitives/daisysp/svf.h"
 
 // ===========================================================================
-// EqModule — 3-band parametric EQ using Soundpipe pareq.
+// EqModule — 3-band parametric EQ.
 //
-// Band types (match Kotlin EqBand.type):
-//   0 = off (bypass)
-//   1 = loShelf   (pareq mode 1)
-//   2 = bell      (pareq mode 0, peaking EQ)
-//   3 = hiShelf   (pareq mode 2)
+// Band types (match Kotlin EqBand.type / EQ_BAND_TYPE_NAMES):
+//   0 = off      (bypass)
+//   1 = loShelf  (sp_pareq mode 1)
+//   2 = lowcut   (highpass biquad — sp_pareq cannot do HP/LP)
+//   3 = bell     (sp_pareq mode 0, peaking)
+//   4 = hiShelf  (sp_pareq mode 2)
+//   5 = hicut    (lowpass biquad)
 //
 // Parameters:
 //   freqHz  — centre/corner frequency, 20–20000 Hz
-//   gainDb  — gain in dB, −12..+12 (ignored for off; 0 dB = unity)
+//   gainDb  — gain in dB, −12..+12 (ignored for lowcut/hicut)
 //   q       — bandwidth/Q, 0.1–10.0
-//
-// Usage:
-//   band.reset(sampleRate);
-//   band.setParams(type, freqHz, gainDb, q);
-//   out = band.processMono(in);          // sampler voices
-//   band.processStereo(L, R);            // SF stereo voices
-//
-// Adding to InstrumentChain follows the existing "Adding a new module" pattern:
-//   1. Add member EqModule eq.
-//   2. Call eq.reset(sr) in reset().
-//   3. Call eq.processMono / processStereo in the signal chain.
-//   Call sites in audio-engine.cpp do not change.
 // ===========================================================================
 
-// Pareq mode index for each band type.
-inline int eqTypeToPareqMode(int type) {
-    if (type == 1) return 1;  // loShelf
-    if (type == 3) return 2;  // hiShelf
-    return 0;                 // bell (default)
-}
-
-// One EQ band: two sp_pareq instances (L and R share coefficients, separate state).
+// One EQ band: sp_pareq for shelf/bell, DaisySP SVF for HP/LP.
+// SVF is double-sampled so it stays stable near Nyquist.
+// Q → SVF resonance: damp = 1/Q in SVF terms, res = 1 − 1/(2Q), clamped to [0, 1).
 struct EqBandModule {
     sp_pareq pL, pR;
     sp_data  sp;
-    bool bypass = true;
+    bool bypass   = true;
+    bool useHpLp  = false;  // true for type 2 (lowcut) and 5 (hicut)
+    int  hpLpType = 0;      // 2=HP 5=LP, used in processMono/processStereo
+    daisysp::Svf svfL, svfR;
 
     void reset(float sr) {
         sp.sr = sr;
         sp_pareq_init(&sp, &pL);
         sp_pareq_init(&sp, &pR);
-        bypass = true;
+        svfL.Init(sr);
+        svfR.Init(sr);
+        bypass = true; useHpLp = false; hpLpType = 0;
     }
 
-    // type: 0=off 1=loShelf 2=bell 3=hiShelf
-    // freqHz: 20–20000, gainDb: −12..+12, q: 0.1–10.0
     void setParams(int type, float freqHz, float gainDb, float q) {
-        bypass = (type == 0);
+        bypass  = (type == 0);
         if (bypass) return;
 
-        float v    = powf(10.0f, gainDb / 20.0f);  // dB → linear amplitude
-        float mode = (float)eqTypeToPareqMode(type);
+        useHpLp  = (type == 2 || type == 5);
+        hpLpType = type;
 
-        pL.fc = freqHz; pL.v = v; pL.q = q; pL.mode = mode;
-        pL.prv_fc = pL.prv_v = pL.prv_q = -1.0f;  // force coefficient recalc
-
-        pR.fc = freqHz; pR.v = v; pR.q = q; pR.mode = mode;
-        pR.prv_fc = pR.prv_v = pR.prv_q = -1.0f;
+        if (useHpLp) {
+            float hz  = fminf(freqHz, sp.sr * 0.45f);
+            // damp = 1/Q in SVF internals; DaisySP maps res → damp = 2*(1-res)
+            // → res = 1 - 1/(2Q), clamped so damp stays positive
+            float res = fmaxf(0.0f, fminf(0.99f, 1.0f - 1.0f / (2.0f * q)));
+            svfL.SetFreq(hz); svfL.SetRes(res); svfL.SetDrive(0.0f);
+            svfR.SetFreq(hz); svfR.SetRes(res); svfR.SetDrive(0.0f);
+        } else {
+            // sp_pareq: mode 0=bell, 1=loShelf, 2=hiShelf
+            int pareqMode = (type == 1) ? 1 : (type == 4) ? 2 : 0;
+            float v    = powf(10.0f, gainDb / 20.0f);
+            float mode = (float)pareqMode;
+            pL.fc = freqHz; pL.v = v; pL.q = q; pL.mode = mode;
+            pL.prv_fc = pL.prv_v = pL.prv_q = -1.0f;
+            pR.fc = freqHz; pR.v = v; pR.q = q; pR.mode = mode;
+            pR.prv_fc = pR.prv_v = pR.prv_q = -1.0f;
+        }
     }
 
     inline float processMono(float in) {
         if (bypass) return in;
+        if (useHpLp) {
+            svfL.Process(in);
+            return (hpLpType == 2) ? svfL.High() : svfL.Low();
+        }
         SPFLOAT out, s = in;
         sp_pareq_compute(&sp, &pL, &s, &out);
         return out;
@@ -74,6 +79,13 @@ struct EqBandModule {
 
     inline void processStereo(float& L, float& R) {
         if (bypass) return;
+        if (useHpLp) {
+            svfL.Process(L);
+            svfR.Process(R);
+            if (hpLpType == 2) { L = svfL.High(); R = svfR.High(); }
+            else               { L = svfL.Low();  R = svfR.Low();  }
+            return;
+        }
         SPFLOAT outL, outR, sL = L, sR = R;
         sp_pareq_compute(&sp, &pL, &sL, &outL);
         sp_pareq_compute(&sp, &pR, &sR, &outR);
