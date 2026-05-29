@@ -314,6 +314,9 @@ class EqModule : TrackerModule {
         val gainDb = (band.gain - 128f) / 128f * 12f           // -12..+12 dB
         val q     = 0.1f * (100f).pow(band.q / 255f)           // log 0.1-10
 
+        // LOWCUT/HICUT use DaisySP SVF (not biquad) — match SVF transfer function exactly
+        if (band.type == 2 || band.type == 5) return svfGainDb(band.type, fc, q, freq, sampleRate)
+
         val w0    = 2f * PI.toFloat() * fc   / sampleRate
         val w     = 2f * PI.toFloat() * freq / sampleRate
         val cosW0 = cos(w0); val sinW0 = sin(w0)
@@ -335,10 +338,6 @@ class EqModule : TrackerModule {
                 a1 = -2f * ((A-1) + (A+1)*cosW0)
                 a2 = (A+1) + (A-1)*cosW0 - 2*sqA*alpha
             }
-            2 -> { // LOWCUT (high pass)
-                val c = 1f + cosW0
-                b0=c/2f; b1= -c; b2=c/2f; a0=1+alpha; a1= -2*cosW0; a2=1-alpha
-            }
             3 -> { // BELL (peaking)
                 b0=1+alpha*A; b1= -2*cosW0; b2=1-alpha*A
                 a0=1+alpha/A; a1= -2*cosW0; a2=1-alpha/A
@@ -352,10 +351,6 @@ class EqModule : TrackerModule {
                 a1 = 2f * ((A-1) - (A+1)*cosW0)
                 a2 = (A+1) - (A-1)*cosW0 - 2*sqA*alpha
             }
-            5 -> { // HICUT (low pass)
-                val c = 1f - cosW0
-                b0=c/2f; b1=c; b2=c/2f; a0=1+alpha; a1= -2*cosW0; a2=1-alpha
-            }
             else -> return 0f
         }
 
@@ -367,6 +362,67 @@ class EqModule : TrackerModule {
 
         val magSq = (numRe*numRe + numIm*numIm) / (denRe*denRe + denIm*denIm + 1e-30f)
         return 10f * log10(magSq + 1e-30f)
+    }
+
+    /**
+     * Exact z-domain transfer function of the DaisySP double-pass Chamberlin SVF.
+     *
+     * State update per sample (two sequential passes, same input x):
+     *   L[n] = β·L[n-1] + α·B[n-1] + f²·x[n]
+     *   B[n] = −α·L[n-1] + γ·B[n-1] + α·x[n]
+     * where k=1−fd−f², α=f(1+k), β=1−f², γ=k²−f².
+     *
+     * HP output uses intermediate B₁ (after pass 1, not B[n]):
+     *   H_HP[n] = k·x[n] − k·L[n-1] − μ·B[n-1],  μ = f+(d+f)·k
+     *
+     * Steady-state at z=e^{jω}:  B̂=α(z−1)/D,  L̂=(αB̂+f²)/(z−β)
+     *   where D=(z−γ)(z−β)+α².
+     *   H_LP = L̂,  H_HP = k − e^{−jω}(k·L̂ + μ·B̂)
+     */
+    private fun svfGainDb(type: Int, fc: Float, q: Float, vizFreq: Float, sampleRate: Float): Float {
+        val fcC = fc.coerceAtMost(sampleRate * 0.45f)
+        val f = 2.0 * sin(PI * minOf(0.25, fcC.toDouble() / (sampleRate * 2.0)))
+        val res = (1.0 - 1.0 / (2.0 * q)).coerceIn(0.0, 0.99)
+        val d = minOf(2.0 * (1.0 - res.pow(0.25)), minOf(2.0, 2.0 / f - f * 0.5))
+
+        val k = 1.0 - f * d - f * f
+        val alpha = f * (1.0 + k)
+        val beta  = 1.0 - f * f
+        val gamma = k * k - f * f
+        val mu    = f + (d + f) * k
+
+        val w    = 2.0 * PI * vizFreq / sampleRate
+        val cosW = cos(w); val sinW = sin(w)
+
+        // D = z² − (β+γ)z + (βγ+α²) evaluated at z = e^{jω}
+        val dRe = cos(2.0 * w) - (beta + gamma) * cosW + (beta * gamma + alpha * alpha)
+        val dIm = sin(2.0 * w) - (beta + gamma) * sinW
+        val dMSq = dRe * dRe + dIm * dIm + 1e-30
+
+        // B̂ = α(z−1)/D
+        val bNumRe = alpha * (cosW - 1.0);  val bNumIm = alpha * sinW
+        val bRe = (bNumRe * dRe + bNumIm * dIm) / dMSq
+        val bIm = (bNumIm * dRe - bNumRe * dIm) / dMSq
+
+        // L̂ = (αB̂ + f²) / (z−β)
+        val lNumRe = alpha * bRe + f * f;  val lNumIm = alpha * bIm
+        val zbRe = cosW - beta;            val zbIm = sinW
+        val zbMSq = zbRe * zbRe + zbIm * zbIm + 1e-30
+        val lRe = (lNumRe * zbRe + lNumIm * zbIm) / zbMSq
+        val lIm = (lNumIm * zbRe - lNumRe * zbIm) / zbMSq
+
+        val magSq: Double = if (type == 5) { // LP (HICUT)
+            lRe * lRe + lIm * lIm
+        } else { // HP (LOWCUT): H_HP = k − e^{−jω}(k·L̂ + μ·B̂)
+            // e^{−jω} = cosW − j·sinW
+            val kLplusMuB_Re = k * lRe + mu * bRe
+            val kLplusMuB_Im = k * lIm + mu * bIm
+            val hRe = k - (cosW * kLplusMuB_Re + sinW * kLplusMuB_Im)
+            val hIm =   - (cosW * kLplusMuB_Im - sinW * kLplusMuB_Re)
+            hRe * hRe + hIm * hIm
+        }
+
+        return (10.0 * log10(magSq + 1e-30)).toFloat().coerceIn(-VIS_DB, VIS_DB)
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -181,6 +181,10 @@ void AudioEngine::backupSample(int id) {
 
 void AudioEngine::undoSample(int id) {
     if (id < 0 || id >= 256 || !sampleBackups[id]) return;
+    for (int v = 0; v < MAX_VOICES; v++) {
+        if (voices[v].instrId == id && voices[v].isActive) voices[v].stop();
+    }
+    std::lock_guard<std::mutex> lock(sampleEditMutex);
     delete[] samples[id];
     int len = sampleBackupLengths[id];
     samples[id] = new float[len];

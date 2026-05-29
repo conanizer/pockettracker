@@ -128,6 +128,17 @@ void AudioEngine::closeStream() {
 void AudioEngine::loadSample(int id, const float* data, int length) {
     if (id < 0 || id >= 256) return;
 
+    // Hold sampleEditMutex while swapping the buffer.  The audio thread uses
+    // try_to_lock on this mutex inside its mix loop, so it will skip at most
+    // one callback (~10 ms of silence) rather than crashing on a freed pointer.
+    std::lock_guard<std::mutex> lock(sampleEditMutex);
+
+    // Stop any voice that is currently playing this sample so its sampleData
+    // pointer can't be followed after we free the buffer below.
+    for (int i = 0; i < MAX_VOICES; i++) {
+        if (voices[i].instrId == id && voices[i].isActive) voices[i].stop();
+    }
+
     if (samples[id]) delete[] samples[id];
     if (samplesRight[id]) { delete[] samplesRight[id]; samplesRight[id] = nullptr; }
     // New file replaces the original — discard any cached rate-mode original.
@@ -148,6 +159,12 @@ void AudioEngine::loadSample(int id, const float* data, int length) {
 
 void AudioEngine::loadSampleStereo(int id, const float* left, const float* right, int length) {
     if (id < 0 || id >= 256 || !left || !right) return;
+
+    std::lock_guard<std::mutex> lock(sampleEditMutex);
+
+    for (int i = 0; i < MAX_VOICES; i++) {
+        if (voices[i].instrId == id && voices[i].isActive) voices[i].stop();
+    }
 
     if (samples[id]) delete[] samples[id];
     if (samplesRight[id]) { delete[] samplesRight[id]; samplesRight[id] = nullptr; }
@@ -172,12 +189,18 @@ bool AudioEngine::hasStereoData(int id) {
 }
 
 void AudioEngine::clearAllSamples() {
-    // Stop all active voices FIRST — they hold direct pointers to sample data.
-    // Deleting samples while voices are still reading them causes use-after-free.
+    // Hold sampleEditMutex for the entire operation.  The audio thread uses
+    // try_to_lock so it skips its mix block rather than reading freed memory.
+    std::lock_guard<std::mutex> lock(sampleEditMutex);
+
+    // Stop all voices inside the lock so we know the audio thread can't be
+    // mid-read when we free the buffers below.
     for (int i = 0; i < MAX_VOICES; i++) {
         voices[i].stop();
     }
-    // Clear the scheduled note/kill/param queues so buffered events don't re-trigger.
+    // Clear queues to prevent re-triggering stopped voices.
+    // Each queue method acquires its own internal mutex; no deadlock risk
+    // because the audio thread cannot hold those mutexes while we hold sampleEditMutex.
     noteQueue.clear();
     killQueue.clear();
     paramUpdateQueue.clear();
