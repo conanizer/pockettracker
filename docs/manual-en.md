@@ -1,6 +1,6 @@
 # PocketTracker User Manual
 
-**Version:** 1.1  
+**Version:** 1.2  
 **App state:** All Extension Packs complete — Testing & Polish
 
 ---
@@ -26,10 +26,11 @@
 17. [EQ EDITOR](#17-eq-editor)
 18. [PROJECT Screen](#18-project-screen)
 19. [SETTINGS Screen](#19-settings-screen)
-20. [Effects Reference](#20-effects-reference)
-21. [Modulation Reference](#21-modulation-reference)
-22. [File Management](#22-file-management)
-23. [Workflow Tips](#23-workflow-tips)
+20. [THEME EDITOR](#20-theme-editor)
+21. [Effects Reference](#21-effects-reference)
+22. [Modulation Reference](#22-modulation-reference)
+23. [File Management](#23-file-management)
+24. [Workflow Tips](#24-workflow-tips)
 
 ---
 
@@ -37,9 +38,9 @@
 
 PocketTracker is a sample-based music tracker for Android handhelds and budget Android devices. It is inspired by M8, LSDJ, and Little GP Tracker (LGPT/Picotracker), and designed to run natively at **640×480** — the resolution of devices like the Miyoo Flip.
 
-If you have never used a tracker before: a tracker is a music sequencer where notes are arranged in a grid, top to bottom, with time flowing downward. Each row is a step, each column carries a parameter (note, instrument, volume, effect). Songs are built by chaining together small patterns called **phrases**, which are grouped into **chains**, which are arranged in a **song**.
+**New to trackers?** A tracker is a music sequencer where notes are arranged in a grid, with time flowing downward. Each row is a step, each column carries a parameter (note, instrument, volume, effect). Songs are built by chaining together short patterns called **phrases**, grouped into **chains**, arranged in a **song**. Think of it as building music from small, reusable blocks.
 
-PocketTracker stores everything in a single project file (`.ptp`). Sounds are loaded from standard `.wav` files, or from **SoundFont (SF2)** files.
+PocketTracker stores everything in a single project file (`.ptp`). Sounds come from standard `.wav` files or **SoundFont (SF2)** files that you load yourself — there are no bundled samples.
 
 ### Target devices
 
@@ -91,7 +92,7 @@ The entire UI renders at a fixed **640×480** pixel canvas, letterboxed on large
 
 ```
 ┌────────────────────────────────────────────────┐
-│  OSCILLOSCOPE  (620×70 px)                     │
+│  VISUALIZER  (620×70 px)                       │
 ├──────────────────────────────┬─────────────────┤
 │                              │  NAV MAP        │
 │  MAIN EDITOR                 │  (80×105 px)    │
@@ -101,15 +102,26 @@ The entire UI renders at a fixed **640×480** pixel canvas, letterboxed on large
 └──────────────────────────────┴─────────────────┘
 ```
 
-**Oscilloscope** — real-time waveform of the mixed audio output. Always visible.
+**Visualizer** — the top bar displays real-time audio. It has eight display modes you can switch in SETTINGS:
+
+| Mode | What it shows |
+|---|---|
+| SCOPE | Classic oscilloscope waveform |
+| BARS | 40-column bar spectrum (frequency bands) |
+| PEAKS | Bar spectrum with peak-hold dots |
+| MIRROR | Waveform mirrored top and bottom |
+| FLAT | Blank bar (saves battery / CPU) |
+| OCTA | 8 mini-scopes side by side, one per active track |
+| SPECT | 40-bin FFT spectrum |
+| SPCT.P | FFT spectrum with peak-hold dots |
 
 **Main editor** — the active screen (PHRASE, CHAIN, SONG, etc.).
 
-**Navigation map** — a miniature 5×5 grid showing your current position in the screen layout.
+**Navigation map** — a miniature 5×5 grid in the top-right showing your position in the screen layout.
 
 **Status line** — brief messages (e.g., `SAVED`, `RESAMPLED TO INST 0C`) that auto-dismiss after a few seconds.
 
-Some screens (SAMPLE EDITOR, EQ EDITOR) open as full-screen overlays that temporarily replace the main layout.
+Some screens (SAMPLE EDITOR, EQ EDITOR, THEME EDITOR) open as full-screen overlays that temporarily replace the main layout.
 
 ---
 
@@ -127,15 +139,17 @@ Row 3                       MIXER
 Row 4                      EFFECTS
 ```
 
-> Row 0 context screens (SCALE, INST POOL) only appear when you are on PHRASE or INSTRUMENT column. MIXER and EFFECTS (rows 3–4) only appear in your **current column** — move left/right first, then up/down.
+> **SCALE** and **INST POOL** (Row 0) are reserved for future features and not yet active.  
+> **GROOVE** and **MODS** (Row 1) only appear in column 2 and 3 respectively.  
+> **MIXER** and **EFFECTS** (rows 3–4) only appear in the column you are currently on — move left/right first, then navigate up/down.
 
 | Combo | Action |
 |---|---|
 | R + RIGHT / LEFT | Move left / right along Row 2 |
-| R + UP | Move to the screen above in current column |
-| R + DOWN | Move to the screen below in current column |
+| R + UP | Move to the screen above in the current column |
+| R + DOWN | Move to the screen below in the current column |
 
-The navigation map in the top-right corner always shows where you are.
+The navigation map always shows where you are.
 
 **Popup screens** — not in the grid, opened contextually:
 
@@ -144,8 +158,9 @@ The navigation map in the top-right corner always shows where you are.
 | SAMPLE EDITOR | INSTRUMENT screen → cursor on SAMPLE → SELECT |
 | EQ EDITOR | INSTRUMENT / MIXER / EFFECTS screen → cursor on EQ row → SELECT |
 | SETTINGS | PROJECT screen → cursor on SETTINGS row → A |
+| THEME EDITOR | SETTINGS screen → cursor on THEME row → A |
 
-> **Tip:** The most common flow is PHRASE (col 2) ↔ INSTRUMENT (col 3) ↔ TABLE (col 4), all on Row 2. Press **R+UP** to reach GROOVE or MODS above.
+> **Tip:** The most common flow is PHRASE (col 2) ↔ INSTRUMENT (col 3) ↔ TABLE (col 4), all on Row 2. Press **R+UP** from PHRASE to reach GROOVE, or from INSTRUMENT to reach MODS.
 
 ---
 
@@ -213,7 +228,7 @@ Hold **A** and press a direction to edit the value under the cursor:
 
 ### 5.4 Context Navigation — B + D-pad
 
-Hold **B** and press LEFT/RIGHT to switch between items of the same type:
+Hold **B** and press LEFT/RIGHT to switch between items of the same type without leaving the screen:
 
 | Screen | B + LEFT / RIGHT |
 |---|---|
@@ -281,7 +296,7 @@ PROJECT
 - A **STEP** is a single note event with optional effects.
 - A **PHRASE** is a short pattern of 16 steps — like a bar of music.
 - A **CHAIN** is a sequence of up to 16 phrases. Each phrase slot can have a **transpose** value to shift pitch without duplicating the phrase.
-- The **SONG** arranges chains across 8 tracks. Each row plays all 8 tracks simultaneously.
+- The **SONG** arranges chains across 8 tracks. Each song row plays all 8 tracks simultaneously.
 
 All values (chain IDs, phrase IDs, instrument IDs, etc.) are hexadecimal, ranging from `00` to `FF`.
 
@@ -318,7 +333,7 @@ The SONG screen arranges chains across 8 tracks. Each column is a track (T0–T7
 
 A chain is a sequence of up to 16 phrase references. Each slot has:
 - **PHR** — phrase ID (`00`–`FF`) or `--` (empty)
-- **TRN** — transpose in semitones (`00` = no transpose; values above `7F` = negative)
+- **TRN** — transpose in semitones (`00` = no transpose; values above `7F` are negative)
 
 ```
      PHR  TRN
@@ -378,7 +393,7 @@ Notes are written as pitch + octave: `C-4`, `C#4`, `D-4`, … `B-9`. Range is **
 
 ### FX columns
 
-Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex). Use A+UP/DOWN on the type to cycle through available effects. Effects are listed in §20.
+Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex). Use A+UP/DOWN on the type to cycle through available effects. Effects are listed in §21.
 
 ---
 
@@ -386,7 +401,7 @@ Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex)
 
 The INSTRUMENT screen configures how a sample or SF2 preset is played.
 
-Navigate here with **R+RIGHT** from PHRASE, or **B+LEFT/RIGHT** to switch instruments.
+Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch between instruments without leaving the screen.
 
 ### WAV instrument parameters
 
@@ -395,7 +410,7 @@ Navigate here with **R+RIGHT** from PHRASE, or **B+LEFT/RIGHT** to switch instru
 | NAME | — | Instrument name. |
 | SAMPLE | path | WAV or SF2 file. Press A to open file browser; SELECT to open SAMPLE EDITOR. |
 | ROOT | C-0 – B-9 | The pitch of the sample as recorded. |
-| DETUNE | 00–FF | Fine tuning. `80` = center. |
+| DETUNE | 00–FF | Fine tuning. `80` = center (no detune). |
 | VOL | 00–FF | Base volume. `FF` = full. |
 | PAN | 00–FF | Stereo pan. `00` = full left, `80` = center, `FF` = full right. |
 | START | 00–FF | Sample start point (fraction of sample length). |
@@ -412,7 +427,7 @@ Navigate here with **R+RIGHT** from PHRASE, or **B+LEFT/RIGHT** to switch instru
 
 ### SF2 instrument parameters
 
-When the loaded sample is an SF2 file, the instrument screen additionally shows override fields for the SoundFont's internal envelope and filter. Setting these to `--` uses the SF2 preset's built-in values.
+When the loaded file is an SF2 SoundFont, additional override fields appear for the preset's internal envelope and filter. Setting these to `--` uses the SF2's built-in values.
 
 | Parameter | Description |
 |---|---|
@@ -425,6 +440,8 @@ When the loaded sample is an SF2 file, the instrument screen additionally shows 
 
 ### Volume chain
 
+Volume is applied in this order:
+
 ```
 Instrument VOL × Phrase V column × Track volume (Mixer) × Master volume (Mixer)
 ```
@@ -436,7 +453,7 @@ When slice markers exist on the sample (set via the SAMPLE EDITOR), the SLICE pa
 | Mode | Behaviour |
 |---|---|
 | OFF | Normal pitch playback — markers are ignored. |
-| CUT | Note pitch selects a slice (C-4 relative to ROOT = slice 0). Plays from slice start to next marker, then stops. |
+| CUT | Note pitch selects a slice (C-4 relative to ROOT = slice 0). Plays from slice start to the next marker, then stops. |
 | TRU | Same slice selection; plays from slice start to end of sample. |
 
 ### Navigating instruments
@@ -555,7 +572,7 @@ Slice markers are stored in the WAV `cue ` chunk — compatible with M8, Blackbo
 
 A table is a 16-row micro-sequencer attached to an instrument. When a note plays, the table runs in parallel at a configurable tick rate, applying per-row transpose, volume, and effects.
 
-Tables are useful for: drum rolls, note slides, automatic arpeggios, per-note automation.
+Tables are great for: drum rolls, note slides, automatic arpeggios, per-note automation.
 
 ```
      TRN  VOL  FX1      FX2      FX3
@@ -575,7 +592,7 @@ Tables are useful for: drum rolls, note slides, automatic arpeggios, per-note au
 The header shows **TIC XX** — how many phrase ticks pass per table row. Use the **TIC** phrase effect to change this value.
 
 - Default: `0C` (12 ticks = one phrase step per table row)
-- Lower = table advances faster
+- Lower values = table advances faster
 - Special values: `FC` = ping-pong, `FE` = random row, `FF` = stop
 
 ### Table–instrument link
@@ -647,7 +664,7 @@ Each track uses groove `00` by default. Use the **GRV XX** phrase effect to swit
 
 ## 14. MODULATION Screen
 
-The MODULATION screen (MODS) adds up to **4 modulation slots** per instrument. Each slot runs an envelope or LFO targeting a destination parameter.
+The MODULATION screen (MODS) adds up to **4 modulation slots** per instrument. Each slot runs an envelope or LFO targeting a destination parameter — great for volume shapes, pitch vibrato, filter sweeps, and more.
 
 Navigate here: **R+UP** from INSTRUMENT (column 3).
 
@@ -660,7 +677,7 @@ Navigate here: **R+UP** from INSTRUMENT (column 3).
 | ADSR | Envelope: Attack → Decay → Sustain → Release |
 | DRUM | Percussive envelope: sharp peak → body hold → tail decay |
 | LFO | Cyclic oscillator |
-| TRIG | Envelope triggered by note, behaves like ADSR (external source triggering is planned post-MVP) |
+| TRIG | Envelope triggered by note, behaves like ADSR |
 
 ### Modulation destinations
 
@@ -669,7 +686,7 @@ Navigate here: **R+UP** from INSTRUMENT (column 3).
 | VOLUME | Amplitude |
 | PAN | Stereo position |
 | PITCH | Pitch in semitones |
-| FINE | Pitch (fine, same range as PITCH — naming may change post-MVP) |
+| FINE | Fine pitch (same range as PITCH) |
 | CUTOFF | Filter cutoff |
 | RES | Filter resonance |
 | SMPSTRT | Sample start point |
@@ -693,14 +710,13 @@ The screen shows two mod slots side by side (MOD1+MOD2, then MOD3+MOD4).
 - FREE — phase never resets
 - RETRIG — phase resets to 0 on each new note
 
-**LFO shapes:** TRI, SIN, RMP+, RMP−, EXP+, EXP−, SQU+, SQU−, RANDOM, DRUNK  
-*(EXP/RANDOM/DRUNK currently fall back to SIN — full shapes coming post-MVP)*
+**LFO shapes:** TRI, SIN, RMP+, RMP−, EXP+, EXP−, SQU+, SQU−, RANDOM, DRUNK
 
 ### Mod-to-mod routing
 
 When DEST is **MOD AMT**, **MOD RATE**, or **MOD BOTH**, the slot modulates the next slot (circular: slot 4 → slot 1).
 
-Example: MOD1 (LFO) → MOD AMT → MOD2 (AHD) — the LFO rhythmically swells the envelope depth.
+Example: MOD1 (LFO) with DEST=MOD AMT targeting MOD2 (AHD) — the LFO rhythmically swells the envelope depth.
 
 ### Controls
 
@@ -717,7 +733,7 @@ Example: MOD1 (LFO) → MOD AMT → MOD2 (AHD) — the LFO rhythmically swells t
 
 ## 15. MIXER Screen
 
-The MIXER screen shows all 8 tracks plus a master column with real-time dBFS peak meters.
+The MIXER screen shows all 8 tracks plus a master column with real-time dBFS peak meters. This is where you balance levels, control reverb/delay return volumes, and open per-track EQs.
 
 Navigate here: **R+DOWN** from any Row 2 screen.
 
@@ -787,7 +803,7 @@ The reverb return volume is set on the MIXER screen (REV row in master column).
 |---|---|
 | TIME | Delay time (`00`–`FF`) in musical subdivisions. |
 | FDBK | Feedback amount (`00`–`FF`). Higher = more repeats. |
-| REV | Amount of delay output sent into the reverb bus (`00`–`FF`). Delay is processed first, so this cross-routing is zero-latency. |
+| REV | Amount of delay output sent into the reverb bus (`00`–`FF`). Delay is processed before reverb, so this cross-routing is zero-latency. |
 | EQ | Press SELECT to open the EQ EDITOR for the delay return. |
 
 The delay return volume is set on the MIXER screen (DEL row in master column).
@@ -807,7 +823,7 @@ Per-instrument effects (filter, drive, crush) are set on the INSTRUMENT screen.
 
 The EQ EDITOR is a full-screen overlay that opens when you press **SELECT** on an EQ row in the INSTRUMENT, MIXER, or EFFECTS screens.
 
-The EQ applies a 3-band parametric equalizer (biquad filter, per the Audio EQ Cookbook). A real-time spectrum analyzer (KissFFT, ~20 fps) shows the master output with the computed frequency response curve overlaid.
+It applies a 3-band parametric equalizer (biquad filter, per the Audio EQ Cookbook). A real-time spectrum analyzer (KissFFT, ~20 fps) shows the master output with the computed frequency response curve overlaid.
 
 ### Layout
 
@@ -872,23 +888,90 @@ WAV exports are saved to `/Documents/PocketTracker/Renders/` with auto-increment
 
 ## 19. SETTINGS Screen
 
-The SETTINGS screen is opened from the PROJECT screen (cursor on SETTINGS row, press A).
+The SETTINGS screen is opened from the PROJECT screen (cursor on SETTINGS row, press A). Press **B** to return to PROJECT.
 
 | Setting | Options | Description |
 |---|---|---|
-| LAYOUT | FULL / T.PORT / T.LAND / T.PORT2 | UI layout mode. FULL = no virtual controls. Touch modes add on-screen buttons. |
-| SCALING | INTEGER / BILINEAR / NEAREST | Screen scaling algorithm. INTEGER = crisp pixel-perfect. |
+| LAYOUT | FULLSCREEN / T.PORT / TOUCH LANDSCAPE / AMIGA PORTRAIT | UI layout mode. FULLSCREEN = no virtual controls (physical buttons only). Touch layouts add on-screen buttons; AMIGA PORTRAIT is a themed retro skin for 20:9 phones. |
+| SCALING | INT / BILINEAR | Screen scaling algorithm. INT = crisp pixel-perfect integer scaling. BILINEAR = smooth subpixel scaling. |
 | BTN SOUND | ON / OFF | Play a click sound on button press. |
 | BTN VOL | 00–FF | Click sound volume. |
-| VIBRATION | ON / OFF | Haptic feedback on button press. |
-| KB INSERT | ON / OFF | QWERTY keyboard insert mode (for name fields). |
-| CURSOR MEM | ON / OFF | Remember cursor position when switching between screens. |
+| BTN VIBRO | ON / OFF | Haptic feedback on button press (where supported). |
+| VIBRO POW | 00–FF | Vibration intensity. `FF` = strongest. |
+| KB INSERT | BEFORE / AFTER | Where the QWERTY keyboard inserts characters in name fields. |
+| CURSOR | REMEMBER / REFRESH | Whether cursor position is preserved when switching between screens. |
+| NOTE PREV | ON / OFF | Play the note at its pitch when you insert it on the PHRASE screen — useful for hearing what you're placing without pressing START. |
+| VISUALIZER | SCOPE / BARS / PEAKS / MIRROR / FLAT / OCTA / SPECT / SPCT.P | Visualizer mode for the top bar (see §3 for descriptions). |
+| THEME | theme name > | Shows the current theme name. Press A to open the THEME EDITOR. |
+| TEMPLATE | SAVE / CLEAR | SAVE stores the current project as a template for new projects. CLEAR removes the saved template. |
 
 Layout and scaling mode are persisted across app restarts. The auto-detected layout on startup depends on whether physical gamepad buttons are detected.
 
 ---
 
-## 20. Effects Reference
+## 20. THEME EDITOR
+
+The THEME EDITOR lets you customize the entire color scheme of the app, or switch between built-in themes. Open it from SETTINGS → THEME row → press A.
+
+Press **B** to close and return to SETTINGS. All color changes apply immediately so you can see them live.
+
+### Row 0 — THEME (built-in selection + SAVE/LOAD)
+
+The top row lets you cycle through built-in themes and save or load custom themes.
+
+| Cursor position (channel) | Action |
+|---|---|
+| 0 — theme name | A+UP/DOWN to cycle built-in themes: CLASSIC, AMBER, BLUE, MONO |
+| 1 — SAVE | Press A to save the current theme to a `.ptt` file |
+| 2 — LOAD | Press A to load a theme from a `.ptt` file |
+
+Move between positions with D-pad LEFT/RIGHT.
+
+### Rows 1–16 — Color parameters
+
+Each row edits one color in the theme. The color preview swatch is shown on the right. Cursor moves between **R**, **G**, **B** channels with D-pad LEFT/RIGHT.
+
+| Label | What it colors |
+|---|---|
+| BACKGROUND | Module fill and default row background |
+| ROW 4TH | Beat-accent rows (every 4th step) |
+| ROW CURSOR | The row the cursor is on |
+| ROW PLAY | The currently playing step during playback |
+| ROW SELECT | Selected region during copy/paste |
+| TXT TITLE | Screen header text (e.g., "PHRASE", "INSTRUMENT") |
+| TXT PARAM | Inactive parameter labels |
+| TXT VALUE | Inactive parameter values |
+| TXT CURSOR | Text on the cursor row |
+| TXT EMPTY | Empty / placeholder cells |
+| VIZ BG | Visualizer background |
+| VIZ LINE | Visualizer center line |
+| VIZ WAVE | Waveform / bar fill color |
+| MTR LOW | Meter green zone (below −6 dBFS) |
+| MTR MID | Meter yellow zone (−6 to 0 dBFS) |
+| MTR HIGH | Meter red zone (≥ 0 dBFS) |
+
+### Controls
+
+| Input | Action |
+|---|---|
+| D-pad UP/DOWN | Move between color rows |
+| D-pad LEFT/RIGHT | Move between R / G / B channels (on color rows), or between theme name / SAVE / LOAD (on row 0) |
+| A + UP/DOWN | +1 / −1 to the selected channel |
+| A + LEFT/RIGHT | +16 / −16 to the selected channel |
+| B | Close theme editor |
+
+### Built-in themes
+
+| Name | Character |
+|---|---|
+| CLASSIC | Dark background, green wave, cyan headers, yellow cursor — the default look |
+| AMBER | Warm amber/orange tones, reminiscent of an old CRT monitor |
+| BLUE | Cool blue tones with bright cyan accents |
+| MONO | Grayscale — pure black/white/grey, no color |
+
+---
+
+## 21. Effects Reference
 
 Effects are placed in the **FX1**, **FX2**, and **FX3** columns of a phrase step, or in the FX columns of a table row. Each has a 3-letter code and a 2-digit hex value.
 
@@ -964,6 +1047,19 @@ Jumps the sample playback start point to offset `XX` (fraction of total length).
 
 ---
 
+### PIT `XX` — Pitch Offset
+
+Instantly shifts the pitch of the note by a signed number of semitones.
+
+- `00`–`7F` = +0 to +127 semitones up
+- `80`–`FF` = −128 to −1 semitones down (e.g., `FF` = −1 st, `F4` = −12 st)
+
+Unlike PSL/PBN, PIT snaps the pitch immediately at note trigger. It does **not** affect which slice is selected when SLICE mode is active — use SLI for that.
+
+Useful for: playing the same phrase at multiple pitch offsets without chain transpose, or layering detuned copies.
+
+---
+
 ### PSL `XX` — Pitch Slide (Portamento)
 
 Slides pitch from the previous note to the current note over `XX` ticks. `PSL 00` = instant.
@@ -1020,6 +1116,20 @@ Randomizes the FX value in the column immediately to the left. Same `X`/`Y` sema
 
 ---
 
+### SLI `XX` — Slice Index
+
+Directly sets the slice to play, bypassing note-based selection.
+
+- `XX` = slice index `00`–`FF`
+- Works regardless of the instrument's SLICE mode — even with SLICE=OFF
+- Overrides the slice that the note pitch would normally select
+
+This is useful when you want precise control over which slice plays without having to map it through note pitch. For example: `SLI 03` always plays slice 3, whatever note is in the N column.
+
+Combine with PIT to pitch-shift a specific slice without changing the slice selection.
+
+---
+
 ### TBL `XX` — Table Set
 
 Overrides the instrument's default table, using table `XX` for this note.
@@ -1050,7 +1160,7 @@ Sets the step volume to `XX` at the exact tick this command fires. Useful in tab
 
 ---
 
-## 21. Modulation Reference
+## 22. Modulation Reference
 
 See §14 for how to edit mod slots.
 
@@ -1096,11 +1206,11 @@ Cyclic modulation. Phase resets to 0 on each new note (RETRIG mode).
 
 ### TRIG Envelope
 
-Currently behaves identically to ADSR — same ATK/DEC/SUS/REL parameters. The planned feature (triggering from an external instrument or track source) is deferred to post-MVP.
+Behaves identically to ADSR — same ATK/DEC/SUS/REL parameters.
 
 ---
 
-## 22. File Management
+## 23. File Management
 
 ### Project files
 
@@ -1113,7 +1223,7 @@ Currently behaves identically to ADSR — same ATK/DEC/SUS/REL parameters. The p
 
 - Format: `.wav` (8/16/24/32-bit PCM or float; mono or stereo)
 - Stereo WAV files are supported natively — SOURCE mode on the instrument or sample editor selects LEFT / RIGHT / STEREO / MONO non-destructively
-- Sample rates: any — PocketTracker compensates pitch for non-44100 Hz files
+- Sample rates: any — PocketTracker compensates pitch for non-44100 Hz files automatically
 - Loaded via: INSTRUMENT screen → SAMPLE field → A button → file browser
 - SF2 files are loaded the same way
 
@@ -1123,6 +1233,11 @@ Currently behaves identically to ADSR — same ATK/DEC/SUS/REL parameters. The p
 - Location: `/Documents/PocketTracker/Renders/`
 - Filenames: `ProjectName_0001.wav`, `_0002.wav`, … (auto-incremented)
 - Triggered from: PROJECT screen → WAV MIX
+
+### Theme files
+
+- Format: `.ptt` (JSON color theme)
+- Saved/loaded from: SETTINGS → THEME → open THEME EDITOR → SAVE / LOAD
 
 ### Resampled instruments
 
@@ -1144,7 +1259,7 @@ Output: `/Documents/PocketTracker/Samples/Chops/{instrument_name}/`
 
 ---
 
-## 23. Workflow Tips
+## 24. Workflow Tips
 
 ### Making your first phrase
 
@@ -1192,6 +1307,14 @@ Rather than duplicating a phrase at a different pitch, set the TRN column in the
 1. Build your complete song.
 2. Navigate to PROJECT screen.
 3. Move cursor to WAV MIX and press **A**. The song renders offline — a status message shows the output filename when done.
+
+### Customizing your theme
+
+1. Navigate to SETTINGS (PROJECT → SETTINGS row → A).
+2. Move to the THEME row and press **A** to open the THEME EDITOR.
+3. On row 0, use A+UP/DOWN on the theme name to cycle through built-in themes (CLASSIC, AMBER, BLUE, MONO).
+4. Move down to any color row, then LEFT/RIGHT to select R/G/B, and A+UP/DOWN to adjust.
+5. When you are happy with the look, move back to row 0, move RIGHT to SAVE, and press A.
 
 ---
 
