@@ -379,10 +379,10 @@ fun LandscapeLayoutWithVirtualButtons(
 // PORTRAIT2 LAYOUT — Retro device skin (20:9 phones)
 //
 // Structure (all heights in X-units, X = deviceWidth / 135):
-//   1. TOP PANEL     — ventilation grille, 39.75X tall
+//   1. TOP PANEL     — ventilation grille, 33X tall
 //   2. SCREEN BEZEL  — frame + tracker screen inside, 102.75X tall
 //   3. BRANDING STRIP— logo + LEDs, 22.5X tall
-//   4. BUTTON CLUSTER— themed 4×4 grid, 135X tall
+//   4. BUTTON CLUSTER— themed 4×4 grid, 141.75X tall (buttons use 135X; 6.75X spacer at bottom)
 //
 // Total: 300X = deviceWidth × (300/135) = deviceWidth × 20/9  (perfect 20:9)
 // ============================================================================
@@ -408,7 +408,7 @@ fun PortraitLayout2WithVirtualButtons(
     //   Case B (18:9–19.5:9): X from width → top panel shrinks/disappears to absorb
     //     the height deficit; bezel/branding/buttons remain full device width.
     //
-    //   Case C (<260.25/135 ≈ 1.928 ratio, e.g. 16:9=1.778): height is the constraint.
+    //   Case C (<267/135 ≈ 1.978 ratio, e.g. 16:9=1.778): height is the constraint.
     //     X is derived from height so bezel+branding+buttons fill the screen height.
     //     Skin width (135X) becomes narrower than the device — casingColor fills the sides.
     val xFromWidth = deviceW / 135f
@@ -425,17 +425,17 @@ fun PortraitLayout2WithVirtualButtons(
         xFromWidth * 300f <= deviceH -> {
             // Case A: full skin fits vertically at width-derived X
             X = xFromWidth
-            topPanelH = (deviceH - X * 260.25f).toInt().coerceAtMost((X * 39.75f).toInt())
+            topPanelH = (deviceH - X * 267f).toInt().coerceAtMost((X * 33f).toInt())
         }
-        xFromWidth * 260.25f <= deviceH -> {
+        xFromWidth * 267f <= deviceH -> {
             // Case B: top panel shrinks (can reach 0) to absorb the height deficit
             X = xFromWidth
-            topPanelH = (deviceH - X * 260.25f).toInt().coerceAtLeast(0)
+            topPanelH = (deviceH - X * 267f).toInt().coerceAtLeast(0)
         }
         else -> {
             // Case C: skin is height-constrained; derive X from remaining height after branding
             topPanelH = 0
-            X = (deviceH - brandingH) / (102.75f + 135f)
+            X = (deviceH - brandingH) / (102.75f + 141.75f)
         }
     }
 
@@ -443,7 +443,7 @@ fun PortraitLayout2WithVirtualButtons(
     val contentW    = (X * 135f).toInt()
     val contentWDp  = (contentW / density).dp
     val bezelH      = (X * 102.75f).toInt()
-    val buttonAreaH = (X * 135f).toInt()
+    val buttonAreaH = (X * 141.75f).toInt()
 
     // When screenBezelThicknessX > 0 the border is expressed in X-units (proportional to skin
     // scale) so it exactly matches the scaled PNG border on every device.  Fall back to the

@@ -30,22 +30,22 @@ class ThemeEditorModule : TrackerModule {
         )
 
         val COLOR_ROWS = listOf(
-            ColorRow("BACKGRND", { it.background },    { t, v -> t.copy(background    = v) }),
-            ColorRow("ROW 4TH ", { it.rowEvery4th },   { t, v -> t.copy(rowEvery4th   = v) }),
-            ColorRow("ROW CURS", { it.rowCursor },     { t, v -> t.copy(rowCursor     = v) }),
-            ColorRow("ROW PLAY", { it.rowPlayback },   { t, v -> t.copy(rowPlayback   = v) }),
-            ColorRow("ROW SEL ", { it.rowSelection },  { t, v -> t.copy(rowSelection  = v) }),
-            ColorRow("TXT TITL", { it.textTitle },     { t, v -> t.copy(textTitle     = v) }),
-            ColorRow("TXT PARA", { it.textParam },     { t, v -> t.copy(textParam     = v) }),
-            ColorRow("TXT VALU", { it.textValue },     { t, v -> t.copy(textValue     = v) }),
-            ColorRow("TXT CURS", { it.textCursor },    { t, v -> t.copy(textCursor    = v) }),
-            ColorRow("TXT EMPT", { it.textEmpty },     { t, v -> t.copy(textEmpty     = v) }),
-            ColorRow("VIZ BG  ", { it.vizBackground }, { t, v -> t.copy(vizBackground = v) }),
-            ColorRow("VIZ LINE", { it.vizCenterLine }, { t, v -> t.copy(vizCenterLine = v) }),
-            ColorRow("VIZ WAVE", { it.vizWave },       { t, v -> t.copy(vizWave       = v) }),
-            ColorRow("MTR LOW ", { it.meterLow },      { t, v -> t.copy(meterLow      = v) }),
-            ColorRow("MTR MID ", { it.meterMid },      { t, v -> t.copy(meterMid      = v) }),
-            ColorRow("MTR HIGH", { it.meterHigh },     { t, v -> t.copy(meterHigh     = v) })
+            ColorRow("BACKGROUND", { it.background },    { t, v -> t.copy(background    = v) }),
+            ColorRow("ROW 4TH",    { it.rowEvery4th },   { t, v -> t.copy(rowEvery4th   = v) }),
+            ColorRow("ROW CURSOR", { it.rowCursor },     { t, v -> t.copy(rowCursor     = v) }),
+            ColorRow("ROW PLAY",   { it.rowPlayback },   { t, v -> t.copy(rowPlayback   = v) }),
+            ColorRow("ROW SELECT", { it.rowSelection },  { t, v -> t.copy(rowSelection  = v) }),
+            ColorRow("TXT TITLE",  { it.textTitle },     { t, v -> t.copy(textTitle     = v) }),
+            ColorRow("TXT PARAM",  { it.textParam },     { t, v -> t.copy(textParam     = v) }),
+            ColorRow("TXT VALUE",  { it.textValue },     { t, v -> t.copy(textValue     = v) }),
+            ColorRow("TXT CURSOR", { it.textCursor },    { t, v -> t.copy(textCursor    = v) }),
+            ColorRow("TXT EMPTY",  { it.textEmpty },     { t, v -> t.copy(textEmpty     = v) }),
+            ColorRow("VIZ BG",     { it.vizBackground }, { t, v -> t.copy(vizBackground = v) }),
+            ColorRow("VIZ LINE",   { it.vizCenterLine }, { t, v -> t.copy(vizCenterLine = v) }),
+            ColorRow("VIZ WAVE",   { it.vizWave },       { t, v -> t.copy(vizWave       = v) }),
+            ColorRow("MTR LOW",    { it.meterLow },      { t, v -> t.copy(meterLow      = v) }),
+            ColorRow("MTR MID",    { it.meterMid },      { t, v -> t.copy(meterMid      = v) }),
+            ColorRow("MTR HIGH",   { it.meterHigh },     { t, v -> t.copy(meterHigh     = v) })
         )
     }
 
@@ -66,11 +66,11 @@ class ThemeEditorModule : TrackerModule {
         )
 
         val nameColumnX = x + 10
-        val rColumnX    = x + 200
-        val gColumnX    = x + 237
-        val bColumnX    = x + 274
-        val swatchX     = x + 320
-        val swatchW     = width - 320 - 10
+        val rColumnX    = x + 230
+        val gColumnX    = x + 267
+        val bColumnX    = x + 304
+        val swatchX     = x + 350
+        val swatchW     = width - 350 - 10
 
         // Theme name / SAVE / LOAD column positions
         val themeNameX  = x + 165
