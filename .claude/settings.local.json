@@ -32,7 +32,9 @@
       "Bash(xargs wc -l)",
       "Bash(Get-ChildItem -Recurse \"C:\\\\Users\\\\conan\\\\AndroidStudioProjects\\\\Pockettracker\\\\app\\\\src\\\\main\\\\cpp\" -Filter \"*.h\")",
       "Bash(Select-Object -ExpandProperty FullName)",
-      "PowerShell(Copy-Item \"C:\\\\Users\\\\conan\\\\AndroidStudioProjects\\\\Pockettracker\\\\app\\\\build\\\\outputs\\\\apk\\\\debug\\\\app-debug.apk\" \"C:\\\\Users\\\\conan\\\\AndroidStudioProjects\\\\Pockettracker\\\\apk\\\\pockettracker-debug.apk\" -Force)"
+      "PowerShell(Copy-Item \"C:\\\\Users\\\\conan\\\\AndroidStudioProjects\\\\Pockettracker\\\\app\\\\build\\\\outputs\\\\apk\\\\debug\\\\app-debug.apk\" \"C:\\\\Users\\\\conan\\\\AndroidStudioProjects\\\\Pockettracker\\\\apk\\\\pockettracker-debug.apk\" -Force)",
+      "Bash(git merge *)",
+      "Bash(git stash *)"
     ]
   }
 }
