@@ -1,2 +1,0 @@
-# Allow APK files in this directory (overrides root *.apk rule)
-!*.apk

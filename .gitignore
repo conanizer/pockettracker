@@ -34,19 +34,14 @@ proguard/
 # Android Studio captures folder
 captures/
 
-# IntelliJ
+# IntelliJ / Android Studio
 *.iml
-.idea/workspace.xml
-.idea/tasks.xml
-.idea/gradle.xml
-.idea/assetWizardSettings.xml
-.idea/dictionaries
-.idea/libraries
-.idea/caches
-.idea/modules.xml
-.idea/navEditor.xml
-# Comment out if you want to keep .idea/
-# .idea/
+.idea/
+
+# Android Studio inspection exports (not project config)
+ClangTidy.xml
+OCUnusedGlobalDeclaration.xml
+.descriptions.xml
 
 # Keystore files
 *.jks
@@ -130,6 +125,15 @@ $RECYCLE.BIN/
 nul
 *.tmp
 .vscode/
+
+# Claude Code — local settings only (project settings.json is kept)
+.claude/settings.local.json
+
+# Internal / planning docs (kept locally, not for contributors)
+docs/internal/
+
+# APK artifacts — release APKs go to GitHub Releases, not the repo
+apk/
 
 # Keep build helper scripts (don't ignore)
 !build.sh
