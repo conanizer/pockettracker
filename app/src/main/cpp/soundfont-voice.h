@@ -1,6 +1,6 @@
 #pragma once
 #include <cmath>
-#include "mod-system.h"
+#include "mods/mod-system.h"
 #include "effects/instrument-chain.h"
 
 // Forward declaration — tsf is defined in soundfont-voice.cpp (TSF_IMPLEMENTATION).

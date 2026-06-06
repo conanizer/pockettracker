@@ -1,6 +1,6 @@
 #pragma once
 #include <cmath>
-#include "../../mod-system.h"
+#include "../mod-system.h"
 
 // tickADSR — advance one audio block for an ADSR or TRIG mod slot (type 2 or 5).
 //   rMult : effective rate multiplier from mod-to-mod routing (1.0 = no mod).

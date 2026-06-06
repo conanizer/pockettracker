@@ -1,7 +1,7 @@
 // TinySoundFont — single-header SF2/SF3 renderer (MIT license)
 // NOTE: TSF_IMPLEMENTATION must be defined in exactly one .cpp file
 #define TSF_IMPLEMENTATION
-#include "tsf.h"
+#include "vendor/tsf/tsf.h"
 
 #include "soundfont-voice.h"
 

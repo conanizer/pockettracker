@@ -34,14 +34,15 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm")
     target_compile_options(pockettracker PRIVATE -ffast-math)
 endif ()
 
-# Include paths: root (for tsf.h), effects/soundpipe (so pareq.c finds soundpipe.h)
+# Include paths: root (for audio-defs.h, sampler-voice.h, etc.),
+#   effects/soundpipe (so pareq.c finds soundpipe.h), kissfft (for kiss_fft.h)
 target_include_directories(pockettracker PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/effects/soundpipe
         ${CMAKE_CURRENT_SOURCE_DIR}/kissfft
 )
 
-# Link with Oboe and libm (required by tsf.h for math functions)
+# Link with Oboe and libm (required by tsf for math functions)
 target_link_libraries(pockettracker
         oboe::oboe
         android

@@ -1,6 +1,6 @@
 #pragma once
 #include <cmath>
-#include "../../mod-system.h"
+#include "../mod-system.h"
 #include "../primitives/lfo-oscillator.h"
 
 // tickLFO — advance one audio block for an LFO mod slot (type 3).

@@ -1,6 +1,6 @@
 #pragma once
 #include <cmath>
-#include "../../mod-system.h"
+#include "../mod-system.h"
 #include "../../sampler-voice.h"
 
 // tickPitchSlide — advance pitch slide / bend state (PSL / PBN effects) by one block.

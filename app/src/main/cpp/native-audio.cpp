@@ -1,10 +1,10 @@
 // native-audio.cpp — STUB
 //
 // This file has been split into focused modules:
-//   filter.h          — Biquad coefficient math (kept as reference; SVF used by effects/)
+//   effects/primitives/filter.h — Biquad coefficient math (kept as reference; SVF used by effects/)
 //   audio-defs.h      — Log macros, constants (MAX_VOICES, DECLICK_SAMPLES, FX_*)
 //   note-queue.h      — SoundfontEntry, NoteQueue/KillQueue, InstrumentParams, Table
-//   mod-system.h      — ParamId, ParamBus, IAudioVoice
+//   mods/mod-system.h — ParamId, ParamBus, IAudioVoice
 //   sampler-voice.h   — Voice struct (sampler, with VoiceModSlot)
 //   soundfont-voice.h — SoundfontVoice struct (SF2 playback)
 //   soundfont-voice.cpp — TSF_IMPLEMENTATION + SoundfontVoice method bodies

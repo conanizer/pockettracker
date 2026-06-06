@@ -1,7 +1,7 @@
 #pragma once
 #include <cstring>
 #include <cmath>
-#include "../mod-system.h"
+#include "mod-system.h"
 #include "modules/ahd-module.h"
 #include "modules/adsr-module.h"
 #include "modules/lfo-module.h"

@@ -5,7 +5,7 @@
 #include <climits>
 #include <vector>
 #include "audio-engine.h"
-#include "tsf.h"  // API declarations only (tsf_close, tsf_load_filename, etc.)
+#include "vendor/tsf/tsf.h"  // API declarations only (tsf_close, tsf_load_filename, etc.)
 
 // JNI requires env and thiz in every function signature, but most thin wrappers don't use them.
 #pragma clang diagnostic push

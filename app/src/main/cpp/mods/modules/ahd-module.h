@@ -1,6 +1,6 @@
 #pragma once
 #include <cmath>
-#include "../../mod-system.h"
+#include "../mod-system.h"
 
 // tickAHD — advance one audio block for an AHD or DRUM mod slot (type 1 or 4).
 //   rMult : effective rate multiplier from mod-to-mod routing (1.0 = no mod).

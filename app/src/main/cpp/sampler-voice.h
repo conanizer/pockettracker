@@ -2,7 +2,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <algorithm>
-#include "mod-system.h"
+#include "mods/mod-system.h"
 #include "effects/instrument-chain.h"
 
 struct Voice : public IAudioVoice {

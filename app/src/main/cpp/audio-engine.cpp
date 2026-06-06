@@ -1,7 +1,7 @@
 ﻿// TSF API declarations only — TSF_IMPLEMENTATION lives in soundfont-voice.cpp
 #include "audio-engine.h"
 #include "kissfft/kiss_fftr.h"
-#include "tsf.h"
+#include "vendor/tsf/tsf.h"
 #include "mods/mod-runner.h"
 #include "mods/modules/pitch-slide-module.h"
 #include "mods/modules/vibrato-module.h"
