@@ -139,3 +139,6 @@ apk/
 !build.sh
 !test.sh
 !clean.sh
+
+# Gradle wrapper JAR must be committed — it bootstraps the build on CI and fresh clones
+!gradle/wrapper/gradle-wrapper.jar
