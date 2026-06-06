@@ -683,7 +683,7 @@ class TrackerController(
                 projectCursorColumn = 1  // Reset to first value column
             }
             ScreenType.SETTINGS -> {
-                settingsCursorRow = if (settingsCursorRow > 0) settingsCursorRow - 1 else 11
+                settingsCursorRow = if (settingsCursorRow > 0) settingsCursorRow - 1 else 10
                 settingsCursorColumn = 1
             }
             ScreenType.INSTRUMENT -> {
@@ -763,7 +763,7 @@ class TrackerController(
                 projectCursorColumn = 1
             }
             ScreenType.SETTINGS -> {
-                settingsCursorRow = if (settingsCursorRow < 11) settingsCursorRow + 1 else 0
+                settingsCursorRow = if (settingsCursorRow < 10) settingsCursorRow + 1 else 0
                 settingsCursorColumn = 1
             }
             ScreenType.INSTRUMENT -> {
@@ -887,7 +887,9 @@ class TrackerController(
                 projectCursorColumn = getProjectCursorRightColumn(projectCursorRow, projectCursorColumn)
             }
             ScreenType.SETTINGS -> {
-                settingsCursorColumn = if (settingsCursorRow == 11) 2 else 1
+                // rows 2 (OVERLAY), 3 (BTN SOUND), 4 (BTN VIBRO), 10 (TEMPLATE) have a second column
+                val hasSecondCol = settingsCursorRow in setOf(2, 3, 4, 10)
+                settingsCursorColumn = if (hasSecondCol && settingsCursorColumn < 2) 2 else settingsCursorColumn
             }
             ScreenType.INSTRUMENT -> {
                 val maxColumn = getInstrumentCursorRightColumn(instrumentCursorRow, instrumentCursorColumn)

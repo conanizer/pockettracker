@@ -1,6 +1,6 @@
 # Development Status
 
-**Last Updated:** 2026-05-21 (rev 5)
+**Last Updated:** 2026-06-06 (rev 6)
 
 ## Current Phase
 
@@ -76,7 +76,7 @@ Week 16:     MVP Release
 - **Table Screen** - 16-row mini-sequencer per instrument
 - **Groove Screen** - Step-timing patterns for swing/shuffle (256 grooves)
 - **Modulation Screen** - 4-slot envelope/LFO editor per instrument
-- **Settings Screen** - Layout mode, scaling, button sound/volume, vibration, keyboard insert mode, cursor persistence, note preview; VISUALIZER row (A+dpad cycles all 8 modes: SCOPE/BARS/PEAKS/MIRROR/FLAT/OCTA/SPECT/SPCT.P); THEME row (A opens theme editor)
+- **Settings Screen** - Layout mode, scaling, screen overlay, button sound/volume, vibration, keyboard insert mode, cursor persistence, note preview; VISUALIZER row (A+dpad cycles all 8 modes: SCOPE/BARS/PEAKS/MIRROR/FLAT/OCTA/SPECT/SPCT.P); THEME row (A opens theme editor). BTN SOUND and BTN VIBRO each show their volume/power value in the same row. OVERLAY row cycles PNG files from `assets/overlays/` (plus OFF); STR column controls opacity 00-FF.
 
 ### Effects (All Complete)
 - **ARP/ARC** - Arpeggio with UP/DOWN/PINGPONG/RANDOM modes and speed control
@@ -166,6 +166,19 @@ Week 16:     MVP Release
 ---
 
 ## Completed Milestones
+
+### Screen Overlay System (Complete - 2026-06-06)
+
+PNG overlays (e.g. CRT scanlines) can be applied over the tracker screen at runtime.
+
+- **Asset folder**: `app/src/main/assets/overlays/` — drop any PNG here to make it selectable.
+- **Settings Screen row 2 (OVERLAY)**: A+dpad cycles through available overlay files (plus OFF). Filename shown without extension, truncated to 8 chars. Second column **STR** (00-FF) controls opacity.
+- **Rendering**: `TrackerScreen` in `ScreenLayouts.kt` uses `Modifier.drawWithContent` — after `drawContent()` the overlay PNG is drawn with `DrawScope.drawImage(..., alpha = STR/255f)` on the same canvas as the game content. Works correctly across all 4 layout modes.
+- **PNG loading**: raw `BitmapFactory.decodeStream` → `asImageBitmap()`, no pixel processing. The PNG's own color values and alpha channel are preserved. Loaded once per overlay name change via `remember(overlayName)`.
+- **Persistence**: `overlay_name` (String) and `overlay_strength` (Int) in SharedPreferences via `LaunchedEffect`.
+- **Settings layout change**: BTN SOUND and BTN VIBRO rows now each show their VOL/POW hex value as a second column (removed the separate BTN VOL and VIBRO POW rows). Settings screen is now 11 rows (0-10) instead of 12.
+
+---
 
 ### Polish & Fixes (Complete - 2026-05-18)
 

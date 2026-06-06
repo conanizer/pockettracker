@@ -9,9 +9,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **ALWAYS read these files first:**
 
 1. **docs/development-status.md** - What's done, what's remaining
-2. **MVP_EXPANSION_PLAN.md** - Mixer, Volume/Pan, WAV Export (COMPLETE!)
-3. **MVP_EXTENSION_PACK_2.md** - Tables, HOP/TIC, Pitch Effects (COMPLETE!)
-4. **MVP_EXPANSION_PACK_3.md** - Groove Screen, Modulation Screen, Resampling (COMPLETE!)
+2. **docs/technical-architecture.md** - System design, file structure, rendering & overlay system
+
 
 **Current Phase:** Testing & Polish
 
@@ -89,7 +88,7 @@ PocketTracker is an Android music tracker application inspired by M8 and LSDJ, d
 
 **Tested Devices:**
 - **Primary:** Miyoo Flip (1GB RAM, Android 13, GammaCoreOS)
-- **Secondary:** Ayaneo Pocket Air Mini (3GB RAM, Android 11) - arriving soon
+- **Secondary:** Ayaneo Pocket Air Mini (3GB RAM, Android 11)
 
 ---
 
@@ -162,6 +161,7 @@ The UI uses a custom pixel-perfect rendering system built on Jetpack Compose Can
 - `PixelPerfectRenderer.kt`: Main renderer with letterboxing and integer scaling
 - `TrackerLayout`: Positions and draws all modules on 640×480 canvas
 - `TrackerModule` interface: All screen modules implement this (draw function, width/height)
+- **Screen overlay**: PNG files in `assets/overlays/` drawn on top of the tracker screen via `Modifier.drawWithContent` + `DrawScope.drawImage(alpha = STR/255f)` in `TrackerScreen` (`ScreenLayouts.kt`). Selected and configured in Settings row 2 (OVERLAY / STR).
 
 **Design Constants:**
 - Screen: 640×480 pixels (4:3 aspect ratio)
@@ -181,7 +181,7 @@ The UI uses a custom pixel-perfect rendering system built on Jetpack Compose Can
 - `TableModule`: 16-row mini-sequencer per instrument
 - `GrooveModule`: Step-timing patterns (swing/shuffle)
 - `ModulationModule`: 4-slot envelope/LFO editor per instrument
-- `SettingsModule`: Layout, scaling, button sound/vibration, cursor settings (opened from Project screen)
+- `SettingsModule`: Layout, scaling, screen overlay, button sound/vibration, cursor settings (opened from Project screen). 11 rows (0-10): LAYOUT, SCALING, OVERLAY (+ STR column), BTN SOUND (+ VOL column), BTN VIBRO (+ POW column), KB INSERT, CURSOR, NOTE PREV, VISUALIZER, THEME, TEMPLATE.
 - `ProjectModule`: Project settings (tempo, name, save/load)
 - `NavigationMapModule`: 80×105px navigation grid display
 - `FileBrowserModule`: File/folder navigation
@@ -650,10 +650,9 @@ project.phrases[0] = project.phrases[0].copy(
 | Document                      | Purpose                     | When to Read |
 |-------------------------------|-----------------------------|--------------|
 | **docs/development-status.md**     | Current progress            | Every session start |
-| **MVP_EXPANSION_PACK_3.md**        | Extension Pack 3 (COMPLETE) | Reference |
 | **docs/technical-architecture.md** | System design               | Understanding architecture |
 | **docs/input-system.md**           | Controls reference          | Adding input handling |
-| **REFACTORING_ROADMAP.md**    | Step-by-step refactoring    | Reference (completed) |
+
 
 ---
 

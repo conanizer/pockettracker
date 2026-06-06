@@ -8,22 +8,18 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 /**
  * SETTINGS SCREEN MODULE
  *
- * A side menu opened from the PROJECT screen (row 6, SETTINGS button).
- * Press A on SETTINGS row in PROJECT screen to open.
- * Press B to return to PROJECT screen.
- *
- * Rows:
- *   0 — LAYOUT    (cycle: FULLSCREEN / TOUCH LANDSCAPE / AMIGA PORTRAIT)
- *   1 — SCALING   (cycle: INT / BILINEAR)
- *   2 — BTN SOUND (ON / OFF, cycling via A+DPAD up/down)
- *   3 — BTN VOL   (00-FF, hex byte via A+DPAD up/down)
- *   4 — BTN VIBRO (ON / OFF, cycling via A+DPAD up/down)
- *   5 — VIBRO POW (00-FF, hex byte via A+DPAD up/down)
- *   6 — KB INSERT (single cycling value: BEFORE=1 / AFTER=0)
- *   7 — CURSOR    (REMEMBER=1 / REFRESH=0) — whether cursor position is preserved on screen navigation
- *   8 — NOTE PREV (ON / OFF) — play note at its pitch when inserting on phrase screen
- *
- * Size: 510×392 pixels (same as other screens)
+ * Rows (0-10):
+ *   0  — LAYOUT    (cycle: FULLSCREEN / TOUCH LANDSCAPE / AMIGA PORTRAIT)
+ *   1  — SCALING   (cycle: INT / BILINEAR)
+ *   2  — OVERLAY   (col1: file name / OFF; col2: STR 00-FF)
+ *   3  — BTN SOUND (col1: ON/OFF; col2: VOL 00-FF)
+ *   4  — BTN VIBRO (col1: ON/OFF; col2: POW 00-FF)
+ *   5  — KB INSERT (single cycling value: BEFORE=1 / AFTER=0)
+ *   6  — CURSOR    (REMEMBER=1 / REFRESH=0)
+ *   7  — NOTE PREV (ON / OFF)
+ *   8  — VISUALIZER
+ *   9  — THEME     (opens editor)
+ *   10 — TEMPLATE  (SAVE / CLEAR)
  */
 class SettingsModule : TrackerModule {
     override val width = 510
@@ -34,113 +30,102 @@ class SettingsModule : TrackerModule {
     private val ROW_HEIGHT = 21
     private val TEXT_PADDING = 3
 
+    // Column positions
+    private val NAME_X_OFFSET  = 10
+    private val VAL1_X_OFFSET  = 190   // primary value
+    private val SUBLABEL_OFFSET = 355   // secondary column label (STR / VOL / POW)
+    private val VAL2_X_OFFSET  = 408   // secondary value (hex)
+
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val s = state as? SettingsState ?: return
         val t = s.appTheme
 
-        // Background
         drawRect(
             color = Color(t.background),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
 
-        val nameColumnX = x + 10
-        val valueColumnX = x + 190
+        val nameColumnX  = x + NAME_X_OFFSET
+        val val1ColumnX  = x + VAL1_X_OFFSET
+        val subLabelX    = x + SUBLABEL_OFFSET
+        val val2ColumnX  = x + VAL2_X_OFFSET
 
-        // Header
         var rowY = y + TEXT_PADDING
-        drawBitmapText(
-            text = "SETTINGS",
-            x = nameColumnX,
-            y = rowY,
-            scale = scale,
-            color = Color(t.textTitle),
-            spacing = CHAR_SPACING,
-            fontScale = FONT_SCALE
-        )
+        drawBitmapText("SETTINGS", nameColumnX, rowY, scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
         rowY += ROW_HEIGHT + 14
 
-        var currentRow = 0
+        var row = 0
 
         // ── ROW 0: LAYOUT ──────────────────────────────────────────────
         val layoutText = when (s.layoutMode) {
             DeviceAdapter.LayoutMode.FULL            -> "FULLSCREEN"
             DeviceAdapter.LayoutMode.TOUCH_PORTRAIT  -> "T.PORT"
-            DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE -> "TOUCH LANDSCAPE"
-            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 -> "AMIGA PORTRAIT"
+            DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE -> "T.LAND"
+            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 -> "AMIGA PORT"
         }
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
+        drawParameterRow(x, rowY, scale, nameColumnX, val1ColumnX, t,
             "LAYOUT", layoutText,
-            isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
-            isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
-        rowY += ROW_HEIGHT; currentRow++
+            s.cursorRow == row && s.cursorColumn == 0,
+            s.cursorRow == row && s.cursorColumn == 1)
+        rowY += ROW_HEIGHT; row++
 
         // ── ROW 1: SCALING ─────────────────────────────────────────────
         val scalingText = when (s.scalingMode) {
             DeviceAdapter.ScalingMode.INTEGER  -> "INT"
             DeviceAdapter.ScalingMode.BILINEAR -> "BILINEAR"
         }
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
+        drawParameterRow(x, rowY, scale, nameColumnX, val1ColumnX, t,
             "SCALING", scalingText,
-            isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
-            isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
-        rowY += ROW_HEIGHT * 2; currentRow++
+            s.cursorRow == row && s.cursorColumn == 0,
+            s.cursorRow == row && s.cursorColumn == 1)
+        rowY += ROW_HEIGHT; row++
 
-        // ── ROW 2: BTN SOUND ───────────────────────────────────────────
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
+        // ── ROW 2: OVERLAY ─────────────────────────────────────────────
+        val allOverlays = listOf("OFF") + s.overlayFiles
+        val overlayDisplayName = if (s.overlayName == "OFF") "OFF"
+                                 else s.overlayName.uppercase().take(8)
+        drawDualParamRow(x, rowY, scale, nameColumnX, val1ColumnX, subLabelX, val2ColumnX, t,
+            "OVERLAY", overlayDisplayName, "STR", s.overlayStrength.toHex2(),
+            s.cursorRow == row, s.cursorColumn)
+        rowY += ROW_HEIGHT * 2; row++
+
+        // ── ROW 3: BTN SOUND ───────────────────────────────────────────
+        drawDualParamRow(x, rowY, scale, nameColumnX, val1ColumnX, subLabelX, val2ColumnX, t,
             "BTN SOUND", if (s.buttonSoundEnabled) "ON" else "OFF",
-            isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
-            isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
-        rowY += ROW_HEIGHT; currentRow++
-
-        // ── ROW 3: BTN VOL ─────────────────────────────────────────────
-        val btnVolHex = s.buttonSoundVolume.toHex2()
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
-            "BTN VOL", btnVolHex,
-            isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
-            isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
-        rowY += ROW_HEIGHT; currentRow++
+            "VOL", s.buttonSoundVolume.toHex2(),
+            s.cursorRow == row, s.cursorColumn)
+        rowY += ROW_HEIGHT; row++
 
         // ── ROW 4: BTN VIBRO ───────────────────────────────────────────
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
+        drawDualParamRow(x, rowY, scale, nameColumnX, val1ColumnX, subLabelX, val2ColumnX, t,
             "BTN VIBRO", if (s.buttonVibroEnabled) "ON" else "OFF",
-            isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
-            isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
-        rowY += ROW_HEIGHT; currentRow++
+            "POW", s.vibroPower.toHex2(),
+            s.cursorRow == row, s.cursorColumn)
+        rowY += ROW_HEIGHT * 2; row++
 
-        // ── ROW 5: VIBRO POW ───────────────────────────────────────────
-        val vibroPowHex = s.vibroPower.toHex2()
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
-            "VIBRO POW", vibroPowHex,
-            isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
-            isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
-        rowY += ROW_HEIGHT * 2; currentRow++
+        // ── ROW 5: KB INSERT ───────────────────────────────────────────
+        drawParameterRow(x, rowY, scale, nameColumnX, val1ColumnX, t,
+            "KB INSERT", if (s.insertBefore) "BEFORE" else "AFTER",
+            s.cursorRow == row && s.cursorColumn == 0,
+            s.cursorRow == row && s.cursorColumn == 1)
+        rowY += ROW_HEIGHT; row++
 
-        // ── ROW 6: KB INSERT ───────────────────────────────────────────
-        val kbInsertText = if (s.insertBefore) "BEFORE" else "AFTER"
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
-            "KB INSERT", kbInsertText,
-            isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
-            isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
-        rowY += ROW_HEIGHT; currentRow++
+        // ── ROW 6: CURSOR ──────────────────────────────────────────────
+        drawParameterRow(x, rowY, scale, nameColumnX, val1ColumnX, t,
+            "CURSOR", if (s.cursorRemember) "REMEMBER" else "REFRESH",
+            s.cursorRow == row && s.cursorColumn == 0,
+            s.cursorRow == row && s.cursorColumn == 1)
+        rowY += ROW_HEIGHT; row++
 
-        // ── ROW 7: CURSOR ──────────────────────────────────────────────
-        val cursorText = if (s.cursorRemember) "REMEMBER" else "REFRESH"
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
-            "CURSOR", cursorText,
-            isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
-            isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
-        rowY += ROW_HEIGHT; currentRow++
-
-        // ── ROW 8: NOTE PREVIEW ────────────────────────────────────────
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
+        // ── ROW 7: NOTE PREVIEW ────────────────────────────────────────
+        drawParameterRow(x, rowY, scale, nameColumnX, val1ColumnX, t,
             "NOTE PREV", if (s.notePreviewEnabled) "ON" else "OFF",
-            isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
-            isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
-        rowY += ROW_HEIGHT * 2; currentRow++
+            s.cursorRow == row && s.cursorColumn == 0,
+            s.cursorRow == row && s.cursorColumn == 1)
+        rowY += ROW_HEIGHT * 2; row++
 
-        // ── ROW 9: VISUALIZER ─────────────────────────────────────────
+        // ── ROW 8: VISUALIZER ─────────────────────────────────────────
         val vizText = when (s.visualizerType) {
             VisualizerType.SCOPE          -> "SCOPE"
             VisualizerType.BARS           -> "BARS"
@@ -151,21 +136,46 @@ class SettingsModule : TrackerModule {
             VisualizerType.SPECTRUM       -> "SPECT"
             VisualizerType.SPECTRUM_PEAKS -> "SPCT.P"
         }
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
+        drawParameterRow(x, rowY, scale, nameColumnX, val1ColumnX, t,
             "VISUALIZER", vizText,
-            isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
-            isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
-        rowY += ROW_HEIGHT; currentRow++
+            s.cursorRow == row && s.cursorColumn == 0,
+            s.cursorRow == row && s.cursorColumn == 1)
+        rowY += ROW_HEIGHT; row++
 
-        // ── ROW 10: THEME EDITOR ───────────────────────────────────────
-        drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX, t,
+        // ── ROW 9: THEME ───────────────────────────────────────────────
+        drawParameterRow(x, rowY, scale, nameColumnX, val1ColumnX, t,
             "THEME", "${s.currentThemeName} >",
-            isCursorOnName = s.cursorRow == currentRow && s.cursorColumn == 0,
-            isCursorOnValue = s.cursorRow == currentRow && s.cursorColumn == 1)
-        rowY += ROW_HEIGHT * 2; currentRow++
+            s.cursorRow == row && s.cursorColumn == 0,
+            s.cursorRow == row && s.cursorColumn == 1)
+        rowY += ROW_HEIGHT * 2; row++
 
-        // ── ROW 11: SONG TEMPLATE ─────────────────────────────────────
-        drawTemplateRow(x, rowY, scale, nameColumnX, valueColumnX, s, currentRow)
+        // ── ROW 10: SONG TEMPLATE ─────────────────────────────────────
+        drawTemplateRow(x, rowY, scale, nameColumnX, val1ColumnX, s, row)
+    }
+
+    private fun DrawScope.drawDualParamRow(
+        x: Int, y: Int, scale: Int,
+        nameColumnX: Int, val1ColumnX: Int, subLabelX: Int, val2ColumnX: Int,
+        t: AppTheme,
+        paramName: String, val1: String, subLabel: String, val2: String,
+        isOnRow: Boolean, cursorColumn: Int
+    ) {
+        val textY = y + TEXT_PADDING
+        if (isOnRow) {
+            drawRect(
+                color = Color(t.rowCursor),
+                topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
+                size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
+            )
+        }
+        drawBitmapText(paramName, nameColumnX, textY, scale,
+            if (isOnRow) Color(t.textCursor) else Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText(val1, val1ColumnX, textY, scale,
+            if (isOnRow && cursorColumn == 1) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText(subLabel, subLabelX, textY, scale,
+            if (isOnRow) Color(t.textParam) else Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText(val2, val2ColumnX, textY, scale,
+            if (isOnRow && cursorColumn == 2) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
     }
 
     private fun DrawScope.drawTemplateRow(
@@ -184,30 +194,15 @@ class SettingsModule : TrackerModule {
                 size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
             )
         }
-
-        drawBitmapText(
-            text = "TEMPLATE",
-            x = nameColumnX,
-            y = textY,
-            scale = scale,
-            color = if (isCursorOnThisRow) Color(t.textCursor) else Color(t.textParam),
-            spacing = CHAR_SPACING,
-            fontScale = FONT_SCALE
-        )
+        drawBitmapText("TEMPLATE", nameColumnX, textY, scale,
+            if (isCursorOnThisRow) Color(t.textCursor) else Color(t.textParam), CHAR_SPACING, FONT_SCALE)
 
         val options = listOf("SAVE", "CLEAR")
         var optionX = valueColumnX
-        for (optionIndex in options.indices) {
-            val isCursorOnThis = isCursorOnThisRow && s.cursorColumn == optionIndex + 1
-            drawBitmapText(
-                text = options[optionIndex],
-                x = optionX,
-                y = textY,
-                scale = scale,
-                color = if (isCursorOnThis) Color(t.textCursor) else Color(t.textValue),
-                spacing = CHAR_SPACING,
-                fontScale = FONT_SCALE
-            )
+        for (i in options.indices) {
+            drawBitmapText(options[i], optionX, textY, scale,
+                if (isCursorOnThisRow && s.cursorColumn == i + 1) Color(t.textCursor) else Color(t.textValue),
+                CHAR_SPACING, FONT_SCALE)
             optionX += 80
         }
     }
@@ -220,7 +215,6 @@ class SettingsModule : TrackerModule {
         isCursorOnName: Boolean, isCursorOnValue: Boolean
     ) {
         val textY = y + TEXT_PADDING
-
         if (isCursorOnName || isCursorOnValue) {
             drawRect(
                 color = Color(t.rowCursor),
@@ -228,26 +222,10 @@ class SettingsModule : TrackerModule {
                 size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
             )
         }
-
-        drawBitmapText(
-            text = parameterName,
-            x = nameColumnX,
-            y = textY,
-            scale = scale,
-            color = if (isCursorOnName || isCursorOnValue) Color(t.textCursor) else Color(t.textParam),
-            spacing = CHAR_SPACING,
-            fontScale = FONT_SCALE
-        )
-
-        drawBitmapText(
-            text = parameterValue,
-            x = valueColumnX,
-            y = textY,
-            scale = scale,
-            color = if (isCursorOnValue) Color(t.textCursor) else Color(t.textValue),
-            spacing = CHAR_SPACING,
-            fontScale = FONT_SCALE
-        )
+        drawBitmapText(parameterName, nameColumnX, textY, scale,
+            if (isCursorOnName || isCursorOnValue) Color(t.textCursor) else Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText(parameterValue, valueColumnX, textY, scale,
+            if (isCursorOnValue) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -258,71 +236,61 @@ class SettingsModule : TrackerModule {
         if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
 
         return when (state.cursorRow) {
-            0 -> CursorContextFactory.readOnly()  // LAYOUT: A key cycles (handled in MainActivity)
-            1 -> CursorContextFactory.readOnly()  // SCALING: A key cycles (handled in MainActivity)
-            2 -> CursorContext(                   // BTN SOUND: ON(1) / OFF(0)
-                valueType = CursorValueType.HEX_BYTE,
-                capabilities = CursorCapabilities(
-                    canIncrement = true, canDecrement = true,
-                    canIncrementFast = false, canDecrementFast = false
-                ),
-                currentValue = if (state.buttonSoundEnabled) 1 else 0,
-                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
-            )
-            3 -> CursorContextFactory.hexByte(    // BTN VOL: 00-FF
-                currentValue = state.buttonSoundVolume, min = 0, max = 255
-            )
-            4 -> CursorContext(                   // BTN VIBRO: ON(1) / OFF(0)
-                valueType = CursorValueType.HEX_BYTE,
-                capabilities = CursorCapabilities(
-                    canIncrement = true, canDecrement = true,
-                    canIncrementFast = false, canDecrementFast = false
-                ),
-                currentValue = if (state.buttonVibroEnabled) 1 else 0,
-                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
-            )
-            5 -> CursorContextFactory.hexByte(    // VIBRO POW: 00-FF
-                currentValue = state.vibroPower, min = 0, max = 255
-            )
-            6 -> CursorContext(                   // KB INSERT: BEFORE(1) / AFTER(0)
-                valueType = CursorValueType.HEX_BYTE,
-                capabilities = CursorCapabilities(
-                    canIncrement = true, canDecrement = true,
-                    canIncrementFast = false, canDecrementFast = false
-                ),
+            0  -> CursorContextFactory.readOnly()   // LAYOUT: A key cycles
+            1  -> CursorContextFactory.readOnly()   // SCALING: A key cycles
+            2  -> when (state.cursorColumn) {
+                1 -> {
+                    val options = listOf("OFF") + state.overlayFiles
+                    CursorContext(
+                        valueType = CursorValueType.HEX_BYTE,
+                        capabilities = CursorCapabilities(canIncrement = true, canDecrement = true,
+                            canIncrementFast = false, canDecrementFast = false),
+                        currentValue = options.indexOf(state.overlayName).coerceAtLeast(0),
+                        minValue = 0, maxValue = (options.size - 1).coerceAtLeast(0),
+                        smallStep = 1, largeStep = 1, emptyValue = -1
+                    )
+                }
+                else -> CursorContextFactory.hexByte(currentValue = state.overlayStrength, min = 0, max = 255)
+            }
+            3  -> when (state.cursorColumn) {   // BTN SOUND
+                1 -> CursorContext(valueType = CursorValueType.HEX_BYTE,
+                    capabilities = CursorCapabilities(canIncrement = true, canDecrement = true,
+                        canIncrementFast = false, canDecrementFast = false),
+                    currentValue = if (state.buttonSoundEnabled) 1 else 0,
+                    minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1)
+                else -> CursorContextFactory.hexByte(currentValue = state.buttonSoundVolume, min = 0, max = 255)
+            }
+            4  -> when (state.cursorColumn) {   // BTN VIBRO
+                1 -> CursorContext(valueType = CursorValueType.HEX_BYTE,
+                    capabilities = CursorCapabilities(canIncrement = true, canDecrement = true,
+                        canIncrementFast = false, canDecrementFast = false),
+                    currentValue = if (state.buttonVibroEnabled) 1 else 0,
+                    minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1)
+                else -> CursorContextFactory.hexByte(currentValue = state.vibroPower, min = 0, max = 255)
+            }
+            5  -> CursorContext(valueType = CursorValueType.HEX_BYTE,   // KB INSERT
+                capabilities = CursorCapabilities(canIncrement = true, canDecrement = true,
+                    canIncrementFast = false, canDecrementFast = false),
                 currentValue = if (state.insertBefore) 1 else 0,
-                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
-            )
-            7 -> CursorContext(                   // CURSOR: REMEMBER(1) / REFRESH(0)
-                valueType = CursorValueType.HEX_BYTE,
-                capabilities = CursorCapabilities(
-                    canIncrement = true, canDecrement = true,
-                    canIncrementFast = false, canDecrementFast = false
-                ),
+                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1)
+            6  -> CursorContext(valueType = CursorValueType.HEX_BYTE,   // CURSOR
+                capabilities = CursorCapabilities(canIncrement = true, canDecrement = true,
+                    canIncrementFast = false, canDecrementFast = false),
                 currentValue = if (state.cursorRemember) 1 else 0,
-                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
-            )
-            8 -> CursorContext(                   // NOTE PREVIEW: ON(1) / OFF(0)
-                valueType = CursorValueType.HEX_BYTE,
-                capabilities = CursorCapabilities(
-                    canIncrement = true, canDecrement = true,
-                    canIncrementFast = false, canDecrementFast = false
-                ),
+                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1)
+            7  -> CursorContext(valueType = CursorValueType.HEX_BYTE,   // NOTE PREV
+                capabilities = CursorCapabilities(canIncrement = true, canDecrement = true,
+                    canIncrementFast = false, canDecrementFast = false),
                 currentValue = if (state.notePreviewEnabled) 1 else 0,
-                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
-            )
-            9  -> CursorContext(                   // VISUALIZER: A+dpad cycles type
-                valueType = CursorValueType.HEX_BYTE,
-                capabilities = CursorCapabilities(
-                    canIncrement = true, canDecrement = true,
-                    canIncrementFast = false, canDecrementFast = false
-                ),
+                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1)
+            8  -> CursorContext(valueType = CursorValueType.HEX_BYTE,   // VISUALIZER
+                capabilities = CursorCapabilities(canIncrement = true, canDecrement = true,
+                    canIncrementFast = false, canDecrementFast = false),
                 currentValue = VisualizerType.values().indexOf(state.visualizerType).coerceAtLeast(0),
                 minValue = 0, maxValue = VisualizerType.values().size - 1,
-                smallStep = 1, largeStep = 1, emptyValue = -1
-            )
-            10 -> CursorContextFactory.readOnly()  // THEME: A opens editor
-            11 -> CursorContextFactory.readOnly()  // TEMPLATE: A triggers save/clear
+                smallStep = 1, largeStep = 1, emptyValue = -1)
+            9  -> CursorContextFactory.readOnly()   // THEME: A opens editor
+            10 -> CursorContextFactory.readOnly()   // TEMPLATE: A triggers save/clear
             else -> CursorContextFactory.none()
         }
     }
@@ -336,47 +304,43 @@ class SettingsModule : TrackerModule {
         action: com.conanizer.pockettracker.core.logic.InputAction
     ): InputResult {
         when (state.cursorRow) {
-            2 -> {  // BTN SOUND
-                if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
-                    return InputResult(modified = true, buttonSoundEnabled = action.value > 0)
+            2 -> when (state.cursorColumn) {   // OVERLAY
+                1 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
+                    val options = listOf("OFF") + state.overlayFiles
+                    return InputResult(modified = true, overlayName = options.getOrElse(action.value) { "OFF" })
+                }
+                2 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
+                    return InputResult(modified = true, overlayStrength = action.value.coerceIn(0, 255))
                 }
             }
-            3 -> {  // BTN VOL
-                if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
+            3 -> when (state.cursorColumn) {   // BTN SOUND
+                1 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
+                    return InputResult(modified = true, buttonSoundEnabled = action.value > 0)
+                }
+                2 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
                     return InputResult(modified = true, buttonSoundVolume = action.value.coerceIn(0, 255))
                 }
             }
-            4 -> {  // BTN VIBRO
-                if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
+            4 -> when (state.cursorColumn) {   // BTN VIBRO
+                1 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
                     return InputResult(modified = true, buttonVibroEnabled = action.value > 0)
                 }
-            }
-            5 -> {  // VIBRO POW
-                if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
+                2 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
                     return InputResult(modified = true, vibroPower = action.value.coerceIn(0, 255))
                 }
             }
-            6 -> {  // KB INSERT
-                if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
-                    return InputResult(modified = true, insertBefore = action.value > 0)
-                }
+            5 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {   // KB INSERT
+                return InputResult(modified = true, insertBefore = action.value > 0)
             }
-            7 -> {  // CURSOR
-                if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
-                    return InputResult(modified = true, cursorRemember = action.value > 0)
-                }
+            6 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {   // CURSOR
+                return InputResult(modified = true, cursorRemember = action.value > 0)
             }
-            8 -> {  // NOTE PREVIEW
-                if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
-                    return InputResult(modified = true, notePreviewEnabled = action.value > 0)
-                }
+            7 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {   // NOTE PREV
+                return InputResult(modified = true, notePreviewEnabled = action.value > 0)
             }
-            9 -> {  // VISUALIZER
-                if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
-                    val types = VisualizerType.values()
-                    val vizType = types.getOrNull(action.value) ?: types[0]
-                    return InputResult(modified = true, visualizerType = vizType)
-                }
+            8 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {   // VISUALIZER
+                val types = VisualizerType.values()
+                return InputResult(modified = true, visualizerType = types.getOrNull(action.value) ?: types[0])
             }
         }
         return InputResult(modified = action !is com.conanizer.pockettracker.core.logic.InputAction.NONE)
@@ -384,6 +348,8 @@ class SettingsModule : TrackerModule {
 
     data class InputResult(
         val modified: Boolean,
+        val overlayName: String? = null,
+        val overlayStrength: Int? = null,
         val buttonSoundEnabled: Boolean? = null,
         val buttonSoundVolume: Int? = null,
         val buttonVibroEnabled: Boolean? = null,
@@ -404,6 +370,9 @@ data class SettingsState(
     val cursorColumn: Int = 1,
     val layoutMode: DeviceAdapter.LayoutMode = DeviceAdapter.LayoutMode.FULL,
     val scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER,
+    val overlayFiles: List<String> = emptyList(),
+    val overlayName: String = "OFF",
+    val overlayStrength: Int = 128,
     val buttonSoundEnabled: Boolean = false,
     val buttonSoundVolume: Int = 255,
     val buttonVibroEnabled: Boolean = false,

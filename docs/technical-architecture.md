@@ -3,8 +3,8 @@
 ## Document Purpose
 This document defines **HOW** PocketTracker is built technically. It covers current architecture, planned refactoring for portability, and technical decisions.
 
-**Last Updated:** 2026-05-21
-**Version:** 2.5
+**Last Updated:** 2026-06-06
+**Version:** 2.6
 **Audience:** Developers, Contributors, Claude Code AI
 
 ---
@@ -101,7 +101,7 @@ PocketTracker/
 │   ├── MixerModule.kt              ✅
 │   ├── EffectModule.kt             ✅ Global send effects (reverb/delay/EQ config)
 │   ├── EqModule.kt                 ✅ 3-band parametric EQ editor (overlay screen)
-│   ├── SettingsModule.kt           ✅ Layout/scaling/haptics/cursor settings
+│   ├── SettingsModule.kt           ✅ Layout/scaling/overlay/haptics/cursor settings (11 rows)
 │   └── ProjectModule.kt            ✅
 │
 ├── TrackerData.kt                  ✅ Pure data structures (PORTABLE)
@@ -600,6 +600,34 @@ data class AppTheme(
 
 **Bundled themes:** CLASSIC (green-on-black), AMBER, BLUE, MONO — defined as companion constants on `AppTheme`.
 
+### Screen Overlay System
+
+PNG overlays (e.g. CRT scanlines) can be layered on top of the tracker screen at runtime.
+
+**Asset convention:** place any PNG in `app/src/main/assets/overlays/`. The Settings screen (OVERLAY row, row 2) lists them automatically via `context.assets.list("overlays")`.
+
+**Loading (`MainActivity.kt`):**
+```kotlin
+val overlayBitmap: ImageBitmap? = remember(overlayName) {
+    if (overlayName == "OFF") null
+    else BitmapFactory.decodeStream(assets.open("overlays/$overlayName.png"))?.asImageBitmap()
+}
+```
+The bitmap is loaded as-is — no pixel processing. `STR` (00-FF) is the only runtime control.
+
+**Rendering (`ScreenLayouts.kt` — `TrackerScreen`):**
+```kotlin
+Modifier.drawWithContent {
+    drawContent()                    // draws PixelPerfectTracker
+    drawImage(bitmap, ..., alpha = STR / 255f)   // overlay on same canvas
+}
+```
+`Modifier.drawWithContent` is critical: it shares the same canvas as `drawContent()`, so the `alpha` draw happens over the already-rendered game pixels. A separate `graphicsLayer { blendMode }` approach was tried first but failed because it composited against the layer's own background rather than the game content.
+
+**Settings wiring:** `overlayName: String` and `overlayStrength: Int` live in `AppStateRefs`, delegated in `AppInputDispatcher`, and persisted via SharedPreferences keys `overlay_name` / `overlay_strength`. `overlayFiles: List<String>` is a read-only computed list passed through `AppStateRefs` (no MutableState needed).
+
+**Adding new overlays:** drop a PNG into `assets/overlays/` — no code changes required.
+
 ---
 
 ## Navigation System
@@ -917,6 +945,7 @@ See **REFACTORING_ROADMAP.md** for detailed step-by-step refactoring plan.
 ---
 
 **Version History:**
+- v2.6 (2026-06-06): Screen overlay system added (Rendering System section); SettingsModule updated to 11 rows; `drawWithContent` compositing pattern documented.
 - v2.5 (2026-05-18): Fact-checked against codebase — fixed ToC duplicate "10.", send/master-chain stub labels, ADSR release status, SCALAR mod type, package name, private member convention, Modules/ directory path, SampleEditorModule added to file tree.
 - v2.4 (2026-05-05): Module code style unified — `.toHex2()`, `rowBgColor()`, factory-only `getCursorContext()`; EffectModule/EqModule/SettingsModule added to file tree; coding conventions updated to reflect current standards.
 - v2.3 (2026-04-22): DSP module system implemented; effects/ directory (primitives + modules + chains); InstrumentChain (Crush→Drive→Filter) wired to all sampler and SF voices; C++ file tree updated in this document; guide-adding-effects.md written

@@ -60,6 +60,7 @@ import com.conanizer.pockettracker.platform.android.AndroidVideoAudioExtractor
 import com.conanizer.pockettracker.platform.android.ButtonSoundManager
 import com.conanizer.pockettracker.platform.android.ButtonHapticManager
 import com.conanizer.pockettracker.core.storage.FileInfo
+import androidx.compose.ui.graphics.asImageBitmap
 import java.io.File
 
 fun File.toFileInfo(): FileInfo = FileInfo(
@@ -422,6 +423,29 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val _notePreviewEnabled = remember { mutableStateOf(prefs.getBoolean("note_preview", true)) }
     var notePreviewEnabled  by _notePreviewEnabled
 
+    // Overlay: list files from assets/overlays/, load + process selected bitmap
+    val overlayFiles: List<String> = remember {
+        try { context.assets.list("overlays")
+                ?.filter { it.endsWith(".png") }
+                ?.map { it.removeSuffix(".png") }
+                ?: emptyList()
+        } catch (_: Exception) { emptyList() }
+    }
+    val _overlayName     = remember { mutableStateOf(prefs.getString("overlay_name", "OFF") ?: "OFF") }
+    var overlayName      by _overlayName
+    val _overlayStrength = remember { mutableStateOf(prefs.getInt("overlay_strength", 128)) }
+    var overlayStrength  by _overlayStrength
+
+    // Load overlay PNG as-is — no processing. The PNG is designed for direct use;
+    // alpha = STR/255f at draw time is the only control needed.
+    val overlayBitmap: androidx.compose.ui.graphics.ImageBitmap? = remember(overlayName) {
+        if (overlayName == "OFF") null
+        else try {
+            android.graphics.BitmapFactory.decodeStream(
+                context.assets.open("overlays/$overlayName.png"))?.asImageBitmap()
+        } catch (_: Exception) { null }
+    }
+
     val _qwertyKeyboardState = remember { mutableStateOf(QwertyKeyboardState()) }
     var qwertyKeyboardState  by _qwertyKeyboardState
     val _fxHelperState = remember { mutableStateOf(FxHelperState()) }
@@ -470,6 +494,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     }
     LaunchedEffect(notePreviewEnabled) {
         prefs.edit().putBoolean("note_preview", notePreviewEnabled).apply()
+    }
+    LaunchedEffect(overlayName) {
+        prefs.edit().putString("overlay_name", overlayName).apply()
+    }
+    LaunchedEffect(overlayStrength) {
+        prefs.edit().putInt("overlay_strength", overlayStrength).apply()
     }
     LaunchedEffect(appTheme) {
         prefs.edit().putString("app_theme", Json { prettyPrint = false }.encodeToString(appTheme)).apply()
@@ -742,6 +772,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             _lastAInsertPosition, _insertBefore, _instrumentFileBrowserAction,
             _previousScreen, _buttonSoundEnabled, _buttonSoundVolume,
             _buttonVibroEnabled, _vibroPower, _cursorRemember, _notePreviewEnabled,
+            _overlayName, _overlayStrength, overlayFiles,
             trackPeakBuffer, masterPeakBuffer, sendPeakBuffer, _appTheme, _themeEditorState,
             _showNewProjectDialog, _showInstrTypeDialog
         )
@@ -872,7 +903,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         },
         soundfontPresetIndex    = stateVersion.let {
             instrumentController.getSoundfontCurrentPresetIndex(project.instruments[currentInstrument])
-        }
+        },
+        overlayBitmap           = overlayBitmap,
+        overlayStrength         = overlayStrength,
+        overlayFiles            = overlayFiles,
+        overlayName             = overlayName
     )
 
     // Show a loading screen until the Oboe stream is open.

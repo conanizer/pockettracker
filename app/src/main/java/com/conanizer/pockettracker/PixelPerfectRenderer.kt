@@ -139,7 +139,11 @@ fun PixelPerfectTracker(
     // SoundFont preset navigation state
     soundfontPresetName: String = "",
     soundfontPresetCount: Int = 0,
-    soundfontPresetIndex: Int = 0
+    soundfontPresetIndex: Int = 0,
+    // Overlay settings (for settings screen display)
+    overlayFiles: List<String> = emptyList(),
+    overlayName: String = "OFF",
+    overlayStrength: Int = 128
 ) {
     if (currentScreen == ScreenType.FILE_BROWSER) {
         android.util.Log.d("PixelPerfectTracker", "FILE_BROWSER screen, fileBrowserState=${if (fileBrowserState != null) "not null (${fileBrowserState.items.size} items)" else "NULL"}")
@@ -313,7 +317,10 @@ fun PixelPerfectTracker(
                         soundfontPresetCount = soundfontPresetCount,
                         soundfontPresetIndex = soundfontPresetIndex,
                         appTheme             = appTheme,
-                        themeEditorState     = themeEditorState
+                        themeEditorState     = themeEditorState,
+                        overlayFiles         = overlayFiles,
+                        overlayName          = overlayName,
+                        overlayStrength      = overlayStrength
                     )
                 }
             }
@@ -443,7 +450,11 @@ class TrackerLayout {
         soundfontPresetCount: Int = 0,
         soundfontPresetIndex: Int = 0,
         appTheme: AppTheme = AppTheme.CLASSIC,
-        themeEditorState: ThemeEditorState = ThemeEditorState()
+        themeEditorState: ThemeEditorState = ThemeEditorState(),
+        // Overlay settings (for settings screen display)
+        overlayFiles: List<String> = emptyList(),
+        overlayName: String = "OFF",
+        overlayStrength: Int = 128
     ) {
         val t = appTheme
         // ===================================
@@ -779,6 +790,9 @@ class TrackerLayout {
                                     cursorColumn = settingsCursorColumn,
                                     layoutMode = layoutMode,
                                     scalingMode = scalingMode,
+                                    overlayFiles = overlayFiles,
+                                    overlayName = overlayName,
+                                    overlayStrength = overlayStrength,
                                     buttonSoundEnabled = buttonSoundEnabled,
                                     buttonSoundVolume = buttonSoundVolume,
                                     buttonVibroEnabled = buttonVibroEnabled,

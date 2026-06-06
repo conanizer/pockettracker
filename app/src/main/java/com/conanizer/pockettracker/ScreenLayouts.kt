@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.paint
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -24,6 +25,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlin.math.floor
 import com.conanizer.pockettracker.core.audio.AudioEngine
@@ -100,12 +103,34 @@ data class TrackerScreenParams(
     val notePreviewEnabled: Boolean = true,
     val soundfontPresetName: String = "",
     val soundfontPresetCount: Int = 0,
-    val soundfontPresetIndex: Int = 0
+    val soundfontPresetIndex: Int = 0,
+    val overlayBitmap: ImageBitmap? = null,
+    val overlayStrength: Int = 128,
+    val overlayFiles: List<String> = emptyList(),
+    val overlayName: String = "OFF"
 )
 
-/** Thin wrapper — forwards every field of [params] to [PixelPerfectTracker]. */
+/** Thin wrapper — forwards every field of [params] to [PixelPerfectTracker], then draws screen overlay. */
 @Composable
 private fun TrackerScreen(params: TrackerScreenParams, modifier: Modifier = Modifier) {
+    // Build overlay modifier once per recomposition; drawWithContent shares the same canvas as
+    // PixelPerfectTracker so BlendMode.Multiply correctly reads the already-drawn game pixels.
+    val bitmap = params.overlayBitmap
+    val overlayModifier: Modifier = if (bitmap != null && params.overlayStrength > 0) {
+        Modifier.drawWithContent {
+            drawContent()
+            drawImage(
+                image     = bitmap,
+                srcOffset = IntOffset.Zero,
+                srcSize   = IntSize(bitmap.width, bitmap.height),
+                dstOffset = IntOffset.Zero,
+                dstSize   = IntSize(size.width.toInt(), size.height.toInt()),
+                alpha     = params.overlayStrength / 255f
+            )
+        }
+    } else Modifier
+
+    Box(modifier = overlayModifier) {
     PixelPerfectTracker(
         currentScreen        = params.currentScreen,
         project              = params.project,
@@ -171,8 +196,12 @@ private fun TrackerScreen(params: TrackerScreenParams, modifier: Modifier = Modi
         notePreviewEnabled   = params.notePreviewEnabled,
         soundfontPresetName  = params.soundfontPresetName,
         soundfontPresetCount = params.soundfontPresetCount,
-        soundfontPresetIndex = params.soundfontPresetIndex
+        soundfontPresetIndex = params.soundfontPresetIndex,
+        overlayFiles         = params.overlayFiles,
+        overlayName          = params.overlayName,
+        overlayStrength      = params.overlayStrength
     )
+    } // end outer Box
 }
 
 // ============================================================================

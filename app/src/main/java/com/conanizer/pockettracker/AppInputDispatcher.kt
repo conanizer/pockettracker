@@ -88,6 +88,9 @@ class AppStateRefs(
     val vibroPower: MutableState<Int>,
     val cursorRemember: MutableState<Boolean>,
     val notePreviewEnabled: MutableState<Boolean>,
+    val overlayName: MutableState<String>,
+    val overlayStrength: MutableState<Int>,
+    val overlayFiles: List<String>,
     val trackPeakBuffer: FloatArray,
     val masterPeakBuffer: FloatArray,
     val sendPeakBuffer: FloatArray,
@@ -153,6 +156,9 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     private var vibroPower by refs.vibroPower
     private var cursorRemember by refs.cursorRemember
     private var notePreviewEnabled by refs.notePreviewEnabled
+    private var overlayName by refs.overlayName
+    private var overlayStrength by refs.overlayStrength
+    private val overlayFiles get() = refs.overlayFiles
     private val trackPeakBuffer get() = refs.trackPeakBuffer
     private val masterPeakBuffer get() = refs.masterPeakBuffer
     private val sendPeakBuffer get() = refs.sendPeakBuffer
@@ -461,6 +467,9 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     cursorColumn = trackerController.settingsCursorColumn,
                     layoutMode = layoutMode,
                     scalingMode = scalingMode,
+                    overlayFiles = overlayFiles,
+                    overlayName = overlayName,
+                    overlayStrength = overlayStrength,
                     buttonSoundEnabled = buttonSoundEnabled,
                     buttonSoundVolume = buttonSoundVolume,
                     buttonVibroEnabled = buttonVibroEnabled,
@@ -475,6 +484,8 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val action = handlerFunction(context)
                 val result = settingsModule.handleInput(settingsState, action)
                 if (result.modified) {
+                    result.overlayName?.let         { overlayName         = it }
+                    result.overlayStrength?.let     { overlayStrength     = it }
                     result.buttonSoundEnabled?.let  { buttonSoundEnabled  = it }
                     result.buttonSoundVolume?.let   { buttonSoundVolume   = it }
                     result.buttonVibroEnabled?.let  { buttonVibroEnabled  = it }
@@ -1166,15 +1177,16 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                             DeviceAdapter.ScalingMode.BILINEAR -> DeviceAdapter.ScalingMode.INTEGER
                         }
                     }
-                    2 -> { buttonSoundEnabled = !buttonSoundEnabled }
-                    4 -> { buttonVibroEnabled = !buttonVibroEnabled }
-                    6 -> { insertBefore = !insertBefore }
-                    7 -> { cursorRemember = !cursorRemember }
-                    8 -> { notePreviewEnabled = !notePreviewEnabled }
-                    10 -> {
+                    // row 2 = OVERLAY: A+dpad handled via generic getCursorContext/handleInput
+                    3 -> { if (trackerController.settingsCursorColumn == 1) buttonSoundEnabled = !buttonSoundEnabled }
+                    4 -> { if (trackerController.settingsCursorColumn == 1) buttonVibroEnabled = !buttonVibroEnabled }
+                    5 -> { insertBefore = !insertBefore }
+                    6 -> { cursorRemember = !cursorRemember }
+                    7 -> { notePreviewEnabled = !notePreviewEnabled }
+                    9 -> {
                         themeEditorState = ThemeEditorState(isOpen = true)
                     }
-                    11 -> {
+                    10 -> {
                         when (trackerController.settingsCursorColumn) {
                             1 -> {
                                 val saved = fileController.saveTemplate(trackerController.project)
