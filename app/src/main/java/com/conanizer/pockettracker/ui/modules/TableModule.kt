@@ -1,12 +1,21 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui.modules
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.input.CursorContext
+import com.conanizer.pockettracker.input.CursorContextFactory
+import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.core.data.Table
 import com.conanizer.pockettracker.core.data.TableRow
 import com.conanizer.pockettracker.core.logic.EffectProcessor
+import com.conanizer.pockettracker.core.logic.InputAction
+import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.getEffectTypeName
+import com.conanizer.pockettracker.ui.rowBgColor
+import com.conanizer.pockettracker.ui.toHex2
 
 /**
  * TABLE SCREEN MODULE
@@ -135,7 +144,14 @@ class TableModule : TrackerModule {
         val isRowSelected = state.selectionMode && (1..8).any { col -> state.isCellSelected(index, col) }
 
         drawRect(
-            color = rowBgColor(index, state.cursorRow, state.playbackRow ?: -1, state.playbackRow != null, isRowSelected, t),
+            color = rowBgColor(
+                index,
+                state.cursorRow,
+                state.playbackRow ?: -1,
+                state.playbackRow != null,
+                isRowSelected,
+                t
+            ),
             topLeft = Offset((x * scale).toFloat(), (dataRowY * scale).toFloat()),
             size = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
         )
@@ -325,7 +341,7 @@ class TableModule : TrackerModule {
      */
     fun handleInput(
         state: TableState,
-        action: com.conanizer.pockettracker.core.logic.InputAction
+        action: InputAction
     ): InputResult {
         val row = state.table.rows[state.cursorRow]
 
@@ -333,10 +349,10 @@ class TableModule : TrackerModule {
             0 -> { /* Step number - read only */ }
             1 -> {  // Transpose
                 when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                    is InputAction.SET_VALUE -> {
                         row.transpose = action.value.coerceIn(0, 255)
                     }
-                    is com.conanizer.pockettracker.core.logic.InputAction.DELETE -> {
+                    is InputAction.DELETE -> {
                         row.transpose = 0x00  // Reset to no transpose
                     }
                     else -> {}
@@ -344,10 +360,10 @@ class TableModule : TrackerModule {
             }
             2 -> {  // Volume
                 when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                    is InputAction.SET_VALUE -> {
                         row.volume = action.value.coerceIn(0, 255)
                     }
-                    is com.conanizer.pockettracker.core.logic.InputAction.DELETE -> {
+                    is InputAction.DELETE -> {
                         row.volume = -1  // Reset to no volume change (empty)
                     }
                     else -> {}
@@ -355,11 +371,11 @@ class TableModule : TrackerModule {
             }
             3 -> {  // FX1 Type
                 when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                    is InputAction.SET_VALUE -> {
                         // Convert index to effect type code
                         row.fx1Type = EffectProcessor.EFFECT_TYPES.getOrElse(action.value) { EffectProcessor.FX_NONE }
                     }
-                    is com.conanizer.pockettracker.core.logic.InputAction.DELETE -> {
+                    is InputAction.DELETE -> {
                         row.fx1Type = 0
                         row.fx1Value = 0
                     }
@@ -368,7 +384,7 @@ class TableModule : TrackerModule {
             }
             4 -> {  // FX1 Value
                 when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                    is InputAction.SET_VALUE -> {
                         row.fx1Value = action.value.coerceIn(0, 255)
                     }
                     else -> {}
@@ -376,11 +392,11 @@ class TableModule : TrackerModule {
             }
             5 -> {  // FX2 Type
                 when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                    is InputAction.SET_VALUE -> {
                         // Convert index to effect type code
                         row.fx2Type = EffectProcessor.EFFECT_TYPES.getOrElse(action.value) { EffectProcessor.FX_NONE }
                     }
-                    is com.conanizer.pockettracker.core.logic.InputAction.DELETE -> {
+                    is InputAction.DELETE -> {
                         row.fx2Type = 0
                         row.fx2Value = 0
                     }
@@ -389,7 +405,7 @@ class TableModule : TrackerModule {
             }
             6 -> {  // FX2 Value
                 when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                    is InputAction.SET_VALUE -> {
                         row.fx2Value = action.value.coerceIn(0, 255)
                     }
                     else -> {}
@@ -397,11 +413,11 @@ class TableModule : TrackerModule {
             }
             7 -> {  // FX3 Type
                 when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                    is InputAction.SET_VALUE -> {
                         // Convert index to effect type code
                         row.fx3Type = EffectProcessor.EFFECT_TYPES.getOrElse(action.value) { EffectProcessor.FX_NONE }
                     }
-                    is com.conanizer.pockettracker.core.logic.InputAction.DELETE -> {
+                    is InputAction.DELETE -> {
                         row.fx3Type = 0
                         row.fx3Value = 0
                     }
@@ -410,7 +426,7 @@ class TableModule : TrackerModule {
             }
             8 -> {  // FX3 Value
                 when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                    is InputAction.SET_VALUE -> {
                         row.fx3Value = action.value.coerceIn(0, 255)
                     }
                     else -> {}
@@ -419,7 +435,7 @@ class TableModule : TrackerModule {
         }
 
         return InputResult(
-            modified = action !is com.conanizer.pockettracker.core.logic.InputAction.NONE
+            modified = action !is InputAction.NONE
         )
     }
 
@@ -456,5 +472,5 @@ data class TableState(
     val ticRate: Int = 0x06,  // Default: 6 tics per row
     val selectionMode: Boolean = false,
     val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
-    val appTheme: AppTheme = AppTheme.CLASSIC
+    val appTheme: AppTheme = AppTheme.Companion.CLASSIC
 )

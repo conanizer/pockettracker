@@ -42,15 +42,12 @@ import com.conanizer.pockettracker.core.logic.FileController
 import com.conanizer.pockettracker.core.audio.AudioEngine
 import com.conanizer.pockettracker.core.data.InstrumentType
 import com.conanizer.pockettracker.core.data.ScreenType
-import com.conanizer.pockettracker.core.logic.ClipboardManager
-import com.conanizer.pockettracker.core.logic.EffectProcessor
 import com.conanizer.pockettracker.core.logic.RenderController
 import com.conanizer.pockettracker.platform.android.OboeAudioBackend
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import com.conanizer.pockettracker.platform.android.AndroidResourceLoader
@@ -61,6 +58,42 @@ import com.conanizer.pockettracker.platform.android.ButtonSoundManager
 import com.conanizer.pockettracker.platform.android.ButtonHapticManager
 import com.conanizer.pockettracker.core.storage.FileInfo
 import androidx.compose.ui.graphics.asImageBitmap
+import com.conanizer.pockettracker.input.AppControllers
+import com.conanizer.pockettracker.input.AppInputDispatcher
+import com.conanizer.pockettracker.input.AppStateRefs
+import com.conanizer.pockettracker.input.InputMapper
+import com.conanizer.pockettracker.input.InsertPosition
+import com.conanizer.pockettracker.input.LocalButtonEventCallback
+import com.conanizer.pockettracker.platform.android.DeviceAdapter
+import com.conanizer.pockettracker.ui.FullScreenLayout
+import com.conanizer.pockettracker.ui.LandscapeLayoutWithVirtualButtons
+import com.conanizer.pockettracker.ui.LocalAppTheme
+import com.conanizer.pockettracker.ui.LocalLayoutMode
+import com.conanizer.pockettracker.ui.PortraitLayout2WithVirtualButtons
+import com.conanizer.pockettracker.ui.PortraitLayoutWithVirtualButtons
+import com.conanizer.pockettracker.ui.TrackerScreenParams
+import com.conanizer.pockettracker.ui.modules.ChainEditorModule
+import com.conanizer.pockettracker.ui.modules.EffectModule
+import com.conanizer.pockettracker.ui.modules.EqModule
+import com.conanizer.pockettracker.ui.modules.FileBrowserModule
+import com.conanizer.pockettracker.ui.modules.GrooveModule
+import com.conanizer.pockettracker.ui.modules.InstrumentModule
+import com.conanizer.pockettracker.ui.modules.MixerModule
+import com.conanizer.pockettracker.ui.modules.ModulationModule
+import com.conanizer.pockettracker.ui.modules.PhraseEditorModule
+import com.conanizer.pockettracker.ui.modules.ProjectModule
+import com.conanizer.pockettracker.ui.modules.SampleEditorModule
+import com.conanizer.pockettracker.ui.modules.SampleEditorState
+import com.conanizer.pockettracker.ui.modules.SettingsModule
+import com.conanizer.pockettracker.ui.modules.SongEditorModule
+import com.conanizer.pockettracker.ui.modules.TableModule
+import com.conanizer.pockettracker.ui.modules.ThemeEditorState
+import com.conanizer.pockettracker.ui.overlays.EqCallerContext
+import com.conanizer.pockettracker.ui.overlays.EqEditorState
+import com.conanizer.pockettracker.ui.overlays.FxHelperState
+import com.conanizer.pockettracker.ui.overlays.QwertyKeyboardState
+import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.ui.theme.DeviceTheme
 import java.io.File
 
 fun File.toFileInfo(): FileInfo = FileInfo(
@@ -594,7 +627,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     var instrumentFileBrowserAction  by _instrumentFileBrowserAction
 
     val sampleEditorModule = remember { SampleEditorModule() }
-    val _sampleEditorState = remember { mutableStateOf(SampleEditorState(sampleId = 0, instrumentId = 0)) }
+    val _sampleEditorState = remember { mutableStateOf(
+        SampleEditorState(
+            sampleId = 0,
+            instrumentId = 0
+        )
+    ) }
     var sampleEditorState  by _sampleEditorState
 
     // Reset note/volume combo when leaving PHRASE screen
@@ -827,87 +865,91 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     }
 
     val trackerParams = TrackerScreenParams(
-        currentScreen           = currentScreen,
-        project                 = project,
-        audioEngine             = audioEngine,
-        playbackController      = playbackController,
-        cursorRow               = cursorRow,
-        cursorColumn            = cursorColumn,
-        isPlaying               = isPlaying,
-        previousColumn          = previousColumn,
-        currentChain            = currentChain,
-        currentPhrase           = currentPhrase,
-        projectCursorRow        = projectCursorRow,
-        projectCursorColumn     = projectCursorColumn,
-        projectStatusMessage    = projectStatusMessage,
-        projectStatusSuccess    = projectStatusSuccess,
-        projectVersion          = projectVersion,
-        currentInstrument       = currentInstrument,
-        instrumentCursorRow     = instrumentCursorRow,
-        instrumentCursorColumn  = instrumentCursorColumn,
+        currentScreen = currentScreen,
+        project = project,
+        audioEngine = audioEngine,
+        playbackController = playbackController,
+        cursorRow = cursorRow,
+        cursorColumn = cursorColumn,
+        isPlaying = isPlaying,
+        previousColumn = previousColumn,
+        currentChain = currentChain,
+        currentPhrase = currentPhrase,
+        projectCursorRow = projectCursorRow,
+        projectCursorColumn = projectCursorColumn,
+        projectStatusMessage = projectStatusMessage,
+        projectStatusSuccess = projectStatusSuccess,
+        projectVersion = projectVersion,
+        currentInstrument = currentInstrument,
+        instrumentCursorRow = instrumentCursorRow,
+        instrumentCursorColumn = instrumentCursorColumn,
         instrumentStatusMessage = instrumentStatusMessage,
         instrumentStatusSuccess = instrumentStatusSuccess,
-        fileBrowserState        = fileBrowserState,
-        sampleEditorState       = sampleEditorState,
-        selectionInfo           = selectionInfo,
-        clipboardInfo           = clipboardInfo,
-        selectionMode           = selectionModeActive,
-        isCellSelected          = isCellSelectedFn,
-        mixerCursorColumn       = trackerController.mixerCursorColumn,
-        mixerMasterRow          = trackerController.mixerMasterRow,
-        trackPeaks              = trackPeakBuffer,
-        masterPeaks             = masterPeakBuffer,
-        sendPeaks               = sendPeakBuffer,
-        currentTable            = trackerController.currentTable,
-        tableCursorRow          = trackerController.tableCursorRow,
-        tableCursorColumn       = trackerController.tableCursorColumn,
-        currentGroove           = trackerController.currentGroove,
-        grooveCursorRow         = trackerController.grooveCursorRow,
-        modCursorRow            = trackerController.modCursorRow,
-        modCursorPair           = trackerController.modCursorPair,
-        modCursorSide           = trackerController.modCursorSide,
-        effectsCursorRow        = trackerController.effectsCursorRow,
-        isRendering             = isRendering,
-        renderProgress          = renderProgress,
-        showCleanDialog         = showCleanDialog,
-        cleanDialogTarget       = cleanDialogTarget,
-        cleanDialogCursor       = cleanDialogCursor,
-        showNewProjectDialog    = showNewProjectDialog,
-        showInstrTypeDialog     = showInstrTypeDialog,
-        songScrollPosition      = stateVersion.let { trackerController.songScrollPosition },
-        scalingMode             = scalingMode,
-        buttonSoundEnabled      = buttonSoundEnabled,
-        buttonSoundVolume       = buttonSoundVolume,
-        buttonVibroEnabled      = buttonVibroEnabled,
-        vibroPower              = vibroPower,
-        qwertyKeyboardState     = qwertyKeyboardState.copy(insertBefore = insertBefore),
-        fxHelperState           = fxHelperState,
-        eqEditorState           = eqEditorState,
-        eqSpectrumData          = eqSpectrumData,
-        themeEditorState        = themeEditorState,
-        settingsCursorRow       = stateVersion.let { trackerController.settingsCursorRow },
-        settingsCursorColumn    = stateVersion.let { trackerController.settingsCursorColumn },
-        cursorRemember          = cursorRemember,
-        notePreviewEnabled      = notePreviewEnabled,
-        soundfontPresetName     = stateVersion.let {
+        fileBrowserState = fileBrowserState,
+        sampleEditorState = sampleEditorState,
+        selectionInfo = selectionInfo,
+        clipboardInfo = clipboardInfo,
+        selectionMode = selectionModeActive,
+        isCellSelected = isCellSelectedFn,
+        mixerCursorColumn = trackerController.mixerCursorColumn,
+        mixerMasterRow = trackerController.mixerMasterRow,
+        trackPeaks = trackPeakBuffer,
+        masterPeaks = masterPeakBuffer,
+        sendPeaks = sendPeakBuffer,
+        currentTable = trackerController.currentTable,
+        tableCursorRow = trackerController.tableCursorRow,
+        tableCursorColumn = trackerController.tableCursorColumn,
+        currentGroove = trackerController.currentGroove,
+        grooveCursorRow = trackerController.grooveCursorRow,
+        modCursorRow = trackerController.modCursorRow,
+        modCursorPair = trackerController.modCursorPair,
+        modCursorSide = trackerController.modCursorSide,
+        effectsCursorRow = trackerController.effectsCursorRow,
+        isRendering = isRendering,
+        renderProgress = renderProgress,
+        showCleanDialog = showCleanDialog,
+        cleanDialogTarget = cleanDialogTarget,
+        cleanDialogCursor = cleanDialogCursor,
+        showNewProjectDialog = showNewProjectDialog,
+        showInstrTypeDialog = showInstrTypeDialog,
+        songScrollPosition = stateVersion.let { trackerController.songScrollPosition },
+        scalingMode = scalingMode,
+        buttonSoundEnabled = buttonSoundEnabled,
+        buttonSoundVolume = buttonSoundVolume,
+        buttonVibroEnabled = buttonVibroEnabled,
+        vibroPower = vibroPower,
+        qwertyKeyboardState = qwertyKeyboardState.copy(insertBefore = insertBefore),
+        fxHelperState = fxHelperState,
+        eqEditorState = eqEditorState,
+        eqSpectrumData = eqSpectrumData,
+        themeEditorState = themeEditorState,
+        settingsCursorRow = stateVersion.let { trackerController.settingsCursorRow },
+        settingsCursorColumn = stateVersion.let { trackerController.settingsCursorColumn },
+        cursorRemember = cursorRemember,
+        notePreviewEnabled = notePreviewEnabled,
+        soundfontPresetName = stateVersion.let {
             val inst = project.instruments[currentInstrument]
             val path = inst.soundfontPath
             if (path != null && inst.instrumentType == InstrumentType.SOUNDFONT) {
                 val slot = instrumentController.sfSlotMap[path]
-                if (slot != null) audioEngine.backend.getSoundfontPresetName(slot, inst.sfBank, inst.sfPreset)
+                if (slot != null) audioEngine.backend.getSoundfontPresetName(
+                    slot,
+                    inst.sfBank,
+                    inst.sfPreset
+                )
                 else "---"
             } else "---"
         },
-        soundfontPresetCount    = stateVersion.let {
+        soundfontPresetCount = stateVersion.let {
             instrumentController.getSoundfontPresetCount(project.instruments[currentInstrument])
         },
-        soundfontPresetIndex    = stateVersion.let {
+        soundfontPresetIndex = stateVersion.let {
             instrumentController.getSoundfontCurrentPresetIndex(project.instruments[currentInstrument])
         },
-        overlayBitmap           = overlayBitmap,
-        overlayStrength         = overlayStrength,
-        overlayFiles            = overlayFiles,
-        overlayName             = overlayName
+        overlayBitmap = overlayBitmap,
+        overlayStrength = overlayStrength,
+        overlayFiles = overlayFiles,
+        overlayName = overlayName
     )
 
     // Show a loading screen until the Oboe stream is open.
@@ -931,7 +973,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val hapticView = LocalView.current
     CompositionLocalProvider(
         LocalLayoutMode provides layoutMode,
-        LocalAppTheme   provides appTheme,
+        LocalAppTheme provides appTheme,
         LocalButtonEventCallback provides { button, isPress ->
             if (isPress) {
                 buttonSoundManager.onPress(button)
@@ -944,36 +986,36 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     ) {
         if (!effectiveLayoutConfig.needsVirtualButtons) {
             FullScreenLayout(
-                layoutConfig  = effectiveLayoutConfig,
-                scalingMode   = scalingMode,
-                params        = trackerParams,
-                inputMapper   = inputMapper,
+                layoutConfig = effectiveLayoutConfig,
+                scalingMode = scalingMode,
+                params = trackerParams,
+                inputMapper = inputMapper,
                 focusRequester = focusRequester
             )
         } else when (layoutMode) {
             DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE ->
                 LandscapeLayoutWithVirtualButtons(
-                    layoutConfig  = effectiveLayoutConfig,
-                    scalingMode   = scalingMode,
-                    params        = trackerParams,
-                    inputMapper   = inputMapper,
+                    layoutConfig = effectiveLayoutConfig,
+                    scalingMode = scalingMode,
+                    params = trackerParams,
+                    inputMapper = inputMapper,
                     focusRequester = focusRequester
                 )
             DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 ->
                 PortraitLayout2WithVirtualButtons(
-                    layoutConfig   = effectiveLayoutConfig,
-                    scalingMode    = scalingMode,
-                    params         = trackerParams,
-                    inputMapper    = inputMapper,
+                    layoutConfig = effectiveLayoutConfig,
+                    scalingMode = scalingMode,
+                    params = trackerParams,
+                    inputMapper = inputMapper,
                     focusRequester = focusRequester,
-                    theme          = theme,
+                    theme = theme,
                 )
             else -> // TOUCH_PORTRAIT (and FULL fallback — shouldn't normally reach here)
                 PortraitLayoutWithVirtualButtons(
-                    layoutConfig  = effectiveLayoutConfig,
-                    scalingMode   = scalingMode,
-                    params        = trackerParams,
-                    inputMapper   = inputMapper,
+                    layoutConfig = effectiveLayoutConfig,
+                    scalingMode = scalingMode,
+                    params = trackerParams,
+                    inputMapper = inputMapper,
                     focusRequester = focusRequester
                 )
         }

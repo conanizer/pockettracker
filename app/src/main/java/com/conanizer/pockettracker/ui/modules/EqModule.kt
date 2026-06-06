@@ -1,4 +1,4 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui.modules
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -6,9 +6,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.input.CursorCapabilities
+import com.conanizer.pockettracker.input.CursorContext
+import com.conanizer.pockettracker.input.CursorContextFactory
+import com.conanizer.pockettracker.input.CursorValueType
+import com.conanizer.pockettracker.ui.overlays.EQ_BAND_TYPE_NAMES
+import com.conanizer.pockettracker.ui.overlays.EqCallerContext
+import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.core.data.EqBand
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.logic.InputAction
+import com.conanizer.pockettracker.ui.darken
+import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.toHex2
 import kotlin.math.*
 
 data class EqState(
@@ -17,7 +28,7 @@ data class EqState(
     val cursorRow:     Int,
     val callerContext: EqCallerContext,
     val spectrumData:  FloatArray? = null,
-    val appTheme:      AppTheme = AppTheme.CLASSIC,
+    val appTheme: AppTheme = AppTheme.Companion.CLASSIC,
 )
 
 /**
@@ -270,11 +281,16 @@ class EqModule : TrackerModule {
             ?: return CursorContextFactory.none()
         return when (state.cursorParam) {
             0 -> CursorContext(
-                valueType    = CursorValueType.HEX_BYTE,
-                capabilities = CursorCapabilities(canIncrement = true, canDecrement = true, canIncrementFast = true, canDecrementFast = true),
+                valueType = CursorValueType.HEX_BYTE,
+                capabilities = CursorCapabilities(
+                    canIncrement = true,
+                    canDecrement = true,
+                    canIncrementFast = true,
+                    canDecrementFast = true
+                ),
                 currentValue = band.type,
-                minValue     = 0, maxValue = EQ_BAND_TYPE_NAMES.size - 1,
-                smallStep    = 1, largeStep = 1
+                minValue = 0, maxValue = EQ_BAND_TYPE_NAMES.size - 1,
+                smallStep = 1, largeStep = 1
             )
             1 -> CursorContextFactory.hexByte(band.freq, min = 0, max = 255)
             2 -> CursorContextFactory.hexByte(band.gain, min = 0, max = 255)

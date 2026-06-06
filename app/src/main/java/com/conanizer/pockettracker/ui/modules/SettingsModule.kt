@@ -1,9 +1,20 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui.modules
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.input.CursorCapabilities
+import com.conanizer.pockettracker.input.CursorContext
+import com.conanizer.pockettracker.input.CursorContextFactory
+import com.conanizer.pockettracker.input.CursorValueType
+import com.conanizer.pockettracker.platform.android.DeviceAdapter
+import com.conanizer.pockettracker.ui.TrackerModule
+import com.conanizer.pockettracker.ui.theme.VisualizerType
+import com.conanizer.pockettracker.core.logic.InputAction
+import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.toHex2
 
 /**
  * SETTINGS SCREEN MODULE
@@ -52,7 +63,8 @@ class SettingsModule : TrackerModule {
         val val2ColumnX  = x + VAL2_X_OFFSET
 
         var rowY = y + TEXT_PADDING
-        drawBitmapText("SETTINGS", nameColumnX, rowY, scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("SETTINGS", nameColumnX, rowY, scale,
+            Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
         rowY += ROW_HEIGHT + 14
 
         var row = 0
@@ -243,8 +255,10 @@ class SettingsModule : TrackerModule {
                     val options = listOf("OFF") + state.overlayFiles
                     CursorContext(
                         valueType = CursorValueType.HEX_BYTE,
-                        capabilities = CursorCapabilities(canIncrement = true, canDecrement = true,
-                            canIncrementFast = false, canDecrementFast = false),
+                        capabilities = CursorCapabilities(
+                            canIncrement = true, canDecrement = true,
+                            canIncrementFast = false, canDecrementFast = false
+                        ),
                         currentValue = options.indexOf(state.overlayName).coerceAtLeast(0),
                         minValue = 0, maxValue = (options.size - 1).coerceAtLeast(0),
                         smallStep = 1, largeStep = 1, emptyValue = -1
@@ -253,42 +267,67 @@ class SettingsModule : TrackerModule {
                 else -> CursorContextFactory.hexByte(currentValue = state.overlayStrength, min = 0, max = 255)
             }
             3  -> when (state.cursorColumn) {   // BTN SOUND
-                1 -> CursorContext(valueType = CursorValueType.HEX_BYTE,
-                    capabilities = CursorCapabilities(canIncrement = true, canDecrement = true,
-                        canIncrementFast = false, canDecrementFast = false),
+                1 -> CursorContext(
+                    valueType = CursorValueType.HEX_BYTE,
+                    capabilities = CursorCapabilities(
+                        canIncrement = true, canDecrement = true,
+                        canIncrementFast = false, canDecrementFast = false
+                    ),
                     currentValue = if (state.buttonSoundEnabled) 1 else 0,
-                    minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1)
+                    minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
+                )
                 else -> CursorContextFactory.hexByte(currentValue = state.buttonSoundVolume, min = 0, max = 255)
             }
             4  -> when (state.cursorColumn) {   // BTN VIBRO
-                1 -> CursorContext(valueType = CursorValueType.HEX_BYTE,
-                    capabilities = CursorCapabilities(canIncrement = true, canDecrement = true,
-                        canIncrementFast = false, canDecrementFast = false),
+                1 -> CursorContext(
+                    valueType = CursorValueType.HEX_BYTE,
+                    capabilities = CursorCapabilities(
+                        canIncrement = true, canDecrement = true,
+                        canIncrementFast = false, canDecrementFast = false
+                    ),
                     currentValue = if (state.buttonVibroEnabled) 1 else 0,
-                    minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1)
+                    minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
+                )
                 else -> CursorContextFactory.hexByte(currentValue = state.vibroPower, min = 0, max = 255)
             }
-            5  -> CursorContext(valueType = CursorValueType.HEX_BYTE,   // KB INSERT
-                capabilities = CursorCapabilities(canIncrement = true, canDecrement = true,
-                    canIncrementFast = false, canDecrementFast = false),
+            5  -> CursorContext(
+                valueType = CursorValueType.HEX_BYTE,   // KB INSERT
+                capabilities = CursorCapabilities(
+                    canIncrement = true, canDecrement = true,
+                    canIncrementFast = false, canDecrementFast = false
+                ),
                 currentValue = if (state.insertBefore) 1 else 0,
-                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1)
-            6  -> CursorContext(valueType = CursorValueType.HEX_BYTE,   // CURSOR
-                capabilities = CursorCapabilities(canIncrement = true, canDecrement = true,
-                    canIncrementFast = false, canDecrementFast = false),
+                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
+            )
+            6  -> CursorContext(
+                valueType = CursorValueType.HEX_BYTE,   // CURSOR
+                capabilities = CursorCapabilities(
+                    canIncrement = true, canDecrement = true,
+                    canIncrementFast = false, canDecrementFast = false
+                ),
                 currentValue = if (state.cursorRemember) 1 else 0,
-                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1)
-            7  -> CursorContext(valueType = CursorValueType.HEX_BYTE,   // NOTE PREV
-                capabilities = CursorCapabilities(canIncrement = true, canDecrement = true,
-                    canIncrementFast = false, canDecrementFast = false),
+                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
+            )
+            7  -> CursorContext(
+                valueType = CursorValueType.HEX_BYTE,   // NOTE PREV
+                capabilities = CursorCapabilities(
+                    canIncrement = true, canDecrement = true,
+                    canIncrementFast = false, canDecrementFast = false
+                ),
                 currentValue = if (state.notePreviewEnabled) 1 else 0,
-                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1)
-            8  -> CursorContext(valueType = CursorValueType.HEX_BYTE,   // VISUALIZER
-                capabilities = CursorCapabilities(canIncrement = true, canDecrement = true,
-                    canIncrementFast = false, canDecrementFast = false),
-                currentValue = VisualizerType.values().indexOf(state.visualizerType).coerceAtLeast(0),
+                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
+            )
+            8  -> CursorContext(
+                valueType = CursorValueType.HEX_BYTE,   // VISUALIZER
+                capabilities = CursorCapabilities(
+                    canIncrement = true, canDecrement = true,
+                    canIncrementFast = false, canDecrementFast = false
+                ),
+                currentValue = VisualizerType.values().indexOf(state.visualizerType)
+                    .coerceAtLeast(0),
                 minValue = 0, maxValue = VisualizerType.values().size - 1,
-                smallStep = 1, largeStep = 1, emptyValue = -1)
+                smallStep = 1, largeStep = 1, emptyValue = -1
+            )
             9  -> CursorContextFactory.readOnly()   // THEME: A opens editor
             10 -> CursorContextFactory.readOnly()   // TEMPLATE: A triggers save/clear
             else -> CursorContextFactory.none()
@@ -301,49 +340,49 @@ class SettingsModule : TrackerModule {
 
     fun handleInput(
         state: SettingsState,
-        action: com.conanizer.pockettracker.core.logic.InputAction
+        action: InputAction
     ): InputResult {
         when (state.cursorRow) {
             2 -> when (state.cursorColumn) {   // OVERLAY
-                1 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
+                1 -> if (action is InputAction.SET_VALUE) {
                     val options = listOf("OFF") + state.overlayFiles
                     return InputResult(modified = true, overlayName = options.getOrElse(action.value) { "OFF" })
                 }
-                2 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
+                2 -> if (action is InputAction.SET_VALUE) {
                     return InputResult(modified = true, overlayStrength = action.value.coerceIn(0, 255))
                 }
             }
             3 -> when (state.cursorColumn) {   // BTN SOUND
-                1 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
+                1 -> if (action is InputAction.SET_VALUE) {
                     return InputResult(modified = true, buttonSoundEnabled = action.value > 0)
                 }
-                2 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
+                2 -> if (action is InputAction.SET_VALUE) {
                     return InputResult(modified = true, buttonSoundVolume = action.value.coerceIn(0, 255))
                 }
             }
             4 -> when (state.cursorColumn) {   // BTN VIBRO
-                1 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
+                1 -> if (action is InputAction.SET_VALUE) {
                     return InputResult(modified = true, buttonVibroEnabled = action.value > 0)
                 }
-                2 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {
+                2 -> if (action is InputAction.SET_VALUE) {
                     return InputResult(modified = true, vibroPower = action.value.coerceIn(0, 255))
                 }
             }
-            5 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {   // KB INSERT
+            5 -> if (action is InputAction.SET_VALUE) {   // KB INSERT
                 return InputResult(modified = true, insertBefore = action.value > 0)
             }
-            6 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {   // CURSOR
+            6 -> if (action is InputAction.SET_VALUE) {   // CURSOR
                 return InputResult(modified = true, cursorRemember = action.value > 0)
             }
-            7 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {   // NOTE PREV
+            7 -> if (action is InputAction.SET_VALUE) {   // NOTE PREV
                 return InputResult(modified = true, notePreviewEnabled = action.value > 0)
             }
-            8 -> if (action is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE) {   // VISUALIZER
+            8 -> if (action is InputAction.SET_VALUE) {   // VISUALIZER
                 val types = VisualizerType.values()
                 return InputResult(modified = true, visualizerType = types.getOrNull(action.value) ?: types[0])
             }
         }
-        return InputResult(modified = action !is com.conanizer.pockettracker.core.logic.InputAction.NONE)
+        return InputResult(modified = action !is InputAction.NONE)
     }
 
     data class InputResult(
@@ -382,5 +421,5 @@ data class SettingsState(
     val notePreviewEnabled: Boolean = true,
     val visualizerType: VisualizerType = VisualizerType.SCOPE,
     val currentThemeName: String = "CLASSIC",
-    val appTheme: AppTheme = AppTheme.CLASSIC
+    val appTheme: AppTheme = AppTheme.Companion.CLASSIC
 )

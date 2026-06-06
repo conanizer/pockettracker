@@ -3,7 +3,7 @@ package com.conanizer.pockettracker.platform.android
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.SoundPool
-import com.conanizer.pockettracker.VirtualButton
+import com.conanizer.pockettracker.input.VirtualButton
 
 /**
  * Plays short WAV click sounds on virtual button press/release.

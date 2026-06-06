@@ -6,8 +6,9 @@
 // PORTRAIT2:  [SCREEN top] → [compact 4×4 button grid]
 // ============================================================================
 
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
@@ -28,6 +29,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.conanizer.pockettracker.platform.android.DeviceAdapter
 import kotlin.math.floor
 import com.conanizer.pockettracker.core.audio.AudioEngine
 import com.conanizer.pockettracker.core.data.Project
@@ -39,9 +41,6 @@ import com.conanizer.pockettracker.input.VirtualControlsLeft
 import com.conanizer.pockettracker.input.VirtualControlsPortrait2
 import com.conanizer.pockettracker.input.VirtualControlsRight
 import com.conanizer.pockettracker.input.inputHandler
-import com.conanizer.pockettracker.ui.DESIGN_HEIGHT_PX
-import com.conanizer.pockettracker.ui.DESIGN_WIDTH_PX
-import com.conanizer.pockettracker.ui.PixelPerfectTracker
 import com.conanizer.pockettracker.ui.modules.FileBrowserModule
 import com.conanizer.pockettracker.ui.modules.SampleEditorState
 import com.conanizer.pockettracker.ui.modules.ThemeEditorState
@@ -126,7 +125,7 @@ data class TrackerScreenParams(
     val overlayName: String = "OFF"
 )
 
-/** Thin wrapper — forwards every field of [params] to [com.conanizer.pockettracker.ui.PixelPerfectTracker], then draws screen overlay. */
+/** Thin wrapper — forwards every field of [params] to [PixelPerfectTracker], then draws screen overlay. */
 @Composable
 private fun TrackerScreen(params: TrackerScreenParams, modifier: Modifier = Modifier) {
     // Build overlay modifier once per recomposition; drawWithContent shares the same canvas as
@@ -231,7 +230,7 @@ fun FullScreenLayout(
     inputMapper: InputMapper,
     focusRequester: FocusRequester
 ) {
-    val density = androidx.compose.ui.platform.LocalDensity.current.density
+    val density = LocalDensity.current.density
 
     Box(
         modifier = Modifier
@@ -278,14 +277,14 @@ fun PortraitLayoutWithVirtualButtons(
     inputMapper: InputMapper,
     focusRequester: FocusRequester
 ) {
-    val spacerHeight = DeviceAdapter.PORTRAIT_SPACER_HEIGHT
-    val density = androidx.compose.ui.platform.LocalDensity.current.density
+    val spacerHeight = DeviceAdapter.Companion.PORTRAIT_SPACER_HEIGHT
+    val density = LocalDensity.current.density
     val spacerHeightDp = (spacerHeight / density).dp
 
     // For non-INTEGER scaling, compute a float scale that fills the available screen slot.
     // The button area size is determined by the portrait pattern dimensions.
-    val buttonX = kotlin.math.floor(layoutConfig.deviceWidth / DeviceAdapter.PORTRAIT_PATTERN_WIDTH)
-    val buttonAreaHeight = kotlin.math.floor(buttonX * DeviceAdapter.PORTRAIT_PATTERN_HEIGHT).toInt()
+    val buttonX = floor(layoutConfig.deviceWidth / DeviceAdapter.Companion.PORTRAIT_PATTERN_WIDTH)
+    val buttonAreaHeight = floor(buttonX * DeviceAdapter.Companion.PORTRAIT_PATTERN_HEIGHT).toInt()
     val availScreenHeight = (layoutConfig.deviceHeight - spacerHeight - buttonAreaHeight).coerceAtLeast(1)
     val floatScale = minOf(layoutConfig.deviceWidth / 640f, availScreenHeight / 480f)
 
@@ -360,15 +359,15 @@ fun LandscapeLayoutWithVirtualButtons(
     val availableButtonWidth = (layoutConfig.deviceWidth - layoutConfig.scaledScreenWidth) / 2
     val availableButtonHeight = layoutConfig.deviceHeight
 
-    val density = androidx.compose.ui.platform.LocalDensity.current.density
+    val density = LocalDensity.current.density
     val buttonWidthDp = maxOf(0f, availableButtonWidth / density).dp
 
-    android.util.Log.d("LandscapeLayout", "=== LANDSCAPE LAYOUT ===")
-    android.util.Log.d("LandscapeLayout", "Device: ${layoutConfig.deviceWidth}×${layoutConfig.deviceHeight}")
-    android.util.Log.d("LandscapeLayout", "Screen: ${layoutConfig.scaledScreenWidth}×${layoutConfig.scaledScreenHeight}")
-    android.util.Log.d("LandscapeLayout", "Button width: $availableButtonWidth px = $buttonWidthDp")
-    android.util.Log.d("LandscapeLayout", "Density: $density")
-    android.util.Log.d("LandscapeLayout", "====================")
+    Log.d("LandscapeLayout", "=== LANDSCAPE LAYOUT ===")
+    Log.d("LandscapeLayout", "Device: ${layoutConfig.deviceWidth}×${layoutConfig.deviceHeight}")
+    Log.d("LandscapeLayout", "Screen: ${layoutConfig.scaledScreenWidth}×${layoutConfig.scaledScreenHeight}")
+    Log.d("LandscapeLayout", "Button width: $availableButtonWidth px = $buttonWidthDp")
+    Log.d("LandscapeLayout", "Density: $density")
+    Log.d("LandscapeLayout", "====================")
 
     Box(
         modifier = Modifier

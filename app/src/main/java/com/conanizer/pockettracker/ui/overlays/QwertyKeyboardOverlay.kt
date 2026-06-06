@@ -1,4 +1,4 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui.overlays
 
 /**
  * QWERTY KEYBOARD OVERLAY

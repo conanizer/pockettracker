@@ -1,4 +1,4 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui
 
 import androidx.compose.ui.graphics.Color
 import com.conanizer.pockettracker.core.data.Chain

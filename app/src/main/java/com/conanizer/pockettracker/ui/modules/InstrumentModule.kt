@@ -1,12 +1,22 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui.modules
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.input.CursorContext
+import com.conanizer.pockettracker.input.CursorContextFactory
+import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.core.data.Instrument
 import com.conanizer.pockettracker.core.data.InstrumentType
 import com.conanizer.pockettracker.core.data.Note
+import com.conanizer.pockettracker.core.logic.InputAction
+import com.conanizer.pockettracker.core.logic.InstrumentController
+import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.toHex1
+import com.conanizer.pockettracker.ui.toHex2
+import java.io.File
 
 /**
  * INSTRUMENT SCREEN MODULE
@@ -432,7 +442,7 @@ class InstrumentModule : TrackerModule {
 
         val header    = if (isSoundFont) "SF" else "SMPL"
         val sourcePath = if (isSoundFont) instrument.soundfontPath else instrument.sampleFilePath
-        val filename  = if (sourcePath != null) java.io.File(sourcePath).nameWithoutExtension else "empty"
+        val filename  = if (sourcePath != null) File(sourcePath).nameWithoutExtension else "empty"
         val loadX     = x + SRC_LOAD_OFFSET
         val editX     = x + SRC_EDIT_OFFSET
         val fileX     = x + SRC_FILENAME_OFFSET
@@ -565,8 +575,8 @@ class InstrumentModule : TrackerModule {
 
     fun handleInput(
         state: InstrumentState,
-        action: com.conanizer.pockettracker.core.logic.InputAction,
-        instrumentController: com.conanizer.pockettracker.core.logic.InstrumentController
+        action: InputAction,
+        instrumentController: InstrumentController
     ): InputResult {
         val isSoundFont = state.instrument.instrumentType == InstrumentType.SOUNDFONT
         val sfOffset    = if (isSoundFont) 1 else 0
@@ -578,7 +588,7 @@ class InstrumentModule : TrackerModule {
 
             isSoundFont && row == 4 -> when (col) {
                 1 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.setSoundfontPresetByIndex(state.instrument, action.value)
                     else -> {}
                 }
@@ -586,19 +596,19 @@ class InstrumentModule : TrackerModule {
 
             row == 4 + sfOffset -> when (col) {  // ROOT + DETUNE + TIC
                 1 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.updateRoot(state.instrument, Note.fromMidi(action.value))
-                    is com.conanizer.pockettracker.core.logic.InputAction.DELETE ->
+                    is InputAction.DELETE ->
                         instrumentController.updateRoot(state.instrument, Note.fromString("C-4"))
                     else -> {}
                 }
                 3 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.updateDetune(state.instrument, action.value)
                     else -> {}
                 }
                 5 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.updateTableTicRate(state.instrument, action.value)
                     else -> {}
                 }
@@ -606,12 +616,12 @@ class InstrumentModule : TrackerModule {
 
             row == 5 + sfOffset -> when (col) {  // VOL + PAN
                 1 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.updateVolume(state.instrument, action.value)
                     else -> {}
                 }
                 3 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.updatePan(state.instrument, action.value)
                     else -> {}
                 }
@@ -619,12 +629,12 @@ class InstrumentModule : TrackerModule {
 
             row == 7 + sfOffset -> when (col) {  // DRIVE + FILTER
                 1 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.updateDrive(state.instrument, action.value)
                     else -> {}
                 }
                 3 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                    is InputAction.SET_VALUE -> {
                         val filterTypes = listOf("off", "lp", "hp", "bp")
                         if (action.value in 0..3)
                             instrumentController.updateFilterType(state.instrument, filterTypes[action.value])
@@ -635,12 +645,12 @@ class InstrumentModule : TrackerModule {
 
             row == 8 + sfOffset -> when (col) {  // CRUSH + FREQ
                 1 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.updateCrush(state.instrument, action.value)
                     else -> {}
                 }
                 3 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.updateFilterCut(state.instrument, action.value)
                     else -> {}
                 }
@@ -648,12 +658,12 @@ class InstrumentModule : TrackerModule {
 
             row == 9 + sfOffset -> when (col) {  // DWNSMPL + RES
                 1 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.updateDownsample(state.instrument, action.value)
                     else -> {}
                 }
                 3 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.updateFilterRes(state.instrument, action.value)
                     else -> {}
                 }
@@ -661,21 +671,21 @@ class InstrumentModule : TrackerModule {
 
             // Soundfont tail rows
             isSoundFont && row == 12 -> when (action) {
-                is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                is InputAction.SET_VALUE ->
                     instrumentController.updateReverbSend(state.instrument, action.value)
                 else -> {}
             }
             isSoundFont && row == 13 -> when (action) {
-                is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                is InputAction.SET_VALUE ->
                     instrumentController.updateDelaySend(state.instrument, action.value)
                 else -> {}
             }
             isSoundFont && row == 14 -> when (action) {
-                is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                is InputAction.SET_VALUE ->
                     instrumentController.updateEqSlot(state.instrument, action.value)
-                is com.conanizer.pockettracker.core.logic.InputAction.DELETE ->
+                is InputAction.DELETE ->
                     instrumentController.updateEqSlot(state.instrument, -1)
-                is com.conanizer.pockettracker.core.logic.InputAction.INSERT_DEFAULT ->
+                is InputAction.INSERT_DEFAULT ->
                     instrumentController.updateEqSlot(state.instrument, 0)
                 else -> {}
             }
@@ -683,47 +693,47 @@ class InstrumentModule : TrackerModule {
             // Sampler tail rows
             !isSoundFont && row == 11 -> when (col) {  // START + REV
                 1 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.updateSampleStart(state.instrument, action.value)
                     else -> {}
                 }
                 3 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.updateReverbSend(state.instrument, action.value)
                     else -> {}
                 }
             }
             !isSoundFont && row == 12 -> when (col) {  // END + DEL
                 1 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.updateSampleEnd(state.instrument, action.value)
                     else -> {}
                 }
                 3 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.updateDelaySend(state.instrument, action.value)
                     else -> {}
                 }
             }
             !isSoundFont && row == 13 -> when (col) {  // REVERSE + EQ
                 1 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.updateReverse(state.instrument, action.value == 1)
                     else -> {}
                 }
                 3 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.updateEqSlot(state.instrument, action.value)
-                    is com.conanizer.pockettracker.core.logic.InputAction.DELETE ->
+                    is InputAction.DELETE ->
                         instrumentController.updateEqSlot(state.instrument, -1)
-                    is com.conanizer.pockettracker.core.logic.InputAction.INSERT_DEFAULT ->
+                    is InputAction.INSERT_DEFAULT ->
                         instrumentController.updateEqSlot(state.instrument, 0)
                     else -> {}
                 }
             }
             !isSoundFont && row == 14 -> when (col) {  // LOOP + SLICE
                 1 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                    is InputAction.SET_VALUE -> {
                         val loopModes = listOf("off", "fwd", "png")
                         if (action.value in 0..2)
                             instrumentController.updateLoopMode(state.instrument, loopModes[action.value])
@@ -731,20 +741,20 @@ class InstrumentModule : TrackerModule {
                     else -> {}
                 }
                 3 -> when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                    is InputAction.SET_VALUE ->
                         instrumentController.updateSlicingMode(state.instrument, action.value)
                     else -> {}
                 }
                 else -> {}
             }
             !isSoundFont && row == 15 -> when (action) {  // LOOP ST
-                is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE ->
+                is InputAction.SET_VALUE ->
                     instrumentController.updateLoopStart(state.instrument, action.value)
                 else -> {}
             }
         }
 
-        return InputResult(modified = action !is com.conanizer.pockettracker.core.logic.InputAction.NONE)
+        return InputResult(modified = action !is InputAction.NONE)
     }
 
     data class InputResult(val modified: Boolean)
@@ -775,5 +785,5 @@ data class InstrumentState(
     val soundfontPresetName: String = "",
     val soundfontPresetCount: Int = 0,
     val soundfontPresetIndex: Int = 0,
-    val appTheme: AppTheme = AppTheme.CLASSIC
+    val appTheme: AppTheme = AppTheme.Companion.CLASSIC
 )

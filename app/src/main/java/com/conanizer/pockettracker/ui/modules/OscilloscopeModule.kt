@@ -1,4 +1,4 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui.modules
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -6,6 +6,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.ui.TrackerModule
+import com.conanizer.pockettracker.ui.theme.VisualizerType
+import com.conanizer.pockettracker.ui.darken
+import kotlin.math.abs
 
 /**
  * VISUALIZER MODULE
@@ -52,7 +57,7 @@ class OscilloscopeModule(
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val oscState = state as? OscilloscopeState
         val waveformData = oscState?.waveformBuffer ?: (state as? FloatArray) ?: FloatArray(width)
-        val t = oscState?.appTheme ?: AppTheme.CLASSIC
+        val t = oscState?.appTheme ?: AppTheme.Companion.CLASSIC
 
         drawRect(
             color = Color(t.vizBackground),
@@ -100,7 +105,7 @@ class OscilloscopeModule(
             val startSample = (i * samplesPerBar).toInt()
             val endSample = ((i + 1) * samplesPerBar).toInt().coerceAtMost(waveformData.size)
             var sum = 0f
-            for (s in startSample until endSample) sum += kotlin.math.abs(waveformData[s])
+            for (s in startSample until endSample) sum += abs(waveformData[s])
             ((sum / (endSample - startSample).coerceAtLeast(1)) * WAVEFORM_GAIN).coerceIn(0f, 1f)
         }
     }
@@ -261,7 +266,7 @@ class OscilloscopeModule(
 
 data class OscilloscopeState(
     val waveformBuffer: FloatArray,
-    val appTheme: AppTheme = AppTheme.CLASSIC,
+    val appTheme: AppTheme = AppTheme.Companion.CLASSIC,
     val trackWaveforms: Array<FloatArray>? = null,
     val activeTrackMask: Int = 0,
     val spectrumData: FloatArray? = null  // 40 log-spaced bins (0-1) for SPECTRUM modes

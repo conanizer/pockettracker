@@ -1,10 +1,19 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui.modules
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.input.CursorContext
+import com.conanizer.pockettracker.input.CursorContextFactory
+import com.conanizer.pockettracker.ui.TrackerModule
+import com.conanizer.pockettracker.ui.clearSongChainRef
 import com.conanizer.pockettracker.core.data.Project
+import com.conanizer.pockettracker.core.logic.InputAction
+import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.rowBgColor
+import com.conanizer.pockettracker.ui.toHex2
 
 /**
  * SONG EDITOR MODULE
@@ -40,11 +49,13 @@ class SongEditorModule : TrackerModule {
         for (i in 0..7) { trackColumns[i] = colX; colX += 30 + 20 }
 
         var rowY = y + TEXT_PADDING
-        drawBitmapText("SONG: ${songState.project.name.take(20)}", x + 10, rowY, scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("SONG: ${songState.project.name.take(20)}", x + 10, rowY, scale,
+            Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
 
         rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING
         for (trackId in 0..7) {
-            drawBitmapText("${trackId + 1}", trackColumns[trackId], rowY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+            drawBitmapText("${trackId + 1}", trackColumns[trackId], rowY, scale,
+                Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         }
 
         for (rowIndex in 0 until VISIBLE_ROWS) {
@@ -66,7 +77,14 @@ class SongEditorModule : TrackerModule {
 
         val t = state.appTheme
         drawRect(
-            color   = rowBgColor(absoluteRow, state.cursorRow, state.playbackRow, state.isPlaying, isRowSelected, t),
+            color   = rowBgColor(
+                absoluteRow,
+                state.cursorRow,
+                state.playbackRow,
+                state.isPlaying,
+                isRowSelected,
+                t
+            ),
             topLeft = Offset((x * scale).toFloat(), (dataRowY * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
         )
@@ -90,7 +108,9 @@ class SongEditorModule : TrackerModule {
                 x = trackColumns[trackId], y = textY, scale = scale,
                 color = when {
                     absoluteRow == state.cursorRow && trackId == (state.cursorTrack - 1) -> Color(t.textCursor)
-                    state.selectionMode && state.isCellSelected(absoluteRow, selectionCol) -> Color(t.vizWave)
+                    state.selectionMode && state.isCellSelected(absoluteRow, selectionCol) -> Color(
+                        t.vizWave
+                    )
                     chainId == -1 -> Color(t.textEmpty)
                     else -> Color(t.textValue)
                 },
@@ -108,7 +128,7 @@ class SongEditorModule : TrackerModule {
 
     fun handleInput(
         state: SongEditorState,
-        action: com.conanizer.pockettracker.core.logic.InputAction
+        action: InputAction
     ): InputResult {
         val trackIndex = state.cursorTrack - 1
         if (trackIndex < 0 || trackIndex >= state.project.tracks.size) return InputResult(modified = false)
@@ -117,15 +137,15 @@ class SongEditorModule : TrackerModule {
         var lastEditedChain: Int? = null
 
         when (action) {
-            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+            is InputAction.SET_VALUE -> {
                 while (track.chainRefs.size <= state.cursorRow) track.chainRefs.add(-1)
                 track.chainRefs[state.cursorRow] = action.value
                 lastEditedChain = action.value
             }
-            is com.conanizer.pockettracker.core.logic.InputAction.DELETE -> {
+            is InputAction.DELETE -> {
                 clearSongChainRef(track, state.cursorRow)
             }
-            is com.conanizer.pockettracker.core.logic.InputAction.INSERT_DEFAULT -> {
+            is InputAction.INSERT_DEFAULT -> {
                 while (track.chainRefs.size <= state.cursorRow) track.chainRefs.add(-1)
                 track.chainRefs[state.cursorRow] = 0
                 lastEditedChain = 0
@@ -134,7 +154,7 @@ class SongEditorModule : TrackerModule {
         }
 
         return InputResult(
-            modified = action !is com.conanizer.pockettracker.core.logic.InputAction.NONE,
+            modified = action !is InputAction.NONE,
             lastEditedChain = lastEditedChain
         )
     }
@@ -154,5 +174,5 @@ data class SongEditorState(
     val playbackRow: Int = 0,
     val selectionMode: Boolean = false,
     val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
-    val appTheme: AppTheme = AppTheme.CLASSIC
+    val appTheme: AppTheme = AppTheme.Companion.CLASSIC
 )

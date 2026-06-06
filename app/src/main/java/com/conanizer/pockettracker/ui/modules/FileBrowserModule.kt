@@ -1,10 +1,15 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui.modules
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.input.CursorContext
+import com.conanizer.pockettracker.input.CursorContextFactory
+import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.core.storage.FileSortMode
+import com.conanizer.pockettracker.ui.drawBitmapText
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -116,7 +121,7 @@ class FileBrowserModule : TrackerModule {
         val permissionError: Boolean = false,
         val fileExtension: String? = null,          // Single-extension filter (legacy)
         val fileExtensions: List<String>? = null,   // Multi-extension filter (null = all files)
-        val appTheme: AppTheme = AppTheme.CLASSIC,
+        val appTheme: AppTheme = AppTheme.Companion.CLASSIC,
         val selectionMode: Boolean = false,
         val selectionAnchor: Int = -1,
         val fileClipboard: List<File> = emptyList(),

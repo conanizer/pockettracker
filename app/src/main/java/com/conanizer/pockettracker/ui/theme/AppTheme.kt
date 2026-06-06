@@ -1,4 +1,4 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui.theme
 
 import kotlinx.serialization.Serializable
 

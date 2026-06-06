@@ -1,4 +1,4 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui
 
 /**
  * 5×5 PIXEL BITMAP FONT

@@ -1,10 +1,17 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui.modules
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.input.CursorContext
+import com.conanizer.pockettracker.input.CursorContextFactory
+import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.core.data.Groove
+import com.conanizer.pockettracker.core.logic.InputAction
+import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.toHex2
 
 /**
  * GROOVE SCREEN MODULE
@@ -29,7 +36,7 @@ data class GrooveState(
     val groove: Groove,
     val cursorRow: Int,      // 0-15
     val cursorColumn: Int = 1,  // 0=step(RO), 1=tick value
-    val appTheme: AppTheme = AppTheme.CLASSIC
+    val appTheme: AppTheme = AppTheme.Companion.CLASSIC
 )
 
 class GrooveModule : TrackerModule {
@@ -169,19 +176,19 @@ class GrooveModule : TrackerModule {
      */
     fun handleInput(
         state: GrooveState,
-        action: com.conanizer.pockettracker.core.logic.InputAction
+        action: InputAction
     ): InputResult {
         when (state.cursorColumn) {
             1 -> {
                 when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                    is InputAction.SET_VALUE -> {
                         state.groove.steps[state.cursorRow] = action.value.coerceIn(0, 255)
                     }
-                    is com.conanizer.pockettracker.core.logic.InputAction.DELETE -> {
+                    is InputAction.DELETE -> {
                         // A+B: set to -1 (end-of-pattern marker)
                         state.groove.steps[state.cursorRow] = -1
                     }
-                    is com.conanizer.pockettracker.core.logic.InputAction.INSERT_DEFAULT -> {
+                    is InputAction.INSERT_DEFAULT -> {
                         // A on empty: insert default tick value (12 = standard TICS_PER_STEP)
                         state.groove.steps[state.cursorRow] = 0x0C
                     }
@@ -190,7 +197,7 @@ class GrooveModule : TrackerModule {
             }
         }
         return InputResult(
-            modified = action !is com.conanizer.pockettracker.core.logic.InputAction.NONE
+            modified = action !is InputAction.NONE
         )
     }
 

@@ -7,10 +7,9 @@ import com.conanizer.pockettracker.core.data.ScreenType
 import com.conanizer.pockettracker.core.data.VolumeUtils
 import com.conanizer.pockettracker.core.audio.AudioEngine
 import com.conanizer.pockettracker.core.data.Chain
-import com.conanizer.pockettracker.core.data.ModType
 import com.conanizer.pockettracker.core.data.Phrase
 import com.conanizer.pockettracker.core.logging.ILogger
-import com.conanizer.pockettracker.getEffectTypeName
+import com.conanizer.pockettracker.ui.getEffectTypeName
 
 // Per-track state for persistent effects (REPEAT, ARPEGGIO, HOP, pitch, groove).
 // Effects persist until cancelled — e.g. REPEAT until new note, KILL, or same FX column override.

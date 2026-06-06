@@ -1,13 +1,24 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui.modules
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.input.CursorContext
+import com.conanizer.pockettracker.input.CursorContextFactory
+import com.conanizer.pockettracker.ui.TrackerModule
+import com.conanizer.pockettracker.ui.clearEffect
 import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.data.Phrase
 import com.conanizer.pockettracker.core.data.PhraseStep
 import com.conanizer.pockettracker.core.logic.EffectProcessor
+import com.conanizer.pockettracker.core.logic.InputAction
+import com.conanizer.pockettracker.core.logic.InstrumentController
+import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.getEffectTypeName
+import com.conanizer.pockettracker.ui.rowBgColor
+import com.conanizer.pockettracker.ui.toHex2
 
 /**
  * PHRASE EDITOR MODULE
@@ -87,7 +98,14 @@ class PhraseEditorModule : TrackerModule {
 
         val t = state.appTheme
         drawRect(
-            color   = rowBgColor(index, state.cursorRow, state.playbackRow, state.isPlaying, isRowSelected, t),
+            color   = rowBgColor(
+                index,
+                state.cursorRow,
+                state.playbackRow,
+                state.isPlaying,
+                isRowSelected,
+                t
+            ),
             topLeft = Offset((x * scale).toFloat(), (dataRowY * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
         )
@@ -237,8 +255,8 @@ class PhraseEditorModule : TrackerModule {
 
     fun handleInput(
         state: PhraseEditorState,
-        action: com.conanizer.pockettracker.core.logic.InputAction,
-        instrumentController: com.conanizer.pockettracker.core.logic.InstrumentController
+        action: InputAction,
+        instrumentController: InstrumentController
     ): InputResult {
         val step = state.phrase.steps[state.cursorRow]
         var lastEditedNote: Note? = null
@@ -246,7 +264,7 @@ class PhraseEditorModule : TrackerModule {
         var lastEditedInstrument: Int? = null
 
         when (action) {
-            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+            is InputAction.SET_VALUE -> {
                 when (state.cursorColumn) {
                     1 -> { step.note = Note.fromMidi(action.value); lastEditedNote = step.note }
                     2 -> { step.volume = action.value; lastEditedVolume = action.value }
@@ -264,7 +282,7 @@ class PhraseEditorModule : TrackerModule {
                     9 -> step.fx3Value = action.value
                 }
             }
-            is com.conanizer.pockettracker.core.logic.InputAction.DELETE -> {
+            is InputAction.DELETE -> {
                 when (state.cursorColumn) {
                     1 -> step.note = Note.EMPTY
                     4, 6, 8 -> {
@@ -273,7 +291,7 @@ class PhraseEditorModule : TrackerModule {
                     }
                 }
             }
-            is com.conanizer.pockettracker.core.logic.InputAction.INSERT_DEFAULT -> {
+            is InputAction.INSERT_DEFAULT -> {
                 if (state.cursorColumn == 1) {
                     step.note = Note.fromString("C-4")
                     lastEditedNote = step.note
@@ -283,7 +301,7 @@ class PhraseEditorModule : TrackerModule {
         }
 
         return InputResult(
-            modified = action !is com.conanizer.pockettracker.core.logic.InputAction.NONE,
+            modified = action !is InputAction.NONE,
             lastEditedNote = lastEditedNote,
             lastEditedVolume = lastEditedVolume,
             lastEditedInstrument = lastEditedInstrument
@@ -306,5 +324,5 @@ data class PhraseEditorState(
     val isPlaying: Boolean,
     val selectionMode: Boolean = false,
     val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
-    val appTheme: AppTheme = AppTheme.CLASSIC
+    val appTheme: AppTheme = AppTheme.Companion.CLASSIC
 )

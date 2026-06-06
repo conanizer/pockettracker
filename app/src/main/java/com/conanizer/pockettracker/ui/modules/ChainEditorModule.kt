@@ -1,10 +1,19 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui.modules
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.input.CursorContext
+import com.conanizer.pockettracker.input.CursorContextFactory
+import com.conanizer.pockettracker.ui.TrackerModule
+import com.conanizer.pockettracker.ui.clearChainSlot
 import com.conanizer.pockettracker.core.data.Chain
+import com.conanizer.pockettracker.core.logic.InputAction
+import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.rowBgColor
+import com.conanizer.pockettracker.ui.toHex2
 
 /**
  * CHAIN EDITOR MODULE
@@ -39,7 +48,8 @@ class ChainEditorModule : TrackerModule {
         val tspX  = colX
 
         var rowY = y + TEXT_PADDING
-        drawBitmapText("CHAIN ${chainState.chain.id.toHex2()}", x + 10, rowY, scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("CHAIN ${chainState.chain.id.toHex2()}", x + 10, rowY, scale,
+            Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
 
         rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING
         drawBitmapText("PH",  phX,  rowY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
@@ -63,7 +73,14 @@ class ChainEditorModule : TrackerModule {
 
         val t = state.appTheme
         drawRect(
-            color   = rowBgColor(index, state.cursorRow, state.playbackRow, state.isPlaying, isRowSelected, t),
+            color   = rowBgColor(
+                index,
+                state.cursorRow,
+                state.playbackRow,
+                state.isPlaying,
+                isRowSelected,
+                t
+            ),
             topLeft = Offset((x * scale).toFloat(), (dataRowY * scale).toFloat()),
             size    = Size((width * scale).toFloat(), (ROW_HEIGHT * scale).toFloat())
         )
@@ -122,23 +139,23 @@ class ChainEditorModule : TrackerModule {
 
     fun handleInput(
         state: ChainEditorState,
-        action: com.conanizer.pockettracker.core.logic.InputAction
+        action: InputAction
     ): InputResult {
         val chain = state.chain
         var lastEditedPhrase: Int? = null
         var lastEditedTranspose: Int? = null
 
         when (action) {
-            is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+            is InputAction.SET_VALUE -> {
                 when (state.cursorColumn) {
                     1 -> { chain.phraseRefs[state.cursorRow] = action.value; lastEditedPhrase = action.value }
                     2 -> { chain.transposeValues[state.cursorRow] = action.value; lastEditedTranspose = action.value }
                 }
             }
-            is com.conanizer.pockettracker.core.logic.InputAction.DELETE -> {
+            is InputAction.DELETE -> {
                 if (state.cursorColumn == 1) clearChainSlot(chain, state.cursorRow)
             }
-            is com.conanizer.pockettracker.core.logic.InputAction.INSERT_DEFAULT -> {
+            is InputAction.INSERT_DEFAULT -> {
                 if (state.cursorColumn == 1) {
                     chain.phraseRefs[state.cursorRow] = 0
                     chain.transposeValues[state.cursorRow] = 0x00
@@ -150,7 +167,7 @@ class ChainEditorModule : TrackerModule {
         }
 
         return InputResult(
-            modified = action !is com.conanizer.pockettracker.core.logic.InputAction.NONE,
+            modified = action !is InputAction.NONE,
             lastEditedPhrase = lastEditedPhrase,
             lastEditedTranspose = lastEditedTranspose
         )
@@ -171,5 +188,5 @@ data class ChainEditorState(
     val isPlaying: Boolean = false,
     val selectionMode: Boolean = false,
     val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
-    val appTheme: AppTheme = AppTheme.CLASSIC
+    val appTheme: AppTheme = AppTheme.Companion.CLASSIC
 )

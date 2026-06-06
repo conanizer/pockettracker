@@ -1,9 +1,13 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.input
 
 import android.util.Log
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.platform.android.DeviceAdapter
+import com.conanizer.pockettracker.ui.clearChainSlot
+import com.conanizer.pockettracker.ui.clearSongChainRef
 import com.conanizer.pockettracker.core.audio.AudioEngine
 import com.conanizer.pockettracker.core.data.InstrumentType
 import com.conanizer.pockettracker.core.data.MAIN_ROW_SCREENS
@@ -11,16 +15,20 @@ import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.data.ScreenType
 import com.conanizer.pockettracker.core.data.VolumeUtils
 import com.conanizer.pockettracker.core.logic.ClipboardManager
+import com.conanizer.pockettracker.core.logic.EffectProcessor
 import com.conanizer.pockettracker.core.logic.FileController
 import com.conanizer.pockettracker.core.logic.InputAction
 import com.conanizer.pockettracker.core.logic.InstrumentController
+import com.conanizer.pockettracker.core.logic.LoadResult
 import com.conanizer.pockettracker.core.logic.RenderController
 import com.conanizer.pockettracker.core.logic.TrackerController
 import com.conanizer.pockettracker.core.storage.FileSortMode
 import com.conanizer.pockettracker.core.storage.WavWriter
+import com.conanizer.pockettracker.ui.getTrackIndex
 import com.conanizer.pockettracker.platform.android.AndroidFileSystem
 import com.conanizer.pockettracker.platform.android.AndroidVideoAudioExtractor
 import com.conanizer.pockettracker.platform.android.OboeAudioBackend
+import com.conanizer.pockettracker.toFileInfo
 import com.conanizer.pockettracker.ui.modules.ChainEditorModule
 import com.conanizer.pockettracker.ui.modules.ChainEditorState
 import com.conanizer.pockettracker.ui.modules.EffectModule
@@ -78,6 +86,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.io.File
 
 /** Tracks where a single A-press inserted into an empty cell (screen, row, col). */
 data class InsertPosition(val screen: ScreenType, val row: Int, val col: Int)
@@ -328,7 +337,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             }
             else -> 0
         }
-        val idx = com.conanizer.pockettracker.core.logic.EffectProcessor.EFFECT_TYPES.indexOf(code)
+        val idx = EffectProcessor.EFFECT_TYPES.indexOf(code)
         return if (idx < 0) 0 else idx
     }
 
@@ -373,15 +382,15 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     }
 
     private fun cycleNextBuiltinTheme() {
-        val idx = AppTheme.BUILTINS.indexOfFirst { it.name == appTheme.name }
-        val next = if (idx >= 0) (idx + 1) % AppTheme.BUILTINS.size else 0
-        appTheme = AppTheme.BUILTINS[next].copy(visualizerType = appTheme.visualizerType)
+        val idx = AppTheme.Companion.BUILTINS.indexOfFirst { it.name == appTheme.name }
+        val next = if (idx >= 0) (idx + 1) % AppTheme.Companion.BUILTINS.size else 0
+        appTheme = AppTheme.Companion.BUILTINS[next].copy(visualizerType = appTheme.visualizerType)
     }
 
     private fun cyclePrevBuiltinTheme() {
-        val idx = AppTheme.BUILTINS.indexOfFirst { it.name == appTheme.name }
-        val prev = if (idx > 0) idx - 1 else AppTheme.BUILTINS.size - 1
-        appTheme = AppTheme.BUILTINS[prev].copy(visualizerType = appTheme.visualizerType)
+        val idx = AppTheme.Companion.BUILTINS.indexOfFirst { it.name == appTheme.name }
+        val prev = if (idx > 0) idx - 1 else AppTheme.Companion.BUILTINS.size - 1
+        appTheme = AppTheme.Companion.BUILTINS[prev].copy(visualizerType = appTheme.visualizerType)
     }
 
     fun openEqEditor(slot: Int, caller: EqCallerContext) {
@@ -990,7 +999,9 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                         themeEditorState = ThemeEditorState()
                         instrumentFileBrowserAction = "LOAD_THEME"
                         previousScreen = trackerController.currentScreen
-                        fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtensions = listOf("ptt"), mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), java.io.File(themesDir))
+                        fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtensions = listOf("ptt"), mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""),
+                            File(themesDir)
+                        )
                         trackerController.currentScreen = ScreenType.FILE_BROWSER
                     }
                 }
@@ -1027,7 +1038,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                     ScreenType.SAMPLE_EDITOR -> {
                                         if (item.file.extension.lowercase() == "wav") {
                                             val result = instrumentController.loadSampleFromFile(trackerController.project, item.file.absolutePath)
-                                            if (result is com.conanizer.pockettracker.core.logic.LoadResult.Success) {
+                                            if (result is LoadResult.Success) {
                                                 trackerController.projectVersion++
                                                 sampleEditorState = sampleEditorState.copy(sampleFilePath = item.file.absolutePath, isModified = false)
                                                 trackerController.currentScreen = ScreenType.SAMPLE_EDITOR
@@ -1051,7 +1062,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                                     trackerController.currentScreen = previousScreen
                                                 } else if (ext == "wav") {
                                                     val result = instrumentController.loadSampleFromFile(trackerController.project, item.file.absolutePath)
-                                                    if (result is com.conanizer.pockettracker.core.logic.LoadResult.Success) {
+                                                    if (result is LoadResult.Success) {
                                                         trackerController.projectVersion++
                                                         trackerController.currentScreen = previousScreen
                                                     } else {
@@ -1078,7 +1089,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                             "LOAD_SAMPLE_EDITOR" -> {
                                                 if (item.file.extension.lowercase() == "wav") {
                                                     val result = instrumentController.loadSampleFromFile(trackerController.project, item.file.absolutePath)
-                                                    if (result is com.conanizer.pockettracker.core.logic.LoadResult.Success) {
+                                                    if (result is LoadResult.Success) {
                                                         trackerController.projectVersion++
                                                         sampleEditorState = sampleEditorState.copy(sampleFilePath = item.file.absolutePath, isModified = false)
                                                         trackerController.currentScreen = ScreenType.SAMPLE_EDITOR
@@ -1091,7 +1102,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                                 val ext = item.file.extension.lowercase()
                                                 if (ext == "wav") {
                                                     val result = instrumentController.loadSampleFromFile(trackerController.project, item.file.absolutePath)
-                                                    if (result is com.conanizer.pockettracker.core.logic.LoadResult.Success) {
+                                                    if (result is LoadResult.Success) {
                                                         trackerController.projectVersion++
                                                         trackerController.currentScreen = previousScreen
                                                     } else {
@@ -1179,7 +1190,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                         2 -> {
                             previousScreen = trackerController.currentScreen
                             trackerController.currentScreen = ScreenType.FILE_BROWSER
-                            val projectsDir = java.io.File(fileController.getProjectsDirectory())
+                            val projectsDir = File(fileController.getProjectsDirectory())
                             fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtension = "ptp", fileExtensions = null, mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), projectsDir)
                         }
                         3 -> {
@@ -1307,12 +1318,12 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                             instrumentFileBrowserAction = "LOAD_PRESET"
                             previousScreen = trackerController.currentScreen
                             trackerController.currentScreen = ScreenType.FILE_BROWSER
-                            val instrumentsDir = java.io.File(fileController.getInstrumentsDirectory())
+                            val instrumentsDir = File(fileController.getInstrumentsDirectory())
                             fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtensions = listOf("pti"), mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), instrumentsDir)
                         }
                         3 -> {
                             val instrumentsDir = fileController.getInstrumentsDirectory()
-                            java.io.File(instrumentsDir).mkdirs()
+                            File(instrumentsDir).mkdirs()
                             val defaultName = instrument.name.ifEmpty { "INST${instrument.id.toString(16).padStart(2,'0').uppercase()}" }
                             qwertyKeyboardState = QwertyKeyboardState(
                                 isOpen = true,
@@ -1334,10 +1345,10 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                             previousScreen = trackerController.currentScreen
                             trackerController.currentScreen = ScreenType.FILE_BROWSER
                             if (instrument.instrumentType == InstrumentType.SOUNDFONT) {
-                                val soundfontsDir = java.io.File(fileController.getSoundfontsDirectory())
+                                val soundfontsDir = File(fileController.getSoundfontsDirectory())
                                 fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtensions = listOf("sf2", "sf3"), mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), soundfontsDir)
                             } else {
-                                val samplesDir = java.io.File(fileController.getSamplesDirectory())
+                                val samplesDir = File(fileController.getSamplesDirectory())
                                 fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtensions = listOf("wav") + FileBrowserModule.VIDEO_EXTENSIONS, mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), samplesDir)
                             }
                         }
@@ -1464,14 +1475,14 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     19 -> when (s.cursorCol) {
                         0 -> {
                             instrumentFileBrowserAction = "LOAD_SAMPLE_EDITOR"
-                            val samplesDir = java.io.File(fileController.getSamplesDirectory())
+                            val samplesDir = File(fileController.getSamplesDirectory())
                             fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtension = "wav", fileExtensions = listOf("wav"), mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), samplesDir)
                             trackerController.currentScreen = ScreenType.FILE_BROWSER
                         }
                         1 -> {
                             val baseName = s.sampleName.ifEmpty { "SAMPLE" }
                             val samplesDir = fileController.getSamplesDirectory()
-                            java.io.File(samplesDir).mkdirs()
+                            File(samplesDir).mkdirs()
                             val targetPath = "$samplesDir/$baseName.wav"
                             run {
                                 val semitones = sampleEditorState.pitchSemitones
@@ -1485,7 +1496,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                     sampleEditorState = sampleEditorState.copy(totalFrames = newLen, waveformData = audioEngine.getSampleWaveform(instId, 620), pitchSemitones = 0, rateMode = 0, selectionStart = scaleFrame(sampleEditorState.selectionStart), selectionEnd = scaleFrame(sampleEditorState.selectionEnd), slicePosition = scaleFrame(sampleEditorState.slicePosition))
                                 }
                             }
-                            if (!java.io.File(targetPath).exists()) {
+                            if (!File(targetPath).exists()) {
                                 val cuePoints = computeSliceCuePoints(sampleEditorState)
                                 val srcMode   = sampleEditorState.sourceMode
                                 val hasStereo = sampleEditorState.hasStereoData
@@ -1511,7 +1522,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                 }
                             } else {
                                 var suggestedName = baseName; var n = 1
-                                while (java.io.File("$samplesDir/$suggestedName.wav").exists()) { suggestedName = "${baseName}_${n.toString().padStart(4,'0')}"; n++ }
+                                while (File("$samplesDir/$suggestedName.wav").exists()) { suggestedName = "${baseName}_${n.toString().padStart(4,'0')}"; n++ }
                                 qwertyKeyboardState = QwertyKeyboardState(
                                     isOpen = true,
                                     text = suggestedName,
@@ -1575,7 +1586,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                             val baseName = s.sampleName.ifEmpty { "SAMPLE" }.replace(Regex("[^A-Za-z0-9_-]"), "_")
                             val chopsDirPath = "${fileController.getSamplesDirectory()}/Chops/$baseName"
                             coroutineScope.launch(Dispatchers.Default) {
-                                java.io.File(chopsDirPath).mkdirs()
+                                File(chopsDirPath).mkdirs()
                                 val floats   = audioEngine.getSampleData(instId)
                                 val origRate = audioEngine.getOriginalSampleRate(instId)
                                 for (idx in 0 until sliceCount) {
@@ -1609,7 +1620,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                         step.instrument = trackerController.lastEditedInstrument
                         step.volume = trackerController.lastEditedVolume
                         trackerController.projectVersion++
-                        if (notePreviewEnabled && step.note != com.conanizer.pockettracker.core.data.Note.EMPTY) {
+                        if (notePreviewEnabled && step.note != Note.EMPTY) {
                             val instrument = trackerController.project.instruments[step.instrument.coerceIn(0, 255)]
                             val sr = audioEngine.getDeviceSampleRate().toLong().coerceAtLeast(44100L)
                             val msPerStep = 60000.0 / trackerController.project.tempo / 4.0
@@ -1718,7 +1729,10 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         when (trackerController.currentScreen) {
             ScreenType.SONG -> {
                 val trackIndex = getTrackIndex(trackerController.cursorColumn)
-                clearSongChainRef(trackerController.project.tracks[trackIndex], trackerController.cursorRow)
+                clearSongChainRef(
+                    trackerController.project.tracks[trackIndex],
+                    trackerController.cursorRow
+                )
                 trackerController.projectVersion++
             }
             ScreenType.CHAIN -> {
@@ -1730,7 +1744,10 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val context = chainEditorModule.getCursorContext(chainState)
                 val action = trackerController.inputController.handleSelect(context)
                 if (action is InputAction.DELETE && trackerController.cursorColumn == 1) {
-                    clearChainSlot(trackerController.project.chains[trackerController.currentChain], trackerController.cursorRow)
+                    clearChainSlot(
+                        trackerController.project.chains[trackerController.currentChain],
+                        trackerController.cursorRow
+                    )
                     trackerController.projectVersion++
                 }
             }
@@ -1834,7 +1851,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 QwertyContext.PROJECT_NAME -> { trackerController.project.name = typedText; trackerController.projectVersion++ }
                 QwertyContext.FILE_RENAME -> {
                     val oldPath = qwertyKeyboardState.contextExtra
-                    val newBaseName = typedText.ifEmpty { java.io.File(oldPath).nameWithoutExtension }
+                    val newBaseName = typedText.ifEmpty { File(oldPath).nameWithoutExtension }
                     if (fileSystem.renameFile(oldPath, newBaseName))
                         fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState, fileBrowserState.currentDirectory)
                 }
@@ -1878,9 +1895,9 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     val srcMode   = sampleEditorState.sourceMode
                     val hasStereo = sampleEditorState.hasStereoData
                     coroutineScope.launch(Dispatchers.Default) {
-                        java.io.File(samplesDir).mkdirs()
+                        File(samplesDir).mkdirs()
                         var path = "$samplesDir/$name.wav"; var counter = 1
-                        while (java.io.File(path).exists()) { path = "$samplesDir/${name}_${counter.toString().padStart(4,'0')}.wav"; counter++ }
+                        while (File(path).exists()) { path = "$samplesDir/${name}_${counter.toString().padStart(4,'0')}.wav"; counter++ }
                         val origRate = audioEngine.getOriginalSampleRate(instId)
                         val leftCh: FloatArray; val rightCh: FloatArray
                         if (!hasStereo) { val m = audioEngine.getSampleData(instId); leftCh = m; rightCh = m }
@@ -1893,7 +1910,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                         val success = WavWriter.writeWav(fileSystem = fileSystem, path = path, leftChannel = leftCh, rightChannel = rightCh, sampleRate = origRate, cuePoints = cuePoints)
                         withContext(Dispatchers.Main) {
                             if (success) {
-                                val savedName = java.io.File(path).nameWithoutExtension
+                                val savedName = File(path).nameWithoutExtension
                                 trackerController.project.instruments[instId].sampleFilePath = path
                                 sampleEditorState = sampleEditorState.copy(sampleFilePath = path, sampleName = savedName, isModified = false)
                                 trackerController.currentScreen = previousScreen
@@ -1910,11 +1927,11 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 }
                 QwertyContext.VIDEO_EXTRACT -> {
                     val videoPath = qwertyKeyboardState.contextExtra ?: ""
-                    val outputName = typedText.ifEmpty { java.io.File(videoPath).nameWithoutExtension + "_audio" }
+                    val outputName = typedText.ifEmpty { File(videoPath).nameWithoutExtension + "_audio" }
                     coroutineScope.launch(Dispatchers.Default) {
                         val result = instrumentController.loadSampleFromVideo(trackerController.project, videoPath, videoExtractor, fileSystem, outputName)
                         withContext(Dispatchers.Main) {
-                            if (result is com.conanizer.pockettracker.core.logic.LoadResult.Success) {
+                            if (result is LoadResult.Success) {
                                 trackerController.projectVersion++
                                 fileBrowserState = fileBrowserState.copy(statusMessage = "CONVERTED: $outputName.WAV", statusSuccess = true)
                                 trackerController.currentScreen = previousScreen
@@ -2463,7 +2480,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         }
     }
 
-    private fun getFileBrowserSelectedFiles(): List<java.io.File> {
+    private fun getFileBrowserSelectedFiles(): List<File> {
         val state = fileBrowserState
         val range = state.selectedRange ?: return emptyList()
         return range.mapNotNull { idx ->
@@ -2479,7 +2496,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         var doneCount = 0; var failCount = 0
         for (srcFile in state.fileClipboard) {
             if (!srcFile.exists()) { failCount++; continue }
-            var destFile = java.io.File(destDir, srcFile.name)
+            var destFile = File(destDir, srcFile.name)
             if (destFile.absolutePath == srcFile.absolutePath) { doneCount++; continue }
             if (destFile.exists()) {
                 var counter = 2
@@ -2487,7 +2504,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val base = srcFile.nameWithoutExtension
                 do {
                     val newName = if (ext.isEmpty()) "${base}_$counter" else "${base}_$counter.$ext"
-                    destFile = java.io.File(destDir, newName)
+                    destFile = File(destDir, newName)
                     counter++
                 } while (destFile.exists())
             }

@@ -1,7 +1,7 @@
 package com.conanizer.pockettracker.core.logic
 
-import com.conanizer.pockettracker.CursorContext
-import com.conanizer.pockettracker.CursorValueType
+import com.conanizer.pockettracker.input.CursorContext
+import com.conanizer.pockettracker.input.CursorValueType
 import com.conanizer.pockettracker.core.logging.ILogger
 
 class InputController(

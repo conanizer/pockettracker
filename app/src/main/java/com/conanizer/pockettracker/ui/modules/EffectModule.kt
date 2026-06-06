@@ -1,16 +1,24 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui.modules
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.input.CursorCapabilities
+import com.conanizer.pockettracker.input.CursorContext
+import com.conanizer.pockettracker.input.CursorContextFactory
+import com.conanizer.pockettracker.input.CursorValueType
+import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.logic.InputAction
+import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.toHex2
 
 data class EffectState(
     val project: Project,
     val cursorRow: Int,  // 0-9
-    val appTheme: AppTheme = AppTheme.CLASSIC
+    val appTheme: AppTheme = AppTheme.Companion.CLASSIC
 )
 
 /**
@@ -178,7 +186,7 @@ class EffectModule : TrackerModule {
         val proj = state.project
         return when (state.cursorRow) {
             ROW_MASTER_TYPE -> CursorContext(
-                valueType    = CursorValueType.HEX_BYTE,
+                valueType = CursorValueType.HEX_BYTE,
                 capabilities = CursorCapabilities(canIncrement = true, canDecrement = true),
                 currentValue = proj.masterBusFx,
                 minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1

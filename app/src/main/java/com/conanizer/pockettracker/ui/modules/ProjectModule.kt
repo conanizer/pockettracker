@@ -1,10 +1,19 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui.modules
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.input.CursorCapabilities
+import com.conanizer.pockettracker.input.CursorContext
+import com.conanizer.pockettracker.input.CursorContextFactory
+import com.conanizer.pockettracker.input.CursorValueType
+import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.core.data.Project
+import com.conanizer.pockettracker.core.logic.InputAction
+import com.conanizer.pockettracker.ui.darken
+import com.conanizer.pockettracker.ui.drawBitmapText
 
 /**
  * PROJECT SCREEN MODULE - FIXED STYLING
@@ -588,13 +597,13 @@ class ProjectModule : TrackerModule {
      */
     fun handleInput(
         state: ProjectState,
-        action: com.conanizer.pockettracker.core.logic.InputAction
+        action: InputAction
     ): InputResult {
         when (state.cursorRow) {
             0 -> {
                 // TEMPO row
                 when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                    is InputAction.SET_VALUE -> {
                         state.project.tempo = action.value.coerceIn(20, 999)
                     }
                     else -> { /* Other actions not applicable */ }
@@ -603,7 +612,7 @@ class ProjectModule : TrackerModule {
             1 -> {
                 // TRANSPOSE row
                 when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                    is InputAction.SET_VALUE -> {
                         state.project.transpose = action.value.coerceIn(0, 255)
                     }
                     else -> { /* Other actions not applicable */ }
@@ -615,14 +624,14 @@ class ProjectModule : TrackerModule {
                 if (charIndex < 0 || charIndex >= 20) return InputResult(modified = false)
 
                 when (action) {
-                    is com.conanizer.pockettracker.core.logic.InputAction.SET_VALUE -> {
+                    is InputAction.SET_VALUE -> {
                         // Set character at position
                         val char = action.value.toChar()
                         val sb = StringBuilder(state.project.name.padEnd(20, ' '))
                         sb.setCharAt(charIndex, char)
                         state.project.name = sb.toString().trimEnd()  // Remove trailing spaces
                     }
-                    is com.conanizer.pockettracker.core.logic.InputAction.DELETE -> {
+                    is InputAction.DELETE -> {
                         // Delete character (replace with space)
                         if (charIndex < state.project.name.length) {
                             val sb = StringBuilder(state.project.name.padEnd(20, ' '))
@@ -639,7 +648,7 @@ class ProjectModule : TrackerModule {
         }
 
         return InputResult(
-            modified = action !is com.conanizer.pockettracker.core.logic.InputAction.NONE
+            modified = action !is InputAction.NONE
         )
     }
 
@@ -670,5 +679,5 @@ data class ProjectState(
     val isRendering: Boolean = false,
     val isStemsRendering: Boolean = false,
     val renderProgress: Float = 0f,
-    val appTheme: AppTheme = AppTheme.CLASSIC
+    val appTheme: AppTheme = AppTheme.Companion.CLASSIC
 )

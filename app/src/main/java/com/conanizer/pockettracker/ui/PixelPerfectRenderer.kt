@@ -1,5 +1,6 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui
 
+import android.util.Log
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -8,10 +9,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.translate
+import com.conanizer.pockettracker.platform.android.DeviceAdapter
 import kotlin.math.min
 import kotlinx.coroutines.delay
 import com.conanizer.pockettracker.core.audio.AudioEngine
@@ -19,6 +23,7 @@ import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.data.ScreenType
 import com.conanizer.pockettracker.core.logic.EffectProcessor
+import com.conanizer.pockettracker.core.logic.PlaybackController
 import com.conanizer.pockettracker.ui.modules.ChainEditorModule
 import com.conanizer.pockettracker.ui.modules.ChainEditorState
 import com.conanizer.pockettracker.ui.modules.EffectModule
@@ -60,6 +65,7 @@ import com.conanizer.pockettracker.ui.overlays.descriptionLines
 import com.conanizer.pockettracker.ui.overlays.qwertyRowsForLayout
 import com.conanizer.pockettracker.ui.theme.AppTheme
 import com.conanizer.pockettracker.ui.theme.VisualizerType
+import kotlin.text.iterator
 
 /**
  * PIXEL-PERFECT TRACKER - MODULAR VERSION
@@ -100,7 +106,7 @@ fun PixelPerfectTracker(
     currentScreen: ScreenType,
     project: Project,
     audioEngine: AudioEngine,
-    playbackController: com.conanizer.pockettracker.core.logic.PlaybackController,
+    playbackController: PlaybackController,
     cursorRow: Int,
     cursorColumn: Int,
     isPlaying: Boolean,
@@ -187,7 +193,7 @@ fun PixelPerfectTracker(
     overlayStrength: Int = 128
 ) {
     if (currentScreen == ScreenType.FILE_BROWSER) {
-        android.util.Log.d("PixelPerfectTracker", "FILE_BROWSER screen, fileBrowserState=${if (fileBrowserState != null) "not null (${fileBrowserState.items.size} items)" else "NULL"}")
+        Log.d("PixelPerfectTracker", "FILE_BROWSER screen, fileBrowserState=${if (fileBrowserState != null) "not null (${fileBrowserState.items.size} items)" else "NULL"}")
     }
     // Playback state
     var playbackRow by remember { mutableStateOf(0) }
@@ -594,7 +600,7 @@ class TrackerLayout {
                     draw(x = 0, y = 0, scale = scale, state = fileBrowserState.copy(appTheme = appTheme))
                 }
             } else {
-                android.util.Log.e("FileBrowser", "fileBrowserState is NULL - cannot render!")
+                Log.e("FileBrowser", "fileBrowserState is NULL - cannot render!")
             }
         } else if (currentScreen == ScreenType.SAMPLE_EDITOR && !eqEditorState.isOpen) {
             if (sampleEditorState != null) {
@@ -1028,7 +1034,7 @@ class TrackerLayout {
             color = Color(t.textTitle),
             topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
             size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat()),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
+            style = Stroke(width = scale.toFloat())
         )
         val instruction = "A=YES  B=NO"
         drawBitmapText(title,       boxX + (boxW - tw(title))       / 2, boxY + 8,  scale, Color(t.textTitle),  cs, fs)
@@ -1085,7 +1091,7 @@ class TrackerLayout {
             color = Color(t.textTitle),
             topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
             size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat()),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
+            style = Stroke(width = scale.toFloat())
         )
 
         // ── Context-sensitive header (centered) ───────────────────────────────
@@ -1167,7 +1173,7 @@ class TrackerLayout {
                         color = Color(t.textCursor),
                         topLeft = Offset((spaceX * scale).toFloat(), (rowY * scale).toFloat()),
                         size = Size((spaceW * scale).toFloat(), (cellH * scale).toFloat()),
-                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
+                        style = Stroke(width = scale.toFloat())
                     )
                 }
                 drawBitmapText(
@@ -1203,7 +1209,7 @@ class TrackerLayout {
                             color = Color(t.textCursor),
                             topLeft = Offset((cellX * scale).toFloat(), (rowY * scale).toFloat()),
                             size = Size(((cellW - 1) * scale).toFloat(), (cellH * scale).toFloat()),
-                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
+                            style = Stroke(width = scale.toFloat())
                         )
                     }
 
@@ -1269,7 +1275,7 @@ class TrackerLayout {
             color = Color(t.textTitle),
             topLeft = Offset((boxX * scale).toFloat(), (boxY * scale).toFloat()),
             size = Size((boxW * scale).toFloat(), (boxH * scale).toFloat()),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
+            style = Stroke(width = scale.toFloat())
         )
 
         // ── Description lines (up to 4) ───────────────────────────────────────
@@ -1332,7 +1338,7 @@ class TrackerLayout {
                     color = Color(t.textCursor),
                     topLeft = Offset((cellX * scale).toFloat(), (cellY * scale).toFloat()),
                     size = Size((cellW * scale).toFloat(), (rowH * scale).toFloat()),
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = scale.toFloat())
+                    style = Stroke(width = scale.toFloat())
                 )
             }
 
@@ -1433,7 +1439,7 @@ fun DrawScope.drawBitmapText(
  * Pixel-perfect paint for bitmap font rendering.
  * isAntiAlias = false prevents sub-pixel blending between adjacent pixels.
  */
-private val _bitmapPaint = androidx.compose.ui.graphics.Paint().apply {
+private val _bitmapPaint = Paint().apply {
     isAntiAlias = false
 }
 
@@ -1456,7 +1462,7 @@ fun DrawScope.drawBitmapChar(
                 (5 * fontScale * scale).toFloat(),
                 (5 * fontScale * scale).toFloat()
             ),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = (scale * fontScale).toFloat())
+            style = Stroke(width = (scale * fontScale).toFloat())
         )
         return
     }

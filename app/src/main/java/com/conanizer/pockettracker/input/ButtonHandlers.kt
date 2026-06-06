@@ -10,16 +10,16 @@
  * - Modifier.inputHandler(): Compose modifier to attach input handling to any UI
  */
 
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.input
 
 import android.os.Handler
 import android.os.Looper
-import androidx.compose.runtime.*
 import com.conanizer.pockettracker.core.logging.ILogger
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.type
 
@@ -324,7 +324,7 @@ class InputMapper(
      * @param keyEvent - The raw keyboard event
      * @return Boolean - true if we handled this key, false if we ignored it
      */
-    fun handleKeyEvent(keyEvent: androidx.compose.ui.input.key.KeyEvent): Boolean {
+    fun handleKeyEvent(keyEvent: KeyEvent): Boolean {
         // Try keyboard mapping first (for PC), then native gamepad codes (for handhelds)
         val virtualButton = keyboardMapping[keyEvent.key]
             ?: nativeGamepadMapping[keyEvent.nativeKeyEvent.keyCode]

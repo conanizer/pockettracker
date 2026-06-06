@@ -1,4 +1,4 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.input
 
 import com.conanizer.pockettracker.core.logic.EffectProcessor
 

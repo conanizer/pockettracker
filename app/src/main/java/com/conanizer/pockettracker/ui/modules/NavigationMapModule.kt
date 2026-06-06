@@ -1,10 +1,13 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui.modules
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.core.data.ScreenType
+import com.conanizer.pockettracker.ui.drawBitmapText
 
 /**
  * SIMPLIFIED NAVIGATION MAP MODULE
@@ -235,5 +238,5 @@ class NavigationMapModule : TrackerModule {
 data class NavigationMapState(
     val currentScreen: ScreenType,
     val sourceColumn: Int,  // Which column we came from (0-4)
-    val appTheme: AppTheme = AppTheme.CLASSIC
+    val appTheme: AppTheme = AppTheme.Companion.CLASSIC
 )

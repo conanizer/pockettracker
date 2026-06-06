@@ -1,11 +1,18 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui.modules
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.input.CursorContext
+import com.conanizer.pockettracker.input.CursorContextFactory
+import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.logic.InputAction
+import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.toHex2
+import kotlin.math.log10
 
 /**
  * MIXER SCREEN MODULE (620×392)
@@ -107,7 +114,8 @@ class MixerModule : TrackerModule {
             size    = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
 
-        drawBitmapText("MIXER", x + 10, y + TEXT_PADDING, scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("MIXER", x + 10, y + TEXT_PADDING, scale,
+            Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
 
         // ── Track stereo meters + volumes (active only at row 0) ───────────
         for (i in 0..7) {
@@ -186,7 +194,9 @@ class MixerModule : TrackerModule {
         drawBitmapText("EQ", x + MSTR_LABEL_X, y + MROW1_Y,
             scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(eqText, x + MSTR_VALUE_X, y + MROW1_Y,
-            scale, if (eqSel) Color(t.textCursor) else if (eqSlot < 0) Color(t.textEmpty) else Color(t.textValue),
+            scale, if (eqSel) Color(t.textCursor) else if (eqSlot < 0) Color(t.textEmpty) else Color(
+                t.textValue
+            ),
             CHAR_SPACING, FONT_SCALE)
 
         // Row 2: OTT/DUST depth editable (right only)
@@ -314,7 +324,7 @@ class MixerModule : TrackerModule {
     }
 
     private fun levelToHeightPx(level: Float, meterH: Int): Int {
-        val db  = 20f * kotlin.math.log10(level.coerceAtLeast(0.00001f))
+        val db  = 20f * log10(level.coerceAtLeast(0.00001f))
         val pos = (db.coerceIn(-42f, 6f) + 42f) / 48f
         return (meterH * pos).toInt()
     }
@@ -440,7 +450,7 @@ data class MixerState(
     val masterPeaks:   FloatArray = FloatArray(2),
     val reverbPeaks:   FloatArray = FloatArray(2),
     val delayPeaks:    FloatArray = FloatArray(2),
-    val appTheme:      AppTheme   = AppTheme.CLASSIC
+    val appTheme: AppTheme = AppTheme.Companion.CLASSIC
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
