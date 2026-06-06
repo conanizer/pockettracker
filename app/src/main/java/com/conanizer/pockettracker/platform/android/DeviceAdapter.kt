@@ -1,15 +1,11 @@
-// ============================================================================
-// DeviceAdapter.kt - CORRECT with 200px portrait spacer
-// ============================================================================
-
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.platform.android
 
 import android.content.Context
 import android.content.res.Configuration
-import android.os.Build
-import android.view.InputDevice
-import android.view.KeyEvent
 import android.graphics.Point
+import android.os.Build
+import android.util.Log
+import android.view.InputDevice
 import android.view.WindowManager
 
 class DeviceAdapter(private val context: Context) {
@@ -75,7 +71,7 @@ class DeviceAdapter(private val context: Context) {
             val device = InputDevice.getDevice(deviceId) ?: continue
 
             if (device.name == "Virtual") {
-                android.util.Log.d("DeviceAdapter", "Skipping: Virtual (emulator UI)")
+                Log.d("DeviceAdapter", "Skipping: Virtual (emulator UI)")
                 continue
             }
 
@@ -86,7 +82,7 @@ class DeviceAdapter(private val context: Context) {
             val hasJoystick = (sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
 
             if (hasGamepad || hasJoystick) {
-                android.util.Log.d("DeviceAdapter", "Found gaming device: ${device.name}")
+                Log.d("DeviceAdapter", "Found gaming device: ${device.name}")
                 return true
             }
 
@@ -98,19 +94,19 @@ class DeviceAdapter(private val context: Context) {
                 if (lowerName.contains("xbox") ||
                     lowerName.contains("controller") ||
                     lowerName.contains("gamepad")) {
-                    android.util.Log.d("DeviceAdapter", "Treating as gamepad (keyboard-like): ${device.name}")
+                    Log.d("DeviceAdapter", "Treating as gamepad (keyboard-like): ${device.name}")
                     return true
                 }
             }
         }
 
-        android.util.Log.d("DeviceAdapter", "No gaming controls found - virtual buttons needed")
+        Log.d("DeviceAdapter", "No gaming controls found - virtual buttons needed")
         return false
     }
     private fun isLandscapeOrientation(): Boolean {
         val orientation = context.resources.configuration.orientation
         val isLandscape = orientation == Configuration.ORIENTATION_LANDSCAPE
-        android.util.Log.d("DeviceAdapter", "Orientation: ${if (isLandscape) "LANDSCAPE" else "PORTRAIT"}")
+        Log.d("DeviceAdapter", "Orientation: ${if (isLandscape) "LANDSCAPE" else "PORTRAIT"}")
         return isLandscape
     }
 
@@ -119,7 +115,7 @@ class DeviceAdapter(private val context: Context) {
 
         val (deviceWidth, deviceHeight) = getDeviceDimensions()
 
-        android.util.Log.d("DeviceAdapter", "Device PHYSICAL screen: ${deviceWidth}×${deviceHeight}")
+        Log.d("DeviceAdapter", "Device PHYSICAL screen: ${deviceWidth}×${deviceHeight}")
 
         val needsVirtual = !hasButtons
         val isLandscape = if (needsVirtual) isLandscapeOrientation() else true
@@ -130,8 +126,8 @@ class DeviceAdapter(private val context: Context) {
             val scale = minOf(scaleByWidth, scaleByHeight)
             val finalScale = maxOf(1, scale)
 
-            android.util.Log.d("DeviceAdapter", "Mode: FULL SCREEN")
-            android.util.Log.d("DeviceAdapter", "Scale factors: width=${scaleByWidth}, height=${scaleByHeight}")
+            Log.d("DeviceAdapter", "Mode: FULL SCREEN")
+            Log.d("DeviceAdapter", "Scale factors: width=${scaleByWidth}, height=${scaleByHeight}")
 
             return LayoutConfig(
                 needsVirtualButtons = false,
@@ -181,18 +177,18 @@ class DeviceAdapter(private val context: Context) {
     }
 
     private fun calculateLandscapeLayout(deviceWidth: Int, deviceHeight: Int): LayoutConfig {
-        android.util.Log.d("DeviceAdapter", "=== LANDSCAPE CALCULATION ===")
+        Log.d("DeviceAdapter", "=== LANDSCAPE CALCULATION ===")
 
         for (scale in 4 downTo 1) {
             val scaledScreenWidth = SCREEN_WIDTH * scale
             val scaledScreenHeight = SCREEN_HEIGHT * scale
 
-            android.util.Log.d("DeviceAdapter", "")
-            android.util.Log.d("DeviceAdapter", "Testing scale ${scale}x:")
-            android.util.Log.d("DeviceAdapter", "  Scaled screen: ${scaledScreenWidth}×${scaledScreenHeight}")
+            Log.d("DeviceAdapter", "")
+            Log.d("DeviceAdapter", "Testing scale ${scale}x:")
+            Log.d("DeviceAdapter", "  Scaled screen: ${scaledScreenWidth}×${scaledScreenHeight}")
 
             if (scaledScreenHeight > deviceHeight || scaledScreenWidth > deviceWidth) {
-                android.util.Log.d("DeviceAdapter", "  ✗ Screen too tall/wide")
+                Log.d("DeviceAdapter", "  ✗ Screen too tall/wide")
                 continue
             }
 
@@ -201,19 +197,19 @@ class DeviceAdapter(private val context: Context) {
             val availableButtonWidth = (deviceWidth - scaledScreenWidth) / 2
 
             if (availableButtonWidth < MIN_BUTTON_PANEL_PX) {
-                android.util.Log.d("DeviceAdapter", "  ✗ Button panel too narrow (${availableButtonWidth}px < ${MIN_BUTTON_PANEL_PX}px)")
+                Log.d("DeviceAdapter", "  ✗ Button panel too narrow (${availableButtonWidth}px < ${MIN_BUTTON_PANEL_PX}px)")
                 continue
             }
             val availableButtonHeight = deviceHeight  // FULL device height
 
-            android.util.Log.d("DeviceAdapter", "  Remaining width: ${deviceWidth - scaledScreenWidth}px")
-            android.util.Log.d("DeviceAdapter", "  Button panel: ${availableButtonWidth}px each")
+            Log.d("DeviceAdapter", "  Remaining width: ${deviceWidth - scaledScreenWidth}px")
+            Log.d("DeviceAdapter", "  Button panel: ${availableButtonWidth}px each")
 
             val boxRatio = availableButtonWidth.toFloat() / availableButtonHeight.toFloat()
             val patternRatio = BUTTON_PATTERN_WIDTH / BUTTON_PATTERN_HEIGHT
 
-            android.util.Log.d("DeviceAdapter", "  Box ratio: ${"%.3f".format(boxRatio)}")
-            android.util.Log.d("DeviceAdapter", "  Pattern ratio: ${"%.3f".format(patternRatio)}")
+            Log.d("DeviceAdapter", "  Box ratio: ${"%.3f".format(boxRatio)}")
+            Log.d("DeviceAdapter", "  Pattern ratio: ${"%.3f".format(patternRatio)}")
 
             val requiredHeight: Int
 
@@ -221,17 +217,17 @@ class DeviceAdapter(private val context: Context) {
                 // Width limits
                 val X = availableButtonWidth / BUTTON_PATTERN_WIDTH
                 requiredHeight = (X * BUTTON_PATTERN_HEIGHT).toInt()
-                android.util.Log.d("DeviceAdapter", "  WIDTH limits → X = ${"%.2f".format(X)}px")
+                Log.d("DeviceAdapter", "  WIDTH limits → X = ${"%.2f".format(X)}px")
             } else {
                 // Height limits
                 requiredHeight = availableButtonHeight
-                android.util.Log.d("DeviceAdapter", "  HEIGHT limits")
+                Log.d("DeviceAdapter", "  HEIGHT limits")
             }
 
-            android.util.Log.d("DeviceAdapter", "  Need ${requiredHeight}px height (have ${availableButtonHeight}px)")
+            Log.d("DeviceAdapter", "  Need ${requiredHeight}px height (have ${availableButtonHeight}px)")
 
             if (requiredHeight <= availableButtonHeight) {
-                android.util.Log.d("DeviceAdapter", "  ✓ FITS! Using ${scale}x")
+                Log.d("DeviceAdapter", "  ✓ FITS! Using ${scale}x")
 
                 return LayoutConfig(
                     needsVirtualButtons = true,
@@ -265,17 +261,17 @@ class DeviceAdapter(private val context: Context) {
     }
 
     private fun calculatePortraitLayout(deviceWidth: Int, deviceHeight: Int): LayoutConfig {
-        android.util.Log.d("DeviceAdapter", "=== PORTRAIT CALCULATION ===")
+        Log.d("DeviceAdapter", "=== PORTRAIT CALCULATION ===")
 
         for (scale in 4 downTo 1) {
             val scaledScreenWidth = SCREEN_WIDTH * scale
             val scaledScreenHeight = SCREEN_HEIGHT * scale
 
-            android.util.Log.d("DeviceAdapter", "")
-            android.util.Log.d("DeviceAdapter", "Testing scale ${scale}x:")
+            Log.d("DeviceAdapter", "")
+            Log.d("DeviceAdapter", "Testing scale ${scale}x:")
 
             if (scaledScreenWidth > deviceWidth) {
-                android.util.Log.d("DeviceAdapter", "  ✗ Screen too wide")
+                Log.d("DeviceAdapter", "  ✗ Screen too wide")
                 continue
             }
 
@@ -284,13 +280,13 @@ class DeviceAdapter(private val context: Context) {
             val availableButtonHeight = deviceHeight - PORTRAIT_SPACER_HEIGHT - scaledScreenHeight
             val availableButtonWidth = deviceWidth  // Full width
 
-            android.util.Log.d("DeviceAdapter", "  Available for buttons: ${availableButtonWidth}×${availableButtonHeight}")
+            Log.d("DeviceAdapter", "  Available for buttons: ${availableButtonWidth}×${availableButtonHeight}")
 
             val boxRatio = availableButtonWidth.toFloat() / availableButtonHeight.toFloat()
             val patternRatio = PORTRAIT_PATTERN_WIDTH / PORTRAIT_PATTERN_HEIGHT
 
-            android.util.Log.d("DeviceAdapter", "  Box ratio: ${"%.3f".format(boxRatio)}")
-            android.util.Log.d("DeviceAdapter", "  Pattern ratio: ${"%.3f".format(patternRatio)}")
+            Log.d("DeviceAdapter", "  Box ratio: ${"%.3f".format(boxRatio)}")
+            Log.d("DeviceAdapter", "  Pattern ratio: ${"%.3f".format(patternRatio)}")
 
             val requiredHeight: Int
 
@@ -298,16 +294,16 @@ class DeviceAdapter(private val context: Context) {
                 // Width limits
                 val X = availableButtonWidth / PORTRAIT_PATTERN_WIDTH
                 requiredHeight = (X * PORTRAIT_PATTERN_HEIGHT).toInt()
-                android.util.Log.d("DeviceAdapter", "  WIDTH limits → X = ${"%.2f".format(X)}px")
-                android.util.Log.d("DeviceAdapter", "  Required height: ${requiredHeight}px")
+                Log.d("DeviceAdapter", "  WIDTH limits → X = ${"%.2f".format(X)}px")
+                Log.d("DeviceAdapter", "  Required height: ${requiredHeight}px")
             } else {
                 // Height limits
                 requiredHeight = availableButtonHeight
-                android.util.Log.d("DeviceAdapter", "  HEIGHT limits")
+                Log.d("DeviceAdapter", "  HEIGHT limits")
             }
 
             if (requiredHeight <= availableButtonHeight) {
-                android.util.Log.d("DeviceAdapter", "  ✓ FITS! Using ${scale}x")
+                Log.d("DeviceAdapter", "  ✓ FITS! Using ${scale}x")
 
                 return LayoutConfig(
                     needsVirtualButtons = true,
@@ -345,14 +341,14 @@ class DeviceAdapter(private val context: Context) {
      * Screen sits above the button area, centered horizontally.
      */
     private fun calculatePortrait2Layout(deviceWidth: Int, deviceHeight: Int): LayoutConfig {
-        android.util.Log.d("DeviceAdapter", "=== PORTRAIT2 CALCULATION ===")
+        Log.d("DeviceAdapter", "=== PORTRAIT2 CALCULATION ===")
 
         for (scale in 4 downTo 1) {
             val scaledScreenWidth = SCREEN_WIDTH * scale
             val scaledScreenHeight = SCREEN_HEIGHT * scale
 
             if (scaledScreenWidth > deviceWidth) {
-                android.util.Log.d("DeviceAdapter", "  ✗ Scale ${scale}x: screen too wide")
+                Log.d("DeviceAdapter", "  ✗ Scale ${scale}x: screen too wide")
                 continue
             }
 
@@ -361,7 +357,7 @@ class DeviceAdapter(private val context: Context) {
             // Height: 5.2X (0.8X spacer above + 4 cells + 3×0.1X row spacers + 0.1X bottom)
             val remainingHeight = deviceHeight - scaledScreenHeight
             if (remainingHeight <= 0) {
-                android.util.Log.d("DeviceAdapter", "  ✗ Scale ${scale}x: no space for buttons")
+                Log.d("DeviceAdapter", "  ✗ Scale ${scale}x: no space for buttons")
                 continue
             }
 
@@ -374,7 +370,7 @@ class DeviceAdapter(private val context: Context) {
             val buttonAreaHeight = (X * 5.2f).toInt()  // 0.8X spacer + 4 button rows + 3×0.1X row spacers + 0.1X bottom
             val buttonAreaWidth  = (X * 4.5f).toInt()  // 2×0.1X outer + 4 button cols + 3×0.1X col spacers
 
-            android.util.Log.d("DeviceAdapter", "  ✓ Scale ${scale}x: X=$X, btnArea=${buttonAreaWidth}×${buttonAreaHeight}")
+            Log.d("DeviceAdapter", "  ✓ Scale ${scale}x: X=$X, btnArea=${buttonAreaWidth}×${buttonAreaHeight}")
 
             return LayoutConfig(
                 needsVirtualButtons = true,

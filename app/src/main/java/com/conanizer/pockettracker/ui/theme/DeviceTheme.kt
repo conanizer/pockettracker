@@ -1,4 +1,4 @@
-package com.conanizer.pockettracker
+package com.conanizer.pockettracker.ui.theme
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -7,12 +7,12 @@ import androidx.compose.ui.text.font.FontFamily
 data class DeviceTheme(
 
     // Fallback colors (visible immediately, even before PNGs load)
-    val casingColor:        Color,
+    val casingColor: Color,
     val buttonBackingColor: Color,
-    val screenBezelColor:   Color,
-    val buttonNormalColor:  Color,
+    val screenBezelColor: Color,
+    val buttonNormalColor: Color,
     val buttonPressedColor: Color,
-    val buttonLabelColor:   Color,
+    val buttonLabelColor: Color,
 
     // Bezel border thickness.
     // Use screenBezelThicknessX (in skin X-units) when a bezel PNG is present — this keeps
@@ -26,7 +26,7 @@ data class DeviceTheme(
     val buttonBackingCornerDp: Float = 12f,
 
     // Button label font (null = FontFamily.SansSerif system fallback)
-    val buttonFont: FontFamily = FontFamily.SansSerif,
+    val buttonFont: FontFamily = FontFamily.Companion.SansSerif,
 
     // PNG image assets (null = use color fallback)
     val topPanelImage:       ImageBitmap? = null,
@@ -38,7 +38,7 @@ data class DeviceTheme(
     val buttonWideNormal:    ImageBitmap? = null,
     val buttonWidePressed:   ImageBitmap? = null,
 
-) {
+    ) {
     companion object {
 
         // AMIGA theme: warm beige/tan, Commodore Amiga-inspired
@@ -61,7 +61,7 @@ data class DeviceTheme(
             screenBezelColor   = Color(0xFF222222),
             buttonNormalColor  = Color(0xFF3D5A80),
             buttonPressedColor = Color(0xFF98C1D9),
-            buttonLabelColor   = Color.White,
+            buttonLabelColor   = Color.Companion.White,
         )
     }
 }

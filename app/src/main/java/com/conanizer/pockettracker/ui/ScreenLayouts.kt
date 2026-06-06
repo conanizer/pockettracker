@@ -33,6 +33,22 @@ import com.conanizer.pockettracker.core.audio.AudioEngine
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.data.ScreenType
 import com.conanizer.pockettracker.core.logic.PlaybackController
+import com.conanizer.pockettracker.input.InputMapper
+import com.conanizer.pockettracker.input.VirtualControls
+import com.conanizer.pockettracker.input.VirtualControlsLeft
+import com.conanizer.pockettracker.input.VirtualControlsPortrait2
+import com.conanizer.pockettracker.input.VirtualControlsRight
+import com.conanizer.pockettracker.input.inputHandler
+import com.conanizer.pockettracker.ui.DESIGN_HEIGHT_PX
+import com.conanizer.pockettracker.ui.DESIGN_WIDTH_PX
+import com.conanizer.pockettracker.ui.PixelPerfectTracker
+import com.conanizer.pockettracker.ui.modules.FileBrowserModule
+import com.conanizer.pockettracker.ui.modules.SampleEditorState
+import com.conanizer.pockettracker.ui.modules.ThemeEditorState
+import com.conanizer.pockettracker.ui.overlays.EqEditorState
+import com.conanizer.pockettracker.ui.overlays.FxHelperState
+import com.conanizer.pockettracker.ui.overlays.QwertyKeyboardState
+import com.conanizer.pockettracker.ui.theme.DeviceTheme
 
 // ============================================================================
 // TRACKER SCREEN PARAMS — all PixelPerfectTracker parameters in one bundle.
@@ -110,7 +126,7 @@ data class TrackerScreenParams(
     val overlayName: String = "OFF"
 )
 
-/** Thin wrapper — forwards every field of [params] to [PixelPerfectTracker], then draws screen overlay. */
+/** Thin wrapper — forwards every field of [params] to [com.conanizer.pockettracker.ui.PixelPerfectTracker], then draws screen overlay. */
 @Composable
 private fun TrackerScreen(params: TrackerScreenParams, modifier: Modifier = Modifier) {
     // Build overlay modifier once per recomposition; drawWithContent shares the same canvas as
@@ -131,76 +147,76 @@ private fun TrackerScreen(params: TrackerScreenParams, modifier: Modifier = Modi
     } else Modifier
 
     Box(modifier = overlayModifier) {
-    PixelPerfectTracker(
-        currentScreen        = params.currentScreen,
-        project              = params.project,
-        audioEngine          = params.audioEngine,
-        playbackController   = params.playbackController,
-        cursorRow            = params.cursorRow,
-        cursorColumn         = params.cursorColumn,
-        isPlaying            = params.isPlaying,
-        previousColumn       = params.previousColumn,
-        currentChain         = params.currentChain,
-        currentPhrase        = params.currentPhrase,
-        projectCursorRow     = params.projectCursorRow,
-        projectCursorColumn  = params.projectCursorColumn,
-        projectStatusMessage = params.projectStatusMessage,
-        projectStatusSuccess = params.projectStatusSuccess,
-        projectVersion       = params.projectVersion,
-        currentInstrument    = params.currentInstrument,
-        instrumentCursorRow  = params.instrumentCursorRow,
-        instrumentCursorColumn = params.instrumentCursorColumn,
-        instrumentStatusMessage = params.instrumentStatusMessage,
-        instrumentStatusSuccess = params.instrumentStatusSuccess,
-        fileBrowserState     = params.fileBrowserState,
-        sampleEditorState    = params.sampleEditorState,
-        selectionInfo        = params.selectionInfo,
-        clipboardInfo        = params.clipboardInfo,
-        selectionMode        = params.selectionMode,
-        isCellSelected       = params.isCellSelected,
-        mixerCursorColumn    = params.mixerCursorColumn,
-        mixerMasterRow       = params.mixerMasterRow,
-        trackPeaks           = params.trackPeaks,
-        masterPeaks          = params.masterPeaks,
-        sendPeaks            = params.sendPeaks,
-        currentTable         = params.currentTable,
-        tableCursorRow       = params.tableCursorRow,
-        tableCursorColumn    = params.tableCursorColumn,
-        currentGroove        = params.currentGroove,
-        grooveCursorRow      = params.grooveCursorRow,
-        modCursorRow         = params.modCursorRow,
-        modCursorPair        = params.modCursorPair,
-        modCursorSide        = params.modCursorSide,
-        effectsCursorRow     = params.effectsCursorRow,
-        isRendering          = params.isRendering,
-        renderProgress       = params.renderProgress,
-        showCleanDialog      = params.showCleanDialog,
-        cleanDialogTarget    = params.cleanDialogTarget,
-        cleanDialogCursor    = params.cleanDialogCursor,
-        showNewProjectDialog = params.showNewProjectDialog,
-        showInstrTypeDialog  = params.showInstrTypeDialog,
-        songScrollPosition   = params.songScrollPosition,
-        scalingMode          = params.scalingMode,
-        buttonSoundEnabled   = params.buttonSoundEnabled,
-        buttonSoundVolume    = params.buttonSoundVolume,
-        buttonVibroEnabled   = params.buttonVibroEnabled,
-        vibroPower           = params.vibroPower,
-        qwertyKeyboardState  = params.qwertyKeyboardState,
-        fxHelperState        = params.fxHelperState,
-        eqEditorState        = params.eqEditorState,
-        eqSpectrumData       = params.eqSpectrumData,
-        themeEditorState     = params.themeEditorState,
-        settingsCursorRow    = params.settingsCursorRow,
-        settingsCursorColumn = params.settingsCursorColumn,
-        cursorRemember       = params.cursorRemember,
-        notePreviewEnabled   = params.notePreviewEnabled,
-        soundfontPresetName  = params.soundfontPresetName,
-        soundfontPresetCount = params.soundfontPresetCount,
-        soundfontPresetIndex = params.soundfontPresetIndex,
-        overlayFiles         = params.overlayFiles,
-        overlayName          = params.overlayName,
-        overlayStrength      = params.overlayStrength
-    )
+        PixelPerfectTracker(
+            currentScreen = params.currentScreen,
+            project = params.project,
+            audioEngine = params.audioEngine,
+            playbackController = params.playbackController,
+            cursorRow = params.cursorRow,
+            cursorColumn = params.cursorColumn,
+            isPlaying = params.isPlaying,
+            previousColumn = params.previousColumn,
+            currentChain = params.currentChain,
+            currentPhrase = params.currentPhrase,
+            projectCursorRow = params.projectCursorRow,
+            projectCursorColumn = params.projectCursorColumn,
+            projectStatusMessage = params.projectStatusMessage,
+            projectStatusSuccess = params.projectStatusSuccess,
+            projectVersion = params.projectVersion,
+            currentInstrument = params.currentInstrument,
+            instrumentCursorRow = params.instrumentCursorRow,
+            instrumentCursorColumn = params.instrumentCursorColumn,
+            instrumentStatusMessage = params.instrumentStatusMessage,
+            instrumentStatusSuccess = params.instrumentStatusSuccess,
+            fileBrowserState = params.fileBrowserState,
+            sampleEditorState = params.sampleEditorState,
+            selectionInfo = params.selectionInfo,
+            clipboardInfo = params.clipboardInfo,
+            selectionMode = params.selectionMode,
+            isCellSelected = params.isCellSelected,
+            mixerCursorColumn = params.mixerCursorColumn,
+            mixerMasterRow = params.mixerMasterRow,
+            trackPeaks = params.trackPeaks,
+            masterPeaks = params.masterPeaks,
+            sendPeaks = params.sendPeaks,
+            currentTable = params.currentTable,
+            tableCursorRow = params.tableCursorRow,
+            tableCursorColumn = params.tableCursorColumn,
+            currentGroove = params.currentGroove,
+            grooveCursorRow = params.grooveCursorRow,
+            modCursorRow = params.modCursorRow,
+            modCursorPair = params.modCursorPair,
+            modCursorSide = params.modCursorSide,
+            effectsCursorRow = params.effectsCursorRow,
+            isRendering = params.isRendering,
+            renderProgress = params.renderProgress,
+            showCleanDialog = params.showCleanDialog,
+            cleanDialogTarget = params.cleanDialogTarget,
+            cleanDialogCursor = params.cleanDialogCursor,
+            showNewProjectDialog = params.showNewProjectDialog,
+            showInstrTypeDialog = params.showInstrTypeDialog,
+            songScrollPosition = params.songScrollPosition,
+            scalingMode = params.scalingMode,
+            buttonSoundEnabled = params.buttonSoundEnabled,
+            buttonSoundVolume = params.buttonSoundVolume,
+            buttonVibroEnabled = params.buttonVibroEnabled,
+            vibroPower = params.vibroPower,
+            qwertyKeyboardState = params.qwertyKeyboardState,
+            fxHelperState = params.fxHelperState,
+            eqEditorState = params.eqEditorState,
+            eqSpectrumData = params.eqSpectrumData,
+            themeEditorState = params.themeEditorState,
+            settingsCursorRow = params.settingsCursorRow,
+            settingsCursorColumn = params.settingsCursorColumn,
+            cursorRemember = params.cursorRemember,
+            notePreviewEnabled = params.notePreviewEnabled,
+            soundfontPresetName = params.soundfontPresetName,
+            soundfontPresetCount = params.soundfontPresetCount,
+            soundfontPresetIndex = params.soundfontPresetIndex,
+            overlayFiles = params.overlayFiles,
+            overlayName = params.overlayName,
+            overlayStrength = params.overlayStrength
+        )
     } // end outer Box
 }
 
@@ -239,7 +255,7 @@ fun FullScreenLayout(
             Box(
                 modifier = Modifier
                     .size(
-                        width  = (DESIGN_WIDTH_PX  * intScale / density).dp,
+                        width  = (DESIGN_WIDTH_PX * intScale / density).dp,
                         height = (DESIGN_HEIGHT_PX * intScale / density).dp
                     )
                     .graphicsLayer { scaleX = fillFactor; scaleY = fillFactor }
@@ -540,14 +556,14 @@ fun PortraitLayout2WithVirtualButtons(
                 // BILINEAR: render at integer-scale size, then stretch by fillFactor
                 // to fill the inner bezel area. Use TransformOrigin(0,0) + explicit pixel
                 // translation so there is no centering-rounding gap on left/top edges.
-                val scaledW = DESIGN_WIDTH_PX  * intScale * fillFactor  // ≈ innerW
+                val scaledW = DESIGN_WIDTH_PX * intScale * fillFactor  // ≈ innerW
                 val scaledH = DESIGN_HEIGHT_PX * intScale * fillFactor  // ≈ innerH
                 val transX  = (innerW - scaledW) / 2f
                 val transY  = (innerH - scaledH) / 2f
                 Box(
                     modifier = Modifier
                         .size(
-                            width  = (DESIGN_WIDTH_PX  * intScale / density).dp,
+                            width  = (DESIGN_WIDTH_PX * intScale / density).dp,
                             height = (DESIGN_HEIGHT_PX * intScale / density).dp
                         )
                         .graphicsLayer {
@@ -578,10 +594,10 @@ fun PortraitLayout2WithVirtualButtons(
                 .height((buttonAreaH / density).dp)
         ) {
             VirtualControlsPortrait2(
-                inputMapper     = inputMapper,
-                availableWidth  = contentW,
+                inputMapper = inputMapper,
+                availableWidth = contentW,
                 availableHeight = buttonAreaH.coerceAtLeast(100),
-                theme           = theme,
+                theme = theme,
             )
         }
     }

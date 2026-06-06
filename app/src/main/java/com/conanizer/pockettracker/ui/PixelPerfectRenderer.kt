@@ -19,6 +19,47 @@ import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.data.ScreenType
 import com.conanizer.pockettracker.core.logic.EffectProcessor
+import com.conanizer.pockettracker.ui.modules.ChainEditorModule
+import com.conanizer.pockettracker.ui.modules.ChainEditorState
+import com.conanizer.pockettracker.ui.modules.EffectModule
+import com.conanizer.pockettracker.ui.modules.EffectState
+import com.conanizer.pockettracker.ui.modules.EqModule
+import com.conanizer.pockettracker.ui.modules.EqState
+import com.conanizer.pockettracker.ui.modules.FileBrowserModule
+import com.conanizer.pockettracker.ui.modules.GrooveModule
+import com.conanizer.pockettracker.ui.modules.GrooveState
+import com.conanizer.pockettracker.ui.modules.InstrumentModule
+import com.conanizer.pockettracker.ui.modules.InstrumentState
+import com.conanizer.pockettracker.ui.modules.MixerModule
+import com.conanizer.pockettracker.ui.modules.MixerState
+import com.conanizer.pockettracker.ui.modules.ModulationModule
+import com.conanizer.pockettracker.ui.modules.ModulationState
+import com.conanizer.pockettracker.ui.modules.NavigationMapModule
+import com.conanizer.pockettracker.ui.modules.NavigationMapState
+import com.conanizer.pockettracker.ui.modules.OscilloscopeModule
+import com.conanizer.pockettracker.ui.modules.OscilloscopeState
+import com.conanizer.pockettracker.ui.modules.PhraseEditorModule
+import com.conanizer.pockettracker.ui.modules.PhraseEditorState
+import com.conanizer.pockettracker.ui.modules.ProjectModule
+import com.conanizer.pockettracker.ui.modules.ProjectState
+import com.conanizer.pockettracker.ui.modules.SampleEditorModule
+import com.conanizer.pockettracker.ui.modules.SampleEditorState
+import com.conanizer.pockettracker.ui.modules.SettingsModule
+import com.conanizer.pockettracker.ui.modules.SettingsState
+import com.conanizer.pockettracker.ui.modules.SongEditorModule
+import com.conanizer.pockettracker.ui.modules.SongEditorState
+import com.conanizer.pockettracker.ui.modules.TableModule
+import com.conanizer.pockettracker.ui.modules.TableState
+import com.conanizer.pockettracker.ui.modules.ThemeEditorDrawState
+import com.conanizer.pockettracker.ui.modules.ThemeEditorModule
+import com.conanizer.pockettracker.ui.modules.ThemeEditorState
+import com.conanizer.pockettracker.ui.overlays.EqEditorState
+import com.conanizer.pockettracker.ui.overlays.FxHelperState
+import com.conanizer.pockettracker.ui.overlays.QwertyKeyboardState
+import com.conanizer.pockettracker.ui.overlays.descriptionLines
+import com.conanizer.pockettracker.ui.overlays.qwertyRowsForLayout
+import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.ui.theme.VisualizerType
 
 /**
  * PIXEL-PERFECT TRACKER - MODULAR VERSION
@@ -578,12 +619,12 @@ class TrackerLayout {
                         draw(
                             x = moduleX, y = currentY, scale = scale,
                             state = EqState(
-                                project       = project,
-                                slotIndex     = eqEditorState.slotIndex,
-                                cursorRow     = eqEditorState.cursorRow,
+                                project = project,
+                                slotIndex = eqEditorState.slotIndex,
+                                cursorRow = eqEditorState.cursorRow,
                                 callerContext = eqEditorState.callerContext,
-                                spectrumData  = eqSpectrumData,
-                                appTheme      = appTheme
+                                spectrumData = eqSpectrumData,
+                                appTheme = appTheme
                             )
                         )
                     }
@@ -693,7 +734,7 @@ class TrackerLayout {
                                     cursorColumn = instrumentCursorColumn,
                                     statusMessage = instrumentStatusMessage,
                                     isSuccess = instrumentStatusSuccess,
-                                    soundfontPresetName  = soundfontPresetName,
+                                    soundfontPresetName = soundfontPresetName,
                                     soundfontPresetCount = soundfontPresetCount,
                                     soundfontPresetIndex = soundfontPresetIndex,
                                     appTheme = appTheme
@@ -728,7 +769,8 @@ class TrackerLayout {
                                     cursorRow = tableCursorRow,
                                     cursorColumn = tableCursorColumn,
                                     playbackRow = tablePlaybackRow,
-                                    ticRate = project.instruments.getOrNull(currentInstrument)?.tableTicRate ?: 0x06,
+                                    ticRate = project.instruments.getOrNull(currentInstrument)?.tableTicRate
+                                        ?: 0x06,
                                     selectionMode = selectionMode,
                                     isCellSelected = isCellSelected,
                                     appTheme = appTheme
@@ -818,14 +860,14 @@ class TrackerLayout {
                                 y = currentY,
                                 scale = scale,
                                 state = MixerState(
-                                    project        = project,
-                                    cursorColumn   = mixerCursorColumn,
+                                    project = project,
+                                    cursorColumn = mixerCursorColumn,
                                     mixerMasterRow = mixerMasterRow,
-                                    trackPeaks     = trackPeaks,
-                                    masterPeaks    = masterPeaks,
-                                    reverbPeaks    = floatArrayOf(sendPeaks[0], sendPeaks[1]),
-                                    delayPeaks     = floatArrayOf(sendPeaks[2], sendPeaks[3]),
-                                    appTheme       = appTheme
+                                    trackPeaks = trackPeaks,
+                                    masterPeaks = masterPeaks,
+                                    reverbPeaks = floatArrayOf(sendPeaks[0], sendPeaks[1]),
+                                    delayPeaks = floatArrayOf(sendPeaks[2], sendPeaks[3]),
+                                    appTheme = appTheme
                                 )
                             )
                         }

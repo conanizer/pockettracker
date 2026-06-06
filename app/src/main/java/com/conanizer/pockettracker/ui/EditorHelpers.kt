@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.Color
 import com.conanizer.pockettracker.core.data.Chain
 import com.conanizer.pockettracker.core.data.PhraseStep
 import com.conanizer.pockettracker.core.data.Track
+import com.conanizer.pockettracker.ui.theme.AppTheme
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SHARED RENDERING CONSTANTS

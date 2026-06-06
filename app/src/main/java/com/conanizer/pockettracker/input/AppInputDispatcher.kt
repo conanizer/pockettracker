@@ -21,12 +21,61 @@ import com.conanizer.pockettracker.core.storage.WavWriter
 import com.conanizer.pockettracker.platform.android.AndroidFileSystem
 import com.conanizer.pockettracker.platform.android.AndroidVideoAudioExtractor
 import com.conanizer.pockettracker.platform.android.OboeAudioBackend
+import com.conanizer.pockettracker.ui.modules.ChainEditorModule
+import com.conanizer.pockettracker.ui.modules.ChainEditorState
+import com.conanizer.pockettracker.ui.modules.EffectModule
+import com.conanizer.pockettracker.ui.modules.EffectState
+import com.conanizer.pockettracker.ui.modules.EqModule
+import com.conanizer.pockettracker.ui.modules.EqState
+import com.conanizer.pockettracker.ui.modules.FileBrowserModule
+import com.conanizer.pockettracker.ui.modules.GrooveModule
+import com.conanizer.pockettracker.ui.modules.GrooveState
+import com.conanizer.pockettracker.ui.modules.InstrumentModule
+import com.conanizer.pockettracker.ui.modules.InstrumentState
+import com.conanizer.pockettracker.ui.modules.MixerModule
+import com.conanizer.pockettracker.ui.modules.MixerState
+import com.conanizer.pockettracker.ui.modules.ModulationModule
+import com.conanizer.pockettracker.ui.modules.ModulationState
+import com.conanizer.pockettracker.ui.modules.PhraseEditorModule
+import com.conanizer.pockettracker.ui.modules.PhraseEditorState
+import com.conanizer.pockettracker.ui.modules.ProjectModule
+import com.conanizer.pockettracker.ui.modules.ProjectState
+import com.conanizer.pockettracker.ui.modules.SampleEditorModule
+import com.conanizer.pockettracker.ui.modules.SampleEditorState
+import com.conanizer.pockettracker.ui.modules.SettingsModule
+import com.conanizer.pockettracker.ui.modules.SettingsState
+import com.conanizer.pockettracker.ui.modules.SongEditorModule
+import com.conanizer.pockettracker.ui.modules.SongEditorState
+import com.conanizer.pockettracker.ui.modules.TableModule
+import com.conanizer.pockettracker.ui.modules.TableState
+import com.conanizer.pockettracker.ui.modules.ThemeEditorModule
+import com.conanizer.pockettracker.ui.modules.ThemeEditorState
+import com.conanizer.pockettracker.ui.overlays.EqCallerContext
+import com.conanizer.pockettracker.ui.overlays.EqEditorState
+import com.conanizer.pockettracker.ui.overlays.FxHelperState
+import com.conanizer.pockettracker.ui.overlays.QwertyContext
+import com.conanizer.pockettracker.ui.overlays.QwertyKeyboardState
+import com.conanizer.pockettracker.ui.overlays.cursorBand
+import com.conanizer.pockettracker.ui.overlays.cursorParam
+import com.conanizer.pockettracker.ui.overlays.deleteChar
+import com.conanizer.pockettracker.ui.overlays.fxMoveCursorDown
+import com.conanizer.pockettracker.ui.overlays.fxMoveCursorLeft
+import com.conanizer.pockettracker.ui.overlays.fxMoveCursorRight
+import com.conanizer.pockettracker.ui.overlays.fxMoveCursorUp
+import com.conanizer.pockettracker.ui.overlays.insertCurrentKey
+import com.conanizer.pockettracker.ui.overlays.moveCursorDown
+import com.conanizer.pockettracker.ui.overlays.moveCursorLeft
+import com.conanizer.pockettracker.ui.overlays.moveCursorRight
+import com.conanizer.pockettracker.ui.overlays.moveCursorUp
+import com.conanizer.pockettracker.ui.overlays.moveTextCursorLeft
+import com.conanizer.pockettracker.ui.overlays.moveTextCursorRight
+import com.conanizer.pockettracker.ui.overlays.selectedEffectCode
+import com.conanizer.pockettracker.ui.overlays.withClampedCol
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -359,11 +408,11 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         if (themeEditorState.isOpen) return
         if (eqEditorState.isOpen) {
             val eqState = EqState(
-                project       = trackerController.project,
-                slotIndex     = eqEditorState.slotIndex,
-                cursorRow     = eqEditorState.cursorRow,
+                project = trackerController.project,
+                slotIndex = eqEditorState.slotIndex,
+                cursorRow = eqEditorState.cursorRow,
                 callerContext = eqEditorState.callerContext,
-                spectrumData  = eqSpectrumData
+                spectrumData = eqSpectrumData
             )
             val context = eqModule.getCursorContext(eqState)
             val action  = handlerFunction(context)
@@ -545,7 +594,9 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     cursorColumn = trackerController.instrumentCursorColumn,
                     statusMessage = trackerController.statusMessage,
                     isSuccess = trackerController.statusSuccess,
-                    soundfontPresetName  = instrumentController.getSoundfontPresetName(trackerController.project),
+                    soundfontPresetName = instrumentController.getSoundfontPresetName(
+                        trackerController.project
+                    ),
                     soundfontPresetCount = instrumentController.getSoundfontPresetCount(inst),
                     soundfontPresetIndex = instrumentController.getSoundfontCurrentPresetIndex(inst)
                 )
@@ -556,13 +607,13 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             }
             ScreenType.MIXER -> {
                 val mixerState = MixerState(
-                    project        = trackerController.project,
-                    cursorColumn   = trackerController.mixerCursorColumn,
+                    project = trackerController.project,
+                    cursorColumn = trackerController.mixerCursorColumn,
                     mixerMasterRow = trackerController.mixerMasterRow,
-                    trackPeaks     = trackPeakBuffer,
-                    masterPeaks    = masterPeakBuffer,
-                    reverbPeaks    = floatArrayOf(sendPeakBuffer[0], sendPeakBuffer[1]),
-                    delayPeaks     = floatArrayOf(sendPeakBuffer[2], sendPeakBuffer[3])
+                    trackPeaks = trackPeakBuffer,
+                    masterPeaks = masterPeakBuffer,
+                    reverbPeaks = floatArrayOf(sendPeakBuffer[0], sendPeakBuffer[1]),
+                    delayPeaks = floatArrayOf(sendPeakBuffer[2], sendPeakBuffer[3])
                 )
                 val context = mixerModule.getCursorContext(mixerState)
                 val action = handlerFunction(context)
@@ -584,7 +635,10 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 }
             }
             ScreenType.EFFECTS -> {
-                val effectState = EffectState(project = trackerController.project, cursorRow = trackerController.effectsCursorRow)
+                val effectState = EffectState(
+                    project = trackerController.project,
+                    cursorRow = trackerController.effectsCursorRow
+                )
                 val context = effectModule.getCursorContext(effectState)
                 val action  = handlerFunction(context)
                 val result  = effectModule.handleInput(effectState, action) { trackerController.projectVersion++ }
@@ -605,9 +659,15 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     trackerController.tableCursorRow,
                     trackerController.tableCursorColumn,
                     playbackRow = null,
-                    ticRate = trackerController.project.instruments.getOrNull(trackerController.currentInstrument)?.tableTicRate ?: 0x06,
+                    ticRate = trackerController.project.instruments.getOrNull(trackerController.currentInstrument)?.tableTicRate
+                        ?: 0x06,
                     selectionMode = trackerController.inputController.isSelectionModeActive(),
-                    isCellSelected = { row, col -> trackerController.inputController.isCellSelected(row, col) }
+                    isCellSelected = { row, col ->
+                        trackerController.inputController.isCellSelected(
+                            row,
+                            col
+                        )
+                    }
                 )
                 val context = tableModule.getCursorContext(tableState)
                 val action = handlerFunction(context)
@@ -910,7 +970,20 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     1 -> {  // SAVE — open QWERTY to name the theme
                         val themesDir = fileController.getThemesDirectory()
                         val name = appTheme.name.replace(Regex("[^a-zA-Z0-9_]"), "_").ifEmpty { "THEME" }
-                        qwertyKeyboardState = QwertyKeyboardState(isOpen = true, text = name, maxLength = 20, textCursor = name.length.coerceAtMost(20), keyCursorRow = 0, keyCursorCol = 0, layout = 0, fieldLabel = "SAVE THEME:", originalText = name, insertBefore = insertBefore, context = QwertyContext.THEME_SAVE, contextExtra = themesDir)
+                        qwertyKeyboardState = QwertyKeyboardState(
+                            isOpen = true,
+                            text = name,
+                            maxLength = 20,
+                            textCursor = name.length.coerceAtMost(20),
+                            keyCursorRow = 0,
+                            keyCursorCol = 0,
+                            layout = 0,
+                            fieldLabel = "SAVE THEME:",
+                            originalText = name,
+                            insertBefore = insertBefore,
+                            context = QwertyContext.THEME_SAVE,
+                            contextExtra = themesDir
+                        )
                     }
                     2 -> {  // LOAD — open file browser in Themes dir filtered to .ptt
                         val themesDir = fileController.getThemesDirectory()
@@ -986,7 +1059,18 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                                     }
                                                 } else if (videoExtractor.isSupportedVideo(item.file.absolutePath)) {
                                                     val suggestedName = item.file.nameWithoutExtension + "_audio"
-                                                    qwertyKeyboardState = QwertyKeyboardState(isOpen = true, text = suggestedName, maxLength = 40, textCursor = suggestedName.length, fieldLabel = "SAVE AS:", originalText = suggestedName, insertBefore = insertBefore, clearOnFirstB = true, context = QwertyContext.VIDEO_EXTRACT, contextExtra = item.file.absolutePath)
+                                                    qwertyKeyboardState = QwertyKeyboardState(
+                                                        isOpen = true,
+                                                        text = suggestedName,
+                                                        maxLength = 40,
+                                                        textCursor = suggestedName.length,
+                                                        fieldLabel = "SAVE AS:",
+                                                        originalText = suggestedName,
+                                                        insertBefore = insertBefore,
+                                                        clearOnFirstB = true,
+                                                        context = QwertyContext.VIDEO_EXTRACT,
+                                                        contextExtra = item.file.absolutePath
+                                                    )
                                                 } else {
                                                     fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
                                                 }
@@ -1015,7 +1099,18 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                                     }
                                                 } else if (videoExtractor.isSupportedVideo(item.file.absolutePath)) {
                                                     val suggestedName = item.file.nameWithoutExtension + "_audio"
-                                                    qwertyKeyboardState = QwertyKeyboardState(isOpen = true, text = suggestedName, maxLength = 40, textCursor = suggestedName.length, fieldLabel = "SAVE AS:", originalText = suggestedName, insertBefore = insertBefore, clearOnFirstB = true, context = QwertyContext.VIDEO_EXTRACT, contextExtra = item.file.absolutePath)
+                                                    qwertyKeyboardState = QwertyKeyboardState(
+                                                        isOpen = true,
+                                                        text = suggestedName,
+                                                        maxLength = 40,
+                                                        textCursor = suggestedName.length,
+                                                        fieldLabel = "SAVE AS:",
+                                                        originalText = suggestedName,
+                                                        insertBefore = insertBefore,
+                                                        clearOnFirstB = true,
+                                                        context = QwertyContext.VIDEO_EXTRACT,
+                                                        contextExtra = item.file.absolutePath
+                                                    )
                                                 } else {
                                                     fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
                                                 }
@@ -1219,7 +1314,18 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                             val instrumentsDir = fileController.getInstrumentsDirectory()
                             java.io.File(instrumentsDir).mkdirs()
                             val defaultName = instrument.name.ifEmpty { "INST${instrument.id.toString(16).padStart(2,'0').uppercase()}" }
-                            qwertyKeyboardState = QwertyKeyboardState(isOpen = true, text = defaultName, maxLength = 20, textCursor = defaultName.length, fieldLabel = "SAVE PRESET:", originalText = defaultName, clearOnFirstB = true, context = QwertyContext.INSTRUMENT_SAVE, contextExtra = instrumentsDir, insertBefore = insertBefore)
+                            qwertyKeyboardState = QwertyKeyboardState(
+                                isOpen = true,
+                                text = defaultName,
+                                maxLength = 20,
+                                textCursor = defaultName.length,
+                                fieldLabel = "SAVE PRESET:",
+                                originalText = defaultName,
+                                clearOnFirstB = true,
+                                context = QwertyContext.INSTRUMENT_SAVE,
+                                contextExtra = instrumentsDir,
+                                insertBefore = insertBefore
+                            )
                         }
                     }
                     3 -> when (trackerController.instrumentCursorColumn) {
@@ -1239,9 +1345,14 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                             val inst = trackerController.project.instruments[trackerController.currentInstrument]
                             val sampleId = trackerController.currentInstrument
                             sampleEditorState = SampleEditorState(
-                                sampleId = sampleId, instrumentId = trackerController.currentInstrument,
-                                sampleName = inst.sampleFilePath?.substringAfterLast('/')?.substringBeforeLast('.') ?: "",
-                                sampleFilePath = inst.sampleFilePath, cursorRow = 1, cursorCol = 0, isModified = false
+                                sampleId = sampleId,
+                                instrumentId = trackerController.currentInstrument,
+                                sampleName = inst.sampleFilePath?.substringAfterLast('/')
+                                    ?.substringBeforeLast('.') ?: "",
+                                sampleFilePath = inst.sampleFilePath,
+                                cursorRow = 1,
+                                cursorCol = 0,
+                                isModified = false
                             )
                             previousScreen = trackerController.currentScreen
                             trackerController.currentScreen = ScreenType.SAMPLE_EDITOR
@@ -1335,7 +1446,20 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     }
                     18 -> {
                         val currentName = s.sampleName
-                        qwertyKeyboardState = QwertyKeyboardState(isOpen = true, text = currentName, maxLength = 20, textCursor = currentName.length.coerceAtMost(20), keyCursorRow = 0, keyCursorCol = 0, layout = 0, fieldLabel = "SAMPLE NAME:", originalText = currentName, insertBefore = insertBefore, context = QwertyContext.SAMPLE_NAME, contextExtra = fileController.getSamplesDirectory())
+                        qwertyKeyboardState = QwertyKeyboardState(
+                            isOpen = true,
+                            text = currentName,
+                            maxLength = 20,
+                            textCursor = currentName.length.coerceAtMost(20),
+                            keyCursorRow = 0,
+                            keyCursorCol = 0,
+                            layout = 0,
+                            fieldLabel = "SAMPLE NAME:",
+                            originalText = currentName,
+                            insertBefore = insertBefore,
+                            context = QwertyContext.SAMPLE_NAME,
+                            contextExtra = fileController.getSamplesDirectory()
+                        )
                     }
                     19 -> when (s.cursorCol) {
                         0 -> {
@@ -1388,7 +1512,21 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                             } else {
                                 var suggestedName = baseName; var n = 1
                                 while (java.io.File("$samplesDir/$suggestedName.wav").exists()) { suggestedName = "${baseName}_${n.toString().padStart(4,'0')}"; n++ }
-                                qwertyKeyboardState = QwertyKeyboardState(isOpen = true, text = suggestedName, maxLength = 24, textCursor = suggestedName.length.coerceAtMost(24), keyCursorRow = 0, keyCursorCol = 0, layout = 0, fieldLabel = "SAVE AS:", originalText = suggestedName, insertBefore = insertBefore, clearOnFirstB = true, context = QwertyContext.SAMPLE_SAVE, contextExtra = samplesDir)
+                                qwertyKeyboardState = QwertyKeyboardState(
+                                    isOpen = true,
+                                    text = suggestedName,
+                                    maxLength = 24,
+                                    textCursor = suggestedName.length.coerceAtMost(24),
+                                    keyCursorRow = 0,
+                                    keyCursorCol = 0,
+                                    layout = 0,
+                                    fieldLabel = "SAVE AS:",
+                                    originalText = suggestedName,
+                                    insertBefore = insertBefore,
+                                    clearOnFirstB = true,
+                                    context = QwertyContext.SAMPLE_SAVE,
+                                    contextExtra = samplesDir
+                                )
                             }
                         }
                         2 -> {
@@ -1457,7 +1595,13 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
 
             ScreenType.PHRASE -> {
                 if (trackerController.cursorColumn == 1 && !trackerController.inputController.isSelectionModeActive()) {
-                    val phraseState = PhraseEditorState(trackerController.project.phrases[trackerController.currentPhrase], trackerController.cursorRow, trackerController.cursorColumn, playbackRow = 0, isPlaying = trackerController.isPlaying())
+                    val phraseState = PhraseEditorState(
+                        trackerController.project.phrases[trackerController.currentPhrase],
+                        trackerController.cursorRow,
+                        trackerController.cursorColumn,
+                        playbackRow = 0,
+                        isPlaying = trackerController.isPlaying()
+                    )
                     val context = phraseEditorModule.getCursorContext(phraseState)
                     if (context.capabilities.isEmpty) {
                         val step = trackerController.project.phrases[trackerController.currentPhrase].steps[trackerController.cursorRow]
@@ -1578,7 +1722,11 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 trackerController.projectVersion++
             }
             ScreenType.CHAIN -> {
-                val chainState = ChainEditorState(trackerController.project.chains[trackerController.currentChain], trackerController.cursorRow, trackerController.cursorColumn)
+                val chainState = ChainEditorState(
+                    trackerController.project.chains[trackerController.currentChain],
+                    trackerController.cursorRow,
+                    trackerController.cursorColumn
+                )
                 val context = chainEditorModule.getCursorContext(chainState)
                 val action = trackerController.inputController.handleSelect(context)
                 if (action is InputAction.DELETE && trackerController.cursorColumn == 1) {
@@ -1600,7 +1748,19 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             ScreenType.PROJECT -> {
                 if (trackerController.projectCursorRow == 2 && trackerController.projectCursorColumn >= 1) {
                     val currentName = trackerController.project.name.trimEnd()
-                    qwertyKeyboardState = QwertyKeyboardState(isOpen = true, text = currentName, maxLength = 20, textCursor = currentName.length.coerceAtMost(20), keyCursorRow = 0, keyCursorCol = 0, layout = 0, fieldLabel = "PROJECT NAME:", originalText = currentName, insertBefore = insertBefore, context = QwertyContext.PROJECT_NAME)
+                    qwertyKeyboardState = QwertyKeyboardState(
+                        isOpen = true,
+                        text = currentName,
+                        maxLength = 20,
+                        textCursor = currentName.length.coerceAtMost(20),
+                        keyCursorRow = 0,
+                        keyCursorCol = 0,
+                        layout = 0,
+                        fieldLabel = "PROJECT NAME:",
+                        originalText = currentName,
+                        insertBefore = insertBefore,
+                        context = QwertyContext.PROJECT_NAME
+                    )
                 }
             }
             ScreenType.SAMPLE_EDITOR -> {
@@ -1610,7 +1770,20 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 }
                 if (sampleEditorState.cursorRow == 18) {
                     val currentName = sampleEditorState.sampleName
-                    qwertyKeyboardState = QwertyKeyboardState(isOpen = true, text = currentName, maxLength = 20, textCursor = currentName.length.coerceAtMost(20), keyCursorRow = 0, keyCursorCol = 0, layout = 0, fieldLabel = "SAMPLE NAME:", originalText = currentName, insertBefore = insertBefore, context = QwertyContext.SAMPLE_NAME, contextExtra = fileController.getSamplesDirectory())
+                    qwertyKeyboardState = QwertyKeyboardState(
+                        isOpen = true,
+                        text = currentName,
+                        maxLength = 20,
+                        textCursor = currentName.length.coerceAtMost(20),
+                        keyCursorRow = 0,
+                        keyCursorCol = 0,
+                        layout = 0,
+                        fieldLabel = "SAMPLE NAME:",
+                        originalText = currentName,
+                        insertBefore = insertBefore,
+                        context = QwertyContext.SAMPLE_NAME,
+                        contextExtra = fileController.getSamplesDirectory()
+                    )
                 }
                 return
             }
@@ -2117,7 +2290,15 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             if (newScreen != trackerController.currentScreen) {
                 when (trackerController.currentScreen) {
                     ScreenType.PHRASE -> {
-                        val context = phraseEditorModule.getCursorContext(PhraseEditorState(trackerController.project.phrases[trackerController.currentPhrase], trackerController.cursorRow, trackerController.cursorColumn, playbackRow = 0, isPlaying = trackerController.isPlaying()))
+                        val context = phraseEditorModule.getCursorContext(
+                            PhraseEditorState(
+                                trackerController.project.phrases[trackerController.currentPhrase],
+                                trackerController.cursorRow,
+                                trackerController.cursorColumn,
+                                playbackRow = 0,
+                                isPlaying = trackerController.isPlaying()
+                            )
+                        )
                         if (!context.capabilities.isEmpty) trackerController.lastEditedInstrument = trackerController.project.phrases[trackerController.currentPhrase].steps[trackerController.cursorRow].instrument
                     }
                     ScreenType.CHAIN -> { val ref = trackerController.project.chains[trackerController.currentChain].phraseRefs[trackerController.cursorRow]; if (ref >= 0) trackerController.lastEditedPhrase = ref }
@@ -2147,7 +2328,15 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         if (newScreen != trackerController.currentScreen) {
             when (trackerController.currentScreen) {
                 ScreenType.PHRASE -> {
-                    val context = phraseEditorModule.getCursorContext(PhraseEditorState(trackerController.project.phrases[trackerController.currentPhrase], trackerController.cursorRow, trackerController.cursorColumn, playbackRow = 0, isPlaying = trackerController.isPlaying()))
+                    val context = phraseEditorModule.getCursorContext(
+                        PhraseEditorState(
+                            trackerController.project.phrases[trackerController.currentPhrase],
+                            trackerController.cursorRow,
+                            trackerController.cursorColumn,
+                            playbackRow = 0,
+                            isPlaying = trackerController.isPlaying()
+                        )
+                    )
                     if (!context.capabilities.isEmpty) trackerController.lastEditedInstrument = trackerController.project.phrases[trackerController.currentPhrase].steps[trackerController.cursorRow].instrument
                 }
                 ScreenType.CHAIN -> { val ref = trackerController.project.chains[trackerController.currentChain].phraseRefs[trackerController.cursorRow]; if (ref >= 0) trackerController.lastEditedPhrase = ref }
@@ -2323,7 +2512,16 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val file = item.file
                 val fieldLabel = when { file.isDirectory -> "FOLDER NAME:"; file.extension.lowercase() == "wav" -> "SAMPLE NAME:"; file.extension.lowercase() == "ptp" -> "PROJECT NAME:"; else -> "FILE NAME:" }
                 val baseName = file.nameWithoutExtension
-                qwertyKeyboardState = QwertyKeyboardState(isOpen = true, text = baseName, textCursor = baseName.length.coerceAtMost(20), fieldLabel = fieldLabel, originalText = baseName, insertBefore = insertBefore, context = QwertyContext.FILE_RENAME, contextExtra = file.absolutePath)
+                qwertyKeyboardState = QwertyKeyboardState(
+                    isOpen = true,
+                    text = baseName,
+                    textCursor = baseName.length.coerceAtMost(20),
+                    fieldLabel = fieldLabel,
+                    originalText = baseName,
+                    insertBefore = insertBefore,
+                    context = QwertyContext.FILE_RENAME,
+                    contextExtra = file.absolutePath
+                )
             }
         }
     }
@@ -2340,7 +2538,16 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         if (trackerController.currentScreen == ScreenType.FILE_BROWSER && fileBrowserState.mode == FileBrowserModule.BrowserMode.NORMAL) {
             val currentDir = fileBrowserState.currentDirectory
             val initialText = "NEW FOLDER"
-            qwertyKeyboardState = QwertyKeyboardState(isOpen = true, text = initialText, textCursor = initialText.length.coerceAtMost(20), fieldLabel = "FOLDER NAME:", originalText = initialText, insertBefore = insertBefore, context = QwertyContext.FOLDER_CREATE, contextExtra = currentDir.absolutePath)
+            qwertyKeyboardState = QwertyKeyboardState(
+                isOpen = true,
+                text = initialText,
+                textCursor = initialText.length.coerceAtMost(20),
+                fieldLabel = "FOLDER NAME:",
+                originalText = initialText,
+                insertBefore = insertBefore,
+                context = QwertyContext.FOLDER_CREATE,
+                contextExtra = currentDir.absolutePath
+            )
         }
     }
 
@@ -2348,7 +2555,16 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         val currentScreen = trackerController.currentScreen
         if (currentScreen == ScreenType.SONG && trackerController.inputController.isSelectionModeActive()) {
             val suggestedName = renderController.generateResampledBaseName()
-            qwertyKeyboardState = QwertyKeyboardState(isOpen = true, text = suggestedName, textCursor = suggestedName.length.coerceAtMost(20), fieldLabel = "SAMPLE NAME:", originalText = suggestedName, insertBefore = insertBefore, clearOnFirstB = true, context = QwertyContext.RESAMPLE)
+            qwertyKeyboardState = QwertyKeyboardState(
+                isOpen = true,
+                text = suggestedName,
+                textCursor = suggestedName.length.coerceAtMost(20),
+                fieldLabel = "SAMPLE NAME:",
+                originalText = suggestedName,
+                insertBefore = insertBefore,
+                clearOnFirstB = true,
+                context = QwertyContext.RESAMPLE
+            )
             return
         }
         val currentPos = InsertPosition(currentScreen, trackerController.cursorRow, trackerController.cursorColumn)
