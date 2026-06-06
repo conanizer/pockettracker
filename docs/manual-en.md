@@ -1349,10 +1349,6 @@ All 256 slots (00–FF) start empty in a new project. There are no bundled defau
 
 ---
 
-## Known Issues
-
-- Generic input warning may appear in the log after device restart — harmless, disappears after a reboot.
-
----
 
 *PocketTracker is open-source (GPL-3.0). Contributions and bug reports welcome.*
+
