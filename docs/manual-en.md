@@ -909,7 +909,7 @@ Per-instrument effects (filter, drive, crush) are set on the INSTRUMENT screen.
 
 The EQ EDITOR is a full-screen overlay that opens when you press **SELECT** on an EQ row in the INSTRUMENT, MIXER, or EFFECTS screens.
 
-It applies a 3-band parametric equalizer (biquad filter, per the Audio EQ Cookbook). A real-time spectrum analyzer (KissFFT, ~20 fps) shows the master output with the computed frequency response curve overlaid.
+It applies a 3-band parametric equalizer (biquad filter, per the Audio EQ Cookbook). A real-time spectrum analyzer (KissFFT, ~20 fps) shows the signal relevant to the current EQ context — instrument output when opened from INSTRUMENT, delay bus from EFFECTS delay, reverb bus from EFFECTS reverb, or master bus from MIXER/master — with the computed frequency response curve overlaid.
 
 ### Layout
 
@@ -941,8 +941,6 @@ Each band has 4 parameters: TYPE, FREQ, GAIN, Q.
 | A + LEFT/RIGHT | Edit value (large step) |
 | B | Close EQ EDITOR and apply changes |
 
-> [!TIP]
-> The spectrum display shows the master output, not just the EQ'd signal. This makes it useful as a general mixing tool — open any EQ slot and use the spectrum to identify frequency buildup across the full mix.
 
 ---
 
