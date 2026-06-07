@@ -405,8 +405,8 @@ The phrase editor has 16 rows (steps 00–0F) and 5 columns:
 | Column | Meaning |
 |---|---|
 | N | Note (`C-4`, `F#3`, etc.). `---` = no note. |
-| V | Volume (`00`–`FF`). `--` = use instrument default. |
-| I | Instrument ID (`00`–`FF`). `--` = use last instrument. |
+| V | Volume (`00`–`FF`). Always set — `FF` = full, applied on top of instrument VOL. |
+| I | Instrument ID (`00`–`FF`). Always set — no empty state. |
 | FX1/FX2/FX3 | Effect type + value (e.g., `REP 03`, `ARP 47`) |
 
 Notes are written as pitch + octave: `C-4`, `C#4`, `D-4`, … `B-9`. Range is **C-0 to B-9**. Middle C = `C-4` (MIDI note 60).
@@ -428,10 +428,7 @@ Notes are written as pitch + octave: `C-4`, `C#4`, `D-4`, … `B-9`. Range is **
 Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex). Use A+UP/DOWN on the type to cycle through available effects. Effects are listed in §21.
 
 > [!WARNING]
-> Some effects (**ARP**, **REP**, **PBN**, **PVB**, **PVX**) **persist across steps** — they keep running until explicitly cancelled. A new note alone does **not** stop them. To cancel, place the same effect with value `00` in the same FX column, or use **KIL**.
-
-> [!TIP]
-> If you leave the I column blank (`--`), the note uses whatever instrument was last active on that track. This saves space in simple phrases, but can be surprising during playback — it's good practice to set the instrument on at least the first step of each phrase.
+> Some effects (**ARP**, **REP**, **PBN**, **PVB**, **PVX**) **persist across steps that have no note** — they keep running on empty rows. They are cancelled by: a new note on the same track, any effect in the same FX column, setting the effect to `00`, or **KIL**.
 
 ---
 
