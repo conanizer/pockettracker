@@ -719,7 +719,7 @@ Each track uses groove `00` by default. Use the **GRV XX** phrase effect to swit
 > To reset a track back to even timing after a groove section, place `GRV 00` in an FX column. Groove `00` defaults to `0C` per step, which is perfectly even.
 
 > [!WARNING]
-> Make sure your groove rows sum to the same total ticks as an ungrooved measure (e.g., 16 steps × 12 ticks = 192). Uneven sums will cause the grooved track to **drift** out of sync with other tracks over time.
+> For the grooved track to stay in sync, each complete cycle of your groove list should **average 12 ticks per entry**. A 2-entry swing sums to 24 (14+10 ✓). A 4-entry groove should sum to 48. If the average is not 12, the track will drift against un-grooved tracks over time.
 
 ### Controls
 
@@ -1098,7 +1098,7 @@ Rapid cycling through multiple pitches to simulate chords.
 Persists across steps. Configure with **ARC**.
 
 > [!WARNING]
-> ARP **persists** across phrase steps. Always place `ARP 00` in the same FX column when you want the arpeggio to stop — a new note alone won't cancel it.
+> ARP **persists** across steps that have no note. It is cancelled by: placing a new note on the same track, placing any effect in the same FX column, `ARP 00`, or **KIL**.
 
 > [!TIP]
 > Place **ARC** once at step 00 to configure the arpeggio mode and speed for the whole phrase. It only needs to be set once — subsequent steps just use the same ARC config.
@@ -1116,11 +1116,13 @@ Persists across steps. Configure with **ARC**.
 
 Probability gate. Rolls a random number each time the step plays.
 
-- `X` = probability for note + FX to the left to play (`0`=never, `F`=always)
-- `Y` = probability for FX to the right to play
+- `X` (high nibble) = probability (`0`=never, `F`=always)
+- `Y` (low nibble) = target: `0`=note, `1`=FX1, `2`=FX2, `3`=FX3
+
+CHA can appear in any FX column and gates any specific target independently of its own position.
 
 > [!TIP]
-> `CHA FF` in FX3 means the note plays but FX2 fires only sometimes — useful for random percussion hits or occasional ornaments without touching the note itself.
+> `CHA 82` anywhere on the step = ~53% chance FX2 fires. `CHA 40` = ~25% chance the note plays at all. Mix multiple CHA slots to gate different targets with different probabilities.
 
 ---
 
@@ -1214,7 +1216,7 @@ Same as PVB but 4× deeper and 2× faster.
 Persists across steps. Cancel with new note, new FX in same column, or KIL.
 
 > [!WARNING]
-> REP **persists** across steps and will retrigger indefinitely. If you forget to cancel it, every subsequent step on that track will keep retriggering the sample.
+> REP **persists** across steps that have no note. A new note, any effect in the same FX column, or **KIL** will cancel it. Steps with a note trigger a fresh sample play and end the retrigger sequence.
 
 ---
 
@@ -1709,7 +1711,7 @@ All 256 slots (00–FF) start empty in a new project. There are no bundled defau
 |---|---|---|---|
 | ARP | Arpeggio | `XY` = intervals | Persists — cancel with `ARP 00` |
 | ARC | Arpeggio Config | `XY` | High nibble=mode (0=UP 1=DN 2=PP 3=RND), low=speed |
-| CHA | Chance | `XY` | X=left prob, Y=right prob (0=never F=always) |
+| CHA | Chance | `XY` | X=probability (0=never F=always), Y=target (0=note 1=FX1 2=FX2 3=FX3) |
 | DEL | Delay | `XX` ticks | Delays row trigger |
 | GRV | Groove | `XX` | Assigns groove to this track |
 | HOP | Hop/Jump | `XY` | Jumps to step Y, X times max |
