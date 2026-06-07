@@ -463,7 +463,7 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 > **ROOT** is the most important tuning parameter. Set it to the actual pitch of your sample (e.g., `A-4` for a 440 Hz sine). If notes sound in the wrong octave, ROOT is usually the reason.
 
 > [!TIP]
-> **DRIVE** and **CRUSH** are subtle at low values (`10`–`30`) and very aggressive near `FF`. Start low — a little tape saturation on a drum bus adds glue without destroying the transient.
+> **DRIVE** and **CRUSH** are subtle at low values (`10`–`30`) and very aggressive near `FF`. Both are per-instrument — start low and increase by ear.
 
 ### SF2 instrument parameters
 
@@ -843,7 +843,7 @@ The **master column** has two additional rows above the volume:
 The master column also has stereo send peak meters showing REV and DEL bus levels.
 
 > [!WARNING]
-> Red meters on the master output mean **clipping** — the signal is digitally distorted. Lower individual track volumes or reduce the master volume. The OTT compressor on the master bus (EFFECTS screen) can help tame peaks, but it won't fix extreme clipping.
+> Red meters mean the master limiter is working hard. The output won't clip, but heavy limiting can colour the sound. Lower individual track volumes to give the limiter more headroom.
 
 > [!TIP]
 > Start all tracks at `80` (unity), balance them by ear, then bring the master down if needed. It's easier to level-match tracks at unity than to compensate after boosting everything.
