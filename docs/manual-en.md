@@ -172,12 +172,6 @@ The navigation map always shows where you are.
 | SETTINGS | PROJECT screen → cursor on SETTINGS row → A |
 | THEME EDITOR | SETTINGS screen → cursor on THEME row → A |
 
-> [!TIP]
-> The most common editing flow is **PHRASE** (col 2) ↔ **INSTRUMENT** (col 3) ↔ **TABLE** (col 4), all on Row 2. From PHRASE press **R+UP** to reach GROOVE, or from INSTRUMENT press **R+UP** to reach MODS.
-
-> [!NOTE]
-> MIXER and EFFECTS sit below Row 2 but only in the column you are currently navigating. If you can't find MIXER, make sure you are on a Row 2 screen first, then press **R+DOWN**.
-
 ---
 
 ## 5. Controls Reference
@@ -361,10 +355,10 @@ The SONG screen arranges chains across 8 tracks. Each column is a track (T0–T7
 
 A chain is a sequence of up to 16 phrase references. Each slot has:
 - **PHR** — phrase ID (`00`–`FF`) or `--` (empty)
-- **TRN** — transpose in semitones (`00` = no transpose; values above `7F` are negative)
+- **TSP** — transpose in semitones (`00` = no transpose; values above `7F` are negative)
 
 ```
-     PHR  TRN
+     PHR  TSP
 00   04   00
 01   04   00
 02   05   0C   ← +12 semitones (one octave up)
@@ -380,13 +374,13 @@ When played, the chain loops from slot 00 after the last filled slot.
 | D-pad | Move cursor |
 | A | Insert last-used value |
 | A + UP/DOWN | Increment / decrement |
-| A + LEFT/RIGHT | ±16 (PHR) or ±12 semitones (TRN) |
+| A + LEFT/RIGHT | ±16 (PHR) or ±12 semitones (TSP) |
 | A + B | Delete slot |
 | B + LEFT/RIGHT | Switch to previous / next chain |
 | START | Play current chain |
 
 > [!TIP]
-> Use **TRN** to play the same phrase at multiple pitches without copying it. One phrase can become a verse, chorus, and bridge by giving it different TRN values across chain slots — `07` = +7 semitones (a perfect fifth up), `0C` = +12 (one octave up).
+> Use **TSP** to play the same phrase at multiple pitches without copying it. One phrase can become a verse, chorus, and bridge by giving it different TSP values across chain slots — `07` = +7 semitones (a perfect fifth up), `0C` = +12 (one octave up).
 
 ---
 
@@ -630,7 +624,7 @@ A table is a 16-row micro-sequencer attached to an instrument. When a note plays
 Tables are great for: drum rolls, note slides, automatic arpeggios, per-note automation.
 
 ```
-     TRN  VOL  FX1      FX2      FX3
+     N    VOL  FX1      FX2      FX3
 00   00   --   ---  00  ---  00  ---  00
 01   03   --   ---  00  ---  00  ---  00
 02   07   --   ---  00  ---  00  ---  00
@@ -638,7 +632,7 @@ Tables are great for: drum rolls, note slides, automatic arpeggios, per-note aut
 
 | Column | Range | Description |
 |---|---|---|
-| TRN | 00–FF | Transpose in semitones. `00` = no shift. Values above `7F` are negative (e.g., `FC` = −4 st). |
+| N | 00–FF | Transpose in semitones. `00` = no shift. Values above `7F` are negative (e.g., `FC` = −4 st). |
 | VOL | 00–FF / -- | Volume multiplier for this row. `--` = no change. |
 | FX1–FX3 | same as phrase | Effects applied on this table tick. |
 
@@ -1393,7 +1387,7 @@ Output: `/Documents/PocketTracker/Samples/Chops/{instrument_name}/`
 
 ### Transpose in chains
 
-Rather than duplicating a phrase at a different pitch, set the TRN column in the CHAIN. `07` = +7 semitones (a perfect fifth). The same phrase plays higher with no copy.
+Rather than duplicating a phrase at a different pitch, set the TSP column in the CHAIN. `07` = +7 semitones (a perfect fifth). The same phrase plays higher with no copy.
 
 ### Swing with groove
 
@@ -1582,9 +1576,9 @@ All 256 slots (00–FF) start empty in a new project. There are no bundled defau
 
 | Input | Action |
 |---|---|
-| A | Insert last-used phrase / TRN |
+| A | Insert last-used phrase / TSP |
 | A + UP / DOWN | ±1 |
-| A + LEFT / RIGHT | ±16 (PHR), ±12 semitones (TRN) |
+| A + LEFT / RIGHT | ±16 (PHR), ±12 semitones (TSP) |
 | A + B | Delete slot |
 | B + LEFT / RIGHT | Previous / next chain |
 
