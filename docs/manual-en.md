@@ -31,6 +31,10 @@
 22. [Modulation Reference](#22-modulation-reference)
 23. [File Management](#23-file-management)
 24. [Workflow Tips](#24-workflow-tips)
+25. [Appendix A: Hex Quick Reference](#appendix-a-hexadecimal-quick-reference)
+26. [Appendix B: Note Names](#appendix-b-note-names)
+27. [Appendix C: Instrument Slots](#appendix-c-instrument-slots)
+28. [Appendix D: Controls Cheat Sheet](#appendix-d-controls-cheat-sheet)
 
 ---
 
@@ -59,6 +63,9 @@ PocketTracker stores everything in a single project file (`.ptp`). Sounds come f
 3. Open the downloaded `.apk` and tap **Install**.
 4. On first launch the app may ask for **All Files Access** permission (Android 11+). Grant it — this is required to read and write project and sample files.
 
+> [!IMPORTANT]
+> If you deny the All Files Access permission, PocketTracker cannot load samples, save projects, or export WAV files. If you accidentally denied it, go to Android Settings → Apps → PocketTracker → Permissions and grant it manually.
+
 ### Sample files
 
 PocketTracker has no bundled default samples — all instrument slots start empty. Copy your own `.wav` files to device storage and load them from the **INSTRUMENT** screen using the file browser. SF2 files are loaded the same way.
@@ -83,6 +90,9 @@ Resampled instruments and CHOP exports are saved to:
 /Documents/PocketTracker/Samples/Resampled/
 /Documents/PocketTracker/Samples/Chops/{name}/
 ```
+
+> [!TIP]
+> Back up your `/Documents/PocketTracker/` folder to a PC before major sessions. The folder contains all your projects, samples, and exported audio.
 
 ---
 
@@ -123,6 +133,9 @@ The entire UI renders at a fixed **640×480** pixel canvas, letterboxed on large
 
 Some screens (SAMPLE EDITOR, EQ EDITOR, THEME EDITOR) open as full-screen overlays that temporarily replace the main layout.
 
+> [!TIP]
+> If you're on a low-power device and notice audio hiccups, switch the visualizer to **FLAT** — it disables the real-time waveform rendering and frees up CPU for the audio engine.
+
 ---
 
 ## 4. Navigation
@@ -160,7 +173,11 @@ The navigation map always shows where you are.
 | SETTINGS | PROJECT screen → cursor on SETTINGS row → A |
 | THEME EDITOR | SETTINGS screen → cursor on THEME row → A |
 
-> **Tip:** The most common flow is PHRASE (col 2) ↔ INSTRUMENT (col 3) ↔ TABLE (col 4), all on Row 2. Press **R+UP** from PHRASE to reach GROOVE, or from INSTRUMENT to reach MODS.
+> [!TIP]
+> The most common editing flow is **PHRASE** (col 2) ↔ **INSTRUMENT** (col 3) ↔ **TABLE** (col 4), all on Row 2. From PHRASE press **R+UP** to reach GROOVE, or from INSTRUMENT press **R+UP** to reach MODS.
+
+> [!NOTE]
+> MIXER and EFFECTS sit below Row 2 but only in the column you are currently navigating. If you can't find MIXER, make sure you are on a Row 2 screen first, then press **R+DOWN**.
 
 ---
 
@@ -177,7 +194,7 @@ The navigation map always shows where you are.
 | B | Cancel / Delete |
 | L | L modifier |
 | R | R modifier |
-| SELECT | SELECT modifier |
+| SELECT | Context action |
 | START | Play / Stop |
 
 #### Keyboard (Bluetooth keyboard or testing on PC)
@@ -205,6 +222,9 @@ Both keyboard and gamepad work simultaneously.
 | B | Delete value / cancel |
 | SELECT | Context action (varies by screen) |
 | START | Play / Stop |
+
+> [!TIP]
+> Pressing **A** on an empty note cell re-inserts the last note you placed — same pitch, same instrument. This is the fastest way to place a drum pattern: move to the row, press A, move on.
 
 ---
 
@@ -266,6 +286,9 @@ Works on PHRASE, CHAIN, SONG, and TABLE screens.
 - **ROW** — full row (all columns)
 - **SCREEN** — all rows visible
 
+> [!TIP]
+> Use **SCREEN** selection mode to duplicate an entire phrase or chain quickly: enter SCREEN mode → B to copy → navigate to an empty phrase/chain → L+A to paste.
+
 ---
 
 ### 5.7 Playback Controls
@@ -300,6 +323,9 @@ PROJECT
 
 All values (chain IDs, phrase IDs, instrument IDs, etc.) are hexadecimal, ranging from `00` to `FF`.
 
+> [!NOTE]
+> All values in PocketTracker are **hexadecimal** (base-16). Decimal 16 = hex `10`, decimal 255 = hex `FF`. See Appendix A for a quick conversion table.
+
 ---
 
 ## 7. SONG Screen
@@ -326,6 +352,9 @@ The SONG screen arranges chains across 8 tracks. Each column is a track (T0–T7
 | A + B | Delete (set to --) |
 | B + UP/DOWN | Page up / down (jump 16 rows) |
 | START | Play song from current row |
+
+> [!TIP]
+> You can start playback from any row — not just the beginning. Move the cursor to the row where you want playback to start, then press **START**. Useful for jumping to a specific section while mixing.
 
 ---
 
@@ -356,6 +385,9 @@ When played, the chain loops from slot 00 after the last filled slot.
 | A + B | Delete slot |
 | B + LEFT/RIGHT | Switch to previous / next chain |
 | START | Play current chain |
+
+> [!TIP]
+> Use **TRN** to play the same phrase at multiple pitches without copying it. One phrase can become a verse, chorus, and bridge by giving it different TRN values across chain slots — `07` = +7 semitones (a perfect fifth up), `0C` = +12 (one octave up).
 
 ---
 
@@ -395,6 +427,12 @@ Notes are written as pitch + octave: `C-4`, `C#4`, `D-4`, … `B-9`. Range is **
 
 Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex). Use A+UP/DOWN on the type to cycle through available effects. Effects are listed in §21.
 
+> [!WARNING]
+> Some effects (**ARP**, **REP**, **PBN**, **PVB**, **PVX**) **persist across steps** — they keep running until explicitly cancelled. A new note alone does **not** stop them. To cancel, place the same effect with value `00` in the same FX column, or use **KIL**.
+
+> [!TIP]
+> If you leave the I column blank (`--`), the note uses whatever instrument was last active on that track. This saves space in simple phrases, but can be surprising during playback — it's good practice to set the instrument on at least the first step of each phrase.
+
 ---
 
 ## 10. INSTRUMENT Screen
@@ -425,6 +463,12 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 | CRUSH | 00–FF | Bit-depth crusher. `00` = off. |
 | EQ | — | Press SELECT to open the EQ EDITOR for this instrument. |
 
+> [!TIP]
+> **ROOT** is the most important tuning parameter. Set it to the actual pitch of your sample (e.g., `A-4` for a 440 Hz sine). If notes sound in the wrong octave, ROOT is usually the reason.
+
+> [!TIP]
+> **DRIVE** and **CRUSH** are subtle at low values (`10`–`30`) and very aggressive near `FF`. Start low — a little tape saturation on a drum bus adds glue without destroying the transient.
+
 ### SF2 instrument parameters
 
 When the loaded file is an SF2 SoundFont, additional override fields appear for the preset's internal envelope and filter. Setting these to `--` uses the SF2's built-in values.
@@ -445,6 +489,9 @@ Volume is applied in this order:
 ```
 Instrument VOL × Phrase V column × Track volume (Mixer) × Master volume (Mixer)
 ```
+
+> [!NOTE]
+> If a note is unexpectedly silent, check all four stages of the volume chain: instrument VOL, phrase V column, track volume in MIXER, and master volume. Any one of them being `00` will silence the output.
 
 ### Slice playback
 
@@ -525,6 +572,12 @@ These modify the waveform in memory (UNDO is available after each operation).
 | REVERSE | Reverse the selection. |
 | UNDO | Revert to state before the last destructive operation. |
 
+> [!WARNING]
+> **UNDO** reverts only the **last single operation** — it is not a full history. If you apply NORMALIZE then FADE OUT, pressing UNDO reverts only the FADE OUT.
+
+> [!WARNING]
+> **OVERWRITE** writes to disk immediately and **cannot be undone**. Once you overwrite, the previous file content is permanently gone. Use **SAVE** (which creates a new numbered file) while experimenting, and only OVERWRITE when you are certain of the result.
+
 ### SYNC mode
 
 SYNC applies time or pitch transformations to match the sample to the current project BPM.
@@ -545,6 +598,9 @@ Applied to the whole sample (or selection) offline — rendered immediately, wit
 | DRIVE | Tape-style saturation. |
 | OTT | 3-band bidirectional compressor. |
 
+> [!TIP]
+> The DUST offline FX is a great one-click "make it lo-fi" button for drum samples. Apply it to a clean break, then SAVE to a new file — you preserve the original and get the processed version as a separate instrument.
+
 ### Transient detection and slices
 
 The SLICE row controls how slice markers are managed:
@@ -558,6 +614,9 @@ The SLICE row controls how slice markers are managed:
 Slice markers are stored in the WAV `cue ` chunk — compatible with M8, Blackbox, Reaper, Logic, and Adobe Audition.
 
 **CHOP** — exports each slice as a separate WAV file to `Samples/Chops/{name}/`.
+
+> [!TIP]
+> After using CHOP, you need to manually load the individual slice files onto new instrument slots. There is no automatic batch-load — but using numbered filenames (which CHOP generates) makes the process fast.
 
 ### Save
 
@@ -594,6 +653,12 @@ The header shows **TIC XX** — how many phrase ticks pass per table row. Use th
 - Default: `0C` (12 ticks = one phrase step per table row)
 - Lower values = table advances faster
 - Special values: `FC` = ping-pong, `FE` = random row, `FF` = stop
+
+> [!TIP]
+> Use **HOP** in the last row of a table section to loop just part of the table. For example: rows 00–03 with `HOP 00` in row 03 will loop those 4 rows indefinitely, ignoring rows 04–0F.
+
+> [!NOTE]
+> By default, instrument N uses table N. To override this per-note, place a **TBL XX** effect in the phrase FX column. The table switches immediately and stays active for subsequent notes on that track.
 
 ### Table–instrument link
 
@@ -649,6 +714,12 @@ Default: groove `00`, row 0 = `0C` (even timing, no swing).
 ### Assigning grooves
 
 Each track uses groove `00` by default. Use the **GRV XX** phrase effect to switch a track to groove `XX`.
+
+> [!TIP]
+> To reset a track back to even timing after a groove section, place `GRV 00` in an FX column. Groove `00` defaults to `0C` per step, which is perfectly even.
+
+> [!WARNING]
+> Make sure your groove rows sum to the same total ticks as an ungrooved measure (e.g., 16 steps × 12 ticks = 192). Uneven sums will cause the grooved track to **drift** out of sync with other tracks over time.
 
 ### Controls
 
@@ -718,6 +789,12 @@ When DEST is **MOD AMT**, **MOD RATE**, or **MOD BOTH**, the slot modulates the 
 
 Example: MOD1 (LFO) with DEST=MOD AMT targeting MOD2 (AHD) — the LFO rhythmically swells the envelope depth.
 
+> [!TIP]
+> Mod-to-mod routing is **circular** — slot 4 targets slot 1. Plan your slot order before setting up complex chains: the modulator should always be a lower-numbered slot than its target, except for the wraparound case.
+
+> [!TIP]
+> **LFO RETRIG** mode resets the phase on every new note, giving a predictable and consistent modulation shape on each hit. Use **FREE** only when you want the LFO to drift independently of your notes — useful for slow pad movement but unpredictable on drums.
+
 ### Controls
 
 | Input | Action |
@@ -769,6 +846,12 @@ The **master column** has two additional rows above the volume:
 
 The master column also has stereo send peak meters showing REV and DEL bus levels.
 
+> [!WARNING]
+> Red meters on the master output mean **clipping** — the signal is digitally distorted. Lower individual track volumes or reduce the master volume. The OTT compressor on the master bus (EFFECTS screen) can help tame peaks, but it won't fix extreme clipping.
+
+> [!TIP]
+> Start all tracks at `80` (unity), balance them by ear, then bring the master down if needed. It's easier to level-match tracks at unity than to compensate after boosting everything.
+
 ### Controls
 
 | Input | Action |
@@ -807,6 +890,12 @@ The reverb return volume is set on the MIXER screen (REV row in master column).
 | EQ | Press SELECT to open the EQ EDITOR for the delay return. |
 
 The delay return volume is set on the MIXER screen (DEL row in master column).
+
+> [!TIP]
+> Setting **Delay REV** above `00` feeds the delay output into the reverb — this creates a "delay into reverb" effect popular in ambient, dub, and post-rock music. Start around `40` and adjust to taste.
+
+> [!WARNING]
+> **FDBK** values near `FF` create near-infinite delay tails that can clip the output. Start around `60`–`80` and increase carefully while listening to the master meter.
 
 ### Master bus
 
@@ -855,6 +944,9 @@ Each band has 4 parameters: TYPE, FREQ, GAIN, Q.
 | A + LEFT/RIGHT | Edit value (large step) |
 | B | Close EQ EDITOR and apply changes |
 
+> [!TIP]
+> The spectrum display shows the master output, not just the EQ'd signal. This makes it useful as a general mixing tool — open any EQ slot and use the spectrum to identify frequency buildup across the full mix.
+
 ---
 
 ## 18. PROJECT Screen
@@ -884,6 +976,12 @@ Navigate here: **R+UP** from SONG or CHAIN.
 
 WAV exports are saved to `/Documents/PocketTracker/Renders/` with auto-incremented filenames (`ProjectName_0001.wav`).
 
+> [!WARNING]
+> **CLEAN SEQ** and **CLEAN INST** are **permanent** — there is no undo. Save your project before running them, in case you remove something you still needed.
+
+> [!TIP]
+> **WAV MIX** renders faster than real-time. A 3-minute song typically exports in a few seconds. The status line shows the output filename when done.
+
 ---
 
 ## 19. SETTINGS Screen
@@ -906,6 +1004,9 @@ The SETTINGS screen is opened from the PROJECT screen (cursor on SETTINGS row, p
 | TEMPLATE | SAVE / CLEAR | SAVE stores the current project as a template for new projects. CLEAR removes the saved template. |
 
 Layout and scaling mode are persisted across app restarts. The auto-detected layout on startup depends on whether physical gamepad buttons are detected.
+
+> [!TIP]
+> **NOTE PREV** is especially useful when building melodies — you can hear each note as you place it without needing to start playback. Turn it off when entering drums to avoid the click noise on every step.
 
 ---
 
@@ -996,6 +1097,12 @@ Rapid cycling through multiple pitches to simulate chords.
 
 Persists across steps. Configure with **ARC**.
 
+> [!WARNING]
+> ARP **persists** across phrase steps. Always place `ARP 00` in the same FX column when you want the arpeggio to stop — a new note alone won't cancel it.
+
+> [!TIP]
+> Place **ARC** once at step 00 to configure the arpeggio mode and speed for the whole phrase. It only needs to be set once — subsequent steps just use the same ARC config.
+
 ---
 
 ### ARC `XX` — Arpeggio Config
@@ -1011,6 +1118,9 @@ Probability gate. Rolls a random number each time the step plays.
 
 - `X` = probability for note + FX to the left to play (`0`=never, `F`=always)
 - `Y` = probability for FX to the right to play
+
+> [!TIP]
+> `CHA FF` in FX3 means the note plays but FX2 fires only sometimes — useful for random percussion hits or occasional ornaments without touching the note itself.
 
 ---
 
@@ -1074,6 +1184,9 @@ Continuous pitch bend. Persists until cancelled.
 - `80`–`FF` = bend DOWN (`80` from the top = fastest downward)
 - `PBN 00` = cancel
 
+> [!WARNING]
+> PBN **persists indefinitely** — the pitch will keep bending until `PBN 00` or a new note on the same track. An uncancelled bend will pitch the track up or down until it sounds completely wrong.
+
 ---
 
 ### PVB `XY` — Vibrato
@@ -1099,6 +1212,9 @@ Same as PVB but 4× deeper and 2× faster.
   - `X` 8–F: increase volume each retrig (fade-in)
 
 Persists across steps. Cancel with new note, new FX in same column, or KIL.
+
+> [!WARNING]
+> REP **persists** across steps and will retrigger indefinitely. If you forget to cancel it, every subsequent step on that track will keep retriggering the sample.
 
 ---
 
@@ -1257,6 +1373,9 @@ When slice markers are set in the SAMPLE EDITOR, use CHOP to export each slice a
 
 Output: `/Documents/PocketTracker/Samples/Chops/{instrument_name}/`
 
+> [!NOTE]
+> CHOP exports do not automatically load into instrument slots. After chopping, open the INSTRUMENT screen and use the file browser to load the individual slice files onto new instruments.
+
 ---
 
 ## 24. Workflow Tips
@@ -1349,6 +1468,290 @@ All 256 slots (00–FF) start empty in a new project. There are no bundled defau
 
 ---
 
+## Appendix D: Controls Cheat Sheet
+
+*Print this page and keep it handy.*
+
+---
+
+### UNIVERSAL — work on every screen
+
+| Input | Action |
+|---|---|
+| D-pad | Move cursor |
+| A | Insert / confirm |
+| A + UP / DOWN | Edit value (+1 / −1) |
+| A + RIGHT / LEFT | Edit value (+16 / −16, or ±1 octave for notes) |
+| A + B | Delete / clear value |
+| B | Cancel / back / delete |
+| START | Play / Stop |
+
+---
+
+### SCREEN NAVIGATION
+
+| Input | Action |
+|---|---|
+| R + RIGHT / LEFT | Move between columns (SONG → CHAIN → PHRASE → INST → TABLE) |
+| R + UP | Move to screen above in current column |
+| R + DOWN | Move to screen below in current column |
+
+**Quick nav:**
+
+| From | To | How |
+|---|---|---|
+| Any Row 2 screen | GROOVE | R + UP (column 2) |
+| INSTRUMENT | MODULATION | R + UP (column 3) |
+| Any Row 2 screen | MIXER | R + DOWN |
+| MIXER | EFFECTS | R + DOWN |
+| SONG or CHAIN | PROJECT | R + UP (column 0 or 1) |
+
+**Popup screens:**
+
+| Screen | How to open |
+|---|---|
+| SAMPLE EDITOR | INSTRUMENT → cursor on SAMPLE → SELECT |
+| EQ EDITOR | INSTRUMENT / MIXER / EFFECTS → cursor on EQ → SELECT |
+| SETTINGS | PROJECT → cursor on SETTINGS → A |
+| THEME EDITOR | SETTINGS → cursor on THEME → A |
+
+---
+
+### CONTEXT NAVIGATION — B + D-pad
+
+| Input | Screen | Action |
+|---|---|---|
+| B + LEFT / RIGHT | PHRASE | Previous / next phrase |
+| B + LEFT / RIGHT | CHAIN | Previous / next chain |
+| B + LEFT / RIGHT | INSTRUMENT | Previous / next instrument |
+| B + LEFT / RIGHT | TABLE | Previous / next table |
+| B + LEFT / RIGHT | GROOVE | Previous / next groove |
+| B + LEFT / RIGHT | MODULATION | Previous / next instrument (mods follow) |
+| B + UP / DOWN | SONG | Page up / down (16 rows) |
+
+---
+
+### COPY / PASTE — PHRASE, CHAIN, SONG, TABLE
+
+| Input | Action |
+|---|---|
+| L + B | Enter selection mode (tap again: CELL → ROW → SCREEN) |
+| B *(in selection)* | Copy, exit selection |
+| L + A *(in selection)* | Cut (copy + clear), exit selection |
+| L + A *(outside selection)* | Paste at cursor |
+| A + B *(in selection)* | Delete selection (no clipboard), exit |
+| A + UP / DOWN *(in selection)* | Increment / decrement all selected values |
+| L | Cancel selection |
+
+---
+
+### PLAYBACK
+
+| Input | Action |
+|---|---|
+| START | Play / Stop |
+| START on SONG | Play from current row |
+| START on CHAIN | Play current chain |
+| START on PHRASE | Play current phrase (loops) |
+| START on INSTRUMENT | Preview instrument |
+| START on SAMPLE EDITOR | Preview sample |
+| START in file browser | Preview highlighted WAV |
+
+---
+
+### FILE BROWSER
+
+| Input | Action |
+|---|---|
+| D-pad UP / DOWN | Move through files / folders |
+| A | Load file / enter folder |
+| B | Go up one directory level |
+| START | Preview highlighted WAV |
+
+---
+
+### SONG SCREEN
+
+| Input | Action |
+|---|---|
+| A | Insert last-used chain ID |
+| A + UP / DOWN | ±1 chain ID |
+| A + LEFT / RIGHT | ±16 chain IDs |
+| A + B | Delete (set to --) |
+| B + UP / DOWN | Page up / down (16 rows) |
+
+---
+
+### CHAIN SCREEN
+
+| Input | Action |
+|---|---|
+| A | Insert last-used phrase / TRN |
+| A + UP / DOWN | ±1 |
+| A + LEFT / RIGHT | ±16 (PHR), ±12 semitones (TRN) |
+| A + B | Delete slot |
+| B + LEFT / RIGHT | Previous / next chain |
+
+---
+
+### PHRASE SCREEN
+
+| Input | Action |
+|---|---|
+| A | Insert last-used note / value |
+| A + UP / DOWN | ±1 semitone (note), ±1 (other) |
+| A + LEFT / RIGHT | ±1 octave (note), ±16 (other) |
+| A + B | Delete value |
+| B + LEFT / RIGHT | Previous / next phrase |
+
+---
+
+### INSTRUMENT SCREEN
+
+| Input | Action |
+|---|---|
+| A (on SAMPLE) | Open file browser |
+| SELECT (on SAMPLE) | Open SAMPLE EDITOR |
+| SELECT (on EQ) | Open EQ EDITOR |
+| A + UP / DOWN | Edit current parameter |
+| A + B | Reset to default |
+| B + LEFT / RIGHT | Previous / next instrument |
+
+---
+
+### SAMPLE EDITOR
+
+| Input | Action |
+|---|---|
+| A + LEFT / RIGHT | Zoom in / out |
+| D-pad LEFT / RIGHT | Scroll (when zoomed) |
+| D-pad (on marker row) | Move selection marker |
+| START | Preview sample |
+| B | Close (discard unsaved changes) |
+
+---
+
+### TABLE SCREEN
+
+| Input | Action |
+|---|---|
+| A + UP / DOWN | Edit value |
+| A + B | Delete value |
+| B + LEFT / RIGHT | Previous / next table |
+| L + B | Enter selection mode |
+
+---
+
+### GROOVE SCREEN
+
+| Input | Action |
+|---|---|
+| D-pad UP / DOWN | Move between rows |
+| A + UP / DOWN | Edit tick value |
+| A + LEFT / RIGHT | Large step |
+| A + B | Clear row |
+| B + LEFT / RIGHT | Previous / next groove |
+
+---
+
+### MODULATION SCREEN
+
+| Input | Action |
+|---|---|
+| D-pad UP / DOWN | Move between parameters |
+| D-pad LEFT / RIGHT | Switch between paired slots |
+| A + UP / DOWN | Edit value |
+| A + LEFT / RIGHT | Large step |
+| A + B | Reset to default |
+| B + LEFT / RIGHT | Previous / next instrument |
+
+---
+
+### MIXER SCREEN
+
+| Input | Action |
+|---|---|
+| D-pad LEFT / RIGHT | Select track column |
+| D-pad UP / DOWN | Move between rows |
+| A + UP / DOWN | ±1 |
+| A + LEFT / RIGHT | ±16 |
+| SELECT | Open EQ EDITOR for this track |
+
+---
+
+### EQ EDITOR
+
+| Input | Action |
+|---|---|
+| D-pad LEFT / RIGHT | Switch between bands 1–3 |
+| D-pad UP / DOWN | Move between parameters |
+| A + UP / DOWN | Edit value |
+| A + LEFT / RIGHT | Large step |
+| B | Close and apply |
+
+---
+
+### THEME EDITOR
+
+| Input | Action |
+|---|---|
+| D-pad UP / DOWN | Move between color rows |
+| D-pad LEFT / RIGHT | Move between R / G / B (color rows) or name / SAVE / LOAD (row 0) |
+| A + UP / DOWN | ±1 to selected channel |
+| A + LEFT / RIGHT | ±16 to selected channel |
+| B | Close |
+
+---
+
+### EFFECTS QUICK REFERENCE
+
+| Code | Name | Value | Notes |
+|---|---|---|---|
+| ARP | Arpeggio | `XY` = intervals | Persists — cancel with `ARP 00` |
+| ARC | Arpeggio Config | `XY` | High nibble=mode (0=UP 1=DN 2=PP 3=RND), low=speed |
+| CHA | Chance | `XY` | X=left prob, Y=right prob (0=never F=always) |
+| DEL | Delay | `XX` ticks | Delays row trigger |
+| GRV | Groove | `XX` | Assigns groove to this track |
+| HOP | Hop/Jump | `XY` | Jumps to step Y, X times max |
+| KIL | Kill | `00` | Stops sample, cancels all persistent FX |
+| OFF | Offset | `XX` | Sample start position jump |
+| PIT | Pitch Offset | `XX` signed | 00–7F up, 80–FF down |
+| PSL | Pitch Slide | `XX` ticks | Portamento |
+| PBN | Pitch Bend | `XX` | 00–7F up, 80–FF down — **persists** |
+| PVB | Vibrato | `XY` | X=speed, Y=depth — **persists** |
+| PVX | Extreme Vibrato | `XY` | 4× deeper, 2× faster than PVB |
+| REP | Repeat/Retrigger | `XY` | Y=0: every X ticks; Y≠0: fade — **persists** |
+| RND | Randomize | `XY` | Randomizes previous FX value |
+| RNL | Randomize Left | `XY` | Randomizes FX in column to the left |
+| SLI | Slice Index | `XX` | Direct slice selection |
+| TBL | Table Set | `XX` | Override instrument's table |
+| THO | Table Hop | `XX` | Jump table to row 0X |
+| TIC | Tick Rate | `XX` | Table speed (FC=pingpong FE=random FF=stop) |
+| VOL | Volume | `XX` | Immediate volume at this tick |
+
+---
+
+### HEX / NOTE QUICK REFERENCE
+
+```
+ Dec  Hex  |  Dec  Hex
+   0   00  |  128   80
+  16   10  |  160   A0
+  32   20  |  192   C0
+  64   40  |  224   E0
+  96   60  |  255   FF
+```
+
+```
+Note offsets:  C   C#  D   D#  E   F   F#  G   G#  A   A#  B
+               00  01  02  03  04  05  06  07  08  09  0A  0B
+```
+
+- **Middle C** = `C-4` = MIDI 60
+- **VOL/PAN center** = `80` (unity / center pan)
+- **+1 octave** = +12 semitones = `0C`
+- **+1 perfect fifth** = +7 semitones = `07`
+
+---
 
 *PocketTracker is open-source (GPL-3.0). Contributions and bug reports welcome.*
-
