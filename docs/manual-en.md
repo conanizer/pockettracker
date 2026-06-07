@@ -90,9 +90,6 @@ Resampled instruments and CHOP exports are saved to:
 /Documents/PocketTracker/Samples/Chops/{name}/
 ```
 
-> [!TIP]
-> Back up your `/Documents/PocketTracker/` folder to a PC before major sessions. The folder contains all your projects, samples, and exported audio.
-
 ---
 
 ## 3. Interface Overview
@@ -323,10 +320,10 @@ All values (chain IDs, phrase IDs, instrument IDs, etc.) are hexadecimal, rangin
 
 ## 7. SONG Screen
 
-The SONG screen arranges chains across 8 tracks. Each column is a track (T0–T7), each row is a song position.
+The SONG screen arranges chains across 8 tracks. Each column is a track (1–8), each row is a song position.
 
 ```
-     T0   T1   T2   T3   T4   T5   T6   T7
+     1    2    3    4    5    6    7    8
 00   04   --   08   --   --   01   --   --
 01   04   --   08   --   --   01   --   --
 02   05   --   09   --   --   02   --   --
@@ -354,11 +351,11 @@ The SONG screen arranges chains across 8 tracks. Each column is a track (T0–T7
 ## 8. CHAIN Screen
 
 A chain is a sequence of up to 16 phrase references. Each slot has:
-- **PHR** — phrase ID (`00`–`FF`) or `--` (empty)
+- **PH** — phrase ID (`00`–`FF`) or `--` (empty)
 - **TSP** — transpose in semitones (`00` = no transpose; values above `7F` are negative)
 
 ```
-     PHR  TSP
+     PH   TSP
 00   04   00
 01   04   00
 02   05   0C   ← +12 semitones (one octave up)
@@ -374,7 +371,7 @@ When played, the chain loops from slot 00 after the last filled slot.
 | D-pad | Move cursor |
 | A | Insert last-used value |
 | A + UP/DOWN | Increment / decrement |
-| A + LEFT/RIGHT | ±16 (PHR) or ±12 semitones (TSP) |
+| A + LEFT/RIGHT | ±16 (PH) or ±12 semitones (TSP) |
 | A + B | Delete slot |
 | B + LEFT/RIGHT | Switch to previous / next chain |
 | START | Play current chain |
@@ -638,11 +635,11 @@ Tables are great for: drum rolls, note slides, automatic arpeggios, per-note aut
 
 ### TIC rate
 
-The header shows **TIC XX** — how many phrase ticks pass per table row. Use the **TIC** phrase effect to change this value.
+The header shows **XX TIC** — how many phrase ticks pass per table row. Use the **TIC** phrase effect to change this value.
 
-- Default: `0C` (12 ticks = one phrase step per table row)
+- Default: `06` (6 ticks per row — two rows per phrase step)
 - Lower values = table advances faster
-- Special values: `FC` = ping-pong, `FE` = random row, `FF` = stop
+- Special values: `00` = trigger mode, `FC` = octave map, `FE` = note map, `FF` = 200Hz mode
 
 > [!TIP]
 > Use **HOP** in the last row of a table section to loop just part of the table. For example: rows 00–03 with `HOP 00` in row 03 will loop those 4 rows indefinitely, ignoring rows 04–0F.
@@ -1252,11 +1249,13 @@ Jumps the table playhead to row `0X`. `THO 00` = loop current section.
 
 Sets the table tick rate:
 
-- `TIC 0C` = default (one table row per phrase step)
-- `TIC 06` = twice as fast
-- `TIC FC` = ping-pong
-- `TIC FE` = random row each tick
-- `TIC FF` = stop table
+- `TIC 06` = default (6 ticks per row, two rows per phrase step)
+- `TIC 03` = twice as fast
+- `TIC 0C` = half speed (one row per phrase step)
+- `TIC 00` = trigger mode — row is set by the note that triggered the instrument, no auto-advance
+- `TIC FC` = octave map — table row = octave of the triggered note (0–9)
+- `TIC FE` = note map — table row = pitch of the triggered note (C=0, C#=1 … B=11)
+- `TIC FF` = 200 Hz mode — table advances approximately one row every 5 ms, independent of tempo
 
 ---
 
@@ -1716,7 +1715,7 @@ All 256 slots (00–FF) start empty in a new project. There are no bundled defau
 | SLI | Slice Index | `XX` | Direct slice selection |
 | TBL | Table Set | `XX` | Override instrument's table |
 | THO | Table Hop | `XX` | Jump table to row 0X |
-| TIC | Tick Rate | `XX` | Table speed (FC=pingpong FE=random FF=stop) |
+| TIC | Tick Rate | `XX` | Table speed (00=trigger 06=default FC=octave FE=note FF=200Hz) |
 | VOL | Volume | `XX` | Immediate volume at this tick |
 
 ---
