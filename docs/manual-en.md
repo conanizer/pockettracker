@@ -48,11 +48,15 @@ PocketTracker stores everything in a single project file (`.ptp`). Sounds come f
 
 ### Target devices
 
-| Device | RAM | OS | Controls |
+PocketTracker is designed for **Android gaming handhelds** — devices with a 640×480 or larger screen and physical buttons. It also runs on any Android phone or tablet using on-screen touch controls.
+
+| Category | Examples | Min RAM | Controls |
 |---|---|---|---|
-| Miyoo Flip | 1 GB | Android 13 | Physical buttons |
-| Ayaneo Pocket Air Mini | 3 GB | Android 11 | Physical buttons |
-| Any Android 8.0+ phone / tablet | 512 MB+ | Android 8+ | Touchscreen |
+| Budget Android handheld | Miyoo Flip, Retroid Pocket series, Game Kiddy devices | 512 MB | Physical buttons |
+| Mid-range Android handheld | Ayaneo Pocket series, Odin 2 Mini, Anbernic RG series | 1 GB+ | Physical buttons |
+| Android phone / tablet | Any Android 8.0+ device | 512 MB | Touchscreen |
+
+**Tested on:** Miyoo Flip (1 GB, Android 13) and Ayaneo Pocket Air Mini (3 GB, Android 11).
 
 ---
 
