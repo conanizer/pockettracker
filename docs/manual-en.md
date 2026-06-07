@@ -46,17 +46,12 @@ PocketTracker is a sample-based music tracker for Android handhelds and budget A
 
 PocketTracker stores everything in a single project file (`.ptp`). Sounds come from standard `.wav` files or **SoundFont (SF2)** files that you load yourself — there are no bundled samples.
 
-### Target devices
+### Minimum requirements
 
-PocketTracker is designed for **Android gaming handhelds** — devices with a 640×480 or larger screen and physical buttons. It also runs on any Android phone or tablet using on-screen touch controls.
-
-| Category | Examples | Min RAM | Controls |
-|---|---|---|---|
-| Budget Android handheld | Miyoo Flip, Retroid Pocket series, Game Kiddy devices | 512 MB | Physical buttons |
-| Mid-range Android handheld | Ayaneo Pocket series, Odin 2 Mini, Anbernic RG series | 1 GB+ | Physical buttons |
-| Android phone / tablet | Any Android 8.0+ device | 512 MB | Touchscreen |
-
-**Tested on:** Miyoo Flip (1 GB, Android 13) and Ayaneo Pocket Air Mini (3 GB, Android 11).
+- **Android** 8.0 (API 26) or later
+- **RAM:** 512 MB
+- **Screen:** 640×480 or larger
+- **Controls:** Physical buttons or touchscreen
 
 ---
 
