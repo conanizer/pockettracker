@@ -991,7 +991,7 @@ The SETTINGS screen is opened from the PROJECT screen (cursor on SETTINGS row, p
 Layout and scaling mode are persisted across app restarts. The auto-detected layout on startup depends on whether physical gamepad buttons are detected.
 
 > [!TIP]
-> **NOTE PREV** is especially useful when building melodies — you can hear each note as you place it without needing to start playback. Turn it off when entering drums to avoid the click noise on every step.
+> **NOTE PREV** is especially useful when building melodies — you can hear each note as you place it without needing to start playback.
 
 ---
 

@@ -38,10 +38,26 @@ struct FilterModule {
     daisysp::Svf svfL;   // mono or left channel
     daisysp::Svf svfR;   // right channel (SF stereo only)
 
+    // Per-block interpolation: prev* = start-of-block, target* = end-of-block
+    float prevFreqL  = 0.25f, prevDampL  = 0.0f;
+    float targetFreqL = 0.25f, targetDampL = 0.0f;
+    float prevFreqR  = 0.25f, prevDampR  = 0.0f;
+    float targetFreqR = 0.25f, targetDampR = 0.0f;
+
     void reset() {
         type = 0;
         svfL.Init(sampleRate);
         svfR.Init(sampleRate);
+        prevFreqL = targetFreqL = svfL.GetFreq();
+        prevDampL = targetDampL = svfL.GetDamp();
+        prevFreqR = targetFreqR = svfR.GetFreq();
+        prevDampR = targetDampR = svfR.GetDamp();
+    }
+
+    // Snapshot start-of-block coefficients. Call BEFORE setParams each block.
+    void snapshotCoeffs() {
+        prevFreqL = targetFreqL; prevDampL = targetDampL;
+        prevFreqR = targetFreqR; prevDampR = targetDampR;
     }
 
     // Recompute all parameters. Call once per block when any param changes.
@@ -62,6 +78,18 @@ struct FilterModule {
         float drv = filterDrive / 25.5f;
         svfL.SetFreq(hz);  svfL.SetRes(res);  svfL.SetDrive(drv);
         svfR.SetFreq(hz);  svfR.SetRes(res);  svfR.SetDrive(drv);
+        targetFreqL = svfL.GetFreq(); targetDampL = svfL.GetDamp();
+        targetFreqR = svfR.GetFreq(); targetDampR = svfR.GetDamp();
+    }
+
+    // Per-sample coefficient interpolation. Call inside the mix loop before process*.
+    // Linearly blends prev→target coefficients without expensive trig recalculation.
+    inline void setInterpolatedCoeffs(float t) {
+        if (!enabled()) return;
+        svfL.SetCoeffs(prevFreqL + (targetFreqL - prevFreqL) * t,
+                       prevDampL + (targetDampL - prevDampL) * t);
+        svfR.SetCoeffs(prevFreqR + (targetFreqR - prevFreqR) * t,
+                       prevDampR + (targetDampR - prevDampR) * t);
     }
 
     bool enabled() const { return type != 0; }

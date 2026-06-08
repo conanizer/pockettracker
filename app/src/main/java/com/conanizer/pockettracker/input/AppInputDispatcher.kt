@@ -477,6 +477,12 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                             trackerController.lastEditedNote = step.note
                             trackerController.lastEditedVolume = step.volume
                             trackerController.lastEditedInstrument = step.instrument
+                            if (notePreviewEnabled && result.lastEditedNote != null) {
+                                val instrument = trackerController.project.instruments[step.instrument.coerceIn(0, 255)]
+                                val sr = audioEngine.getDeviceSampleRate().toLong().coerceAtLeast(44100L)
+                                val stepFrames = (60000.0 / trackerController.project.tempo / 4.0 * sr / 1000.0).toLong()
+                                audioEngine.previewNoteWithTimeout(instrument, step.note, trackerController.project, stepFrames)
+                            }
                         }
                     }
                     trackerController.projectVersion++

@@ -75,6 +75,12 @@ class Svf
     */
     inline float Peak() { return out_peak_; }
 
+    // Direct coefficient access — bypasses the trig recalculation in SetFreq/SetRes.
+    // Used by FilterModule to interpolate coefficients per-sample without calling powf/sinf.
+    inline void SetCoeffs(float freq, float damp) { freq_ = freq; damp_ = damp; }
+    inline float GetFreq() const { return freq_; }
+    inline float GetDamp() const { return damp_; }
+
   private:
     float sr_, fc_, res_, drive_, freq_, damp_;
     float notch_, low_, high_, band_, peak_;

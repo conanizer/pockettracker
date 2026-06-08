@@ -381,19 +381,26 @@ class EqModule : TrackerModule {
     }
 
     /**
-     * Exact z-domain transfer function of the DaisySP double-pass Chamberlin SVF.
+     * Z-domain transfer function of the DaisySP double-pass Chamberlin SVF.
      *
-     * State update per sample (two sequential passes, same input x):
-     *   L[n] = β·L[n-1] + α·B[n-1] + f²·x[n]
-     *   B[n] = −α·L[n-1] + γ·B[n-1] + α·x[n]
-     * where k=1−fd−f², α=f(1+k), β=1−f², γ=k²−f².
+     * DaisySP Process() runs two sequential passes on the same input and averages:
+     *   out_low  = 0.5*low_pass1  + 0.5*low_pass2
+     *   out_high = 0.5*high_pass1 + 0.5*high_pass2
      *
-     * HP output uses intermediate B₁ (after pass 1, not B[n]):
-     *   H_HP[n] = k·x[n] − k·L[n-1] − μ·B[n-1],  μ = f+(d+f)·k
+     * Combined state update (drive=0):
+     *   L[n] = β·L[n-1] + α·B[n-1] + f²·x[n],  β=1−f²
+     *   B[n] = −α·L[n-1] + γ·B[n-1] + α·x[n],  γ=k²−f²
+     * where k=1−fd−f², α=f(1+k).
      *
-     * Steady-state at z=e^{jω}:  B̂=α(z−1)/D,  L̂=(αB̂+f²)/(z−β)
-     *   where D=(z−γ)(z−β)+α².
-     *   H_LP = L̂,  H_HP = k − e^{−jω}(k·L̂ + μ·B̂)
+     * Steady-state at z=e^{jω}: B̂=α(z−1)/D, L̂=(αB̂+f²)/(z−β),
+     *   D=(z−γ)(z−β)+α².
+     *
+     * pass1: low1 = L[n-1]+f·B[n-1],  high1 = x − L[n-1] − (d+f)·B[n-1]
+     * pass2: low2 = L[n],              high2 = k·x − k·L[n-1] − μ·B[n-1], μ=f+(d+f)k
+     *
+     * Averaged transfer functions:
+     *   H_LP = 0.5·(1+e^{−jω})·L̂ + 0.5·f·e^{−jω}·B̂
+     *   H_HP = 0.5·(1+k) − 0.5·e^{−jω}·((1+k)·L̂ + (d+f+μ)·B̂)
      */
     private fun svfGainDb(type: Int, fc: Float, q: Float, vizFreq: Float, sampleRate: Float): Float {
         val fcC = fc.coerceAtMost(sampleRate * 0.45f)
@@ -427,14 +434,23 @@ class EqModule : TrackerModule {
         val lRe = (lNumRe * zbRe + lNumIm * zbIm) / zbMSq
         val lIm = (lNumIm * zbRe - lNumRe * zbIm) / zbMSq
 
+        // e^{−jω} terms reused by both branches
+        val emjwL_Re = cosW * lRe + sinW * lIm   // Re(e^{-jω}·L̂)
+        val emjwL_Im = cosW * lIm - sinW * lRe   // Im(e^{-jω}·L̂)
+        val emjwB_Re = cosW * bRe + sinW * bIm   // Re(e^{-jω}·B̂)
+        val emjwB_Im = cosW * bIm - sinW * bRe   // Im(e^{-jω}·B̂)
+
         val magSq: Double = if (type == 5) { // LP (HICUT)
-            lRe * lRe + lIm * lIm
-        } else { // HP (LOWCUT): H_HP = k − e^{−jω}(k·L̂ + μ·B̂)
-            // e^{−jω} = cosW − j·sinW
-            val kLplusMuB_Re = k * lRe + mu * bRe
-            val kLplusMuB_Im = k * lIm + mu * bIm
-            val hRe = k - (cosW * kLplusMuB_Re + sinW * kLplusMuB_Im)
-            val hIm =   - (cosW * kLplusMuB_Im - sinW * kLplusMuB_Re)
+            // H_LP = 0.5·(1+e^{−jω})·L̂ + 0.5·f·e^{−jω}·B̂
+            val hRe = 0.5 * (lRe + emjwL_Re + f * emjwB_Re)
+            val hIm = 0.5 * (lIm + emjwL_Im + f * emjwB_Im)
+            hRe * hRe + hIm * hIm
+        } else { // HP (LOWCUT)
+            // H_HP = 0.5·(1+k) − 0.5·e^{−jω}·((1+k)·L̂ + (d+f+μ)·B̂)
+            val onePlusK = 1.0 + k
+            val dfm = d + f + mu
+            val hRe = 0.5 * onePlusK - 0.5 * (onePlusK * emjwL_Re + dfm * emjwB_Re)
+            val hIm =                - 0.5 * (onePlusK * emjwL_Im + dfm * emjwB_Im)
             hRe * hRe + hIm * hIm
         }
 

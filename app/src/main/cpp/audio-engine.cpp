@@ -441,6 +441,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     sv.chain.filter.setParams(sv.instrParams.filterType, sv.instrParams.filterCut,
                                               sv.instrParams.filterRes, sv.instrParams.filterDrive,
                                               (int)sampleRate);
+                    sv.chain.filter.snapshotCoeffs(); // seed prev = target so first block doesn't interpolate from reset defaults
                     sv.chain.drive.setDrive(sv.instrParams.drive);
                     sv.chain.crush.setParams(sv.instrParams.crush, sv.instrParams.downsample);
                     if (sv.instrParams.eqActive) {
@@ -983,15 +984,18 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         Voice& voice = voices[v];
         if (!voice.isActive) continue;
 
-        // PAN modulation: recalculate stereo gains from ParamBus (base=basePan, mod=env/LFO)
+        // PAN modulation: snapshot before update so the mix loop can interpolate per-sample
+        voice.prevPanLeft  = voice.panLeft;
+        voice.prevPanRight = voice.panRight;
         if (fabsf(voice.params.mod[PARAM_PAN]) > 0.001f) {
             float modPan = fmaxf(0.0f, fminf(1.0f, voice.params.get(PARAM_PAN)));
             float panAngle = modPan * (float)M_PI * 0.5f;
-            voice.panLeft = cosf(panAngle);
+            voice.panLeft  = cosf(panAngle);
             voice.panRight = sinf(panAngle);
         }
 
-        // FILTER modulation: recompute coefficients when LFO/ADSR drives CUT or RES
+        // FILTER modulation: snapshot then recompute coefficients when LFO/ADSR drives CUT or RES
+        voice.chain.filter.snapshotCoeffs();
         if (voice.chain.filter.enabled() &&
                 (fabsf(voice.params.mod[PARAM_FILTER_CUT]) > 0.5f ||
                  fabsf(voice.params.mod[PARAM_FILTER_RES]) > 0.5f)) {
@@ -1048,25 +1052,20 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
             // Bounds check - need idx+1 for interpolation
             if (idx < 0 || idx >= voice.sampleLength - 1) {
-                // Handle edge case: exactly at last sample
-                if (idx == voice.sampleLength - 1 && frac == 0.0f) {
-                    float valL = voice.sampleData[idx];
-                    float valR = voice.sampleDataRight ? voice.sampleDataRight[idx] : valL;
-                    float sampleL = valL * voice.panLeft;
-                    float sampleR = valR * voice.panRight;
-                    output[i * channelCount] += sampleL;
-                    output[i * channelCount + 1] += sampleR;
-                    if (voice.trackId >= 0 && voice.trackId < 8) {
-                        framePeaksPerTrackL[voice.trackId] = fmaxf(framePeaksPerTrackL[voice.trackId], fabsf(sampleL));
-                        framePeaksPerTrackR[voice.trackId] = fmaxf(framePeaksPerTrackR[voice.trackId], fabsf(sampleR));
-                    }
+                if (idx < 0) {
+                    voice.isActive = false;  // negative position: safety hard-stop
+                } else {
+                    // At or past last interpolation point: fade out so SVF resonance decays
+                    voice.position = (float)(voice.sampleLength - 2);
+                    voice.startFadeOut();  // no-op if already fading
                 }
-                voice.isActive = false;
                 break;
             }
 
             // STEP 4 scalars (shared by mono and stereo paths)
             float t = (numFrames > 1) ? (float)(i + 1) / (float)numFrames : 1.0f;
+            float panL = voice.prevPanLeft  + (voice.panLeft  - voice.prevPanLeft)  * t;
+            float panR = voice.prevPanRight + (voice.panRight - voice.prevPanRight) * t;
             float finalVol = voice.volume;
             for (int m = 0; m < 4; m++) {
                 const VoiceModSlot& mod = voice.voiceMods[m];
@@ -1076,9 +1075,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         float envAtI = mod.prevEnvValue + (mod.envValue - mod.prevEnvValue) * t;
                         finalVol = fmaxf(0.0f, finalVol * (1.0f + envAtI * mod.effectiveAmt));
                     } else {
-                        float envAtI = (mod.envValue < mod.prevEnvValue)
-                            ? mod.prevEnvValue + (mod.envValue - mod.prevEnvValue) * t
-                            : mod.envValue;
+                        float envAtI = mod.prevEnvValue + (mod.envValue - mod.prevEnvValue) * t;
                         finalVol = fmaxf(0.0f, finalVol + (envAtI - 1.0f) * mod.effectiveAmt);
                     }
                 }
@@ -1109,6 +1106,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 }
                 float procL = s1L + (s2L - s1L) * frac;
                 float procR = s1R + (s2R - s1R) * frac;
+                voice.chain.filter.setInterpolatedCoeffs(t);
                 voice.chain.processStereo(procL, procR);
 
                 float scalar = finalVol * volRoute;
@@ -1116,12 +1114,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 procR *= scalar;
 
                 if ((stemsMode == 0 || stemsMode >= 9) && voice.reverbSend > 0.0f) {
-                    revSendBufL[i] += procL * voice.panLeft  * voice.reverbSend;
-                    revSendBufR[i] += procR * voice.panRight * voice.reverbSend;
+                    revSendBufL[i] += procL * panL * voice.reverbSend;
+                    revSendBufR[i] += procR * panR * voice.reverbSend;
                 }
                 if ((stemsMode == 0 || stemsMode >= 9) && voice.delaySend > 0.0f) {
-                    dlySendBufL[i] += procL * voice.panLeft  * voice.delaySend;
-                    dlySendBufR[i] += procR * voice.panRight * voice.delaySend;
+                    dlySendBufL[i] += procL * panL * voice.delaySend;
+                    dlySendBufR[i] += procR * panR * voice.delaySend;
                 }
 
                 float globalMul = trackVol * masterVol * antiClick;
@@ -1138,8 +1136,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     }
                 }
 
-                sampleL = procL * voice.panLeft;
-                sampleR = procR * voice.panRight;
+                sampleL = procL * panL;
+                sampleR = procR * panR;
             } else {
                 // ── MONO SAMPLE PATH ──────────────────────────────────────────────
                 float sample1 = voice.sampleData[idx];
@@ -1153,17 +1151,18 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 }
 
                 float processedSample = sample1 + (sample2 - sample1) * frac;
+                voice.chain.filter.setInterpolatedCoeffs(t);
                 processedSample = voice.chain.processMono(processedSample);
 
                 float sample = processedSample * finalVol * volRoute;
 
                 if ((stemsMode == 0 || stemsMode >= 9) && voice.reverbSend > 0.0f) {
-                    revSendBufL[i] += sample * voice.panLeft  * voice.reverbSend;
-                    revSendBufR[i] += sample * voice.panRight * voice.reverbSend;
+                    revSendBufL[i] += sample * panL * voice.reverbSend;
+                    revSendBufR[i] += sample * panR * voice.reverbSend;
                 }
                 if ((stemsMode == 0 || stemsMode >= 9) && voice.delaySend > 0.0f) {
-                    dlySendBufL[i] += sample * voice.panLeft  * voice.delaySend;
-                    dlySendBufR[i] += sample * voice.panRight * voice.delaySend;
+                    dlySendBufL[i] += sample * panL * voice.delaySend;
+                    dlySendBufR[i] += sample * panR * voice.delaySend;
                 }
 
                 sample = sample * trackVol * masterVol * antiClick;
@@ -1176,8 +1175,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     }
                 }
 
-                sampleL = sample * voice.panLeft;
-                sampleR = sample * voice.panRight;
+                sampleL = sample * panL;
+                sampleR = sample * panR;
             }
 
             if (stemsMode == 0 || voice.trackId == stemsMode - 1) {
@@ -1220,7 +1219,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     if (voice.loopMode == 1) {
                         voice.position = (float)voice.actualLoopStart;
                     } else {
-                        voice.isActive = false;
+                        voice.position = (float)voice.actualStart;
+                        voice.startFadeOut();
                         break;
                     }
                 }
@@ -1230,7 +1230,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     if (voice.loopMode == 1) {
                         voice.position = (float)voice.actualLoopStart;
                     } else {
-                        voice.isActive = false;
+                        voice.position = (float)(voice.actualEnd - 1);
+                        voice.startFadeOut();
                         break;
                     }
                 }
@@ -1292,7 +1293,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 }
             }
 
-            // If filter mod is active, recompute coefficients via InstrumentChain.
+            // If filter mod is active, snapshot then recompute coefficients via InstrumentChain.
+            sv.chain.filter.snapshotCoeffs();
             if (sv.chain.filter.enabled()) {
                 int modCut = std::max(0, std::min(255,
                     (int)(sv.instrParams.filterCut + sv.modDestValues[PARAM_FILTER_CUT])));
@@ -1319,8 +1321,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
 
             for (int i = 0; i < numFrames; i++) {
+                float lerp_t = (numFrames > 1) ? (float)(i + 1) / (float)numFrames : 1.0f;
                 float L = sfBuf[i * 2];
                 float R = sfBuf[i * 2 + 1];
+                sv.chain.filter.setInterpolatedCoeffs(lerp_t);
                 sv.chain.processStereo(L, R);
                 sfBuf[i * 2]     = L;
                 sfBuf[i * 2 + 1] = R;

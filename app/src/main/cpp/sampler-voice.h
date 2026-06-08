@@ -19,6 +19,8 @@ struct Voice : public IAudioVoice {
     float volume;
     float panLeft;           // Left channel gain (0.0-1.0)
     float panRight;          // Right channel gain (0.0-1.0)
+    float prevPanLeft;       // Pan left at start of block (for per-sample interpolation)
+    float prevPanRight;      // Pan right at start of block (for per-sample interpolation)
 
     // Playback parameters (calculated from instrument params)
     int actualStart;     // Actual sample index to start from
@@ -79,7 +81,8 @@ struct Voice : public IAudioVoice {
 
     Voice() : isActive(false), fadeInRemaining(0), sampleData(nullptr), sampleDataRight(nullptr), sampleLength(0),
               position(0), trackId(-1), playbackRate(1.0f), basePlaybackRate(1.0f), volume(1.0f),
-              panLeft(0.707f), panRight(0.707f),  // Default to center
+              panLeft(0.707f), panRight(0.707f),
+              prevPanLeft(0.707f), prevPanRight(0.707f),
               actualStart(0), actualEnd(0), actualLoopStart(0),
               reverse(false), loopMode(0), loopingBack(false),
               tableId(-1), tableRow(0), lastProcessedRow(-1), tableTicRate(6), tableTicCounter(0),
@@ -110,8 +113,8 @@ struct Voice : public IAudioVoice {
         // Calculate constant-power pan gains
         // pan: 0.0=left, 0.5=center, 1.0=right
         float panAngle = pan * (float)M_PI * 0.5f;  // 0 to π/2
-        panLeft = cosf(panAngle);
-        panRight = sinf(panAngle);
+        panLeft = prevPanLeft = cosf(panAngle);
+        panRight = prevPanRight = sinf(panAngle);
 
         // Convert normalized 0-255 values to actual sample positions
         // Use startPointOverride if provided (Offset effect / slice start), otherwise use instrument default
@@ -142,6 +145,7 @@ struct Voice : public IAudioVoice {
         chain.reset(sampleRate);
         chain.filter.setParams(instrParams.filterType, instrParams.filterCut,
                                instrParams.filterRes, instrParams.filterDrive, sampleRate);
+        chain.filter.snapshotCoeffs(); // seed prev = target so first block doesn't interpolate from reset defaults
         if (instrParams.eqActive) {
             chain.eq.active = true;
             for (int i = 0; i < 3; i++) {
@@ -296,8 +300,8 @@ struct Voice : public IAudioVoice {
     void setPan(float pan) override {
         params.setBase(PARAM_PAN, pan);
         float angle = pan * (float)M_PI * 0.5f;
-        panLeft  = cosf(angle);
-        panRight = sinf(angle);
+        panLeft = prevPanLeft = cosf(angle);
+        panRight = prevPanRight = sinf(angle);
     }
 
     void retrigger(int startPoint) override {
