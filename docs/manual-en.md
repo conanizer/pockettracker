@@ -446,7 +446,7 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 | FILTER | LP / HP / BP / OFF | Resonant SVF filter type. |
 | CUT | 00–FF | Filter cutoff frequency. `FF` = open. |
 | RES | 00–FF | Filter resonance. `00` = none. |
-| DRIVE | 00–FF | Tape-style saturation. `00` = off. |
+| DRIVE | 00–FF | Soft-clipping overdrive. `00` = off. |
 | CRUSH | 00–FF | Bit-depth crusher. `00` = off. |
 | EQ | — | Press SELECT to open the EQ EDITOR for this instrument. |
 
@@ -582,7 +582,7 @@ Applied to the whole sample (or selection) offline — rendered immediately, wit
 |---|---|
 | EQ | Apply the EQ settings (opens EQ EDITOR first). |
 | DUST | Lo-fi effect chain: shelf EQ → low-pass → tube saturation → FET compression → wow/drift → bitcrush → soft-clip. |
-| DRIVE | Tape-style saturation. |
+| DRIVE | Soft-clipping overdrive. |
 | OTT | 3-band bidirectional compressor. |
 
 > [!TIP]
