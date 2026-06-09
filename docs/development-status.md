@@ -1,6 +1,6 @@
 # Development Status
 
-**Last Updated:** 2026-06-06 (rev 6)
+**Last Updated:** 2026-06-09 (rev 7)
 
 ## Current Phase
 
@@ -145,6 +145,8 @@ Week 16:     MVP Release
 - **sinf in LFO hot path** — `lfoShape()` calls `sinf()` every audio block for every active sine-wave LFO. On low-end ARM (Miyoo Flip) this is measurable. Fix: 256-entry float sine wavetable (~1 KB) with linear interpolation for the sine case; triangle/ramp/square are already branchless. Only worth doing if profiling shows LFO is a bottleneck.
 
 - **Fine pitch destination (dest=4) naming ambiguity** — PARAM_PITCH dest=4 applies `effectiveAmt * 1.0` semitones, identical range to coarse pitch (dest=3, scale=12). "Fine" conventionally means ±1 semitone (cents). Either cap the scale to 0.01–0.1 or rename the destination to avoid misleading users. Deferred post-MVP.
+
+- **Sample editor dry preview still passes through master bus** — `previewInstrumentDry()` bypasses per-instrument effects (EQ slot, reverb/delay sends, modulation) but master chain (OTT/DUST/limiter/preamp) still applies because it is on the shared summed output. A true "completely dry" preview requires either a separate dry output bus in C++ or a `bypassMasterForDryPreview` atomic flag in `processAudioBlock` that skips `masterChain.process()` for the duration of the preview. Needs changes in `audio-engine.h`, `audio-engine.cpp`, `native-audio.cpp` (JNI), `IAudioBackend.kt`, and `OboeAudioBackend.kt`.
 
 ---
 
