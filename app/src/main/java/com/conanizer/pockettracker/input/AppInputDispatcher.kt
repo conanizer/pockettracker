@@ -1516,7 +1516,8 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                         2 -> { leftCh = audioEngine.getSampleData(instId); rightCh = audioEngine.getSampleDataRight(instId) }
                                         else -> { val l = audioEngine.getSampleData(instId); val r = audioEngine.getSampleDataRight(instId); val m = FloatArray(l.size) { i -> (l[i] + r[i]) / 2f }; leftCh = m; rightCh = m }
                                     }
-                                    val success = WavWriter.writeWav(fileSystem = fileSystem, path = targetPath, leftChannel = leftCh, rightChannel = rightCh, sampleRate = origRate, cuePoints = cuePoints)
+                                    val outputChannels = if (hasStereo && srcMode == 2) 2 else 1
+                                    val success = WavWriter.writeWav(fileSystem = fileSystem, path = targetPath, leftChannel = leftCh, rightChannel = rightCh, sampleRate = origRate, cuePoints = cuePoints, channels = outputChannels)
                                     withContext(Dispatchers.Main) {
                                         if (success) {
                                             trackerController.project.instruments[instId].sampleFilePath = targetPath
@@ -1574,7 +1575,8 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                         2 -> { leftCh = audioEngine.getSampleData(instId); rightCh = audioEngine.getSampleDataRight(instId) }
                                         else -> { val l = audioEngine.getSampleData(instId); val r = audioEngine.getSampleDataRight(instId); val m = FloatArray(l.size) { i -> (l[i] + r[i]) / 2f }; leftCh = m; rightCh = m }
                                     }
-                                    val success = WavWriter.writeWav(fileSystem = fileSystem, path = filePath, leftChannel = leftCh, rightChannel = rightCh, sampleRate = origRate, cuePoints = cuePoints)
+                                    val outputChannels = if (hasStereo && srcMode == 2) 2 else 1
+                                    val success = WavWriter.writeWav(fileSystem = fileSystem, path = filePath, leftChannel = leftCh, rightChannel = rightCh, sampleRate = origRate, cuePoints = cuePoints, channels = outputChannels)
                                     withContext(Dispatchers.Main) {
                                         if (success) {
                                             trackerController.project.instruments[instId].sliceMarkers = cuePoints.map { it.toLong() }
@@ -1913,7 +1915,8 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                             2 -> { leftCh = audioEngine.getSampleData(instId); rightCh = audioEngine.getSampleDataRight(instId) }
                             else -> { val l = audioEngine.getSampleData(instId); val r = audioEngine.getSampleDataRight(instId); val m = FloatArray(l.size) { i -> (l[i] + r[i]) / 2f }; leftCh = m; rightCh = m }
                         }
-                        val success = WavWriter.writeWav(fileSystem = fileSystem, path = path, leftChannel = leftCh, rightChannel = rightCh, sampleRate = origRate, cuePoints = cuePoints)
+                        val outputChannels = if (hasStereo && srcMode == 2) 2 else 1
+                        val success = WavWriter.writeWav(fileSystem = fileSystem, path = path, leftChannel = leftCh, rightChannel = rightCh, sampleRate = origRate, cuePoints = cuePoints, channels = outputChannels)
                         withContext(Dispatchers.Main) {
                             if (success) {
                                 val savedName = File(path).nameWithoutExtension

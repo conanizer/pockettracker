@@ -34,14 +34,15 @@ object WavWriter {
         leftChannel: FloatArray,
         rightChannel: FloatArray,
         sampleRate: Int = 44100,
-        cuePoints: IntArray = intArrayOf()
+        cuePoints: IntArray = intArrayOf(),
+        channels: Int = 2  // 1 = mono (left channel data only), 2 = stereo
     ): Boolean {
         require(leftChannel.size == rightChannel.size) {
             "Left and right channels must have the same length"
         }
 
         val numSamples = leftChannel.size
-        val numChannels = 2
+        val numChannels = channels.coerceIn(1, 2)
         val bitsPerSample = 16
         val bytesPerSample = bitsPerSample / 8
         val blockAlign = numChannels * bytesPerSample
@@ -92,7 +93,7 @@ object WavWriter {
 
         for (i in 0 until numSamples) {
             buffer.putShort(floatToInt16(leftChannel[i]))
-            buffer.putShort(floatToInt16(rightChannel[i]))
+            if (numChannels == 2) buffer.putShort(floatToInt16(rightChannel[i]))
         }
 
         // ===================================
