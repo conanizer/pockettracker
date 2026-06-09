@@ -2041,16 +2041,16 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val previewSlot = audioEngine.prepareSampleEditorSourcePreview(instId, sampleEditorState.sourceMode)
                 val savedSampleId = inst.sampleId
                 if (previewSlot != instId) inst.sampleId = previewSlot
-                val savedInstrument = trackerController.currentInstrument
-                trackerController.currentInstrument = instId
-                trackerController.previewInstrument()
-                trackerController.currentInstrument = savedInstrument
+                audioEngine.previewInstrumentDry(inst)
                 if (previewSlot != instId) inst.sampleId = savedSampleId
                 inst.root = savedRoot
                 coroutineScope.launch {
                     delay(100)
                     inst.sampleStart = savedStart; inst.sampleEnd = savedEnd
                     audioEngine.updateInstrumentPlaybackParams(inst)
+                    // Restore effects bypassed for dry preview
+                    audioEngine.pushInstrumentEqAndSends(inst, trackerController.project)
+                    audioEngine.pushInstrumentModulation(inst, trackerController.project.tempo)
                 }
             }
             ScreenType.INSTRUMENT -> trackerController.previewInstrument()

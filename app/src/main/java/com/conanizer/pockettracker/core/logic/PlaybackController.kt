@@ -148,7 +148,9 @@ class PlaybackController(
     private var nextChainRowToSchedule: Int = 0
     private var nextSongRowToSchedule: Int = 0
     private var nextSongChainRowToSchedule: Int = 0
-    private val chainRowStartFrames = mutableMapOf<Int, Long>()
+    // List (not map) so we keep per-iteration start frames. A map would overwrite row 0's entry
+    // when it loops around before the cursor has had a chance to read the first occurrence.
+    private val chainRowStartFrames = ArrayDeque<Pair<Int, Long>>()
     private val songPositionStartFrames = mutableMapOf<Pair<Int,Int>, Long>()
 
     // Snapshot taken just BEFORE scheduling a phrase, so notifyDataChanged() can roll back
@@ -187,6 +189,8 @@ class PlaybackController(
                 PlaybackPosition(step, 0, 0, 0)
             }
             PlaybackMode.CHAIN -> {
+                // Prune entries that are definitely in the past (> 1 phrase ago).
+                chainRowStartFrames.removeAll { (_, startFrame) -> currentFrame > startFrame + framesPerPhrase }
                 var chainRow = 0
                 var phraseStep = 0
                 for ((row, startFrame) in chainRowStartFrames) {
@@ -361,7 +365,7 @@ class PlaybackController(
                         val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
 
                         val result = schedulePhrase(project.phrases[phraseId], nextFrameToSchedule, 0, transposeSemitones, project, framesPerStep, effectiveStartRow)
-                        chainRowStartFrames[nextRow] = nextFrameToSchedule
+                        chainRowStartFrames.addLast(nextRow to nextFrameToSchedule)
                         nextFrameToSchedule += result.framesScheduled
 
                         nextChainRowToSchedule = (nextRow + 1) % 16
@@ -637,7 +641,7 @@ class PlaybackController(
             val phraseId = chain.phraseRefs[firstRow]
             val transposeSemitones = chain.getTransposeSemitones(firstRow)
             val result = schedulePhrase(project.phrases[phraseId], playbackStartFrame, 0, transposeSemitones + project.getTransposeSemitones(), project, framesPerStep)
-            chainRowStartFrames[firstRow] = playbackStartFrame
+            chainRowStartFrames.addLast(firstRow to playbackStartFrame)
             nextFrameToSchedule += result.framesScheduled
             nextChainRowToSchedule = firstRow + 1
         }

@@ -21,6 +21,7 @@ class AudioEngine(
     private val logger: ILogger
 ) {
     private val TAG = "AudioEngine"
+    private val PREVIEW_TRACK_ID = 8  // dedicated voice slot for all previews (outside song tracks 0-7)
 
     // Waveform buffer for visualization (620 samples for 620px width oscilloscope)
     val waveformBuffer = FloatArray(620) { 0f }
@@ -208,7 +209,8 @@ class AudioEngine(
                 return false
             }
 
-            backend.stopAll()
+            // Stop only the previous preview voice — leave song playback untouched.
+            backend.killTrack(PREVIEW_TRACK_ID)
 
             val (left, right, adjustedBaseFreq) = loadWavFileFromPath(filePath)
             if (right != null) {
@@ -217,7 +219,6 @@ class AudioEngine(
                 backend.loadSample(255, left)
             }
 
-            // CRITICAL: Resume stream so audio callback processes the scheduled note
             backend.resumeStream()
 
             val c4Freq = 261.63f
@@ -225,7 +226,7 @@ class AudioEngine(
             backend.scheduleNote(
                 frame = targetFrame,
                 sampleId = 255,
-                trackId = 0,
+                trackId = PREVIEW_TRACK_ID,
                 freq = c4Freq,
                 baseFreq = adjustedBaseFreq,
                 vol = 1.0f,
@@ -242,7 +243,7 @@ class AudioEngine(
 
     fun previewSampleData(samples: FloatArray, sampleRate: Int, samplesRight: FloatArray? = null): Boolean {
         return try {
-            backend.stopAll()
+            backend.killTrack(PREVIEW_TRACK_ID)
             if (samplesRight != null) {
                 backend.loadSampleStereo(255, samples, samplesRight)
             } else {
@@ -253,7 +254,7 @@ class AudioEngine(
             backend.scheduleNote(
                 frame = backend.getCurrentFrame() + 100,
                 sampleId = 255,
-                trackId = 0,
+                trackId = PREVIEW_TRACK_ID,
                 freq = 261.63f,
                 baseFreq = adjustedBaseFreq,
                 vol = 1.0f,
@@ -279,7 +280,7 @@ class AudioEngine(
                 targetFrame = targetFrame,
                 note = instrument.root,
                 instrumentId = instrument.id,
-                trackId = 0,
+                trackId = PREVIEW_TRACK_ID,
                 volume = VolumeUtils.hexToFloat(instrument.volume),
                 phraseVol = 1.0f,
                 pan = VolumeUtils.hexToFloat(instrument.pan),
@@ -288,7 +289,7 @@ class AudioEngine(
             )
             // Hard-stop after 2 seconds so SF sustain notes don't ring forever during preview.
             val sr = backend.getSampleRate().toLong().coerceAtLeast(44100L)
-            backend.scheduleKill(targetFrame + sr * 2, 0)
+            backend.scheduleKill(targetFrame + sr * 2, PREVIEW_TRACK_ID)
             return
         }
 
@@ -328,7 +329,7 @@ class AudioEngine(
         backend.scheduleNoteWithTable(
             frame = targetFrame,
             sampleId = sampleId,
-            trackId = 0,
+            trackId = PREVIEW_TRACK_ID,
             freq = targetFreq,
             baseFreq = compensatedBaseFreq,
             vol = volume,
@@ -348,6 +349,44 @@ class AudioEngine(
         logger.d(TAG, "🔊 Preview instrument ${instrument.id.toString(16).padStart(2,'0').uppercase()}: freq=$targetFreq Hz, vol=$volume, pan=$pan, tableId=$tableId")
     }
 
+    // Plays the sample at ROOT pitch with no instrument effects (no filter, EQ, sends, or mod).
+    // Used by the sample editor so the user hears the raw waveform, not the processed sound.
+    // Caller must restore EQ/sends/mod via pushInstrumentEqAndSends + pushInstrumentModulation
+    // after a suitable delay (the effect params are zeroed here to take effect at voice trigger).
+    fun previewInstrumentDry(instrument: Instrument) {
+        if (instrument.instrumentType == InstrumentType.SOUNDFONT) return
+        val sampleId = instrument.sampleId
+
+        val rootFreq = instrument.root.toFrequency()
+        val detuneSemitones = (instrument.detune shr 4).toFloat()
+        val detuneFraction = (instrument.detune and 0x0F) / 16.0f
+        val totalDetuneSemitones = detuneSemitones + detuneFraction - 8.0f
+        val detuneMultiplier = Math.pow(2.0, (totalDetuneSemitones / 12.0)).toFloat()
+        val targetFreq = rootFreq * detuneMultiplier
+
+        val sampleRateRatio = sampleRateRatios[sampleId] ?: 1.0f
+        val compensatedBaseFreq = 261.63f * sampleRateRatio
+
+        backend.killTrack(PREVIEW_TRACK_ID)
+        backend.resumeStream()
+
+        backend.clearInstrumentModulation(sampleId)
+        backend.setInstrumentEqSlot(sampleId, -1)
+        backend.setInstrumentSendLevels(sampleId, 0, 0)
+
+        backend.scheduleNote(
+            frame = backend.getCurrentFrame() + 100,
+            sampleId = sampleId,
+            trackId = PREVIEW_TRACK_ID,
+            freq = targetFreq,
+            baseFreq = compensatedBaseFreq,
+            vol = 1.0f,
+            pan = 0.5f
+        )
+
+        logger.d(TAG, "🔊 [DRY] Preview instrument ${instrument.id.toString(16).padStart(2,'0').uppercase()}: freq=$targetFreq Hz")
+    }
+
     fun previewNoteWithTimeout(
         instrument: Instrument,
         note: Note,
@@ -363,14 +402,14 @@ class AudioEngine(
                 targetFrame = targetFrame,
                 note = note,
                 instrumentId = instrument.id,
-                trackId = 0,
+                trackId = PREVIEW_TRACK_ID,
                 volume = VolumeUtils.hexToFloat(instrument.volume),
                 phraseVol = 1.0f,
                 pan = VolumeUtils.hexToFloat(instrument.pan),
                 project = project,
                 tableIdOverride = -1
             )
-            backend.scheduleKill(targetFrame + durationFrames, 0)
+            backend.scheduleKill(targetFrame + durationFrames, PREVIEW_TRACK_ID)
             return
         }
 
@@ -401,7 +440,7 @@ class AudioEngine(
         backend.scheduleNoteWithTable(
             frame = targetFrame,
             sampleId = sampleId,
-            trackId = 0,
+            trackId = PREVIEW_TRACK_ID,
             freq = targetFreq,
             baseFreq = compensatedBaseFreq,
             vol = volume,
@@ -417,7 +456,7 @@ class AudioEngine(
             vibratoSpeed = 0f,
             vibratoDepth = 0f
         )
-        backend.scheduleKill(targetFrame + durationFrames, 0)
+        backend.scheduleKill(targetFrame + durationFrames, PREVIEW_TRACK_ID)
     }
 
     fun calculateInstrumentBaseFrequency(instrument: Instrument): Float {
