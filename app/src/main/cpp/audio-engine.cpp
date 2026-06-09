@@ -307,6 +307,25 @@ void AudioEngine::resumeStream() {
     }
 }
 
+// ARM FZ (Flush-to-Zero) bit eliminates denormal CPU stalls. Must be set per-thread
+// because FPCR/FPSCR are thread-local registers.
+static void setFlushToZeroForCurrentThread() {
+    thread_local bool done = false;
+    if (done) return;
+    done = true;
+#if defined(__aarch64__)
+    uint64_t fpcr;
+    asm volatile("mrs %0, fpcr" : "=r"(fpcr));
+    fpcr |= (1ULL << 24);  // FZ bit
+    asm volatile("msr fpcr, %0" : : "r"(fpcr));
+#elif defined(__arm__)
+    uint32_t fpscr;
+    asm volatile("vmrs %0, fpscr" : "=r"(fpscr));
+    fpscr |= (1U << 24);  // FZ bit
+    asm volatile("vmsr fpscr, %0" : : "r"(fpscr));
+#endif
+}
+
 // ALL audio DSP lives here. onAudioReady and renderOffline are thin wrappers.
 // Rule: NEVER add audio processing logic directly to onAudioReady or renderOffline.
 void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCount, float sampleRate) {
@@ -1457,21 +1476,7 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
         void *audioData,
         int32_t numFrames) {
 
-    // Set flush-to-zero mode once at audio thread start.
-    static std::once_flag ftzFlag;
-    std::call_once(ftzFlag, []() {
-#if defined(__aarch64__)
-        uint64_t fpcr;
-        asm volatile("mrs %0, fpcr" : "=r"(fpcr));
-        fpcr |= (1ULL << 24);  // FZ bit
-        asm volatile("msr fpcr, %0" : : "r"(fpcr));
-#elif defined(__arm__)
-        uint32_t fpscr;
-        asm volatile("vmrs %0, fpscr" : "=r"(fpscr));
-        fpscr |= (1U << 24);  // FZ bit
-        asm volatile("vmsr fpscr, %0" : : "r"(fpscr));
-#endif
-    });
+    setFlushToZeroForCurrentThread();
 
     float *output = static_cast<float*>(audioData);
     int channelCount = audioStream->getChannelCount();
@@ -2033,6 +2038,7 @@ float AudioEngine::getModulatedPlaybackRate(Voice& voice) {
 }
 
 void AudioEngine::renderOffline(int numFrames, float* output, int sampleRate) {
+    setFlushToZeroForCurrentThread();
     for (int i = 0; i < numFrames * 2; i++) output[i] = 0.0f;
 
     const int BLOCK_SIZE = 256;

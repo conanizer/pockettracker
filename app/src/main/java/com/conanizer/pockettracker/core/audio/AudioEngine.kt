@@ -7,9 +7,9 @@ import com.conanizer.pockettracker.core.data.ModType
 import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.data.Table
+import com.conanizer.pockettracker.core.data.TICS_PER_STEP
 import com.conanizer.pockettracker.core.data.VolumeUtils
 import com.conanizer.pockettracker.core.logging.ILogger
-import com.conanizer.pockettracker.core.logic.PlaybackController
 import com.conanizer.pockettracker.core.resources.IResourceLoader
 import java.io.File
 import java.nio.ByteBuffer
@@ -558,8 +558,8 @@ class AudioEngine(
             // Convert tick-based pitch params to frame-based (same as sampler path)
             val tempo = project.tempo
             val sr = backend.getSampleRate().toFloat()
-            val framesPerTic = sr / (tempo / 60f * 4f * 12f)
-            val framesPerStep = framesPerTic * 12f
+            val framesPerTic = sr / (tempo / 60f * 4f * TICS_PER_STEP)
+            val framesPerStep = framesPerTic * TICS_PER_STEP
             val pslDurationFrames = if (pslDuration > 0f) pslDuration * framesPerTic else 0f
             val pbnRatePerFrame   = if (pbnRate  != 0f)  pbnRate  / framesPerStep  else 0f
 
@@ -679,10 +679,10 @@ class AudioEngine(
         pushInstrumentEqAndSends(instrument, project)
 
         // Convert tick-based pitch effect params to frame-based so C++ needs no tempo knowledge.
-        // framesPerTic = sampleRate / (tempo/60 * 4 steps/beat * 12 tics/step)
+        // framesPerTic = sampleRate / (tempo/60 * 4 steps/beat * TICS_PER_STEP)
         val sampleRate = backend.getSampleRate().toFloat()
-        val framesPerTic = sampleRate / (tempo / 60f * 4f * 12f)
-        val framesPerStep = framesPerTic * 12f  // TICS_PER_STEP = 12
+        val framesPerTic = sampleRate / (tempo / 60f * 4f * TICS_PER_STEP)
+        val framesPerStep = framesPerTic * TICS_PER_STEP
         val pslDurationFrames = if (pslDuration > 0f) pslDuration * framesPerTic else 0f
         // pbnRate is semitones/step (per EffectProcessor docs: "PBN 10 = 1 semitone per step")
         val pbnRatePerFrame  = if (pbnRate  != 0f)  pbnRate  / framesPerStep  else 0f
@@ -977,8 +977,8 @@ class AudioEngine(
         // Convert tick-based pitch params to frame-based (same as scheduleNote)
         val tempo = project.tempo
         val sr = backend.getSampleRate().toFloat()
-        val framesPerTic = sr / (tempo / 60f * 4f * 12f)
-        val framesPerStep = framesPerTic * 12f
+        val framesPerTic = sr / (tempo / 60f * 4f * TICS_PER_STEP)
+        val framesPerStep = framesPerTic * TICS_PER_STEP
         val pslDurationFrames = if (pslDuration > 0f) pslDuration * framesPerTic else 0f
         val pbnRatePerFrame   = if (pbnRate  != 0f)  pbnRate  / framesPerStep  else 0f
 
@@ -1044,8 +1044,7 @@ class AudioEngine(
         // Frames per tic: at 120 BPM, 4 steps/beat, 12 tics/step → ~230 samples/tic
         val beatsPerSecond = tempo / 60.0f
         val stepsPerBeat = 4.0f
-        val ticsPerStep = PlaybackController.TICS_PER_STEP.toFloat()
-        val framesPerTic = sampleRate / (beatsPerSecond * stepsPerBeat * ticsPerStep)
+        val framesPerTic = sampleRate / (beatsPerSecond * stepsPerBeat * TICS_PER_STEP)
 
         var anyActive = false
         for (slotIndex in 0..3) {

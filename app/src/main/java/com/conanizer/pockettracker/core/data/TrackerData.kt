@@ -2,6 +2,10 @@ package com.conanizer.pockettracker.core.data
 
 import kotlinx.serialization.Serializable
 
+// Tics per phrase step. Both the Kotlin scheduler and the C++ modulation engine use this.
+// Changing it here propagates everywhere — do not hardcode 12 in either layer.
+const val TICS_PER_STEP = 12
+
 // Note representation
 @Serializable
 data class Note(

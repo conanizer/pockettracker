@@ -4,6 +4,7 @@ import android.content.Context
 import org.acra.ReportField
 import org.acra.data.CrashReportData
 import org.acra.sender.ReportSender
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -46,7 +47,10 @@ class GitHubIssueSender(
             val payload = buildJsonPayload(title, body)
             conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
 
-            conn.responseCode  // trigger the request
+            val responseCode = conn.responseCode
+            if (responseCode !in 200..299) {
+                throw IOException("GitHub API returned HTTP $responseCode")
+            }
         } finally {
             conn.disconnect()
         }

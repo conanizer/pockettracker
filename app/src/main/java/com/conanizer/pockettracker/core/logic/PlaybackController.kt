@@ -4,6 +4,7 @@ import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.data.PhraseStep
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.data.ScreenType
+import com.conanizer.pockettracker.core.data.TICS_PER_STEP
 import com.conanizer.pockettracker.core.data.VolumeUtils
 import com.conanizer.pockettracker.core.audio.AudioEngine
 import com.conanizer.pockettracker.core.data.Chain
@@ -167,8 +168,6 @@ class PlaybackController(
     companion object {
         const val LOOKAHEAD_MS = 50L
         const val BUFFER_PHRASES = 2
-        // 12 tics/step: divisible by 2 (half), 3 (triplets), 4 (quarter), 6 (sextuplets)
-        const val TICS_PER_STEP = 12
     }
 
     fun getPlaybackPosition(): PlaybackPosition {
@@ -680,81 +679,28 @@ class PlaybackController(
     }
 
     // Uses the same schedulePhrase logic as live playback — groove, HOP, pitch, etc. all identical.
-    fun scheduleSongForRender(project: Project, startRow: Int, endRow: Int): Long {
-        for (i in trackStates.indices) trackStates[i] = TrackState()
-
-        val sampleRate = audioEngine.getDeviceSampleRate()
-        val msPerStep  = 60000.0 / project.tempo / 4.0
-        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
-
-        var currentFrame = 0L
-
-        for (songRow in startRow..endRow) {
-            trackStates.forEach { it.trackStopped = false }
-
-            var maxChainLength = 0
-            for (trackId in 0..7) {
-                val track = project.tracks[trackId]
-                if (track.mute) continue
-                if (songRow >= track.chainRefs.size) continue
-                val chainId = track.chainRefs[songRow]
-                if (chainId < 0 || chainId >= 256) continue
-                val length = (0..15).count { !project.chains[chainId].isEmpty(it) }
-                if (length > maxChainLength) maxChainLength = length
-            }
-
-            for (chainRow in 0 until maxChainLength) {
-                var maxFramesScheduled = 0L
-                var scheduledAny = false
-
-                for (trackId in 0..7) {
-                    val trackState = trackStates[trackId]
-                    if (trackState.trackStopped) continue
-
-                    val track = project.tracks[trackId]
-                    if (track.mute) continue
-                    if (songRow >= track.chainRefs.size) continue
-
-                    val chainId = track.chainRefs[songRow]
-                    if (chainId < 0 || chainId >= 256) continue
-
-                    val chain = project.chains[chainId]
-                    if (chain.isEmpty(chainRow)) continue
-
-                    val phraseId = chain.phraseRefs[chainRow]
-                    if (phraseId < 0 || phraseId >= 256) continue
-
-                    val transposeSemitones = chain.getTransposeSemitones(chainRow) + project.getTransposeSemitones()
-                    val hopStartRow = trackState.consumeHopTarget()
-                    val effectiveStartRow = if (hopStartRow >= 0) hopStartRow else 0
-
-                    val result = schedulePhrase(
-                        project.phrases[phraseId], currentFrame, trackId,
-                        transposeSemitones, project, framesPerStep, effectiveStartRow
-                    )
-                    scheduledAny = true
-                    if (result.framesScheduled > maxFramesScheduled)
-                        maxFramesScheduled = result.framesScheduled
-                }
-
-                if (scheduledAny) currentFrame += maxFramesScheduled
-            }
-        }
-
-        return currentFrame
-    }
+    fun scheduleSongForRender(project: Project, startRow: Int, endRow: Int): Long =
+        scheduleSongRowRange(project, startRow, endRow)
 
     fun scheduleSelectionForRender(
         project: Project,
         startRow: Int,
         endRow: Int,
         selectedTrackIds: Set<Int>
+    ): Long = scheduleSongRowRange(project, startRow, endRow, trackFilter = selectedTrackIds)
+
+    // Shared render-path scheduler. trackFilter = null schedules all tracks; non-null restricts to
+    // the given set. Muted tracks are always skipped. Does not update live-playback cursor state.
+    private fun scheduleSongRowRange(
+        project: Project,
+        startRow: Int,
+        endRow: Int,
+        trackFilter: Set<Int>? = null
     ): Long {
         for (i in trackStates.indices) trackStates[i] = TrackState()
 
         val sampleRate = audioEngine.getDeviceSampleRate()
-        val msPerStep  = 60000.0 / project.tempo / 4.0
-        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+        val framesPerStep = (60000.0 / project.tempo / 4.0 * sampleRate / 1000.0).toLong()
 
         var currentFrame = 0L
 
@@ -763,7 +709,7 @@ class PlaybackController(
 
             var maxChainLength = 0
             for (trackId in 0..7) {
-                if (trackId !in selectedTrackIds) continue
+                if (trackFilter != null && trackId !in trackFilter) continue
                 val track = project.tracks[trackId]
                 if (track.mute) continue
                 if (songRow >= track.chainRefs.size) continue
@@ -778,20 +724,16 @@ class PlaybackController(
                 var scheduledAny = false
 
                 for (trackId in 0..7) {
-                    if (trackId !in selectedTrackIds) continue
+                    if (trackFilter != null && trackId !in trackFilter) continue
                     val trackState = trackStates[trackId]
                     if (trackState.trackStopped) continue
-
                     val track = project.tracks[trackId]
                     if (track.mute) continue
                     if (songRow >= track.chainRefs.size) continue
-
                     val chainId = track.chainRefs[songRow]
                     if (chainId < 0 || chainId >= 256) continue
-
                     val chain = project.chains[chainId]
                     if (chain.isEmpty(chainRow)) continue
-
                     val phraseId = chain.phraseRefs[chainRow]
                     if (phraseId < 0 || phraseId >= 256) continue
 
