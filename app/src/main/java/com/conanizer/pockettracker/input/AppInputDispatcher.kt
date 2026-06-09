@@ -1518,11 +1518,12 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                     }
                                     val outputChannels = if (hasStereo && srcMode == 2) 2 else 1
                                     val success = WavWriter.writeWav(fileSystem = fileSystem, path = targetPath, leftChannel = leftCh, rightChannel = rightCh, sampleRate = origRate, cuePoints = cuePoints, channels = outputChannels)
+                                    if (success && outputChannels == 1) audioEngine.loadSampleFromFile(instId, targetPath)
                                     withContext(Dispatchers.Main) {
                                         if (success) {
                                             trackerController.project.instruments[instId].sampleFilePath = targetPath
                                             trackerController.project.instruments[instId].sliceMarkers = cuePoints.map { it.toLong() }
-                                            sampleEditorState = sampleEditorState.copy(sampleFilePath = targetPath, sampleName = baseName, isModified = false)
+                                            sampleEditorState = sampleEditorState.copy(sampleFilePath = targetPath, sampleName = baseName, isModified = false, hasStereoData = audioEngine.hasStereoData(instId))
                                             trackerController.currentScreen = previousScreen
                                         }
                                     }
@@ -1577,10 +1578,11 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                     }
                                     val outputChannels = if (hasStereo && srcMode == 2) 2 else 1
                                     val success = WavWriter.writeWav(fileSystem = fileSystem, path = filePath, leftChannel = leftCh, rightChannel = rightCh, sampleRate = origRate, cuePoints = cuePoints, channels = outputChannels)
+                                    if (success && outputChannels == 1) audioEngine.loadSampleFromFile(instId, filePath)
                                     withContext(Dispatchers.Main) {
                                         if (success) {
                                             trackerController.project.instruments[instId].sliceMarkers = cuePoints.map { it.toLong() }
-                                            sampleEditorState = sampleEditorState.copy(isModified = false)
+                                            sampleEditorState = sampleEditorState.copy(isModified = false, hasStereoData = audioEngine.hasStereoData(instId))
                                             trackerController.currentScreen = previousScreen
                                         }
                                     }
@@ -1917,11 +1919,12 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                         }
                         val outputChannels = if (hasStereo && srcMode == 2) 2 else 1
                         val success = WavWriter.writeWav(fileSystem = fileSystem, path = path, leftChannel = leftCh, rightChannel = rightCh, sampleRate = origRate, cuePoints = cuePoints, channels = outputChannels)
+                        if (success && outputChannels == 1) audioEngine.loadSampleFromFile(instId, path)
                         withContext(Dispatchers.Main) {
                             if (success) {
                                 val savedName = File(path).nameWithoutExtension
                                 trackerController.project.instruments[instId].sampleFilePath = path
-                                sampleEditorState = sampleEditorState.copy(sampleFilePath = path, sampleName = savedName, isModified = false)
+                                sampleEditorState = sampleEditorState.copy(sampleFilePath = path, sampleName = savedName, isModified = false, hasStereoData = audioEngine.hasStereoData(instId))
                                 trackerController.currentScreen = previousScreen
                             }
                         }

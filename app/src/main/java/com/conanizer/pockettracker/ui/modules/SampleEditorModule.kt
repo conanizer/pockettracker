@@ -90,7 +90,7 @@ class SampleEditorModule : TrackerModule {
         if (cur) rowBg(x, y, scale, s.appTheme)
         drawLabel3val(x, ty, scale, cur, s.cursorCol, s.appTheme,
             "ZOOM",   "${1 shl s.zoomLevel}X",        0,
-            "SOURCE", SOURCE_VALUES[s.sourceMode],     1,
+            "SOURCE", if (s.hasStereoData) SOURCE_VALUES[s.sourceMode] else "MONO", 1,
             "RATE",   RATE_VALUES[s.rateMode],         2)
     }
 
@@ -467,7 +467,7 @@ class SampleEditorModule : TrackerModule {
             0 -> CursorContextFactory.readOnly()
             1 -> when (s.cursorCol) {
                 0 -> CursorContextFactory.hexByte(s.zoomLevel, 0, 4)
-                1 -> CursorContextFactory.toggleTernary(SOURCE_VALUES[s.sourceMode],   SOURCE_VALUES)
+                1 -> if (s.hasStereoData) CursorContextFactory.toggleTernary(SOURCE_VALUES[s.sourceMode], SOURCE_VALUES) else CursorContextFactory.readOnly()
                 2 -> CursorContextFactory.toggleTernary(RATE_VALUES[s.rateMode],       RATE_VALUES)
                 else -> CursorContextFactory.none()
             }
