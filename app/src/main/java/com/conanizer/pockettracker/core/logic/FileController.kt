@@ -72,10 +72,7 @@ class FileController(
                 return LoadResult.Error("File not found: $filename")
             }
             val jsonString = fileSystem.readFile(filePath)
-            val project = json.decodeFromString<Project>(jsonString)
-            migrateProject(project)
-            logger.d(TAG, "✅ Project loaded: $filename")
-            LoadResult.Success(project)
+            decodeAndMigrate(jsonString, filename)
         } catch (e: Exception) {
             logger.e(TAG, "❌ Load error: ${e.message}")
             LoadResult.Error(e.message ?: "Unknown error")
@@ -89,10 +86,7 @@ class FileController(
                 return LoadResult.Error("File not found: ${fileInfo.name}")
             }
             val jsonString = fileSystem.readFile(fileInfo.path)
-            val project = json.decodeFromString<Project>(jsonString)
-            migrateProject(project)
-            logger.d(TAG, "✅ Project loaded: ${fileInfo.name}")
-            LoadResult.Success(project)
+            decodeAndMigrate(jsonString, fileInfo.name)
         } catch (e: Exception) {
             logger.e(TAG, "❌ Load error: ${e.message}")
             LoadResult.Error(e.message ?: "Unknown error")
@@ -148,10 +142,7 @@ class FileController(
             val path = fileSystem.getTemplateProjectPath()
             if (!fileSystem.fileExists(path)) return LoadResult.Error("No template")
             val jsonString = fileSystem.readFile(path)
-            val project = json.decodeFromString<Project>(jsonString)
-            migrateProject(project)
-            logger.d(TAG, "✅ Template loaded")
-            LoadResult.Success(project)
+            decodeAndMigrate(jsonString, "template")
         } catch (e: Exception) {
             logger.e(TAG, "❌ Template load error: ${e.message}")
             LoadResult.Error(e.message ?: "Unknown error")
@@ -199,6 +190,40 @@ class FileController(
     // ========================================
     // PROJECT MIGRATION
     // ========================================
+
+    /**
+     * Shared load tail for all entry points (loadProject ×2, loadTemplate): validate structure,
+     * migrate, log. Keeps validation + migration in one place so every load path is protected.
+     * Throwing JSON-parse errors propagate to each caller's try/catch and become LoadResult.Error.
+     */
+    private fun decodeAndMigrate(jsonString: String, label: String): LoadResult {
+        val project = json.decodeFromString<Project>(jsonString)
+        validateProjectStructure(project)?.let { err ->
+            logger.e(TAG, "❌ Invalid project ($label): $err")
+            return LoadResult.Error(err)
+        }
+        migrateProject(project)
+        logger.d(TAG, "✅ Project loaded: $label")
+        return LoadResult.Success(project)
+    }
+
+    /**
+     * Guard against truncated / hand-edited / corrupt files. Deserialization with
+     * ignoreUnknownKeys=true happily produces wrong-sized arrays (e.g. "tracks":[]), which would
+     * otherwise crash with an opaque IndexOutOfBounds deep in playback. Returns an error message,
+     * or null if the structure is valid.
+     */
+    private fun validateProjectStructure(p: Project): String? {
+        fun check(name: String, actual: Int, expected: Int): String? =
+            if (actual != expected) "Corrupt project: expected $expected $name, got $actual" else null
+        return check("phrases", p.phrases.size, 256)
+            ?: check("chains", p.chains.size, 256)
+            ?: check("tracks", p.tracks.size, 8)
+            ?: check("instruments", p.instruments.size, 256)
+            ?: check("tables", p.tables.size, 256)
+            ?: check("grooves", p.grooves.size, 256)
+            ?: check("EQ presets", p.eqPresets.size, 128)
+    }
 
     private fun migrateProject(project: Project) {
         if (project.version < 1) {

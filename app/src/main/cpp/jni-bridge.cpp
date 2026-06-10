@@ -200,6 +200,14 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1clear
     }
 }
 
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1clearSample(
+        JNIEnv *env, jobject thiz, jint id) {
+    if (engine) {
+        engine->clearSample((int)id);
+    }
+}
+
 JNIEXPORT jintArray JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getTrackActiveNotes(
         JNIEnv *env, jobject thiz) {
@@ -794,7 +802,8 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1sched
         jfloat pslInitialOffset, jfloat pslDuration, jfloat pbnRate,
         jfloat vibratoSpeed, jfloat vibratoDepth,
         jfloat phraseVol, jint sampleId,
-        jint tableId, jint tableTicRate, jint noteOctave, jint notePitch, jint tableStartRow) {
+        jint tableId, jint tableTicRate, jint noteOctave, jint notePitch, jint tableStartRow,
+        jfloat detuneSemitones) {
     if (engine) {
         engine->scheduleSoundfontNote((int64_t)frame, (int)trackId, (int)sfSlot,
                                       (int)midiNote, (int)velocity,
@@ -803,7 +812,8 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1sched
                                       (float)pbnRate, (float)vibratoSpeed, (float)vibratoDepth,
                                       (float)phraseVol, (int)sampleId,
                                       (int)tableId, (int)tableTicRate,
-                                      (int)noteOctave, (int)notePitch, (int)tableStartRow);
+                                      (int)noteOctave, (int)notePitch, (int)tableStartRow,
+                                      (float)detuneSemitones);
     }
 }
 

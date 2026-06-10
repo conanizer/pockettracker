@@ -1,10 +1,33 @@
 package com.conanizer.pockettracker.core.data
 
 import kotlinx.serialization.Serializable
+import kotlin.math.pow
 
 // Tics per phrase step. Both the Kotlin scheduler and the C++ modulation engine use this.
 // Changing it here propagates everywhere — do not hardcode 12 in either layer.
 const val TICS_PER_STEP = 12
+
+/**
+ * Format an Int as a 2-digit uppercase hex string (e.g. 255 → "FF"). Masks to the lower 8 bits.
+ *
+ * Core-layer counterpart to the UI's `EditorHelpers.toHex2()`. The UI keeps its own copy because
+ * `core/` must not depend on the `ui/` package; this one is the single source for core/data code.
+ */
+fun Int.toHex2(): String = (this and 0xFF).toString(16).uppercase().padStart(2, '0')
+
+/**
+ * Decode a 0x00–0xFF transpose byte to signed semitones using the two's-complement convention:
+ * 0x00 = 0, 0x01–0x7F = +1..+127, 0x80–0xFF = −128..−1.
+ *
+ * Single source of truth for Chain / Project / TableRow transpose. Previously each had its own
+ * decoder and they disagreed at exactly 0x80 (some treated it as +128, others −128), producing a
+ * 256-semitone discontinuity when nudging transpose down past 0x80. Two's-complement is chosen so
+ * that decrementing 0x00 → 0xFF → … → 0x80 is a smooth −1, −2, … −128.
+ */
+fun byteToSignedSemitones(b: Int): Int {
+    val v = b and 0xFF
+    return if (v < 0x80) v else v - 256
+}
 
 // Note representation
 @Serializable
@@ -42,7 +65,7 @@ data class Note(
         if (pitch == -1) return 0f
         // MIDI note to frequency: f = 440 * 2^((n-69)/12)
         val midiNote = toMidi()
-        return 440f * Math.pow(2.0, (midiNote - 69) / 12.0).toFloat()
+        return 440f * 2.0.pow((midiNote - 69) / 12.0).toFloat()
     }
 
     override fun toString(): String {
@@ -55,7 +78,7 @@ data class Note(
 @Serializable
 data class PhraseStep(
     var note: Note = Note.EMPTY,
-    var instrument: Int = 0x00,  // 00-7F
+    var instrument: Int = 0x00,  // 00-FF (256 instrument slots)
     var volume: Int = 0xFF,      // 00-FF (FF = max)
     var fx1Type: Int = 0x00,     // Effect type (Milestone 2: NOW EDITABLE!)
     var fx1Value: Int = 0x00,    // Effect value
@@ -100,21 +123,10 @@ data class Chain(
     fun isEmpty(index: Int): Boolean = phraseRefs[index] == -1
 
     /**
-     * Get transpose in semitones (-127 to +128)
-     * 0x00 = 0 semitones (no change)
-     * 0x01-0x80 = +1 to +128 semitones (up)
-     * 0xFF = -1 semitone
-     * 0xFE = -2 semitones
-     * 0x81 = -127 semitones (down)
+     * Get transpose in semitones for a slot. See [byteToSignedSemitones]:
+     * 0x00 = 0, 0x01-0x7F = +1..+127, 0x80-0xFF = -128..-1.
      */
-    fun getTransposeSemitones(index: Int): Int {
-        val value = transposeValues[index]
-        return if (value <= 0x80) {
-            value  // 0x00-0x80 = 0 to +128
-        } else {
-            value - 256  // 0x81-0xFF = -127 to -1
-        }
-    }
+    fun getTransposeSemitones(index: Int): Int = byteToSignedSemitones(transposeValues[index])
 
 
     override fun equals(other: Any?): Boolean {
@@ -150,7 +162,7 @@ data class Chain(
 @Serializable
 data class Table(
     val id: Int,  // 00-FF
-    var name: String = "TBL${id.toString(16).padStart(2,'0').uppercase()}",
+    var name: String = "TBL${id.toHex2()}",
     val rows: Array<TableRow> = Array(16) { TableRow() }
 ) {
     override fun equals(other: Any?): Boolean {
@@ -184,15 +196,8 @@ data class TableRow(
     companion object {
         fun empty() = TableRow()
 
-        /**
-         * Convert transpose value to semitones
-         * 00 = 0 semitones (no change)
-         * 01-7F = +1 to +127 semitones (up)
-         * 80-FF = -128 to -1 semitones (down)
-         */
-        fun transposeToSemitones(transpose: Int): Int {
-            return if (transpose < 0x80) transpose else transpose - 256
-        }
+        /** Convert a transpose byte to signed semitones. See [byteToSignedSemitones]. */
+        fun transposeToSemitones(transpose: Int): Int = byteToSignedSemitones(transpose)
     }
 
     /**
@@ -370,8 +375,8 @@ data class SFOverrides(
 // Instrument definition
 @Serializable
 data class Instrument(
-    val id: Int,  // 00-7F
-    var name: String = "INST${id.toString(16).padStart(2,'0').uppercase()}",
+    val id: Int,  // 00-FF (256 instrument slots)
+    var name: String = "INST${id.toHex2()}",
     var sampleId: Int = -1,  // Which sample from resources (-1 = empty/no sample)
     var volume: Int = 0xFF,  // 00-FF instrument volume (FF = max)
     var pan: Int = 0x80,  // 00-FF pan (00=left, 80=center, FF=right)
@@ -503,7 +508,7 @@ object VolumeUtils {
     /**
      * Format volume as 2-digit hex string
      */
-    fun formatHex(value: Int): String = (value and 0xFF).toString(16).uppercase().padStart(2, '0')
+    fun formatHex(value: Int): String = value.toHex2()
 }
 
 // The entire project
@@ -525,7 +530,7 @@ data class Project(
     // Reverb send channel parameters
     var reverbFeedback: Int = 0x60,  // 00-FF decay time (maps to 0.0–0.98 feedback)
     var reverbDamp: Int = 0x80,      // 00-FF damping LP cutoff (maps to ~1kHz–20kHz)
-    var reverbWet: Int = 0x80,       // 00-FF dry/wet mix
+    var reverbWet: Int = 0x80,       // 00-FF reverb return gain (controlled from mixer; not a dry/wet mix)
     var reverbInputEq: Int = -1,     // -1=off, 00-7F = EQ preset slot applied before reverb
 
     // Delay send channel parameters
@@ -555,7 +560,7 @@ data class Project(
         // "empty" state is determined by sampleFilePath == null
         Instrument(
             id = index,
-            name = "INST${index.toString(16).padStart(2, '0').uppercase()}",
+            name = "INST${index.toHex2()}",
             sampleId = index
         )
     },
@@ -566,26 +571,12 @@ data class Project(
     // Grooves (256 slots)
     val grooves: Array<Groove> = Array(256) { Groove(it) }
 ) {
-    /**
-     * Convert project transpose byte to semitones.
-     * Same encoding as Chain.getTransposeSemitones: 0x00=0, 0x01-0x7F=+1 to +127, 0x81-0xFF=-127 to -1.
-     */
-    fun getTransposeSemitones(): Int {
-        return if (transpose <= 0x80) transpose else transpose - 256
-    }
+    /** Convert the project-global transpose byte to signed semitones. See [byteToSignedSemitones]. */
+    fun getTransposeSemitones(): Int = byteToSignedSemitones(transpose)
 
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-        other as Project
-        if (name != other.name) return false
-        if (tempo != other.tempo) return false
-        return true
-    }
-
-    override fun hashCode(): Int {
-        var result = name.hashCode()
-        result = 31 * result + tempo
-        return result
-    }
+    // NOTE: Project intentionally has NO custom equals()/hashCode(). A previous version compared only
+    // name + tempo, which made two completely different songs compare "equal" — a trap for anything
+    // that dirty-checks projects or holds one in a mutableStateOf (structuralEqualityPolicy). The data
+    // class default (all fields; array fields by reference) is safe: it never reports false equality.
+    // Recomposition is driven by TrackerController.projectVersion, not by Project equality.
 }

@@ -60,6 +60,9 @@ interface IAudioBackend {
      */
     fun clearAllSamples()
 
+    /** Free all buffers for a single sample slot (used when a slot is repurposed, e.g. sampler → SoundFont). */
+    fun clearSample(id: Int)
+
     // Sample editor operations
     fun getSampleLength(id: Int): Int
     fun getSampleWaveform(id: Int, numBins: Int): FloatArray
@@ -644,7 +647,8 @@ interface IAudioBackend {
         tableTicRate: Int = 6,   // Tic rate for table advancement
         noteOctave: Int = 4,     // Note octave (for TICFC/TICFE table modes)
         notePitch: Int = 0,      // Note pitch  (for TICFE table mode)
-        tableStartRow: Int = -1  // THO: force starting row (-1 = default)
+        tableStartRow: Int = -1, // THO: force starting row (-1 = default)
+        detuneSemitones: Float = 0f  // Static instrument detune in semitones (fractional)
     )
 
     /**

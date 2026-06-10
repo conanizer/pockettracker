@@ -7,6 +7,17 @@
 // SAMPLE EDITOR OPERATIONS
 // ============================================================
 
+// Replace the working buffers for `id` with a new left + optional right of length newLen, freeing the
+// old buffers. Keeps left/right and their shared length in lockstep so the stereo mix path can never
+// read a stale or short right channel. Length-changing ops MUST go through this. Pass newR=nullptr for mono.
+void AudioEngine::setSampleBuffers(int id, float* newL, float* newR, int newLen) {
+    delete[] samples[id];
+    delete[] samplesRight[id];
+    samples[id]       = newL;
+    samplesRight[id]  = newR;
+    sampleLengths[id] = newLen;
+}
+
 int AudioEngine::getSampleLength(int id) {
     if (id < 0 || id >= 256 || !samples[id]) return 0;
     return sampleLengths[id];
@@ -126,14 +137,20 @@ void AudioEngine::normalizeSample(int id, int startFrame, int endFrame) {
     startFrame = std::max(0, startFrame);
     endFrame   = std::min(sampleLengths[id], endFrame);
     if (startFrame >= endFrame) return;
+    float* bufR = samplesRight[id];
+    // Peak across BOTH channels so the same gain is applied to each — preserves the stereo image.
     float peak = 0.0f;
     for (int i = startFrame; i < endFrame; i++) {
         float v = std::abs(samples[id][i]);
         if (v > peak) peak = v;
+        if (bufR) { float r = std::abs(bufR[i]); if (r > peak) peak = r; }
     }
     if (peak < 0.0001f) return;
     float gain = 1.0f / peak;
-    for (int i = startFrame; i < endFrame; i++) samples[id][i] *= gain;
+    for (int i = startFrame; i < endFrame; i++) {
+        samples[id][i] *= gain;
+        if (bufR) bufR[i] *= gain;
+    }
 }
 
 void AudioEngine::fadeInSample(int id, int startFrame, int endFrame) {
@@ -142,8 +159,12 @@ void AudioEngine::fadeInSample(int id, int startFrame, int endFrame) {
     endFrame   = std::min(sampleLengths[id], endFrame);
     int count  = endFrame - startFrame;
     if (count <= 0) return;
-    for (int i = 0; i < count; i++)
-        samples[id][startFrame + i] *= (float)i / count;
+    float* bufR = samplesRight[id];
+    for (int i = 0; i < count; i++) {
+        float g = (float)i / count;
+        samples[id][startFrame + i] *= g;
+        if (bufR) bufR[startFrame + i] *= g;
+    }
 }
 
 void AudioEngine::fadeOutSample(int id, int startFrame, int endFrame) {
@@ -152,8 +173,12 @@ void AudioEngine::fadeOutSample(int id, int startFrame, int endFrame) {
     endFrame   = std::min(sampleLengths[id], endFrame);
     int count  = endFrame - startFrame;
     if (count <= 0) return;
-    for (int i = 0; i < count; i++)
-        samples[id][startFrame + i] *= 1.0f - (float)i / count;
+    float* bufR = samplesRight[id];
+    for (int i = 0; i < count; i++) {
+        float g = 1.0f - (float)i / count;
+        samples[id][startFrame + i] *= g;
+        if (bufR) bufR[startFrame + i] *= g;
+    }
 }
 
 void AudioEngine::silenceRegion(int id, int startFrame, int endFrame) {
@@ -161,6 +186,8 @@ void AudioEngine::silenceRegion(int id, int startFrame, int endFrame) {
     startFrame = std::max(0, startFrame);
     endFrame   = std::min(sampleLengths[id], endFrame);
     std::memset(samples[id] + startFrame, 0, (endFrame - startFrame) * sizeof(float));
+    if (samplesRight[id])
+        std::memset(samplesRight[id] + startFrame, 0, (endFrame - startFrame) * sizeof(float));
 }
 
 void AudioEngine::reverseSample(int id, int startFrame, int endFrame) {
@@ -168,14 +195,22 @@ void AudioEngine::reverseSample(int id, int startFrame, int endFrame) {
     startFrame = std::max(0, startFrame);
     endFrame   = std::min(sampleLengths[id], endFrame);
     std::reverse(samples[id] + startFrame, samples[id] + endFrame);
+    if (samplesRight[id])
+        std::reverse(samplesRight[id] + startFrame, samplesRight[id] + endFrame);
 }
 
 void AudioEngine::backupSample(int id) {
     if (id < 0 || id >= 256 || !samples[id]) return;
     delete[] sampleBackups[id];
+    delete[] sampleBackupsRight[id];
+    sampleBackupsRight[id] = nullptr;
     int len = sampleLengths[id];
     sampleBackups[id] = new float[len];
     std::memcpy(sampleBackups[id], samples[id], len * sizeof(float));
+    if (samplesRight[id]) {
+        sampleBackupsRight[id] = new float[len];
+        std::memcpy(sampleBackupsRight[id], samplesRight[id], len * sizeof(float));
+    }
     sampleBackupLengths[id] = len;
 }
 
@@ -185,19 +220,29 @@ void AudioEngine::undoSample(int id) {
         if (voices[v].instrId == id && voices[v].isActive) voices[v].stop();
     }
     std::lock_guard<std::mutex> lock(sampleEditMutex);
-    delete[] samples[id];
     int len = sampleBackupLengths[id];
-    samples[id] = new float[len];
-    std::memcpy(samples[id], sampleBackups[id], len * sizeof(float));
-    sampleLengths[id] = len;
+    float* newL = new float[len];
+    std::memcpy(newL, sampleBackups[id], len * sizeof(float));
+    float* newR = nullptr;
+    if (sampleBackupsRight[id]) {
+        newR = new float[len];
+        std::memcpy(newR, sampleBackupsRight[id], len * sizeof(float));
+    }
+    setSampleBuffers(id, newL, newR, len);  // restores mono/stereo state of the backup
 }
 
 void AudioEngine::saveFxPreviewBackup(int id) {
     if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] <= 0) return;
     delete[] fxPreviewBackup;
+    delete[] fxPreviewBackupRight;
+    fxPreviewBackupRight = nullptr;
     int len = sampleLengths[id];
     fxPreviewBackup    = new float[len];
     std::memcpy(fxPreviewBackup, samples[id], len * sizeof(float));
+    if (samplesRight[id]) {
+        fxPreviewBackupRight = new float[len];
+        std::memcpy(fxPreviewBackupRight, samplesRight[id], len * sizeof(float));
+    }
     fxPreviewBackupLen = len;
     fxPreviewBackupId  = id;
 }
@@ -211,11 +256,15 @@ void AudioEngine::restoreFxPreviewBackup() {
         }
         std::lock_guard<std::mutex> lock(sampleEditMutex);
         std::memcpy(samples[id], fxPreviewBackup, fxPreviewBackupLen * sizeof(float));
+        if (fxPreviewBackupRight && samplesRight[id])
+            std::memcpy(samplesRight[id], fxPreviewBackupRight, fxPreviewBackupLen * sizeof(float));
     }
     delete[] fxPreviewBackup;
-    fxPreviewBackup    = nullptr;
-    fxPreviewBackupLen = 0;
-    fxPreviewBackupId  = -1;
+    delete[] fxPreviewBackupRight;
+    fxPreviewBackup      = nullptr;
+    fxPreviewBackupRight = nullptr;
+    fxPreviewBackupLen   = 0;
+    fxPreviewBackupId    = -1;
 }
 
 void AudioEngine::cropSample(int id, int startFrame, int endFrame) {
@@ -224,11 +273,14 @@ void AudioEngine::cropSample(int id, int startFrame, int endFrame) {
     endFrame   = std::min(sampleLengths[id], endFrame);
     if (startFrame >= endFrame) return;
     int newLen = endFrame - startFrame;
-    float* buf = new float[newLen];
-    std::memcpy(buf, samples[id] + startFrame, newLen * sizeof(float));
-    delete[] samples[id];
-    samples[id] = buf;
-    sampleLengths[id] = newLen;
+    float* newL = new float[newLen];
+    std::memcpy(newL, samples[id] + startFrame, newLen * sizeof(float));
+    float* newR = nullptr;
+    if (samplesRight[id]) {
+        newR = new float[newLen];
+        std::memcpy(newR, samplesRight[id] + startFrame, newLen * sizeof(float));
+    }
+    setSampleBuffers(id, newL, newR, newLen);
     instrumentParams[id].startPoint = 0;
     instrumentParams[id].endPoint   = 255;
 }
@@ -241,12 +293,16 @@ void AudioEngine::deleteSampleRegion(int id, int startFrame, int endFrame) {
     int oldLen = sampleLengths[id];
     int newLen = oldLen - (endFrame - startFrame);
     if (newLen <= 0) return;
-    float* buf = new float[newLen];
-    std::memcpy(buf,               samples[id],             startFrame * sizeof(float));
-    std::memcpy(buf + startFrame,  samples[id] + endFrame,  (oldLen - endFrame) * sizeof(float));
-    delete[] samples[id];
-    samples[id] = buf;
-    sampleLengths[id] = newLen;
+    float* newL = new float[newLen];
+    std::memcpy(newL,              samples[id],            startFrame * sizeof(float));
+    std::memcpy(newL + startFrame, samples[id] + endFrame, (oldLen - endFrame) * sizeof(float));
+    float* newR = nullptr;
+    if (samplesRight[id]) {
+        newR = new float[newLen];
+        std::memcpy(newR,              samplesRight[id],            startFrame * sizeof(float));
+        std::memcpy(newR + startFrame, samplesRight[id] + endFrame, (oldLen - endFrame) * sizeof(float));
+    }
+    setSampleBuffers(id, newL, newR, newLen);
     instrumentParams[id].startPoint = 0;
     instrumentParams[id].endPoint   = 255;
 }
@@ -258,8 +314,14 @@ void AudioEngine::copyRegion(int id, int startFrame, int endFrame) {
     if (startFrame >= endFrame) return;
     int len = endFrame - startFrame;
     delete[] sampleClipboard;
+    delete[] sampleClipboardRight;
+    sampleClipboardRight = nullptr;
     sampleClipboard = new float[len];
     std::memcpy(sampleClipboard, samples[id] + startFrame, len * sizeof(float));
+    if (samplesRight[id]) {
+        sampleClipboardRight = new float[len];
+        std::memcpy(sampleClipboardRight, samplesRight[id] + startFrame, len * sizeof(float));
+    }
     sampleClipboardLength = len;
 }
 
@@ -267,14 +329,23 @@ void AudioEngine::pasteRegion(int id, int insertAt) {
     if (id < 0 || id >= 256 || !samples[id] || !sampleClipboard || sampleClipboardLength <= 0) return;
     insertAt = std::max(0, std::min(sampleLengths[id], insertAt));
     int oldLen = sampleLengths[id];
-    int newLen = oldLen + sampleClipboardLength;
-    float* buf = new float[newLen];
-    std::memcpy(buf,                             samples[id],          insertAt * sizeof(float));
-    std::memcpy(buf + insertAt,                  sampleClipboard,      sampleClipboardLength * sizeof(float));
-    std::memcpy(buf + insertAt + sampleClipboardLength, samples[id] + insertAt, (oldLen - insertAt) * sizeof(float));
-    delete[] samples[id];
-    samples[id] = buf;
-    sampleLengths[id] = newLen;
+    int clip   = sampleClipboardLength;
+    int newLen = oldLen + clip;
+    float* newL = new float[newLen];
+    std::memcpy(newL,                   samples[id],            insertAt * sizeof(float));
+    std::memcpy(newL + insertAt,        sampleClipboard,        clip * sizeof(float));
+    std::memcpy(newL + insertAt + clip, samples[id] + insertAt, (oldLen - insertAt) * sizeof(float));
+    float* newR = nullptr;
+    if (samplesRight[id]) {
+        // Right of the inserted block: stereo clip → its right channel; mono clip → duplicate the
+        // mono clip so the inserted audio is centred rather than silent on the right.
+        const float* clipR = sampleClipboardRight ? sampleClipboardRight : sampleClipboard;
+        newR = new float[newLen];
+        std::memcpy(newR,                   samplesRight[id],            insertAt * sizeof(float));
+        std::memcpy(newR + insertAt,        clipR,                       clip * sizeof(float));
+        std::memcpy(newR + insertAt + clip, samplesRight[id] + insertAt, (oldLen - insertAt) * sizeof(float));
+    }
+    setSampleBuffers(id, newL, newR, newLen);
     instrumentParams[id].startPoint = 0;
     instrumentParams[id].endPoint   = 255;
 }
@@ -288,11 +359,14 @@ void AudioEngine::downsampleSample(int id, int factor) {
     int oldLen = sampleLengths[id];
     int newLen = oldLen / factor;
     if (newLen < 1) return;
-    float* newBuf = new float[newLen];
-    for (int i = 0; i < newLen; i++) newBuf[i] = samples[id][i * factor];
-    delete[] samples[id];
-    samples[id] = newBuf;
-    sampleLengths[id] = newLen;
+    float* newL = new float[newLen];
+    for (int i = 0; i < newLen; i++) newL[i] = samples[id][i * factor];
+    float* newR = nullptr;
+    if (samplesRight[id]) {
+        newR = new float[newLen];
+        for (int i = 0; i < newLen; i++) newR[i] = samplesRight[id][i * factor];
+    }
+    setSampleBuffers(id, newL, newR, newLen);
     // Instrument start/end points (0-255 fraction) map to the same relative positions,
     // so they remain valid after decimation without adjustment.
 }
@@ -311,29 +385,43 @@ void AudioEngine::applyRateMode(int id, int factor) {
     std::lock_guard<std::mutex> lock(sampleEditMutex);
 
     if (factor <= 1) {
-        // Restore HIGH: copy original back, then discard cache.
+        // Restore HIGH: copy original (both channels) back, then discard cache.
         if (!originalSamples[id]) return; // Already at HIGH, nothing to restore.
-        delete[] samples[id];
-        samples[id] = new float[originalSampleLengths[id]];
-        std::memcpy(samples[id], originalSamples[id], originalSampleLengths[id] * sizeof(float));
-        sampleLengths[id] = originalSampleLengths[id];
-        delete[] originalSamples[id];
-        originalSamples[id] = nullptr;
+        int len = originalSampleLengths[id];
+        float* newL = new float[len];
+        std::memcpy(newL, originalSamples[id], len * sizeof(float));
+        float* newR = nullptr;
+        if (originalSamplesRight[id]) {
+            newR = new float[len];
+            std::memcpy(newR, originalSamplesRight[id], len * sizeof(float));
+        }
+        setSampleBuffers(id, newL, newR, len);
+        delete[] originalSamples[id];       originalSamples[id] = nullptr;
+        delete[] originalSamplesRight[id];  originalSamplesRight[id] = nullptr;
         originalSampleLengths[id] = 0;
     } else {
-        // Store original on first rate change away from HIGH.
+        // Store original (both channels) on first rate change away from HIGH.
         if (!originalSamples[id]) {
-            originalSamples[id] = new float[sampleLengths[id]];
-            std::memcpy(originalSamples[id], samples[id], sampleLengths[id] * sizeof(float));
-            originalSampleLengths[id] = sampleLengths[id];
+            int len = sampleLengths[id];
+            originalSamples[id] = new float[len];
+            std::memcpy(originalSamples[id], samples[id], len * sizeof(float));
+            if (samplesRight[id]) {
+                originalSamplesRight[id] = new float[len];
+                std::memcpy(originalSamplesRight[id], samplesRight[id], len * sizeof(float));
+            }
+            originalSampleLengths[id] = len;
         }
         // Always derive from the cached original so NORM→LOFI→NORM roundtrips are lossless.
         int newLen = originalSampleLengths[id] / factor;
         if (newLen < 1) return;
-        delete[] samples[id];
-        samples[id] = new float[newLen];
-        for (int i = 0; i < newLen; i++) samples[id][i] = originalSamples[id][i * factor];
-        sampleLengths[id] = newLen;
+        float* newL = new float[newLen];
+        for (int i = 0; i < newLen; i++) newL[i] = originalSamples[id][i * factor];
+        float* newR = nullptr;
+        if (originalSamplesRight[id]) {
+            newR = new float[newLen];
+            for (int i = 0; i < newLen; i++) newR[i] = originalSamplesRight[id][i * factor];
+        }
+        setSampleBuffers(id, newL, newR, newLen);
     }
 }
 
@@ -346,30 +434,32 @@ void AudioEngine::pitchShiftSample(int id, float semitones) {
 
     std::lock_guard<std::mutex> lock(sampleEditMutex);
 
-    // Pitch shift makes this buffer the new "original"; discard any RATE cache.
-    if (originalSamples[id]) {
-        delete[] originalSamples[id];
-        originalSamples[id] = nullptr;
-        originalSampleLengths[id] = 0;
-    }
+    // Pitch shift makes this buffer the new "original"; discard any RATE cache (both channels).
+    delete[] originalSamples[id];       originalSamples[id] = nullptr;
+    delete[] originalSamplesRight[id];  originalSamplesRight[id] = nullptr;
+    originalSampleLengths[id] = 0;
 
     float ratio  = std::pow(2.0f, semitones / 12.0f);
     int   oldLen = sampleLengths[id];
     int   newLen = std::max(1, (int)std::round((float)oldLen / ratio));
 
-    float* newBuf = new float[newLen];
-    for (int i = 0; i < newLen; i++) {
-        float srcPos = i * ratio;
-        int   srcIdx = (int)srcPos;
-        float frac   = srcPos - srcIdx;
-        float s0 = (srcIdx     < oldLen) ? samples[id][srcIdx]     : 0.0f;
-        float s1 = (srcIdx + 1 < oldLen) ? samples[id][srcIdx + 1] : s0;
-        newBuf[i] = s0 + (s1 - s0) * frac;
-    }
+    // Linear-resample one channel of length oldLen into a fresh newLen buffer.
+    auto resample = [&](const float* src) -> float* {
+        float* dst = new float[newLen];
+        for (int i = 0; i < newLen; i++) {
+            float srcPos = i * ratio;
+            int   srcIdx = (int)srcPos;
+            float frac   = srcPos - srcIdx;
+            float s0 = (srcIdx     < oldLen) ? src[srcIdx]     : 0.0f;
+            float s1 = (srcIdx + 1 < oldLen) ? src[srcIdx + 1] : s0;
+            dst[i] = s0 + (s1 - s0) * frac;
+        }
+        return dst;
+    };
 
-    delete[] samples[id];
-    samples[id]       = newBuf;
-    sampleLengths[id] = newLen;
+    float* newL = resample(samples[id]);
+    float* newR = samplesRight[id] ? resample(samplesRight[id]) : nullptr;
+    setSampleBuffers(id, newL, newR, newLen);
 }
 
 void AudioEngine::timeStretchSample(int id, float ratio) {
@@ -382,29 +472,28 @@ void AudioEngine::timeStretchSample(int id, float ratio) {
 
     std::lock_guard<std::mutex> lock(sampleEditMutex);
 
-    // Time-stretch makes this buffer the new "original"; discard any RATE cache.
-    if (originalSamples[id]) {
-        delete[] originalSamples[id];
-        originalSamples[id] = nullptr;
-        originalSampleLengths[id] = 0;
-    }
+    // Time-stretch makes this buffer the new "original"; discard any RATE cache (both channels).
+    delete[] originalSamples[id];       originalSamples[id] = nullptr;
+    delete[] originalSamplesRight[id];  originalSamplesRight[id] = nullptr;
+    originalSampleLengths[id] = 0;
 
     int oldLen = sampleLengths[id];
-    std::vector<float> newL = sola::stretch(samples[id], oldLen, ratio, 44100.0f);
-    int newLen = (int)newL.size();
+    std::vector<float> outL = sola::stretch(samples[id], oldLen, ratio, 44100.0f);
+    int newLen = (int)outL.size();
+    float* newL = new float[newLen];
+    std::copy(outL.begin(), outL.end(), newL);
 
-    delete[] samples[id];
-    samples[id] = new float[newLen];
-    std::copy(newL.begin(), newL.end(), samples[id]);
-    sampleLengths[id] = newLen;
-
+    float* newR = nullptr;
     if (samplesRight[id]) {
-        std::vector<float> newR = sola::stretch(samplesRight[id], oldLen, ratio, 44100.0f);
-        int rLen = (int)newR.size();
-        delete[] samplesRight[id];
-        samplesRight[id] = new float[rLen];
-        std::copy(newR.begin(), newR.end(), samplesRight[id]);
+        // Deterministic for the same oldLen/ratio, so outR.size() == newLen; clamp + zero-pad defensively
+        // so the right buffer is always exactly newLen (keeps L/R in lockstep).
+        std::vector<float> outR = sola::stretch(samplesRight[id], oldLen, ratio, 44100.0f);
+        newR = new float[newLen];
+        int n = std::min((int)outR.size(), newLen);
+        std::copy(outR.begin(), outR.begin() + n, newR);
+        for (int i = n; i < newLen; i++) newR[i] = 0.0f;
     }
+    setSampleBuffers(id, newL, newR, newLen);
 }
 
 void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRate, int limiterPreGain) {
@@ -416,66 +505,73 @@ void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRat
 
     std::lock_guard<std::mutex> lock(sampleEditMutex);
 
-    float* buf = samples[id];
-    int    len = sampleLengths[id];
+    int len = sampleLengths[id];
 
-    constexpr int CHUNK = 512;
-    float stereo[CHUNK * 2];
+    // Apply the selected destructive FX + limiter to one channel buffer in place. Each channel gets
+    // its own fresh module instances so left and right are processed independently (and identically),
+    // keeping a stereo sample's two channels in sync.
+    auto applyToChannel = [&](float* buf) {
+        constexpr int CHUNK = 512;
+        float stereo[CHUNK * 2];
 
-    if (fxType == 0) { // OTT
-        OttModule ott;
-        ott.reset(sampleRate);
-        ott.resetForRender(fxValue / 255.0f);
-        for (int pos = 0; pos < len; pos += CHUNK) {
-            int n = std::min(CHUNK, len - pos);
-            for (int i = 0; i < n; i++) {
-                stereo[i * 2]     = buf[pos + i];
-                stereo[i * 2 + 1] = buf[pos + i];
+        if (fxType == 0) { // OTT
+            OttModule ott;
+            ott.reset(sampleRate);
+            ott.resetForRender(fxValue / 255.0f);
+            for (int pos = 0; pos < len; pos += CHUNK) {
+                int n = std::min(CHUNK, len - pos);
+                for (int i = 0; i < n; i++) {
+                    stereo[i * 2]     = buf[pos + i];
+                    stereo[i * 2 + 1] = buf[pos + i];
+                }
+                ott.process(stereo, n, 2);
+                for (int i = 0; i < n; i++) buf[pos + i] = stereo[i * 2];
             }
-            ott.process(stereo, n, 2);
-            for (int i = 0; i < n; i++) buf[pos + i] = stereo[i * 2];
-        }
-    } else if (fxType == 1) { // DUST
-        skdust::DustChain dust;
-        dust.prepare((double)sampleRate, CHUNK, 2);
-        dust.setDustAmount(fxValue / 255.0f);
-        for (int pos = 0; pos < len; pos += CHUNK) {
-            int n = std::min(CHUNK, len - pos);
-            for (int i = 0; i < n; i++) {
-                stereo[i * 2]     = buf[pos + i];
-                stereo[i * 2 + 1] = buf[pos + i];
+        } else if (fxType == 1) { // DUST
+            skdust::DustChain dust;
+            dust.prepare((double)sampleRate, CHUNK, 2);
+            dust.setDustAmount(fxValue / 255.0f);
+            for (int pos = 0; pos < len; pos += CHUNK) {
+                int n = std::min(CHUNK, len - pos);
+                for (int i = 0; i < n; i++) {
+                    stereo[i * 2]     = buf[pos + i];
+                    stereo[i * 2 + 1] = buf[pos + i];
+                }
+                dust.process(stereo, n, 2);
+                for (int i = 0; i < n; i++) buf[pos + i] = stereo[i * 2];
             }
-            dust.process(stereo, n, 2);
-            for (int i = 0; i < n; i++) buf[pos + i] = stereo[i * 2];
+        } else if (fxType == 2) { // DRIVE
+            DriveModule drive;
+            drive.reset();
+            drive.setDrive(fxValue);
+            for (int i = 0; i < len; i++) buf[i] = drive.processMono(buf[i]);
+        } else if (fxType == 3) { // EQ — apply preset slot (fxValue = slot 0-127)
+            int slot = std::min(fxValue, 127);
+            const EqPresetBank& preset = eqPresets[slot];
+            EqModule eq;
+            eq.reset(sampleRate);
+            for (int b = 0; b < 3; b++) {
+                const EqBandData& bd = preset.bands[b];
+                eq.bands[b].setParams(bd.type, bd.freqHz, bd.gainDb, bd.q);
+                if (bd.type != 0) eq.active = true;
+            }
+            if (eq.active) {
+                for (int i = 0; i < len; i++) buf[i] = eq.processMono(buf[i]);
+            }
         }
-    } else if (fxType == 2) { // DRIVE
-        DriveModule drive;
-        drive.reset();
-        drive.setDrive(fxValue);
-        for (int i = 0; i < len; i++) buf[i] = drive.processMono(buf[i]);
-    } else if (fxType == 3) { // EQ — apply preset slot (fxValue = slot 0-127)
-        int slot = std::min(fxValue, 127);
-        const EqPresetBank& preset = eqPresets[slot];
-        EqModule eq;
-        eq.reset(sampleRate);
-        for (int b = 0; b < 3; b++) {
-            const EqBandData& bd = preset.bands[b];
-            eq.bands[b].setParams(bd.type, bd.freqHz, bd.gainDb, bd.q);
-            if (bd.type != 0) eq.active = true;
-        }
-        if (eq.active) {
-            for (int i = 0; i < len; i++) buf[i] = eq.processMono(buf[i]);
-        }
-    }
 
-    // Limiter pass: clamp the result to ±1 using the same pre-gain as the master limiter.
-    // Prevents waveform from exceeding the visible area after saturation/compression effects.
-    LimiterModule lim;
-    lim.reset();
-    lim.setPreGain(1.0f + (limiterPreGain / 255.0f) * 3.0f);
-    for (int i = 0; i < len; i++) {
-        lim.limL.ProcessBlock(&buf[i], 1, lim.preGain);
-    }
+        // Limiter pass: clamp the result to ±1 using the same pre-gain as the master limiter.
+        // Prevents waveform from exceeding the visible area after saturation/compression effects.
+        LimiterModule lim;
+        lim.reset();
+        lim.setPreGain(1.0f + (limiterPreGain / 255.0f) * 3.0f);
+        for (int i = 0; i < len; i++) {
+            lim.limL.ProcessBlock(&buf[i], 1, lim.preGain);
+        }
+    };
+
+    applyToChannel(samples[id]);
+    if (samplesRight[id]) applyToChannel(samplesRight[id]);
 }
 
 int AudioEngine::findZeroCrossing(int id, int frame, int searchRadius) {

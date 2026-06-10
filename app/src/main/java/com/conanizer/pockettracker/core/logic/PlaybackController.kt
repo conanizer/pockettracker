@@ -10,7 +10,6 @@ import com.conanizer.pockettracker.core.audio.AudioEngine
 import com.conanizer.pockettracker.core.data.Chain
 import com.conanizer.pockettracker.core.data.Phrase
 import com.conanizer.pockettracker.core.logging.ILogger
-import com.conanizer.pockettracker.ui.getEffectTypeName
 
 // Per-track state for persistent effects (REPEAT, ARPEGGIO, HOP, pitch, groove).
 // Effects persist until cancelled — e.g. REPEAT until new note, KILL, or same FX column override.
@@ -170,6 +169,34 @@ class PlaybackController(
     companion object {
         const val LOOKAHEAD_MS = 50L
         const val BUFFER_PHRASES = 2
+
+        // Per-retrigger ADDITIVE volume delta for the REPEAT (Rxy) effect, indexed by ramp nibble:
+        // 0,8 = no change · 1-7 = decrease (1 subtle … 7 rapid) · 9-F = increase (9 subtle … F rapid).
+        // Single source of truth — used both to apply the live ramp and to preserve ramp volume
+        // across RPT→RPT transitions. Keep these two uses in sync by referencing this constant only.
+        val REPEAT_RAMP_DELTAS = floatArrayOf(
+            0.00f,   // 0: no change
+            -0.02f,  // 1: very subtle decrease (~50 retrigs to silence)
+            -0.04f,  // 2: subtle decrease (~25 retrigs)
+            -0.06f,  // 3: gentle decrease (~17 retrigs)
+            -0.10f,  // 4: moderate decrease (~10 retrigs)
+            -0.15f,  // 5: noticeable decrease (~7 retrigs)
+            -0.20f,  // 6: heavy decrease (~5 retrigs)
+            -0.30f,  // 7: rapid decrease (~3 retrigs)
+            0.00f,   // 8: no change
+            0.02f,   // 9: very subtle increase
+            0.04f,   // A: subtle increase
+            0.06f,   // B: gentle increase
+            0.10f,   // C: moderate increase
+            0.15f,   // D: noticeable increase
+            0.20f,   // E: heavy increase
+            0.30f    // F: rapid increase
+        )
+
+        // Per-step scheduling trace. Off in shipped builds: the verbose logger.d() calls in the
+        // scheduling path build strings every pass even when logcat hides them (wasted work on the
+        // Miyoo Flip during playback). Flip to true for note-by-note debugging. Mirrors C++ AUDIO_TRACE.
+        const val TRACE = false
     }
 
     fun getPlaybackPosition(): PlaybackPosition {
@@ -801,10 +828,8 @@ class PlaybackController(
 
         // Save current ramp volume before potential clearRepeat() (for RPT-to-RPT transitions)
         val savedRampVolume = if (trackState.hasActiveRepeat() && trackState.repeatRetrigCount > 0) {
-            // Inline delta lookup to calculate last accumulated volume
-            val rampDeltas = floatArrayOf(0f, -0.02f, -0.04f, -0.06f, -0.10f, -0.15f, -0.20f, -0.30f,
-                                          0f, 0.02f, 0.04f, 0.06f, 0.10f, 0.15f, 0.20f, 0.30f)
-            val oldDelta = rampDeltas[trackState.repeatVolRamp.coerceIn(0, 15)]
+            // Last accumulated ramp volume (preserved across RPT→RPT transitions)
+            val oldDelta = REPEAT_RAMP_DELTAS[trackState.repeatVolRamp.coerceIn(0, 15)]
             (trackState.repeatBaseVolume + trackState.repeatRetrigCount * oldDelta).coerceIn(0f, 1f)
         } else {
             -1f // No active ramp to preserve
@@ -926,7 +951,7 @@ class PlaybackController(
                         3 -> { s.fx3Type = prevType; s.fx3Value = randomValue }
                     }
                 }
-                logger.d(TAG, "🎲 RND: FX$slot recalled ${getEffectTypeName(prevType)} → " +
+                logger.d(TAG, "🎲 RND: FX$slot recalled ${EffectProcessor.effectName(prevType)} → " +
                         "0x${randomValue.toString(16).uppercase().padStart(2, '0')} " +
                         "(was 0x${prevValue.toString(16).uppercase().padStart(2, '0')}, " +
                         "range ${minNibble.toString(16).uppercase()}0-${maxNibble.toString(16).uppercase()}F)")
@@ -975,8 +1000,8 @@ class PlaybackController(
                         }
                     }
                     val targetType = when (targetSlot) {
-                        1 -> getEffectTypeName(effectiveStep.fx1Type)
-                        2 -> getEffectTypeName(effectiveStep.fx2Type)
+                        1 -> EffectProcessor.effectName(effectiveStep.fx1Type)
+                        2 -> EffectProcessor.effectName(effectiveStep.fx2Type)
                         else -> "???"
                     }
                     logger.d(TAG, "🎲 RNL: FX$targetSlot ($targetType) value → " +
@@ -1350,28 +1375,6 @@ class PlaybackController(
             else -> 0
         }
 
-        // Volume ramp: ADDITIVE delta per retrigger (accumulates across steps)
-        // 0,8 = no change; 1-7 = decrease; 9-F = increase
-        // Values are subtracted/added to the base volume per retrig
-        val volRampDeltas = floatArrayOf(
-            0.00f,   // 0: no change
-            -0.02f,  // 1: very subtle decrease (~50 retrigs to silence)
-            -0.04f,  // 2: subtle decrease (~25 retrigs)
-            -0.06f,  // 3: gentle decrease (~17 retrigs)
-            -0.10f,  // 4: moderate decrease (~10 retrigs)
-            -0.15f,  // 5: noticeable decrease (~7 retrigs)
-            -0.20f,  // 6: heavy decrease (~5 retrigs)
-            -0.30f,  // 7: rapid decrease (~3 retrigs)
-            0.00f,   // 8: no change
-            0.02f,   // 9: very subtle increase
-            0.04f,   // A: subtle increase
-            0.06f,   // B: gentle increase
-            0.10f,   // C: moderate increase
-            0.15f,   // D: noticeable increase
-            0.20f,   // E: heavy increase
-            0.30f    // F: rapid increase
-        )
-
         // Apply REPEAT if active
         if (activeRepeatInterval > 0 && trackState.lastNote != Note.EMPTY) {
             val framesPerTic = stepDuration / TICS_PER_STEP
@@ -1389,7 +1392,7 @@ class PlaybackController(
             val retrigInstrument = if (hasNote) effectiveStep.instrument else trackState.lastInstrument
             val retrigPan = if (hasNote) instrumentPan else trackState.lastPan
             val retrigStartPoint = if (hasNote) params.startPoint else trackState.lastStartPoint
-            val rampDelta = volRampDeltas[activeVolRamp.coerceIn(0, 15)]
+            val rampDelta = REPEAT_RAMP_DELTAS[activeVolRamp.coerceIn(0, 15)]
 
             if (activeRepeatInterval < TICS_PER_STEP) {
                 // ═══════════════════════════════════════════════════════════════════

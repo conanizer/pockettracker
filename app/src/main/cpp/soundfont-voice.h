@@ -26,6 +26,10 @@ struct SoundfontVoice : public IAudioVoice {
     float noteVolume  = 1.0f;  // Note-only volume (instrument × phrase × V-effect)
     float trackVolume = 1.0f;  // Cached track volume; combined with noteVolume for TSF channel
 
+    // Static per-instrument detune in semitones (fractional). Independent of PSL/PBN so it survives
+    // pitch slides; folded into pitchMod every block. Set at note trigger, NOT cleared by resetPitchState.
+    float detuneSemitones  = 0.0f;
+
     // Pitch effect state (PSL/PBN/PVB/PVX) — advanced each block, applied via MIDI pitch wheel
     float pitchOffset      = 0.0f;
     float pitchSlideTarget = 0.0f;

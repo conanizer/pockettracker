@@ -56,6 +56,11 @@ class EffectProcessor(
     private val TAG = "EffectProcessor"
 
     companion object {
+        // Per-step scheduling trace. Off in shipped builds: the logger.d() calls below build a
+        // string for every effect on every scheduling pass even when logcat hides them — wasted
+        // work on low-end devices during playback. Flip to true for effect-by-effect debugging.
+        const val TRACE = false
+
         const val FX_NONE = 0x00
 
         const val FX_ARC = 0x03       // Cxx - Arpeggio Config (mode/speed)
@@ -86,6 +91,21 @@ class EffectProcessor(
             FX_RND, FX_RNL, FX_REPEAT, FX_TBL, FX_THO, FX_VOLUME,
             FX_PSL, FX_PBN, FX_PVB, FX_PVX, FX_PIT, FX_SLI
         )
+
+        // Single source of truth for effect code → 3-letter display name, keyed off the FX_* constants
+        // (not literal hex) so codes and names can never drift apart. UI and PlaybackController both use
+        // effectName(); the UI's EditorHelpers.getEffectTypeName() delegates here.
+        // NOTE: the on-screen name for FX_REPEAT is "RPT" — the user manual still says "REP" (doc drift).
+        val FX_NAMES: Map<Int, String> = mapOf(
+            FX_ARC to "ARC", FX_CHA to "CHA", FX_DEL to "DEL", FX_GRV to "GRV", FX_HOP to "HOP",
+            FX_TIC to "TIC", FX_ARPEGGIO to "ARP", FX_KILL to "KIL", FX_OFFSET to "OFF",
+            FX_RND to "RND", FX_RNL to "RNL", FX_REPEAT to "RPT", FX_TBL to "TBL", FX_THO to "THO",
+            FX_VOLUME to "VOL", FX_PSL to "PSL", FX_PBN to "PBN", FX_PVB to "PVB", FX_PVX to "PVX",
+            FX_PIT to "PIT", FX_SLI to "SLI"
+        )
+
+        /** Effect code → 3-letter name, or "---" for NONE/unknown. */
+        fun effectName(code: Int): String = FX_NAMES[code] ?: "---"
     }
 
     fun resolveStepParams(
@@ -128,28 +148,25 @@ class EffectProcessor(
             when (type) {
                 FX_OFFSET -> {
                     startPoint = value
-                    logger.d(
-                        TAG,
-                        "📍 OFFSET effect: startPoint=$value (0x${value.toString(16).uppercase()})"
-                    )
+                    if (TRACE) logger.d(TAG, "📍 OFFSET effect: startPoint=$value (0x${value.toString(16).uppercase()})")
                 }
 
                 FX_VOLUME -> {
                     volume = value / 255.0f
                     volumeFromVxx = true
-                    logger.d(TAG, "🔊 VOLUME effect: volume=$volume (raw=$value)")
+                    if (TRACE) logger.d(TAG, "🔊 VOLUME effect: volume=$volume (raw=$value)")
                 }
 
                 FX_KILL -> {
                     killAtFrame = baseFrame
-                    logger.d(TAG, "🔪 KILL effect: scheduled at frame $baseFrame")
+                    if (TRACE) logger.d(TAG, "🔪 KILL effect: scheduled at frame $baseFrame")
                 }
 
                 FX_ARPEGGIO -> {
                     arpeggioValue = value
                     val semi1 = (value shr 4) and 0x0F
                     val semi2 = value and 0x0F
-                    logger.d(TAG, "🎵 ARPEGGIO effect: +$semi1, +$semi2 semitones")
+                    if (TRACE) logger.d(TAG, "🎵 ARPEGGIO effect: +$semi1, +$semi2 semitones")
                 }
 
                 FX_ARC -> {
@@ -158,7 +175,7 @@ class EffectProcessor(
                     val speed = value and 0x0F
                     val modeNames = listOf("UP", "DOWN", "PINGPONG", "RANDOM")
                     val modeName = modeNames.getOrElse(mode) { "UP" }
-                    logger.d(TAG, "🎼 ARC effect: mode=$modeName, speed=$speed tics")
+                    if (TRACE) logger.d(TAG, "🎼 ARC effect: mode=$modeName, speed=$speed tics")
                 }
 
                 FX_REPEAT -> {
@@ -180,61 +197,61 @@ class EffectProcessor(
                         (repeatVolRamp ?: 0) in 1..7 -> "vol decrease ${repeatVolRamp}"
                         else -> "vol increase ${(repeatVolRamp ?: 0) - 8}"
                     }
-                    logger.d(TAG, "🔁 REPEAT R${value.toString(16).uppercase().padStart(2, '0')}: " +
+                    if (TRACE) logger.d(TAG, "🔁 REPEAT R${value.toString(16).uppercase().padStart(2, '0')}: " +
                             "retrig every ${repeatCount} ticks, $rampDesc")
                 }
 
                 FX_HOP -> {
                     hopValue = value
                     if (value == 0xFF) {
-                        logger.d(TAG, "🦘 HOP FF: stop track")
+                        if (TRACE) logger.d(TAG, "🦘 HOP FF: stop track")
                     } else {
                         val targetRow = value and 0x0F
-                        logger.d(TAG, "🦘 HOP effect: jump to row $targetRow on next phrase")
+                        if (TRACE) logger.d(TAG, "🦘 HOP effect: jump to row $targetRow on next phrase")
                     }
                 }
 
                 FX_PSL -> {
                     pslDuration = value
-                    logger.d(TAG, "🎵 PSL effect: portamento duration=$value ticks")
+                    if (TRACE) logger.d(TAG, "🎵 PSL effect: portamento duration=$value ticks")
                 }
 
                 FX_PBN -> {
                     pbnValue = value
                     if (value == 0) {
-                        logger.d(TAG, "🎵 PBN effect: stop pitch bend")
+                        if (TRACE) logger.d(TAG, "🎵 PBN effect: stop pitch bend")
                     } else {
                         val direction = if (value < 0x80) "UP" else "DOWN"
                         val rate = (value and 0x7F) / 16f
-                        logger.d(TAG, "🎵 PBN effect: bend $direction at $rate semitones/step")
+                        if (TRACE) logger.d(TAG, "🎵 PBN effect: bend $direction at $rate semitones/step")
                     }
                 }
 
                 FX_PVB -> {
                     pvbValue = value
                     if (value == 0) {
-                        logger.d(TAG, "🎵 PVB effect: stop vibrato")
+                        if (TRACE) logger.d(TAG, "🎵 PVB effect: stop vibrato")
                     } else {
                         val speed = 2f + ((value shr 4) and 0x0F) * 0.5f
                         val depth = (value and 0x0F) * 0.125f
-                        logger.d(TAG, "🎵 PVB effect: speed=${speed}Hz, depth=$depth semitones")
+                        if (TRACE) logger.d(TAG, "🎵 PVB effect: speed=${speed}Hz, depth=$depth semitones")
                     }
                 }
 
                 FX_PVX -> {
                     pvxValue = value
                     if (value == 0) {
-                        logger.d(TAG, "🎵 PVX effect: stop extreme vibrato")
+                        if (TRACE) logger.d(TAG, "🎵 PVX effect: stop extreme vibrato")
                     } else {
                         val speed = (2f + ((value shr 4) and 0x0F) * 0.5f) * 2f
                         val depth = (value and 0x0F) * 0.125f * 4f
-                        logger.d(TAG, "🎵 PVX effect: speed=${speed}Hz, depth=$depth semitones (extreme)")
+                        if (TRACE) logger.d(TAG, "🎵 PVX effect: speed=${speed}Hz, depth=$depth semitones (extreme)")
                     }
                 }
 
                 FX_DEL -> {
                     delayTicks = value
-                    logger.d(TAG, "⏳ DEL effect: delay $value ticks")
+                    if (TRACE) logger.d(TAG, "⏳ DEL effect: delay $value ticks")
                 }
 
                 FX_CHA -> {
@@ -246,50 +263,50 @@ class EffectProcessor(
                         in 1..3 -> "FX slot $target"
                         else -> "unknown"
                     }
-                    logger.d(TAG, "🎲 CHA effect: probability=$probability/15, target=$targetName")
+                    if (TRACE) logger.d(TAG, "🎲 CHA effect: probability=$probability/15, target=$targetName")
                 }
 
                 FX_RND -> {
                     rndValue = value
                     val minNibble = (value shr 4) and 0x0F
                     val maxNibble = value and 0x0F
-                    logger.d(TAG, "🎲 RND effect: randomize previous FX value range ${minNibble}0-${maxNibble}F")
+                    if (TRACE) logger.d(TAG, "🎲 RND effect: randomize previous FX value range ${minNibble}0-${maxNibble}F")
                 }
 
                 FX_RNL -> {
                     rnlValue = value
                     val minNibble = (value shr 4) and 0x0F
                     val maxNibble = value and 0x0F
-                    logger.d(TAG, "🎲 RNL effect: randomize left FX value range ${minNibble}0-${maxNibble}F")
+                    if (TRACE) logger.d(TAG, "🎲 RNL effect: randomize left FX value range ${minNibble}0-${maxNibble}F")
                 }
 
                 FX_TBL -> {
                     tableOverride = value
-                    logger.d(TAG, "📋 TBL effect: set table ${value.toString(16).uppercase().padStart(2, '0')}")
+                    if (TRACE) logger.d(TAG, "📋 TBL effect: set table ${value.toString(16).uppercase().padStart(2, '0')}")
                 }
 
                 FX_THO -> {
                     tableHopTarget = value
-                    logger.d(TAG, "📋 THO effect: table hop to row ${value.toString(16).uppercase().padStart(2, '0')}")
+                    if (TRACE) logger.d(TAG, "📋 THO effect: table hop to row ${value.toString(16).uppercase().padStart(2, '0')}")
                 }
 
                 FX_GRV -> {
                     grooveId = value
                     if (value == 0) {
-                        logger.d(TAG, "🥁 GRV effect: disable groove (default timing)")
+                        if (TRACE) logger.d(TAG, "🥁 GRV effect: disable groove (default timing)")
                     } else {
-                        logger.d(TAG, "🥁 GRV effect: assign groove table ${value.toString(16).uppercase().padStart(2, '0')}")
+                        if (TRACE) logger.d(TAG, "🥁 GRV effect: assign groove table ${value.toString(16).uppercase().padStart(2, '0')}")
                     }
                 }
 
                 FX_PIT -> {
                     pitSemitones = if (value < 0x80) value else value - 256
-                    logger.d(TAG, "🎵 PIT effect: pitch offset=$pitSemitones semitones")
+                    if (TRACE) logger.d(TAG, "🎵 PIT effect: pitch offset=$pitSemitones semitones")
                 }
 
                 FX_SLI -> {
                     sliIndex = value
-                    logger.d(TAG, "🎵 SLI effect: slice index=$value")
+                    if (TRACE) logger.d(TAG, "🎵 SLI effect: slice index=$value")
                 }
             }
         }

@@ -1,6 +1,7 @@
 package com.conanizer.pockettracker.ui
 
 import androidx.compose.ui.graphics.Color
+import com.conanizer.pockettracker.core.logic.EffectProcessor
 import com.conanizer.pockettracker.core.data.Chain
 import com.conanizer.pockettracker.core.data.PhraseStep
 import com.conanizer.pockettracker.core.data.Track
@@ -80,35 +81,10 @@ fun clearEffect(step: PhraseStep, fxSlot: Int) {
 }
 
 /**
- * Get effect type 3-letter name for display
- * Returns: ---, ARC, CHA, DEL, GRV, HOP, TIC, ARP, KIL, OFF, RND, RNL, RPT, TBL, THO, VOL, PSL, PBN, PVB, PVX, PIT, SLI
+ * Get effect type 3-letter name for display. Thin UI alias for [EffectProcessor.effectName] — the
+ * code↔name map lives in core (keyed off the FX_* constants) so it can't drift from the effect codes.
  */
-fun getEffectTypeName(effectType: Int): String {
-    return when (effectType) {
-        0x03 -> "ARC"  // Arpeggio Config
-        0x04 -> "CHA"  // Chance
-        0x05 -> "DEL"  // Delay row
-        0x07 -> "GRV"  // Groove assign
-        0x08 -> "HOP"  // Table hop (jump to row)
-        0x09 -> "TIC"  // Table tick rate
-        0x0A -> "ARP"  // Arpeggio
-        0x0B -> "KIL"  // Kill
-        0x0F -> "OFF"  // Offset
-        0x10 -> "RND"  // Randomize previous FX
-        0x11 -> "RNL"  // Randomize left FX
-        0x12 -> "RPT"  // Repeat
-        0x14 -> "TBL"  // Table assign
-        0x15 -> "THO"  // Table Hop
-        0x16 -> "VOL"  // Volume
-        0x19 -> "PSL"  // Pitch Slide (portamento)
-        0x1A -> "PBN"  // Pitch Bend
-        0x1B -> "PVB"  // Vibrato
-        0x1C -> "PVX"  // Extreme Vibrato
-        0x1D -> "PIT"  // Pitch offset
-        0x1E -> "SLI"  // Slice index override
-        else -> "---"   // NONE
-    }
-}
+fun getEffectTypeName(effectType: Int): String = EffectProcessor.effectName(effectType)
 
 
 

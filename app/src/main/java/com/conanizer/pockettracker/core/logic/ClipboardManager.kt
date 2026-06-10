@@ -542,36 +542,12 @@ class ClipboardManager(
         endRow: Int,
         endColumn: Int
     ): CutResult {
-        // First copy
+        // Cut = copy + delete. Delete owns the clearing logic so cut and delete can never diverge.
         copyPhraseSteps(project, phraseId, startRow, startColumn, endRow, endColumn)
-
-        // Then clear source
-        val phrase = project.phrases[phraseId]
-        val minRow = minOf(startRow, endRow)
-        val maxRow = maxOf(startRow, endRow)
-        val minCol = minOf(startColumn, endColumn)
-        val maxCol = maxOf(startColumn, endColumn)
-        var itemsCut = 0
-
-        for (row in minRow..maxRow) {
-            val step = phrase.steps[row]
-            for (col in minCol..maxCol) {
-                when (col) {
-                    1 -> { step.note = Note.EMPTY; itemsCut++ }
-                    2 -> { step.volume = 0xFF; itemsCut++ }
-                    3 -> { step.instrument = 0; itemsCut++ }
-                    4 -> { step.fx1Type = 0; itemsCut++ }
-                    5 -> { step.fx1Value = 0; itemsCut++ }
-                    6 -> { step.fx2Type = 0; itemsCut++ }
-                    7 -> { step.fx2Value = 0; itemsCut++ }
-                    8 -> { step.fx3Type = 0; itemsCut++ }
-                    9 -> { step.fx3Value = 0; itemsCut++ }
-                }
-            }
-        }
-
-        logger.d(TAG, "✂️ Cut $itemsCut phrase items from phrase $phraseId")
-        return CutResult.Success(itemsCut)
+        val n = (deletePhraseSteps(project, phraseId, startRow, startColumn, endRow, endColumn)
+                as? DeleteResult.Success)?.itemsDeleted ?: 0
+        logger.d(TAG, "✂️ Cut $n phrase items from phrase $phraseId")
+        return CutResult.Success(n)
     }
 
     /**
@@ -585,28 +561,12 @@ class ClipboardManager(
         endRow: Int,
         endColumn: Int
     ): CutResult {
-        // First copy
+        // Cut = copy + delete. Delete owns the clearing logic so cut and delete can never diverge.
         copyChainRows(project, chainId, startRow, startColumn, endRow, endColumn)
-
-        // Then clear source
-        val chain = project.chains[chainId]
-        val minRow = minOf(startRow, endRow)
-        val maxRow = maxOf(startRow, endRow)
-        val minCol = minOf(startColumn, endColumn)
-        val maxCol = maxOf(startColumn, endColumn)
-        var itemsCut = 0
-
-        for (row in minRow..maxRow) {
-            for (col in minCol..maxCol) {
-                when (col) {
-                    1 -> { chain.phraseRefs[row] = -1; itemsCut++ }  // -1 = empty
-                    2 -> { chain.transposeValues[row] = 0x00; itemsCut++ }
-                }
-            }
-        }
-
-        logger.d(TAG, "✂️ Cut $itemsCut chain items from chain $chainId")
-        return CutResult.Success(itemsCut)
+        val n = (deleteChainRows(project, chainId, startRow, startColumn, endRow, endColumn)
+                as? DeleteResult.Success)?.itemsDeleted ?: 0
+        logger.d(TAG, "✂️ Cut $n chain items from chain $chainId")
+        return CutResult.Success(n)
     }
 
     /**
@@ -619,31 +579,12 @@ class ClipboardManager(
         endRow: Int,
         endColumn: Int     // 1-8 (track number)
     ): CutResult {
-        // First copy
+        // Cut = copy + delete. Delete owns the clearing logic so cut and delete can never diverge.
         copySongCells(project, startRow, startColumn, endRow, endColumn)
-
-        // Then clear source
-        val minRow = minOf(startRow, endRow)
-        val maxRow = maxOf(startRow, endRow)
-        val minCol = minOf(startColumn, endColumn)
-        val maxCol = maxOf(startColumn, endColumn)
-        var itemsCut = 0
-
-        for (row in minRow..maxRow) {
-            for (col in minCol..maxCol) {
-                val trackIndex = col - 1
-                if (trackIndex < 0 || trackIndex >= 8) continue
-
-                val track = project.tracks[trackIndex]
-                if (row < track.chainRefs.size) {
-                    track.chainRefs[row] = -1  // Clear to empty
-                    itemsCut++
-                }
-            }
-        }
-
-        logger.d(TAG, "✂️ Cut $itemsCut song cells")
-        return CutResult.Success(itemsCut)
+        val n = (deleteSongCells(project, startRow, startColumn, endRow, endColumn)
+                as? DeleteResult.Success)?.itemsDeleted ?: 0
+        logger.d(TAG, "✂️ Cut $n song cells")
+        return CutResult.Success(n)
     }
 
     /**
@@ -657,35 +598,12 @@ class ClipboardManager(
         endRow: Int,
         endColumn: Int
     ): CutResult {
-        // First copy
+        // Cut = copy + delete. Delete owns the clearing logic so cut and delete can never diverge.
         copyTableRows(project, tableId, startRow, startColumn, endRow, endColumn)
-
-        // Then clear source
-        val table = project.tables[tableId]
-        val minRow = minOf(startRow, endRow)
-        val maxRow = maxOf(startRow, endRow)
-        val minCol = minOf(startColumn, endColumn)
-        val maxCol = maxOf(startColumn, endColumn)
-        var itemsCut = 0
-
-        for (row in minRow..maxRow) {
-            val tableRow = table.rows[row]
-            for (col in minCol..maxCol) {
-                when (col) {
-                    1 -> { tableRow.transpose = 0x00; itemsCut++ }
-                    2 -> { tableRow.volume = -1; itemsCut++ }
-                    3 -> { tableRow.fx1Type = 0; itemsCut++ }
-                    4 -> { tableRow.fx1Value = 0; itemsCut++ }
-                    5 -> { tableRow.fx2Type = 0; itemsCut++ }
-                    6 -> { tableRow.fx2Value = 0; itemsCut++ }
-                    7 -> { tableRow.fx3Type = 0; itemsCut++ }
-                    8 -> { tableRow.fx3Value = 0; itemsCut++ }
-                }
-            }
-        }
-
-        logger.d(TAG, "✂️ Cut $itemsCut table items from table $tableId")
-        return CutResult.Success(itemsCut)
+        val n = (deleteTableRows(project, tableId, startRow, startColumn, endRow, endColumn)
+                as? DeleteResult.Success)?.itemsDeleted ?: 0
+        logger.d(TAG, "✂️ Cut $n table items from table $tableId")
+        return CutResult.Success(n)
     }
 
     // ========================================
