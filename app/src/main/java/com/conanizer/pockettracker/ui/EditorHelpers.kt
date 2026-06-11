@@ -63,22 +63,7 @@ fun rowBgColor(
     else                              -> Color(theme.background)
 }
 
-fun clearEffect(step: PhraseStep, fxSlot: Int) {
-    when (fxSlot) {
-        1 -> {
-            step.fx1Type = 0x00
-            step.fx1Value = 0x00
-        }
-        2 -> {
-            step.fx2Type = 0x00
-            step.fx2Value = 0x00
-        }
-        3 -> {
-            step.fx3Type = 0x00
-            step.fx3Value = 0x00
-        }
-    }
-}
+fun clearEffect(step: PhraseStep, fxSlot: Int) = step.setFx(fxSlot, 0x00, 0x00)
 
 /**
  * Get effect type 3-letter name for display. Thin UI alias for [EffectProcessor.effectName] — the

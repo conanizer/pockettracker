@@ -980,12 +980,8 @@ class TrackerController(
 
         for (phraseId in usedPhraseIds) {
             for (step in project.phrases[phraseId].steps) {
-                val fxPairs = listOf(
-                    step.fx1Type to step.fx1Value,
-                    step.fx2Type to step.fx2Value,
-                    step.fx3Type to step.fx3Value
-                )
-                for ((fxType, fxValue) in fxPairs) {
+                for (slot in 1..3) {
+                    val (fxType, fxValue) = step.fx(slot)
                     if (fxType == EffectProcessor.FX_TBL) usedTableIds.add(fxValue and 0xFF)
                     if (fxType == EffectProcessor.FX_GRV) usedGrooveIds.add(fxValue and 0xFF)
                 }

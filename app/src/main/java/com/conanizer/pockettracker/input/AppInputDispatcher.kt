@@ -2029,7 +2029,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 }
                 val pitchSemitones = sampleEditorState.pitchSemitones
                 if (pitchSemitones != 0) {
-                    val shiftedMidi = (inst.root.toMidi() + pitchSemitones).coerceIn(0, 119)
+                    val shiftedMidi = (inst.root.toMidi() + pitchSemitones).coerceIn(0, 127)
                     inst.root = Note.fromMidi(shiftedMidi)
                 }
                 val previewSlot = audioEngine.prepareSampleEditorSourcePreview(instId, sampleEditorState.sourceMode)

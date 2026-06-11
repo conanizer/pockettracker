@@ -32,15 +32,15 @@ fun byteToSignedSemitones(b: Int): Int {
 // Note representation
 @Serializable
 data class Note(
-    val pitch: Int,  // 0-119 (C-0 to B-9), -1 = empty
-    val octave: Int  // 0-9
+    val pitch: Int,  // 0-11 chromatic index into NOTES (C-=0 .. B-=11), -1 = empty
+    val octave: Int  // octave number shown after the note name (C-0..B-9 editable; C-4 = middle C)
 ) {
     companion object {
         val EMPTY = Note(-1, 0)
         val NOTES = listOf("C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-")
 
         fun fromMidi(midi: Int): Note {
-            if (midi < 0 || midi > 119) return EMPTY
+            if (midi < 0 || midi > 127) return EMPTY  // standard MIDI 0..127; C-4 = 60, editable C-0..G-9
             val octave = midi / 12 - 1  // MIDI 60 = C-4, so octave = 60/12 - 1 = 4
             val pitch = midi % 12
             return Note(pitch, octave)
@@ -88,6 +88,34 @@ data class PhraseStep(
     var fx3Value: Int = 0x00
 ) {
     fun isEmpty(): Boolean = note == Note.EMPTY
+
+    // Indexed access to the 3 FX slots (1-3) so callers don't hand-expand a when(slot) over the flat
+    // fxNType/fxNValue fields. The serialized fields stay flat for backward compatibility.
+    /** (type, value) for FX slot 1-3; (0, 0) if out of range. */
+    fun fx(slot: Int): Pair<Int, Int> = when (slot) {
+        1 -> fx1Type to fx1Value
+        2 -> fx2Type to fx2Value
+        3 -> fx3Type to fx3Value
+        else -> 0 to 0
+    }
+    /** Effect type for FX slot 1-3; 0 if out of range. */
+    fun fxType(slot: Int): Int = fx(slot).first
+    /** Set both type and value for FX slot 1-3 (no-op out of range). */
+    fun setFx(slot: Int, type: Int, value: Int) {
+        when (slot) {
+            1 -> { fx1Type = type; fx1Value = value }
+            2 -> { fx2Type = type; fx2Value = value }
+            3 -> { fx3Type = type; fx3Value = value }
+        }
+    }
+    /** Set only the value for FX slot 1-3 (no-op out of range). */
+    fun setFxValue(slot: Int, value: Int) {
+        when (slot) {
+            1 -> fx1Value = value
+            2 -> fx2Value = value
+            3 -> fx3Value = value
+        }
+    }
 }
 
 // Phrase = 16 steps

@@ -138,12 +138,7 @@ class EffectProcessor(
         var sliIndex: Int? = null
 
         for (fxSlot in 1..3) {
-            val (type, value) = when (fxSlot) {
-                1 -> step.fx1Type to step.fx1Value
-                2 -> step.fx2Type to step.fx2Value
-                3 -> step.fx3Type to step.fx3Value
-                else -> 0 to 0
-            }
+            val (type, value) = step.fx(fxSlot)
 
             when (type) {
                 FX_OFFSET -> {

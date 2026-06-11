@@ -216,8 +216,11 @@ object CursorContextFactory {
             isEmpty = isEmpty
         ),
         currentValue = currentValue,
-        minValue = 0,
-        maxValue = 119,     // C-0 to B-9
+        // C-0 (midi 12) to G-9 (midi 127), keeping C-4 = middle C = midi 60 (scientific notation).
+        // The old 0..119 range displayed as C--1..B-8 (ugly double-dash negative octave); the bottom
+        // octave C--1..B-1 is hidden by starting at C-0. Top is the real MIDI ceiling (127 = G-9).
+        minValue = 12,
+        maxValue = 127,
         smallStep = 1,      // 1 semitone
         largeStep = 12,     // 1 octave
         emptyValue = -1
