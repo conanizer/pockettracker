@@ -1,6 +1,6 @@
 # Development Status
 
-**Last Updated:** 2026-06-09 (rev 7)
+**Last Updated:** 2026-06-12 (rev 8)
 
 ## Current Phase
 
@@ -148,6 +148,10 @@ Week 16:     MVP Release
 
 - **Sample editor dry preview still passes through master bus** — `previewInstrumentDry()` bypasses per-instrument effects (EQ slot, reverb/delay sends, modulation) but master chain (OTT/DUST/limiter/preamp) still applies because it is on the shared summed output. A true "completely dry" preview requires either a separate dry output bus in C++ or a `bypassMasterForDryPreview` atomic flag in `processAudioBlock` that skips `masterChain.process()` for the duration of the preview. Needs changes in `audio-engine.h`, `audio-engine.cpp`, `native-audio.cpp` (JNI), `IAudioBackend.kt`, and `OboeAudioBackend.kt`.
 
+- **God-methods deferred from the code review (2026-06)** — `AppInputDispatcher.handleButtonA` (~720 lines) and the retrigger block inside `PlaybackController.scheduleStepWithEffects` (~165 lines) are the two remaining oversized methods. Both are in critical, untested paths (the main input dispatch + the real-time, side-effecting scheduler), so blind text extraction is high-risk. Best decomposed incrementally in an IDE with the app running. The cheaper extractions (CHA/RND preprocessing, FX-slot accessors, value-edit unification) were already done. See `docs/code-review/REVIEW.md` findings 2.2 / 3.2.
+
+- **Wide JNI facade (review 4.1)** — `IAudioBackend` (~100 methods) / `OboeAudioBackend` / `jni-bridge.cpp` / `AudioEngine.kt` mirror each other; many `AudioEngine` methods are pure 1-line forwards (mostly sample-editor ops). Could be grouped behind an `ISampleEditorBackend` to shrink the surface. "Not urgent" — adding one engine call means touching four files (now documented in `technical-architecture.md`).
+
 ---
 
 ## Remaining Work
@@ -168,6 +172,36 @@ Week 16:     MVP Release
 ---
 
 ## Completed Milestones
+
+### Code Review Fixes (Complete - 2026-06-12)
+
+Staged 7-stage code review (full record in `docs/code-review/REVIEW.md`), merged via PR #8. All
+findings scoped as code fixes are resolved; remaining items are deferred refactors (see Architecture
+Debt) and non-code advisories.
+
+**Correctness (user-facing):**
+- **Stereo sample edits no longer corrupt/crash the right channel** — every destructive sample-editor op now maintains `samplesRight` in lockstep with the left via `setSampleBuffers()`; new right-channel buffers for undo / RATE-cache / clipboard / FX-preview. (Was a SIGSEGV / broken-stereo bug on a shipped feature.)
+- **Buttons no longer act behind open dialogs** — `confirmDialogOpen()` guards SELECT / START / R-DPAD so a CLEAN / NEW-PROJECT / INSTR-TYPE dialog can't have a destructive edit applied invisibly behind it.
+- **Transpose decoders unified** — one `byteToSignedSemitones()` (two's-complement, 0x80 = −128); chain / project / table transpose no longer disagree by 256 semitones at the boundary.
+- **Retrigger ramp table de-duplicated** into one `REPEAT_RAMP_DELTAS` constant.
+- **CHA 00 now gates the note** — dropped the `&& fxValue > 0` guard so probability-0 chance actually silences (was always playing).
+- **SF pitch** — ROOT direction matched to sampler; fractional DETUNE threaded through to TSF; sampler DETUNE direction fixed; sample/SF memory freed when a slot switches to SoundFont.
+
+**Note octave range** — phrase/ROOT note cursor now spans **C-0..G-9** (MIDI 12-127) instead of C--1..B-8, keeping C-4 = middle C (hides the ugly negative bottom octave; caps at the real MIDI ceiling). No saved-project impact — `octave`/`pitch` fields and `toMidi()` unchanged.
+
+**Robustness / perf:**
+- `validateProjectStructure()` on load (corrupt/wrong-sized `.ptp` fails gracefully instead of crashing in playback); removed `Project.equals/hashCode` (was name+tempo only).
+- `volumeMutex` snapshotted once per block (out of the hot mix loop — removes a real-time dropout hazard).
+- Per-step / per-note string logging gated behind `TRACE` flags (no wasted formatting during playback on the Miyoo Flip).
+
+**Consistency / structure:**
+- Effect code→name moved into core `EffectProcessor.effectName()` (removed a `core/logic → ui` layering leak + a second source of truth).
+- `PhraseStep` FX-slot accessors (`fx()/fxType()/setFx()/setFxValue()`) replace ~6 hand-expanded `when(slot)` blocks.
+- `cut = copy + delete` in `ClipboardManager`; `incrementValue`/`decrementValue` collapsed into one signed `stepValue()`; extracted `applyChanceAndRandomize()` out of `scheduleStepWithEffects`.
+- Core `Int.toHex2()`, `C4_HZ`/`framesPerTicAt()` helpers, `kotlin.math.pow` consistency; ~183 lines of dead example code removed from `ButtonHandlers.kt`.
+- New `technical-architecture.md` note documenting the four-file JNI "how to add an engine call" ritual.
+
+---
 
 ### Screen Overlay System (Complete - 2026-06-06)
 
@@ -435,9 +469,10 @@ Standardised all screen modules to a single consistent style (new modules led, o
 - Memory: ~1× SF2 file size (single handle), vs old architecture which used ~8×
 
 ### MIDI Note Convention
-- C-4 = MIDI 60 (middle C)
+- C-4 = MIDI 60 (middle C) — scientific pitch notation
 - Formula: `(octave + 1) * 12 + pitch`
 - Frequency: `440 * 2^((midi - 69) / 12)`
+- **Editable range: C-0 (MIDI 12) to G-9 (MIDI 127)** — the note/ROOT cursor is limited to this window so the ugly negative bottom octave (C--1..B-1) is hidden and the top stays within the real MIDI ceiling. `Note.fromMidi` accepts the full 0..127; only the cursor bounds are clamped (`CursorContext.note()`).
 
 ### Instrument Slots
 - All 256 slots (00-FF) are identical in structure
