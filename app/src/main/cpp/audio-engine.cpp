@@ -17,8 +17,10 @@ AudioEngine::AudioEngine() {
         sampleLengths[i] = 0;
         instrumentParams[i] = InstrumentParams();
         sampleBackups[i] = nullptr;
+        sampleBackupsRight[i] = nullptr;
         sampleBackupLengths[i] = 0;
         originalSamples[i] = nullptr;
+        originalSamplesRight[i] = nullptr;
         originalSampleLengths[i] = 0;
     }
     globalFrameCounter = 0;
@@ -43,12 +45,17 @@ AudioEngine::AudioEngine() {
 AudioEngine::~AudioEngine() {
     closeStream();
     for (int i = 0; i < 256; i++) {
-        if (samples[i])         delete[] samples[i];
-        if (samplesRight[i])    delete[] samplesRight[i];
-        if (sampleBackups[i])   delete[] sampleBackups[i];
-        if (originalSamples[i]) delete[] originalSamples[i];
+        if (samples[i])              delete[] samples[i];
+        if (samplesRight[i])         delete[] samplesRight[i];
+        if (sampleBackups[i])        delete[] sampleBackups[i];
+        if (sampleBackupsRight[i])   delete[] sampleBackupsRight[i];
+        if (originalSamples[i])      delete[] originalSamples[i];
+        if (originalSamplesRight[i]) delete[] originalSamplesRight[i];
     }
     delete[] sampleClipboard;
+    delete[] sampleClipboardRight;
+    delete[] fxPreviewBackup;
+    delete[] fxPreviewBackupRight;
 }
 
 bool AudioEngine::openStream() {
@@ -147,6 +154,7 @@ void AudioEngine::loadSample(int id, const float* data, int length) {
         originalSamples[id] = nullptr;
         originalSampleLengths[id] = 0;
     }
+    if (originalSamplesRight[id]) { delete[] originalSamplesRight[id]; originalSamplesRight[id] = nullptr; }
 
     samples[id] = new float[length];
     for (int i = 0; i < length; i++) {
@@ -173,6 +181,7 @@ void AudioEngine::loadSampleStereo(int id, const float* left, const float* right
         originalSamples[id] = nullptr;
         originalSampleLengths[id] = 0;
     }
+    if (originalSamplesRight[id]) { delete[] originalSamplesRight[id]; originalSamplesRight[id] = nullptr; }
 
     samples[id] = new float[length];
     samplesRight[id] = new float[length];
@@ -186,6 +195,26 @@ void AudioEngine::loadSampleStereo(int id, const float* left, const float* right
 bool AudioEngine::hasStereoData(int id) {
     if (id < 0 || id >= 256) return false;
     return samplesRight[id] != nullptr;
+}
+
+void AudioEngine::clearSample(int id) {
+    if (id < 0 || id >= 256) return;
+    std::lock_guard<std::mutex> lock(sampleEditMutex);
+    for (int i = 0; i < MAX_VOICES; i++) {
+        if (voices[i].instrId == id && voices[i].isActive) voices[i].stop();
+    }
+    // Free every per-slot buffer so a sample doesn't linger in memory after the slot is repurposed
+    // (e.g. switching the instrument to SoundFont). delete[] nullptr is a safe no-op.
+    delete[] samples[id];              samples[id] = nullptr;
+    delete[] samplesRight[id];         samplesRight[id] = nullptr;
+    delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
+    delete[] sampleBackupsRight[id];   sampleBackupsRight[id] = nullptr;
+    delete[] originalSamples[id];      originalSamples[id] = nullptr;
+    delete[] originalSamplesRight[id]; originalSamplesRight[id] = nullptr;
+    sampleLengths[id]        = 0;
+    sampleBackupLengths[id]  = 0;
+    originalSampleLengths[id] = 0;
+    LOGD("Sample %d cleared from memory", id);
 }
 
 void AudioEngine::clearAllSamples() {
@@ -220,6 +249,7 @@ void AudioEngine::clearAllSamples() {
             originalSamples[i] = nullptr;
             originalSampleLengths[i] = 0;
         }
+        if (originalSamplesRight[i]) { delete[] originalSamplesRight[i]; originalSamplesRight[i] = nullptr; }
     }
     LOGD("All samples cleared");
 }
@@ -332,6 +362,18 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     for (int t = 0; t < 8; t++) { framePeaksPerTrackL[t] = 0.0f; framePeaksPerTrackR[t] = 0.0f; }
     frameSendPeakRevL = frameSendPeakRevR = frameSendPeakDelL = frameSendPeakDelR = 0.0f;
 
+    // Snapshot real-time volumes ONCE per block under a single lock, then read them lock-free in the
+    // hot loops below. Previously volumeMutex was taken per-sample-per-voice (~350k locks/sec/voice) —
+    // pure overhead plus a dropout hazard if the Kotlin thread held the lock during setTrackVolume/
+    // setMasterVolume. One block of slightly-stale volume is inaudible.
+    float trackVolSnapshot[8];
+    float masterVolSnapshot;
+    {
+        std::lock_guard<std::mutex> lock(volumeMutex);
+        for (int t = 0; t < 8; t++) trackVolSnapshot[t] = trackVolumes[t];
+        masterVolSnapshot = masterVolume;
+    }
+
     // Send-bus accumulation buffers (stereo, panned contributions from all voices)
     static constexpr int MAX_BLOCK = 1024;
     float revSendBufL[MAX_BLOCK] = {}, revSendBufR[MAX_BLOCK] = {};
@@ -402,12 +444,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     soundfonts[note.sfSlot].handle != nullptr) {
 
                     SoundfontVoice& sv = sfVoices[t];
-                    float trkVol;
-                    { std::lock_guard<std::mutex> vlock(volumeMutex); trkVol = trackVolumes[t]; }
+                    float trkVol = trackVolSnapshot[t];
                     sv.triggerNote(note.sfSlot, note.midiNote, note.midiVelocity,
                                    note.volume, trkVol, note.pan, note.sfBank, note.sfPreset, t);
                     sv.isReleasingOnly = false;
                     sv.resetPitchState();
+                    sv.detuneSemitones = note.detuneSemitones;  // static instrument detune (set after reset)
 
                     // M8-style: honour TIC effect in table's last row (same as sampler path).
                     int effectiveTicRate = note.tableTicRate;
@@ -1101,12 +1143,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
             float volRoute = voice.prevModDestValues[PARAM_VOL]
                            + (voice.modDestValues[PARAM_VOL] - voice.prevModDestValues[PARAM_VOL]) * t;
-            float trackVol, masterVol;
-            {
-                std::lock_guard<std::mutex> lock(volumeMutex);
-                trackVol = (voice.trackId >= 0 && voice.trackId < 8) ? trackVolumes[voice.trackId] : 1.0f;
-                masterVol = masterVolume;
-            }
+            float trackVol = (voice.trackId >= 0 && voice.trackId < 8) ? trackVolSnapshot[voice.trackId] : 1.0f;
+            float masterVol = masterVolSnapshot;
             float antiClick = voice.antiClickFade();
 
             float sampleL, sampleR;
@@ -1262,8 +1300,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
     {
         float sfBuf[2048];  // 1024 frames * 2 channels — safe for any Oboe buffer size
-        float masterVol;
-        { std::lock_guard<std::mutex> vlock(volumeMutex); masterVol = masterVolume; }
+        float masterVol = masterVolSnapshot;
 
         for (int t = 0; t < 8; t++) {
             SoundfontVoice& sv = sfVoices[t];
@@ -1286,8 +1323,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 }
             }
             if (sv.sfSlot >= 0) {
-                float trkVol;
-                { std::lock_guard<std::mutex> vlock(volumeMutex); trkVol = trackVolumes[t]; }
+                float trkVol = trackVolSnapshot[t];
                 tsf* h = soundfonts[sv.sfSlot].handle;
                 if (h) tsf_channel_set_volume(h, t, noteVol * trkVol);
             }
@@ -1593,7 +1629,8 @@ void AudioEngine::scheduleSoundfontNote(int64_t targetFrame, int trackId, int sf
                                         float pbnRate, float vibratoSpeed, float vibratoDepth,
                                         float phraseVol, int sampleId,
                                         int tableId, int tableTicRate,
-                                        int noteOctave, int notePitch, int tableStartRow) {
+                                        int noteOctave, int notePitch, int tableStartRow,
+                                        float detuneSemitones) {
     ScheduledNote note{};
     note.targetFrame      = targetFrame;
     note.trackId          = trackId;
@@ -1620,6 +1657,7 @@ void AudioEngine::scheduleSoundfontNote(int64_t targetFrame, int trackId, int sf
     note.vibratoSpeed     = vibratoSpeed;
     note.vibratoDepth     = vibratoDepth;
     note.tableStartRow    = tableStartRow;
+    note.detuneSemitones  = detuneSemitones;
     noteQueue.schedule(note);
 }
 

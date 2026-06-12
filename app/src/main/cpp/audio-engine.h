@@ -26,6 +26,8 @@ public:
     void loadSampleStereo(int id, const float* left, const float* right, int length);
     bool hasStereoData(int id);
     void clearAllSamples();
+    // Free all buffers for a single slot (used when a slot is repurposed, e.g. sampler → SoundFont).
+    void clearSample(int id);
 
     void setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt,
                              int drv, int crsh, int dwn, int fType, int fCut, int fRes);
@@ -127,7 +129,7 @@ public:
                                float phraseVol = 1.0f, int sampleId = -1,
                                int tableId = -1, int tableTicRate = 6,
                                int noteOctave = 4, int notePitch = 0,
-                               int tableStartRow = -1);
+                               int tableStartRow = -1, float detuneSemitones = 0.0f);
 
     // Schedule a kill event (for Kill effect K00)
     void scheduleKill(int64_t targetFrame, int trackId);
@@ -313,17 +315,27 @@ private:
     Voice voices[MAX_VOICES];
     float* samples[256];
     float* samplesRight[256];          // right channel for stereo samples (null = mono)
-    int    sampleLengths[256];
-    float* sampleBackups[256];        // single-level undo buffers
-    int    sampleBackupLengths[256];
-    float* fxPreviewBackup    = nullptr; // separate clean-sample copy for FX preview (doesn't clobber undo)
-    int    fxPreviewBackupLen = 0;
-    int    fxPreviewBackupId  = -1;
-    float* originalSamples[256];      // cached HIGH-rate original for non-destructive RATE mode
+    int    sampleLengths[256];         // ONE length for both channels — samplesRight[id], when non-null,
+                                       // always has exactly this length (kept in lockstep by every edit op)
+    float* sampleBackups[256];        // single-level undo buffers (left channel)
+    float* sampleBackupsRight[256];   // single-level undo buffers (right channel; null = backup was mono)
+    int    sampleBackupLengths[256];  // length of both backup channels
+    float* fxPreviewBackup      = nullptr; // separate clean-sample copy for FX preview (doesn't clobber undo)
+    float* fxPreviewBackupRight = nullptr; // right channel of the FX-preview backup (null = mono)
+    int    fxPreviewBackupLen   = 0;
+    int    fxPreviewBackupId    = -1;
+    float* originalSamples[256];      // cached HIGH-rate original for non-destructive RATE mode (left)
+    float* originalSamplesRight[256]; // cached HIGH-rate original (right channel; null = mono)
     int    originalSampleLengths[256];
     std::mutex sampleEditMutex;       // held during buffer swap; try-locked in voice mix loop
-    float* sampleClipboard = nullptr; // cross-operation copy/paste buffer
+    float* sampleClipboard      = nullptr; // cross-operation copy/paste buffer (left)
+    float* sampleClipboardRight = nullptr; // copy/paste buffer (right channel; null = mono clip)
     int    sampleClipboardLength = 0;
+
+    // Replace the working buffers for `id` with a new left + optional right of length newLen, freeing the
+    // old buffers. Keeps left/right and their shared length in lockstep so the stereo mix path can never
+    // read a stale or short right channel. Pass newR=nullptr for a mono result.
+    void setSampleBuffers(int id, float* newL, float* newR, int newLen);
     InstrumentParams instrumentParams[256];
     InstrumentModSlot instrumentModSlots[256][4]; // [sampleId][slotIndex]
 

@@ -62,6 +62,7 @@ struct ScheduledNote {
     int  midiVelocity = 100;    // MIDI velocity 0-127
     int  sfBank      = 0;       // SF2 bank number (0-127)
     int  sfPreset    = 0;       // SF2 preset number within bank (0-127)
+    float detuneSemitones = 0.0f; // SF: static fine pitch offset in semitones (instrument detune)
 
     // For priority queue sorting (earliest frame first)
     bool operator>(const ScheduledNote& other) const {

@@ -287,7 +287,10 @@ class InstrumentController(
                 volume = instrument.volume / 255f,
                 phraseVol = 1.0f,
                 pan = instrument.pan / 255f,
-                project = project
+                project = project,
+                // Audition the root note itself; without this, note==root + the (60-root) phrase
+                // transpose collapses to a fixed C-4 and ROOT has no effect on the SF preview.
+                isRootAudition = true
             )
             // Schedule note-off after ~1 second so preview doesn't sustain forever
             val sampleRate = audioEngine.backend.getSampleRate().takeIf { it > 0 } ?: 44100
@@ -754,6 +757,9 @@ class InstrumentController(
         // screens don't misidentify the instrument as the old type.
         if (newType == InstrumentType.SOUNDFONT) {
             instrument.sampleFilePath = null
+            // The WAV slot is now logically empty (sampleFilePath == null); free its C++ buffers too so
+            // the sample doesn't linger in memory after the slot becomes a SoundFont.
+            audioEngine.clearSample(currentInstrument)
         } else {
             instrument.soundfontPath = null
         }

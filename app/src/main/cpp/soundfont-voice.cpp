@@ -144,7 +144,9 @@ void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
     // 0 semitones after a +2 row): the wheel is persistent in TSF and must be explicitly
     // re-centered, or the previous pitch offset sticks (unlike the sampler which
     // recalculates playbackRate from modDestValues every sample).
-    if (!pitchSliding && !vibratoActive && modDestValues[PARAM_PITCH] == 0.0f) {
+    // detuneSemitones counts as active pitch: a static instrument detune has no slide/vibrato/mod,
+    // so without this it would be wiped to center here and never reach the pitch wheel below.
+    if (!pitchSliding && !vibratoActive && modDestValues[PARAM_PITCH] == 0.0f && detuneSemitones == 0.0f) {
         tsf_channel_set_pitchrange(h, _trackId, PITCH_RANGE);
         tsf_channel_set_pitchwheel(h, _trackId, 8192);
         return;
@@ -169,9 +171,10 @@ void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
         while (vibratoPhase >= 2.0f * (float)M_PI) vibratoPhase -= 2.0f * (float)M_PI;
     }
 
+    // detuneSemitones: static instrument detune (fractional, persists across slides)
     // pitchOffset: PSL/PBN pitch slide state (semitones, advanced above)
     // modDestValues[PARAM_PITCH]: accumulated from LFO/AHD routes targeting PITCH
-    float pitchMod = pitchOffset + modDestValues[PARAM_PITCH];
+    float pitchMod = detuneSemitones + pitchOffset + modDestValues[PARAM_PITCH];
     if (vibratoActive) pitchMod += sinf(vibratoPhase) * vibratoDepth;
 
     float clamped    = fmaxf(-PITCH_RANGE, fminf(PITCH_RANGE, pitchMod));

@@ -980,12 +980,8 @@ class TrackerController(
 
         for (phraseId in usedPhraseIds) {
             for (step in project.phrases[phraseId].steps) {
-                val fxPairs = listOf(
-                    step.fx1Type to step.fx1Value,
-                    step.fx2Type to step.fx2Value,
-                    step.fx3Type to step.fx3Value
-                )
-                for ((fxType, fxValue) in fxPairs) {
+                for (slot in 1..3) {
+                    val (fxType, fxValue) = step.fx(slot)
                     if (fxType == EffectProcessor.FX_TBL) usedTableIds.add(fxValue and 0xFF)
                     if (fxType == EffectProcessor.FX_GRV) usedGrooveIds.add(fxValue and 0xFF)
                 }
@@ -1052,7 +1048,9 @@ class TrackerController(
         val dualParamRows = if (isSoundFont) setOf(0, 6, 8, 9, 10) else setOf(0, 5, 7, 8, 9, 11, 12, 13, 14)
         return when {
             row == 0 -> (currentColumn + 1).coerceAtMost(3)            // 1→2→3
-            row == 3 -> (currentColumn + 1).coerceAtMost(3)            // 2→3 (max col 3)
+            // Source row: sampler has LOAD (2) + EDIT (3); SF has LOAD only (no editable waveform),
+            // so cap at col 2 — otherwise right-from-LOAD lands on the hidden EDIT and the cursor vanishes.
+            row == 3 -> (currentColumn + 1).coerceAtMost(if (isSoundFont) 2 else 3)
             row == tripleRow -> (currentColumn + 2).coerceAtMost(5)    // 1→3→5
             row in dualParamRows -> 3                                   // jump 1→3
             else -> 1

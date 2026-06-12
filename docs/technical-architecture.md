@@ -375,6 +375,46 @@ class AudioEngine(
 }
 ```
 
+### Adding a New Engine Call (the four-file ritual)
+
+> **Why this note exists:** the portability seam is deliberate but wide. `IAudioBackend` has ~100
+> methods, `OboeAudioBackend` mirrors each as an `external fun`, `jni-bridge.cpp` has ~115 hand-written
+> thunks, and many `AudioEngine` methods are 1-line forwards. So adding *one* engine feature means
+> touching **four files in lockstep** (five with the C++ engine itself). Miss one and you get an
+> `UnsatisfiedLinkError` at runtime, not a compile error. This is the checklist so the ritual is
+> documented rather than rediscovered each time.
+
+To add a call `fooBar(id: Int, gain: Float)` that reaches the native engine, edit in this order:
+
+1. **C++ engine — `audio-engine.h` / `audio-engine.cpp`**
+   Implement the actual behaviour as a method on the `AudioEngine` C++ class. All DSP must live in
+   `processAudioBlock` (see the Audio Processing Chain Rule) — `fooBar` only mutates state the mix loop
+   reads. Guard any shared state touched by the audio thread with the existing mutex discipline.
+
+2. **JNI thunk — `jni-bridge.cpp`**
+   Add `Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1fooBar(JNIEnv*,
+   jobject, jint id, jfloat gain)` that marshals args and calls `engine->fooBar(id, gain)`. Gotchas:
+   the function name must match the package path exactly, `_` in the Kotlin name becomes `_1` in the
+   symbol, `Long` → `jlong`, and a `FloatArray` arg needs `GetFloatArrayElements` / `ReleaseFloatArrayElements`
+   (see `native_loadSample` for the pattern).
+
+3. **Backend impl — `platform/android/OboeAudioBackend.kt`**
+   Declare `private external fun native_fooBar(id: Int, gain: Float)` and add the interface override
+   `override fun fooBar(id: Int, gain: Float) = native_fooBar(id, gain)`.
+
+4. **Interface — `core/audio/IAudioBackend.kt`**
+   Add `fun fooBar(id: Int, gain: Float)` to the interface so core code can call it portably and the
+   future `ALSAAudioBackend` is forced to implement it too.
+
+5. **Engine facade — `core/audio/AudioEngine.kt`**
+   Add the method core/UI actually calls. If it carries logic, put it here (still no Android imports);
+   if it's a pure pass-through, it's just `fun fooBar(id: Int, gain: Float) = backend.fooBar(id, gain)`.
+
+**Verification:** because the JNI link is resolved lazily, the only real check is running the app and
+exercising the new call — a clean compile does **not** prove the thunk name is correct. (Sample-editor
+ops are the bulk of the pure pass-throughs; finding 4.1 notes they could later be grouped behind an
+`ISampleEditorBackend` to shrink this surface, but that refactor is not yet done.)
+
 ### SoundFont (SF2) Engine
 
 **Implementation:** TinySoundFont (TSF) — single-header C++ SF2 synthesizer, with a small fork patch for per-channel rendering.

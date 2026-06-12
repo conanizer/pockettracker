@@ -43,8 +43,8 @@ enum class CursorValueType {
     TOGGLE_BINARY,      // Binary toggle (off/on)
     TOGGLE_TERNARY,     // Ternary toggle (3-state: off/fwd/png, etc.)
 
-    // Effects (Milestone 2)
-    EFFECT_TYPE,        // Effect type (---, ARP, KIL, OFF, RPT, VOL)
+    // Effects
+    EFFECT_TYPE,        // Effect type — see EffectProcessor.EFFECT_TYPES for the full set
     EFFECT_VALUE,       // Effect value (00-FF)
 
     // Special
@@ -216,8 +216,11 @@ object CursorContextFactory {
             isEmpty = isEmpty
         ),
         currentValue = currentValue,
-        minValue = 0,
-        maxValue = 119,     // C-0 to B-9
+        // C-0 (midi 12) to G-9 (midi 127), keeping C-4 = middle C = midi 60 (scientific notation).
+        // The old 0..119 range displayed as C--1..B-8 (ugly double-dash negative octave); the bottom
+        // octave C--1..B-1 is hidden by starting at C-0. Top is the real MIDI ceiling (127 = G-9).
+        minValue = 12,
+        maxValue = 127,
         smallStep = 1,      // 1 semitone
         largeStep = 12,     // 1 octave
         emptyValue = -1
@@ -325,7 +328,7 @@ object CursorContextFactory {
     /**
      * Hex nibble (0-F single hex digit)
      * 
-     * Used for: BPM (beats per minute), effect parameters, future single-digit editing
+     * Used for: single hex-digit fields (effect sub-parameters, nibble editing)
      * Range: 0-15 (F)
      * Small step: 1 (0→1→2...→F)
      * Large step: 4 (0→4→8→C→0)

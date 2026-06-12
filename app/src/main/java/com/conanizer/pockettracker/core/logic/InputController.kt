@@ -180,7 +180,7 @@ class InputController(
         if (!context.isEditable()) return InputAction.NONE
         if (context.capabilities.isEmpty && context.capabilities.canInsert) return InputAction.INSERT_DEFAULT
         if (context.capabilities.canIncrement) {
-            val newValue = incrementValue(context.currentValue, context.smallStep, context)
+            val newValue = stepValue(context.currentValue, context.smallStep, context)
             return InputAction.SET_VALUE(newValue)
         }
         return InputAction.NONE
@@ -190,7 +190,7 @@ class InputController(
         if (!context.isEditable()) return InputAction.NONE
         if (context.capabilities.isEmpty) return InputAction.NONE
         if (context.capabilities.canDecrement) {
-            val newValue = decrementValue(context.currentValue, context.smallStep, context)
+            val newValue = stepValue(context.currentValue, -context.smallStep, context)
             return InputAction.SET_VALUE(newValue)
         }
         return InputAction.NONE
@@ -199,7 +199,7 @@ class InputController(
     fun handleARight(context: CursorContext): InputAction {
         if (!context.isEditable() || context.capabilities.isEmpty) return InputAction.NONE
         if (context.capabilities.canIncrementFast) {
-            return InputAction.SET_VALUE(incrementValue(context.currentValue, context.largeStep, context))
+            return InputAction.SET_VALUE(stepValue(context.currentValue, context.largeStep, context))
         }
         return InputAction.NONE
     }
@@ -207,7 +207,7 @@ class InputController(
     fun handleALeft(context: CursorContext): InputAction {
         if (!context.isEditable() || context.capabilities.isEmpty) return InputAction.NONE
         if (context.capabilities.canDecrementFast) {
-            return InputAction.SET_VALUE(decrementValue(context.currentValue, context.largeStep, context))
+            return InputAction.SET_VALUE(stepValue(context.currentValue, -context.largeStep, context))
         }
         return InputAction.NONE
     }
@@ -230,15 +230,18 @@ class InputController(
         return InputAction.NONE
     }
 
-    private fun incrementValue(current: Int, step: Int, context: CursorContext): Int {
+    // Apply a signed step to the cursor value, honouring the value type's wrap/clamp rules.
+    // Positive signedStep increments, negative decrements (replaces the old mirror-image
+    // incrementValue/decrementValue pair, which had identical case lists differing only by sign).
+    private fun stepValue(current: Int, signedStep: Int, context: CursorContext): Int {
         return when (context.valueType) {
             CursorValueType.CHARACTER -> {
-                val currentChar = current.toChar()
-                val currentIndex = ALLOWED_CHARS.indexOf(currentChar)
+                val size = ALLOWED_CHARS.size
+                val currentIndex = ALLOWED_CHARS.indexOf(current.toChar())
                 if (currentIndex == -1) {
-                    ALLOWED_CHARS[0].code
+                    (if (signedStep >= 0) ALLOWED_CHARS.first() else ALLOWED_CHARS.last()).code
                 } else {
-                    ALLOWED_CHARS[(currentIndex + step) % ALLOWED_CHARS.size].code
+                    ALLOWED_CHARS[((currentIndex + signedStep) % size + size) % size].code
                 }
             }
 
@@ -252,45 +255,13 @@ class InputController(
             CursorValueType.INSTRUMENT_REF,
             CursorValueType.TOGGLE_BINARY,
             CursorValueType.TOGGLE_TERNARY -> {
-                var newVal = current + step
-                while (newVal > context.maxValue) {
-                    newVal -= (context.maxValue - context.minValue + 1)
-                }
+                val range = context.maxValue - context.minValue + 1
+                var newVal = current + signedStep
+                while (newVal > context.maxValue) newVal -= range
+                while (newVal < context.minValue) newVal += range
                 newVal
             }
-            else -> (current + step).coerceIn(context.minValue, context.maxValue)
-        }
-    }
-
-    private fun decrementValue(current: Int, step: Int, context: CursorContext): Int {
-        return when (context.valueType) {
-            CursorValueType.CHARACTER -> {
-                val currentChar = current.toChar()
-                val currentIndex = ALLOWED_CHARS.indexOf(currentChar)
-                if (currentIndex == -1) {
-                    ALLOWED_CHARS.last().code
-                } else {
-                    ALLOWED_CHARS[(currentIndex - step + ALLOWED_CHARS.size) % ALLOWED_CHARS.size].code
-                }
-            }
-
-            CursorValueType.PHRASE_REF,
-            CursorValueType.CHAIN_REF,
-            CursorValueType.HEX_BYTE,
-            CursorValueType.SEMITONE_OFFSET,
-            CursorValueType.VOLUME,
-            CursorValueType.EFFECT_TYPE,
-            CursorValueType.EFFECT_VALUE,
-            CursorValueType.INSTRUMENT_REF,
-            CursorValueType.TOGGLE_BINARY,
-            CursorValueType.TOGGLE_TERNARY -> {
-                var newVal = current - step
-                while (newVal < context.minValue) {
-                    newVal += (context.maxValue - context.minValue + 1)
-                }
-                newVal
-            }
-            else -> (current - step).coerceIn(context.minValue, context.maxValue)
+            else -> (current + signedStep).coerceIn(context.minValue, context.maxValue)
         }
     }
 }

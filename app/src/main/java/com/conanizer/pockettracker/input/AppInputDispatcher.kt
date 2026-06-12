@@ -1360,19 +1360,22 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                         }
                         3 -> {
                             val inst = trackerController.project.instruments[trackerController.currentInstrument]
-                            val sampleId = trackerController.currentInstrument
-                            sampleEditorState = SampleEditorState(
-                                sampleId = sampleId,
-                                instrumentId = trackerController.currentInstrument,
-                                sampleName = inst.sampleFilePath?.substringAfterLast('/')
-                                    ?.substringBeforeLast('.') ?: "",
-                                sampleFilePath = inst.sampleFilePath,
-                                cursorRow = 1,
-                                cursorCol = 0,
-                                isModified = false
-                            )
-                            previousScreen = trackerController.currentScreen
-                            trackerController.currentScreen = ScreenType.SAMPLE_EDITOR
+                            // Sample editor is sampler-only — SoundFont instruments have no editable waveform.
+                            if (inst.instrumentType != InstrumentType.SOUNDFONT) {
+                                val sampleId = trackerController.currentInstrument
+                                sampleEditorState = SampleEditorState(
+                                    sampleId = sampleId,
+                                    instrumentId = trackerController.currentInstrument,
+                                    sampleName = inst.sampleFilePath?.substringAfterLast('/')
+                                        ?.substringBeforeLast('.') ?: "",
+                                    sampleFilePath = inst.sampleFilePath,
+                                    cursorRow = 1,
+                                    cursorCol = 0,
+                                    isModified = false
+                                )
+                                previousScreen = trackerController.currentScreen
+                                trackerController.currentScreen = ScreenType.SAMPLE_EDITOR
+                            }
                         }
                     }
                 }
@@ -1411,7 +1414,18 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                         5 -> {
                             audioEngine.restoreFxPreviewBackup()
                             audioEngine.undoSample(instId)
-                            sampleEditorState = sampleEditorState.copy(totalFrames = audioEngine.getSampleLength(instId), waveformData = audioEngine.getSampleWaveform(instId, 620))
+                            // Undo restores a different sample length, so reset the selection to the full
+                            // restored sample (0..newLen). Clamping instead would leave a partial selection
+                            // after undoing a length-shrinking op (e.g. SYNC that shortened the sample).
+                            // Slice marker is clamped, not reset, so it stays put if still in range.
+                            val newLen = audioEngine.getSampleLength(instId)
+                            sampleEditorState = sampleEditorState.copy(
+                                totalFrames = newLen,
+                                waveformData = audioEngine.getSampleWaveform(instId, 620),
+                                selectionStart = 0L,
+                                selectionEnd = newLen.toLong(),
+                                slicePosition = sampleEditorState.slicePosition.coerceIn(0L, newLen.toLong())
+                            )
                         }
                     }
                     16 -> if (s.cursorCol == 2) {
@@ -1437,7 +1451,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                             audioEngine.pitchShiftSample(instId, semitones)
                                             val newLen = audioEngine.getSampleLength(instId)
                                             fun scaleFrame(f: Long) = if (oldLen > 0) (f * newLen.toLong() / oldLen).coerceIn(0L, newLen.toLong()) else 0L
-                                            sampleEditorState = sampleEditorState.copy(totalFrames = newLen, waveformData = audioEngine.getSampleWaveform(instId, 620), pitchSemitones = 0, selectionStart = scaleFrame(sampleEditorState.selectionStart), selectionEnd = scaleFrame(sampleEditorState.selectionEnd), slicePosition = scaleFrame(sampleEditorState.slicePosition), isModified = true)
+                                            sampleEditorState = sampleEditorState.copy(totalFrames = newLen, waveformData = audioEngine.getSampleWaveform(instId, 620), pitchSemitones = 0, selectionStart = 0L, selectionEnd = newLen.toLong(), slicePosition = scaleFrame(sampleEditorState.slicePosition), isModified = true)
                                         }
                                     }
                                 }
@@ -1454,7 +1468,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                             audioEngine.timeStretchSample(instId, ratio)
                                             val newLen = audioEngine.getSampleLength(instId)
                                             fun scaleFrame(f: Long) = if (oldLen > 0) (f * newLen.toLong() / oldLen).coerceIn(0L, newLen.toLong()) else 0L
-                                            sampleEditorState = sampleEditorState.copy(totalFrames = newLen, waveformData = audioEngine.getSampleWaveform(instId, 620), selectionStart = scaleFrame(sampleEditorState.selectionStart), selectionEnd = scaleFrame(sampleEditorState.selectionEnd), slicePosition = scaleFrame(sampleEditorState.slicePosition), isModified = true)
+                                            sampleEditorState = sampleEditorState.copy(totalFrames = newLen, waveformData = audioEngine.getSampleWaveform(instId, 620), selectionStart = 0L, selectionEnd = newLen.toLong(), slicePosition = scaleFrame(sampleEditorState.slicePosition), isModified = true)
                                         }
                                     }
                                 }
@@ -1732,46 +1746,25 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             else -> { }
         }
     }
+    // True while a simple confirm dialog (CLEAN / NEW PROJECT / INSTR TYPE) is open. These are modal
+    // yes/no prompts handled by A (confirm) and B (cancel) in handleButtonA/B. Every OTHER input must
+    // be swallowed so it can't act on the screen behind the dialog (e.g. SELECT clearing a chain ref,
+    // START toggling playback). A/B naturally close the dialog before any combo can form, so guarding
+    // the non-A/B entry points (SELECT, START) is sufficient.
+    private fun confirmDialogOpen(): Boolean =
+        showCleanDialog || showNewProjectDialog || showInstrTypeDialog
+
     fun handleSelect() {
+        if (confirmDialogOpen()) return
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = QwertyKeyboardState(); return }
         if (themeEditorState.isOpen) { themeEditorState = ThemeEditorState(); return }
         if (eqEditorState.isOpen) { eqEditorState = EqEditorState(); return }
         when (trackerController.currentScreen) {
-            ScreenType.SONG -> {
-                val trackIndex = getTrackIndex(trackerController.cursorColumn)
-                clearSongChainRef(
-                    trackerController.project.tracks[trackIndex],
-                    trackerController.cursorRow
-                )
-                trackerController.projectVersion++
-            }
-            ScreenType.CHAIN -> {
-                val chainState = ChainEditorState(
-                    trackerController.project.chains[trackerController.currentChain],
-                    trackerController.cursorRow,
-                    trackerController.cursorColumn
-                )
-                val context = chainEditorModule.getCursorContext(chainState)
-                val action = trackerController.inputController.handleSelect(context)
-                if (action is InputAction.DELETE && trackerController.cursorColumn == 1) {
-                    clearChainSlot(
-                        trackerController.project.chains[trackerController.currentChain],
-                        trackerController.cursorRow
-                    )
-                    trackerController.projectVersion++
-                }
-            }
-            ScreenType.PHRASE -> {
-                val step = trackerController.project.phrases[trackerController.currentPhrase].steps[trackerController.cursorRow]
-                when (trackerController.cursorColumn) {
-                    1 -> { step.note = Note.EMPTY; trackerController.projectVersion++ }
-                    2 -> { step.volume = 0xFF; trackerController.projectVersion++ }
-                    3 -> { step.instrument = 0; trackerController.projectVersion++ }
-                    4, 5 -> { step.fx1Type = 0; step.fx1Value = 0; trackerController.projectVersion++ }
-                    6, 7 -> { step.fx2Type = 0; step.fx2Value = 0; trackerController.projectVersion++ }
-                    8, 9 -> { step.fx3Type = 0; step.fx3Value = 0; trackerController.projectVersion++ }
-                }
-            }
+            // SELECT no longer clears the value under the cursor on the editor screens — deleting a value
+            // is A+B (and selection delete). SELECT is left free here for context actions / future use.
+            ScreenType.SONG -> { }
+            ScreenType.CHAIN -> { }
+            ScreenType.PHRASE -> { }
             ScreenType.PROJECT -> {
                 if (trackerController.projectCursorRow == 2 && trackerController.projectCursorColumn >= 1) {
                     val currentName = trackerController.project.name.trimEnd()
@@ -1855,6 +1848,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         }
     }
     fun handleStart() {
+        if (confirmDialogOpen()) return
         if (qwertyKeyboardState.isOpen) {
             val typedText = qwertyKeyboardState.text.trimEnd()
             when (qwertyKeyboardState.context) {
@@ -2035,7 +2029,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 }
                 val pitchSemitones = sampleEditorState.pitchSemitones
                 if (pitchSemitones != 0) {
-                    val shiftedMidi = (inst.root.toMidi() + pitchSemitones).coerceIn(0, 119)
+                    val shiftedMidi = (inst.root.toMidi() + pitchSemitones).coerceIn(0, 127)
                     inst.root = Note.fromMidi(shiftedMidi)
                 }
                 val previewSlot = audioEngine.prepareSampleEditorSourcePreview(instId, sampleEditorState.sourceMode)
@@ -2269,6 +2263,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     fun handleBUp()    { if (trackerController.currentScreen == ScreenType.SONG) trackerController.moveSongBigUp() }
     fun handleBDown()  { if (trackerController.currentScreen == ScreenType.SONG) trackerController.moveSongBigDown() }
     fun handleRUp() {
+        if (confirmDialogOpen()) return
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.copy(layout = 0).withClampedCol(); return }
         if (themeEditorState.isOpen) return
         if (eqEditorState.isOpen || trackerController.currentScreen == ScreenType.SAMPLE_EDITOR || trackerController.currentScreen == ScreenType.SETTINGS) return
@@ -2289,6 +2284,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     }
 
     fun handleRDown() {
+        if (confirmDialogOpen()) return
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.copy(layout = 1).withClampedCol(); return }
         if (themeEditorState.isOpen) return
         if (eqEditorState.isOpen || trackerController.currentScreen == ScreenType.SAMPLE_EDITOR || trackerController.currentScreen == ScreenType.SETTINGS) return
@@ -2309,6 +2305,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     }
 
     fun handleRLeft() {
+        if (confirmDialogOpen()) return
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveTextCursorLeft(); return }
         if (themeEditorState.isOpen) return
         if (eqEditorState.isOpen || trackerController.currentScreen == ScreenType.SAMPLE_EDITOR || trackerController.currentScreen == ScreenType.SETTINGS) return
@@ -2350,6 +2347,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     }
 
     fun handleRRight() {
+        if (confirmDialogOpen()) return
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveTextCursorRight(); return }
         if (themeEditorState.isOpen) return
         if (eqEditorState.isOpen || trackerController.currentScreen == ScreenType.FILE_BROWSER || trackerController.currentScreen == ScreenType.SAMPLE_EDITOR || trackerController.currentScreen == ScreenType.SETTINGS) return

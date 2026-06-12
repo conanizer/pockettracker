@@ -69,6 +69,10 @@ class OboeAudioBackend : IAudioBackend {
         Log.d(TAG, "🗑️ Cleared all loaded samples")
     }
 
+    override fun clearSample(id: Int) {
+        native_clearSample(id)
+    }
+
     override fun getSampleLength(id: Int): Int = native_getSampleLength(id)
     override fun getSampleWaveform(id: Int, numBins: Int): FloatArray = native_getSampleWaveform(id, numBins)
     override fun getSampleWaveformRange(id: Int, startFrame: Int, endFrame: Int, numBins: Int): FloatArray = native_getSampleWaveformRange(id, startFrame, endFrame, numBins)
@@ -446,12 +450,14 @@ class OboeAudioBackend : IAudioBackend {
         pslInitialOffset: Float, pslDuration: Float,
         pbnRate: Float, vibratoSpeed: Float, vibratoDepth: Float,
         phraseVol: Float, sampleId: Int,
-        tableId: Int, tableTicRate: Int, noteOctave: Int, notePitch: Int, tableStartRow: Int
+        tableId: Int, tableTicRate: Int, noteOctave: Int, notePitch: Int, tableStartRow: Int,
+        detuneSemitones: Float
     ) {
         native_scheduleSoundfontNote(
             frame, trackId, sfSlot, midiNote, velocity, vol, pan, bank, preset,
             pslInitialOffset, pslDuration, pbnRate, vibratoSpeed, vibratoDepth,
-            phraseVol, sampleId, tableId, tableTicRate, noteOctave, notePitch, tableStartRow
+            phraseVol, sampleId, tableId, tableTicRate, noteOctave, notePitch, tableStartRow,
+            detuneSemitones
         )
     }
 
@@ -491,6 +497,7 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_loadSampleStereo(sampleId: Int, leftData: FloatArray, rightData: FloatArray)
     private external fun native_hasStereoData(sampleId: Int): Boolean
     private external fun native_clearAllSamples()
+    private external fun native_clearSample(id: Int)
     private external fun native_getTrackActiveNotes(): IntArray
     private external fun native_scheduleNote(
         targetFrame: Long,
@@ -611,7 +618,8 @@ class OboeAudioBackend : IAudioBackend {
         pslInitialOffset: Float, pslDuration: Float,
         pbnRate: Float, vibratoSpeed: Float, vibratoDepth: Float,
         phraseVol: Float, sampleId: Int,
-        tableId: Int, tableTicRate: Int, noteOctave: Int, notePitch: Int, tableStartRow: Int
+        tableId: Int, tableTicRate: Int, noteOctave: Int, notePitch: Int, tableStartRow: Int,
+        detuneSemitones: Float
     )
     private external fun native_setSoundfontEnvelopeOverrides(sfSlot: Int, bank: Int, preset: Int,
                                                                atk: Int, dec: Int, sus: Int, rel: Int)
