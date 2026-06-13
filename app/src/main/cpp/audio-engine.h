@@ -311,6 +311,11 @@ public:
     void setStemsMode(int mode) { stemsMode = mode; }
 
 private:
+    // Maximum frames processAudioBlock can handle in one call — all its per-block buffers
+    // (send buses, OCTA accumulators, sfBuf) are sized to this. Callers with potentially
+    // larger blocks (onAudioReady, renderOffline) must chunk.
+    static constexpr int MAX_BLOCK = 1024;
+
     std::shared_ptr<oboe::AudioStream> stream;
     Voice voices[MAX_VOICES];
     float* samples[256];
@@ -336,6 +341,10 @@ private:
     // old buffers. Keeps left/right and their shared length in lockstep so the stereo mix path can never
     // read a stale or short right channel. Pass newR=nullptr for a mono result.
     void setSampleBuffers(int id, float* newL, float* newR, int newLen);
+    // Stop voices reading slot `id`'s buffers, then acquire sampleEditMutex. EVERY destructive
+    // sample-editor op must hold the returned lock while mutating/freeing the slot's buffers so
+    // the audio thread's try_lock fails (one silent block) instead of reading freed memory.
+    std::unique_lock<std::mutex> beginSampleEdit(int id);
     InstrumentParams instrumentParams[256];
     InstrumentModSlot instrumentModSlots[256][4]; // [sampleId][slotIndex]
 

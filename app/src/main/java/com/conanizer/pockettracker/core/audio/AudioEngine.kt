@@ -848,9 +848,14 @@ class AudioEngine(
     fun downsampleSample(instrumentId: Int, factor: Int) {
         backend.downsampleSample(instrumentId, factor)
         sampleRateRatios[instrumentId]?.let { sampleRateRatios[instrumentId] = it * factor }
+        // Phrase playback reads the sampleBaseFrequencies cache (ROOT × ratio / detune), not
+        // sampleRateRatios — scale it by the same factor or playback pitch is permanently wrong
+        // while previews (which recompute from the ratio) sound correct.
+        sampleBaseFrequencies[instrumentId]?.let { sampleBaseFrequencies[instrumentId] = it * factor }
     }
 
     fun applyRateMode(instrumentId: Int, factor: Int) {
+        val oldRatio = sampleRateRatios[instrumentId]
         if (factor <= 1) {
             // Restore HIGH: reset ratio to original and discard cache.
             originalSampleRateRatios.remove(instrumentId)?.let { origRatio ->
@@ -864,6 +869,15 @@ class AudioEngine(
             // Set ratio relative to original so pitch stays correct at any rate.
             originalSampleRateRatios[instrumentId]?.let { origRatio ->
                 sampleRateRatios[instrumentId] = origRatio * factor
+            }
+        }
+        // Keep the playback base-frequency cache in sync (see downsampleSample): scale it by the
+        // ratio change. ROOT/DETUNE edits later recompute it fully via updateInstrumentBaseFrequency,
+        // which reads the updated sampleRateRatios — so the two stay consistent either way.
+        val newRatio = sampleRateRatios[instrumentId]
+        if (oldRatio != null && newRatio != null && oldRatio != newRatio) {
+            sampleBaseFrequencies[instrumentId]?.let {
+                sampleBaseFrequencies[instrumentId] = it * (newRatio / oldRatio)
             }
         }
         backend.applyRateMode(instrumentId, factor)

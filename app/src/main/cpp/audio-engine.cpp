@@ -374,8 +374,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         masterVolSnapshot = masterVolume;
     }
 
-    // Send-bus accumulation buffers (stereo, panned contributions from all voices)
-    static constexpr int MAX_BLOCK = 1024;
+    // Send-bus accumulation buffers (stereo, panned contributions from all voices).
+    // MAX_BLOCK is a class constant; onAudioReady/renderOffline chunk larger requests.
     float revSendBufL[MAX_BLOCK] = {}, revSendBufR[MAX_BLOCK] = {};
     float dlySendBufL[MAX_BLOCK] = {}, dlySendBufR[MAX_BLOCK] = {};
 
@@ -1322,9 +1322,16 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     noteVol = fmaxf(0.0f, noteVol + (mod.envValue - 1.0f) * mod.effectiveAmt);
                 }
             }
-            if (sv.sfSlot >= 0) {
+            // Snapshot sfSlot ONCE into a local: eviction (JNI thread) calls detach() which sets
+            // sv.sfSlot = -1 at any moment — re-reading the member after the >= 0 check indexes
+            // soundfonts[-1] (out of bounds → garbage tsf* → SIGSEGV in tsf_channel_set_volume).
+            int volSlot = sv.sfSlot;
+            if (volSlot >= 0 && volSlot < MAX_SOUNDFONTS) {
                 float trkVol = trackVolSnapshot[t];
-                tsf* h = soundfonts[sv.sfSlot].handle;
+                // Read the handle INSIDE the slot mutex: loadSoundfont's eviction path can
+                // tsf_close + null it concurrently; a stale pointer here is a use-after-free.
+                std::lock_guard<std::mutex> sfLock(soundfonts[volSlot].mutex);
+                tsf* h = soundfonts[volSlot].handle;
                 if (h) tsf_channel_set_volume(h, t, noteVol * trkVol);
             }
 
@@ -1365,15 +1372,23 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
         for (int t = 0; t < 8; t++) {
             SoundfontVoice& sv = sfVoices[t];
-            if (!sv.isActive || sv.sfSlot < 0) continue;
-            tsf* h = soundfonts[sv.sfSlot].handle;
-            if (!h) continue;
+            // Local sfSlot snapshot — see the volSlot comment above (detach() race).
+            int slot = sv.sfSlot;
+            if (!sv.isActive || slot < 0 || slot >= MAX_SOUNDFONTS) continue;
 
             memset(sfBuf, 0, sizeof(float) * numFrames * 2);
+            bool rendered = false;
             {
-                std::lock_guard<std::mutex> sfLock(soundfonts[sv.sfSlot].mutex);
-                tsf_render_float_channel(h, t, sfBuf, numFrames, 0 /* overwrite */);
+                // Handle must be read INSIDE the lock: capturing it before would let
+                // loadSoundfont's eviction tsf_close it between the read and the render.
+                std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
+                tsf* h = soundfonts[slot].handle;
+                if (h) {
+                    tsf_render_float_channel(h, t, sfBuf, numFrames, 0 /* overwrite */);
+                    rendered = true;
+                }
             }
+            if (!rendered) continue;
 
             for (int i = 0; i < numFrames; i++) {
                 float lerp_t = (numFrames > 1) ? (float)(i + 1) / (float)numFrames : 1.0f;
@@ -1527,7 +1542,15 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
     }
 
     float sampleRate = (float)audioStream->getSampleRate();
-    processAudioBlock(output, numFrames, channelCount, sampleRate);
+    // Oboe bursts are normally 192-960 frames, but the None/Shared fallback path or unusual
+    // ROMs can exceed MAX_BLOCK — and every per-block buffer in processAudioBlock is sized to
+    // MAX_BLOCK. Chunk to keep them in bounds (renderOffline already does the same).
+    int processed = 0;
+    while (processed < numFrames) {
+        int chunk = std::min((int)numFrames - processed, MAX_BLOCK);
+        processAudioBlock(output + processed * channelCount, chunk, channelCount, sampleRate);
+        processed += chunk;
+    }
 
     {
         std::lock_guard<std::mutex> lock(waveformMutex);
@@ -1909,9 +1932,10 @@ void AudioEngine::setTrackVolume(int trackId, float volume) {
     { std::lock_guard<std::mutex> lock(volumeMutex); trackVolumes[trackId] = volume; }
     SoundfontVoice& sv = sfVoices[trackId];
     sv.trackVolume = volume;
-    if (sv.isActive && sv.sfSlot >= 0 && sv.sfSlot < MAX_SOUNDFONTS) {
-        std::lock_guard<std::mutex> sfLock(soundfonts[sv.sfSlot].mutex);
-        tsf* h = soundfonts[sv.sfSlot].handle;
+    int slot = sv.sfSlot;  // snapshot once — detach() can set the member to -1 concurrently
+    if (sv.isActive && slot >= 0 && slot < MAX_SOUNDFONTS) {
+        std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
+        tsf* h = soundfonts[slot].handle;
         if (h) tsf_channel_set_volume(h, trackId, sv.noteVolume * volume);
     }
     LOGD("🔊 Track %d volume set to %.2f", trackId, volume);

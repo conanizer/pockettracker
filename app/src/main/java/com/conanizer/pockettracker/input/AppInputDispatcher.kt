@@ -581,6 +581,11 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                         val instId = sampleEditorState.instrumentId
                         val oldLen = sampleEditorState.totalFrames
                         audioEngine.applyRateMode(instId, newFactor)
+                        // RATE changes the slot's sample-rate ratio, but the 2-phrase lookahead has
+                        // already scheduled notes with the OLD base frequency — they would play the
+                        // re-decimated buffer at double/half pitch. Roll the schedule buffer back so
+                        // upcoming phrases reschedule with the new ratio (no-op when not playing).
+                        trackerController.playbackController.notifyDataChanged()
                         val newLen = audioEngine.getSampleLength(instId)
                         fun scaleFrame(f: Long) =
                             if (oldLen > 0) (f * newLen.toLong() / oldLen).coerceIn(0L, newLen.toLong()) else 0L
@@ -894,7 +899,9 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
 
     fun handleDPadUp() {
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorUp() }
-        else if (showCleanDialog) { return }
+        // All confirm dialogs are pure A-confirm/B-cancel — swallow DPAD so the cursor can't
+        // move on the screen behind the modal (was only guarding CLEAN, and only Up/Down).
+        else if (confirmDialogOpen()) { return }
         else if (themeEditorState.isOpen) {
             val row = themeEditorState.cursorRow
             themeEditorState = themeEditorState.copy(cursorRow = if (row > 0) row - 1 else ThemeEditorModule.MAX_ROW)
@@ -908,7 +915,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
 
     fun handleDPadDown() {
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorDown() }
-        else if (showCleanDialog) { return }
+        else if (confirmDialogOpen()) { return }
         else if (themeEditorState.isOpen) {
             val row = themeEditorState.cursorRow
             themeEditorState = themeEditorState.copy(cursorRow = if (row < ThemeEditorModule.MAX_ROW) row + 1 else 0)
@@ -922,6 +929,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
 
     fun handleDPadLeft() {
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorLeft() }
+        else if (confirmDialogOpen()) { return }
         else if (themeEditorState.isOpen) {
             val ch = themeEditorState.cursorChannel
             themeEditorState = themeEditorState.copy(cursorChannel = if (ch > 0) ch - 1 else 2)
@@ -935,6 +943,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
 
     fun handleDPadRight() {
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorRight() }
+        else if (confirmDialogOpen()) { return }
         else if (themeEditorState.isOpen) {
             val ch = themeEditorState.cursorChannel
             themeEditorState = themeEditorState.copy(cursorChannel = if (ch < 2) ch + 1 else 0)
@@ -1746,13 +1755,16 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             else -> { }
         }
     }
-    // True while a simple confirm dialog (CLEAN / NEW PROJECT / INSTR TYPE) is open. These are modal
-    // yes/no prompts handled by A (confirm) and B (cancel) in handleButtonA/B. Every OTHER input must
-    // be swallowed so it can't act on the screen behind the dialog (e.g. SELECT clearing a chain ref,
-    // START toggling playback). A/B naturally close the dialog before any combo can form, so guarding
-    // the non-A/B entry points (SELECT, START) is sufficient.
+    // True while a simple confirm dialog (CLEAN / NEW PROJECT / INSTR TYPE / sample-editor
+    // discard-changes) is open. These are modal yes/no prompts handled by A (confirm) and B (cancel)
+    // in handleButtonA/B. Every OTHER input must be swallowed so it can't act on the screen behind
+    // the dialog (e.g. SELECT clearing a chain ref or opening the EQ editor, START toggling
+    // playback/preview). A/B naturally close the dialog before any combo can form, so guarding the
+    // non-A/B entry points (SELECT, START, R+DPAD) is sufficient.
+    // RULE: every new show*Dialog-style modal state MUST be added to this predicate.
     private fun confirmDialogOpen(): Boolean =
-        showCleanDialog || showNewProjectDialog || showInstrTypeDialog
+        showCleanDialog || showNewProjectDialog || showInstrTypeDialog ||
+            sampleEditorState.showConfirmClose
 
     fun handleSelect() {
         if (confirmDialogOpen()) return

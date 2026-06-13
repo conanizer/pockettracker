@@ -95,7 +95,9 @@ public:
     void schedule(const ScheduledNote& note) {
         std::lock_guard<std::mutex> lock(mutex);
         queue.push(note);
-        LOGD("📅 Scheduled note: frame=%lld, sample=%d, track=%d, freq=%.2f",
+        // LOGT, not LOGD: the audio callback takes this mutex every frame, so an always-on
+        // logging syscall while holding it is a priority-inversion / dropout hazard.
+        LOGT("📅 Scheduled note: frame=%lld, sample=%d, track=%d, freq=%.2f",
              (long long)note.targetFrame, note.sampleId, note.trackId, note.frequency);
     }
 
@@ -152,7 +154,8 @@ public:
     void schedule(const ScheduledKill& kill) {
         std::lock_guard<std::mutex> lock(mutex);
         queue.push(kill);
-        LOGD("🔪 Scheduled kill: frame=%lld, track=%d", (long long)kill.targetFrame, kill.trackId);
+        // LOGT, not LOGD — see NoteQueue::schedule.
+        LOGT("🔪 Scheduled kill: frame=%lld, track=%d", (long long)kill.targetFrame, kill.trackId);
     }
 
     // Check if any kill should trigger at or before this frame

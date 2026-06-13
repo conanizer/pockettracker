@@ -43,7 +43,7 @@ android {
         versionName = "0.9.$gitCommitCount ($gitShortHash)"
 
         buildConfigField("String", "GITHUB_REPO_OWNER", "\"conanizer\"")
-        buildConfigField("String", "GITHUB_REPO_NAME", "\"pockettracker.\"")
+        buildConfigField("String", "GITHUB_REPO_NAME", "\"pockettracker\"")
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
