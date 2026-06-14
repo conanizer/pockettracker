@@ -164,8 +164,8 @@ public:
     void getWaveform(float* outBuffer, int bufferSize);
 
     // Get per-track waveform data for OCTA visualizer.
-    // outBuffer: 8 * WAVEFORM_SIZE floats (track0[0..619], track1[0..619], ...).
-    // activeFlags: bool[8] — true if track had active (non-fading) voices last block.
+    // outBuffer: TRACK_WAVEFORM_COUNT * WAVEFORM_SIZE floats (track0[0..619], ... track7, preview).
+    // activeFlags: bool[TRACK_WAVEFORM_COUNT] — true if that lane had active (non-fading) voices last block.
     void getTrackWaveforms(float* outBuffer, bool* activeFlags);
 
     // Get log-spaced frequency-domain magnitude spectrum for EQ visualizer (0-1 per bin)
@@ -411,10 +411,15 @@ private:
         EqBandData bands[3];
     } eqPresets[128];
 
-    // Per-track waveform buffers for OCTA visualizer
-    float trackWaveformBuffer[8][WAVEFORM_SIZE] = {};
+    // Per-track waveform buffers for OCTA visualizer.
+    // 8 song tracks + 1 dedicated preview lane (index PREVIEW_LANE): sampler/sample/note previews
+    // play on PREVIEW_TRACK_ID (outside tracks 0-7), so without their own lane they never appear
+    // on the per-track scopes. SF instrument previews use track 0 and already show on lane 0.
+    static const int PREVIEW_LANE = 8;
+    static const int TRACK_WAVEFORM_COUNT = 9;  // 8 tracks + preview lane
+    float trackWaveformBuffer[TRACK_WAVEFORM_COUNT][WAVEFORM_SIZE] = {};
     int   trackWaveformIndex = 0;
-    bool  trackHasVoice[8] = {};
+    bool  trackHasVoice[TRACK_WAVEFORM_COUNT] = {};
 
     // Downsampling for oscilloscope (capture every Nth sample)
     // Lower = faster scrolling (more zoomed in), Higher = slower scrolling (more time visible)

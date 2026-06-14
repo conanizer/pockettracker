@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.translate
 import com.conanizer.pockettracker.platform.android.DeviceAdapter
+import kotlin.math.abs
 import kotlin.math.min
 import kotlinx.coroutines.delay
 import com.conanizer.pockettracker.core.audio.AudioEngine
@@ -83,6 +84,10 @@ import kotlin.text.iterator
 
 // Design constants
 const val DESIGN_WIDTH_PX = 640
+
+// 6.1: below this peak amplitude the captured scope is treated as flat (silent), so the
+// refresh loop stops forcing redraws. ~ -54 dBFS — visually indistinguishable from a flat line.
+private const val SCOPE_SILENCE_THRESHOLD = 0.002f
 
 /**
  * CompositionLocal that carries the current LayoutMode down the composition tree.
@@ -199,14 +204,45 @@ fun PixelPerfectTracker(
     var playbackSongRow by remember { mutableStateOf(0) }
     var trackNotes by remember { mutableStateOf(List(8) { Note.EMPTY }) }
 
-    // Oscilloscope refresh ticker (force continuous Canvas redraws for smooth waveform)
+    // Oscilloscope refresh ticker. Reading this inside the Canvas draw lambda forces a redraw;
+    // the loop below only bumps it while something is actually animating (see 6.1).
     var oscilloscopeTicker by remember { mutableStateOf(0L) }
 
-    // Oscilloscope refresh loop (independent of playback position)
+    // Read fresh inside the long-lived loop without restarting it (LaunchedEffect key stays Unit).
+    val appTheme = LocalAppTheme.current
+    val currentIsPlaying by rememberUpdatedState(isPlaying)
+    val currentVizType by rememberUpdatedState(appTheme.visualizerType)
+
+    // Oscilloscope / visualizer refresh loop (independent of playback position).
+    // 6.1: a single Canvas can only redraw all-or-nothing, so reading the ticker here used to
+    // repaint the entire 640×480 layout 60×/sec FOREVER — even sitting idle on a static phrase
+    // grid, which the review flagged as the dominant battery drain on the handheld. Now the loop
+    // refreshes the capture buffers and only bumps the ticker (→ redraw) while audio is audible
+    // (song/phrase playing OR a one-shot preview still ringing). When idle it keeps polling cheaply
+    // for audio onset but does NOT bump the ticker, so the Canvas repaints only on real state
+    // changes (cursor move, value edit, playback row). One final bump on the active→idle edge draws
+    // the flattened scope, then full-screen redraws stop entirely.
     LaunchedEffect(Unit) {
+        var wasAudible = true
         while (true) {
-            oscilloscopeTicker++
-            delay(16L)  // ~60 FPS refresh rate
+            audioEngine.updateWaveformWithDecay(currentIsPlaying)
+            if (currentVizType == VisualizerType.OCTA) audioEngine.updateTrackWaveforms()
+            if (currentVizType == VisualizerType.SPECTRUM ||
+                currentVizType == VisualizerType.SPECTRUM_PEAKS) audioEngine.updateSpectrum()
+
+            val audible = currentIsPlaying ||
+                audioEngine.waveformBuffer.any { abs(it) > SCOPE_SILENCE_THRESHOLD }
+            if (audible) {
+                oscilloscopeTicker++
+                wasAudible = true
+                delay(16L)            // ~60 fps while something moves
+            } else {
+                if (wasAudible) {     // active → idle edge: draw the now-flat scope one last time
+                    oscilloscopeTicker++
+                    wasAudible = false
+                }
+                delay(50L)            // idle: poll for audio onset, no ticker bump → no redraw
+            }
         }
     }
 
@@ -266,7 +302,6 @@ fun PixelPerfectTracker(
     // objects per frame causes GC pressure that can crash the RenderThread on Android 11
     // (Snapdragon GPU drivers can't safely be paused mid-frame by the JVM GC).
     val layoutMode = LocalLayoutMode.current
-    val appTheme   = LocalAppTheme.current
     val layout = remember { TrackerLayout() }
     Canvas(
         modifier = Modifier
@@ -521,14 +556,12 @@ class TrackerLayout {
         val moduleX = SIDE_SPACER
         var currentY = SCREEN_SPACER  // Start 6px from top
 
-        // Update waveform data from native audio engine (every frame)
-        // When not playing, decay waveform to smoothly fade out oscilloscope
-        audioEngine.updateWaveformWithDecay(isPlaying)
+        // Capture buffers (waveform / track waveforms / spectrum) are refreshed by the
+        // oscilloscope ticker loop (6.1), not here — the draw only reads the latest snapshot.
+        // We still need these flags to pick what to hand the oscilloscope module.
         val isOcta = appTheme.visualizerType == VisualizerType.OCTA
         val isSpectrum = appTheme.visualizerType == VisualizerType.SPECTRUM ||
                          appTheme.visualizerType == VisualizerType.SPECTRUM_PEAKS
-        if (isOcta) audioEngine.updateTrackWaveforms()
-        if (isSpectrum) audioEngine.updateSpectrum()
 
         // MODULE 1: OSCILLOSCOPE (waveform display)
         // Position: Top of screen
@@ -542,7 +575,12 @@ class TrackerLayout {
                     waveformBuffer = audioEngine.waveformBuffer,
                     appTheme = appTheme,
                     trackWaveforms = if (isOcta) audioEngine.trackWaveformBuffers else null,
-                    activeTrackMask = if (isOcta) audioEngine.phraseTrackMask else 0,
+                    // Tracks 0-7 from the scheduled-track mask; the preview lane (bit 8) only when
+                    // stopped, so it never crowds the song scopes during playback.
+                    activeTrackMask = if (isOcta) {
+                        val base = audioEngine.phraseTrackMask and 0xFF
+                        if (!isPlaying && audioEngine.previewLaneActive) base or (1 shl 8) else base
+                    } else 0,
                     spectrumData = if (isSpectrum) audioEngine.spectrumBuffer else null
                 )
             )

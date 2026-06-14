@@ -44,10 +44,16 @@ class AudioEngine(
     // Waveform buffer for visualization (620 samples for 620px width oscilloscope)
     val waveformBuffer = FloatArray(620) { 0f }
 
-    // Per-track waveform buffers for OCTA visualizer
-    private val trackWaveformBufferFlat = FloatArray(8 * 620)
-    private val activeTrackFlags = BooleanArray(8)
-    val trackWaveformBuffers: Array<FloatArray> = Array(8) { FloatArray(620) }
+    // Per-track waveform buffers for OCTA visualizer.
+    // 9 lanes: 8 song tracks + 1 preview lane (index 8) so sampler/sample/note previews — which
+    // play on PREVIEW_TRACK_ID, outside tracks 0-7 — get their own scope. Must match C++
+    // AudioEngine::TRACK_WAVEFORM_COUNT.
+    private val trackWaveformBufferFlat = FloatArray(9 * 620)
+    private val activeTrackFlags = BooleanArray(9)
+    val trackWaveformBuffers: Array<FloatArray> = Array(9) { FloatArray(620) }
+
+    /** True when the preview lane (index 8) had audio last block — drives the OCTA preview scope. */
+    val previewLaneActive: Boolean get() = activeTrackFlags[8]
 
     // Spectrum buffer for SPECTRUM/SPECTRUM_PEAKS visualizer (40 log-spaced bins, 0-1)
     val spectrumBuffer = FloatArray(40)
@@ -557,7 +563,7 @@ class AudioEngine(
 
     fun updateTrackWaveforms() {
         backend.getTrackWaveforms(trackWaveformBufferFlat, activeTrackFlags)
-        for (t in 0 until 8) {
+        for (t in 0 until 9) {
             trackWaveformBufferFlat.copyInto(trackWaveformBuffers[t], 0, t * 620, (t + 1) * 620)
         }
     }

@@ -690,3 +690,77 @@ deliberately deferred to their own batches so each can be device-tested in isola
    text, file browser, and the arrow glyphs (↑↓←→) in keyboard/hints still draw correctly.
 3. **EQ spectrum:** open the EQ editor, confirm the analyzer still animates correctly (FFT cfg cache).
 4. **General:** app builds for release (one `buildFeatures` block); audio pitch correct at startup.
+
+**Batch 3 device-tested + committed 2026-06-14 (`d03df9b`).** Playback (no regression, cleaner logs),
+rendering (identical incl. arrows), EQ spectrum animates, release APK builds clean — all ✅.
+
+### Batch 4 — 6.1 idle redraw eliminated (2026-06-14) — 🔧 awaiting device test
+
+The structural performance item, done without the riskier literal "second Canvas" split.
+
+- **6.1 🔧 Activity-gated oscilloscope ticker** (`PixelPerfectRenderer.kt`)
+  The single `Canvas` redraws all-or-nothing, and its draw lambda reads `oscilloscopeTicker`, which a
+  `LaunchedEffect` bumped every 16 ms **forever** — so the whole 640×480 layout (phrase grid, nav map,
+  right bar, everything) repainted 60×/sec even sitting idle on a static screen. The review's tier-2
+  "give the scope its own Canvas" was rejected: this file documents `RenderThread` SEGVs from
+  multi-node / SubcomposeLayout churn on the Miyoo's Snapdragon driver, and the animated modal overlays
+  (EQ spectrum, OCTA/SPECTRUM visualizers) share the same ticker, so a clean spatial split is both
+  fragile and messy. Instead the **single Canvas is untouched** (documented safety property preserved)
+  and only the ticker *cadence* changed: the loop now refreshes the capture buffers and bumps the
+  ticker (→ redraw) **only while audio is audible** — `isPlaying` OR `waveformBuffer` peak above a
+  ~ -54 dBFS silence threshold (catches one-shot note previews that ring while not in song playback).
+  When idle it keeps polling every 50 ms for audio onset but does **not** bump the ticker, so the
+  Canvas repaints only on real state changes (cursor move, value edit, playback-row advance). One final
+  bump on the active→idle edge draws the flattened scope, then full-screen redraws stop entirely →
+  **zero idle GPU/CPU redraw cost**, the dominant battery drain the review flagged. The per-frame
+  buffer refresh (`updateWaveformWithDecay` / `updateTrackWaveforms` / `updateSpectrum`) moved out of
+  `drawLayout` into this loop; `isPlaying` / visualizer type are read fresh via `rememberUpdatedState`
+  so the `LaunchedEffect(Unit)` never restarts. The EQ-editor spectrum is unaffected (driven by its own
+  independent 50 ms `eqSpectrumData` reassignment loop in MainActivity).
+
+**Test focus for Batch 4 (6.1):**
+1. **Idle is truly idle:** sit on the PHRASE screen, not playing — the scope shows a flat line and the
+   screen is static (battery/CPU should drop noticeably; if profiling, RenderThread work → ~0 when
+   untouched). Moving the cursor / editing a value still updates instantly (real state change → redraw).
+2. **Playback smooth:** START a song/phrase — the oscilloscope animates at full 60 fps and the playback
+   row highlight moves smoothly, exactly as before. Stop → scope decays to flat, then settles (no frozen
+   mid-decay waveform).
+3. **Note preview animates:** while NOT playing, trigger a note preview (A on a note / instrument
+   audition) — the scope reacts to it within ~50 ms and animates while it rings, then goes flat.
+4. **Visualizers:** with OCTA and with SPECTRUM/SPECTRUM_PEAKS themes, the visualizer animates during
+   playback/preview and freezes flat when idle. EQ editor analyzer still animates (its own loop).
+5. **No regressions** on FILE_BROWSER / SAMPLE_EDITOR / dialogs / overlays drawing.
+
+**Batch 4 (6.1) device-tested OK 2026-06-14** — playback/idle/preview/visualizers/EQ all ✅. One
+follow-up observed during test (below).
+
+### Batch 4b — OCTA preview lane (2026-06-14) — 🔧 awaiting device test
+
+Follow-up from the 6.1 test: the OCTA visualizer didn't react to instrument preview. Root cause is
+pre-existing (not 6.1): sampler/sample/note previews play on `PREVIEW_TRACK_ID = 8`, outside the 8
+song tracks OCTA captured, so they were never drawn. (Oscilloscope + SPECTRUM read the *master*
+capture, which includes preview, so those already animated; SF instrument previews use track 0 and
+already showed on lane 0.)
+
+Fix — **dedicated preview lane, shown only when stopped** (Option 2 + refinement):
+- C++ per-track waveform storage grew 8 → 9 lanes (`TRACK_WAVEFORM_COUNT`, `PREVIEW_LANE = 8` in
+  `audio-engine.h`): `trackWaveformBuffer` / `trackHasVoice` / the `trackWaveAccumL/R` + `trackWasActive`
+  audio-callback locals. The sampler mix loop now accumulates `trackId < TRACK_WAVEFORM_COUNT` (so the
+  preview voice, trackId 8, lands in lane 8); meter peaks stay tracks 0-7. Capture/decay/`getTrackWaveforms`
+  loops bumped to 9. Heap cost ≈ +2.5 KB (ring) ; audio-callback stack ≈ +8 KB (the `[9][MAX_BLOCK]`
+  accumulators). The JNI binding (`jni-bridge.cpp`) was hardcoded to 8 flags — fixed to size by the
+  Kotlin array length so it can't overflow when C++ writes 9.
+- Kotlin: `trackWaveformBufferFlat` / `activeTrackFlags` / `trackWaveformBuffers` → 9 lanes;
+  `updateTrackWaveforms` loops 9; new `AudioEngine.previewLaneActive` (= lane-8 flag).
+- Display: `PixelPerfectRenderer` ORs bit 8 into the OCTA `activeTrackMask` **only when `!isPlaying`**
+  and `previewLaneActive`, so the preview scope never crowds the song lanes during playback. When
+  stopped + previewing there are no active song tracks, so it's the only scope (full width).
+  `OscilloscopeModule.drawOcta` filters lanes `0 until 9`.
+
+**Test focus for Batch 4b:**
+1. **Sampler preview shows on OCTA:** OCTA theme, stopped, preview a *sampler* instrument (A on
+   instrument screen / note audition / sample browser) → a full-width scope animates, then clears.
+2. **SF preview still shows** (on lane 0, as before).
+3. **During playback:** OCTA shows only the active song-track scopes; previewing while playing does
+   NOT add a 9th lane (refinement). Song-track scopes + meters unchanged.
+4. **No crash / no OOB:** previews + playback + visualizer switching, watch logcat for native issues.

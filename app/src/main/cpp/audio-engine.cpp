@@ -382,10 +382,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     float revSendBufL[MAX_BLOCK] = {}, revSendBufR[MAX_BLOCK] = {};
     float dlySendBufL[MAX_BLOCK] = {}, dlySendBufR[MAX_BLOCK] = {};
 
-    // Per-track waveform accumulators for OCTA visualizer
-    float trackWaveAccumL[8][MAX_BLOCK] = {};
-    float trackWaveAccumR[8][MAX_BLOCK] = {};
-    bool  trackWasActive[8] = {};
+    // Per-track waveform accumulators for OCTA visualizer (+1 preview lane, see TRACK_WAVEFORM_COUNT)
+    float trackWaveAccumL[TRACK_WAVEFORM_COUNT][MAX_BLOCK] = {};
+    float trackWaveAccumR[TRACK_WAVEFORM_COUNT][MAX_BLOCK] = {};
+    bool  trackWasActive[TRACK_WAVEFORM_COUNT] = {};
 
     // Per-instrument spectrum accumulator (mono, summed across all active voices of one instrument)
     float instrSpectrumTempL[MAX_BLOCK] = {};
@@ -1247,9 +1247,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             if (!voice.isFadingOut && voice.trackId >= 0 && voice.trackId < 8) {
                 framePeaksPerTrackL[voice.trackId] = fmaxf(framePeaksPerTrackL[voice.trackId], fabsf(sampleL));
                 framePeaksPerTrackR[voice.trackId] = fmaxf(framePeaksPerTrackR[voice.trackId], fabsf(sampleR));
-                trackWasActive[voice.trackId] = true;
             }
-            if (voice.trackId >= 0 && voice.trackId < 8) {
+            // OCTA per-track capture: tracks 0-7 plus the preview lane (PREVIEW_TRACK_ID == PREVIEW_LANE).
+            if (voice.trackId >= 0 && voice.trackId < TRACK_WAVEFORM_COUNT) {
+                if (!voice.isFadingOut) trackWasActive[voice.trackId] = true;
                 trackWaveAccumL[voice.trackId][i] += sampleL;
                 trackWaveAccumR[voice.trackId][i] += sampleR;
             }
@@ -1453,9 +1454,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // Per-track waveform capture for OCTA visualizer
     {
         std::lock_guard<std::mutex> lock(waveformMutex);
-        for (int t = 0; t < 8; t++) trackHasVoice[t] = trackWasActive[t];
+        for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) trackHasVoice[t] = trackWasActive[t];
         for (int i = 0; i < numFrames; i++) {
-            for (int t = 0; t < 8; t++) {
+            for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) {
                 trackWaveformBuffer[t][trackWaveformIndex] =
                     (trackWaveAccumL[t][i] + trackWaveAccumR[t][i]) * 0.5f;
             }
@@ -1914,7 +1915,7 @@ void AudioEngine::decayWaveform() {
         waveformBuffer[i] *= WAVEFORM_DECAY;
         if (fabsf(waveformBuffer[i]) < 0.001f) waveformBuffer[i] = 0.0f;
     }
-    for (int t = 0; t < 8; t++) {
+    for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) {
         for (int i = 0; i < WAVEFORM_SIZE; i++) {
             trackWaveformBuffer[t][i] *= WAVEFORM_DECAY;
             if (fabsf(trackWaveformBuffer[t][i]) < 0.001f) trackWaveformBuffer[t][i] = 0.0f;
@@ -1924,7 +1925,7 @@ void AudioEngine::decayWaveform() {
 
 void AudioEngine::getTrackWaveforms(float* outBuffer, bool* activeFlags) {
     std::lock_guard<std::mutex> lock(waveformMutex);
-    for (int t = 0; t < 8; t++) {
+    for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) {
         activeFlags[t] = trackHasVoice[t];
         for (int i = 0; i < WAVEFORM_SIZE; i++) {
             int readIdx = (trackWaveformIndex + i) % WAVEFORM_SIZE;
