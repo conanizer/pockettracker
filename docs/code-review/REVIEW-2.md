@@ -694,7 +694,7 @@ deliberately deferred to their own batches so each can be device-tested in isola
 **Batch 3 device-tested + committed 2026-06-14 (`d03df9b`).** Playback (no regression, cleaner logs),
 rendering (identical incl. arrows), EQ spectrum animates, release APK builds clean — all ✅.
 
-### Batch 4 — 6.1 idle redraw eliminated (2026-06-14) — 🔧 awaiting device test
+### Batch 4 — 6.1 idle redraw eliminated (2026-06-14) — ✅ device-tested + committed (`ddef4b3`)
 
 The structural performance item, done without the riskier literal "second Canvas" split.
 
@@ -734,7 +734,7 @@ The structural performance item, done without the riskier literal "second Canvas
 **Batch 4 (6.1) device-tested OK 2026-06-14** — playback/idle/preview/visualizers/EQ all ✅. One
 follow-up observed during test (below).
 
-### Batch 4b — OCTA preview lane (2026-06-14) — 🔧 awaiting device test
+### Batch 4b — OCTA preview lane (2026-06-14) — ✅ device-tested + committed (`ddef4b3`)
 
 Follow-up from the 6.1 test: the OCTA visualizer didn't react to instrument preview. Root cause is
 pre-existing (not 6.1): sampler/sample/note previews play on `PREVIEW_TRACK_ID = 8`, outside the 8
