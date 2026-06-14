@@ -66,11 +66,17 @@ android {
         }
         release {
             buildConfigField("String", "GITHUB_TOKEN", "\"\"")  // No token in release builds
-            isMinifyEnabled = false
+            // 7.2: R8 + resource shrinking. Smaller dex → faster cold start and less code pinned in
+            // RAM on the 1 GB Miyoo. JNI keep rules + kotlinx-serialization keep rules live in
+            // proguard-rules.pro. Overlay PNGs are in assets/ (not res/) so resource shrinking
+            // leaves them alone.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {
