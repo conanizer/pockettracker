@@ -116,6 +116,17 @@ public:
         return note;
     }
 
+    // Drain every note with targetFrame <= maxFrame into `out` (ascending frame order, since the
+    // heap pops earliest-first) under a SINGLE lock. Lets the audio callback dispatch a whole
+    // block's worth of notes without taking this mutex once per frame. `out` is appended to.
+    void drainUntil(int64_t maxFrame, std::vector<ScheduledNote>& out) {
+        std::lock_guard<std::mutex> lock(mutex);
+        while (!queue.empty() && queue.top().targetFrame <= maxFrame) {
+            out.push_back(queue.top());
+            queue.pop();
+        }
+    }
+
     // Clear all scheduled notes (for stop/reset)
     void clear() {
         std::lock_guard<std::mutex> lock(mutex);
@@ -171,6 +182,15 @@ public:
         ScheduledKill kill = queue.top();
         queue.pop();
         return kill;
+    }
+
+    // Drain every kill with targetFrame <= maxFrame into `out` (ascending order). See NoteQueue.
+    void drainUntil(int64_t maxFrame, std::vector<ScheduledKill>& out) {
+        std::lock_guard<std::mutex> lock(mutex);
+        while (!queue.empty() && queue.top().targetFrame <= maxFrame) {
+            out.push_back(queue.top());
+            queue.pop();
+        }
     }
 
     // Clear all scheduled kills
@@ -234,6 +254,15 @@ public:
         ScheduledParamUpdate u = queue.top();
         queue.pop();
         return u;
+    }
+
+    // Drain every update with targetFrame <= maxFrame into `out` (ascending order). See NoteQueue.
+    void drainUntil(int64_t maxFrame, std::vector<ScheduledParamUpdate>& out) {
+        std::lock_guard<std::mutex> lock(mutex);
+        while (!queue.empty() && queue.top().targetFrame <= maxFrame) {
+            out.push_back(queue.top());
+            queue.pop();
+        }
     }
 
     void clear() {

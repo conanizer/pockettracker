@@ -1,6 +1,7 @@
 #pragma once
 #include <oboe/Oboe.h>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <mutex>
 #include <vector>
@@ -354,6 +355,25 @@ private:
     NoteQueue noteQueue;             // Thread-safe queue of scheduled notes
     KillQueue killQueue;             // Thread-safe queue of scheduled kill events
     ParamUpdateQueue paramUpdateQueue; // Thread-safe queue of scheduled parameter updates
+    // Per-block drain buffers (1.3): the audio callback empties each queue ONCE per block into
+    // these (one lock each) instead of taking the queue mutex every frame. Reused across blocks so
+    // the backing allocation persists (no per-block heap churn after warmup). Audio-thread-only.
+    std::vector<ScheduledNote>        noteBatch;
+    std::vector<ScheduledKill>        killBatch;
+    std::vector<ScheduledParamUpdate> paramBatch;
+
+    // Demand-driven visualizer capture (1.2 / 1.10): the UI read methods (getTrackWaveforms /
+    // getSpectrumMagnitudes*) stamp these with the wall clock; the audio callback only does the
+    // (expensive) OCTA accumulation / spectrum-ring writes when a read happened recently. No
+    // Kotlin→C++ enable flag to keep in sync — capture simply follows actual demand, and stops
+    // ~CAPTURE_IDLE_MS after the visualizer/EQ stops polling.
+    static const int64_t CAPTURE_IDLE_MS = 250;
+    std::atomic<int64_t> lastTrackWaveformReadMs{-CAPTURE_IDLE_MS};
+    std::atomic<int64_t> lastSpectrumReadMs{-CAPTURE_IDLE_MS};
+    static int64_t nowMs() {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
     int64_t globalFrameCounter;    // Total frames processed since start
     std::atomic<bool> isOfflineRendering{false};  // True during WAV export → onAudioReady outputs silence
     int stemsMode = 0;  // 0=normal, 1-8=track stem, 9=reverb, 10=delay

@@ -764,3 +764,60 @@ Fix — **dedicated preview lane, shown only when stopped** (Option 2 + refineme
 3. **During playback:** OCTA shows only the active song-track scopes; previewing while playing does
    NOT add a 9th lane (refinement). Song-track scopes + meters unchanged.
 4. **No crash / no OOB:** previews + playback + visualizer switching, watch logcat for native issues.
+
+**Batch 4b device-tested OK 2026-06-14** and committed with Batch 4 (`ddef4b3`).
+
+### Batch 5 — audio hot-path: trim the per-callback work (2026-06-14) — 🔧 awaiting device test
+
+The 1.2/1.3/1.10 trio: less work in `processAudioBlock` (called ~230×/sec on a deadline). C++-only;
+no Kotlin/JNI changes. **Highest-risk batch in the review — this is the real-time mix path.**
+
+- **1.3 🔧 Drain scheduling queues once per block, not per frame** (`note-queue.h`, `audio-engine.cpp`)
+  The per-frame loop called `paramUpdateQueue.hasUpdateAt` / `killQueue.hasKillAt` /
+  `noteQueue.hasNoteAt` **every frame** — each takes+releases that queue's mutex, ~130k lock ops/sec
+  even when empty. New `drainUntil(maxFrame, out)` on each queue pops everything with
+  `targetFrame <= globalFrameCounter + numFrames - 1` under **one lock** into reusable per-engine
+  batch vectors (`noteBatch`/`killBatch`/`paramBatch`, `reserve(64)` in the ctor → no audio-thread
+  realloc). The frame loop then dispatches from the batches with zero locking (batches are sorted
+  ascending since the heap pops earliest-first). Safe against the 2-phrase lookahead: notes scheduled
+  mid-block always target future blocks (> blockEnd) so they're drained later; only current-block
+  events (the playhead) can ever fire ≤1 block after a stop, which is imperceptible.
+
+- **1.2 🔧 Stop blanking 84 KB of scratch every callback + skip unwatched visualizer work**
+  (`audio-engine.cpp`) The send-bus / OCTA-accumulator / instrument-spectrum scratch arrays were
+  `= {}` (full `MAX_BLOCK` memset regardless of `numFrames`) every block. Now each is memset only for
+  the `[0,numFrames)` slice actually used. The 64 KB+ OCTA accumulator pair (the bulk) is zeroed,
+  filled (per-voice adds in the hot loop, sampler + SF paths), and captured **only when OCTA is being
+  displayed** (`octaWanted`); the instrument-spectrum scratch only when an instrument is monitored.
+
+- **1.10 🔧 Gate spectrum-ring writes + never block the audio thread on the UI** (`audio-engine.cpp`)
+  The master / delay / reverb / instrument spectrum rings were written every block under a *blocking*
+  `lock_guard(spectrumMutex)` — wasted ~99% of the time (EQ/spectrum closed) and able to stall the
+  audio thread while the UI held the lock copying 2048 samples out. Now each write is gated on demand
+  (`spectrumWanted` / `monitoredInstrId`) and uses `try_to_lock` — on contention it drops that block's
+  capture (one invisible frame of graph data).
+
+- **Demand-driven gating (no Kotlin/JNI flag to keep in sync):** the UI read methods
+  (`getTrackWaveforms`, `getSpectrumMagnitudes[ForSource]`) stamp a `steady_clock` millisecond
+  timestamp; the audio thread enables capture only if a read happened within `CAPTURE_IDLE_MS` (250 ms).
+  The 6.1 ticker already polls these every ≤50 ms while OCTA/SPECTRUM is shown, and the EQ screen polls
+  every 50 ms while open — so capture follows actual demand and stops ~250 ms after the visualizer/EQ
+  stops polling. The master *waveform* ring (oscilloscope) is left ungated (always cheap, usually the
+  default visualizer).
+
+- **Offline render visualizer freeze (device-test follow-up):** `octaWanted`/`spectrumWanted` are also
+  forced false while `isOfflineRendering` — during WAV export the live stream is silent (so the 6.1
+  idle-gate stops the ticker and the screen only repaints on progress-% ticks), and OCTA would
+  otherwise snapshot random mid-render frames → a frozen, twitching scope. Now the visualizers sit
+  flat during a render (the desired "don't react during render" behavior).
+
+**Test focus for Batch 5 (audio integrity is the whole point — listen hard):**
+1. **No dropouts / glitches under load:** dense song (many tracks, retrigs/arps, fast steps), long
+   playback — listen for clicks/stutters that weren't there before. This is the main risk.
+2. **Timing unchanged:** notes still trigger sample-accurately (retrig/arp/groove/PSL/PBN feel identical).
+3. **Stop is clean:** hitting STOP cuts promptly with no stray note after.
+4. **Visualizers still animate:** oscilloscope, OCTA (incl. preview lane), SPECTRUM/SPECTRUM_PEAKS, and
+   the EQ-editor analyzer all update correctly — and *keep* updating after switching themes back and
+   forth (verifies the demand-gate re-enables capture). First frame after opening may be ~1 frame stale.
+5. **WAV export still correct:** offline render output unchanged (same code path, deterministic).
+6. **Watch logcat** for any native crash across playback + preview + EQ + visualizer switching.
