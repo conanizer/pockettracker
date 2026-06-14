@@ -34,6 +34,12 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm")
     target_compile_options(pockettracker PRIVATE -ffast-math)
 endif ()
 
+# 7.3: explicit optimization level. The NDK leaves Debug at -O0, which makes the real-time audio
+# engine too slow to test reliably on the Miyoo (the variant we test most). Force -O2 in Debug so
+# debug builds run the engine at near-release speed; Release keeps -O3. (We debug via logcat, not
+# native breakpoints, so the loss of -O0 debuggability is a non-issue here.)
+target_compile_options(pockettracker PRIVATE $<IF:$<CONFIG:Debug>,-O2,-O3>)
+
 # Include paths: root (for audio-defs.h, sampler-voice.h, etc.),
 #   effects/soundpipe (so pareq.c finds soundpipe.h), kissfft (for kiss_fft.h)
 target_include_directories(pockettracker PRIVATE

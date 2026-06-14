@@ -863,3 +863,41 @@ The small remaining correctness/consistency items. Branch `code-review-2-cleanup
 4. **SF eviction (2.4):** load **5+ SoundFont instruments** (more than 4) while a song using SF2s plays;
    the currently-playing SoundFonts must keep sounding (the idle/unused one gets evicted), no crash,
    clean logcat. Reloading/seeing "Evicted soundfont slot N" in logcat is expected.
+
+**Batch 6 device-tested OK + committed 2026-06-14 (`039a302`), merged to main (`ef505ab`).**
+
+### Batch 7 — build optimization: 7.2 / 7.3 (2026-06-14) — ✅ device-tested + committed (`47a6342`)
+
+> Device test: release APK installs + runs, project save/load round-trips, ~half the debug APK size
+> (<9 MB). Required adding `-dontwarn javax.annotation.processing.**` / `com.google.auto.service.**`
+> (AutoService classes pulled in by ACRA; build-time only). Release uses the debug signingConfig for
+> sideload testing — a dedicated release keystore is a future task if distributing via Play.
+
+Release size/startup + native speed. Branch `code-review-2-build` off main.
+
+- **7.2 🔧 Release build now minifies + shrinks resources** (`build.gradle.kts`, `proguard-rules.pro`)
+  `isMinifyEnabled = true` + `isShrinkResources = true` (were off). Smaller dex → faster cold start
+  and less code pinned in RAM on the 1 GB Miyoo (Compose apps typically shrink 30-50%). Keep rules:
+  the JNI `native <methods>` + crash/ACRA rules were already present (PR #6); added the canonical
+  **kotlinx.serialization** `-if @Serializable … keepclassmembers` block + `-keepattributes
+  RuntimeVisibleAnnotations,AnnotationDefault` so R8 can't strip/rename the generated serializers
+  behind project save/load, instrument presets, and themes. Overlay PNGs live in `assets/` (not
+  `res/`), so resource shrinking doesn't touch them.
+
+- **7.3 🔧 Explicit native optimization level** (`CMakeLists.txt`)
+  Added `target_compile_options(... $<IF:$<CONFIG:Debug>,-O2,-O3>)`. The NDK leaves **Debug at -O0**,
+  which makes the real-time audio engine sluggish in exactly the variant we test most on the Miyoo;
+  now Debug gets -O2 (near-release speed) while Release keeps -O3. `-ffast-math` (ARM) unchanged.
+
+**Test focus for Batch 7 — 7.2's whole risk surface is the RELEASE variant only (debug is unaffected
+by minify), so this needs a real `assembleRelease` install + smoke test, not just a debug run:**
+1. **Release app launches** (no `ClassNotFoundException`/`NoSuchMethodError` from over-stripping).
+2. **Save AND load a project** on the release build — the #1 R8 risk (serialization). Verify all data
+   round-trips (phrases/chains/song/instruments/themes/presets identical). Also load an *older*
+   project file (migration path).
+3. **Audio plays** (JNI native methods kept), **overlays still render** (assets), **app icon + splash**
+   show (resource shrinking), **crash reporter** doesn't crash on init (ACRA kept).
+4. **7.3:** debug build still runs correctly; audio engine should feel the same or smoother on the
+   Miyoo (it's just faster code). Release audio unchanged (was already -O3).
+5. Compare release APK size before/after (optional, satisfying) and watch logcat on first launch for
+   any R8 `Missing class`/reflection warnings at runtime.

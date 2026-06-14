@@ -28,3 +28,38 @@
 # Keep crash reporting classes
 -keep class com.conanizer.pockettracker.crash.** { *; }
 -keep class org.acra.** { *; }
+
+# kotlinx.serialization — keep generated serializers for @Serializable model classes
+# (project save/load, instrument presets, themes). kotlinx-serialization-json 1.6.0 ships its own
+# consumer R8 rules, but keep these explicitly since save/load correctness is critical.
+-keepattributes RuntimeVisibleAnnotations,AnnotationDefault
+
+# Keep `Companion` object fields of serializable classes.
+-if @kotlinx.serialization.Serializable class **
+-keepclassmembers class <1> {
+    static <1>$Companion Companion;
+}
+
+# Keep `serializer()` on companion objects (both default and named) of serializable classes.
+-if @kotlinx.serialization.Serializable class ** {
+    static **$* *;
+}
+-keepclassmembers class <2>$<3> {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+
+# Keep `INSTANCE.serializer()` of serializable objects.
+-if @kotlinx.serialization.Serializable class ** {
+    public static ** INSTANCE;
+}
+-keepclassmembers class <1> {
+    public static <1> INSTANCE;
+    kotlinx.serialization.KSerializer serializer(...);
+}
+
+# Google AutoService (a build-time annotation processor pulled in transitively by ACRA) references
+# javax.annotation.processing.* — classes that exist only at compile time, never in the Android
+# runtime. The code is never reached on-device, so silence R8's missing-class errors for them.
+# (These mirror app/build/outputs/mapping/release/missing_rules.txt.)
+-dontwarn javax.annotation.processing.**
+-dontwarn com.google.auto.service.**
