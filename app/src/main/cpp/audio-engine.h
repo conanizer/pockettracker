@@ -374,7 +374,10 @@ private:
         return std::chrono::duration_cast<std::chrono::milliseconds>(
                    std::chrono::steady_clock::now().time_since_epoch()).count();
     }
-    int64_t globalFrameCounter;    // Total frames processed since start
+    // Written by the audio/render thread (processAudioBlock), read by the Kotlin scheduler via
+    // getCurrentFrame() JNI — atomic (relaxed) makes that formally race-free at zero cost on arm64
+    // and keeps the planned Linux port correct on unknown hardware (1.8).
+    std::atomic<int64_t> globalFrameCounter{0};  // Total frames processed since start
     std::atomic<bool> isOfflineRendering{false};  // True during WAV export → onAudioReady outputs silence
     int stemsMode = 0;  // 0=normal, 1-8=track stem, 9=reverb, 10=delay
 

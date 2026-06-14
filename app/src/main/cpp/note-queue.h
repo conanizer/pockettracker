@@ -3,6 +3,8 @@
 #include <mutex>
 #include <vector>
 #include <string>
+#include <atomic>
+#include <cstdint>
 #include "audio-defs.h"
 
 // ===================================
@@ -18,10 +20,20 @@ struct SoundfontEntry {
     std::mutex mutex;            // Protects handle from concurrent audio/JNI access
     int instrumentId = -1;       // Which Instrument slot owns this (-1 = free)
     std::string filePath;
+    std::atomic<uint64_t> lastUsed{0};  // Monotonic use tick for LRU eviction (2.4); 0 = never used
     // fileData removed: per-track clones are gone; master handle is used directly via MIDI channels.
 };
 
 extern SoundfontEntry soundfonts[MAX_SOUNDFONTS];
+
+// Monotonic "use" tick for true-LRU SoundFont eviction (2.4). Bumped on load and on each note
+// trigger; eviction drops the slot with the smallest tick (genuinely least-recently-used, vs the
+// old "smallest instrumentId" heuristic that could evict the SF playing right now). A function-local
+// static gives one shared counter across translation units with no ODR-prone global definition.
+inline uint64_t nextSfUseTick() {
+    static std::atomic<uint64_t> counter{0};
+    return counter.fetch_add(1, std::memory_order_relaxed) + 1;
+}
 
 // Sample-accurate note scheduling: notes carry exact target frame numbers;
 // the audio callback triggers them at precise moments.

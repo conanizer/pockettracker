@@ -1,6 +1,6 @@
 package com.conanizer.pockettracker.core.storage
 
-import java.io.File
+import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -163,48 +163,64 @@ object WavWriter {
      * Frame 0 is excluded (it's the implicit sample start, not a slice boundary).
      */
     fun readCuePoints(path: String): IntArray {
-        return try {
-            val bytes = File(path).readBytes()
-            if (bytes.size < 12) return intArrayOf()
-            val buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        // 4.1: scan chunk headers with RandomAccessFile, seeking past each chunk body, so only the
+        // small cue chunk is ever read into memory. Called on every sample load (and once per
+        // instrument on project load) — reading the whole multi-MB WAV here was pure GC pressure.
+        try {
+            RandomAccessFile(path, "r").use { raf ->
+                val fileLen = raf.length()
+                if (fileLen < 12) return intArrayOf()
 
-            // Verify RIFF/WAVE header
-            val riffId = ByteArray(4).also { buf.get(it) }
-            if (String(riffId, Charsets.US_ASCII) != "RIFF") return intArrayOf()
-            buf.getInt()  // RIFF chunk size
-            val waveId = ByteArray(4).also { buf.get(it) }
-            if (String(waveId, Charsets.US_ASCII) != "WAVE") return intArrayOf()
+                // RIFF/WAVE header (12 bytes)
+                val header = ByteArray(12)
+                raf.readFully(header)
+                val hb = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
+                val riffId = ByteArray(4).also { hb.get(it) }
+                hb.getInt()  // RIFF chunk size
+                val waveId = ByteArray(4).also { hb.get(it) }
+                if (String(riffId, Charsets.US_ASCII) != "RIFF" ||
+                    String(waveId, Charsets.US_ASCII) != "WAVE") return intArrayOf()
 
-            // Scan subchunks until we find "cue "
-            while (buf.remaining() >= 8) {
-                val chunkId = ByteArray(4).also { buf.get(it) }
-                val chunkSize = buf.getInt()
-                if (String(chunkId, Charsets.US_ASCII) == "cue ") {
-                    if (buf.remaining() < 4) break
-                    val count = buf.getInt()
-                    val frames = mutableListOf<Int>()
-                    repeat(count) {
-                        if (buf.remaining() < 24) return@repeat
-                        buf.getInt()              // ID
-                        val pos = buf.getInt()    // position (frame number)
-                        buf.getInt()              // data chunk ID ("data")
-                        buf.getInt()              // chunk start
-                        buf.getInt()              // block start
-                        buf.getInt()              // sample offset
-                        if (pos > 0) frames.add(pos)
+                // Walk chunk headers (8 bytes each), reading only the "cue " body.
+                val idBytes = ByteArray(4)
+                val sizeBytes = ByteArray(4)
+                while (raf.filePointer + 8 <= fileLen) {
+                    raf.readFully(idBytes)
+                    raf.readFully(sizeBytes)
+                    val chunkSize = ByteBuffer.wrap(sizeBytes).order(ByteOrder.LITTLE_ENDIAN).getInt()
+                    if (chunkSize < 0) break  // malformed / >2GB chunk → avoid a backward seek loop
+
+                    if (String(idBytes, Charsets.US_ASCII) == "cue ") {
+                        val bodyLen = chunkSize.coerceAtMost((fileLen - raf.filePointer).toInt())
+                        if (bodyLen < 4) return intArrayOf()
+                        val body = ByteArray(bodyLen)
+                        raf.readFully(body)
+                        val cb = ByteBuffer.wrap(body).order(ByteOrder.LITTLE_ENDIAN)
+                        val count = cb.getInt()
+                        val frames = mutableListOf<Int>()
+                        repeat(count) {
+                            if (cb.remaining() < 24) return@repeat
+                            cb.getInt()              // ID
+                            val pos = cb.getInt()    // position (frame number)
+                            cb.getInt()              // data chunk ID ("data")
+                            cb.getInt()              // chunk start
+                            cb.getInt()              // block start
+                            cb.getInt()              // sample offset
+                            if (pos > 0) frames.add(pos)
+                        }
+                        return frames.toIntArray()
                     }
-                    return frames.toIntArray()
-                } else {
-                    // Skip chunk, padding to even boundary
-                    val skip = chunkSize + (chunkSize and 1)
-                    if (buf.remaining() < skip) break
-                    buf.position(buf.position() + skip)
+
+                    // Skip chunk body, padding to even boundary.
+                    val skip = chunkSize.toLong() + (chunkSize and 1)
+                    if (raf.filePointer + skip > fileLen) break
+                    raf.seek(raf.filePointer + skip)
                 }
             }
-            intArrayOf()
         } catch (e: Exception) {
-            intArrayOf()
+            // fall through to empty
         }
+        return intArrayOf()
     }
 
     /**
