@@ -23,10 +23,6 @@ android {
     compileSdk {
         version = release(36)
     }
-    buildFeatures {
-        prefab = true
-    }
-
     val gitCommitCount = "git rev-list --count HEAD".runCommand()?.trim()?.toIntOrNull() ?: 1
     val gitShortHash = "git rev-parse --short HEAD".runCommand()?.trim() ?: "unknown"
 
@@ -57,10 +53,6 @@ android {
         }
     }
 
-    buildFeatures {
-        prefab = true
-    }
-
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
@@ -89,6 +81,7 @@ android {
         jvmTarget = "11"
     }
     buildFeatures {
+        prefab = true
         compose = true
         buildConfig = true
     }

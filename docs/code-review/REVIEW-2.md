@@ -639,3 +639,54 @@ surfaced two pre-existing bugs unrelated to the Batch-2 changes (3 and 5 below).
    the window scrolls and the selection extends (try down to ~row 100 and back up). Cut / copy /
    paste / delete operate on the full multi-screen selection. SCREEN-scope (cycle L+B to ALL)
    selects the whole song. PHRASE/CHAIN/TABLE selection unchanged.
+
+### Batch 3 — low-risk performance + cleanup (2026-06-14) — 🔧 awaiting test
+
+Mechanical perf/memory wins for the 1 GB Miyoo Flip — no real-time mix-loop restructure and no
+behavioral change. (The structural 6.1 idle-redraw and the audio-hot-path items 1.2/1.3/1.10 are
+deliberately deferred to their own batches so each can be device-tested in isolation.)
+
+- **3.2 🔧 PlaybackController per-step/per-note logging gated** (`PlaybackController.kt`)
+  The companion `const val TRACE = false` existed but **no call site referenced it** — all 53
+  `logger.d` ran ungated, building strings every note/step during playback (the per-note volume-chain
+  log alone did two `"%.4f".format()`). Wrapped the 42 per-step/per-note/per-schedule calls in
+  `if (TRACE)`; since `TRACE` is a compile-time `const false`, the whole statement (string building
+  included) is dead-code-eliminated. The 10 lifecycle logs (play / stop / data-changed / phrase·chain·
+  song init) stay ungated. Flip `TRACE = true` for note-by-note debugging.
+
+- **6.3 🔧 Hex-string caches** (`EditorHelpers.kt`)
+  `Int.toHex2()` (called for every visible hex cell every frame) allocated 3 short-lived strings per
+  call — the documented Snapdragon RenderThread GC-pressure vector. Now `HEX2_CACHE` (256 entries) +
+  `HEX1_CACHE` (16) are precomputed once; both extensions index the cache → allocation-free. No call
+  sites change. (Core `TrackerData.toHex2` left alone — used at construction, not per frame.)
+
+- **6.2 🔧 Array-indexed font lookup** (`BitmapFont5x5.kt`, `PixelPerfectRenderer.kt`)
+  `drawBitmapChar` did `FONT_5X5[char]` — a `Map<Char,ByteArray>` hash + Char boxing per glyph
+  (~700+ glyphs/frame). New `FONT_5X5_ASCII: Array<ByteArray?>` (0..127, uppercase fallback baked in)
+  is indexed directly by `char.code`; non-ASCII (arrows ↑↓←→, code >127) still uses the map. The
+  glyph-atlas (6.2 "real win") is a bigger change, deferred. Visual output is identical.
+
+- **6.4 🔧 Removed per-recomposition `Log.d`** (`PixelPerfectRenderer.kt`)
+  The FILE_BROWSER `Log.d` (with string interpolation) ran on every recomposition while the browser
+  was open. Removed; the `Log` import stays (still used by a `Log.e` null-guard).
+
+- **1.9 🔧 Cached the KissFFT config** (`audio-engine.cpp`)
+  `computeSpectrumFFT` did `kiss_fftr_alloc` + `kiss_fftr_free` per call (malloc + twiddle-table trig
+  init at ~20 fps with the EQ open). Now a function-local `static kiss_fftr_cfg` (FFT size is constant;
+  all callers are the single UI poll thread, so C++11 once-init is safe; lives for the process).
+
+- **1.7 🔧 Sample-rate fallback 48000 → 44100** (`audio-engine.cpp`)
+  `getSampleRate()` returned 48000 when the stream was null while every other fallback uses 44100 — an
+  ~8.8% rate/pitch error if Kotlin read it before the stream opened. Now 44100, consistent.
+
+- **7.4 🔧 Merged the three `buildFeatures {}` blocks** (`build.gradle.kts`) into one
+  (`prefab` + `compose` + `buildConfig`). Cosmetic.
+
+**Test focus for Batch 3:**
+1. **Playback regression:** phrase/chain/song playback, retrig/arp/CHA/RND/groove/pitch FX all behave
+   exactly as before (logging is the only change — verify nothing audibly differs). Optionally flip
+   `TRACE = true` once and confirm the per-step logs reappear in logcat.
+2. **Rendering:** all screens render identically — phrase grid hex values, instrument/sample/mixer
+   text, file browser, and the arrow glyphs (↑↓←→) in keyboard/hints still draw correctly.
+3. **EQ spectrum:** open the EQ editor, confirm the analyzer still animates correctly (FFT cfg cache).
+4. **General:** app builds for release (one `buildFeatures` block); audio pitch correct at startup.

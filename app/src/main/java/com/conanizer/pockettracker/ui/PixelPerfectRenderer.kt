@@ -192,9 +192,6 @@ fun PixelPerfectTracker(
     overlayName: String = "OFF",
     overlayStrength: Int = 128
 ) {
-    if (currentScreen == ScreenType.FILE_BROWSER) {
-        Log.d("PixelPerfectTracker", "FILE_BROWSER screen, fileBrowserState=${if (fileBrowserState != null) "not null (${fileBrowserState.items.size} items)" else "NULL"}")
-    }
     // Playback state
     var playbackRow by remember { mutableStateOf(0) }
     var playbackChainRow by remember { mutableStateOf(0) }
@@ -1451,7 +1448,9 @@ fun DrawScope.drawBitmapChar(
     color: Color,
     fontScale: Int = 1
 ) {
-    val charData = FONT_5X5[char] ?: FONT_5X5[char.uppercaseChar()]
+    // ASCII fast path: array index (no HashMap hash + Char boxing) per glyph; map only for >127 (arrows).
+    val code = char.code
+    val charData = if (code in 0..127) FONT_5X5_ASCII[code] else (FONT_5X5[char] ?: FONT_5X5[char.uppercaseChar()])
 
     if (charData == null) {
         // Missing character - draw outline square

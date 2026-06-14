@@ -327,7 +327,10 @@ int AudioEngine::getSampleRate() {
     if (stream) {
         return stream->getSampleRate();
     }
-    return 48000; // Default fallback
+    // Match every other fallback in the engine (triggerNote, setPitchSlide/Bend,
+    // updateVoiceModulation, the Kotlin layer) — 48000 here made rate/pitch math ~8.8% off
+    // if Kotlin cached this before the stream opened.
+    return 44100; // Default fallback
 }
 
 void AudioEngine::resumeStream() {
@@ -1789,10 +1792,13 @@ static void computeSpectrumFFT(kiss_fft_scalar* input, int numBins, float* out) 
         input[i] *= w;
     }
 
-    kiss_fftr_cfg cfg = kiss_fftr_alloc(SPECTRUM_FFT_SIZE, 0, nullptr, nullptr);
+    // Cache the config across calls: kiss_fftr_alloc does a malloc + twiddle-table trig init
+    // every time. All callers are the single UI poll thread (~20 fps while the EQ screen is open),
+    // so a function-local static is safe and removes that per-call churn. FFT size is constant,
+    // so the cfg lives for the process (never freed).
+    static kiss_fftr_cfg cfg = kiss_fftr_alloc(SPECTRUM_FFT_SIZE, 0, nullptr, nullptr);
     kiss_fft_cpx cpx_out[SPECTRUM_FFT_SIZE / 2 + 1];
     kiss_fftr(cfg, input, cpx_out);
-    kiss_fftr_free(cfg);
 
     const float sampleRate = 44100.0f;
     const float fMin = 20.0f, fMax = 20000.0f;

@@ -20,11 +20,18 @@ const val TEXT_PADDING = 3    // 3px padding above/below text
 // HEX FORMATTING
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Precomputed hex strings. toHex2() is called for every visible hex cell every frame (~100+ cells
+// at 60 fps); allocating 3 short-lived strings per call (toString/uppercase/padStart) was tens of
+// thousands of garbage strings/sec — the documented GC-pressure vector that has crashed the
+// RenderThread on Snapdragon drivers (see PixelPerfectRenderer). Caching makes both allocation-free.
+private val HEX2_CACHE: Array<String> = Array(256) { it.toString(16).uppercase().padStart(2, '0') }
+private val HEX1_CACHE: Array<String> = Array(16) { it.toString(16).uppercase() }
+
 /** Format as 2-digit uppercase hex (e.g. 255 → "FF"). Masks to lower 8 bits. */
-fun Int.toHex2(): String = (this and 0xFF).toString(16).uppercase().padStart(2, '0')
+fun Int.toHex2(): String = HEX2_CACHE[this and 0xFF]
 
 /** Format as 1-digit uppercase hex (e.g. 15 → "F"). Masks to lower 4 bits. */
-fun Int.toHex1(): String = (this and 0x0F).toString(16).uppercase()
+fun Int.toHex1(): String = HEX1_CACHE[this and 0x0F]
 
 /** Format as 8-digit uppercase hex (e.g. 65536L → "00010000"). */
 fun Long.toHex8(): String = this.toString(16).uppercase().padStart(8, '0')
