@@ -866,7 +866,12 @@ The small remaining correctness/consistency items. Branch `code-review-2-cleanup
 
 **Batch 6 device-tested OK + committed 2026-06-14 (`039a302`), merged to main (`ef505ab`).**
 
-### Batch 7 — build optimization: 7.2 / 7.3 (2026-06-14) — 🔧 awaiting device test
+### Batch 7 — build optimization: 7.2 / 7.3 (2026-06-14) — ✅ device-tested + committed (`47a6342`)
+
+> Device test: release APK installs + runs, project save/load round-trips, ~half the debug APK size
+> (<9 MB). Required adding `-dontwarn javax.annotation.processing.**` / `com.google.auto.service.**`
+> (AutoService classes pulled in by ACRA; build-time only). Release uses the debug signingConfig for
+> sideload testing — a dedicated release keystore is a future task if distributing via Play.
 
 Release size/startup + native speed. Branch `code-review-2-build` off main.
 
