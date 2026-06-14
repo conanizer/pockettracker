@@ -543,3 +543,99 @@ Round-2 diagnosis (stale lookahead notes) was incomplete:
 HIGH→NORM→LOFI→HIGH — pitch must be correct (and identical to HIGH) from the next phrase boundary
 after each switch, and must STAY correct. Also: RATE while stopped, then play — correct pitch;
 ROOT/DETUNE edits after a RATE change still behave; destructive PITCH/TSTRETCH unchanged.
+
+### Batch 2 — remaining "fix before release" items 7-8 — 🔧 awaiting test
+
+- **1.5 🔧 int64 start/end math in `Voice::trigger` / `retrigger`** (`sampler-voice.h`)
+  `(point × length) / 255` now computed in `int64_t` — was overflowing int32 for samples longer
+  than ~3 minutes (realistic via video-audio extraction), making START/END/LOOP-START and the
+  initial playback position wrong on long samples.
+
+- **3.1 + 4.2 🔧 WAV export rewritten as chunked streaming render**
+  (`RenderController.kt`, new `core/storage/WavStreamWriter.kt`)
+  - New `WavStreamWriter`: 16-bit PCM streaming writer — writes a placeholder header, appends
+    converted chunks, patches sizes + atomically renames `path.tmp → path` on `finish()`
+    (no half-written .wav after a failed/aborted render). `abort()` cleans up. Same java.io-only
+    portability level as `WavWriter.readCuePoints`. >2 GB guard preserved from `writeWav`.
+  - `RenderController`: one shared `renderToWavFile(totalFrames, …)` helper renders in
+    `RENDER_CHUNK_FRAMES` (220 500 ≈ 5 s) slices — `renderFrames(chunk)` → append → repeat.
+    Replaces all **5** former whole-song blocks (full mix, selection resample, N track stems,
+    reverb stem, delay stem). Peak memory drops from ~4 full-song copies (~300+ MB for a 4-min
+    song — OOM on the 1 GB Miyoo) to ~2 chunk copies (~4 MB), independent of song length.
+  - Bonus: progress now advances smoothly through the render (was stuck at "Rendering audio…"
+    30%→85% in one jump); stems report per-pass sub-progress.
+  - Chunked output is bit-identical to the single-call render: the C++ engine keeps its frame
+    counter and note queue across `renderFrames` calls (renderOffline already chunked internally
+    at 256 frames).
+  - `WavWriter.writeWav` (in-memory) is unchanged — still used for sample-editor SAVE/CHOP where
+    files are small and the cue chunk is needed.
+
+**Test focus for Batch 2:**
+1. **WAV MIX (full song):** render a song with reverb/delay/OTT — file plays correctly in an
+   external player, length matches, no clicks at ~5 s boundaries (chunk seams), loudness identical
+   to a pre-change render of the same song if one exists. Progress bar moves smoothly.
+2. **Long song:** render the longest song available (ideally 3-4+ min) on the Miyoo Flip — must
+   complete without the app being killed (this was the OOM case).
+3. **Selection resample:** resample a selection → file appears in Samples/Resampled, loads and
+   plays at correct pitch.
+4. **Stems:** render stems — each track WAV + reverb/delay stems sound dry/correct as before;
+   per-track progress visible.
+5. **Long sample START/END (1.5):** load/extract a > 3-minute WAV, set START well into the sample
+   and END before the end — note starts/stops at the set points (previously START was ignored or
+   wrong on long samples). Reverse + loop on the same sample.
+
+### Batch 2 — Round 2 (fixes from device testing, 2026-06-14) — 🔧 awaiting test
+
+Batch-2 device test results: **1 WAV MIX ✅, 3 selection resample ✅, 4 stems ✅** — the chunked
+streaming render works. **2 long song:** render *completes* fine (this was the render-side OOM, now
+fixed), but loading the resulting 29 MB render back **as a sample** OOM-crashed. Testing also
+surfaced two pre-existing bugs unrelated to the Batch-2 changes (3 and 5 below). All three fixed:
+
+- **R2.1 🔧 OOM loading a large WAV as a sample** (`AudioEngine.kt` `parseWavBuffer`)
+  Loading a 29 MB stereo render crashed with `OutOfMemoryError` at the L/R split (the engine's
+  Java heap is clamped to 128 MB on the Miyoo Flip). Root cause: `parseWavBuffer` decoded the whole
+  file into a **full-size intermediate `FloatArray` (`rawSamples`)** and *then* allocated separate
+  `left`/`right` copies — so the 29 MB byte buffer + ~58 MB `rawSamples` + ~58 MB L/R were all live
+  at once (~145 MB > 128 MB). **Fix:** dropped the intermediate — a local `fun decode(idx)` (a named
+  local function, not a lambda, so the `Int`/`Float` stay primitive — no per-sample boxing/GC churn)
+  reads one sample straight from the byte buffer, and the channels are de-interleaved directly into
+  `left`/`right` (mono → one buffer). Peak heap for the float data halves (~58 MB), clearing the OOM.
+  Format validation moved to a single up-front check. This is the sample-*load* counterpart to the
+  render-side streaming fix (3.1/4.2); a future improvement could stream the file via
+  `RandomAccessFile` to also drop the 29 MB byte-buffer copy (pairs with 4.1's cue-scan streaming).
+
+- **R2.2 🔧 Sample-editor preview ignored START/END markers on stereo samples** (`AppInputDispatcher.kt`)
+  Pressing START in the sample editor played the **whole sample** instead of the selection, for any
+  *stereo* sample (mono worked). Root cause: the default `sourceMode` is LEFT (0), so for stereo data
+  `prepareSampleEditorSourcePreview` routes the preview through scratch slot **254** — but the
+  selection START/END were pushed via `updateInstrumentPlaybackParams` **before** `inst.sampleId` was
+  swapped to 254, so slot 254 kept its default 0/255 params and played the entire sample. **Fix:**
+  push the playback params **after** the slot swap, so they land on the slot that actually plays
+  (254 for LEFT/RIGHT/MONO, the real slot for STEREO/mono). The post-preview restore (100 ms later)
+  is unchanged.
+
+- **R2.3 🔧 Song-screen selection couldn't scroll past row 15** (`InputController.kt`,
+  `AppInputDispatcher.kt`, `TrackerController.kt`)
+  Selection on the SONG screen (256 rows, 16 visible) only worked within the top 16 rows — expanding
+  down stopped at row 15 and the window never scrolled. PHRASE/CHAIN/TABLE (single 16-row screens)
+  were correct. Root cause: `expandSelection` was called with a hardcoded `maxRow = 15`, and
+  selection mode keeps the cursor anchored (so nothing drove the scroll). **Fix:** pass
+  `maxRow = 255` for SONG; new `TrackerController.scrollSongToRow()` scrolls the 16-row window to
+  follow the growing selection edge (`selectionEnd.row`) on each DPAD expand. Also threaded `maxRow`
+  into `handleSelectB`/`initializeSelectionForScope` so SCREEN-scope "select all" covers the whole
+  song (0..255), not just the visible 16 rows. (Continuous 60 fps redraw — review 6.1 — means the
+  scrolled view repaints without an explicit invalidation.)
+
+**Re-test focus (Round 2):**
+1. **Load large render as sample (R2.1):** render a 3–4 min song (29 MB+ stereo WAV), then load it
+   into an instrument and preview it from the file browser — no OOM, plays correctly. Also load
+   several large samples in one session (watch for cumulative heap pressure). Normal small WAV
+   loads (16/24/32-bit, mono + stereo) still load and play at correct pitch/length.
+2. **Stereo START/END preview (R2.2):** load a **stereo** sample, open the sample editor, make a
+   selection, press START — preview plays **only the selection** in every SOURCE mode (LEFT, RIGHT,
+   STEREO, MONO). Repeat on a mono sample (should still work). After preview, the instrument's
+   real START/END are restored (no stuck slice on the instrument screen).
+3. **Song selection scroll (R2.3):** on SONG, L+B to start a selection, hold DPAD-DOWN past row 15 —
+   the window scrolls and the selection extends (try down to ~row 100 and back up). Cut / copy /
+   paste / delete operate on the full multi-screen selection. SCREEN-scope (cycle L+B to ALL)
+   selects the whole song. PHRASE/CHAIN/TABLE selection unchanged.

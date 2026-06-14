@@ -889,7 +889,15 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val maxColumn = when (trackerController.currentScreen) {
                     ScreenType.PHRASE -> 9; ScreenType.CHAIN -> 2; ScreenType.SONG -> 8; else -> 1
                 }
-                trackerController.inputController.expandSelection(direction, 15, maxColumn)
+                // SONG is 256 rows deep (16 visible); PHRASE/CHAIN/TABLE are a single 16-row screen.
+                val maxRow = if (trackerController.currentScreen == ScreenType.SONG) 255 else 15
+                trackerController.inputController.expandSelection(direction, maxRow, maxColumn)
+                if (trackerController.currentScreen == ScreenType.SONG) {
+                    // Cursor stays anchored in selection mode, so scroll to follow the growing edge.
+                    trackerController.inputController.selectionEnd?.let {
+                        trackerController.scrollSongToRow(it.row)
+                    }
+                }
                 return
             }
         }
@@ -2037,7 +2045,6 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 if (total > 0 && sampleEditorState.selectionEnd > sampleEditorState.selectionStart) {
                     inst.sampleStart = ((sampleEditorState.selectionStart * 255L) / total).toInt().coerceIn(0, 255)
                     inst.sampleEnd   = ((sampleEditorState.selectionEnd   * 255L) / total).toInt().coerceIn(0, 255)
-                    audioEngine.updateInstrumentPlaybackParams(inst)
                 }
                 val pitchSemitones = sampleEditorState.pitchSemitones
                 if (pitchSemitones != 0) {
@@ -2047,6 +2054,11 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val previewSlot = audioEngine.prepareSampleEditorSourcePreview(instId, sampleEditorState.sourceMode)
                 val savedSampleId = inst.sampleId
                 if (previewSlot != instId) inst.sampleId = previewSlot
+                // Push START/END to the slot that actually plays. For stereo samples in LEFT/RIGHT/MONO
+                // source mode the preview routes through scratch slot 254 — pushing params before the
+                // swap left slot 254 at default 0/255, so it played the whole sample and ignored the
+                // selection markers.
+                audioEngine.updateInstrumentPlaybackParams(inst)
                 audioEngine.previewInstrumentDry(inst)
                 if (previewSlot != instId) inst.sampleId = savedSampleId
                 inst.root = savedRoot
@@ -2478,7 +2490,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         when (trackerController.currentScreen) {
             ScreenType.PHRASE  -> trackerController.inputController.handleSelectB(trackerController.cursorRow, trackerController.cursorColumn, 9)
             ScreenType.CHAIN   -> trackerController.inputController.handleSelectB(trackerController.cursorRow, trackerController.cursorColumn, 2)
-            ScreenType.SONG    -> trackerController.inputController.handleSelectB(trackerController.cursorRow, trackerController.cursorColumn, 8)
+            ScreenType.SONG    -> trackerController.inputController.handleSelectB(trackerController.cursorRow, trackerController.cursorColumn, 8, maxRow = 255)
             ScreenType.TABLE   -> trackerController.inputController.handleSelectB(trackerController.tableCursorRow, trackerController.tableCursorColumn, 8)
             ScreenType.FILE_BROWSER -> {
                 if (fileBrowserState.mode != FileBrowserModule.BrowserMode.NORMAL) return

@@ -62,12 +62,12 @@ class InputController(
 
     private var lastSelectBTime: Long = 0
 
-    fun handleSelectB(cursorRow: Int, cursorColumn: Int, maxColumn: Int) {
+    fun handleSelectB(cursorRow: Int, cursorColumn: Int, maxColumn: Int, maxRow: Int = 15) {
         val now = System.currentTimeMillis()
 
         if (selectionScope == SelectionScope.NONE) {
             selectionScope = SelectionScope.CELL
-            initializeSelectionForScope(cursorRow, cursorColumn, maxColumn)
+            initializeSelectionForScope(cursorRow, cursorColumn, maxColumn, maxRow)
             logger.d(TAG, "📋 Selection: CELL mode at ($cursorRow, $cursorColumn)")
         } else if (now - lastSelectBTime < MULTI_TAP_WINDOW) {
             // Multi-tap within window - cycle through modes
@@ -77,7 +77,7 @@ class InputController(
                 SelectionScope.SCREEN -> SelectionScope.CELL
                 else -> SelectionScope.CELL
             }
-            initializeSelectionForScope(cursorRow, cursorColumn, maxColumn)
+            initializeSelectionForScope(cursorRow, cursorColumn, maxColumn, maxRow)
             logger.d(TAG, "📋 Selection: ${selectionScope.name} mode")
         } else {
             // Too slow - exit selection mode
@@ -88,7 +88,7 @@ class InputController(
         lastSelectBTime = now
     }
 
-    private fun initializeSelectionForScope(cursorRow: Int, cursorColumn: Int, maxColumn: Int) {
+    private fun initializeSelectionForScope(cursorRow: Int, cursorColumn: Int, maxColumn: Int, maxRow: Int) {
         when (selectionScope) {
             SelectionScope.CELL -> {
                 selectionStart = CursorPosition(cursorRow, cursorColumn)
@@ -99,8 +99,9 @@ class InputController(
                 selectionEnd = CursorPosition(cursorRow, maxColumn)
             }
             SelectionScope.SCREEN -> {
+                // Whole screen: rows 0..maxRow (SONG spans all 256 rows, not just the 16 visible).
                 selectionStart = CursorPosition(0, 1)
-                selectionEnd = CursorPosition(15, maxColumn)
+                selectionEnd = CursorPosition(maxRow, maxColumn)
             }
             else -> { }
         }

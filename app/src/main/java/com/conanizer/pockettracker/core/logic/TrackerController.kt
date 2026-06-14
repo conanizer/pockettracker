@@ -927,6 +927,13 @@ class TrackerController(
         }
     }
 
+    /** Scroll the 16-row song window so [row] is visible. Used when expanding a selection past
+     *  the visible window (selection mode keeps the cursor anchored, so it can't drive the scroll). */
+    fun scrollSongToRow(row: Int) {
+        if (row < songScrollPosition) songScrollPosition = row
+        else if (row >= songScrollPosition + 16) songScrollPosition = row - 15
+    }
+
     fun moveSongBigUp() {
         val newRow = (cursorRow - 16).coerceAtLeast(0)
         cursorRow = newRow
