@@ -716,7 +716,7 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadS
     const char* pathStr = env->GetStringUTFChars(path, nullptr);
     if (!pathStr) return -1;
 
-    // Find a free slot; if none, evict the slot whose instrumentId is lowest (oldest heuristic)
+    // Find a free slot; if none, evict the least-recently-used one.
     int slot = -1;
     for (int i = 0; i < MAX_SOUNDFONTS; i++) {
         if (soundfonts[i].handle == nullptr) {
@@ -725,13 +725,13 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadS
         }
     }
     if (slot == -1) {
-        // Evict slot with smallest instrumentId (oldest loaded)
-        int minId = INT_MAX;
+        // Evict the genuinely least-recently-used slot (smallest use tick), not the one with the
+        // smallest instrumentId — that old heuristic could evict the SoundFont playing right now (2.4).
+        uint64_t oldest = UINT64_MAX;
+        slot = 0;
         for (int i = 0; i < MAX_SOUNDFONTS; i++) {
-            if (soundfonts[i].instrumentId < minId) {
-                minId = soundfonts[i].instrumentId;
-                slot = i;
-            }
+            uint64_t lu = soundfonts[i].lastUsed.load(std::memory_order_relaxed);
+            if (lu < oldest) { oldest = lu; slot = i; }
         }
         // Free the evicted slot
         std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
@@ -760,6 +760,7 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadS
         tsf_set_output(soundfonts[slot].handle, TSF_STEREO_INTERLEAVED, sampleRate, 0.0f);
         soundfonts[slot].instrumentId = (int)instrumentId;
         soundfonts[slot].filePath = pathStr;
+        soundfonts[slot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // freshly loaded = newest (2.4)
         LOGD("🎹 Loaded soundfont slot %d: %s (instrumentId=%d)", slot, pathStr, (int)instrumentId);
     }
 

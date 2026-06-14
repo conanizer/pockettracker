@@ -562,8 +562,7 @@ class PlaybackController(
             // immediately on the triggering step, not deferred to the next phrase.
             // scheduleStepWithEffects also processes GRV (idempotent — same result).
             for (fxSlot in 1..3) {
-                val fxType = when (fxSlot) { 1 -> step.fx1Type; 2 -> step.fx2Type; else -> step.fx3Type }
-                val fxValue = when (fxSlot) { 1 -> step.fx1Value; 2 -> step.fx2Value; else -> step.fx3Value }
+                val (fxType, fxValue) = step.fx(fxSlot)
                 if (fxType == EffectProcessor.FX_GRV) {
                     trackState.grooveId = fxValue
                     localGrooveStep = 0  // New groove always starts at slot 0

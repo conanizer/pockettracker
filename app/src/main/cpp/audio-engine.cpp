@@ -23,7 +23,7 @@ AudioEngine::AudioEngine() {
         originalSamplesRight[i] = nullptr;
         originalSampleLengths[i] = 0;
     }
-    globalFrameCounter = 0;
+    globalFrameCounter.store(0, std::memory_order_relaxed);
 
     // Pre-size the per-block drain buffers (1.3) so the audio thread never reallocates them at
     // runtime. A single ~23 ms block only ever holds a handful of events (a few tracks × retrigs).
@@ -424,14 +424,17 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // then dispatch from them inside the frame loop with zero locking. The heap pops earliest-first
     // so each batch is already sorted ascending by targetFrame.
     noteBatch.clear(); killBatch.clear(); paramBatch.clear();
-    const int64_t blockEnd = globalFrameCounter + numFrames - 1;
+    // Snapshot the frame counter once (1.8: it's atomic; this thread is the only writer, so a single
+    // relaxed load is enough and avoids re-loading it per frame below).
+    const int64_t blockStartFrame = globalFrameCounter.load(std::memory_order_relaxed);
+    const int64_t blockEnd = blockStartFrame + numFrames - 1;
     paramUpdateQueue.drainUntil(blockEnd, paramBatch);
     killQueue.drainUntil(blockEnd, killBatch);
     noteQueue.drainUntil(blockEnd, noteBatch);
     size_t paramIdx = 0, killIdx = 0, noteIdx = 0;
 
     for (int32_t frame = 0; frame < numFrames; frame++) {
-        int64_t currentFrame = globalFrameCounter + frame;
+        int64_t currentFrame = blockStartFrame + frame;
 
         // Process scheduled parameter updates (e.g. Vxx phraseVol on empty steps)
         while (paramIdx < paramBatch.size() && paramBatch[paramIdx].targetFrame <= currentFrame) {
@@ -487,6 +490,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
                     SoundfontVoice& sv = sfVoices[t];
                     float trkVol = trackVolSnapshot[t];
+                    soundfonts[note.sfSlot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // LRU touch (2.4)
                     sv.triggerNote(note.sfSlot, note.midiNote, note.midiVelocity,
                                    note.volume, trkVol, note.pan, note.sfBank, note.sfPreset, t);
                     sv.isReleasingOnly = false;
@@ -1572,7 +1576,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
     }
 
-    globalFrameCounter += numFrames;
+    globalFrameCounter.store(blockStartFrame + numFrames, std::memory_order_relaxed);
 }
 
 oboe::DataCallbackResult AudioEngine::onAudioReady(
@@ -1667,7 +1671,7 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
 }
 
 int64_t AudioEngine::getCurrentFrame() {
-    return globalFrameCounter;
+    return globalFrameCounter.load(std::memory_order_relaxed);
 }
 
 void AudioEngine::scheduleNote(int64_t targetFrame, int sampleId, int trackId,
@@ -2176,11 +2180,11 @@ void AudioEngine::renderOffline(int numFrames, float* output, int sampleRate) {
 }
 
 void AudioEngine::resetFrameCounter() {
-    globalFrameCounter = 0;
+    globalFrameCounter.store(0, std::memory_order_relaxed);
 }
 
 int64_t AudioEngine::getFrameCounter() {
-    return globalFrameCounter;
+    return globalFrameCounter.load(std::memory_order_relaxed);
 }
 
 void AudioEngine::setOfflineRendering(bool offline) {

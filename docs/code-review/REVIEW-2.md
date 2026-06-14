@@ -821,3 +821,45 @@ no Kotlin/JNI changes. **Highest-risk batch in the review — this is the real-t
    forth (verifies the demand-gate re-enables capture). First frame after opening may be ~1 frame stale.
 5. **WAV export still correct:** offline render output unchanged (same code path, deterministic).
 6. **Watch logcat** for any native crash across playback + preview + EQ + visualizer switching.
+
+**Batch 5 device-tested OK + committed 2026-06-14 (`1b41ee6`), merged to main (`40dfc27`).**
+
+### Batch 6 — robustness / cleanup: 1.8 / 4.1 / 3.3 / 2.4 (2026-06-14) — ✅ device-tested + committed (`039a302`)
+
+The small remaining correctness/consistency items. Branch `code-review-2-cleanup` off main.
+
+- **1.8 🔧 `globalFrameCounter` → `std::atomic<int64_t>`** (`audio-engine.h`, `audio-engine.cpp`)
+  Written by the audio/render thread, read by the Kotlin scheduler via `getCurrentFrame()` — was a
+  plain `int64_t` (formally a data race; benign on arm64 but undefined for the planned Linux port).
+  Now atomic with **relaxed** ordering (lock-free on arm64/x86_64 → zero cost): all reads `.load`,
+  writes `.store`. The hot frame loop snapshots it once per block into a local `blockStartFrame`
+  instead of re-loading per frame.
+
+- **4.1 🔧 `WavWriter.readCuePoints` no longer reads the whole file** (`WavWriter.kt`)
+  Was `File(path).readBytes()` — the entire (multi-MB) WAV pulled into a `ByteBuffer` just to find a
+  few chunk headers, on **every** sample load and once per instrument on project load (2× file-size
+  transient allocations, GC pressure on the 1 GB Miyoo). Now a `RandomAccessFile` reads 8-byte chunk
+  headers and `seek()`s past each body; only the small `cue ` chunk body is ever read. Same parse
+  (LE, even-padding, frame 0 excluded) + a `chunkSize < 0` guard against a malformed backward-seek loop.
+
+- **3.3 🔧 GRV pre-scan uses the FX-slot accessor** (`PlaybackController.kt`)
+  Replaced the hand-expanded `when (fxSlot) { 1 -> step.fx1Type; … }` pair with
+  `val (fxType, fxValue) = step.fx(fxSlot)` — the accessor added in review #1 (6.3). Pure cleanup,
+  identical behavior.
+
+- **2.4 🔧 True-LRU SoundFont eviction** (`note-queue.h`, `jni-bridge.cpp`, `audio-engine.cpp`)
+  With all `MAX_SOUNDFONTS` (4) slots full, a 5th load evicted the slot with the **smallest
+  instrumentId** — which could be the SF2 *playing right now*. Now each slot has an atomic `lastUsed`
+  tick (`nextSfUseTick()`, a shared function-local-static counter), bumped on load **and on every
+  note trigger**; eviction drops the genuinely least-recently-used slot.
+
+**Test focus for Batch 6:**
+1. **Playback timing unchanged (1.8):** songs play exactly as before (the scheduler reads the now-atomic
+   frame counter) — no drift, no audible difference. WAV export still correct.
+2. **Cue/CHOP slices still load (4.1):** load a WAV that has cue points (sliced sample) → slices detected
+   as before; normal WAVs (no cue) load fine; load a project whose instruments use sliced samples →
+   all load correctly. (Bonus: large-sample / project loads should feel a touch lighter on memory.)
+3. **Groove still works (3.3):** a GRV effect on a step changes the groove immediately on that step.
+4. **SF eviction (2.4):** load **5+ SoundFont instruments** (more than 4) while a song using SF2s plays;
+   the currently-playing SoundFonts must keep sounding (the idle/unused one gets evicted), no crash,
+   clean logcat. Reloading/seeing "Evicted soundfont slot N" in logcat is expected.
