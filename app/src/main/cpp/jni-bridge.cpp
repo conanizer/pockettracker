@@ -406,13 +406,17 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getTr
     if (!engine || outArray == nullptr || activeFlags == nullptr) return;
     jsize length = env->GetArrayLength(outArray);
     float* buf = new float[length];
-    bool flags[8];
+    // getTrackWaveforms writes 8 track lanes + 1 preview lane (TRACK_WAVEFORM_COUNT). Size the
+    // local arrays generously; the Kotlin array lengths are authoritative for how much we copy.
+    bool flags[16] = {};
     engine->getTrackWaveforms(buf, flags);
     env->SetFloatArrayRegion(outArray, 0, length, buf);
     delete[] buf;
-    jboolean jflags[8];
-    for (int i = 0; i < 8; i++) jflags[i] = flags[i] ? JNI_TRUE : JNI_FALSE;
-    env->SetBooleanArrayRegion(activeFlags, 0, 8, jflags);
+    jsize flagLen = env->GetArrayLength(activeFlags);
+    if (flagLen > 16) flagLen = 16;
+    jboolean jflags[16];
+    for (int i = 0; i < flagLen; i++) jflags[i] = flags[i] ? JNI_TRUE : JNI_FALSE;
+    env->SetBooleanArrayRegion(activeFlags, 0, flagLen, jflags);
 }
 
 JNIEXPORT jfloatArray JNICALL

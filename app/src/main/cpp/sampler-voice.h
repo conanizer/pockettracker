@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <algorithm>
 #include "mods/mod-system.h"
@@ -120,9 +121,11 @@ struct Voice : public IAudioVoice {
         // Use startPointOverride if provided (Offset effect / slice start), otherwise use instrument default
         int effectiveStartPoint = (startPointOverride >= 0) ? startPointOverride : instrParams.startPoint;
         int effectiveEndPoint   = (endPointOverride   >= 0) ? endPointOverride   : instrParams.endPoint;
-        actualStart = (effectiveStartPoint * length) / 255;
-        actualEnd   = (effectiveEndPoint   * length) / 255;
-        actualLoopStart = (instrParams.loopStart * length) / 255;
+        // int64 math: point × length overflows int32 for samples ≳ 8.4M frames (~3 min at
+        // 44.1 kHz — easy to hit via video-audio extraction), silently breaking START/END.
+        actualStart = (int)(((int64_t)effectiveStartPoint * length) / 255);
+        actualEnd   = (int)(((int64_t)effectiveEndPoint   * length) / 255);
+        actualLoopStart = (int)(((int64_t)instrParams.loopStart * length) / 255);
 
         // Clamp to valid range
         actualStart = std::max(0, std::min(actualStart, length - 1));
@@ -307,7 +310,8 @@ struct Voice : public IAudioVoice {
     void retrigger(int startPoint) override {
         if (!isActive || !sampleData) return;
         if (startPoint >= 0 && startPoint <= 255 && sampleLength > 0) {
-            position = (float)((startPoint * sampleLength) / 255);
+            // int64 — same overflow as trigger() for long samples
+            position = (float)(((int64_t)startPoint * sampleLength) / 255);
             position = fmaxf((float)actualStart, fminf(position, (float)(actualEnd - 1)));
         } else {
             position = (float)actualStart;

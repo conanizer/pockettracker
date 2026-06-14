@@ -1,6 +1,7 @@
 #pragma once
 #include <oboe/Oboe.h>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <mutex>
 #include <vector>
@@ -164,8 +165,8 @@ public:
     void getWaveform(float* outBuffer, int bufferSize);
 
     // Get per-track waveform data for OCTA visualizer.
-    // outBuffer: 8 * WAVEFORM_SIZE floats (track0[0..619], track1[0..619], ...).
-    // activeFlags: bool[8] — true if track had active (non-fading) voices last block.
+    // outBuffer: TRACK_WAVEFORM_COUNT * WAVEFORM_SIZE floats (track0[0..619], ... track7, preview).
+    // activeFlags: bool[TRACK_WAVEFORM_COUNT] — true if that lane had active (non-fading) voices last block.
     void getTrackWaveforms(float* outBuffer, bool* activeFlags);
 
     // Get log-spaced frequency-domain magnitude spectrum for EQ visualizer (0-1 per bin)
@@ -311,6 +312,11 @@ public:
     void setStemsMode(int mode) { stemsMode = mode; }
 
 private:
+    // Maximum frames processAudioBlock can handle in one call — all its per-block buffers
+    // (send buses, OCTA accumulators, sfBuf) are sized to this. Callers with potentially
+    // larger blocks (onAudioReady, renderOffline) must chunk.
+    static constexpr int MAX_BLOCK = 1024;
+
     std::shared_ptr<oboe::AudioStream> stream;
     Voice voices[MAX_VOICES];
     float* samples[256];
@@ -336,6 +342,10 @@ private:
     // old buffers. Keeps left/right and their shared length in lockstep so the stereo mix path can never
     // read a stale or short right channel. Pass newR=nullptr for a mono result.
     void setSampleBuffers(int id, float* newL, float* newR, int newLen);
+    // Stop voices reading slot `id`'s buffers, then acquire sampleEditMutex. EVERY destructive
+    // sample-editor op must hold the returned lock while mutating/freeing the slot's buffers so
+    // the audio thread's try_lock fails (one silent block) instead of reading freed memory.
+    std::unique_lock<std::mutex> beginSampleEdit(int id);
     InstrumentParams instrumentParams[256];
     InstrumentModSlot instrumentModSlots[256][4]; // [sampleId][slotIndex]
 
@@ -345,6 +355,25 @@ private:
     NoteQueue noteQueue;             // Thread-safe queue of scheduled notes
     KillQueue killQueue;             // Thread-safe queue of scheduled kill events
     ParamUpdateQueue paramUpdateQueue; // Thread-safe queue of scheduled parameter updates
+    // Per-block drain buffers (1.3): the audio callback empties each queue ONCE per block into
+    // these (one lock each) instead of taking the queue mutex every frame. Reused across blocks so
+    // the backing allocation persists (no per-block heap churn after warmup). Audio-thread-only.
+    std::vector<ScheduledNote>        noteBatch;
+    std::vector<ScheduledKill>        killBatch;
+    std::vector<ScheduledParamUpdate> paramBatch;
+
+    // Demand-driven visualizer capture (1.2 / 1.10): the UI read methods (getTrackWaveforms /
+    // getSpectrumMagnitudes*) stamp these with the wall clock; the audio callback only does the
+    // (expensive) OCTA accumulation / spectrum-ring writes when a read happened recently. No
+    // Kotlin→C++ enable flag to keep in sync — capture simply follows actual demand, and stops
+    // ~CAPTURE_IDLE_MS after the visualizer/EQ stops polling.
+    static const int64_t CAPTURE_IDLE_MS = 250;
+    std::atomic<int64_t> lastTrackWaveformReadMs{-CAPTURE_IDLE_MS};
+    std::atomic<int64_t> lastSpectrumReadMs{-CAPTURE_IDLE_MS};
+    static int64_t nowMs() {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
     int64_t globalFrameCounter;    // Total frames processed since start
     std::atomic<bool> isOfflineRendering{false};  // True during WAV export → onAudioReady outputs silence
     int stemsMode = 0;  // 0=normal, 1-8=track stem, 9=reverb, 10=delay
@@ -402,10 +431,15 @@ private:
         EqBandData bands[3];
     } eqPresets[128];
 
-    // Per-track waveform buffers for OCTA visualizer
-    float trackWaveformBuffer[8][WAVEFORM_SIZE] = {};
+    // Per-track waveform buffers for OCTA visualizer.
+    // 8 song tracks + 1 dedicated preview lane (index PREVIEW_LANE): sampler/sample/note previews
+    // play on PREVIEW_TRACK_ID (outside tracks 0-7), so without their own lane they never appear
+    // on the per-track scopes. SF instrument previews use track 0 and already show on lane 0.
+    static const int PREVIEW_LANE = 8;
+    static const int TRACK_WAVEFORM_COUNT = 9;  // 8 tracks + preview lane
+    float trackWaveformBuffer[TRACK_WAVEFORM_COUNT][WAVEFORM_SIZE] = {};
     int   trackWaveformIndex = 0;
-    bool  trackHasVoice[8] = {};
+    bool  trackHasVoice[TRACK_WAVEFORM_COUNT] = {};
 
     // Downsampling for oscilloscope (capture every Nth sample)
     // Lower = faster scrolling (more zoomed in), Higher = slower scrolling (more time visible)

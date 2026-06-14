@@ -25,6 +25,12 @@ AudioEngine::AudioEngine() {
     }
     globalFrameCounter = 0;
 
+    // Pre-size the per-block drain buffers (1.3) so the audio thread never reallocates them at
+    // runtime. A single ~23 ms block only ever holds a handful of events (a few tracks × retrigs).
+    noteBatch.reserve(64);
+    killBatch.reserve(64);
+    paramBatch.reserve(64);
+
     for (int i = 0; i < WAVEFORM_SIZE; i++) {
         waveformBuffer[i] = 0.0f;
     }
@@ -327,7 +333,10 @@ int AudioEngine::getSampleRate() {
     if (stream) {
         return stream->getSampleRate();
     }
-    return 48000; // Default fallback
+    // Match every other fallback in the engine (triggerNote, setPitchSlide/Bend,
+    // updateVoiceModulation, the Kotlin layer) — 48000 here made rate/pitch math ~8.8% off
+    // if Kotlin cached this before the stream opened.
+    return 44100; // Default fallback
 }
 
 void AudioEngine::resumeStream() {
@@ -374,26 +383,59 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         masterVolSnapshot = masterVolume;
     }
 
-    // Send-bus accumulation buffers (stereo, panned contributions from all voices)
-    static constexpr int MAX_BLOCK = 1024;
-    float revSendBufL[MAX_BLOCK] = {}, revSendBufR[MAX_BLOCK] = {};
-    float dlySendBufL[MAX_BLOCK] = {}, dlySendBufR[MAX_BLOCK] = {};
+    // 1.2: zero only the [0,numFrames) slice actually used (not the full MAX_BLOCK arrays), and
+    // skip the expensive visualizer accumulators when nobody is watching (see CAPTURE_IDLE_MS).
+    // Also skip all visualizer capture during offline WAV export: the live stream is silent so the
+    // scopes already read flat, and OCTA would otherwise snapshot random mid-render frames that only
+    // repaint on progress ticks (a frozen, twitching scope). Let the visualizers sit flat mid-render.
+    const bool offlineRender    = isOfflineRendering.load(std::memory_order_relaxed);
+    const int64_t nowMsec       = nowMs();
+    const bool octaWanted       = !offlineRender && (nowMsec - lastTrackWaveformReadMs.load(std::memory_order_relaxed)) < CAPTURE_IDLE_MS;
+    const bool spectrumWanted   = !offlineRender && (nowMsec - lastSpectrumReadMs.load(std::memory_order_relaxed))      < CAPTURE_IDLE_MS;
+    const size_t frameBytes     = (size_t)numFrames * sizeof(float);
 
-    // Per-track waveform accumulators for OCTA visualizer
-    float trackWaveAccumL[8][MAX_BLOCK] = {};
-    float trackWaveAccumR[8][MAX_BLOCK] = {};
-    bool  trackWasActive[8] = {};
+    // Send-bus accumulation buffers (stereo, panned contributions from all voices). Always needed
+    // (reverb/delay always run). MAX_BLOCK is a class constant; onAudioReady/renderOffline chunk
+    // larger requests, so only [0,numFrames) is ever touched.
+    float revSendBufL[MAX_BLOCK], revSendBufR[MAX_BLOCK];
+    float dlySendBufL[MAX_BLOCK], dlySendBufR[MAX_BLOCK];
+    memset(revSendBufL, 0, frameBytes); memset(revSendBufR, 0, frameBytes);
+    memset(dlySendBufL, 0, frameBytes); memset(dlySendBufR, 0, frameBytes);
 
-    // Per-instrument spectrum accumulator (mono, summed across all active voices of one instrument)
-    float instrSpectrumTempL[MAX_BLOCK] = {};
+    // Per-track waveform accumulators for OCTA visualizer (+1 preview lane). The 64 KB+ pair is the
+    // bulk of the per-block memset and is read only by OCTA — zero/fill it only when OCTA is shown.
+    float trackWaveAccumL[TRACK_WAVEFORM_COUNT][MAX_BLOCK];
+    float trackWaveAccumR[TRACK_WAVEFORM_COUNT][MAX_BLOCK];
+    bool  trackWasActive[TRACK_WAVEFORM_COUNT] = {};
+    if (octaWanted) {
+        for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) {
+            memset(trackWaveAccumL[t], 0, frameBytes);
+            memset(trackWaveAccumR[t], 0, frameBytes);
+        }
+    }
+
+    // Per-instrument spectrum accumulator (mono sum of one instrument's voices) — only when the
+    // EQ screen is monitoring an instrument.
     int   monitoredInstrId = instrSpectrumInstrId.load(std::memory_order_relaxed);
+    float instrSpectrumTempL[MAX_BLOCK];
+    if (monitoredInstrId >= 0) memset(instrSpectrumTempL, 0, frameBytes);
+
+    // 1.3: drain each queue ONCE for the whole block (one lock each) into reusable batch buffers,
+    // then dispatch from them inside the frame loop with zero locking. The heap pops earliest-first
+    // so each batch is already sorted ascending by targetFrame.
+    noteBatch.clear(); killBatch.clear(); paramBatch.clear();
+    const int64_t blockEnd = globalFrameCounter + numFrames - 1;
+    paramUpdateQueue.drainUntil(blockEnd, paramBatch);
+    killQueue.drainUntil(blockEnd, killBatch);
+    noteQueue.drainUntil(blockEnd, noteBatch);
+    size_t paramIdx = 0, killIdx = 0, noteIdx = 0;
 
     for (int32_t frame = 0; frame < numFrames; frame++) {
         int64_t currentFrame = globalFrameCounter + frame;
 
         // Process scheduled parameter updates (e.g. Vxx phraseVol on empty steps)
-        while (paramUpdateQueue.hasUpdateAt(currentFrame)) {
-            ScheduledParamUpdate upd = paramUpdateQueue.pop();
+        while (paramIdx < paramBatch.size() && paramBatch[paramIdx].targetFrame <= currentFrame) {
+            ScheduledParamUpdate upd = paramBatch[paramIdx++];
             // Apply to sampler voices
             for (int v = 0; v < MAX_VOICES; v++) {
                 if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
@@ -407,8 +449,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
 
         // Process all scheduled kill events for this exact frame (BEFORE notes)
-        while (killQueue.hasKillAt(currentFrame)) {
-            ScheduledKill kill = killQueue.pop();
+        while (killIdx < killBatch.size() && killBatch[killIdx].targetFrame <= currentFrame) {
+            ScheduledKill kill = killBatch[killIdx++];
             if (kill.softKill) {
                 triggerNoteOff(kill.trackId);  // Sampler: trigger ADSR release
                 // SF: noteOff (TSF handles its own release envelope internally)
@@ -431,8 +473,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
 
         // Trigger all notes scheduled for this exact frame
-        while (noteQueue.hasNoteAt(currentFrame)) {
-            ScheduledNote note = noteQueue.pop();
+        while (noteIdx < noteBatch.size() && noteBatch[noteIdx].targetFrame <= currentFrame) {
+            ScheduledNote note = noteBatch[noteIdx++];
 
             // ---- SOUNDFONT PATH ----
             // Tracks use the master tsf* handle via MIDI channels (channel = trackId).
@@ -1244,9 +1286,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             if (!voice.isFadingOut && voice.trackId >= 0 && voice.trackId < 8) {
                 framePeaksPerTrackL[voice.trackId] = fmaxf(framePeaksPerTrackL[voice.trackId], fabsf(sampleL));
                 framePeaksPerTrackR[voice.trackId] = fmaxf(framePeaksPerTrackR[voice.trackId], fabsf(sampleR));
-                trackWasActive[voice.trackId] = true;
             }
-            if (voice.trackId >= 0 && voice.trackId < 8) {
+            // OCTA per-track capture: tracks 0-7 plus the preview lane (PREVIEW_TRACK_ID == PREVIEW_LANE).
+            // Gated on octaWanted (1.2): the accumulators are only zeroed/read when OCTA is shown.
+            if (octaWanted && voice.trackId >= 0 && voice.trackId < TRACK_WAVEFORM_COUNT) {
+                if (!voice.isFadingOut) trackWasActive[voice.trackId] = true;
                 trackWaveAccumL[voice.trackId][i] += sampleL;
                 trackWaveAccumR[voice.trackId][i] += sampleR;
             }
@@ -1322,9 +1366,16 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     noteVol = fmaxf(0.0f, noteVol + (mod.envValue - 1.0f) * mod.effectiveAmt);
                 }
             }
-            if (sv.sfSlot >= 0) {
+            // Snapshot sfSlot ONCE into a local: eviction (JNI thread) calls detach() which sets
+            // sv.sfSlot = -1 at any moment — re-reading the member after the >= 0 check indexes
+            // soundfonts[-1] (out of bounds → garbage tsf* → SIGSEGV in tsf_channel_set_volume).
+            int volSlot = sv.sfSlot;
+            if (volSlot >= 0 && volSlot < MAX_SOUNDFONTS) {
                 float trkVol = trackVolSnapshot[t];
-                tsf* h = soundfonts[sv.sfSlot].handle;
+                // Read the handle INSIDE the slot mutex: loadSoundfont's eviction path can
+                // tsf_close + null it concurrently; a stale pointer here is a use-after-free.
+                std::lock_guard<std::mutex> sfLock(soundfonts[volSlot].mutex);
+                tsf* h = soundfonts[volSlot].handle;
                 if (h) tsf_channel_set_volume(h, t, noteVol * trkVol);
             }
 
@@ -1365,15 +1416,23 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
         for (int t = 0; t < 8; t++) {
             SoundfontVoice& sv = sfVoices[t];
-            if (!sv.isActive || sv.sfSlot < 0) continue;
-            tsf* h = soundfonts[sv.sfSlot].handle;
-            if (!h) continue;
+            // Local sfSlot snapshot — see the volSlot comment above (detach() race).
+            int slot = sv.sfSlot;
+            if (!sv.isActive || slot < 0 || slot >= MAX_SOUNDFONTS) continue;
 
             memset(sfBuf, 0, sizeof(float) * numFrames * 2);
+            bool rendered = false;
             {
-                std::lock_guard<std::mutex> sfLock(soundfonts[sv.sfSlot].mutex);
-                tsf_render_float_channel(h, t, sfBuf, numFrames, 0 /* overwrite */);
+                // Handle must be read INSIDE the lock: capturing it before would let
+                // loadSoundfont's eviction tsf_close it between the read and the render.
+                std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
+                tsf* h = soundfonts[slot].handle;
+                if (h) {
+                    tsf_render_float_channel(h, t, sfBuf, numFrames, 0 /* overwrite */);
+                    rendered = true;
+                }
             }
+            if (!rendered) continue;
 
             for (int i = 0; i < numFrames; i++) {
                 float lerp_t = (numFrames > 1) ? (float)(i + 1) / (float)numFrames : 1.0f;
@@ -1396,7 +1455,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
 
             float trackPeakL = 0.0f, trackPeakR = 0.0f;
-            trackWasActive[t] = true;
+            if (octaWanted) trackWasActive[t] = true;  // OCTA capture only (1.2)
             for (int i = 0; i < numFrames; i++) {
                 float sL = sfBuf[i * 2];
                 float sR = sfBuf[i * 2 + 1];
@@ -1408,8 +1467,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     output[i * 2]     += outL;
                     output[i * 2 + 1] += outR;
                 }
-                trackWaveAccumL[t][i] += outL;
-                trackWaveAccumR[t][i] += outR;
+                if (octaWanted) {
+                    trackWaveAccumL[t][i] += outL;
+                    trackWaveAccumR[t][i] += outR;
+                }
             }
             float trackPeak = fmaxf(trackPeakL, trackPeakR);
             framePeaksPerTrackL[t] = fmaxf(framePeaksPerTrackL[t], trackPeakL);
@@ -1432,12 +1493,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
     }
 
-    // Per-track waveform capture for OCTA visualizer
-    {
+    // Per-track waveform capture for OCTA visualizer — only when OCTA is being displayed (1.2).
+    if (octaWanted) {
         std::lock_guard<std::mutex> lock(waveformMutex);
-        for (int t = 0; t < 8; t++) trackHasVoice[t] = trackWasActive[t];
+        for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) trackHasVoice[t] = trackWasActive[t];
         for (int i = 0; i < numFrames; i++) {
-            for (int t = 0; t < 8; t++) {
+            for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) {
                 trackWaveformBuffer[t][trackWaveformIndex] =
                     (trackWaveAccumL[t][i] + trackWaveAccumR[t][i]) * 0.5f;
             }
@@ -1457,13 +1518,17 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
         }
         reverbSend.process(revSendBufL, revSendBufR, revWetL, revWetR, numFrames);
-        {
-            std::lock_guard<std::mutex> lock(spectrumMutex);
-            for (int i = 0; i < numFrames; i++) {
-                delaySpectrumBuffer[delaySpectrumWriteIdx] = dlyWetL[i];
-                delaySpectrumWriteIdx = (delaySpectrumWriteIdx + 1) % SPECTRUM_SIZE;
-                reverbSpectrumBuffer[reverbSpectrumWriteIdx] = revWetL[i];
-                reverbSpectrumWriteIdx = (reverbSpectrumWriteIdx + 1) % SPECTRUM_SIZE;
+        // 1.10: only capture when the EQ/spectrum UI is actually polling, and never block the audio
+        // thread on the UI's read — try_lock and drop this block's data on contention (invisible).
+        if (spectrumWanted) {
+            std::unique_lock<std::mutex> lock(spectrumMutex, std::try_to_lock);
+            if (lock.owns_lock()) {
+                for (int i = 0; i < numFrames; i++) {
+                    delaySpectrumBuffer[delaySpectrumWriteIdx] = dlyWetL[i];
+                    delaySpectrumWriteIdx = (delaySpectrumWriteIdx + 1) % SPECTRUM_SIZE;
+                    reverbSpectrumBuffer[reverbSpectrumWriteIdx] = revWetL[i];
+                    reverbSpectrumWriteIdx = (reverbSpectrumWriteIdx + 1) % SPECTRUM_SIZE;
+                }
             }
         }
         for (int i = 0; i < numFrames; i++) {
@@ -1496,11 +1561,14 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     else
         masterChain.limiter.process(output, numFrames, channelCount);
 
-    {
-        std::lock_guard<std::mutex> lock(spectrumMutex);
-        for (int i = 0; i < numFrames; i++) {
-            instrSpectrumBuffer[instrSpectrumWriteIdx] = instrSpectrumTempL[i];
-            instrSpectrumWriteIdx = (instrSpectrumWriteIdx + 1) % SPECTRUM_SIZE;
+    // 1.10: only when an instrument is being monitored (EQ screen), and never block on the UI read.
+    if (monitoredInstrId >= 0) {
+        std::unique_lock<std::mutex> lock(spectrumMutex, std::try_to_lock);
+        if (lock.owns_lock()) {
+            for (int i = 0; i < numFrames; i++) {
+                instrSpectrumBuffer[instrSpectrumWriteIdx] = instrSpectrumTempL[i];
+                instrSpectrumWriteIdx = (instrSpectrumWriteIdx + 1) % SPECTRUM_SIZE;
+            }
         }
     }
 
@@ -1527,7 +1595,15 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
     }
 
     float sampleRate = (float)audioStream->getSampleRate();
-    processAudioBlock(output, numFrames, channelCount, sampleRate);
+    // Oboe bursts are normally 192-960 frames, but the None/Shared fallback path or unusual
+    // ROMs can exceed MAX_BLOCK — and every per-block buffer in processAudioBlock is sized to
+    // MAX_BLOCK. Chunk to keep them in bounds (renderOffline already does the same).
+    int processed = 0;
+    while (processed < numFrames) {
+        int chunk = std::min((int)numFrames - processed, MAX_BLOCK);
+        processAudioBlock(output + processed * channelCount, chunk, channelCount, sampleRate);
+        processed += chunk;
+    }
 
     {
         std::lock_guard<std::mutex> lock(waveformMutex);
@@ -1541,11 +1617,15 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
         }
     }
 
-    {
-        std::lock_guard<std::mutex> lock(spectrumMutex);
-        for (int i = 0; i < numFrames; i++) {
-            spectrumBuffer[spectrumWriteIdx] = output[i * channelCount];
-            spectrumWriteIdx = (spectrumWriteIdx + 1) % SPECTRUM_SIZE;
+    // 1.10: master spectrum ring — only while the spectrum visualizer or EQ screen is polling,
+    // and try_lock so the audio thread never blocks on the UI's 2048-sample copy-out.
+    if ((nowMs() - lastSpectrumReadMs.load(std::memory_order_relaxed)) < CAPTURE_IDLE_MS) {
+        std::unique_lock<std::mutex> lock(spectrumMutex, std::try_to_lock);
+        if (lock.owns_lock()) {
+            for (int i = 0; i < numFrames; i++) {
+                spectrumBuffer[spectrumWriteIdx] = output[i * channelCount];
+                spectrumWriteIdx = (spectrumWriteIdx + 1) % SPECTRUM_SIZE;
+            }
         }
     }
 
@@ -1766,10 +1846,13 @@ static void computeSpectrumFFT(kiss_fft_scalar* input, int numBins, float* out) 
         input[i] *= w;
     }
 
-    kiss_fftr_cfg cfg = kiss_fftr_alloc(SPECTRUM_FFT_SIZE, 0, nullptr, nullptr);
+    // Cache the config across calls: kiss_fftr_alloc does a malloc + twiddle-table trig init
+    // every time. All callers are the single UI poll thread (~20 fps while the EQ screen is open),
+    // so a function-local static is safe and removes that per-call churn. FFT size is constant,
+    // so the cfg lives for the process (never freed).
+    static kiss_fftr_cfg cfg = kiss_fftr_alloc(SPECTRUM_FFT_SIZE, 0, nullptr, nullptr);
     kiss_fft_cpx cpx_out[SPECTRUM_FFT_SIZE / 2 + 1];
     kiss_fftr(cfg, input, cpx_out);
-    kiss_fftr_free(cfg);
 
     const float sampleRate = 44100.0f;
     const float fMin = 20.0f, fMax = 20000.0f;
@@ -1801,6 +1884,7 @@ static void readCircularBuffer(const float* buf, int writeIdx, int bufSize, kiss
 }
 
 void AudioEngine::getSpectrumMagnitudes(int numBins, float* out) {
+    lastSpectrumReadMs.store(nowMs(), std::memory_order_relaxed);  // demand signal for 1.10 capture gate
     kiss_fft_scalar input[SPECTRUM_FFT_SIZE];
     {
         std::lock_guard<std::mutex> lock(spectrumMutex);
@@ -1810,6 +1894,7 @@ void AudioEngine::getSpectrumMagnitudes(int numBins, float* out) {
 }
 
 void AudioEngine::getSpectrumMagnitudesForSource(int source, int instrId, int numBins, float* out) {
+    lastSpectrumReadMs.store(nowMs(), std::memory_order_relaxed);  // demand signal for 1.10 capture gate
     if (source == 3) instrSpectrumInstrId.store(instrId, std::memory_order_relaxed);
 
     kiss_fft_scalar input[SPECTRUM_FFT_SIZE];
@@ -1885,7 +1970,7 @@ void AudioEngine::decayWaveform() {
         waveformBuffer[i] *= WAVEFORM_DECAY;
         if (fabsf(waveformBuffer[i]) < 0.001f) waveformBuffer[i] = 0.0f;
     }
-    for (int t = 0; t < 8; t++) {
+    for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) {
         for (int i = 0; i < WAVEFORM_SIZE; i++) {
             trackWaveformBuffer[t][i] *= WAVEFORM_DECAY;
             if (fabsf(trackWaveformBuffer[t][i]) < 0.001f) trackWaveformBuffer[t][i] = 0.0f;
@@ -1894,8 +1979,9 @@ void AudioEngine::decayWaveform() {
 }
 
 void AudioEngine::getTrackWaveforms(float* outBuffer, bool* activeFlags) {
+    lastTrackWaveformReadMs.store(nowMs(), std::memory_order_relaxed);  // demand signal for 1.2 OCTA gate
     std::lock_guard<std::mutex> lock(waveformMutex);
-    for (int t = 0; t < 8; t++) {
+    for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) {
         activeFlags[t] = trackHasVoice[t];
         for (int i = 0; i < WAVEFORM_SIZE; i++) {
             int readIdx = (trackWaveformIndex + i) % WAVEFORM_SIZE;
@@ -1909,9 +1995,10 @@ void AudioEngine::setTrackVolume(int trackId, float volume) {
     { std::lock_guard<std::mutex> lock(volumeMutex); trackVolumes[trackId] = volume; }
     SoundfontVoice& sv = sfVoices[trackId];
     sv.trackVolume = volume;
-    if (sv.isActive && sv.sfSlot >= 0 && sv.sfSlot < MAX_SOUNDFONTS) {
-        std::lock_guard<std::mutex> sfLock(soundfonts[sv.sfSlot].mutex);
-        tsf* h = soundfonts[sv.sfSlot].handle;
+    int slot = sv.sfSlot;  // snapshot once — detach() can set the member to -1 concurrently
+    if (sv.isActive && slot >= 0 && slot < MAX_SOUNDFONTS) {
+        std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
+        tsf* h = soundfonts[slot].handle;
         if (h) tsf_channel_set_volume(h, trackId, sv.noteVolume * volume);
     }
     LOGD("🔊 Track %d volume set to %.2f", trackId, volume);

@@ -18,6 +18,18 @@ void AudioEngine::setSampleBuffers(int id, float* newL, float* newR, int newLen)
     sampleLengths[id] = newLen;
 }
 
+// Stop voices reading slot `id`'s buffers, then acquire sampleEditMutex. Every destructive op
+// below must hold the returned lock while mutating/freeing the slot's buffers: the audio thread
+// try_locks this mutex in its mix loop, so it skips one block (~10 ms silence) instead of reading
+// freed or half-edited memory. Without it, editing a sample that is audible at that moment
+// (background playback, or preview-then-edit) is a use-after-free crash.
+std::unique_lock<std::mutex> AudioEngine::beginSampleEdit(int id) {
+    for (int v = 0; v < MAX_VOICES; v++) {
+        if (voices[v].isActive && voices[v].sampleData == samples[id]) voices[v].stop();
+    }
+    return std::unique_lock<std::mutex>(sampleEditMutex);
+}
+
 int AudioEngine::getSampleLength(int id) {
     if (id < 0 || id >= 256 || !samples[id]) return 0;
     return sampleLengths[id];
@@ -134,6 +146,10 @@ float AudioEngine::getSamplePlaybackPosition(int id) {
 
 void AudioEngine::normalizeSample(int id, int startFrame, int endFrame) {
     if (id < 0 || id >= 256 || !samples[id]) return;
+    // In-place op: no buffer is freed, so no voice-stop needed — but hold the edit lock so the
+    // mix loop skips one block rather than playing a half-edited region. Same for the other
+    // in-place ops below (fade/silence/reverse).
+    std::lock_guard<std::mutex> lock(sampleEditMutex);
     startFrame = std::max(0, startFrame);
     endFrame   = std::min(sampleLengths[id], endFrame);
     if (startFrame >= endFrame) return;
@@ -155,6 +171,7 @@ void AudioEngine::normalizeSample(int id, int startFrame, int endFrame) {
 
 void AudioEngine::fadeInSample(int id, int startFrame, int endFrame) {
     if (id < 0 || id >= 256 || !samples[id]) return;
+    std::lock_guard<std::mutex> lock(sampleEditMutex);
     startFrame = std::max(0, startFrame);
     endFrame   = std::min(sampleLengths[id], endFrame);
     int count  = endFrame - startFrame;
@@ -169,6 +186,7 @@ void AudioEngine::fadeInSample(int id, int startFrame, int endFrame) {
 
 void AudioEngine::fadeOutSample(int id, int startFrame, int endFrame) {
     if (id < 0 || id >= 256 || !samples[id]) return;
+    std::lock_guard<std::mutex> lock(sampleEditMutex);
     startFrame = std::max(0, startFrame);
     endFrame   = std::min(sampleLengths[id], endFrame);
     int count  = endFrame - startFrame;
@@ -183,6 +201,7 @@ void AudioEngine::fadeOutSample(int id, int startFrame, int endFrame) {
 
 void AudioEngine::silenceRegion(int id, int startFrame, int endFrame) {
     if (id < 0 || id >= 256 || !samples[id]) return;
+    std::lock_guard<std::mutex> lock(sampleEditMutex);
     startFrame = std::max(0, startFrame);
     endFrame   = std::min(sampleLengths[id], endFrame);
     std::memset(samples[id] + startFrame, 0, (endFrame - startFrame) * sizeof(float));
@@ -192,6 +211,7 @@ void AudioEngine::silenceRegion(int id, int startFrame, int endFrame) {
 
 void AudioEngine::reverseSample(int id, int startFrame, int endFrame) {
     if (id < 0 || id >= 256 || !samples[id]) return;
+    std::lock_guard<std::mutex> lock(sampleEditMutex);
     startFrame = std::max(0, startFrame);
     endFrame   = std::min(sampleLengths[id], endFrame);
     std::reverse(samples[id] + startFrame, samples[id] + endFrame);
@@ -269,6 +289,7 @@ void AudioEngine::restoreFxPreviewBackup() {
 
 void AudioEngine::cropSample(int id, int startFrame, int endFrame) {
     if (id < 0 || id >= 256 || !samples[id]) return;
+    auto editLock = beginSampleEdit(id);
     startFrame = std::max(0, startFrame);
     endFrame   = std::min(sampleLengths[id], endFrame);
     if (startFrame >= endFrame) return;
@@ -287,6 +308,7 @@ void AudioEngine::cropSample(int id, int startFrame, int endFrame) {
 
 void AudioEngine::deleteSampleRegion(int id, int startFrame, int endFrame) {
     if (id < 0 || id >= 256 || !samples[id]) return;
+    auto editLock = beginSampleEdit(id);
     startFrame = std::max(0, startFrame);
     endFrame   = std::min(sampleLengths[id], endFrame);
     if (startFrame >= endFrame) return;
@@ -327,6 +349,7 @@ void AudioEngine::copyRegion(int id, int startFrame, int endFrame) {
 
 void AudioEngine::pasteRegion(int id, int insertAt) {
     if (id < 0 || id >= 256 || !samples[id] || !sampleClipboard || sampleClipboardLength <= 0) return;
+    auto editLock = beginSampleEdit(id);
     insertAt = std::max(0, std::min(sampleLengths[id], insertAt));
     int oldLen = sampleLengths[id];
     int clip   = sampleClipboardLength;
@@ -356,6 +379,7 @@ int AudioEngine::getClipboardLength() {
 
 void AudioEngine::downsampleSample(int id, int factor) {
     if (id < 0 || id >= 256 || !samples[id] || factor <= 1) return;
+    auto editLock = beginSampleEdit(id);
     int oldLen = sampleLengths[id];
     int newLen = oldLen / factor;
     if (newLen < 1) return;

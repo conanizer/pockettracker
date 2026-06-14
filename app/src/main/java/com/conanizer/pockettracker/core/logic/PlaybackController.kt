@@ -544,7 +544,7 @@ class PlaybackController(
         val trackState = trackStates[trackId.coerceIn(0, 7)]
 
         if (trackState.trackStopped) {
-            logger.d(TAG, "  Track $trackId stopped by HOP FF, skipping phrase")
+            if (TRACE) logger.d(TAG, "  Track $trackId stopped by HOP FF, skipping phrase")
             return SchedulePhraseResult(0, hopTriggered = false, trackStopped = true, framesScheduled = 0L)
         }
 
@@ -615,9 +615,9 @@ class PlaybackController(
                 // Persist groove position for the next phrase (if groove was active at any point)
                 if (anyGrooveActive) trackState.grooveStep = localGrooveStep
                 if (trackState.trackStopped) {
-                    logger.d(TAG, "  HOP FF at row $stepIndex: track $trackId stopped, scheduled $rowsScheduled rows")
+                    if (TRACE) logger.d(TAG, "  HOP FF at row $stepIndex: track $trackId stopped, scheduled $rowsScheduled rows")
                 } else {
-                    logger.d(TAG, "  HOP at row $stepIndex: jumping to row ${trackState.hopTargetRow}, scheduled $rowsScheduled rows")
+                    if (TRACE) logger.d(TAG, "  HOP at row $stepIndex: jumping to row ${trackState.hopTargetRow}, scheduled $rowsScheduled rows")
                 }
                 return SchedulePhraseResult(rowsScheduled, hopTriggered = true, trackStopped = trackState.trackStopped, framesScheduled = frameOffset)
             }
@@ -627,9 +627,9 @@ class PlaybackController(
 
         if (scheduledNotes > 0) {
             if (effectiveStartRow > 0) {
-                logger.d(TAG, "  Scheduled $scheduledNotes notes (starting from row $effectiveStartRow due to HOP)")
+                if (TRACE) logger.d(TAG, "  Scheduled $scheduledNotes notes (starting from row $effectiveStartRow due to HOP)")
             } else {
-                logger.d(TAG, "  Scheduled $scheduledNotes notes")
+                if (TRACE) logger.d(TAG, "  Scheduled $scheduledNotes notes")
             }
         }
 
@@ -818,7 +818,7 @@ class PlaybackController(
 
                 if (!passed) {
                     val targetName = if (target == 0) "note" else "FX$target"
-                    logger.d(TAG, "🎲 CHA: probability=$probability/15, roll=$roll → BLOCKED $targetName")
+                    if (TRACE) logger.d(TAG, "🎲 CHA: probability=$probability/15, roll=$roll → BLOCKED $targetName")
                     if (target == 0) {
                         skipNote = true
                     } else if (target in 1..3) {
@@ -827,7 +827,7 @@ class PlaybackController(
                     }
                 } else {
                     val targetName = if (target == 0) "note" else "FX$target"
-                    logger.d(TAG, "🎲 CHA: probability=$probability/15, roll=$roll → PASSED $targetName")
+                    if (TRACE) logger.d(TAG, "🎲 CHA: probability=$probability/15, roll=$roll → PASSED $targetName")
                 }
             }
         }
@@ -854,7 +854,7 @@ class PlaybackController(
 
                 // Replace this column with the previous FX type + random value
                 effectiveStep = effectiveStep.copy().also { it.setFx(slot, prevType, randomValue) }
-                logger.d(TAG, "🎲 RND: FX$slot recalled ${EffectProcessor.effectName(prevType)} → " +
+                if (TRACE) logger.d(TAG, "🎲 RND: FX$slot recalled ${EffectProcessor.effectName(prevType)} → " +
                         "0x${randomValue.toString(16).uppercase().padStart(2, '0')} " +
                         "(was 0x${prevValue.toString(16).uppercase().padStart(2, '0')}, " +
                         "range ${minNibble.toString(16).uppercase()}0-${maxNibble.toString(16).uppercase()}F)")
@@ -880,7 +880,7 @@ class PlaybackController(
                                 note = Note.fromMidi((noteMidi + noteOffset).coerceIn(0, 127)),
                                 instrument = (step.instrument + instOffset).coerceIn(0, 255)
                             )
-                            logger.d(TAG, "🎲 RNL FX1: note ${step.note}→${effectiveStep.note} " +
+                            if (TRACE) logger.d(TAG, "🎲 RNL FX1: note ${step.note}→${effectiveStep.note} " +
                                     "(±$noteRange), inst ${step.instrument.toString(16).uppercase().padStart(2, '0')}" +
                                     "→${effectiveStep.instrument.toString(16).uppercase().padStart(2, '0')} (±$instRange)")
                         }
@@ -898,7 +898,7 @@ class PlaybackController(
 
                     effectiveStep = effectiveStep.copy().also { it.setFxValue(targetSlot, randomValue) }
                     val targetType = EffectProcessor.effectName(effectiveStep.fxType(targetSlot))
-                    logger.d(TAG, "🎲 RNL: FX$targetSlot ($targetType) value → " +
+                    if (TRACE) logger.d(TAG, "🎲 RNL: FX$targetSlot ($targetType) value → " +
                             "0x${randomValue.toString(16).uppercase().padStart(2, '0')} " +
                             "(range ${minNibble.toString(16).uppercase()}0-${maxNibble.toString(16).uppercase()}F)")
                 }
@@ -929,7 +929,7 @@ class PlaybackController(
         if (hasKill) {
             trackState.clearRepeat()
             trackState.clearArpeggio()
-            logger.d(TAG, "🔪 KILL detected → persistent REPEAT and ARPEGGIO cancelled")
+            if (TRACE) logger.d(TAG, "🔪 KILL detected → persistent REPEAT and ARPEGGIO cancelled")
         }
 
         // Check if step has a note → clears persistent REPEAT and ARPEGGIO (new note triggers)
@@ -953,7 +953,7 @@ class PlaybackController(
         // (Any effect in the same column overrides the persistent REPEAT)
         if (trackState.hasActiveRepeat()) {
             if (step.fxType(trackState.repeatActiveColumn) != EffectProcessor.FX_NONE) {
-                logger.d(TAG, "🔄 FX in column ${trackState.repeatActiveColumn} → persistent REPEAT cancelled")
+                if (TRACE) logger.d(TAG, "🔄 FX in column ${trackState.repeatActiveColumn} → persistent REPEAT cancelled")
                 trackState.clearRepeat()
             }
         }
@@ -962,7 +962,7 @@ class PlaybackController(
         // (Any effect in the same column overrides the persistent ARPEGGIO)
         if (trackState.hasActiveArpeggio()) {
             if (step.fxType(trackState.arpeggioActiveColumn) != EffectProcessor.FX_NONE) {
-                logger.d(TAG, "🔄 FX in column ${trackState.arpeggioActiveColumn} → persistent ARPEGGIO cancelled")
+                if (TRACE) logger.d(TAG, "🔄 FX in column ${trackState.arpeggioActiveColumn} → persistent ARPEGGIO cancelled")
                 trackState.clearArpeggio()
             }
         }
@@ -995,7 +995,7 @@ class PlaybackController(
         val effectiveTargetFrame = if (delayTicks > 0) {
             val framesPerTic = stepDuration / TICS_PER_STEP
             val delayFrames = delayTicks * framesPerTic
-            logger.d(TAG, "⏳ DEL: delaying note by $delayTicks ticks ($delayFrames frames)")
+            if (TRACE) logger.d(TAG, "⏳ DEL: delaying note by $delayTicks ticks ($delayFrames frames)")
             targetFrame + delayFrames
         } else {
             targetFrame
@@ -1008,7 +1008,7 @@ class PlaybackController(
         // TBL XX: Override table ID for this note (and subsequent retrigs)
         val tableIdOverride = if (params.tableOverride != null && params.tableOverride >= 0) {
             trackState.lastTableOverride = params.tableOverride
-            logger.d(TAG, "📋 TBL: Override table to ${params.tableOverride.toString(16).uppercase().padStart(2, '0')}")
+            if (TRACE) logger.d(TAG, "📋 TBL: Override table to ${params.tableOverride.toString(16).uppercase().padStart(2, '0')}")
             params.tableOverride
         } else if (hasNote) {
             // New note without TBL: reset to instrument default
@@ -1028,9 +1028,9 @@ class PlaybackController(
             if (!hasNote) {
                 // No note: jump the active voice's table row directly
                 audioEngine.setVoiceTableRow(trackId, targetRow)
-                logger.d(TAG, "📋 THO: Jumped active voice table to row $targetRow (no note)")
+                if (TRACE) logger.d(TAG, "📋 THO: Jumped active voice table to row $targetRow (no note)")
             } else {
-                logger.d(TAG, "📋 THO: Will start table at row $targetRow (with note)")
+                if (TRACE) logger.d(TAG, "📋 THO: Will start table at row $targetRow (with note)")
             }
             targetRow
         } else {
@@ -1042,9 +1042,9 @@ class PlaybackController(
             trackState.grooveId = params.grooveId
             trackState.grooveStep = 0  // Reset groove position
             if (params.grooveId == 0) {
-                logger.d(TAG, "🥁 GRV 00: Disabled groove (default timing)")
+                if (TRACE) logger.d(TAG, "🥁 GRV 00: Disabled groove (default timing)")
             } else {
-                logger.d(TAG, "🥁 GRV: Assigned groove ${params.grooveId.toString(16).uppercase().padStart(2, '0')}")
+                if (TRACE) logger.d(TAG, "🥁 GRV: Assigned groove ${params.grooveId.toString(16).uppercase().padStart(2, '0')}")
             }
         }
 
@@ -1081,7 +1081,7 @@ class PlaybackController(
                 if (currentMidi >= 0 && previousMidi != currentMidi) {
                     pslInitialOffset = (previousMidi - currentMidi).toFloat()
                     pslDuration = params.pslDuration.toFloat()
-                    logger.d(TAG, "🎵 PSL: Portamento from ${Note.fromMidi(previousMidi)} to $note " +
+                    if (TRACE) logger.d(TAG, "🎵 PSL: Portamento from ${Note.fromMidi(previousMidi)} to $note " +
                             "(offset=$pslInitialOffset) over ${params.pslDuration} ticks")
                 }
             }
@@ -1095,7 +1095,7 @@ class PlaybackController(
                 }
                 trackState.pitchBendActive = true
                 val direction = if (params.pbnValue < 0x80) "UP" else "DOWN"
-                logger.d(TAG, "🎵 PBN ${params.pbnValue.toString(16).uppercase().padStart(2, '0')}: " +
+                if (TRACE) logger.d(TAG, "🎵 PBN ${params.pbnValue.toString(16).uppercase().padStart(2, '0')}: " +
                         "Bend $direction at $pbnRate semitones/step")
             }
 
@@ -1106,7 +1106,7 @@ class PlaybackController(
                 vibratoSpeed = 2f + speedNibble * 0.5f
                 vibratoDepth = depthNibble * 0.125f
                 trackState.vibratoActive = true
-                logger.d(TAG, "🎵 PVB ${params.pvbValue.toString(16).uppercase().padStart(2, '0')}: " +
+                if (TRACE) logger.d(TAG, "🎵 PVB ${params.pvbValue.toString(16).uppercase().padStart(2, '0')}: " +
                         "Vibrato speed=${vibratoSpeed}Hz, depth=$vibratoDepth semitones")
             }
 
@@ -1117,12 +1117,12 @@ class PlaybackController(
                 vibratoSpeed = (2f + speedNibble * 0.5f) * 2f  // 2x speed
                 vibratoDepth = depthNibble * 0.125f * 4f       // 4x depth
                 trackState.vibratoActive = true
-                logger.d(TAG, "🎵 PVX ${params.pvxValue.toString(16).uppercase().padStart(2, '0')}: " +
+                if (TRACE) logger.d(TAG, "🎵 PVX ${params.pvxValue.toString(16).uppercase().padStart(2, '0')}: " +
                         "EXTREME vibrato speed=${vibratoSpeed}Hz, depth=$vibratoDepth semitones")
             }
 
             // Debug: Log the full volume chain so we can verify what reaches the audio engine
-            logger.d(TAG, "🔊 Volume chain: instrVol=${"%.4f".format(instrVol)}" +
+            if (TRACE) logger.d(TAG, "🔊 Volume chain: instrVol=${"%.4f".format(instrVol)}" +
                     " phraseVol=${"%.4f".format(phraseVol)}" +
                     " (C++ multiplies: TABLE_VOL × phraseVol × instrVol)")
 
@@ -1195,7 +1195,7 @@ class PlaybackController(
             // change fires sample-accurately (PlaybackController runs ahead of the audio clock).
             if (params.volumeFromVxx) {
                 audioEngine.scheduleTrackPhraseVol(effectiveTargetFrame, trackId, phraseVol)
-                logger.d(TAG, "🔊 Vxx on empty step: track=$trackId phraseVol=$phraseVol at frame=$effectiveTargetFrame")
+                if (TRACE) logger.d(TAG, "🔊 Vxx on empty step: track=$trackId phraseVol=$phraseVol at frame=$effectiveTargetFrame")
             }
 
             // Handle PBN (Pitch Bend) - modify currently playing voice
@@ -1204,7 +1204,7 @@ class PlaybackController(
                     // PBN 00: Stop pitch bend
                     audioEngine.setPitchBend(trackId, 0f, tempo)
                     trackState.pitchBendActive = false
-                    logger.d(TAG, "🎵 PBN 00: Pitch bend stopped (mid-note)")
+                    if (TRACE) logger.d(TAG, "🎵 PBN 00: Pitch bend stopped (mid-note)")
                 } else {
                     val semitonesPerTick = if (params.pbnValue < 0x80) {
                         params.pbnValue / 16f
@@ -1214,7 +1214,7 @@ class PlaybackController(
                     audioEngine.setPitchBend(trackId, semitonesPerTick, tempo)
                     trackState.pitchBendActive = true
                     val direction = if (params.pbnValue < 0x80) "UP" else "DOWN"
-                    logger.d(TAG, "🎵 PBN ${params.pbnValue.toString(16).uppercase().padStart(2, '0')}: " +
+                    if (TRACE) logger.d(TAG, "🎵 PBN ${params.pbnValue.toString(16).uppercase().padStart(2, '0')}: " +
                             "Bend $direction (mid-note)")
                 }
             }
@@ -1224,7 +1224,7 @@ class PlaybackController(
                 if (params.pvbValue == 0) {
                     audioEngine.setVibrato(trackId, 0f, 0f)
                     trackState.vibratoActive = false
-                    logger.d(TAG, "🎵 PVB 00: Vibrato stopped (mid-note)")
+                    if (TRACE) logger.d(TAG, "🎵 PVB 00: Vibrato stopped (mid-note)")
                 } else {
                     val speedNibble = (params.pvbValue shr 4) and 0x0F
                     val depthNibble = params.pvbValue and 0x0F
@@ -1232,7 +1232,7 @@ class PlaybackController(
                     val depth = depthNibble * 0.125f
                     audioEngine.setVibrato(trackId, speed, depth)
                     trackState.vibratoActive = true
-                    logger.d(TAG, "🎵 PVB ${params.pvbValue.toString(16).uppercase().padStart(2, '0')}: " +
+                    if (TRACE) logger.d(TAG, "🎵 PVB ${params.pvbValue.toString(16).uppercase().padStart(2, '0')}: " +
                             "Vibrato (mid-note)")
                 }
             }
@@ -1242,7 +1242,7 @@ class PlaybackController(
                 if (params.pvxValue == 0) {
                     audioEngine.setVibrato(trackId, 0f, 0f)
                     trackState.vibratoActive = false
-                    logger.d(TAG, "🎵 PVX 00: Extreme vibrato stopped (mid-note)")
+                    if (TRACE) logger.d(TAG, "🎵 PVX 00: Extreme vibrato stopped (mid-note)")
                 } else {
                     val speedNibble = (params.pvxValue shr 4) and 0x0F
                     val depthNibble = params.pvxValue and 0x0F
@@ -1250,7 +1250,7 @@ class PlaybackController(
                     val depth = depthNibble * 0.125f * 4f
                     audioEngine.setVibrato(trackId, speed, depth)
                     trackState.vibratoActive = true
-                    logger.d(TAG, "🎵 PVX ${params.pvxValue.toString(16).uppercase().padStart(2, '0')}: " +
+                    if (TRACE) logger.d(TAG, "🎵 PVX ${params.pvxValue.toString(16).uppercase().padStart(2, '0')}: " +
                             "EXTREME vibrato (mid-note)")
                 }
             }
@@ -1272,12 +1272,12 @@ class PlaybackController(
             if (params.hopValue == 0xFF) {
                 // HOPFF: Stop this track
                 trackState.trackStopped = true
-                logger.d(TAG, "🦘 HOP FF: Track $trackId stopped at step $stepIndex")
+                if (TRACE) logger.d(TAG, "🦘 HOP FF: Track $trackId stopped at step $stepIndex")
             } else {
                 // HOP XY: Set target row for next phrase (low nibble = Y)
                 val targetRow = params.hopValue and 0x0F
                 trackState.hopTargetRow = targetRow
-                logger.d(TAG, "🦘 HOP: Track $trackId jumping at step $stepIndex, next phrase starts at row $targetRow")
+                if (TRACE) logger.d(TAG, "🦘 HOP: Track $trackId jumping at step $stepIndex, next phrase starts at row $targetRow")
             }
         }
 
@@ -1323,7 +1323,7 @@ class PlaybackController(
                 newRepeatVolRamp in 1..7 -> ", vol decrease $newRepeatVolRamp"
                 else -> ", vol increase ${newRepeatVolRamp - 8}"
             }
-            logger.d(TAG, "🔁 REPEAT: retrig every $newRepeatTicInterval ticks$rampDesc " +
+            if (TRACE) logger.d(TAG, "🔁 REPEAT: retrig every $newRepeatTicInterval ticks$rampDesc " +
                     "set in column $newRepeatColumn, baseVol=${"%.4f".format(trackState.repeatBaseVolume)} → PERSISTENT")
         }
 
@@ -1391,13 +1391,13 @@ class PlaybackController(
                         pitSemitones = params.pitSemitones ?: 0,
                         sliIndex = params.sliIndex ?: -1
                     )
-                    logger.d(TAG, "🔁 retrig[${trackState.repeatRetrigCount}] vol=${"%.4f".format(retrigVolume)} " +
+                    if (TRACE) logger.d(TAG, "🔁 retrig[${trackState.repeatRetrigCount}] vol=${"%.4f".format(retrigVolume)} " +
                             "(base=${"%.4f".format(trackState.repeatBaseVolume)}, delta=$rampDelta)")
                 }
 
                 val isPersistent = !hasNote && trackState.hasActiveRepeat()
                 val modeLabel = if (isPersistent) "PERSISTENT" else "step"
-                logger.d(TAG, "🔁 REPEAT ($modeLabel): ${triggersCount} triggers, interval=$activeRepeatInterval ticks, delta=$rampDelta")
+                if (TRACE) logger.d(TAG, "🔁 REPEAT ($modeLabel): ${triggersCount} triggers, interval=$activeRepeatInterval ticks, delta=$rampDelta")
             } else {
                 // ═══════════════════════════════════════════════════════════════════
                 // MULTI-STEP REPEAT (interval > 12 ticks): Sparse triggers
@@ -1406,7 +1406,7 @@ class PlaybackController(
                 val stepEndFrame = targetFrame + stepDuration
 
                 if (hasNote && newRepeatTicInterval > 0) {
-                    logger.d(TAG, "🔁 REPEAT (multi-step): started, interval=$activeRepeatInterval ticks")
+                    if (TRACE) logger.d(TAG, "🔁 REPEAT (multi-step): started, interval=$activeRepeatInterval ticks")
                 } else {
                     val framesSinceStart = targetFrame - trackState.repeatStartFrame
                     if (framesSinceStart >= 0) {
@@ -1441,7 +1441,7 @@ class PlaybackController(
                         }
 
                         if (triggersInStep > 0) {
-                            logger.d(TAG, "🔁 REPEAT (PERSISTENT multi-step): $triggersInStep trigger(s)")
+                            if (TRACE) logger.d(TAG, "🔁 REPEAT (PERSISTENT multi-step): $triggersInStep trigger(s)")
                         }
                     }
                 }
@@ -1459,7 +1459,7 @@ class PlaybackController(
             trackState.arpeggioMode = mode.coerceIn(0, 3)
             trackState.arpeggioSpeed = if (speed > 0) speed else 4  // Default speed is 4 tics
             val modeNames = listOf("UP", "DOWN", "PINGPONG", "RANDOM")
-            logger.d(TAG, "🎼 ARC C${params.arcValue.toString(16).uppercase().padStart(2, '0')}: " +
+            if (TRACE) logger.d(TAG, "🎼 ARC C${params.arcValue.toString(16).uppercase().padStart(2, '0')}: " +
                     "mode=${modeNames.getOrElse(trackState.arpeggioMode) { "UP" }}, speed=${trackState.arpeggioSpeed} tics")
         }
 
@@ -1484,7 +1484,7 @@ class PlaybackController(
         // ARP00 cancels arpeggio (explicit cancellation)
         if (newArpColumn > 0 && newArpValue == 0) {
             trackState.clearArpeggio()
-            logger.d(TAG, "🎵 ARP00 → arpeggio cancelled")
+            if (TRACE) logger.d(TAG, "🎵 ARP00 → arpeggio cancelled")
         } else if (newArpColumn > 0 && newArpValue > 0) {
             // New ARPEGGIO is set, update persistent state
             trackState.arpeggioActiveColumn = newArpColumn
@@ -1492,7 +1492,7 @@ class PlaybackController(
             trackState.arpeggioStartFrame = targetFrame  // Track start frame for phase continuity
             val semi1 = (newArpValue shr 4) and 0x0F
             val semi2 = newArpValue and 0x0F
-            logger.d(TAG, "🎵 ARP A${newArpValue.toString(16).uppercase().padStart(2, '0')} " +
+            if (TRACE) logger.d(TAG, "🎵 ARP A${newArpValue.toString(16).uppercase().padStart(2, '0')} " +
                     "(+$semi1, +$semi2) set in column $newArpColumn at frame $targetFrame → now PERSISTENT")
         }
 
@@ -1644,7 +1644,7 @@ class PlaybackController(
             val modeLabel = if (isPersistent) "PERSISTENT" else "step"
             val modeNames = listOf("UP", "DOWN", "PINGPONG", "RANDOM")
             val crossStepInfo = if (framesSinceStart > 0) " (cross-step)" else ""
-            logger.d(TAG, "🎵 ARP A${trackState.arpeggioValue.toString(16).uppercase().padStart(2, '0')} " +
+            if (TRACE) logger.d(TAG, "🎵 ARP A${trackState.arpeggioValue.toString(16).uppercase().padStart(2, '0')} " +
                     "($modeLabel, ${modeNames.getOrElse(trackState.arpeggioMode) { "UP" }})$crossStepInfo: " +
                     "$notesScheduled notes at speed ${trackState.arpeggioSpeed}")
         }

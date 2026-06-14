@@ -229,7 +229,8 @@ class OscilloscopeModule(
             return
         }
 
-        val activeTracks = (0 until 8).filter { (activeTrackMask shr it) and 1 == 1 }
+        // 0-7 = song tracks, 8 = preview lane (only set when stopped — see PixelPerfectRenderer).
+        val activeTracks = (0 until 9).filter { (activeTrackMask shr it) and 1 == 1 }
         val count = activeTracks.size
         // Each track scope gets an equal share of the width, minus gaps between them
         val totalGap = OCTA_TRACK_GAP * (count - 1)

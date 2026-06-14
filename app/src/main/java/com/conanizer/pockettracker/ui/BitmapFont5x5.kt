@@ -105,3 +105,14 @@ internal val FONT_5X5 = mapOf(
     '"' to byteArrayOf(0b01010, 0b00000, 0b00000, 0b00000, 0b00000),
     ' ' to byteArrayOf(0b00000, 0b00000, 0b00000, 0b00000, 0b00000), // EMPTY
 )
+
+/**
+ * ASCII-indexed view of [FONT_5X5] for the hot draw path. A full phrase screen is ~700+ glyphs ×
+ * 60 fps; a `Map<Char, ByteArray>` lookup boxes the Char and hashes every glyph. This array is
+ * indexed directly by `char.code` (0..127) with the uppercase fallback baked in (null = unmapped).
+ * Non-ASCII glyphs (arrows ↑↓←→) keep using the map — they only appear in occasional hints.
+ */
+internal val FONT_5X5_ASCII: Array<ByteArray?> = Array(128) { code ->
+    val c = code.toChar()
+    FONT_5X5[c] ?: FONT_5X5[c.uppercaseChar()]
+}

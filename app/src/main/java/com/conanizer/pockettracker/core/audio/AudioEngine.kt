@@ -44,10 +44,16 @@ class AudioEngine(
     // Waveform buffer for visualization (620 samples for 620px width oscilloscope)
     val waveformBuffer = FloatArray(620) { 0f }
 
-    // Per-track waveform buffers for OCTA visualizer
-    private val trackWaveformBufferFlat = FloatArray(8 * 620)
-    private val activeTrackFlags = BooleanArray(8)
-    val trackWaveformBuffers: Array<FloatArray> = Array(8) { FloatArray(620) }
+    // Per-track waveform buffers for OCTA visualizer.
+    // 9 lanes: 8 song tracks + 1 preview lane (index 8) so sampler/sample/note previews — which
+    // play on PREVIEW_TRACK_ID, outside tracks 0-7 — get their own scope. Must match C++
+    // AudioEngine::TRACK_WAVEFORM_COUNT.
+    private val trackWaveformBufferFlat = FloatArray(9 * 620)
+    private val activeTrackFlags = BooleanArray(9)
+    val trackWaveformBuffers: Array<FloatArray> = Array(9) { FloatArray(620) }
+
+    /** True when the preview lane (index 8) had audio last block — drives the OCTA preview scope. */
+    val previewLaneActive: Boolean get() = activeTrackFlags[8]
 
     // Spectrum buffer for SPECTRUM/SPECTRUM_PEAKS visualizer (40 log-spaced bins, 0-1)
     val spectrumBuffer = FloatArray(40)
@@ -172,50 +178,65 @@ class AudioEngine(
 
         val bytesPerSample = bitsPerSample / 8
         val totalSamples   = dataSize / bytesPerSample
-        val rawSamples     = FloatArray(totalSamples)
 
-        when {
+        val supported = (effectiveFormat == 3 && bitsPerSample == 32) ||
+                        (effectiveFormat == 1 && (bitsPerSample == 16 || bitsPerSample == 24 || bitsPerSample == 32))
+        if (!supported) throw IllegalArgumentException(
+            "Unsupported WAV format=$audioFormat (effective=$effectiveFormat) bits=$bitsPerSample")
+
+        // Decode one PCM/float sample by index, straight from the byte buffer. Declared as a local
+        // `fun` (not a lambda) so the Int arg / Float return stay primitive — no per-sample boxing.
+        // Decoding directly into the destination channel buffers below avoids a full-size
+        // intermediate FloatArray; that intermediate doubled peak heap and OOM-killed large samples
+        // (e.g. a 29 MB song render) on the 1 GB Miyoo Flip (128 MB Java heap).
+        fun decode(idx: Int): Float = when {
             effectiveFormat == 3 && bitsPerSample == 32 -> {
-                // IEEE 32-bit float — read directly
-                val fb = ByteBuffer.wrap(buffer, dataStart, totalSamples * 4)
-                    .order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
-                for (i in rawSamples.indices) rawSamples[i] = fb.get(i)
+                val p = dataStart + idx * 4
+                Float.fromBits(
+                    (buffer[p].toInt() and 0xFF) or
+                    ((buffer[p + 1].toInt() and 0xFF) shl 8) or
+                    ((buffer[p + 2].toInt() and 0xFF) shl 16) or
+                    ((buffer[p + 3].toInt() and 0xFF) shl 24)
+                )
             }
             effectiveFormat == 1 && bitsPerSample == 16 -> {
-                val sb = ByteBuffer.wrap(buffer, dataStart, totalSamples * 2)
-                    .order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
-                for (i in rawSamples.indices) rawSamples[i] = sb.get(i) / 32768f
+                val p = dataStart + idx * 2
+                ((buffer[p].toInt() and 0xFF) or (buffer[p + 1].toInt() shl 8)) / 32768f
             }
             effectiveFormat == 1 && bitsPerSample == 24 -> {
                 // 24-bit PCM: 3 bytes per sample, little-endian signed
-                for (i in rawSamples.indices) {
-                    val bytePos = dataStart + i * 3
-                    val b0 = buffer[bytePos].toInt() and 0xFF
-                    val b1 = buffer[bytePos + 1].toInt() and 0xFF
-                    val b2 = buffer[bytePos + 2].toInt()  // signed — sign-extends into 32 bits
-                    rawSamples[i] = ((b2 shl 16) or (b1 shl 8) or b0) / 8388608f  // 2^23
-                }
+                val p = dataStart + idx * 3
+                val b0 = buffer[p].toInt() and 0xFF
+                val b1 = buffer[p + 1].toInt() and 0xFF
+                val b2 = buffer[p + 2].toInt()  // signed — sign-extends into 32 bits
+                ((b2 shl 16) or (b1 shl 8) or b0) / 8388608f  // 2^23
             }
-            effectiveFormat == 1 && bitsPerSample == 32 -> {
-                // 32-bit PCM integer
-                val ib = ByteBuffer.wrap(buffer, dataStart, totalSamples * 4)
-                    .order(ByteOrder.LITTLE_ENDIAN).asIntBuffer()
-                for (i in rawSamples.indices) rawSamples[i] = ib.get(i) / 2147483648f  // 2^31
+            else -> {  // effectiveFormat == 1 && bitsPerSample == 32 (validated above)
+                val p = dataStart + idx * 4
+                ((buffer[p].toInt() and 0xFF) or
+                 ((buffer[p + 1].toInt() and 0xFF) shl 8) or
+                 ((buffer[p + 2].toInt() and 0xFF) shl 16) or
+                 (buffer[p + 3].toInt() shl 24)) / 2147483648f  // 2^31
             }
-            else -> throw IllegalArgumentException("Unsupported WAV format=$audioFormat (effective=$effectiveFormat) bits=$bitsPerSample")
         }
 
         // Sample rate compensation: adjust base frequency so the engine plays at correct pitch
         val deviceSampleRate = getDeviceSampleRate()
         val adjustedBaseFreq = C4_HZ * (deviceSampleRate.toFloat() / sampleRate.toFloat())
 
-        // Stereo: keep L and R channels separate; mono: right = null
+        // Stereo: de-interleave directly into L/R; mono: one buffer. No full-size intermediate.
         return if (channels == 2) {
-            val left  = FloatArray(rawSamples.size / 2) { i -> rawSamples[i * 2] }
-            val right = FloatArray(rawSamples.size / 2) { i -> rawSamples[i * 2 + 1] }
+            val frames = totalSamples / 2
+            val left  = FloatArray(frames)
+            val right = FloatArray(frames)
+            for (i in 0 until frames) {
+                left[i]  = decode(i * 2)
+                right[i] = decode(i * 2 + 1)
+            }
             Triple(left, right, adjustedBaseFreq)
         } else {
-            Triple(rawSamples, null, adjustedBaseFreq)
+            val mono = FloatArray(totalSamples) { decode(it) }
+            Triple(mono, null, adjustedBaseFreq)
         }
     }
 
@@ -542,7 +563,7 @@ class AudioEngine(
 
     fun updateTrackWaveforms() {
         backend.getTrackWaveforms(trackWaveformBufferFlat, activeTrackFlags)
-        for (t in 0 until 8) {
+        for (t in 0 until 9) {
             trackWaveformBufferFlat.copyInto(trackWaveformBuffers[t], 0, t * 620, (t + 1) * 620)
         }
     }
@@ -848,9 +869,14 @@ class AudioEngine(
     fun downsampleSample(instrumentId: Int, factor: Int) {
         backend.downsampleSample(instrumentId, factor)
         sampleRateRatios[instrumentId]?.let { sampleRateRatios[instrumentId] = it * factor }
+        // Phrase playback reads the sampleBaseFrequencies cache (ROOT × ratio / detune), not
+        // sampleRateRatios — scale it by the same factor or playback pitch is permanently wrong
+        // while previews (which recompute from the ratio) sound correct.
+        sampleBaseFrequencies[instrumentId]?.let { sampleBaseFrequencies[instrumentId] = it * factor }
     }
 
     fun applyRateMode(instrumentId: Int, factor: Int) {
+        val oldRatio = sampleRateRatios[instrumentId]
         if (factor <= 1) {
             // Restore HIGH: reset ratio to original and discard cache.
             originalSampleRateRatios.remove(instrumentId)?.let { origRatio ->
@@ -864,6 +890,15 @@ class AudioEngine(
             // Set ratio relative to original so pitch stays correct at any rate.
             originalSampleRateRatios[instrumentId]?.let { origRatio ->
                 sampleRateRatios[instrumentId] = origRatio * factor
+            }
+        }
+        // Keep the playback base-frequency cache in sync (see downsampleSample): scale it by the
+        // ratio change. ROOT/DETUNE edits later recompute it fully via updateInstrumentBaseFrequency,
+        // which reads the updated sampleRateRatios — so the two stay consistent either way.
+        val newRatio = sampleRateRatios[instrumentId]
+        if (oldRatio != null && newRatio != null && oldRatio != newRatio) {
+            sampleBaseFrequencies[instrumentId]?.let {
+                sampleBaseFrequencies[instrumentId] = it * (newRatio / oldRatio)
             }
         }
         backend.applyRateMode(instrumentId, factor)

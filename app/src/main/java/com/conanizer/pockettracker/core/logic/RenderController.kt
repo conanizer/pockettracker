@@ -4,7 +4,7 @@ import com.conanizer.pockettracker.core.audio.AudioEngine
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.logging.ILogger
 import com.conanizer.pockettracker.core.storage.IFileSystem
-import com.conanizer.pockettracker.core.storage.WavWriter
+import com.conanizer.pockettracker.core.storage.WavStreamWriter
 
 /**
  * RENDER CONTROLLER
@@ -18,8 +18,8 @@ import com.conanizer.pockettracker.core.storage.WavWriter
  *   1. Find song bounds (first / last used row)
  *   2. Set up instrument params (sample points, filter, modulation)
  *   3. scheduleSongForRender → fills the C++ note queue at frames 0..N
- *   4. renderFrames(N) → C++ processes the queue offline and returns audio
- *   5. Write 16-bit stereo WAV
+ *   4. renderToWavFile → renders in ~5 s chunks, streaming each chunk to a
+ *      16-bit stereo WAV via WavStreamWriter (flat memory use, real progress)
  */
 class RenderController(
     private val audioEngine: AudioEngine,
@@ -31,6 +31,46 @@ class RenderController(
 
     companion object {
         private const val TAG = "RenderController"
+
+        // Frames per renderFrames() JNI call: ~5 s of stereo float ≈ 1.7 MB per chunk.
+        // Rendering the whole song in ONE call held ~4 full-song copies in RAM at peak
+        // (C++ vector + jfloatArray + channel splits + WAV ByteBuffer) — an OOM kill on
+        // 1 GB devices for songs of a few minutes. Chunking keeps peak memory flat and
+        // makes real render progress reporting possible.
+        private const val RENDER_CHUNK_FRAMES = 220_500
+    }
+
+    /**
+     * Render [totalFrames] from the already-scheduled C++ note queue into a 16-bit stereo WAV
+     * at [path], in RENDER_CHUNK_FRAMES slices. Reports progress over [progressFrom]..[progressTo].
+     * The engine keeps its state (frame counter, scheduled notes) across chunks, so chunked
+     * output is bit-identical to a single renderFrames(totalFrames) call.
+     */
+    private fun renderToWavFile(
+        totalFrames: Long,
+        sampleRate: Int,
+        path: String,
+        progressCallback: ProgressCallback?,
+        progressFrom: Float,
+        progressTo: Float,
+        progressLabel: String
+    ): Boolean {
+        val writer = WavStreamWriter(path, sampleRate)
+        try {
+            var rendered = 0L
+            while (rendered < totalFrames) {
+                val chunk = minOf(RENDER_CHUNK_FRAMES.toLong(), totalFrames - rendered).toInt()
+                val audio = audioBackend.renderFrames(chunk, sampleRate)
+                writer.appendInterleaved(audio, chunk)
+                rendered += chunk
+                val p = progressFrom + (progressTo - progressFrom) * (rendered.toFloat() / totalFrames)
+                progressCallback?.onProgress(p, progressLabel)
+            }
+            return writer.finish()
+        } catch (e: Exception) {
+            writer.abort()
+            throw e
+        }
     }
 
     sealed class RenderResult {
@@ -83,27 +123,16 @@ class RenderController(
             audioBackend.setLimiterPreGain(project.limiterPreGain)
 
             val sampleRate = audioBackend.getSampleRate()
-            val audio = audioBackend.renderFrames(totalFrames.toInt(), sampleRate)
-
-            progressCallback?.onProgress(0.85f, "Writing WAV file...")
-
-            val n = totalFrames.toInt()
-            val leftChannel  = FloatArray(n) { audio[it * 2] }
-            val rightChannel = FloatArray(n) { audio[it * 2 + 1] }
-
             val outputDir = fileSystem.getRendersDirectory()
             val filename  = generateFilename(project.name, outputDir)
 
-            val success = WavWriter.writeWav(
-                fileSystem    = fileSystem,
-                path          = filename,
-                leftChannel   = leftChannel,
-                rightChannel  = rightChannel,
-                sampleRate    = sampleRate
+            val success = renderToWavFile(
+                totalFrames, sampleRate, filename,
+                progressCallback, 0.3f, 0.98f, "Rendering audio..."
             )
 
             return if (success) {
-                val durationMs = (n.toLong() * 1000L) / sampleRate
+                val durationMs = (totalFrames * 1000L) / sampleRate
                 progressCallback?.onProgress(1f, "Done!")
                 RenderResult.Success(filename, durationMs)
             } else {
@@ -164,27 +193,16 @@ class RenderController(
             audioBackend.setLimiterPreGain(project.limiterPreGain)
 
             val sampleRate = audioBackend.getSampleRate()
-            val audio = audioBackend.renderFrames(totalFrames.toInt(), sampleRate)
-
-            progressCallback?.onProgress(0.85f, "Writing WAV file...")
-
-            val n = totalFrames.toInt()
-            val leftChannel  = FloatArray(n) { audio[it * 2] }
-            val rightChannel = FloatArray(n) { audio[it * 2 + 1] }
-
             val outputDir = fileSystem.getResampledDirectory()
             val filename  = generateResampledFilename(outputDir, customBaseName)
 
-            val success = WavWriter.writeWav(
-                fileSystem   = fileSystem,
-                path         = filename,
-                leftChannel  = leftChannel,
-                rightChannel = rightChannel,
-                sampleRate   = sampleRate
+            val success = renderToWavFile(
+                totalFrames, sampleRate, filename,
+                progressCallback, 0.3f, 0.98f, "Rendering audio..."
             )
 
             return if (success) {
-                val durationMs = (n.toLong() * 1000L) / sampleRate
+                val durationMs = (totalFrames * 1000L) / sampleRate
                 progressCallback?.onProgress(1f, "Done!")
                 RenderResult.Success(filename, durationMs)
             } else {
@@ -276,7 +294,8 @@ class RenderController(
             var passIndex = 0
 
             for ((stemIdx, trackId) in activeTracks.withIndex()) {
-                progressCallback?.onProgress(passIndex.toFloat() / totalPasses, "Rendering track ${stemIdx + 1}/${activeTracks.size}...")
+                val label = "Rendering track ${stemIdx + 1}/${activeTracks.size}..."
+                progressCallback?.onProgress(passIndex.toFloat() / totalPasses, label)
 
                 audioBackend.stopAll()
                 audioBackend.clearScheduledNotes()
@@ -285,63 +304,52 @@ class RenderController(
                 val totalFrames = playbackController.scheduleSongForRender(project, startRow, endRow)
                 if (totalFrames > 0L) {
                     audioBackend.setStemsMode(trackId + 1)
-                    val audio = audioBackend.renderFrames(totalFrames.toInt(), sampleRate)
-                    audioBackend.setStemsMode(0)
-
-                    val n = totalFrames.toInt()
-                    WavWriter.writeWav(
-                        fileSystem   = fileSystem,
-                        path         = "$stemDir/${safeProjectName}_${stemIdx + 1}.wav",
-                        leftChannel  = FloatArray(n) { audio[it * 2] },
-                        rightChannel = FloatArray(n) { audio[it * 2 + 1] },
-                        sampleRate   = sampleRate
+                    renderToWavFile(
+                        totalFrames, sampleRate, "$stemDir/${safeProjectName}_${stemIdx + 1}.wav",
+                        progressCallback,
+                        passIndex.toFloat() / totalPasses, (passIndex + 1).toFloat() / totalPasses, label
                     )
+                    audioBackend.setStemsMode(0)
                 }
                 passIndex++
             }
 
             // Reverb stem (only if instruments use reverb send)
             if (hasReverbSend) {
-                progressCallback?.onProgress(passIndex.toFloat() / totalPasses, "Rendering reverb stem...")
+                val label = "Rendering reverb stem..."
+                progressCallback?.onProgress(passIndex.toFloat() / totalPasses, label)
                 audioBackend.stopAll()
                 audioBackend.clearScheduledNotes()
                 audioBackend.resetFrameCounter()
                 val reverbFrames = playbackController.scheduleSongForRender(project, startRow, endRow)
                 if (reverbFrames > 0L) {
                     audioBackend.setStemsMode(9)
-                    val audio = audioBackend.renderFrames(reverbFrames.toInt(), sampleRate)
-                    audioBackend.setStemsMode(0)
-                    val n = reverbFrames.toInt()
-                    WavWriter.writeWav(
-                        fileSystem   = fileSystem,
-                        path         = "$stemDir/${safeProjectName}_reverb.wav",
-                        leftChannel  = FloatArray(n) { audio[it * 2] },
-                        rightChannel = FloatArray(n) { audio[it * 2 + 1] },
-                        sampleRate   = sampleRate
+                    renderToWavFile(
+                        reverbFrames, sampleRate, "$stemDir/${safeProjectName}_reverb.wav",
+                        progressCallback,
+                        passIndex.toFloat() / totalPasses, (passIndex + 1).toFloat() / totalPasses, label
                     )
+                    audioBackend.setStemsMode(0)
                 }
                 passIndex++
             }
 
             // Delay stem (only if instruments use delay send)
             if (hasDelaySend) {
-                progressCallback?.onProgress(passIndex.toFloat() / totalPasses, "Rendering delay stem...")
+                val label = "Rendering delay stem..."
+                progressCallback?.onProgress(passIndex.toFloat() / totalPasses, label)
                 audioBackend.stopAll()
                 audioBackend.clearScheduledNotes()
                 audioBackend.resetFrameCounter()
                 val delayFrames = playbackController.scheduleSongForRender(project, startRow, endRow)
                 if (delayFrames > 0L) {
                     audioBackend.setStemsMode(10)
-                    val audio = audioBackend.renderFrames(delayFrames.toInt(), sampleRate)
-                    audioBackend.setStemsMode(0)
-                    val n = delayFrames.toInt()
-                    WavWriter.writeWav(
-                        fileSystem   = fileSystem,
-                        path         = "$stemDir/${safeProjectName}_delay.wav",
-                        leftChannel  = FloatArray(n) { audio[it * 2] },
-                        rightChannel = FloatArray(n) { audio[it * 2 + 1] },
-                        sampleRate   = sampleRate
+                    renderToWavFile(
+                        delayFrames, sampleRate, "$stemDir/${safeProjectName}_delay.wav",
+                        progressCallback,
+                        passIndex.toFloat() / totalPasses, (passIndex + 1).toFloat() / totalPasses, label
                     )
+                    audioBackend.setStemsMode(0)
                 }
             }
 
