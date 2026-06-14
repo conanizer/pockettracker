@@ -640,7 +640,7 @@ surfaced two pre-existing bugs unrelated to the Batch-2 changes (3 and 5 below).
    paste / delete operate on the full multi-screen selection. SCREEN-scope (cycle L+B to ALL)
    selects the whole song. PHRASE/CHAIN/TABLE selection unchanged.
 
-### Batch 3 — low-risk performance + cleanup (2026-06-14) — 🔧 awaiting test
+### Batch 3 — low-risk performance + cleanup (2026-06-14) — ✅ device-tested + committed (`d03df9b`)
 
 Mechanical perf/memory wins for the 1 GB Miyoo Flip — no real-time mix-loop restructure and no
 behavioral change. (The structural 6.1 idle-redraw and the audio-hot-path items 1.2/1.3/1.10 are
