@@ -767,7 +767,7 @@ Fix — **dedicated preview lane, shown only when stopped** (Option 2 + refineme
 
 **Batch 4b device-tested OK 2026-06-14** and committed with Batch 4 (`ddef4b3`).
 
-### Batch 5 — audio hot-path: trim the per-callback work (2026-06-14) — 🔧 awaiting device test
+### Batch 5 — audio hot-path: trim the per-callback work (2026-06-14) — ✅ device-tested + committed (`1b41ee6`)
 
 The 1.2/1.3/1.10 trio: less work in `processAudioBlock` (called ~230×/sec on a deadline). C++-only;
 no Kotlin/JNI changes. **Highest-risk batch in the review — this is the real-time mix path.**
