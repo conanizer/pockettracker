@@ -824,7 +824,7 @@ no Kotlin/JNI changes. **Highest-risk batch in the review — this is the real-t
 
 **Batch 5 device-tested OK + committed 2026-06-14 (`1b41ee6`), merged to main (`40dfc27`).**
 
-### Batch 6 — robustness / cleanup: 1.8 / 4.1 / 3.3 / 2.4 (2026-06-14) — 🔧 awaiting device test
+### Batch 6 — robustness / cleanup: 1.8 / 4.1 / 3.3 / 2.4 (2026-06-14) — ✅ device-tested + committed (`039a302`)
 
 The small remaining correctness/consistency items. Branch `code-review-2-cleanup` off main.
 
