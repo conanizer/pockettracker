@@ -1,6 +1,6 @@
 # Development Status
 
-**Last Updated:** 2026-06-12 (rev 8)
+**Last Updated:** 2026-06-15 (rev 9)
 
 ## Current Phase
 
@@ -172,6 +172,35 @@ Week 16:     MVP Release
 ---
 
 ## Completed Milestones
+
+### Review #2 Fixes (Complete - 2026-06-15)
+
+Second full staged code review (full record + per-batch fix log in `docs/code-review/REVIEW-2.md`),
+focused on crash-class races, 1 GB-device performance/memory, and build optimization. All findings
+implemented and device-tested on the Miyoo Flip across 8 batches (branches merged to `main`).
+
+**Crash / correctness:**
+- **Sample-editor crop/delete/paste/downsample now hold the edit lock + stop voices** before freeing buffers (same SIGSEGV class as Review #1's stereo bug, from the locking side).
+- **SoundFont eviction races fixed** — TSF handle read inside the slot mutex; `sfSlot` snapshot at all lock sites (the real native eviction crash). Eviction is now true-LRU (was "smallest instrumentId", which could evict the SF2 playing right now).
+- **Audio callback guarded against unusual Oboe burst sizes** (`numFrames > MAX_BLOCK` chunking — latent stack corruption).
+- **int64 sample START/END math** — samples > ~3.2 min no longer start from the wrong point / overflow.
+- **Sample-editor "discard changes?" dialog** added to the modal guard; DPAD guarded behind all dialogs.
+
+**Performance / memory (1 GB Miyoo):**
+- **Idle full-screen redraw eliminated** — the whole 640×480 layout no longer repaints 60×/sec when nothing is playing and no input has occurred; the oscilloscope ticker now only drives redraws while audio is audible. Biggest battery win.
+- **Audio hot-path trimmed** — scheduling queues drained once per block (was ~130k mutex ops/sec), per-callback scratch zeroing cut to the frames actually used, spectrum capture demand-gated + `try_lock` (never blocks the audio thread on the UI).
+- **Glyph atlas** — bitmap font pre-rendered into one image; each character draws as a single tinted blit (~7× fewer draw calls), pixel-perfect preserved.
+- **Streaming WAV export** (`WavStreamWriter`, 220500-frame chunks) + **streaming sample-load WAV parse** — fixed an OOM loading large renders as samples on the 128 MB heap.
+- **Allocation churn removed** — hex-string + glyph caches, cached FFT config, `RandomAccessFile` cue-chunk scan (no longer reads the whole WAV per sample load).
+
+**Build:**
+- **R8 minify + resource shrink** for release (APK ~halved, <9 MB) with kotlinx-serialization + JNI keep rules; release debug-signed for sideload.
+- **Explicit native `-O2`** for debug builds (was `-O0`) so the audio engine runs at near-release speed in the variant we test most; release stays `-O3`.
+
+**Consistency / robustness:**
+- `globalFrameCounter` made `std::atomic` (was a formal data race across audio/Kotlin threads).
+- OCTA visualizer gained a dedicated preview lane (sampler previews are audible on a scope when stopped).
+- Per-step logging gated behind `TRACE`; `getSampleRate()` fallback unified to 44100; GRV pre-scan uses the `fx()` accessor.
 
 ### Code Review Fixes (Complete - 2026-06-12)
 
