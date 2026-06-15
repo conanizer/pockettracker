@@ -906,7 +906,10 @@ by minify), so this needs a real `assembleRelease` install + smoke test, not jus
 APK <9 MB (~half debug). Needed `-dontwarn javax.annotation.processing.**` + `com.google.auto.service.**`
 (AutoService via ACRA, build-time only). Release debug-signed for sideload testing.
 
-### Batch 8 — 6.2 glyph atlas (2026-06-15) — 🔧 awaiting device test
+### Batch 8 — 6.2 glyph atlas (2026-06-15) — ✅ device-tested + committed (`cff5b33`)
+
+> Device test: text identical across all screens (hex cells, notes, labels, arrows, symbols), colours
+> correct incl. theme switches, smooth playback. **Last Review #2 item — review complete.**
 
 The last Review #2 item. Branch `code-review-2-glyph-atlas` off main. `PixelPerfectRenderer.kt` only.
 
