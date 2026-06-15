@@ -73,6 +73,10 @@ public:
     void reverseSample(int id, int startFrame, int endFrame);
     void backupSample(int id);
     void undoSample(int id);
+    // Free the single-level undo backup for a slot. Called when the sample editor closes: undo is
+    // unreachable once the editor is gone, so the backup is otherwise dead weight — a full-length copy
+    // (×2 for stereo) sitting in RAM until the slot is reloaded (REVIEW-3 1.1).
+    void freeSampleUndo(int id);
     // Non-destructive FX preview: saves a clean copy separate from the undo slot.
     // Call saveFxPreviewBackup before applySampleFx for preview; restoreFxPreviewBackup to revert.
     void saveFxPreviewBackup(int id);

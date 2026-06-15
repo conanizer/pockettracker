@@ -411,9 +411,11 @@ class RenderController(
 
         for (instId in usedInstruments) {
             val instrument = project.instruments.getOrNull(instId) ?: continue
-            if (instrument.sampleFilePath == null) {
+            if (instrument.isSoundfont()) {
                 // SF instrument: ensure instrumentParams[instId] has safe defaults so stale
                 // WAV params from a previous render or project load don't bleed into SF output.
+                // (isSoundfont(), not sampleFilePath == null — the latter is also true for empty
+                // sampler slots, which belong on the sampler path below — REVIEW-3 3.3.)
                 audioEngine.applySoundfontFilterOverrides(instrument)
                 audioEngine.pushInstrumentModulation(instrument, project.tempo)
                 audioEngine.pushInstrumentEqAndSends(instrument, project)

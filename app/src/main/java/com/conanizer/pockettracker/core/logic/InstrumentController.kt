@@ -536,8 +536,10 @@ class InstrumentController(
      * @return Instrument ID of the new instrument, or -1 if no empty slot / load failed
      */
     fun createResampledInstrument(project: Project, wavPath: String): Int {
-        // Find first empty slot (no sample file loaded)
-        val slotId = project.instruments.indexOfFirst { it.sampleFilePath == null }
+        // Find the first genuinely free slot. isFree() (not sampleFilePath == null) so we don't claim a
+        // configured SoundFont slot — those also have a null sampleFilePath, and overwriting one would
+        // leave a broken SOUNDFONT-typed instrument with a sample behind it (REVIEW-3 2.1).
+        val slotId = project.instruments.indexOfFirst { it.isFree() }
         if (slotId < 0) {
             setStatus("No empty instrument slot", success = false)
             logger.e(TAG, "❌ Resample: no empty instrument slot")
@@ -552,6 +554,10 @@ class InstrumentController(
         }
 
         val instrument = project.instruments[slotId]
+        // isFree() already guarantees a clean SAMPLER slot, but reset type/SF path defensively so the
+        // claimed slot can never be left in a hybrid state.
+        instrument.instrumentType = InstrumentType.SAMPLER
+        instrument.soundfontPath = null
         instrument.sampleFilePath = wavPath
         instrument.sampleId = slotId
         instrument.root = Note.fromString("C-4")

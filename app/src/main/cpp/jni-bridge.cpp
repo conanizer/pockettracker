@@ -219,6 +219,12 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1clear
     }
 }
 
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1freeSampleUndo(
+        JNIEnv *env, jobject thiz, jint id) {
+    if (engine) engine->freeSampleUndo((int)id);
+}
+
 JNIEXPORT jintArray JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getTrackActiveNotes(
         JNIEnv *env, jobject thiz) {

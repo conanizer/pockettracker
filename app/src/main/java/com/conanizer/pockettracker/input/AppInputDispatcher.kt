@@ -991,6 +991,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         }
         if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.showConfirmClose) {
             audioEngine.restoreFxPreviewBackup()
+            audioEngine.freeSampleUndo(sampleEditorState.instrumentId)  // editor closing — undo unreachable (REVIEW-3 1.1)
             sampleEditorState = sampleEditorState.copy(showConfirmClose = false, isModified = false)
             trackerController.currentScreen = previousScreen
             return
@@ -1748,6 +1749,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     sampleEditorState = sampleEditorState.copy(showConfirmClose = true)
                 } else {
                     audioEngine.restoreFxPreviewBackup()
+                    audioEngine.freeSampleUndo(sampleEditorState.instrumentId)  // editor closing — undo unreachable (REVIEW-3 1.1)
                     trackerController.currentScreen = previousScreen
                 }
                 return

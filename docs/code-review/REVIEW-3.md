@@ -317,4 +317,34 @@ concrete way to finally chip at the `handleButtonA` god-method.
   without OOM, all formats/paths correct. The dead Kotlin `loadWavFileFromPath`/`parseWavBuffer` (+ now
   unused `ByteBuffer`/`ByteOrder` imports) were deleted after confirmation.
 
-The Stage 1–5 findings above are not yet started.
+### Stage 1–5 batch 1 — 2.1 + 1.1 + 3.3 (2026-06-15) — 🔧 awaiting device test
+
+- **2.1 + 3.3 🔧 Resample no longer clobbers a SoundFont; `Instrument.isFree()/isSoundfont()` added**
+  (`TrackerData.kt`, `InstrumentController.kt`, `RenderController.kt`). New `Instrument.isSoundfont()`
+  and `isFree()` (= no WAV path, no SF path, type SAMPLER). `createResampledInstrument` searches with
+  `isFree()` instead of the overloaded `sampleFilePath == null` (which also matches a configured
+  SoundFont), and resets type/soundfontPath defensively when claiming the slot.
+  `RenderController.setupInstrumentParams` now branches on `isSoundfont()` (was `sampleFilePath == null`,
+  which also caught empty sampler slots). `AudioEngine` sampler-path check left as-is — it's already
+  past the SF early-return, so `sampleFilePath == null` there unambiguously means empty sampler.
+  *Test:* configure a SoundFont on instrument 00, make a short song, resample a selection → the resample
+  lands in a *different* empty slot and 00 stays a working SoundFont (previously 00 was overwritten into
+  a broken SOUNDFONT-typed slot with a sample). Normal resample into an empty project still works; SF +
+  sampler render/playback unchanged.
+
+- **1.1 🔧 Free the sample-editor undo backup on close** (`audio-engine.h`/`sample-editor.cpp`,
+  `jni-bridge.cpp`, `IAudioBackend.kt`, `OboeAudioBackend.kt`, `AudioEngine.kt`, `AppInputDispatcher.kt`).
+  New `freeSampleUndo(id)` frees `sampleBackups[id]` (+R) — a full-length copy made before every
+  destructive edit — when the editor closes (both the clean B-exit and the discard-confirm exit; B is the
+  only way out since R-nav is blocked in the editor). Undo is unreachable after close, so this is
+  behavior-neutral and also eliminates a stale cross-session undo. The RATE-HIGH cache (`originalSamples`)
+  is intentionally NOT freed: it's null at HIGH and needed for lossless restore at LOFI/NORM, so freeing
+  it would only break RATE.
+  *Test:* edit a sample (crop/normalize/etc.), close the editor → slot memory drops by ~one sample copy;
+  reopen → sample intact, UNDO before any new edit does nothing (no stale restore), a fresh edit + UNDO
+  still reverts. RATE HIGH↔LOFI↔NORM still restores losslessly across open/close. Edit several samples in
+  a session and confirm memory doesn't climb per closed editor.
+
+Remaining Stage 1–5 findings not yet started: **2.2** (renderSelection ignores DUST master bus),
+**3.1** (shared song-traversal helper), **3.2** (dual base-frequency caches), **4.1** (handleButtonA
+decomposition), **4.2** (dead code), and the Stage 5 ideas.

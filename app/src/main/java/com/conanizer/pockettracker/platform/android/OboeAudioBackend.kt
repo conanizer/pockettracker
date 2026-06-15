@@ -79,6 +79,8 @@ class OboeAudioBackend : IAudioBackend {
         native_clearSample(id)
     }
 
+    override fun freeSampleUndo(id: Int) = native_freeSampleUndo(id)
+
     override fun getSampleLength(id: Int): Int = native_getSampleLength(id)
     override fun getSampleWaveform(id: Int, numBins: Int): FloatArray = native_getSampleWaveform(id, numBins)
     override fun getSampleWaveformRange(id: Int, startFrame: Int, endFrame: Int, numBins: Int): FloatArray = native_getSampleWaveformRange(id, startFrame, endFrame, numBins)
@@ -505,6 +507,7 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_hasStereoData(sampleId: Int): Boolean
     private external fun native_clearAllSamples()
     private external fun native_clearSample(id: Int)
+    private external fun native_freeSampleUndo(id: Int)
     private external fun native_getTrackActiveNotes(): IntArray
     private external fun native_scheduleNote(
         targetFrame: Long,

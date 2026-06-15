@@ -75,6 +75,10 @@ interface IAudioBackend {
     /** Free all buffers for a single sample slot (used when a slot is repurposed, e.g. sampler → SoundFont). */
     fun clearSample(id: Int)
 
+    /** Free the single-level undo backup for slot [id] (called when the sample editor closes — undo is
+     *  unreachable afterwards, so the backup is otherwise wasted RAM). See REVIEW-3 1.1. */
+    fun freeSampleUndo(id: Int)
+
     // Sample editor operations
     fun getSampleLength(id: Int): Int
     fun getSampleWaveform(id: Int, numBins: Int): FloatArray

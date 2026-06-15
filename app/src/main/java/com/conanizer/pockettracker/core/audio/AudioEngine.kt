@@ -703,6 +703,10 @@ class AudioEngine(
         backend.clearSample(instrumentId)
     }
 
+    /** Free the sample editor's single-level undo backup for [instrumentId] (call on editor close — the
+     *  undo is unreachable once the editor is gone, so it's just wasted RAM). See REVIEW-3 1.1. */
+    fun freeSampleUndo(instrumentId: Int) = backend.freeSampleUndo(instrumentId)
+
     fun getSampleLength(instrumentId: Int): Int = backend.getSampleLength(instrumentId)
     fun getSampleWaveform(instrumentId: Int, numBins: Int): FloatArray = backend.getSampleWaveform(instrumentId, numBins)
     fun getSampleWaveformRange(instrumentId: Int, startFrame: Int, endFrame: Int, numBins: Int): FloatArray = backend.getSampleWaveformRange(instrumentId, startFrame, endFrame, numBins)
