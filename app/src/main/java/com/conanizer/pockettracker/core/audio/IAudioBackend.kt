@@ -49,6 +49,18 @@ interface IAudioBackend {
      */
     fun loadSampleStereo(id: Int, left: FloatArray, right: FloatArray)
 
+    /**
+     * Decode a WAV file directly into native sample slot [id] — no Java-heap round trip. Supports
+     * 16/24/32-bit PCM, 32-bit float, mono/stereo, WAVE_FORMAT_EXTENSIBLE. Returns the WAV's sample
+     * rate (>0) on success, 0 on failure. Keeping the decode native lets multi-MB samples load on
+     * low-heap devices without OOM (the byte buffer + both float channels no longer have to fit in
+     * the capped Java heap).
+     *
+     * @param id Sample slot (0-255)
+     * @param path Absolute filesystem path to the .wav file
+     */
+    fun loadSampleFromWav(id: Int, path: String): Int
+
     /** Returns true if the sample at [id] has a separate right-channel buffer (stereo). */
     fun hasStereoData(id: Int): Boolean
 

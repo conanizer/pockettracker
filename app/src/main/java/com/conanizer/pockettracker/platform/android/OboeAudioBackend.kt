@@ -62,6 +62,12 @@ class OboeAudioBackend : IAudioBackend {
         Log.d(TAG, "📦 Loaded stereo sample $id (${left.size} frames)")
     }
 
+    override fun loadSampleFromWav(id: Int, path: String): Int {
+        val rate = native_loadSampleFromWav(id, path)
+        Log.d(TAG, "📦 Loaded WAV sample $id from $path (rate=$rate)")
+        return rate
+    }
+
     override fun hasStereoData(id: Int): Boolean = native_hasStereoData(id)
 
     override fun clearAllSamples() {
@@ -495,6 +501,7 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_delete()
     private external fun native_loadSample(sampleId: Int, sampleData: FloatArray)
     private external fun native_loadSampleStereo(sampleId: Int, leftData: FloatArray, rightData: FloatArray)
+    private external fun native_loadSampleFromWav(id: Int, path: String): Int
     private external fun native_hasStereoData(sampleId: Int): Boolean
     private external fun native_clearAllSamples()
     private external fun native_clearSample(id: Int)

@@ -6,6 +6,9 @@
 #include "mods/modules/pitch-slide-module.h"
 #include "mods/modules/vibrato-module.h"
 #include "effects/primitives/sola-stretch.h"
+#include <cstdio>
+#include <cstdint>
+#include <new>
 
 // Definition of the per-track soundfont voice array (extern declared in audio-engine.h)
 SoundfontVoice sfVoices[8];
@@ -196,6 +199,179 @@ void AudioEngine::loadSampleStereo(int id, const float* left, const float* right
     sampleLengths[id] = length;
 
     LOGD("Sample %d: %d frames (stereo)", id, length);
+}
+
+// Decode one WAV sample at `p` to a normalized float in [-1, 1). Mirrors AudioEngine.kt
+// parseWavBuffer's `decode()` byte-for-byte (little-endian, identical divisors) so a native file
+// load is bit-identical to the old Java decode.
+static inline float decodeWavSample(const uint8_t* p, int audioFormat, int bitsPerSample) {
+    if (audioFormat == 3 && bitsPerSample == 32) {           // IEEE float
+        uint32_t u = (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+                     ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+        float out;
+        std::memcpy(&out, &u, sizeof(out));
+        return out;
+    }
+    if (bitsPerSample == 16) {                               // PCM 16-bit
+        int16_t v = (int16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
+        return v / 32768.0f;
+    }
+    if (bitsPerSample == 24) {                               // PCM 24-bit, little-endian signed
+        // Assemble unsigned (no signed-shift UB), then sign-extend bit 23.
+        uint32_t u = (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16);
+        int32_t v = (u & 0x800000u) ? (int32_t)(u | 0xFF000000u) : (int32_t)u;
+        return v / 8388608.0f;                               // 2^23
+    }
+    // PCM 32-bit (only remaining supported case)
+    uint32_t u = (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+                 ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+    return (int32_t)u / 2147483648.0f;                       // 2^31
+}
+
+int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
+    if (id < 0 || id >= 256 || !path) return 0;
+
+    FILE* f = fopen(path, "rb");
+    if (!f) { LOGE("loadSampleFromWavFile: cannot open %s", path); return 0; }
+
+    // RIFF/WAVE header (12 bytes).
+    uint8_t hdr[12];
+    if (fread(hdr, 1, 12, f) != 12 ||
+        std::memcmp(hdr, "RIFF", 4) != 0 || std::memcmp(hdr + 8, "WAVE", 4) != 0) {
+        LOGE("loadSampleFromWavFile: not a RIFF/WAVE file: %s", path);
+        fclose(f);
+        return 0;
+    }
+
+    // Scan chunks for fmt + data (fmt always precedes data in a valid WAV). Don't assume fixed
+    // offsets — a JUNK/bext/RF64 chunk before fmt shifts everything (matches parseWavBuffer).
+    int audioFormat = 0, channels = 0, sampleRate = 0, bitsPerSample = 0;
+    bool haveFmt = false;
+    long dataOffset = -1;
+    uint32_t dataSize = 0;
+    uint8_t ch[8];
+    while (fread(ch, 1, 8, f) == 8) {
+        uint32_t chunkSize = (uint32_t)ch[4] | ((uint32_t)ch[5] << 8) |
+                             ((uint32_t)ch[6] << 16) | ((uint32_t)ch[7] << 24);
+        if (std::memcmp(ch, "fmt ", 4) == 0) {
+            uint8_t fmt[40] = {0};
+            uint32_t toRead = chunkSize < sizeof(fmt) ? chunkSize : (uint32_t)sizeof(fmt);
+            if (fread(fmt, 1, toRead, f) != toRead) break;
+            audioFormat   = (int)(fmt[0] | (fmt[1] << 8));
+            channels      = (int)(fmt[2] | (fmt[3] << 8));
+            sampleRate    = (int)((uint32_t)fmt[4] | ((uint32_t)fmt[5] << 8) |
+                                  ((uint32_t)fmt[6] << 16) | ((uint32_t)fmt[7] << 24));
+            bitsPerSample = (int)(fmt[14] | (fmt[15] << 8));
+            // WAVE_FORMAT_EXTENSIBLE (0xFFFE): real format code is the first 2 bytes of the
+            // sub-format GUID at offset 24 into the fmt body (1=PCM, 3=float).
+            if (audioFormat == 0xFFFE && toRead >= 26)
+                audioFormat = (int)(fmt[24] | (fmt[25] << 8));
+            haveFmt = true;
+            long skip = (long)chunkSize - (long)toRead + (long)(chunkSize & 1);
+            if (skip > 0) fseek(f, skip, SEEK_CUR);
+        } else if (std::memcmp(ch, "data", 4) == 0) {
+            dataOffset = ftell(f);
+            dataSize = chunkSize;
+            break;
+        } else {
+            fseek(f, (long)chunkSize + (long)(chunkSize & 1), SEEK_CUR);  // skip, pad to even
+        }
+    }
+
+    if (!haveFmt || dataOffset < 0 || channels < 1 || channels > 2 ||
+        bitsPerSample == 0 || sampleRate == 0) {
+        LOGE("loadSampleFromWavFile: bad header (fmt=%d ch=%d bits=%d rate=%d) %s",
+             audioFormat, channels, bitsPerSample, sampleRate, path);
+        fclose(f);
+        return 0;
+    }
+    bool isFloat = (audioFormat == 3 && bitsPerSample == 32);
+    bool isPcm   = (audioFormat == 1 && (bitsPerSample == 16 || bitsPerSample == 24 || bitsPerSample == 32));
+    if (!isFloat && !isPcm) {
+        LOGE("loadSampleFromWavFile: unsupported format=%d bits=%d %s", audioFormat, bitsPerSample, path);
+        fclose(f);
+        return 0;
+    }
+
+    int bytesPerSample = bitsPerSample / 8;
+    int bytesPerFrame  = bytesPerSample * channels;
+
+    // Clamp dataSize to the real bytes left after dataOffset so a bogus chunk size can't over-read.
+    fseek(f, 0, SEEK_END);
+    long fileEnd = ftell(f);
+    fseek(f, dataOffset, SEEK_SET);
+    long avail = fileEnd - dataOffset;
+    if (avail < 0) avail = 0;
+    if ((long)dataSize > avail) dataSize = (uint32_t)avail;
+
+    int totalFrames = (int)(dataSize / (uint32_t)bytesPerFrame);
+    if (totalFrames < 1) { fclose(f); return 0; }
+
+    // Allocate the destination buffers in NATIVE memory (not the capped Java heap). std::nothrow so
+    // a genuine OOM returns cleanly instead of terminating (native new aborts under -fno-exceptions).
+    float* newL = new (std::nothrow) float[totalFrames];
+    float* newR = (channels == 2) ? new (std::nothrow) float[totalFrames] : nullptr;
+    if (!newL || (channels == 2 && !newR)) {
+        delete[] newL;
+        delete[] newR;
+        fclose(f);
+        LOGE("loadSampleFromWavFile: OOM allocating %d frames", totalFrames);
+        return 0;
+    }
+
+    // Stream the data chunk in whole-frame blocks so a sample is never split across a read.
+    const int BLOCK_FRAMES = 16384;
+    std::vector<uint8_t> blk((size_t)BLOCK_FRAMES * bytesPerFrame);
+    int frameIdx = 0;
+    while (frameIdx < totalFrames) {
+        int want = totalFrames - frameIdx;
+        if (want > BLOCK_FRAMES) want = BLOCK_FRAMES;
+        size_t got = fread(blk.data(), 1, (size_t)want * bytesPerFrame, f);
+        int framesGot = (int)(got / (size_t)bytesPerFrame);
+        for (int i = 0; i < framesGot; i++) {
+            const uint8_t* p = blk.data() + (size_t)i * bytesPerFrame;
+            newL[frameIdx + i] = decodeWavSample(p, audioFormat, bitsPerSample);
+            if (channels == 2)
+                newR[frameIdx + i] = decodeWavSample(p + bytesPerSample, audioFormat, bitsPerSample);
+        }
+        frameIdx += framesGot;
+        if (framesGot < want) break;  // short read / truncated file (shouldn't happen — see clamp)
+    }
+    fclose(f);
+
+    // `new float[]` is not zero-initialized; a short read above would leave indeterminate tail
+    // samples. dataSize is clamped to the bytes actually present, so this is defensive — but zero
+    // any unfilled tail so we can never play uninitialized memory as noise.
+    if (frameIdx < totalFrames) {
+        std::memset(newL + frameIdx, 0, (size_t)(totalFrames - frameIdx) * sizeof(float));
+        if (newR) std::memset(newR + frameIdx, 0, (size_t)(totalFrames - frameIdx) * sizeof(float));
+    }
+
+    // Swap into the slot under the edit lock (audio thread try_locks it in the mix loop), stopping
+    // any voice reading the old buffer first — same discipline as loadSample. Free EVERY stale
+    // per-slot buffer, including the undo backup that loadSample/loadSampleStereo leak on reuse
+    // (REVIEW-3 1.2): a fresh file makes the old sample's undo/rate caches meaningless.
+    {
+        std::lock_guard<std::mutex> lock(sampleEditMutex);
+        for (int v = 0; v < MAX_VOICES; v++) {
+            if (voices[v].instrId == id && voices[v].isActive) voices[v].stop();
+        }
+        delete[] samples[id];
+        delete[] samplesRight[id];
+        delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
+        delete[] sampleBackupsRight[id];   sampleBackupsRight[id] = nullptr;
+        sampleBackupLengths[id] = 0;
+        delete[] originalSamples[id];      originalSamples[id] = nullptr;
+        delete[] originalSamplesRight[id]; originalSamplesRight[id] = nullptr;
+        originalSampleLengths[id] = 0;
+        samples[id] = newL;
+        samplesRight[id] = newR;
+        sampleLengths[id] = totalFrames;
+    }
+
+    LOGD("loadSampleFromWavFile: id=%d %d frames %s rate=%d bits=%d fmt=%d",
+         id, totalFrames, channels == 2 ? "stereo" : "mono", sampleRate, bitsPerSample, audioFormat);
+    return sampleRate;
 }
 
 bool AudioEngine::hasStereoData(int id) {

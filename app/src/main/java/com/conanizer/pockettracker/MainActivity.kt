@@ -860,8 +860,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val selectionInfo = stateVersion.let { trackerController.inputController.getSelectionInfo() }
     val clipboardInfo = stateVersion.let { clipboardManager.getClipboardInfo() }
     val selectionModeActive = stateVersion.let { trackerController.inputController.selectionMode }
-    val isCellSelectedFn: (Int, Int) -> Boolean = { row, col ->
-        trackerController.inputController.isCellSelected(row, col)
+    // Key the cell-selection lambda on the current selection bounds so its IDENTITY changes when
+    // the selection is expanded. Post-6.1 the screen only redraws when a param to PixelPerfectTracker
+    // changes; in selection mode the cursor is anchored and the scope label ("SEL:CELL") is unchanged,
+    // and isCellSelected was a stable (compiler-memoized) lambda — so a growing selection changed no
+    // param, the composable was skipped, and the highlight looked frozen (copy still worked blind).
+    // remember(selStart, selEnd) hands down a fresh lambda on each expand → recomposition → redraw.
+    val selStart = stateVersion.let { trackerController.inputController.selectionStart }
+    val selEnd = stateVersion.let { trackerController.inputController.selectionEnd }
+    val isCellSelectedFn: (Int, Int) -> Boolean = remember(selStart, selEnd) {
+        { row, col -> trackerController.inputController.isCellSelected(row, col) }
     }
 
     val trackerParams = TrackerScreenParams(

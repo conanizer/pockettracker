@@ -12,8 +12,6 @@ import com.conanizer.pockettracker.core.data.VolumeUtils
 import com.conanizer.pockettracker.core.logging.ILogger
 import com.conanizer.pockettracker.core.resources.IResourceLoader
 import java.io.File
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import kotlin.math.pow
 
 class AudioEngine(
@@ -99,18 +97,22 @@ class AudioEngine(
                 return false
             }
 
-            val (left, right, adjustedBaseFreq) = loadWavFileFromPath(filePath)
-            if (right != null) {
-                backend.loadSampleStereo(instrumentId, left, right)
-            } else {
-                backend.loadSample(instrumentId, left)
+            // Decode entirely in native memory (no Java-heap round trip). A multi-MB sample used to
+            // need the whole file ByteArray + both float channels live at once on the capped Java
+            // heap, which OOM-killed large loads even on a 3 GB device (REVIEW-3 6.2). Native returns
+            // the WAV sample rate; the base-frequency compensation is still computed here.
+            val wavRate = backend.loadSampleFromWav(instrumentId, filePath)
+            if (wavRate <= 0) {
+                logger.e(TAG, "❌ Failed to load sample (native WAV decode) from $filePath")
+                return false
             }
 
+            val adjustedBaseFreq = C4_HZ * (getDeviceSampleRate().toFloat() / wavRate.toFloat())
             sampleBaseFrequencies[instrumentId] = adjustedBaseFreq
             sampleRateRatios[instrumentId] = adjustedBaseFreq / C4_HZ
             originalSampleRateRatios.remove(instrumentId)
 
-            logger.d(TAG, "✅ Loaded sample: instrumentId=$instrumentId, length=${left.size}, stereo=${right != null}, baseFreq=$adjustedBaseFreq, path=$filePath")
+            logger.d(TAG, "✅ Loaded sample: instrumentId=$instrumentId, length=${backend.getSampleLength(instrumentId)}, stereo=${backend.hasStereoData(instrumentId)}, baseFreq=$adjustedBaseFreq, path=$filePath")
             return true
         } catch (e: Exception) {
             logger.e(TAG, "❌ Error loading sample from file: ${e.message}")
@@ -118,127 +120,11 @@ class AudioEngine(
         }
     }
 
-    private fun loadWavFileFromPath(filePath: String): Triple<FloatArray, FloatArray?, Float> {
-        File(filePath).inputStream().use { inputStream ->
-            val fileSize = inputStream.available()
-            val buffer = ByteArray(fileSize)
-            inputStream.read(buffer)
-
-            return parseWavBuffer(buffer)
-        }
-    }
-
-    private fun parseWavBuffer(buffer: ByteArray): Triple<FloatArray, FloatArray?, Float> {
-        if (buffer.size < 12) throw IllegalArgumentException("WAV buffer too small: ${buffer.size}")
-
-        fun readShortAt(pos: Int) = ByteBuffer.wrap(buffer, pos, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt()
-        fun readIntAt(pos: Int)   = ByteBuffer.wrap(buffer, pos, 4).order(ByteOrder.LITTLE_ENDIAN).int
-
-        // Scan all chunks from the start — do NOT assume fmt is at a fixed offset.
-        // Some files have a JUNK/bext/RF64 chunk before "fmt ", which shifts all byte positions.
-        var scanPos = 12  // Skip RIFF + WAVE header (12 bytes)
-        var fmtStart  = -1
-        var dataStart = -1
-        var dataSize  = -1
-        while (scanPos + 8 <= buffer.size) {
-            val chunkId   = String(buffer, scanPos, 4, Charsets.US_ASCII)
-            val chunkSize = readIntAt(scanPos + 4)
-            when (chunkId) {
-                "fmt " -> fmtStart = scanPos + 8  // record fmt data position
-                "data" -> {
-                    dataStart = scanPos + 8
-                    dataSize  = chunkSize.coerceAtMost(buffer.size - dataStart)
-                }
-            }
-            if (fmtStart >= 0 && dataStart >= 0) break
-            scanPos += 8 + chunkSize + (chunkSize and 1)  // pad to even boundary per WAV spec
-        }
-        if (fmtStart  < 0) throw IllegalArgumentException("No 'fmt ' chunk found in WAV file")
-        if (dataStart < 0) throw IllegalArgumentException("No 'data' chunk found in WAV file")
-
-        // Read fmt fields at their correct relative offsets inside the fmt chunk data
-        val audioFormat   = readShortAt(fmtStart + 0) and 0xFFFF  // 1=PCM, 3=IEEE float, 65534=extensible
-        val channels      = readShortAt(fmtStart + 2)
-        val sampleRate    = readIntAt  (fmtStart + 4)
-        val bitsPerSample = readShortAt(fmtStart + 14)
-
-        // WAVE_FORMAT_EXTENSIBLE (0xFFFE=65534): actual encoding is in the sub-format GUID.
-        // The GUID starts 24 bytes into the fmt data; its first 2 bytes are the real format code
-        // (1=PCM, 3=IEEE float) — identical to the standard audioFormat field.
-        val effectiveFormat = if (audioFormat == 65534 && fmtStart + 26 <= buffer.size) {
-            readShortAt(fmtStart + 24) and 0xFFFF
-        } else {
-            audioFormat
-        }
-
-        logger.d(TAG, "WAV: format=$audioFormat effective=$effectiveFormat channels=$channels sampleRate=$sampleRate bits=$bitsPerSample")
-
-        if (bitsPerSample == 0) throw IllegalArgumentException("WAV bitsPerSample is 0 — corrupt header?")
-        if (sampleRate    == 0) throw IllegalArgumentException("WAV sampleRate is 0 — corrupt header?")
-
-        val bytesPerSample = bitsPerSample / 8
-        val totalSamples   = dataSize / bytesPerSample
-
-        val supported = (effectiveFormat == 3 && bitsPerSample == 32) ||
-                        (effectiveFormat == 1 && (bitsPerSample == 16 || bitsPerSample == 24 || bitsPerSample == 32))
-        if (!supported) throw IllegalArgumentException(
-            "Unsupported WAV format=$audioFormat (effective=$effectiveFormat) bits=$bitsPerSample")
-
-        // Decode one PCM/float sample by index, straight from the byte buffer. Declared as a local
-        // `fun` (not a lambda) so the Int arg / Float return stay primitive — no per-sample boxing.
-        // Decoding directly into the destination channel buffers below avoids a full-size
-        // intermediate FloatArray; that intermediate doubled peak heap and OOM-killed large samples
-        // (e.g. a 29 MB song render) on the 1 GB Miyoo Flip (128 MB Java heap).
-        fun decode(idx: Int): Float = when {
-            effectiveFormat == 3 && bitsPerSample == 32 -> {
-                val p = dataStart + idx * 4
-                Float.fromBits(
-                    (buffer[p].toInt() and 0xFF) or
-                    ((buffer[p + 1].toInt() and 0xFF) shl 8) or
-                    ((buffer[p + 2].toInt() and 0xFF) shl 16) or
-                    ((buffer[p + 3].toInt() and 0xFF) shl 24)
-                )
-            }
-            effectiveFormat == 1 && bitsPerSample == 16 -> {
-                val p = dataStart + idx * 2
-                ((buffer[p].toInt() and 0xFF) or (buffer[p + 1].toInt() shl 8)) / 32768f
-            }
-            effectiveFormat == 1 && bitsPerSample == 24 -> {
-                // 24-bit PCM: 3 bytes per sample, little-endian signed
-                val p = dataStart + idx * 3
-                val b0 = buffer[p].toInt() and 0xFF
-                val b1 = buffer[p + 1].toInt() and 0xFF
-                val b2 = buffer[p + 2].toInt()  // signed — sign-extends into 32 bits
-                ((b2 shl 16) or (b1 shl 8) or b0) / 8388608f  // 2^23
-            }
-            else -> {  // effectiveFormat == 1 && bitsPerSample == 32 (validated above)
-                val p = dataStart + idx * 4
-                ((buffer[p].toInt() and 0xFF) or
-                 ((buffer[p + 1].toInt() and 0xFF) shl 8) or
-                 ((buffer[p + 2].toInt() and 0xFF) shl 16) or
-                 (buffer[p + 3].toInt() shl 24)) / 2147483648f  // 2^31
-            }
-        }
-
-        // Sample rate compensation: adjust base frequency so the engine plays at correct pitch
-        val deviceSampleRate = getDeviceSampleRate()
-        val adjustedBaseFreq = C4_HZ * (deviceSampleRate.toFloat() / sampleRate.toFloat())
-
-        // Stereo: de-interleave directly into L/R; mono: one buffer. No full-size intermediate.
-        return if (channels == 2) {
-            val frames = totalSamples / 2
-            val left  = FloatArray(frames)
-            val right = FloatArray(frames)
-            for (i in 0 until frames) {
-                left[i]  = decode(i * 2)
-                right[i] = decode(i * 2 + 1)
-            }
-            Triple(left, right, adjustedBaseFreq)
-        } else {
-            val mono = FloatArray(totalSamples) { decode(it) }
-            Triple(mono, null, adjustedBaseFreq)
-        }
-    }
+    // WAV file decoding now happens in C++ (backend.loadSampleFromWav → AudioEngine::loadSampleFromWavFile)
+    // so a multi-MB sample never has to fit in the capped Java heap (REVIEW-3 6.2). The old Kotlin
+    // loadWavFileFromPath/parseWavBuffer were removed once the native path was device-confirmed.
+    // (previewSampleData further down still takes in-memory floats — resampled audio — which is a
+    // separate path with no file to stream.)
 
     fun previewSampleFile(filePath: String): Boolean {
         try {
@@ -251,12 +137,13 @@ class AudioEngine(
             // Stop only the previous preview voice — leave song playback untouched.
             backend.killTrack(PREVIEW_TRACK_ID)
 
-            val (left, right, adjustedBaseFreq) = loadWavFileFromPath(filePath)
-            if (right != null) {
-                backend.loadSampleStereo(255, left, right)
-            } else {
-                backend.loadSample(255, left)
+            // Native decode (see loadSampleFromFile / REVIEW-3 6.2) — no Java-heap copy of the file.
+            val wavRate = backend.loadSampleFromWav(255, filePath)
+            if (wavRate <= 0) {
+                logger.e(TAG, "❌ Failed to preview sample (native WAV decode): $filePath")
+                return false
             }
+            val adjustedBaseFreq = C4_HZ * (getDeviceSampleRate().toFloat() / wavRate.toFloat())
 
             backend.resumeStream()
 

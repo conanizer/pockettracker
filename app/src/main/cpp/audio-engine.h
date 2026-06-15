@@ -25,6 +25,11 @@ public:
 
     void loadSample(int id, const float* data, int length);
     void loadSampleStereo(int id, const float* left, const float* right, int length);
+    // Decode a WAV file straight into native sample memory (no Java-heap round trip). Handles the
+    // same formats as the Kotlin parser it replaces for file loads — 16/24/32-bit PCM, 32-bit float,
+    // mono/stereo, WAVE_FORMAT_EXTENSIBLE. Returns the WAV sample rate (>0) on success, 0 on failure.
+    // Lets multi-MB samples load without OOM on the capped Java heap (REVIEW-3 6.2).
+    int loadSampleFromWavFile(int id, const char* path);
     bool hasStereoData(int id);
     void clearAllSamples();
     // Free all buffers for a single slot (used when a slot is repurposed, e.g. sampler → SoundFont).
