@@ -9,7 +9,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -1478,6 +1485,68 @@ private val _bitmapPaint = Paint().apply {
     isAntiAlias = false
 }
 
+// Dedicated paint for the glyph-atlas path: isAntiAlias=false + FilterQuality.None so the upscaled
+// cells stay hard-edged and crisp even when the letterbox offset is fractional (matches the per-rect
+// path exactly). Separate from _bitmapPaint so its per-glyph colorFilter never leaks into the
+// fallback drawing. colorFilter is set (to a cached tint) per glyph just before each draw.
+private val _atlasPaint = Paint().apply {
+    isAntiAlias = false
+    filterQuality = FilterQuality.None
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// GLYPH ATLAS (6.2)
+// ───────────────────────────────────────────────────────────────────────────
+// A full phrase screen is ~700+ glyphs, and the old per-glyph path emitted up to ~7 drawRect calls
+// each (thousands of draw ops/frame at 60 fps during playback). Instead we pre-render the 128 ASCII
+// glyphs once into a single 640×5 white-on-transparent ImageBitmap and stamp each glyph with ONE
+// tinted drawImage. FilterQuality.None (nearest-neighbour) keeps the 5×5 cells pixel-perfect at any
+// integer scale, so a single native-resolution atlas covers every fontScale/scale combination.
+// Non-ASCII glyphs (arrows ↑↓←→) and unmapped chars keep the original per-row run drawing below.
+
+private const val ATLAS_CELL = 5  // each glyph is 5×5 in the source bitmap
+private val ATLAS_CELL_SIZE = IntSize(ATLAS_CELL, ATLAS_CELL)
+
+private val GLYPH_ATLAS: ImageBitmap by lazy {
+    val cols = 128
+    val w = cols * ATLAS_CELL  // 640
+    val h = ATLAS_CELL         // 5
+    val px = IntArray(w * h)   // ARGB_8888; 0 = transparent
+    val white = 0xFFFFFFFF.toInt()
+    for (code in 0 until cols) {
+        val glyph = FONT_5X5_ASCII[code] ?: continue
+        val baseX = code * ATLAS_CELL
+        for (row in 0 until ATLAS_CELL) {
+            val bits = glyph[row].toInt()
+            for (col in 0 until ATLAS_CELL) {
+                if ((bits shr (4 - col)) and 1 != 0) px[row * w + baseX + col] = white
+            }
+        }
+    }
+    android.graphics.Bitmap.createBitmap(px, w, h, android.graphics.Bitmap.Config.ARGB_8888).asImageBitmap()
+}
+
+// Cache one ColorFilter per tint colour. ColorFilter.tint() allocates a JVM object + native peer, so
+// recreating it per glyph would reintroduce exactly the per-frame GC churn 6.3 removed. Theme palettes
+// are tiny, so a linear scan of packed ARGB ints (no boxing) is both zero-alloc and fast. Draw-thread
+// only.
+private var tintKeys = IntArray(16)
+private var tintVals = arrayOfNulls<ColorFilter>(16)
+private var tintCount = 0
+private fun tintFor(color: Color): ColorFilter {
+    val argb = color.toArgb()
+    for (i in 0 until tintCount) if (tintKeys[i] == argb) return tintVals[i]!!
+    if (tintCount == tintKeys.size) {
+        tintKeys = tintKeys.copyOf(tintCount * 2)
+        tintVals = tintVals.copyOf(tintCount * 2)
+    }
+    val cf = ColorFilter.tint(color)
+    tintKeys[tintCount] = argb
+    tintVals[tintCount] = cf
+    tintCount++
+    return cf
+}
+
 fun DrawScope.drawBitmapChar(
     char: Char,
     x: Int,
@@ -1486,10 +1555,29 @@ fun DrawScope.drawBitmapChar(
     color: Color,
     fontScale: Int = 1
 ) {
-    // ASCII fast path: array index (no HashMap hash + Char boxing) per glyph; map only for >127 (arrows).
     val code = char.code
-    val charData = if (code in 0..127) FONT_5X5_ASCII[code] else (FONT_5X5[char] ?: FONT_5X5[char.uppercaseChar()])
+    // ASCII glyph-atlas fast path: one tinted image blit instead of up to ~7 drawRects per glyph.
+    if (code in 0..127) {
+        val glyph = FONT_5X5_ASCII[code]
+        if (glyph != null) {
+            val size = ATLAS_CELL * fontScale * scale
+            drawIntoCanvas { canvas ->
+                _atlasPaint.colorFilter = tintFor(color)
+                canvas.drawImageRect(
+                    image = GLYPH_ATLAS,
+                    srcOffset = IntOffset(code * ATLAS_CELL, 0),
+                    srcSize = ATLAS_CELL_SIZE,
+                    dstOffset = IntOffset(x * scale, y * scale),
+                    dstSize = IntSize(size, size),
+                    paint = _atlasPaint
+                )
+            }
+            return
+        }
+    }
 
+    // Non-ASCII (arrows ↑↓←→) and unmapped chars: original per-row run drawing.
+    val charData = FONT_5X5[char] ?: FONT_5X5[char.uppercaseChar()]
     if (charData == null) {
         // Missing character - draw outline square
         drawRect(

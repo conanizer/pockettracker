@@ -901,3 +901,39 @@ by minify), so this needs a real `assembleRelease` install + smoke test, not jus
    Miyoo (it's just faster code). Release audio unchanged (was already -O3).
 5. Compare release APK size before/after (optional, satisfying) and watch logcat on first launch for
    any R8 `Missing class`/reflection warnings at runtime.
+
+**Batch 7 device-tested OK + committed 2026-06-15 (`47a6342`), merged to main (`0a668f5`).** Release
+APK <9 MB (~half debug). Needed `-dontwarn javax.annotation.processing.**` + `com.google.auto.service.**`
+(AutoService via ACRA, build-time only). Release debug-signed for sideload testing.
+
+### Batch 8 — 6.2 glyph atlas (2026-06-15) — ✅ device-tested + committed (`cff5b33`)
+
+> Device test: text identical across all screens (hex cells, notes, labels, arrows, symbols), colours
+> correct incl. theme switches, smooth playback. **Last Review #2 item — review complete.**
+
+The last Review #2 item. Branch `code-review-2-glyph-atlas` off main. `PixelPerfectRenderer.kt` only.
+
+- **6.2 🔧 Font glyph atlas.** A full phrase screen is ~700+ glyphs and the old path emitted up to ~7
+  `drawRect`s each (thousands of draw ops/frame at 60 fps during playback). Now the 128 ASCII glyphs
+  are pre-rendered **once** into a single 640×5 white-on-transparent `ImageBitmap` (`GLYPH_ATLAS`,
+  `by lazy`); each ASCII glyph draws as **one** `canvas.drawImageRect` from that atlas → ~7× fewer
+  draw calls, batchable by Skia. Pixel-perfect preserved two ways: a dedicated `_atlasPaint`
+  (`isAntiAlias=false`, `FilterQuality.None`) so the integer upscale is hard-edged even at fractional
+  letterbox offsets, and nearest-neighbour mapping of a 5px cell to `5*fontScale*scale` px is exactly
+  the per-font-pixel block the old rects drew (mathematically identical output). Tint colours are
+  cached (`tintFor`, linear scan of packed ARGB ints → zero per-frame allocation, mirroring 6.3 — a
+  fresh `ColorFilter.tint` per glyph would have reintroduced the GC-churn vector). Non-ASCII glyphs
+  (arrows ↑↓←→) and unmapped/missing chars keep the original per-row run drawing untouched.
+
+**Test focus for Batch 8 (it touches ALL on-screen text — look closely):**
+1. **Text is crisp and identical** on every screen (phrase/chain/song/instrument/table/mixer/effects/
+   project/settings/file-browser): hex cells, note names, labels, BPM, track monitor — no blur, no
+   shifted/misaligned glyphs, correct spacing. Check at the device's actual scale (Miyoo = scale 1).
+2. **Colours correct:** every text colour matches before (cursor/selection/playback rows, param vs
+   value vs empty colours, status messages). Switch **themes** and confirm all text recolours right
+   (exercises the tint cache across palettes).
+3. **Arrows + symbols** (↑↓←→ in hints/keyboard, `#-./:%+<>=[]()!?|"`) still render correctly (arrows
+   use the untouched fallback path; the symbols go through the atlas).
+4. **Different text sizes** render correctly (any fontScale used for large vs small text).
+5. **Playback feel:** during playback the phrase grid should be as smooth or smoother (fewer draw
+   calls); watch logcat for any RenderThread issue. No glitches when switching screens rapidly.
