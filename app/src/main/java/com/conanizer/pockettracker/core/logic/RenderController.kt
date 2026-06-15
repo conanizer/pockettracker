@@ -115,12 +115,7 @@ class RenderController(
             progressCallback?.onProgress(0.3f, "Rendering audio...")
 
             // Reset active bus effect for clean offline render.
-            audioBackend.setMasterFx(project.masterBusFx)
-            if (project.masterBusFx == 0)
-                audioBackend.setOttDepthForRender(project.ottDepth)
-            else
-                audioBackend.setDustDepthForRender(project.dustDepth)
-            audioBackend.setLimiterPreGain(project.limiterPreGain)
+            applyMasterBusForRender(project)
 
             val sampleRate = audioBackend.getSampleRate()
             val outputDir = fileSystem.getRendersDirectory()
@@ -189,8 +184,9 @@ class RenderController(
 
             progressCallback?.onProgress(0.3f, "Rendering audio...")
 
-            audioBackend.setOttDepthForRender(project.ottDepth)
-            audioBackend.setLimiterPreGain(project.limiterPreGain)
+            // Honor the project's master bus (OTT *or* DUST) — was hardcoded to OTT, so a DUST project's
+            // resample didn't match playback (REVIEW-3 2.2).
+            applyMasterBusForRender(project)
 
             val sampleRate = audioBackend.getSampleRate()
             val outputDir = fileSystem.getResampledDirectory()
@@ -368,6 +364,21 @@ class RenderController(
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Push the project's master-bus effect (OTT or DUST) + limiter for a clean offline render
+     * (the no-warmup-fade *ForRender variants). Both the full-song and selection renders need this so
+     * the export matches playback — the selection path previously hardcoded OTT and silently ignored a
+     * DUST master bus (REVIEW-3 2.2). Stems bypass the master bus (setStemsMode), so they don't use it.
+     */
+    private fun applyMasterBusForRender(project: Project) {
+        audioBackend.setMasterFx(project.masterBusFx)
+        if (project.masterBusFx == 0)
+            audioBackend.setOttDepthForRender(project.ottDepth)
+        else
+            audioBackend.setDustDepthForRender(project.dustDepth)
+        audioBackend.setLimiterPreGain(project.limiterPreGain)
+    }
 
     private fun findSongBounds(project: Project): Pair<Int, Int> {
         var first = -1

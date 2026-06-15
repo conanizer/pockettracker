@@ -345,6 +345,18 @@ concrete way to finally chip at the `handleButtonA` god-method.
   still reverts. RATE HIGH↔LOFI↔NORM still restores losslessly across open/close. Edit several samples in
   a session and confirm memory doesn't climb per closed editor.
 
-Remaining Stage 1–5 findings not yet started: **2.2** (renderSelection ignores DUST master bus),
-**3.1** (shared song-traversal helper), **3.2** (dual base-frequency caches), **4.1** (handleButtonA
-decomposition), **4.2** (dead code), and the Stage 5 ideas.
+### Stage 1–5 batch 2 — 2.2 (2026-06-16) — 🔧 awaiting device test
+
+- **2.2 🔧 Selection resample honors the DUST master bus** (`RenderController.kt`). The full-song render
+  branched on `masterBusFx` (OTT *or* DUST) but `renderSelectionToWav` hardcoded
+  `setOttDepthForRender(project.ottDepth)` — so resampling a selection in a DUST-master-bus project
+  baked in OTT (or nothing) instead of DUST, and the resample didn't match playback. Extracted the
+  shared `applyMasterBusForRender(project)` (setMasterFx + OTT/DUST-for-render + limiter) and call it
+  from both render paths. Stems intentionally don't use it (they bypass the master bus via setStemsMode).
+  Kotlin-only; the song-render path is behavior-identical (pure DRY).
+  *Test:* set the master bus to DUST (Effects screen), make a short song, resample a selection → the
+  resampled WAV should have the DUST character (matching playback), not OTT. Repeat with OTT master bus
+  (unchanged). Full-song WAV MIX still correct for both OTT and DUST. Stems still render dry.
+
+Remaining Stage 1–5 findings not yet started: **3.1** (shared song-traversal helper), **3.2** (dual
+base-frequency caches), **4.1** (handleButtonA decomposition), **4.2** (dead code), and the Stage 5 ideas.
