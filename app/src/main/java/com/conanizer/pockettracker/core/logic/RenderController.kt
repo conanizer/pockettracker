@@ -253,24 +253,7 @@ class RenderController(
             if (activeTracks.isEmpty()) return RenderResult.Error("No active tracks")
 
             // Collect instruments used in the song range to check send routing
-            val usedInstrIds = mutableSetOf<Int>()
-            for (row in startRow..endRow) {
-                for (track in project.tracks) {
-                    if (track.mute) continue
-                    if (row >= track.chainRefs.size) continue
-                    val chainId = track.chainRefs[row]
-                    if (chainId !in 0..255) continue
-                    val chain = project.chains[chainId]
-                    for (slot in 0..15) {
-                        val phraseId = chain.phraseRefs[slot]
-                        if (phraseId !in 0..255) continue
-                        for (step in project.phrases[phraseId].steps) {
-                            if (!step.isEmpty() && step.instrument in 0..255)
-                                usedInstrIds.add(step.instrument)
-                        }
-                    }
-                }
-            }
+            val usedInstrIds = project.collectUsedInstruments(startRow, endRow)
             val hasReverbSend = usedInstrIds.any { (project.instruments.getOrNull(it)?.reverbSend ?: 0) > 0 }
             val hasDelaySend  = usedInstrIds.any { (project.instruments.getOrNull(it)?.delaySend  ?: 0) > 0 }
 
@@ -400,25 +383,7 @@ class RenderController(
      * in the song range.  Must be called before [scheduleSongForRender].
      */
     private fun setupInstrumentParams(project: Project, startRow: Int, endRow: Int) {
-        val usedInstruments = mutableSetOf<Int>()
-
-        for (row in startRow..endRow) {
-            for (track in project.tracks) {
-                if (track.mute) continue
-                if (row >= track.chainRefs.size) continue
-                val chainId = track.chainRefs[row]
-                if (chainId !in 0..255) continue
-                val chain = project.chains[chainId]
-                for (slot in 0..15) {
-                    val phraseId = chain.phraseRefs[slot]
-                    if (phraseId !in 0..255) continue
-                    for (step in project.phrases[phraseId].steps) {
-                        if (!step.isEmpty() && step.instrument in 0..255)
-                            usedInstruments.add(step.instrument)
-                    }
-                }
-            }
-        }
+        val usedInstruments = project.collectUsedInstruments(startRow, endRow)
 
         for (instId in usedInstruments) {
             val instrument = project.instruments.getOrNull(instId) ?: continue

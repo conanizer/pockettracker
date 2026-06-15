@@ -358,5 +358,22 @@ concrete way to finally chip at the `handleButtonA` god-method.
   resampled WAV should have the DUST character (matching playback), not OTT. Repeat with OTT master bus
   (unchanged). Full-song WAV MIX still correct for both OTT and DUST. Stems still render dry.
 
-Remaining Stage 1–5 findings not yet started: **3.1** (shared song-traversal helper), **3.2** (dual
-base-frequency caches), **4.1** (handleButtonA decomposition), **4.2** (dead code), and the Stage 5 ideas.
+### Stage 1–5 batch 3 — 3.1 (2026-06-16) — 🔧 awaiting device test
+
+- **3.1 🔧 Shared song-traversal helper** (new `core/logic/SongTraversal.kt`, `RenderController.kt`).
+  Added `Project.forEachStepInSongRange(startRow, endRow, includeMuted) { step -> }` (the bounds-guarded
+  nested walk) + `Project.collectUsedInstruments(startRow, endRow)` built on it. RenderController's two
+  byte-identical "collect used instruments in range" walks (`setupInstrumentParams` + the stems
+  send-routing scan) now call `collectUsedInstruments`, so the guards can't drift between copies.
+  Kotlin-only, behavior-identical (same logic, just centralized; −34 lines net in RenderController).
+  *Scope correction:* the finding listed ~6–8 sites, but on inspection only these two were genuinely the
+  same walk. The live scheduler (`PlaybackController`) walks by playback position / HOP / checkpoints,
+  and CLEAN (`TrackerController.collectUsedRefs`) spans the *whole* song and counts muted tracks as used
+  — different traversals with different semantics, so folding them in would change behavior. Correctly
+  left alone; the rest of the grep hits were single-cell chain/clipboard ops.
+  *Test (pure refactor — any difference is a bug):* WAV MIX (full song), selection resample, and stems
+  all render identically — same instruments audible, reverb/delay stems appear only when those sends are
+  used, muted tracks still excluded.
+
+Remaining Stage 1–5 findings not yet started: **3.2** (dual base-frequency caches), **4.1**
+(handleButtonA decomposition), **4.2** (dead code), and the Stage 5 ideas.
