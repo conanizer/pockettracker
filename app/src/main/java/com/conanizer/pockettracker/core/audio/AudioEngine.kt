@@ -455,14 +455,6 @@ class AudioEngine(
         }
     }
 
-    fun getActiveTrackMask(): Int {
-        var mask = 0
-        for (t in 0 until 8) {
-            if (activeTrackFlags[t]) mask = mask or (1 shl t)
-        }
-        return mask
-    }
-
     fun updateSpectrum() {
         val result = backend.getSpectrumMagnitudes(spectrumBuffer.size)
         result.copyInto(spectrumBuffer, 0, 0, minOf(result.size, spectrumBuffer.size))

@@ -419,12 +419,6 @@ class TrackerController(
         return instrumentController.previewSampleFile(filePath)
     }
 
-    fun updateInstrumentPlaybackParams(instrumentId: Int) {
-        val instrument = project.instruments[instrumentId]
-        instrumentController.updatePlaybackParams(instrument)
-        projectVersion++
-    }
-
     fun navigateToScreen(screen: ScreenType) {
         currentScreen = screen
     }

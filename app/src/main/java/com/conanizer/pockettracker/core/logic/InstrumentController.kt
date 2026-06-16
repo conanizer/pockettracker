@@ -571,41 +571,6 @@ class InstrumentController(
         return slotId
     }
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Generic Update (legacy, kept for compatibility)
-    // ─────────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Update playback parameters (generic)
-     * @deprecated Use specific update functions instead
-     */
-    fun updatePlaybackParams(instrument: Instrument) {
-        audioEngine.updateInstrumentPlaybackParams(instrument)
-        logger.d(TAG, "🎛️ Updated playback params for instrument ${formatHex(instrument.id)}")
-    }
-
-    /**
-     * Update instrument parameter (generic)
-     * Delegates to specific update functions based on parameter type
-     *
-     * @param instrument The instrument to update
-     * @param parameter Which parameter changed
-     */
-    fun updateParameter(instrument: Instrument, parameter: InstrumentParameter) {
-        when (parameter) {
-            InstrumentParameter.ROOT, InstrumentParameter.DETUNE -> {
-                // These affect base frequency calculation
-                audioEngine.updateInstrumentBaseFrequency(instrument)
-            }
-            else -> {
-                // All other parameters affect playback
-                audioEngine.updateInstrumentPlaybackParams(instrument)
-            }
-        }
-
-        lastEditedInstrument = instrument.id
-    }
-
     // ═══════════════════════════════════════════════════════════════════════════
     // SOUNDFONT OPERATIONS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -931,26 +896,4 @@ class InstrumentController(
 sealed class LoadResult {
     object Success : LoadResult()
     data class Error(val message: String) : LoadResult()
-}
-
-/**
- * Instrument parameters that can be updated
- * Used to determine which audio engine update function to call
- */
-enum class InstrumentParameter {
-    ROOT,
-    DETUNE,
-    VOLUME,
-    PAN,
-    DRIVE,
-    CRUSH,
-    DOWNSAMPLE,
-    FILTER_TYPE,
-    FILTER_CUT,
-    FILTER_RES,
-    SAMPLE_START,
-    SAMPLE_END,
-    LOOP_MODE,
-    LOOP_START,
-    TABLE_TIC_RATE
 }

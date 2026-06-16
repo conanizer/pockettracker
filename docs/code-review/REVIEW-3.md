@@ -375,5 +375,22 @@ concrete way to finally chip at the `handleButtonA` god-method.
   all render identically — same instruments audible, reverb/delay stems appear only when those sends are
   used, muted tracks still excluded.
 
+### Stage 1–5 batch 4 — 4.2 (2026-06-16) — 🔧 awaiting device test
+
+- **4.2 🔧 Deleted confirmed dead code** (`AudioEngine.kt`, `TrackerController.kt`,
+  `InstrumentController.kt`, −71 lines). The finding named `getActiveTrackMask` + `updatePlaybackParams`;
+  checking callers first showed the real dead set is a chain that had to go together:
+  - `AudioEngine.getActiveTrackMask()` — no callers (it was Kotlin, not C++ as the finding said).
+  - `TrackerController.updateInstrumentPlaybackParams(Int)` → `InstrumentController.updatePlaybackParams`
+    — both dead (the TrackerController wrapper had no callers, and it was the *only* caller of the
+    InstrumentController method, so deleting just the latter would have broken compilation).
+  - `InstrumentController.updateParameter` + the `InstrumentParameter` enum — the rest of the same
+    "Generic Update (legacy)" section, also dead (`updateParameter` had no callers; the enum was used
+    only by it).
+  Verified zero remaining references to any deleted symbol. Pure deletion — the live update path
+  (`audioEngine.updateInstrumentPlaybackParams`, called from ~20 sites) is untouched.
+  *Test (lowest-risk batch — if it compiles, nothing changed):* smoke-test instrument editing
+  (ROOT/DETUNE/VOL/PAN/filter/loop/start-end update audio live), resample, project load.
+
 Remaining Stage 1–5 findings not yet started: **3.2** (dual base-frequency caches), **4.1**
-(handleButtonA decomposition), **4.2** (dead code), and the Stage 5 ideas.
+(handleButtonA decomposition), and the Stage 5 ideas.
