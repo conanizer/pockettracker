@@ -554,7 +554,7 @@ prompt, **C** the onStop background flush. Phase A is Kotlin-only (the pre-commi
 5.3 (crash-safe autosave) complete across Phases A/B/C. Remaining Review #3 item: only Stage 5 idea 5.1
 (sample-RAM readout). **3.2 / 4.1 / 4.2 / 5.2 / 5.3 (A+B+C)** done.
 
-### 5.3 follow-up ⬜ DEFERRED — session resume on app-killing ROMs
+### 5.3 follow-up ✅ DONE (RESUME setting) — session resume on app-killing ROMs
 
 Device testing surfaced a UX gap that is **OS-side, not app-side**. The Miyoo Flip and Ayaneo Pocket
 Air Mini (AOSP-ish ROMs) **kill the process when the app is backgrounded**, so it cold-starts on return;
@@ -563,16 +563,23 @@ three. Proof it's a true cold-start, not a code reset: the recovery prompt is on
 `LaunchedEffect(audioReady)` when `audioReady` flips false→true, which can't happen on a warm resume.)
 Because the app holds the whole session only in memory and doesn't reopen the last project on launch, a
 home-out→return on the handhelds lands on a blank project (template/empty) — and, for unsaved work, the
-new "RECOVER WORK?" prompt.
+"RECOVER WORK?" prompt. The prompt is the right default on a warm phone but noise on a device that kills
+the app every background, so the choice is now **per-device and user-selectable**.
 
-- **Current behavior (shipped, kept for now):** the recovery prompt. Unsaved → prompt; saved → blank
-  (reload manually). The Phase C onStop flush ensures the latest edits are captured before the OS kill.
-- **Deferred option to revisit:** switch the launch path from the prompt to **silent auto-resume** —
-  make the autosave a rolling "last session" (written on edits *and* on save, cleared only by NEW) and
-  reload it automatically on launch, covering saved *and* unsaved work. This replicates the Xiaomi
-  warm-resume experience on the killing devices: home-out→return lands exactly where you left off, no
-  prompt, no blank. Trade-off discussed with the developer: it drives the common "continue" case to zero
-  friction at the cost of "start fresh" requiring NEW — which is *identical* to the Xiaomi behavior the
-  developer prefers, so not a regression. Moderate change (autosave shifts from crash-prompt to
-  session-persistence; the dirty-flag-after-resume detail needs settling). **Parked — revisit in a later
-  pass.**
+- **Shipped:** a **RESUME** setting (SETTINGS row 11, persisted in `SharedPreferences` so it differs per
+  device, *not* in the project file):
+  - **ASK** (default) → the "RECOVER WORK?" prompt (unchanged Phase-B path). Right for warm-resume phones.
+  - **AUTO** → on launch, silently `recoverFromAutosave()` + reload samples, no prompt (status flashes
+    "RECOVERED"). The recovered project stays dirty, so it keeps re-autosaving and survives the *next*
+    kill too; a corrupt autosave is dropped so AUTO can't loop on it. Right for the Miyoo/Ayaneo, where it
+    makes a home-out→return land back on the in-progress work, replicating the Xiaomi warm-resume feel.
+  - The Phase C onStop flush still ensures the latest edits are captured before the OS kill, for both modes.
+  - Code: `MainActivity` `LaunchedEffect(audioReady)` branches on `autosaveResumeAuto`; the setting is
+    wired through the usual `SettingsModule` → `AppInputDispatcher`/`AppStateRefs` → `ScreenLayouts` →
+    `PixelPerfectRenderer` path (mirrors `notePreviewEnabled`).
+- **Still deferred (the rolling "last session" part):** AUTO resumes *unsaved/recovered* work only. After a
+  clean **Save** + background-kill, AUTO still lands blank, because a clean save clears the autosave and the
+  onStop flush skips a non-dirty project. Closing that gap means making the autosave a rolling last-session
+  (written on edits *and* on save, cleared only by NEW) so AUTO also resumes saved sessions — a moderate
+  change (autosave shifts from crash-prompt to full session-persistence; the dirty-flag-after-resume detail
+  needs settling). **Parked — revisit if the saved-then-blank case proves annoying in practice.**

@@ -1,6 +1,6 @@
 # Development Status
 
-**Last Updated:** 2026-06-17 (rev 10)
+**Last Updated:** 2026-06-18 (rev 11)
 
 ## Current Phase
 
@@ -152,7 +152,7 @@ Week 16:     MVP Release
 
 - **Wide JNI facade (review 4.1)** — `IAudioBackend` (~100 methods) / `OboeAudioBackend` / `jni-bridge.cpp` / `AudioEngine.kt` mirror each other; many `AudioEngine` methods are pure 1-line forwards (mostly sample-editor ops). Could be grouped behind an `ISampleEditorBackend` to shrink the surface. "Not urgent" — adding one engine call means touching four files (now documented in `technical-architecture.md`).
 
-- **Session resume on app-killing ROMs (Review #3 5.3 follow-up)** — the Miyoo Flip and Ayaneo Pocket Air Mini kill the app's process when backgrounded (the Xiaomi 12T Pro / MIUI keeps it warm), so the app cold-starts to a blank project on return; for unsaved work the new "RECOVER WORK?" prompt appears. Shipped behavior **keeps the prompt**. Deferred option: make the autosave a rolling "last session" (written on save too, cleared only by NEW) and silently **auto-resume** it on launch — replicates the Xiaomi warm-resume experience on the killing devices (continue exactly where you left off; "start fresh" = NEW, same as on Xiaomi). Moderate change; the dirty-flag-after-resume detail needs settling. See `docs/code-review/REVIEW-3.md` "5.3 follow-up".
+- **Session resume on app-killing ROMs (Review #3 5.3 follow-up)** — the Miyoo Flip and Ayaneo Pocket Air Mini kill the app's process when backgrounded (the Xiaomi 12T Pro / MIUI keeps it warm), so the app cold-starts to a blank project on return. **Mostly addressed** by the per-device SETTINGS **RESUME** setting: **AUTO** silently auto-resumes the autosave on launch (no prompt) on the killing devices, **ASK** keeps the "RECOVER WORK?" prompt on warm phones. **Remaining deferred piece:** AUTO resumes *unsaved/recovered* work only — a cleanly-saved-then-killed session still lands blank. Closing it means a rolling "last session" (autosave written on save too, cleared only by NEW) so AUTO resumes saved work as well; moderate change, the dirty-flag-after-resume detail needs settling. See `docs/code-review/REVIEW-3.md` "5.3 follow-up".
 
 ---
 
@@ -206,11 +206,14 @@ work. Findings 1.1–4.2 device-tested and merged to `main`; the autosave work (
 **Crash-safe autosave (5.3, new feature — Phases A/B/C):**
 - Working project autosaves to an app-private `autosave.ptp` ~3 s after edits (debounced, off-thread,
   no audio glitch — verified on Miyoo), cleared on clean save/load/new.
-- Launch shows a **"RECOVER WORK?"** prompt if an autosave survived (= unclean prior exit): A=recover
-  (loads + reloads samples, stays dirty), B=discard.
-- `ON_STOP` flush captures the latest edit before the OS kills a backgrounded app.
-- **Deferred:** on ROMs that kill the app on background (Miyoo/Ayaneo, unlike Xiaomi), resume lands on a
-  blank project + prompt; switching to silent "auto-resume last session" is parked for a later pass (see
+- Launch recovery is **per-device selectable** via the SETTINGS **RESUME** row (persisted in
+  `SharedPreferences`): **ASK** (default) shows a **"RECOVER WORK?"** prompt (A=recover loads + reloads
+  samples, stays dirty; B=discard); **AUTO** silently restores the autosave on launch with no prompt
+  (stays dirty so it survives the next kill; corrupt autosave is dropped). AUTO suits ROMs that kill the
+  app on background (Miyoo/Ayaneo); ASK suits warm-resume phones (Xiaomi).
+- `ON_STOP` flush captures the latest edit before the OS kills a backgrounded app (both modes).
+- **Still deferred:** AUTO resumes *unsaved/recovered* work only — after a clean Save + background-kill it
+  still lands blank. Making AUTO resume saved sessions too (a rolling "last session") is parked (see
   Architecture Debt and REVIEW-3.md "5.3 follow-up").
 
 ### Review #2 Fixes (Complete - 2026-06-15)

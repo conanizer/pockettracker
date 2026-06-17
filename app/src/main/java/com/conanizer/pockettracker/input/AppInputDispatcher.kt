@@ -156,7 +156,8 @@ class AppStateRefs(
     val themeEditorState: MutableState<ThemeEditorState>,
     val showNewProjectDialog: MutableState<Boolean>,
     val showInstrTypeDialog: MutableState<Boolean>,
-    val showRecoveryDialog: MutableState<Boolean>
+    val showRecoveryDialog: MutableState<Boolean>,
+    val autosaveResumeAuto: MutableState<Boolean>
 )
 
 class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
@@ -226,6 +227,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     private var showNewProjectDialog by refs.showNewProjectDialog
     private var showInstrTypeDialog by refs.showInstrTypeDialog
     private var showRecoveryDialog by refs.showRecoveryDialog
+    private var autosaveResumeAuto by refs.autosaveResumeAuto
 
     // Dedicated return target for SETTINGS — set when entering, never overwritten by FILE_BROWSER navigation
     private var settingsReturnScreen: ScreenType = ScreenType.PROJECT
@@ -542,6 +544,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     insertBefore = insertBefore,
                     cursorRemember = cursorRemember,
                     notePreviewEnabled = notePreviewEnabled,
+                    autosaveResumeAuto = autosaveResumeAuto,
                     visualizerType = appTheme.visualizerType,
                     currentThemeName = appTheme.name
                 )
@@ -558,6 +561,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     result.insertBefore?.let        { insertBefore        = it }
                     result.cursorRemember?.let      { cursorRemember      = it }
                     result.notePreviewEnabled?.let  { notePreviewEnabled  = it }
+                    result.autosaveResumeAuto?.let  { autosaveResumeAuto  = it }
                     result.visualizerType?.let      { appTheme = appTheme.copy(visualizerType = it) }
                     trackerController.projectVersion++
                 }
@@ -1364,6 +1368,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     }
                 }
             }
+            11 -> { autosaveResumeAuto = !autosaveResumeAuto }
         }
     }
 

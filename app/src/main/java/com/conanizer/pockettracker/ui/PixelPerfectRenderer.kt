@@ -196,6 +196,8 @@ fun PixelPerfectTracker(
     cursorRemember: Boolean = false,
     // Note preview setting (for settings screen display)
     notePreviewEnabled: Boolean = true,
+    // Autosave resume mode (for settings screen display)
+    autosaveResumeAuto: Boolean = false,
     // SoundFont preset navigation state
     soundfontPresetName: String = "",
     soundfontPresetCount: Int = 0,
@@ -400,6 +402,7 @@ fun PixelPerfectTracker(
                         settingsCursorColumn = settingsCursorColumn,
                         cursorRemember = cursorRemember,
                         notePreviewEnabled = notePreviewEnabled,
+                        autosaveResumeAuto = autosaveResumeAuto,
                         trackNotes = trackNotes,
                         soundfontPresetName  = soundfontPresetName,
                         soundfontPresetCount = soundfontPresetCount,
@@ -532,6 +535,8 @@ class TrackerLayout {
         cursorRemember: Boolean = false,
         // Note preview setting (passed through to SettingsState for display)
         notePreviewEnabled: Boolean = true,
+        // Autosave resume mode (passed through to SettingsState for display)
+        autosaveResumeAuto: Boolean = false,
         // Track note monitor
         trackNotes: List<Note> = List(8) { Note.EMPTY },
         // SoundFont preset navigation state
@@ -893,6 +898,7 @@ class TrackerLayout {
                                     insertBefore = qwertyKeyboardState.insertBefore,
                                     cursorRemember = cursorRemember,
                                     notePreviewEnabled = notePreviewEnabled,
+                                    autosaveResumeAuto = autosaveResumeAuto,
                                     visualizerType = t.visualizerType,
                                     currentThemeName = t.name,
                                     appTheme = appTheme

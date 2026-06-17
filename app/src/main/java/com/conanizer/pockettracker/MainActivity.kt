@@ -468,6 +468,13 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val _notePreviewEnabled = remember { mutableStateOf(prefs.getBoolean("note_preview", true)) }
     var notePreviewEnabled  by _notePreviewEnabled
 
+    // Autosave recovery behaviour (REVIEW-3 5.3 follow-up). ASK (false) shows the RECOVER WORK?
+    // prompt on launch; AUTO (true) silently restores the autosave with no prompt. Per-device
+    // (SharedPreferences, not the project file) so it can differ between handhelds that kill the
+    // app on background (AUTO) and phones that keep it warm (ASK).
+    val _autosaveResumeAuto = remember { mutableStateOf(prefs.getBoolean("autosave_resume_auto", false)) }
+    var autosaveResumeAuto  by _autosaveResumeAuto
+
     // Overlay: list files from assets/overlays/, load + process selected bitmap
     val overlayFiles: List<String> = remember {
         try { context.assets.list("overlays")
@@ -539,6 +546,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     }
     LaunchedEffect(notePreviewEnabled) {
         prefs.edit().putBoolean("note_preview", notePreviewEnabled).apply()
+    }
+    LaunchedEffect(autosaveResumeAuto) {
+        prefs.edit().putBoolean("autosave_resume_auto", autosaveResumeAuto).apply()
     }
     LaunchedEffect(overlayName) {
         prefs.edit().putString("overlay_name", overlayName).apply()
@@ -841,7 +851,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             _buttonVibroEnabled, _vibroPower, _cursorRemember, _notePreviewEnabled,
             _overlayName, _overlayStrength, overlayFiles,
             trackPeakBuffer, masterPeakBuffer, sendPeakBuffer, _appTheme, _themeEditorState,
-            _showNewProjectDialog, _showInstrTypeDialog, _showRecoveryDialog
+            _showNewProjectDialog, _showInstrTypeDialog, _showRecoveryDialog,
+            _autosaveResumeAuto
         )
     }
     val dispatcher = remember { AppInputDispatcher(appCtrl, appState) }
@@ -867,17 +878,27 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         } catch (e: Exception) { }
     }
 
-    // Crash-recovery prompt (REVIEW-3 5.3 Phase B): an autosave surviving to launch means the last
-    // session didn't exit cleanly (a clean save/load/new deletes it). Offer to restore it once the
-    // engine is up (so A=recover can reload samples). We also request focus as the dialog appears:
-    // the B button is KEYCODE_BACK on the Miyoo, and audioReady can flip after a focus-losing
-    // recomposition — without focus, A/B never reach the app and B falls through to the system
-    // (minimizing the app) instead of dismissing the dialog.
+    // Crash-recovery at launch (REVIEW-3 5.3 Phase B + RESUME-mode follow-up): an autosave surviving
+    // to launch means the last session didn't exit cleanly (a clean save/load/new deletes it). What we
+    // do with it depends on the per-device RESUME setting:
+    //   • AUTO  → silently restore it, no prompt (for handhelds that kill the app on background, where
+    //             a prompt every return is noise). recoverFromAutosave leaves the project dirty so it
+    //             keeps re-autosaving and survives the next kill; reload samples since the autosave
+    //             stores paths, not PCM. A corrupt autosave is dropped so AUTO can't loop on it.
+    //   • ASK   → the recovery prompt. We request focus as the dialog appears: B is KEYCODE_BACK on the
+    //             Miyoo, and audioReady can flip after a focus-losing recomposition — without focus, A/B
+    //             never reach the app and B falls through to the system (minimizing it) instead of
+    //             dismissing the dialog.
     LaunchedEffect(audioReady) {
         if (audioReady && fileController.hasAutosave()) {
-            showRecoveryDialog = true
-            kotlinx.coroutines.delay(50)  // let the surface settle after the audioReady recomposition, as the layout-change re-focus below does
-            try { focusRequester.requestFocus() } catch (e: Exception) { }
+            if (autosaveResumeAuto) {
+                if (trackerController.recoverFromAutosave()) dispatcher.reloadProjectSamples()
+                else fileController.clearAutosave()
+            } else {
+                showRecoveryDialog = true
+                kotlinx.coroutines.delay(50)  // let the surface settle after the audioReady recomposition, as the layout-change re-focus below does
+                try { focusRequester.requestFocus() } catch (e: Exception) { }
+            }
         }
     }
     // Safety net for the above: if focus still isn't on the input view, the system would treat B
@@ -1001,6 +1022,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         settingsCursorColumn = stateVersion.let { trackerController.settingsCursorColumn },
         cursorRemember = cursorRemember,
         notePreviewEnabled = notePreviewEnabled,
+        autosaveResumeAuto = autosaveResumeAuto,
         soundfontPresetName = stateVersion.let {
             val inst = project.instruments[currentInstrument]
             val path = inst.soundfontPath
