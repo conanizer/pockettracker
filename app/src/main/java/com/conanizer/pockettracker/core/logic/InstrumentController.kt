@@ -115,7 +115,6 @@ class InstrumentController(
         logger.d(TAG, "🔄 Sync to last edited instrument ${formatHex(currentInstrument)}")
         if (project != null) {
             val instrument = project.instruments[currentInstrument]
-            audioEngine.updateInstrumentBaseFrequency(instrument)
             audioEngine.updateInstrumentPlaybackParams(instrument)
         }
     }
@@ -333,23 +332,21 @@ class InstrumentController(
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * Update instrument root note
-     * Recalculates base frequency (ROOT + DETUNE)
+     * Update instrument root note.
+     * Playback base frequency (ROOT × rate ratio / detune) is derived at schedule time (REVIEW-3 3.2).
      */
     fun updateRoot(instrument: Instrument, note: Note) {
         instrument.root = note
-        audioEngine.updateInstrumentBaseFrequency(instrument)
         logger.d(TAG, "🎹 Updated ROOT: ${instrument.root}")
     }
 
 
     /**
-     * Update instrument detune parameter
-     * Recalculates base frequency (ROOT + DETUNE)
+     * Update instrument detune parameter.
+     * Playback base frequency (ROOT × rate ratio / detune) is derived at schedule time (REVIEW-3 3.2).
      */
     fun updateDetune(instrument: Instrument, detune: Int) {
         instrument.detune = detune.coerceIn(0, 255)
-        audioEngine.updateInstrumentBaseFrequency(instrument)
         logger.d(TAG, "🎚️ Updated DETUNE: 0x${formatHex(instrument.detune)}")
     }
 
@@ -564,7 +561,6 @@ class InstrumentController(
         instrument.volume = 0xFF
         instrument.pan = 0x80
 
-        audioEngine.updateInstrumentBaseFrequency(instrument)
         audioEngine.updateInstrumentPlaybackParams(instrument)
 
         logger.d(TAG, "✅ Resampled instrument created: slot=${formatHex(slotId)}, path=$wavPath")
@@ -819,7 +815,6 @@ class InstrumentController(
                         instrument.sampleId = currentInstrument
                         instrument.sliceMarkers = WavWriter.readCuePoints(path).map { it.toLong() }
                         // Push all parameters (filter, drive, start/end, etc.) to C++ for this slot
-                        audioEngine.updateInstrumentBaseFrequency(instrument)
                         audioEngine.updateInstrumentPlaybackParams(instrument)
                         setStatus("LOADED: ${src.name}", true)
                     }

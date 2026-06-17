@@ -62,8 +62,10 @@ class AudioEngine(
     var phraseTrackMask: Int = 0
         private set
 
-    // Sample metadata (base frequencies and sample rate compensation ratios)
-    private val sampleBaseFrequencies = mutableMapOf<Int, Float>()
+    // Sample-rate compensation ratio per slot (deviceRate / wavRate). The playback base frequency
+    // (ROOT × ratio / detune) is derived from this on demand via calculateInstrumentBaseFrequency() —
+    // there is no separate base-frequency cache to keep in sync (REVIEW-3 3.2; the dual cache was the
+    // root cause of REVIEW-2's RATE-pitch bug, where one copy went stale while the other stayed right).
     private val sampleRateRatios = mutableMapOf<Int, Float>()
     // Original ratios cached for non-destructive RATE mode (cleared when new sample is loaded)
     private val originalSampleRateRatios = mutableMapOf<Int, Float>()
@@ -100,19 +102,17 @@ class AudioEngine(
             // Decode entirely in native memory (no Java-heap round trip). A multi-MB sample used to
             // need the whole file ByteArray + both float channels live at once on the capped Java
             // heap, which OOM-killed large loads even on a 3 GB device (REVIEW-3 6.2). Native returns
-            // the WAV sample rate; the base-frequency compensation is still computed here.
+            // the WAV sample rate; the rate-compensation ratio is still computed here.
             val wavRate = backend.loadSampleFromWav(instrumentId, filePath)
             if (wavRate <= 0) {
                 logger.e(TAG, "❌ Failed to load sample (native WAV decode) from $filePath")
                 return false
             }
 
-            val adjustedBaseFreq = C4_HZ * (getDeviceSampleRate().toFloat() / wavRate.toFloat())
-            sampleBaseFrequencies[instrumentId] = adjustedBaseFreq
-            sampleRateRatios[instrumentId] = adjustedBaseFreq / C4_HZ
+            sampleRateRatios[instrumentId] = getDeviceSampleRate().toFloat() / wavRate.toFloat()
             originalSampleRateRatios.remove(instrumentId)
 
-            logger.d(TAG, "✅ Loaded sample: instrumentId=$instrumentId, length=${backend.getSampleLength(instrumentId)}, stereo=${backend.hasStereoData(instrumentId)}, baseFreq=$adjustedBaseFreq, path=$filePath")
+            logger.d(TAG, "✅ Loaded sample: instrumentId=$instrumentId, length=${backend.getSampleLength(instrumentId)}, stereo=${backend.hasStereoData(instrumentId)}, rateRatio=${sampleRateRatios[instrumentId]}, path=$filePath")
             return true
         } catch (e: Exception) {
             logger.e(TAG, "❌ Error loading sample from file: ${e.message}")
@@ -400,35 +400,6 @@ class AudioEngine(
         return rootFreq * sampleRateRatio / detuneMultiplier
     }
 
-    fun updateInstrumentBaseFrequency(instrument: Instrument) {
-        val baseFreq = calculateInstrumentBaseFrequency(instrument)
-        sampleBaseFrequencies[instrument.sampleId] = baseFreq
-        logger.d(TAG, "📝 Updated base frequency for instrument ${instrument.id}: $baseFreq Hz")
-    }
-
-    fun playNote(note: Note, instrumentId: Int, trackId: Int, volume: Float = 1.0f, pan: Float = 0.5f, project: Project? = null) {
-        if (note == Note.EMPTY) return
-
-        val sampleId = if (project != null && instrumentId in 0..255) {
-            project.instruments[instrumentId].sampleId
-        } else {
-            instrumentId % 12
-        }
-
-        val baseFreq = sampleBaseFrequencies[sampleId] ?: C4_HZ
-        val frequency = note.toFrequency()
-
-        backend.scheduleNote(
-            frame = backend.getCurrentFrame(),
-            sampleId = sampleId,
-            trackId = trackId,
-            freq = frequency,
-            baseFreq = baseFreq,
-            vol = volume,
-            pan = pan
-        )
-    }
-
     fun updateWaveform() {
         backend.updateWaveform(waveformBuffer)
     }
@@ -589,7 +560,9 @@ class AudioEngine(
 
         if (TRACE) logger.d(TAG, "📋 scheduleNote: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, vol=${"%.4f".format(volume)}, pan=$pan, tableId=$tableId")
 
-        val baseFreq = sampleBaseFrequencies[sampleId] ?: C4_HZ
+        // Base frequency = ROOT × sampleRateRatio / detune, computed fresh from the live instrument so
+        // it can never drift from the rate ratio (REVIEW-3 3.2). Slice mode overrides it below.
+        val baseFreq = calculateInstrumentBaseFrequency(instrument)
 
         // Slice playback: triggered by slicingMode (CUT/TRU) or an explicit SLI FX.
         // SLI works even when slicingMode=OFF as long as the sample has markers.
@@ -681,7 +654,6 @@ class AudioEngine(
     }
 
     fun clearAllSamples() {
-        sampleBaseFrequencies.clear()
         sampleRateRatios.clear()
         originalSampleRateRatios.clear()
         backend.clearAllSamples()
@@ -689,7 +661,6 @@ class AudioEngine(
 
     /** Free the C++ buffers + cached metadata for one slot (e.g. when switching it to SoundFont). */
     fun clearSample(instrumentId: Int) {
-        sampleBaseFrequencies.remove(instrumentId)
         sampleRateRatios.remove(instrumentId)
         originalSampleRateRatios.remove(instrumentId)
         backend.clearSample(instrumentId)
@@ -751,15 +722,12 @@ class AudioEngine(
     fun getClipboardLength(): Int = backend.getClipboardLength()
     fun downsampleSample(instrumentId: Int, factor: Int) {
         backend.downsampleSample(instrumentId, factor)
+        // Playback base freq is derived from sampleRateRatios at schedule time (REVIEW-3 3.2), so
+        // scaling the ratio is the whole job — there is no second cache to keep in sync.
         sampleRateRatios[instrumentId]?.let { sampleRateRatios[instrumentId] = it * factor }
-        // Phrase playback reads the sampleBaseFrequencies cache (ROOT × ratio / detune), not
-        // sampleRateRatios — scale it by the same factor or playback pitch is permanently wrong
-        // while previews (which recompute from the ratio) sound correct.
-        sampleBaseFrequencies[instrumentId]?.let { sampleBaseFrequencies[instrumentId] = it * factor }
     }
 
     fun applyRateMode(instrumentId: Int, factor: Int) {
-        val oldRatio = sampleRateRatios[instrumentId]
         if (factor <= 1) {
             // Restore HIGH: reset ratio to original and discard cache.
             originalSampleRateRatios.remove(instrumentId)?.let { origRatio ->
@@ -775,15 +743,8 @@ class AudioEngine(
                 sampleRateRatios[instrumentId] = origRatio * factor
             }
         }
-        // Keep the playback base-frequency cache in sync (see downsampleSample): scale it by the
-        // ratio change. ROOT/DETUNE edits later recompute it fully via updateInstrumentBaseFrequency,
-        // which reads the updated sampleRateRatios — so the two stay consistent either way.
-        val newRatio = sampleRateRatios[instrumentId]
-        if (oldRatio != null && newRatio != null && oldRatio != newRatio) {
-            sampleBaseFrequencies[instrumentId]?.let {
-                sampleBaseFrequencies[instrumentId] = it * (newRatio / oldRatio)
-            }
-        }
+        // Playback base freq is derived from sampleRateRatios at schedule time (REVIEW-3 3.2) — the
+        // updated ratio above is all that's needed; there's no separate base-frequency cache to scale.
         backend.applyRateMode(instrumentId, factor)
     }
 
@@ -932,64 +893,6 @@ class AudioEngine(
     fun clearLoadedTables() {
         loadedTables.clear()
         logger.d(TAG, "🗑️ Cleared loaded tables tracking")
-    }
-
-    fun scheduleNoteWithTable(
-        targetFrame: Long,
-        note: Note,
-        instrumentId: Int,
-        trackId: Int,
-        volume: Float = 1.0f,
-        pan: Float = 0.5f,
-        project: Project,
-        startPointOverride: Int = -1,
-        tableIdOverride: Int = -1,
-        pslInitialOffset: Float = 0f,
-        pslDuration: Float = 0f,
-        pbnRate: Float = 0f,
-        vibratoSpeed: Float = 0f,
-        vibratoDepth: Float = 0f,
-        tableStartRow: Int = -1
-    ) {
-        if (note == Note.EMPTY) return
-        if (trackId in 0..7) phraseTrackMask = phraseTrackMask or (1 shl trackId)
-
-        val instrument = if (instrumentId in 0..255) {
-            project.instruments[instrumentId]
-        } else {
-            logger.w(TAG, "❌ Invalid instrumentId=$instrumentId, skipping note")
-            return
-        }
-
-        val sampleId = instrument.sampleId
-        val tableId = if (tableIdOverride >= 0) tableIdOverride else instrumentId
-        val tableTicRate = instrument.tableTicRate
-
-        if (tableId >= 0 && tableId < 256) {
-            ensureTableLoaded(project.tables[tableId])
-        }
-
-        val baseFreq = sampleBaseFrequencies[sampleId] ?: C4_HZ
-        val frequency = note.toFrequency()
-
-        // Convert tick-based pitch params to frame-based (same as scheduleNote)
-        val tempo = project.tempo
-        val framesPerTic = framesPerTicAt(tempo)
-        val framesPerStep = framesPerTic * TICS_PER_STEP
-        val pslDurationFrames = if (pslDuration > 0f) pslDuration * framesPerTic else 0f
-        val pbnRatePerFrame   = if (pbnRate  != 0f)  pbnRate  / framesPerStep  else 0f
-
-        // Resume stream so audio callback can process the queue
-        backend.resumeStream()
-
-        logger.d(TAG, "📋 scheduleNoteWithTable: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, tableId=$tableId, ticRate=$tableTicRate")
-
-        backend.scheduleNoteWithTable(
-            targetFrame, sampleId, trackId, frequency, baseFreq, volume, 1.0f, pan,
-            startPointOverride, -1, tableId, tableTicRate, note.octave, note.pitch,
-            pslInitialOffset, pslDurationFrames, pbnRatePerFrame, vibratoSpeed, vibratoDepth,
-            tableStartRow
-        )
     }
 
     fun getVoiceTableRow(trackId: Int): Int = backend.getVoiceTableRow(trackId)

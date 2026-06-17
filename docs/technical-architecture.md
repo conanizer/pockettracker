@@ -365,10 +365,11 @@ class AudioEngine(
         return success
     }
     
-    fun playNote(sampleId: Int, trackId: Int, freq: Float, vol: Float) {
+    fun playNote(instrument: Instrument, trackId: Int, freq: Float, vol: Float) {
         val frame = backend.getCurrentFrame()
-        val baseFreq = sampleBaseFrequencies[sampleId] ?: 261.63f
-        backend.scheduleNote(frame, sampleId, trackId, freq, baseFreq, vol)
+        // Base freq derived on demand from the sample-rate ratio (no cached copy to keep in sync)
+        val baseFreq = calculateInstrumentBaseFrequency(instrument)
+        backend.scheduleNote(frame, instrument.sampleId, trackId, freq, baseFreq, vol)
     }
     
     // All logic here - no Android dependencies!

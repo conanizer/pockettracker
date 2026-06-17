@@ -275,7 +275,6 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             } else if (instrument.sampleFilePath != null) {
                 val filePath = instrument.sampleFilePath!!
                 if (audioEngine.loadSampleFromFile(instrument.id, filePath)) {
-                    audioEngine.updateInstrumentBaseFrequency(instrument)
                     audioEngine.updateInstrumentPlaybackParams(instrument)
                     instrument.sliceMarkers = WavWriter.readCuePoints(filePath).map { it.toLong() }
                     loadedCount++

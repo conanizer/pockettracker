@@ -416,5 +416,30 @@ concrete way to finally chip at the `handleButtonA` god-method.
   FX apply, SYNC pitch/stretch, name, load, save / save-as / chop; FILE_BROWSER load + delete; and
   PHRASE/CHAIN/SONG quick-insert (A on an empty cell duplicates the last-edited value).
 
-Remaining Stage 1–5 findings not yet started: **3.2** (dual base-frequency caches) and the Stage 5
-ideas. **4.1** and **4.2** done.
+### Stage 1–5 batch 6 — 3.2 (2026-06-17) — 🔧 awaiting device test
+
+- **3.2 🔧 Collapsed the dual base-frequency caches** (`AudioEngine.kt`, `InstrumentController.kt`,
+  `AppInputDispatcher.kt`, `technical-architecture.md`). `sampleBaseFrequencies` was a second cache
+  holding `ROOT × rateRatio / detune` that every RATE / downsample / ROOT / DETUNE op had to update by
+  hand alongside `sampleRateRatios` — the exact desync behind REVIEW-2's RATE-pitch bug (R3.1). Removed
+  it entirely; the playback base frequency is now derived on demand from `sampleRateRatios` via the
+  existing `calculateInstrumentBaseFrequency(instrument)`.
+  - **Investigation first (audio hot path):** of the three cache readers, only one is live — the phrase
+    `scheduleNote`. The other two (`playNote`, the Kotlin `scheduleNoteWithTable` overload) were dead
+    repo-wide and were deleted. So the only behaviour-affecting line is the live reader, and it now
+    computes exactly what the *synced* cache held (`ROOT × ratio / detune`) — behaviour-preserving in
+    the correct case, self-healing in the stale case the finding describes.
+  - Deleted the writer `updateInstrumentBaseFrequency` + its 6 call sites (5 in InstrumentController,
+    1 in AppInputDispatcher), each of which already re-ran `updateInstrumentPlaybackParams` (untouched).
+  - Deleted the manual base-freq scaling in `downsampleSample` / `applyRateMode` (the "scale this too or
+    pitch is permanently wrong" scar tissue) — scaling the single ratio is now the whole job.
+  - The finding's one-line formula `C4 × ratio × detune` was an oversimplification (drops ROOT, inverts
+    detune direction); the real `ROOT × ratio / detune` already lived in `calculateInstrumentBaseFrequency`,
+    so this reuses it rather than reimplementing.
+  *Test (pitch is the thing to verify):* play a phrase across several instruments at different ROOT and
+  DETUNE and confirm pitch matches each instrument's preview; change RATE (HIGH→lower) and confirm phrase
+  playback pitch tracks it (the original R3.1 bug); resample, then save/reload a project and confirm pitch
+  is unchanged. SoundFont instruments use a separate path and are unaffected.
+
+Remaining Stage 1–5 findings not yet started: only the Stage 5 ideas (5.1 sample-RAM readout, 5.2 int16
+caches, 5.3 autosave). **3.2 / 4.1 / 4.2** done.
