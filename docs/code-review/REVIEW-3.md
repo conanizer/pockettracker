@@ -441,5 +441,26 @@ concrete way to finally chip at the `handleButtonA` god-method.
   playback pitch tracks it (the original R3.1 bug); resample, then save/reload a project and confirm pitch
   is unchanged. SoundFont instruments use a separate path and are unaffected.
 
-Remaining Stage 1–5 findings not yet started: only the Stage 5 ideas (5.1 sample-RAM readout, 5.2 int16
-caches, 5.3 autosave). **3.2 / 4.1 / 4.2** done.
+### Stage 1–5 batch 7 — 5.2 (2026-06-17) — 🔧 awaiting device test
+
+- **5.2 🔧 int16 storage for the undo / RATE-HIGH caches** (`audio-engine.h`, `sample-editor.cpp`;
+  C++-only). The four restore-only buffers — undo `sampleBackups`(+R) and RATE-HIGH `originalSamples`(+R) —
+  are now `int16_t*` instead of `float*`, halving their RAM. They never feed the mix loop (they only ever
+  copy back into the working `samples[]` on undo / RATE-restore), so the working/playback path stays full
+  float and is untouched. Two file-local converters in `sample-editor.cpp`: `f32ToCacheI16` clamps to
+  [-1,1] then `lround(f*32768)` (so an over-unity working sample — post-normalize/gain — restores at full
+  scale instead of wrapping), `cacheI16ToF32` divides by 32768 to match the WAV decoder. The round trip is
+  therefore **bit-exact for the 16-bit-sourced WAVs that dominate** and an inaudible ~-96 dBFS
+  requantization otherwise. Converted at every store (`backupSample`, `applyRateMode` cache-fill) and every
+  restore (`undoSample`, `applyRateMode` HIGH-restore + decimation read); `audio-engine.cpp`'s 24 touch
+  sites are all `delete[]`/null/length, correct unchanged on `int16_t*`. Pairs with 1.1 (undo freed on
+  close) and the still-resident-at-LOFI RATE cache: an editing session's restore buffers now cost half.
+  - *Note:* `fxPreviewBackup` is intentionally left float — it's a different, single-slot buffer the finding
+    doesn't name, and it round-trips through live FX preview rather than pure restore.
+  - **C++-only change: the Kotlin pre-commit hook does NOT compile it** — needs an NDK build + device test.
+  *Test:* edit a sample then UNDO → reverts correctly; RATE HIGH→LOFI→NORM→HIGH still restores cleanly
+  (16-bit WAV: bit-identical; verify no audible change). Stereo + mono samples both. Normalize to full scale
+  then UNDO → no wrap/garbage. Confirm per-edited-slot memory drops vs. before for the undo + LOFI-cache case.
+
+Remaining Stage 1–5 findings not yet started: only Stage 5 ideas 5.1 (sample-RAM readout) and 5.3
+(autosave). **3.2 / 4.1 / 4.2 / 5.2** done.

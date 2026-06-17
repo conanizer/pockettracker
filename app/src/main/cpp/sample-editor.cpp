@@ -2,10 +2,25 @@
 // All methods here are called from the UI thread, never from the audio callback.
 #include "audio-engine.h"
 #include "effects/primitives/sola-stretch.h"
+#include <cmath>
 
 // ============================================================
 // SAMPLE EDITOR OPERATIONS
 // ============================================================
+
+// The undo and RATE-HIGH caches are stored as int16 to halve their RAM (REVIEW-3 5.2): they only
+// ever restore the working buffer, never feed the mix loop. f32->i16 clamps to [-1,1] (so an
+// over-unity working sample — post-normalize/gain — restores at full scale rather than wrapping)
+// and rounds to nearest; i16->f32 uses /32768 to match the WAV decoder, making the round trip
+// bit-exact for 16-bit-sourced WAVs and an inaudible ~-96 dBFS requantization for the rest.
+static inline int16_t f32ToCacheI16(float f) {
+    float c = std::min(1.0f, std::max(-1.0f, f));
+    int   v = (int)std::lround(c * 32768.0f);
+    if (v >  32767) v =  32767;
+    if (v < -32768) v = -32768;
+    return (int16_t)v;
+}
+static inline float cacheI16ToF32(int16_t v) { return v / 32768.0f; }
 
 // Replace the working buffers for `id` with a new left + optional right of length newLen, freeing the
 // old buffers. Keeps left/right and their shared length in lockstep so the stereo mix path can never
@@ -225,11 +240,11 @@ void AudioEngine::backupSample(int id) {
     delete[] sampleBackupsRight[id];
     sampleBackupsRight[id] = nullptr;
     int len = sampleLengths[id];
-    sampleBackups[id] = new float[len];
-    std::memcpy(sampleBackups[id], samples[id], len * sizeof(float));
+    sampleBackups[id] = new int16_t[len];
+    for (int i = 0; i < len; i++) sampleBackups[id][i] = f32ToCacheI16(samples[id][i]);
     if (samplesRight[id]) {
-        sampleBackupsRight[id] = new float[len];
-        std::memcpy(sampleBackupsRight[id], samplesRight[id], len * sizeof(float));
+        sampleBackupsRight[id] = new int16_t[len];
+        for (int i = 0; i < len; i++) sampleBackupsRight[id][i] = f32ToCacheI16(samplesRight[id][i]);
     }
     sampleBackupLengths[id] = len;
 }
@@ -242,11 +257,11 @@ void AudioEngine::undoSample(int id) {
     std::lock_guard<std::mutex> lock(sampleEditMutex);
     int len = sampleBackupLengths[id];
     float* newL = new float[len];
-    std::memcpy(newL, sampleBackups[id], len * sizeof(float));
+    for (int i = 0; i < len; i++) newL[i] = cacheI16ToF32(sampleBackups[id][i]);
     float* newR = nullptr;
     if (sampleBackupsRight[id]) {
         newR = new float[len];
-        std::memcpy(newR, sampleBackupsRight[id], len * sizeof(float));
+        for (int i = 0; i < len; i++) newR[i] = cacheI16ToF32(sampleBackupsRight[id][i]);
     }
     setSampleBuffers(id, newL, newR, len);  // restores mono/stereo state of the backup
 }
@@ -425,11 +440,11 @@ void AudioEngine::applyRateMode(int id, int factor) {
         if (!originalSamples[id]) return; // Already at HIGH, nothing to restore.
         int len = originalSampleLengths[id];
         float* newL = new float[len];
-        std::memcpy(newL, originalSamples[id], len * sizeof(float));
+        for (int i = 0; i < len; i++) newL[i] = cacheI16ToF32(originalSamples[id][i]);
         float* newR = nullptr;
         if (originalSamplesRight[id]) {
             newR = new float[len];
-            std::memcpy(newR, originalSamplesRight[id], len * sizeof(float));
+            for (int i = 0; i < len; i++) newR[i] = cacheI16ToF32(originalSamplesRight[id][i]);
         }
         setSampleBuffers(id, newL, newR, len);
         delete[] originalSamples[id];       originalSamples[id] = nullptr;
@@ -439,11 +454,11 @@ void AudioEngine::applyRateMode(int id, int factor) {
         // Store original (both channels) on first rate change away from HIGH.
         if (!originalSamples[id]) {
             int len = sampleLengths[id];
-            originalSamples[id] = new float[len];
-            std::memcpy(originalSamples[id], samples[id], len * sizeof(float));
+            originalSamples[id] = new int16_t[len];
+            for (int i = 0; i < len; i++) originalSamples[id][i] = f32ToCacheI16(samples[id][i]);
             if (samplesRight[id]) {
-                originalSamplesRight[id] = new float[len];
-                std::memcpy(originalSamplesRight[id], samplesRight[id], len * sizeof(float));
+                originalSamplesRight[id] = new int16_t[len];
+                for (int i = 0; i < len; i++) originalSamplesRight[id][i] = f32ToCacheI16(samplesRight[id][i]);
             }
             originalSampleLengths[id] = len;
         }
@@ -451,11 +466,11 @@ void AudioEngine::applyRateMode(int id, int factor) {
         int newLen = originalSampleLengths[id] / factor;
         if (newLen < 1) return;
         float* newL = new float[newLen];
-        for (int i = 0; i < newLen; i++) newL[i] = originalSamples[id][i * factor];
+        for (int i = 0; i < newLen; i++) newL[i] = cacheI16ToF32(originalSamples[id][i * factor]);
         float* newR = nullptr;
         if (originalSamplesRight[id]) {
             newR = new float[newLen];
-            for (int i = 0; i < newLen; i++) newR[i] = originalSamplesRight[id][i * factor];
+            for (int i = 0; i < newLen; i++) newR[i] = cacheI16ToF32(originalSamplesRight[id][i * factor]);
         }
         setSampleBuffers(id, newL, newR, newLen);
     }

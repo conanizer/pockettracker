@@ -2,6 +2,7 @@
 #include <oboe/Oboe.h>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <vector>
@@ -332,16 +333,19 @@ private:
     float* samplesRight[256];          // right channel for stereo samples (null = mono)
     int    sampleLengths[256];         // ONE length for both channels — samplesRight[id], when non-null,
                                        // always has exactly this length (kept in lockstep by every edit op)
-    float* sampleBackups[256];        // single-level undo buffers (left channel)
-    float* sampleBackupsRight[256];   // single-level undo buffers (right channel; null = backup was mono)
-    int    sampleBackupLengths[256];  // length of both backup channels
+    // Undo + RATE-HIGH caches exist only to RESTORE the working buffer, never to play directly, so
+    // they are stored as int16 to halve their RAM (REVIEW-3 5.2). Bit-exact for the 16-bit-sourced
+    // WAVs that dominate (decoder reads those as v/32768); ~-96 dBFS requantization otherwise.
+    int16_t* sampleBackups[256];      // single-level undo buffers (left channel)
+    int16_t* sampleBackupsRight[256]; // single-level undo buffers (right channel; null = backup was mono)
+    int      sampleBackupLengths[256];// length of both backup channels
     float* fxPreviewBackup      = nullptr; // separate clean-sample copy for FX preview (doesn't clobber undo)
     float* fxPreviewBackupRight = nullptr; // right channel of the FX-preview backup (null = mono)
     int    fxPreviewBackupLen   = 0;
     int    fxPreviewBackupId    = -1;
-    float* originalSamples[256];      // cached HIGH-rate original for non-destructive RATE mode (left)
-    float* originalSamplesRight[256]; // cached HIGH-rate original (right channel; null = mono)
-    int    originalSampleLengths[256];
+    int16_t* originalSamples[256];      // cached HIGH-rate original for non-destructive RATE mode (left, int16 — see above)
+    int16_t* originalSamplesRight[256]; // cached HIGH-rate original (right channel; null = mono)
+    int      originalSampleLengths[256];
     std::mutex sampleEditMutex;       // held during buffer swap; try-locked in voice mix loop
     float* sampleClipboard      = nullptr; // cross-operation copy/paste buffer (left)
     float* sampleClipboardRight = nullptr; // copy/paste buffer (right channel; null = mono clip)
