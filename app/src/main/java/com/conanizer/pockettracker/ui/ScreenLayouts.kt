@@ -101,6 +101,7 @@ data class TrackerScreenParams(
     val cleanDialogCursor: Int = 0,      // 0 = YES, 1 = NO
     val showNewProjectDialog: Boolean = false,
     val showInstrTypeDialog: Boolean = false,
+    val showRecoveryDialog: Boolean = false,
     val songScrollPosition: Int = 0,
     val scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER,
     val buttonSoundEnabled: Boolean = false,
@@ -194,6 +195,7 @@ private fun TrackerScreen(params: TrackerScreenParams, modifier: Modifier = Modi
             cleanDialogCursor = params.cleanDialogCursor,
             showNewProjectDialog = params.showNewProjectDialog,
             showInstrTypeDialog = params.showInstrTypeDialog,
+            showRecoveryDialog = params.showRecoveryDialog,
             songScrollPosition = params.songScrollPosition,
             scalingMode = params.scalingMode,
             buttonSoundEnabled = params.buttonSoundEnabled,

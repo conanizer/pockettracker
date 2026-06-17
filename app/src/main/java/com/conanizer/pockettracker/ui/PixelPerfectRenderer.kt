@@ -171,6 +171,7 @@ fun PixelPerfectTracker(
     // Simple confirm dialogs
     showNewProjectDialog: Boolean = false,
     showInstrTypeDialog: Boolean = false,
+    showRecoveryDialog: Boolean = false,
     // Song scroll position
     songScrollPosition: Int = 0,
     // Scaling mode (for project screen display)
@@ -383,6 +384,7 @@ fun PixelPerfectTracker(
                         cleanDialogCursor = cleanDialogCursor,
                         showNewProjectDialog = showNewProjectDialog,
                         showInstrTypeDialog = showInstrTypeDialog,
+                        showRecoveryDialog = showRecoveryDialog,
                         layoutMode = layoutMode,
                         songScrollPosition = songScrollPosition,
                         scalingMode = scalingMode,
@@ -505,6 +507,7 @@ class TrackerLayout {
         // Simple confirm dialogs (A=YES, B=NO)
         showNewProjectDialog: Boolean = false,
         showInstrTypeDialog: Boolean = false,
+        showRecoveryDialog: Boolean = false,
         // Layout mode (from CompositionLocal, for display in project screen)
         layoutMode: DeviceAdapter.LayoutMode = DeviceAdapter.LayoutMode.FULL,
         // Song scroll position (viewport start row for 256-row song)
@@ -1024,6 +1027,9 @@ class TrackerLayout {
         }
         if (showInstrTypeDialog) {
             drawSimpleConfirmDialog(scale, "CHANGE TYPE?", appTheme)
+        }
+        if (showRecoveryDialog) {
+            drawSimpleConfirmDialog(scale, "RECOVER WORK?", appTheme)
         }
 
         // ===================================

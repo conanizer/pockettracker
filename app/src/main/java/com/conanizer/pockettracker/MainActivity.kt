@@ -17,6 +17,7 @@ import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -331,6 +332,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     var showNewProjectDialog by _showNewProjectDialog
     val _showInstrTypeDialog = remember { mutableStateOf(false) }
     var showInstrTypeDialog by _showInstrTypeDialog
+    val _showRecoveryDialog = remember { mutableStateOf(false) }
+    var showRecoveryDialog by _showRecoveryDialog
 
     // Tracks where the last single A-press inserted into an empty cell (screen, row, col)
     // Used by A+A to decide whether to insert next-unused (only allowed on same cell)
@@ -836,7 +839,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             _buttonVibroEnabled, _vibroPower, _cursorRemember, _notePreviewEnabled,
             _overlayName, _overlayStrength, overlayFiles,
             trackPeakBuffer, masterPeakBuffer, sendPeakBuffer, _appTheme, _themeEditorState,
-            _showNewProjectDialog, _showInstrTypeDialog
+            _showNewProjectDialog, _showInstrTypeDialog, _showRecoveryDialog
         )
     }
     val dispatcher = remember { AppInputDispatcher(appCtrl, appState) }
@@ -860,6 +863,26 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         try {
             focusRequester.requestFocus()
         } catch (e: Exception) { }
+    }
+
+    // Crash-recovery prompt (REVIEW-3 5.3 Phase B): an autosave surviving to launch means the last
+    // session didn't exit cleanly (a clean save/load/new deletes it). Offer to restore it once the
+    // engine is up (so A=recover can reload samples). We also request focus as the dialog appears:
+    // the B button is KEYCODE_BACK on the Miyoo, and audioReady can flip after a focus-losing
+    // recomposition — without focus, A/B never reach the app and B falls through to the system
+    // (minimizing the app) instead of dismissing the dialog.
+    LaunchedEffect(audioReady) {
+        if (audioReady && fileController.hasAutosave()) {
+            showRecoveryDialog = true
+            kotlinx.coroutines.delay(50)  // let the surface settle after the audioReady recomposition, as the layout-change re-focus below does
+            try { focusRequester.requestFocus() } catch (e: Exception) { }
+        }
+    }
+    // Safety net for the above: if focus still isn't on the input view, the system would treat B
+    // (= BACK) as "minimize". While the recovery prompt is up, intercept BACK and make it NO/discard.
+    BackHandler(enabled = showRecoveryDialog) {
+        showRecoveryDialog = false
+        fileController.clearAutosave()
     }
 
     // When the layout mode changes, Compose destroys the old layout composable and builds
@@ -944,6 +967,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         cleanDialogCursor = cleanDialogCursor,
         showNewProjectDialog = showNewProjectDialog,
         showInstrTypeDialog = showInstrTypeDialog,
+        showRecoveryDialog = showRecoveryDialog,
         songScrollPosition = stateVersion.let { trackerController.songScrollPosition },
         scalingMode = scalingMode,
         buttonSoundEnabled = buttonSoundEnabled,

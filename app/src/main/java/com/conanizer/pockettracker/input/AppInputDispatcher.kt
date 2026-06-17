@@ -155,7 +155,8 @@ class AppStateRefs(
     val appTheme: MutableState<AppTheme>,
     val themeEditorState: MutableState<ThemeEditorState>,
     val showNewProjectDialog: MutableState<Boolean>,
-    val showInstrTypeDialog: MutableState<Boolean>
+    val showInstrTypeDialog: MutableState<Boolean>,
+    val showRecoveryDialog: MutableState<Boolean>
 )
 
 class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
@@ -224,6 +225,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     private var themeEditorState by refs.themeEditorState
     private var showNewProjectDialog by refs.showNewProjectDialog
     private var showInstrTypeDialog by refs.showInstrTypeDialog
+    private var showRecoveryDialog by refs.showRecoveryDialog
 
     // Dedicated return target for SETTINGS — set when entering, never overwritten by FILE_BROWSER navigation
     private var settingsReturnScreen: ScreenType = ScreenType.PROJECT
@@ -979,6 +981,13 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             audioEngine.clearLoadedTables()
             return
         }
+        if (showRecoveryDialog) {
+            showRecoveryDialog = false
+            // A = recover: load the autosave (stays dirty so the user is nudged to Save it for real),
+            // then reload its samples — the autosave stores paths, not PCM. REVIEW-3 5.3 Phase B.
+            if (trackerController.recoverFromAutosave()) reloadProjectSamples()
+            return
+        }
         if (showInstrTypeDialog) {
             showInstrTypeDialog = false
             instrumentController.currentInstrument = trackerController.currentInstrument
@@ -1077,6 +1086,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                         trackerController.statusMessage = "LOADED: ${item.file.nameWithoutExtension}"
                                         trackerController.statusSuccess = true
                                         trackerController.projectVersion++
+                                        trackerController.markProjectClean()  // fresh load isn't dirty (REVIEW-3 5.3 fix)
                                         trackerController.currentScreen = previousScreen
                                     }
                                     is FileController.LoadResult.Error -> fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
@@ -1196,6 +1206,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                         reloadProjectSamples()
                                         audioEngine.clearLoadedTables()
                                         trackerController.projectVersion++
+                                        trackerController.markProjectClean()  // fresh load isn't dirty (REVIEW-3 5.3 fix)
                                         trackerController.currentScreen = previousScreen
                                     }
                                     is FileController.LoadResult.Error -> fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
@@ -1725,6 +1736,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.deleteChar(); return }
         if (showCleanDialog) { showCleanDialog = false; return }
         if (showNewProjectDialog) { showNewProjectDialog = false; return }
+        if (showRecoveryDialog) { showRecoveryDialog = false; fileController.clearAutosave(); return }  // B = discard recovery
         if (showInstrTypeDialog) { showInstrTypeDialog = false; return }
         if (themeEditorState.isOpen) { themeEditorState = ThemeEditorState(); return }
         if (trackerController.currentScreen == ScreenType.SETTINGS) {
@@ -1792,7 +1804,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     // non-A/B entry points (SELECT, START, R+DPAD) is sufficient.
     // RULE: every new show*Dialog-style modal state MUST be added to this predicate.
     private fun confirmDialogOpen(): Boolean =
-        showCleanDialog || showNewProjectDialog || showInstrTypeDialog ||
+        showCleanDialog || showNewProjectDialog || showInstrTypeDialog || showRecoveryDialog ||
             sampleEditorState.showConfirmClose
 
     fun handleSelect() {

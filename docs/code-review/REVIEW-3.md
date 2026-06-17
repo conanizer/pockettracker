@@ -491,5 +491,46 @@ prompt, **C** the onStop background flush. Phase A is Kotlin-only (the pre-commi
   **Edit while a song plays on the Miyoo → zero audio dropout** (the key bar). Rapid editing doesn't
   stutter the UI. Save *during* the 3 s window → no autosave file reappears afterward.
 
-Remaining: Stage 5 idea 5.1 (sample-RAM readout); **5.3 Phases B (recovery prompt) + C (onStop flush)**.
-**3.2 / 4.1 / 4.2 / 5.2 / 5.3.A** done.
+### Stage 5 — 5.3 Phase B — crash-recovery autosave: the launch recovery prompt (2026-06-17) — 🔧 awaiting device test
+
+- **5.3.B 🔧 Recovery prompt** (`FileController`, `TrackerController`, `AppInputDispatcher`,
+  `MainActivity`, `ScreenLayouts`, `PixelPerfectRenderer`). At launch, if `autosave.ptp` still exists
+  (Phase A clears it on every clean save/load/new, so its survival == an unclean prior exit), a
+  `"RECOVER WORK?"` modal offers to restore it.
+  - **Same overlay as "NEW PROJECT?"** — reuses `drawSimpleConfirmDialog` (dimmed screen + centered box
+    + `A=YES  B=NO`), just a different title. New `showRecoveryDialog` state threaded through the exact
+    `showNewProjectDialog` path (MainActivity state → `AppStateRefs` → dispatcher `by refs` + the A/B
+    guards + `confirmDialogOpen()`; ScreenLayouts params → `PixelPerfectTracker` → draw).
+  - **A = recover**: `TrackerController.recoverFromAutosave()` loads the autosave into the working
+    project, bumps `projectVersion` but **not** `savedProjectVersion` (so it stays *dirty* → the user is
+    nudged to Save it for real) and **does not** delete the file; the dispatcher then calls
+    `reloadProjectSamples()` (the autosave stores sample *paths*, not PCM — same reload as a normal load).
+  - **B = discard**: `clearAutosave()` deletes the file and dismisses.
+  - **Launch check** = a `LaunchedEffect(audioReady)` gated on the engine being up (so A=recover can
+    reload samples). Doesn't re-fire on warm resume (audioReady doesn't re-flip). The startup template
+    load sets `project` without bumping `projectVersion`, so a fresh launch is *not* dirty → no spurious
+    autosave and no false prompt.
+  - Kotlin-only (pre-commit compiles it). Phase C (onStop flush) still pending.
+  - **Two device-test fixes (round 2):**
+    1. *Phantom recovery after a normal load.* The two project-load handlers bump `projectVersion++`
+       after `loadProject` (to force a post-`reloadProjectSamples` redraw), which left the freshly-loaded
+       project reading **dirty** — so autosave fired with no real edit and the next launch falsely
+       prompted. (Pre-existing latent bug — it also caused a spurious "unsaved changes" prompt on NEW
+       after a load — that Phase A exposed.) Fix: new `TrackerController.markProjectClean()` called after
+       each load's redraw bump (the two `loadProject(fileInfo)` sites only; instrument/preset loads
+       correctly stay dirty; `recoverFromAutosave` stays dirty by design).
+    2. *Pressing NO minimized the app.* On the Miyoo the **B button is `KEYCODE_BACK`**
+       (ButtonHandlers.kt:298); `handleKeyEvent` only consumes it when the input view has focus, but the
+       prompt appears gated on `audioReady`, which can flip after a focus-losing recomposition — so the
+       BACK fell through to the system (minimize) instead of dismissing. Fix: request focus as the dialog
+       shows (`delay(50)` then `requestFocus`, matching the existing layout-change re-focus) so A *and* B
+       reach the app, plus a `BackHandler(enabled = showRecoveryDialog)` safety net that turns a
+       still-unfocused BACK into NO/discard rather than a minimize.
+  *Test (simulate a crash):* edit, then `adb shell am force-stop com.conanizer.pockettracker`, relaunch →
+  **"RECOVER WORK?"** appears. **A** → edits + samples restored, project shows dirty/"RECOVERED", a real
+  Save then clears it. **B** → discarded (no minimize), no prompt next launch. **Load a project, don't
+  edit, relaunch → no prompt** (fix 1). Clean save then relaunch → no prompt. Recover a project whose
+  instruments use WAVs → samples audible after recover. Dialog blocks other input (SELECT/START/R-nav).
+
+Remaining: Stage 5 idea 5.1 (sample-RAM readout); **5.3 Phase C (onStop flush)**.
+**3.2 / 4.1 / 4.2 / 5.2 / 5.3.A / 5.3.B** done.

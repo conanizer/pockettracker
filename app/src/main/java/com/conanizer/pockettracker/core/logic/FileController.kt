@@ -184,6 +184,22 @@ class FileController(
         }
     }
 
+    /** True if a crash-recovery autosave exists (i.e. the last session didn't exit cleanly). */
+    fun hasAutosave(): Boolean = fileSystem.fileExists(fileSystem.getAutosaveFilePath())
+
+    /** Load + migrate the crash-recovery autosave (same decode path as a normal project load). */
+    fun loadAutosave(): LoadResult {
+        return try {
+            val path = fileSystem.getAutosaveFilePath()
+            if (!fileSystem.fileExists(path)) return LoadResult.Error("No autosave")
+            val jsonString = fileSystem.readFile(path)
+            decodeAndMigrate(jsonString, "autosave")
+        } catch (e: Exception) {
+            logger.e(TAG, "❌ Autosave load error: ${e.message}")
+            LoadResult.Error(e.message ?: "Unknown error")
+        }
+    }
+
     /** Delete the autosave file, if any. Called on every clean save/load/new. */
     fun clearAutosave(): Boolean {
         val path = fileSystem.getAutosaveFilePath()
