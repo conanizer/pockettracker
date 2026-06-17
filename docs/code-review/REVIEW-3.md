@@ -392,5 +392,29 @@ concrete way to finally chip at the `handleButtonA` god-method.
   *Test (lowest-risk batch — if it compiles, nothing changed):* smoke-test instrument editing
   (ROOT/DETUNE/VOL/PAN/filter/loop/start-end update audio live), resample, project load.
 
-Remaining Stage 1–5 findings not yet started: **3.2** (dual base-frequency caches), **4.1**
-(handleButtonA decomposition), and the Stage 5 ideas.
+### Stage 1–5 batch 5 — 4.1 (2026-06-17) — 🔧 awaiting device test
+
+- **4.1 🔧 Decomposed the `handleButtonA` god-method** (`AppInputDispatcher.kt`). The ~740-line
+  `when (currentScreen)` is now a thin dispatch table; each screen's confirm/insert body moved verbatim
+  into its own `private fun handleConfirmA<Screen>()` on the same class. Pure cut-paste — behaviour
+  identical, braces balanced, 8 call-sites ↔ 8 methods.
+  - **Mechanism diverged from the finding's `onConfirmA`-on-`TrackerModule` proposal — deliberately.**
+    Reading all 740 lines showed 7 of 8 bodies are dispatcher *orchestration* (screen transitions,
+    file/audio I/O, coroutine renders, and ~10 private dialog states: `previousScreen`,
+    `fileBrowserState`, `qwertyKeyboardState`, `sampleEditorState`, `instrumentFileBrowserAction`, …).
+    Moving those into `ui/` modules would force a context object exposing audio+file+dialog internals to
+    the ui layer — a portability regression against the Linux-port goal. Private methods on the dispatcher
+    give the same readability win (router + named pieces) at zero plumbing and zero behaviour risk, and
+    keep orchestration where it belongs. (Developer chose this over the hybrid split.)
+  - The global modal-dialog guards (qwerty / clean / new-project / instr-type / sample-confirm-close /
+    eq / theme) stay at the top of `handleButtonA`; only the per-screen `when` branches were extracted.
+  - The two bare `return`s inside the SAMPLE_EDITOR body stay correct: the `when` was the last statement
+    in `handleButtonA`, so returning from the extracted method is equivalent to falling off the branch.
+  *Test (touch one A-action per screen):* PROJECT save / load / WAV+STEMS export / NEW / SETTINGS-enter;
+  SETTINGS toggles (layout, scaling, btn-sound/vibro, theme, template); INSTRUMENT load preset/source /
+  save preset / open sample-editor; SAMPLE_EDITOR crop/cut/copy/paste/delete, normalize/fade/reverse/undo,
+  FX apply, SYNC pitch/stretch, name, load, save / save-as / chop; FILE_BROWSER load + delete; and
+  PHRASE/CHAIN/SONG quick-insert (A on an empty cell duplicates the last-edited value).
+
+Remaining Stage 1–5 findings not yet started: **3.2** (dual base-frequency caches) and the Stage 5
+ideas. **4.1** and **4.2** done.
