@@ -1,6 +1,6 @@
 # Development Status
 
-**Last Updated:** 2026-06-15 (rev 9)
+**Last Updated:** 2026-06-17 (rev 10)
 
 ## Current Phase
 
@@ -32,7 +32,7 @@ Week 16:     MVP Release
 - Pixel-perfect rendering at 640x480 with letterboxing
 - Virtual controls with device detection (gaming handheld vs touchscreen)
 - Generic input handler (A+direction for value editing)
-- File management (save/load .ptp projects)
+- File management (save/load .ptp projects); crash-safe autosave with launch recovery prompt (Review #3 5.3)
 - Navigation system (5x5 screen grid with R+DPAD)
 - Key repeat (hold D-PAD / A+DPAD / B+DPAD)
 
@@ -152,6 +152,8 @@ Week 16:     MVP Release
 
 - **Wide JNI facade (review 4.1)** — `IAudioBackend` (~100 methods) / `OboeAudioBackend` / `jni-bridge.cpp` / `AudioEngine.kt` mirror each other; many `AudioEngine` methods are pure 1-line forwards (mostly sample-editor ops). Could be grouped behind an `ISampleEditorBackend` to shrink the surface. "Not urgent" — adding one engine call means touching four files (now documented in `technical-architecture.md`).
 
+- **Session resume on app-killing ROMs (Review #3 5.3 follow-up)** — the Miyoo Flip and Ayaneo Pocket Air Mini kill the app's process when backgrounded (the Xiaomi 12T Pro / MIUI keeps it warm), so the app cold-starts to a blank project on return; for unsaved work the new "RECOVER WORK?" prompt appears. Shipped behavior **keeps the prompt**. Deferred option: make the autosave a rolling "last session" (written on save too, cleared only by NEW) and silently **auto-resume** it on launch — replicates the Xiaomi warm-resume experience on the killing devices (continue exactly where you left off; "start fresh" = NEW, same as on Xiaomi). Moderate change; the dirty-flag-after-resume detail needs settling. See `docs/code-review/REVIEW-3.md` "5.3 follow-up".
+
 ---
 
 ## Remaining Work
@@ -172,6 +174,44 @@ Week 16:     MVP Release
 ---
 
 ## Completed Milestones
+
+### Review #3 Fixes (2026-06-15 → 06-17)
+
+Third full-repo review (full record + per-batch fix log in `docs/code-review/REVIEW-3.md`), focused on
+fresh bugs in less-trodden instrument/render/slot paths, low-end memory, and the long-deferred structure
+work. Findings 1.1–4.2 device-tested and merged to `main`; the autosave work (5.2 + 5.3) is on branch
+`code-review-3-round2`, device-tested, pending merge.
+
+**Round-2 device bugs:**
+- **Selection highlight repaint regression** — selecting in PHRASE/CHAIN/SONG/TABLE now redraws live (the
+  post-Review-#2 idle-redraw model had stopped repainting the growing selection).
+- **Large-WAV OOM moved off the Java heap** — WAV decode now happens in C++ (`loadSampleFromWavFile`,
+  streamed in 16k-frame blocks straight into native memory), so loading any file size no longer hits the
+  128 MB heap cap; `largeHeap` kept as headroom.
+
+**Correctness:**
+- **2.1** resample slot-allocator no longer clobbers a configured SoundFont (real `Instrument.isFree()`).
+- **2.2** selection resample now honors the DUST master bus (shared `applyMasterBusForRender`).
+- **1.2** `loadSample`/`loadSampleStereo` free the stale undo cache on slot reuse (stale-undo corruption).
+
+**Memory (1 GB Miyoo):**
+- **1.1** undo backup freed when the sample editor closes.
+- **5.2** undo + RATE-HIGH restore caches stored as `int16` (half the RAM; bit-exact for 16-bit WAVs).
+
+**Structure / consistency:**
+- **3.1** shared `SongTraversal.kt` helper; **3.2** collapsed the dual base-frequency caches (the
+  RATE-pitch desync root cause); **3.3** `Instrument.isFree()/isSoundfont()`; **4.1** decomposed the
+  `handleButtonA` god-method into per-screen handlers; **4.2** deleted confirmed dead update paths.
+
+**Crash-safe autosave (5.3, new feature — Phases A/B/C):**
+- Working project autosaves to an app-private `autosave.ptp` ~3 s after edits (debounced, off-thread,
+  no audio glitch — verified on Miyoo), cleared on clean save/load/new.
+- Launch shows a **"RECOVER WORK?"** prompt if an autosave survived (= unclean prior exit): A=recover
+  (loads + reloads samples, stays dirty), B=discard.
+- `ON_STOP` flush captures the latest edit before the OS kills a backgrounded app.
+- **Deferred:** on ROMs that kill the app on background (Miyoo/Ayaneo, unlike Xiaomi), resume lands on a
+  blank project + prompt; switching to silent "auto-resume last session" is parked for a later pass (see
+  Architecture Debt and REVIEW-3.md "5.3 follow-up").
 
 ### Review #2 Fixes (Complete - 2026-06-15)
 

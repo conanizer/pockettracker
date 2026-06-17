@@ -184,6 +184,10 @@ class FileController(
         }
     }
 
+    /** Serialize + write the autosave in one synchronous call — for the onStop flush, which can't
+     *  await a coroutine (the process may be killed right after). Call on the main thread (tear-free). */
+    fun saveAutosave(project: Project): Boolean = writeAutosave(serializeProject(project))
+
     /** True if a crash-recovery autosave exists (i.e. the last session didn't exit cleanly). */
     fun hasAutosave(): Boolean = fileSystem.fileExists(fileSystem.getAutosaveFilePath())
 

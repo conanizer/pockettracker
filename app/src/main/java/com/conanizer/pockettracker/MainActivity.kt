@@ -20,6 +20,8 @@ import androidx.core.view.WindowCompat
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -883,6 +885,22 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     BackHandler(enabled = showRecoveryDialog) {
         showRecoveryDialog = false
         fileController.clearAutosave()
+    }
+
+    // Autosave onStop flush (REVIEW-3 5.3 Phase C). The 3 s debounce can lose the last edits if Android
+    // kills the backgrounded app (common on the 1 GB Miyoo) before it fires. On ON_STOP, flush
+    // synchronously when dirty: onStop runs on the main thread and the process may be killed right
+    // after, so we can't await a coroutine — and main is the project's sole mutator, so a direct
+    // serialize+write is tear-free.
+    DisposableEffect(Unit) {
+        val activity = context as? ComponentActivity
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && trackerController.isProjectDirty) {
+                fileController.saveAutosave(trackerController.project)
+            }
+        }
+        activity?.lifecycle?.addObserver(observer)
+        onDispose { activity?.lifecycle?.removeObserver(observer) }
     }
 
     // When the layout mode changes, Compose destroys the old layout composable and builds

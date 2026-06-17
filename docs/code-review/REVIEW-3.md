@@ -532,5 +532,47 @@ prompt, **C** the onStop background flush. Phase A is Kotlin-only (the pre-commi
   edit, relaunch → no prompt** (fix 1). Clean save then relaunch → no prompt. Recover a project whose
   instruments use WAVs → samples audible after recover. Dialog blocks other input (SELECT/START/R-nav).
 
-Remaining: Stage 5 idea 5.1 (sample-RAM readout); **5.3 Phase C (onStop flush)**.
-**3.2 / 4.1 / 4.2 / 5.2 / 5.3.A / 5.3.B** done.
+### Stage 5 — 5.3 Phase C — crash-recovery autosave: the onStop flush (2026-06-17) — 🔧 awaiting device test
+
+- **5.3.C 🔧 onStop background flush** (`FileController`, `MainActivity`). The 3 s debounce can lose the
+  last edits if Android kills the *backgrounded* app (common on the 1 GB Miyoo) before it fires. A
+  `DisposableEffect` registers a `LifecycleEventObserver` on the activity's lifecycle; on `ON_STOP`,
+  if `isProjectDirty`, it flushes **synchronously** via new `FileController.saveAutosave(project)`
+  (= `writeAutosave(serializeProject(project))`). onStop runs on the main thread and the process may be
+  killed right after, so it can't await a coroutine; main is the project's sole mutator, so the direct
+  serialize+write is tear-free.
+  - **No `LocalLifecycleOwner`**: with Compose BOM 2025.11.01 and no `lifecycle-runtime-compose` dep,
+    neither package's `LocalLifecycleOwner` is reliably available — so the lifecycle is taken from
+    `LocalContext.current as? ComponentActivity` (`MainActivity` is one). `Lifecycle`/`LifecycleEventObserver`
+    come from the present `lifecycle-runtime-ktx`.
+  - Completes 5.3. Kotlin-only (pre-commit compiles it).
+  *Test:* edit, **background the app** (home), then `adb shell am kill com.conanizer.pockettracker` (or let
+  the system reclaim it) → relaunch → **"RECOVER WORK?"** with the *latest* edit (not just up to the last
+  debounce). Confirm the onStop write fires immediately on background (logcat `✅ Wrote file: …/autosave.ptp`
+  the moment you home out with unsaved edits), and **not** when the project is clean (just saved/loaded).
+
+5.3 (crash-safe autosave) complete across Phases A/B/C. Remaining Review #3 item: only Stage 5 idea 5.1
+(sample-RAM readout). **3.2 / 4.1 / 4.2 / 5.2 / 5.3 (A+B+C)** done.
+
+### 5.3 follow-up ⬜ DEFERRED — session resume on app-killing ROMs
+
+Device testing surfaced a UX gap that is **OS-side, not app-side**. The Miyoo Flip and Ayaneo Pocket
+Air Mini (AOSP-ish ROMs) **kill the process when the app is backgrounded**, so it cold-starts on return;
+the Xiaomi 12T Pro (MIUI) keeps it warm and resumes seamlessly. (Confirmed by the developer comparing all
+three. Proof it's a true cold-start, not a code reset: the recovery prompt is only ever set by
+`LaunchedEffect(audioReady)` when `audioReady` flips false→true, which can't happen on a warm resume.)
+Because the app holds the whole session only in memory and doesn't reopen the last project on launch, a
+home-out→return on the handhelds lands on a blank project (template/empty) — and, for unsaved work, the
+new "RECOVER WORK?" prompt.
+
+- **Current behavior (shipped, kept for now):** the recovery prompt. Unsaved → prompt; saved → blank
+  (reload manually). The Phase C onStop flush ensures the latest edits are captured before the OS kill.
+- **Deferred option to revisit:** switch the launch path from the prompt to **silent auto-resume** —
+  make the autosave a rolling "last session" (written on edits *and* on save, cleared only by NEW) and
+  reload it automatically on launch, covering saved *and* unsaved work. This replicates the Xiaomi
+  warm-resume experience on the killing devices: home-out→return lands exactly where you left off, no
+  prompt, no blank. Trade-off discussed with the developer: it drives the common "continue" case to zero
+  friction at the cost of "start fresh" requiring NEW — which is *identical* to the Xiaomi behavior the
+  developer prefers, so not a regression. Moderate change (autosave shifts from crash-prompt to
+  session-persistence; the dirty-flag-after-resume detail needs settling). **Parked — revisit in a later
+  pass.**
