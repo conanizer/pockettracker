@@ -161,6 +161,36 @@ class FileController(
     }
 
     // ========================================
+    // AUTOSAVE (crash-recovery) OPERATIONS — REVIEW-3 5.3
+    // ========================================
+    // A separate app-private autosave.ptp, written while there is unsaved work and cleared on every
+    // clean save/load/new (see TrackerController). serialize/write are split so the caller can run
+    // the serialization on the main thread (the project's sole mutator → tear-free) and the file
+    // write on an IO thread; see AutosaveManager.
+
+    /** Serialize a project to its JSON string. Call on the main thread, then hand the result to
+     *  [writeAutosave] on an IO thread. */
+    fun serializeProject(project: Project): String = json.encodeToString(project)
+
+    /** Write a pre-serialized project JSON to the autosave file (atomic temp+rename in writeFile). */
+    fun writeAutosave(jsonString: String): Boolean {
+        return try {
+            val ok = fileSystem.writeFile(fileSystem.getAutosaveFilePath(), jsonString)
+            if (ok) logger.d(TAG, "✅ Autosaved")
+            ok
+        } catch (e: Exception) {
+            logger.e(TAG, "❌ Autosave write error: ${e.message}")
+            false
+        }
+    }
+
+    /** Delete the autosave file, if any. Called on every clean save/load/new. */
+    fun clearAutosave(): Boolean {
+        val path = fileSystem.getAutosaveFilePath()
+        return if (fileSystem.fileExists(path)) fileSystem.deleteFile(path) else true
+    }
+
+    // ========================================
     // INSTRUMENT PRESET (.pti) OPERATIONS
     // ========================================
 

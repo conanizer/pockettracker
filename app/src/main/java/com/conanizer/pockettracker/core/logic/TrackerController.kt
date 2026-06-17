@@ -244,6 +244,7 @@ class TrackerController(
         when (result) {
             is FileController.SaveResult.Success -> {
                 savedProjectVersion = projectVersion
+                fileController.clearAutosave()  // work is now safely in a real file (REVIEW-3 5.3)
                 statusMessage = "SAVED"
                 statusSuccess = true
             }
@@ -264,6 +265,7 @@ class TrackerController(
                 project = result.project
                 projectVersion++
                 savedProjectVersion = projectVersion
+                fileController.clearAutosave()  // working state now matches a real file (REVIEW-3 5.3)
                 statusMessage = "LOADED: $filename"
                 statusSuccess = true
                 resetEditingContext()
@@ -287,6 +289,7 @@ class TrackerController(
                 project = result.project
                 projectVersion++
                 savedProjectVersion = projectVersion
+                fileController.clearAutosave()  // working state now matches a real file (REVIEW-3 5.3)
                 statusMessage = "LOADED: ${fileInfo.nameWithoutExtension}"
                 statusSuccess = true
                 resetEditingContext()
@@ -309,6 +312,7 @@ class TrackerController(
         project = Project(version = 1)
         projectVersion++
         savedProjectVersion = projectVersion
+        fileController.clearAutosave()  // fresh project, nothing to recover (REVIEW-3 5.3)
         statusMessage = "NEW PROJECT"
         statusSuccess = true
 

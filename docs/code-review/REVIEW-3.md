@@ -462,5 +462,34 @@ concrete way to finally chip at the `handleButtonA` god-method.
   (16-bit WAV: bit-identical; verify no audible change). Stereo + mono samples both. Normalize to full scale
   then UNDO → no wrap/garbage. Confirm per-edited-slot memory drops vs. before for the undo + LOFI-cache case.
 
-Remaining Stage 1–5 findings not yet started: only Stage 5 ideas 5.1 (sample-RAM readout) and 5.3
-(autosave). **3.2 / 4.1 / 4.2 / 5.2** done.
+### Stage 5 — 5.3 Phase A — crash-recovery autosave: the write path (2026-06-17) — 🔧 awaiting device test
+
+5.3 split into three device-testable phases: **A** the write path (this), **B** the launch recovery
+prompt, **C** the onStop background flush. Phase A is Kotlin-only (the pre-commit hook compiles it).
+
+- **5.3.A 🔧 Autosave write path** (new `core/logic/AutosaveManager.kt`; `IFileSystem`/`AndroidFileSystem`,
+  `FileController`, `TrackerController`, `MainActivity`). The working project is serialized to an
+  app-private `autosave.ptp` (in `filesDir`, like the existing template — never shown in the browser)
+  a few seconds after the last edit.
+  - **Trigger** = `LaunchedEffect(projectVersion)` in `PocketTrackerApp`. Every edit bumps
+    `projectVersion`, re-keying the effect and cancelling the pending `delay(AUTOSAVE_DEBOUNCE_MS=3000)`,
+    so an edit burst coalesces into one write. Guarded by `isProjectDirty` **before and after** the delay
+    (a save during the window clears dirty + deletes the file but doesn't bump `projectVersion`, so the
+    post-delay re-check stops it from re-creating a false-recovery file). Playback-agnostic by design.
+  - **Memory/thread**: serialize runs on the main thread (the project's sole mutator → tear-free; ~550 KB
+    real saves measured, ~1–4 MB transient, GC'd fast), the file write on `Dispatchers.IO`. No PCM is
+    serialized (samples are native, referenced by path), so cost is independent of sample size. The audio
+    callback is pure-native (no JNI upcalls) so GC can't pause it, and notes are buffered 2 phrases ahead
+    — autosave can't glitch playback.
+  - **Lifetime**: `FileController.clearAutosave()` is called on every clean save / load / new (the
+    `savedProjectVersion = projectVersion` points), so the file exists **iff** there is unsaved work →
+    its presence at next launch will drive Phase B's recovery prompt.
+  - No recovery UI yet — Phase A only proves the file is written/cleared correctly and costs nothing
+    audible.
+  *Test:* edit something, wait ~3 s, confirm `<filesDir>/autosave.ptp` appears (adb: `run-as <pkg> ls
+  files/`); keep editing → it updates but only ~3 s after you pause. Save / load / New → file is deleted.
+  **Edit while a song plays on the Miyoo → zero audio dropout** (the key bar). Rapid editing doesn't
+  stutter the UI. Save *during* the 3 s window → no autosave file reappears afterward.
+
+Remaining: Stage 5 idea 5.1 (sample-RAM readout); **5.3 Phases B (recovery prompt) + C (onStop flush)**.
+**3.2 / 4.1 / 4.2 / 5.2 / 5.3.A** done.

@@ -377,6 +377,10 @@ class AndroidFileSystem(
         return File(context.filesDir, "template.ptp").absolutePath
     }
 
+    override fun getAutosaveFilePath(): String {
+        return File(context.filesDir, "autosave.ptp").absolutePath
+    }
+
     /**
      * Write binary data to file (overwrites if exists).
      */

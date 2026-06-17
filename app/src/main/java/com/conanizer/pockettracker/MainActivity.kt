@@ -180,6 +180,10 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// Crash-recovery autosave debounce: write this long after the last edit, so a burst of edits
+// coalesces into a single write (REVIEW-3 5.3, Phase A).
+private const val AUTOSAVE_DEBOUNCE_MS = 3000L
+
 @Composable
 fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: DeviceAdapter) {
     val context = LocalContext.current
@@ -261,6 +265,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     }
 
     val fileController = remember { FileController(fileSystem, logger) }
+    val autosaveManager = remember {
+        com.conanizer.pockettracker.core.logic.AutosaveManager(fileController, logger)
+    }
 
     val audioBackend = remember { OboeAudioBackend() }
     val resourceLoader = remember { AndroidResourceLoader(context) }
@@ -605,6 +612,23 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         if (instrumentController.statusMessage.isNotEmpty()) {
             kotlinx.coroutines.delay(5000)
             instrumentController.clearStatus()
+        }
+    }
+
+    // Crash-recovery autosave (REVIEW-3 5.3, Phase A). Every edit bumps projectVersion, which re-keys
+    // this effect: a new edit cancels the pending delay, so a burst of edits coalesces into one write
+    // AUTOSAVE_DEBOUNCE_MS after the user pauses. Only writes when dirty (skips load/new/save, which
+    // already match a clean file). Playback-agnostic by design — autosave() serializes here on the main
+    // thread (tear-free) and writes on IO, and the audio engine is native, so this can't glitch audio.
+    LaunchedEffect(projectVersion) {
+        if (trackerController.isProjectDirty) {
+            kotlinx.coroutines.delay(AUTOSAVE_DEBOUNCE_MS)
+            // Re-check: a save during the debounce window clears dirty + deletes the file, and this
+            // effect isn't re-keyed by a save (it doesn't bump projectVersion), so without this we'd
+            // re-create autosave.ptp after a clean save and trigger a false recovery next launch.
+            if (trackerController.isProjectDirty) {
+                autosaveManager.autosave(trackerController.project)
+            }
         }
     }
 

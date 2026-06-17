@@ -164,6 +164,13 @@ interface IFileSystem {
      * @return Absolute path to the template .ptp file
      */
     fun getTemplateProjectPath(): String
+
+    /**
+     * Get the path for the crash-recovery autosave file.
+     * Stored in app-private storage (like the template), so it never appears in the file browser.
+     * @return Absolute path to autosave.ptp
+     */
+    fun getAutosaveFilePath(): String
 }
 
 /**
