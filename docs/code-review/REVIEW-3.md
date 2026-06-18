@@ -631,3 +631,15 @@ load/recovery path starts from a clean native slate (this also closes the PCM-on
 device: **NEW now drops `SAMPLE RAM` back toward baseline** instead of stranding the SF2. Still open (minor,
 not the leak): `reloadProjectSamples` has no SF **dedup** — two instruments sharing one SF2 load it twice into
 two slots — worth fixing later.
+
+**Two more free-path gaps surfaced by the readout (both fixed, device-tested; Kotlin-only, reusing the
+existing `unloadSoundfont` / `reloadProjectSamples`):**
+1. **Changing instrument type away from SoundFont didn't free the SF2.** `setInstrumentType` freed the WAV
+   when switching *to* SoundFont (`clearSample`), but the reverse branch only nulled `soundfontPath` — the SF2
+   stayed resident. Fixed: the to-sampler branch now `unloadSoundfont`s the slot + drops the `sfSlotMap`
+   entry, **guarded** so it frees only when no other instrument still references that `.sf2`.
+2. **COMPACT INST didn't reclaim memory until a save + reload.** `cleanUnusedInst()` replaced unused
+   instruments with empty ones in the data model but left their native sample/SF2 buffers loaded. Fixed: the
+   COMPACT-INST confirm now calls `reloadProjectSamples()` after `cleanUnusedInst()` (INST only, not SEQ),
+   which clears all native buffers and reloads only what the compacted project still references — RAM drops
+   immediately instead of waiting for a save + reload.

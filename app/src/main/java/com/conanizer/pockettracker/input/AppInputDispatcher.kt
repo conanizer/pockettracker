@@ -982,7 +982,16 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         if (showCleanDialog) {
             val target = cleanDialogTarget
             showCleanDialog = false
-            if (target == "SEQ") trackerController.cleanUnusedSeq() else trackerController.cleanUnusedInst()
+            if (target == "SEQ") {
+                trackerController.cleanUnusedSeq()
+            } else {
+                trackerController.cleanUnusedInst()
+                // Compacting replaced unused instruments with empty ones in the data model, but their
+                // native sample/SF2 buffers are still loaded — reload from the compacted project to
+                // actually free them (clearAll + reload). Without this the RAM only drops after a
+                // save+reload. REVIEW-3 5.1.
+                reloadProjectSamples()
+            }
             return
         }
         if (showNewProjectDialog) {

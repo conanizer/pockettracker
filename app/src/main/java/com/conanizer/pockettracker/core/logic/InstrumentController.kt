@@ -740,7 +740,15 @@ class InstrumentController(
             // the sample doesn't linger in memory after the slot becomes a SoundFont.
             audioEngine.clearSample(currentInstrument)
         } else {
+            val sfPath = instrument.soundfontPath
             instrument.soundfontPath = null
+            // Mirror the WAV path: free the SF2's native slot too, else it lingers in RAM after the slot
+            // becomes a sampler (REVIEW-3 5.1). Guard the shared-file case — only unload when no other
+            // instrument still references that SF2 (slots are shared by path via sfSlotMap).
+            if (sfPath != null && project.instruments.none { it.soundfontPath == sfPath }) {
+                sfSlotMap[sfPath]?.let { slot -> audioEngine.backend.unloadSoundfont(slot) }
+                sfSlotMap.remove(sfPath)
+            }
         }
     }
 
