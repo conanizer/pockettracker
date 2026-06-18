@@ -130,7 +130,8 @@ struct SoundfontVoice : public IAudioVoice {
     // TSF channel volume = noteVol * trkVol so per-track mixing works on the shared handle.
     void triggerNote(int slot, int midiNote, int midiVelocity,
                      float noteVol, float trkVol, float pan,
-                     int bank, int preset, int trackId);
+                     int bank, int preset, int trackId,
+                     int envAtk, int envDec, int envSus, int envRel);
 
     // Reset pitch state after a new note trigger.
     // needsPitchReset=true so applyPitchMod() resets the TSF pitch wheel to center on the

@@ -672,7 +672,7 @@ interface IAudioBackend {
      * Pass -1 for any field to keep the SF2 preset's built-in value.
      * atk/dec/rel: 0-255 → ~0.001s-10s (exponential). sus: 0-255 → 0.0-1.0 gain.
      */
-    fun setSoundfontEnvelopeOverrides(sfSlot: Int, bank: Int, preset: Int,
+    fun setSoundfontEnvelopeOverrides(instrumentId: Int,
                                       atk: Int, dec: Int, sus: Int, rel: Int)
 
     /**

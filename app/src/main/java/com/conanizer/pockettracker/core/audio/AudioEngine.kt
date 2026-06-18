@@ -838,10 +838,11 @@ class AudioEngine(
     }
 
     fun applySoundfontEnvelopeOverrides(instrument: Instrument) {
-        val path = instrument.soundfontPath ?: return
-        val slot = sfSlotProvider?.invoke(path) ?: return  // sfSlot (0-7), not instrument index
+        // Store the override keyed by instrument id; C++ applies it atomically at note trigger
+        // (REVIEW-3 5.1 SF de-dup). No slot/bank/preset needed — the trigger uses the note's own
+        // bank/preset, so two instruments sharing one de-duplicated handle stay isolated.
         val ov = instrument.sfOverrides
-        backend.setSoundfontEnvelopeOverrides(slot, instrument.sfBank, instrument.sfPreset,
+        backend.setSoundfontEnvelopeOverrides(instrument.id,
             ov.ampAttack, ov.ampDecay, ov.ampSustain, ov.ampRelease)
     }
 

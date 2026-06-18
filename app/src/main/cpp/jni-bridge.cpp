@@ -733,6 +733,19 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadS
     const char* pathStr = env->GetStringUTFChars(path, nullptr);
     if (!pathStr) return -1;
 
+    // De-dup: if this exact file is already loaded, reuse its slot instead of loading a 2nd copy
+    // (REVIEW-3 5.1). Multiple instruments share one handle — they play on distinct MIDI channels
+    // (= tracks) and apply their ADSR override per-note in triggerNote, so per-instrument state stays
+    // isolated. Frees stay reference-guarded (setInstrumentType / clearAllSoundfonts).
+    for (int i = 0; i < MAX_SOUNDFONTS; i++) {
+        if (soundfonts[i].handle != nullptr && soundfonts[i].filePath == pathStr) {
+            soundfonts[i].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);
+            LOGD("🎹 Reusing soundfont slot %d (de-dup): %s", i, pathStr);
+            env->ReleaseStringUTFChars(path, pathStr);
+            return i;
+        }
+    }
+
     // Find a free slot; if none, evict the least-recently-used one.
     int slot = -1;
     for (int i = 0; i < MAX_SOUNDFONTS; i++) {
@@ -796,14 +809,12 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setSo
 
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setSoundfontEnvelopeOverrides(
-        JNIEnv *env, jobject thiz, jint sfSlot, jint bank, jint preset,
+        JNIEnv *env, jobject thiz, jint instrumentId,
         jint atk, jint dec, jint sus, jint rel) {
-    if (sfSlot < 0 || sfSlot >= MAX_SOUNDFONTS || !soundfonts[sfSlot].handle) return;
-    std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
-    tsf_preset_apply_overrides(soundfonts[sfSlot].handle, (int)bank, (int)preset,
-                               (int)atk, (int)dec, (int)sus, (int)rel);
-    LOGD("🎹 SF envelope overrides: slot=%d bank=%d preset=%d atk=%d dec=%d sus=%d rel=%d",
-         (int)sfSlot, (int)bank, (int)preset, (int)atk, (int)dec, (int)sus, (int)rel);
+    // Store the override keyed by instrument id; triggerNote applies it atomically before note_on
+    // (REVIEW-3 5.1 SF de-dup). No slot/bank/preset here — the trigger uses the note's own bank/preset,
+    // so instruments sharing one de-duplicated handle stay isolated.
+    if (engine) engine->setSoundfontEnvelopeOverride((int)instrumentId, (int)atk, (int)dec, (int)sus, (int)rel);
 }
 
 JNIEXPORT void JNICALL

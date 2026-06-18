@@ -111,7 +111,8 @@ void SoundfontVoice::setMidiNote(int midiNote) {
 
 void SoundfontVoice::triggerNote(int slot, int midiNote, int midiVelocity,
                                  float noteVol, float trkVol, float pan,
-                                 int bank, int preset, int trackId) {
+                                 int bank, int preset, int trackId,
+                                 int envAtk, int envDec, int envSus, int envRel) {
     sfSlot      = slot;
     _trackId    = trackId;
     noteVolume  = noteVol;
@@ -136,6 +137,11 @@ void SoundfontVoice::triggerNote(int slot, int midiNote, int midiVelocity,
     tsf_channel_set_pan(h, _trackId, pan);
     tsf_channel_set_volume(h, _trackId, noteVol * trkVol);
     tsf_channel_set_bank_preset(h, _trackId, bank, preset);
+    // Apply THIS instrument's ADSR override atomically, under the slot mutex we already hold, right
+    // before note_on. TSF captures the envelope into the voice at note_on, so each note grabs its own
+    // override even when instruments share a de-duplicated handle — the next trigger re-patches and
+    // re-captures, and playing voices are immune (REVIEW-3 5.1 SF de-dup). -1 fields keep the SF2 value.
+    tsf_preset_apply_overrides(h, bank, preset, envAtk, envDec, envSus, envRel);
     tsf_channel_note_on(h, _trackId, midiNote, midiVelocity / 127.0f);
     activeNote = midiNote;
     isActive   = true;

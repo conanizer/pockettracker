@@ -643,3 +643,43 @@ existing `unloadSoundfont` / `reloadProjectSamples`):**
    COMPACT-INST confirm now calls `reloadProjectSamples()` after `cleanUnusedInst()` (INST only, not SEQ),
    which clears all native buffers and reloads only what the compacted project still references — RAM drops
    immediately instead of waiting for a save + reload.
+
+### 5.1 finding ✅ FIXED — SF2 de-duplication (RAM) + the volume-sharing trap (avoided)
+
+Today `loadSoundfont` never de-dups: every SoundFont instrument loads its **own** `tsf` handle, so N instruments
+referencing one `.sf2` cost N× its (already ~2×-file-size) RAM. With `MAX_SOUNDFONTS = 4`, the worst case is
+4× one SF2 — a real wall on a 1 GB device. De-dup (one handle per unique file) is the obvious win, but a prior
+attempt caused **different presets of one SF2 on two tracks to share volume**, so it was reverted.
+
+**Why it shared, exactly.** The per-channel rendering fork already isolates almost everything per track —
+`tsf_channel_set_volume/_pan/_bank_preset/_pitchwheel(h, trackId, …)` are all keyed by track, and filter/drive
+ride `instrumentParams[instrumentId]` copied into the per-track voice. The **one** exception is the **ADSR
+envelope override** (ATK/DEC/SUS/REL): `tsf_preset_apply_overrides` patches `presets[].regions[].ampenv`, which
+is **shared per-`(bank,preset)` on the handle** — and `SUS` is a *sustain gain*, i.e. a volume level. With each
+instrument on its own handle that never collides; share a handle and instruments on the same preset fight over
+that patch. It's applied at *schedule* time (≈2 phrases early), making it racy too.
+
+**The enabler for a clean fix.** TSF *captures* the envelope into the voice at note-on
+(`tsf_voice_envelope_setup(&voice->ampenv, &region->ampenv, …)`) and renders from the voice's own `ampenv`, not
+the live region — so a region patch only affects the **next** note-on; playing voices are immune.
+
+**Fix (shipped, device-tested):**
+1. **De-dup the handle.** `native_loadSoundfont` first scans for a slot already holding that `filePath` and
+   returns it (LRU-touched) instead of loading a second copy. Frees stay reference-guarded (the
+   `setInstrumentType` "no other instrument uses this path" check, generalized).
+2. **Make the envelope override atomic per-trigger, keyed by instrument id.** Store ATK/DEC/SUS/REL per
+   instrument in C++ (`sfEnvOverrides[256]`, indexed by `sampleId` → *always unique*, so two instruments never
+   collide in storage). At trigger, `SoundfontVoice::triggerNote` calls `tsf_preset_apply_overrides(...)` **right
+   before `tsf_channel_note_on`, under the slot mutex it already holds** — so note-on captures *this* instrument's
+   envelope atomically; the next trigger re-patches and re-captures; simultaneous notes on a shared handle each
+   capture their own. `native_setSoundfontEnvelopeOverrides` becomes a per-instrument *store* (no schedule-time
+   region patch), so the old racy path is gone.
+
+   Result: de-dup gives 1× RAM while different presets/overrides of one SF2 on different tracks stay fully
+   independent. **Verified on device** against the original repro: two instruments sharing one SF2 now show ~1×
+   its RAM (was ~N×), and two tracks with different presets + different ATK/SUS stay independent — the
+   volume-sharing trap is gone. Single-instrument behaviour (incl. KIL→REL release) is unchanged: the same
+   override values are applied, just atomically at trigger instead of as a persistent schedule-time region patch.
+   Touched C++ (`audio-engine.{h,cpp}`, `soundfont-voice.{h,cpp}`, `jni-bridge`) + Kotlin backend
+   (`IAudioBackend`/`OboeAudioBackend`/`AudioEngine`); C++ isn't validated by the pre-commit hook, so the gate
+   was a clean build + that repro.

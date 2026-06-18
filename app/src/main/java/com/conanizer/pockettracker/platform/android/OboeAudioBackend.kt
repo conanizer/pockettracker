@@ -469,9 +469,9 @@ class OboeAudioBackend : IAudioBackend {
         )
     }
 
-    override fun setSoundfontEnvelopeOverrides(sfSlot: Int, bank: Int, preset: Int,
+    override fun setSoundfontEnvelopeOverrides(instrumentId: Int,
                                                atk: Int, dec: Int, sus: Int, rel: Int) {
-        native_setSoundfontEnvelopeOverrides(sfSlot, bank, preset, atk, dec, sus, rel)
+        native_setSoundfontEnvelopeOverrides(instrumentId, atk, dec, sus, rel)
     }
 
     override fun setSoundfontFilterOverrides(sampleId: Int, filterType: Int,
@@ -635,8 +635,8 @@ class OboeAudioBackend : IAudioBackend {
         tableId: Int, tableTicRate: Int, noteOctave: Int, notePitch: Int, tableStartRow: Int,
         detuneSemitones: Float
     )
-    private external fun native_setSoundfontEnvelopeOverrides(sfSlot: Int, bank: Int, preset: Int,
-                                                               atk: Int, dec: Int, sus: Int, rel: Int)
+    private external fun native_setSoundfontEnvelopeOverrides(instrumentId: Int,
+                                                              atk: Int, dec: Int, sus: Int, rel: Int)
     private external fun native_setSoundfontFilterOverrides(sampleId: Int, filterType: Int,
                                                             filterCut: Int, filterRes: Int)
     private external fun native_unloadSoundfont(sfSlot: Int)

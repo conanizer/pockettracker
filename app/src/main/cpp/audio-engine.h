@@ -131,6 +131,10 @@ public:
                       float pbnRate = 0.0f, float vibratoSpeed = 0.0f, float vibratoDepth = 0.0f,
                       int tableStartRow = -1);
 
+    // Store a per-instrument SF2 ADSR override (REVIEW-3 5.1 SF de-dup). Keyed by instrument id and
+    // applied atomically at note trigger, so instruments sharing a de-duplicated handle don't clash.
+    void setSoundfontEnvelopeOverride(int instrumentId, int atk, int dec, int sus, int rel);
+
     // Schedule a soundfont note (public method — called from JNI)
     void scheduleSoundfontNote(int64_t targetFrame, int trackId, int sfSlot,
                                int midiNote, int midiVelocity, float vol, float pan,
@@ -361,6 +365,11 @@ private:
     std::unique_lock<std::mutex> beginSampleEdit(int id);
     InstrumentParams instrumentParams[256];
     InstrumentModSlot instrumentModSlots[256][4]; // [sampleId][slotIndex]
+    // Per-instrument SF2 ADSR envelope override (REVIEW-3 5.1 SF de-dup): stored keyed by instrument id
+    // (always unique) and applied atomically in triggerNote, so two instruments sharing one de-duplicated
+    // tsf handle never collide on the shared preset-region patch. -1 = keep the SF2 preset's own value.
+    struct SfEnvOverride { int atk = -1, dec = -1, sus = -1, rel = -1; };
+    SfEnvOverride sfEnvOverrides[256];
 
     Table tables[256];             // 256 tables, each with 16 rows
     std::mutex tableMutex;         // Protect table data during load/access

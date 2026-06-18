@@ -667,8 +667,16 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     SoundfontVoice& sv = sfVoices[t];
                     float trkVol = trackVolSnapshot[t];
                     soundfonts[note.sfSlot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // LRU touch (2.4)
+                    // This instrument's ADSR override (applied atomically inside triggerNote, before
+                    // note_on) — keyed by instrument id so de-duplicated handles stay isolated (5.1).
+                    int eAtk = -1, eDec = -1, eSus = -1, eRel = -1;
+                    if (note.sampleId >= 0 && note.sampleId < 256) {
+                        const SfEnvOverride& eo = sfEnvOverrides[note.sampleId];
+                        eAtk = eo.atk; eDec = eo.dec; eSus = eo.sus; eRel = eo.rel;
+                    }
                     sv.triggerNote(note.sfSlot, note.midiNote, note.midiVelocity,
-                                   note.volume, trkVol, note.pan, note.sfBank, note.sfPreset, t);
+                                   note.volume, trkVol, note.pan, note.sfBank, note.sfPreset, t,
+                                   eAtk, eDec, eSus, eRel);
                     sv.isReleasingOnly = false;
                     sv.resetPitchState();
                     sv.detuneSemitones = note.detuneSemitones;  // static instrument detune (set after reset)
@@ -1919,6 +1927,12 @@ void AudioEngine::scheduleSoundfontNote(int64_t targetFrame, int trackId, int sf
     note.tableStartRow    = tableStartRow;
     note.detuneSemitones  = detuneSemitones;
     noteQueue.schedule(note);
+}
+
+void AudioEngine::setSoundfontEnvelopeOverride(int instrumentId, int atk, int dec, int sus, int rel) {
+    if (instrumentId < 0 || instrumentId >= 256) return;
+    SfEnvOverride& o = sfEnvOverrides[instrumentId];
+    o.atk = atk; o.dec = dec; o.sus = sus; o.rel = rel;
 }
 
 void AudioEngine::scheduleKill(int64_t targetFrame, int trackId) {
