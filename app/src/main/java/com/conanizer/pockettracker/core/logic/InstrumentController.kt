@@ -133,6 +133,18 @@ class InstrumentController(
     }
 
     /**
+     * Unload ALL soundfonts from the audio engine and drop the path→slot map. Called whenever the
+     * project changes (new / load) so cached SF2s — which cost ≈2× their file size in RAM — don't
+     * accumulate across projects. The 4-slot LRU cache otherwise only frees a slot on eviction
+     * (loading a 5th distinct SF2), so NEW/load would leave the old SF2 resident (REVIEW-3 5.1 fix).
+     */
+    fun clearAllSoundfonts() {
+        audioEngine.backend.clearAllSoundfonts()
+        sfSlotMap.clear()
+        logger.d(TAG, "🗑️ All soundfonts unloaded for project change")
+    }
+
+    /**
      * Load sample from file into current instrument
      *
      * @param project Project containing instrument data

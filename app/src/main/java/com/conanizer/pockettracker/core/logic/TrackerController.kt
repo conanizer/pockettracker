@@ -325,6 +325,7 @@ class TrackerController(
         statusSuccess = true
 
         instrumentController.clearAllSamples()
+        instrumentController.clearAllSoundfonts()   // free cached SF2s too (REVIEW-3 5.1 leak fix)
 
         resetEditingContext()
     }

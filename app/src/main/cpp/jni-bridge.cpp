@@ -857,6 +857,28 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1unloa
     LOGD("🎹 Unloaded soundfont slot %d", (int)sfSlot);
 }
 
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1clearAllSoundfonts(
+        JNIEnv *env, jobject thiz) {
+    // Free EVERY soundfont slot — called when the project changes (NEW / load). The 4-slot cache
+    // otherwise only reclaims a slot on LRU eviction (a 5th distinct SF2), so a loaded SF2's float
+    // samples (≈2× its file size) stay resident across NEW/load. REVIEW-3 5.1 leak fix. Same per-slot
+    // body as native_1unloadSoundfont (detach voices, then close under the slot mutex).
+    for (int s = 0; s < MAX_SOUNDFONTS; s++) {
+        for (int t = 0; t < 8; t++) {
+            if (sfVoices[t].sfSlot == s) sfVoices[t].detach();
+        }
+        std::lock_guard<std::mutex> sfLock(soundfonts[s].mutex);
+        if (soundfonts[s].handle) {
+            tsf_close(soundfonts[s].handle);
+            soundfonts[s].handle = nullptr;
+        }
+        soundfonts[s].instrumentId = -1;
+        soundfonts[s].filePath.clear();
+    }
+    LOGD("🎹 Cleared all soundfont slots");
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSoundfontPresetName(
         JNIEnv *env, jobject thiz, jint sfSlot, jint bank, jint preset) {

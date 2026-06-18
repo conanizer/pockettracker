@@ -604,7 +604,7 @@ issues; the value only recomposes when it actually changes.
 - Caveat: it measures *native growth since launch*, so it can include minor engine warm-up (lazy DSP on first
   playback). Stage 2's diagnostics will quantify that; the baseline can be refined then if needed.
 
-### 5.1 finding 🔴 SoundFont memory leak (surfaced by the Stage 1 readout)
+### 5.1 finding ✅ FIXED — SoundFont memory leak (surfaced by the Stage 1 readout)
 
 The readout earned its keep immediately. Loading a 101 MB SF2 shows ~206 MB (TSF expands 16-bit samples to
 32-bit float ≈ 2× file size — correct, not double-counted). **NEW (or loading another project) does not
@@ -622,10 +622,12 @@ Parallel gap found while tracing: the **load-project path never calls `clearAllS
 `newProject` does), so loading project B after A frees A's PCM only for the instrument slots B reuses;
 soundfonts always leak.
 
-**Proposed fix (pending — next task):** add native `clearAllSoundfonts()` (loop all slots, detach voices +
-`tsf_close` + null — the body `unloadSoundfont` already uses) → `IAudioBackend`/`OboeAudioBackend` →
-`InstrumentController.clearAllSoundfonts()` (+ `sfSlotMap.clear()`); call it in `newProject()`, and put
-`clearAllSamples()` + `clearAllSoundfonts()` at the **top of `reloadProjectSamples()`** so every load/recovery
-path starts from a clean native slate (also closes the PCM-on-load gap). Separately, `reloadProjectSamples`
-has no SF **dedup** (two instruments sharing one SF2 load it twice into two slots) — worth fixing later, not
-the leak itself.
+**Fix (shipped, device-tested):** added native `clearAllSoundfonts()` (loops all slots, detaching voices then
+`tsf_close` under `soundfonts[slot].mutex` — the same body `unloadSoundfont` uses and the same lock the audio
+render holds, so it's safe to call during playback) → `IAudioBackend`/`OboeAudioBackend` →
+`InstrumentController.clearAllSoundfonts()` (+ `sfSlotMap.clear()`). Called in `newProject()`, and
+`clearAllSamples()` + `clearAllSoundfonts()` now run at the **top of `reloadProjectSamples()`** so every
+load/recovery path starts from a clean native slate (this also closes the PCM-on-load gap above). Verified on
+device: **NEW now drops `SAMPLE RAM` back toward baseline** instead of stranding the SF2. Still open (minor,
+not the leak): `reloadProjectSamples` has no SF **dedup** — two instruments sharing one SF2 load it twice into
+two slots — worth fixing later.

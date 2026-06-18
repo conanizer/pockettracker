@@ -687,6 +687,12 @@ interface IAudioBackend {
     fun unloadSoundfont(sfSlot: Int)
 
     /**
+     * Free EVERY soundfont slot at once. Called when the project changes (NEW / load) so cached SF2s
+     * — which cost ≈2× their file size in RAM — don't accumulate across projects (REVIEW-3 5.1).
+     */
+    fun clearAllSoundfonts()
+
+    /**
      * Return the preset name string for display on the instrument screen.
      * Returns "---" if slot is invalid or preset not found.
      */

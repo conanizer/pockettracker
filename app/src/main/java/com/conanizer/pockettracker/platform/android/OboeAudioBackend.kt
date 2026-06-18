@@ -483,6 +483,10 @@ class OboeAudioBackend : IAudioBackend {
         native_unloadSoundfont(sfSlot)
     }
 
+    override fun clearAllSoundfonts() {
+        native_clearAllSoundfonts()
+    }
+
     override fun getSoundfontPresetName(sfSlot: Int, bank: Int, preset: Int): String =
         native_getSoundfontPresetName(sfSlot, bank, preset) ?: "---"
 
@@ -636,6 +640,7 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_setSoundfontFilterOverrides(sampleId: Int, filterType: Int,
                                                             filterCut: Int, filterRes: Int)
     private external fun native_unloadSoundfont(sfSlot: Int)
+    private external fun native_clearAllSoundfonts()
     private external fun native_getSoundfontPresetName(sfSlot: Int, bank: Int, preset: Int): String?
     private external fun native_getSoundfontFirstBankPreset(sfSlot: Int): IntArray
     private external fun native_getSoundfontPresetCount(sfSlot: Int): Int

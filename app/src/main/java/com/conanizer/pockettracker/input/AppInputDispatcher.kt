@@ -258,6 +258,12 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     }
 
     fun reloadProjectSamples() {
+        // Start every load/recovery from a clean native slate so the previous project's PCM and
+        // soundfonts don't accumulate (REVIEW-3 5.1). clearAllSamples holds sampleEditMutex and stops
+        // voices inside the lock (audio-safe); clearAllSoundfonts frees all SF slots + the path→slot
+        // map. Both are repopulated by the load loop below.
+        audioEngine.clearAllSamples()
+        instrumentController.clearAllSoundfonts()
         var loadedCount = 0
         var failedCount = 0
         trackerController.project.instruments.forEach { instrument ->
