@@ -192,6 +192,33 @@ class ProjectModule : TrackerModule {
             isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1,
             t = t
         )
+
+        // ─────────────────────────────────────
+        // SAMPLE RAM readout — read-only info line (NOT a cursor row), REVIEW-3 5.1.
+        // Value = native-heap growth since launch (≈ loaded sample + soundfont PCM), supplied by
+        // MainActivity. Integer math (tenths of a MB) avoids locale decimal-separator issues.
+        // ─────────────────────────────────────
+        rowY += ROW_HEIGHT * 2
+        val ramTenths = (projectState.sampleRamBytes * 10 + 524288) / 1048576
+        drawBitmapText(
+            text = "SAMPLE RAM",
+            x = nameColumnX,
+            y = rowY + TEXT_PADDING,
+            scale = scale,
+            color = Color(t.textParam),
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+        drawBitmapText(
+            text = "${ramTenths / 10}.${ramTenths % 10} MB",
+            x = valueColumnX,
+            y = rowY + TEXT_PADDING,
+            scale = scale,
+            color = Color(t.textValue),
+            spacing = CHAR_SPACING,
+            fontScale = FONT_SCALE
+        )
+
         // ===================================
         // STEP 5: Draw status message at bottom (if any)
         // ===================================
@@ -679,5 +706,6 @@ data class ProjectState(
     val isRendering: Boolean = false,
     val isStemsRendering: Boolean = false,
     val renderProgress: Float = 0f,
+    val sampleRamBytes: Long = 0L,
     val appTheme: AppTheme = AppTheme.Companion.CLASSIC
 )

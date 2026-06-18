@@ -96,6 +96,7 @@ data class TrackerScreenParams(
     val effectsCursorRow: Int = 0,
     val isRendering: Boolean = false,
     val renderProgress: Float = 0f,
+    val sampleRamBytes: Long = 0L,
     val showCleanDialog: Boolean = false,
     val cleanDialogTarget: String = "",  // "SEQ" or "INST"
     val cleanDialogCursor: Int = 0,      // 0 = YES, 1 = NO
@@ -191,6 +192,7 @@ private fun TrackerScreen(params: TrackerScreenParams, modifier: Modifier = Modi
             effectsCursorRow = params.effectsCursorRow,
             isRendering = params.isRendering,
             renderProgress = params.renderProgress,
+            sampleRamBytes = params.sampleRamBytes,
             showCleanDialog = params.showCleanDialog,
             cleanDialogTarget = params.cleanDialogTarget,
             cleanDialogCursor = params.cleanDialogCursor,

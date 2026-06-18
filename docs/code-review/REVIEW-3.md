@@ -551,8 +551,9 @@ prompt, **C** the onStop background flush. Phase A is Kotlin-only (the pre-commi
   debounce). Confirm the onStop write fires immediately on background (logcat `✅ Wrote file: …/autosave.ptp`
   the moment you home out with unsaved edits), and **not** when the project is clean (just saved/loaded).
 
-5.3 (crash-safe autosave) complete across Phases A/B/C. Remaining Review #3 item: only Stage 5 idea 5.1
-(sample-RAM readout). **3.2 / 4.1 / 4.2 / 5.2 / 5.3 (A+B+C)** done.
+5.3 (crash-safe autosave) complete across Phases A/B/C. **3.2 / 4.1 / 4.2 / 5.2 / 5.3 (A+B+C)** done.
+5.1 (sample-RAM readout) is now in progress — **Stage 1 shipped** (see below); it immediately surfaced a
+SoundFont memory leak (see "5.1 finding"), which is the next fix.
 
 ### 5.3 follow-up ✅ DONE (RESUME setting) — session resume on app-killing ROMs
 
@@ -583,3 +584,48 @@ the app every background, so the choice is now **per-device and user-selectable*
   (written on edits *and* on save, cleared only by NEW) so AUTO also resumes saved sessions — a moderate
   change (autosave shifts from crash-prompt to full session-persistence; the dirty-flag-after-resume detail
   needs settling). **Parked — revisit if the saved-then-blank case proves annoying in practice.**
+
+### 5.1 ✅ Stage 1 DONE — sample-RAM readout on the PROJECT screen
+
+Staged (agreed with the developer): **Stage 1** readout → **Stage 2** live `USED / LIMIT` + device-memory
+diagnostics to calibrate the real crash wall per device → **Stage 3** load-blocking once calibrated.
+
+**Stage 1 (shipped, device-tested):** a read-only `SAMPLE RAM  xx.x MB` line below the SYSTEM row on the
+PROJECT screen (not a cursor row). Instead of summing native buffers by hand, it uses Android's own number:
+a startup baseline is snapshotted with `Debug.getNativeHeapAllocatedSize()` right after the engine's DSP is
+allocated but *before* any samples load; while the PROJECT screen is shown, a 500 ms poll displays
+`current − baseline` ≈ the PCM of the user's loaded samples **and** soundfonts (TSF allocates native heap, so
+SF is counted automatically — no SF proxy, no C++ getter). Integer tenths-of-a-MB formatting avoids locale
+issues; the value only recomposes when it actually changes.
+- Files (all Kotlin): `MainActivity` (baseline capture in the engine-create effect + PROJECT poll + state),
+  `ScreenLayouts` + `PixelPerfectRenderer` (display pass-through, mirrors `renderProgress`), `ProjectModule`
+  (the line).
+- On device: ~3.5–6 MB at rest, grows on sample/SF load, drops on NEW.
+- Caveat: it measures *native growth since launch*, so it can include minor engine warm-up (lazy DSP on first
+  playback). Stage 2's diagnostics will quantify that; the baseline can be refined then if needed.
+
+### 5.1 finding 🔴 SoundFont memory leak (surfaced by the Stage 1 readout)
+
+The readout earned its keep immediately. Loading a 101 MB SF2 shows ~206 MB (TSF expands 16-bit samples to
+32-bit float ≈ 2× file size — correct, not double-counted). **NEW (or loading another project) does not
+reclaim it** — the number stays at 206 MB, reproducibly. On a 1 GB device this is the single biggest OOM risk.
+
+**Root cause (three facts):**
+1. `unloadSoundfont()` exists (native `tsf_close`, `jni-bridge.cpp:843`; backend wrapper; interface decl) but
+   has **zero callers** anywhere in Kotlin.
+2. `newProject()` frees **PCM only** — `clearAllSamples()` clears the `samples[]` slots (why PCM drops), but
+   nothing touches the `soundfonts[]` handles, and `sfSlotMap` is never cleared.
+3. SoundFonts live in a **4-slot LRU cache** (`MAX_SOUNDFONTS = 4`) reclaimed only by *eviction* — i.e. when a
+   **5th** distinct SF2 is loaded. So NEW/load leaves the `tsf` handle + its float samples fully resident.
+
+Parallel gap found while tracing: the **load-project path never calls `clearAllSamples` either** (only
+`newProject` does), so loading project B after A frees A's PCM only for the instrument slots B reuses;
+soundfonts always leak.
+
+**Proposed fix (pending — next task):** add native `clearAllSoundfonts()` (loop all slots, detach voices +
+`tsf_close` + null — the body `unloadSoundfont` already uses) → `IAudioBackend`/`OboeAudioBackend` →
+`InstrumentController.clearAllSoundfonts()` (+ `sfSlotMap.clear()`); call it in `newProject()`, and put
+`clearAllSamples()` + `clearAllSoundfonts()` at the **top of `reloadProjectSamples()`** so every load/recovery
+path starts from a clean native slate (also closes the PCM-on-load gap). Separately, `reloadProjectSamples`
+has no SF **dedup** (two instruments sharing one SF2 load it twice into two slots) — worth fixing later, not
+the leak itself.

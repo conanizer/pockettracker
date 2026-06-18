@@ -164,6 +164,8 @@ fun PixelPerfectTracker(
     // Render state (WAV export)
     isRendering: Boolean = false,
     renderProgress: Float = 0f,
+    // Sample-RAM readout (PROJECT screen)
+    sampleRamBytes: Long = 0L,
     // Clean dialog state
     showCleanDialog: Boolean = false,
     cleanDialogTarget: String = "",  // "SEQ" or "INST"
@@ -381,6 +383,7 @@ fun PixelPerfectTracker(
                         effectsCursorRow = effectsCursorRow,
                         isRendering = isRendering,
                         renderProgress = renderProgress,
+                        sampleRamBytes = sampleRamBytes,
                         showCleanDialog = showCleanDialog,
                         cleanDialogTarget = cleanDialogTarget,
                         cleanDialogCursor = cleanDialogCursor,
@@ -503,6 +506,8 @@ class TrackerLayout {
         // Render state (WAV export)
         isRendering: Boolean = false,
         renderProgress: Float = 0f,
+        // Sample-RAM readout (PROJECT screen)
+        sampleRamBytes: Long = 0L,
         // Clean dialog state
         showCleanDialog: Boolean = false,
         cleanDialogTarget: String = "",  // "SEQ" or "INST"
@@ -700,6 +705,7 @@ class TrackerLayout {
                                     isSuccess = projectStatusSuccess,
                                     isRendering = isRendering,
                                     renderProgress = renderProgress,
+                                    sampleRamBytes = sampleRamBytes,
                                     appTheme = appTheme
                                 )
                             )

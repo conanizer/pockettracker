@@ -287,10 +287,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // stream triggers Android's C2 codec framework to enumerate ~42 codecs, which can take
     // up to 35 seconds and completely freezes the main thread if done synchronously.
     var audioReady by remember { mutableStateOf(false) }
+    // Native-heap baseline for the PROJECT sample-RAM readout (REVIEW-3 5.1). Captured below right
+    // after the engine's fixed DSP is allocated but before any samples load, so the readout can show
+    // (current native heap − baseline) ≈ the PCM of the samples/soundfonts the user has loaded.
+    // −1 = not captured yet.
+    var nativeHeapBaseline by remember { mutableStateOf(-1L) }
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             audioEngine.create()
         }
+        // Engine DSP is now allocated and no user samples are loaded yet (the template/recovery sample
+        // loads are keyed on audioReady, set on the next line) → this is the clean "zero samples" baseline.
+        nativeHeapBaseline = android.os.Debug.getNativeHeapAllocatedSize()
         audioReady = true
     }
 
@@ -323,6 +331,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     var isStemsRendering by _isStemsRendering
     val _renderProgress = remember { mutableFloatStateOf(0f) }
     var renderProgress by _renderProgress
+    // Sample-RAM readout value for the PROJECT screen (REVIEW-3 5.1) — native-heap growth since the
+    // startup baseline, refreshed by the poll below while the project screen is visible.
+    val _sampleRamBytes = remember { mutableStateOf(0L) }
+    var sampleRamBytes by _sampleRamBytes
 
     val _showCleanDialog = remember { mutableStateOf(false) }
     var showCleanDialog by _showCleanDialog
@@ -830,6 +842,21 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
     }
 
+    // Sample-RAM readout poll for the PROJECT screen (REVIEW-3 5.1). While the project screen is shown,
+    // refresh (current native heap − startup baseline) ≈ loaded sample/soundfont RAM. Android's getter
+    // is cheap; the State only recomposes when the MB value actually changes. coerceAtLeast(0) guards
+    // the brief window before the baseline is captured (and any native shrink below it).
+    LaunchedEffect(currentScreen) {
+        if (currentScreen == ScreenType.PROJECT) {
+            while (true) {
+                val base = if (nativeHeapBaseline >= 0L) nativeHeapBaseline
+                           else android.os.Debug.getNativeHeapAllocatedSize()
+                sampleRamBytes = (android.os.Debug.getNativeHeapAllocatedSize() - base).coerceAtLeast(0L)
+                kotlinx.coroutines.delay(500)
+            }
+        }
+    }
+
     val appCtrl = remember {
         AppControllers(
             trackerController, audioEngine, audioBackend, instrumentController,
@@ -1001,6 +1028,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         effectsCursorRow = trackerController.effectsCursorRow,
         isRendering = isRendering,
         renderProgress = renderProgress,
+        sampleRamBytes = sampleRamBytes,
         showCleanDialog = showCleanDialog,
         cleanDialogTarget = cleanDialogTarget,
         cleanDialogCursor = cleanDialogCursor,
