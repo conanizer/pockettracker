@@ -775,6 +775,8 @@ class TrackerLayout {
                                     selectionMode = selectionMode,
                                     isCellSelected = isCellSelected,
                                     scrollPosition = songScrollPosition,
+                                    statusMessage = projectStatusMessage,
+                                    statusSuccess = projectStatusSuccess,
                                     appTheme = appTheme
                                 )
                             )

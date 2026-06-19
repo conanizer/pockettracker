@@ -2677,40 +2677,112 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         }
     }
 
+    /** Phrase IDs referenced by any chain. A phrase counts as "used" even when its steps are
+     *  empty (e.g. a silent spacer inside a pad chain), so clone targets must skip these or
+     *  cloning would overwrite a phrase another chain depends on. */
+    private fun usedPhraseIds(): Set<Int> {
+        val used = HashSet<Int>()
+        for (c in trackerController.project.chains) for (ref in c.phraseRefs) if (ref != -1) used.add(ref)
+        return used
+    }
+
+    /** Chain IDs referenced by any song track (same "used even if empty" reasoning as phrases). */
+    private fun usedChainIds(): Set<Int> {
+        val used = HashSet<Int>()
+        for (t in trackerController.project.tracks) for (ref in t.chainRefs) if (ref != -1) used.add(ref)
+        return used
+    }
+
     fun handleLBA() {
         when (trackerController.currentScreen) {
             ScreenType.SONG -> {
-                val track = trackerController.project.tracks[trackerController.cursorColumn - 1]
+                val project = trackerController.project
+                val track = project.tracks[trackerController.cursorColumn - 1]
                 val currentChainId = track.chainRefs.getOrNull(trackerController.cursorRow) ?: -1
                 if (currentChainId != -1) {
-                    val start = currentChainId + 1
-                    val nextEmpty = ((start..255) + (0 until start)).firstOrNull { trackerController.project.chains[it].phraseRefs.all { ref -> ref == -1 } }
-                    if (nextEmpty != null) {
-                        val src = trackerController.project.chains[currentChainId]; val dst = trackerController.project.chains[nextEmpty]
-                        src.phraseRefs.copyInto(dst.phraseRefs); src.transposeValues.copyInto(dst.transposeValues)
-                        track.chainRefs[trackerController.cursorRow] = nextEmpty; trackerController.lastEditedChain = nextEmpty; trackerController.projectVersion++
+                    val src = project.chains[currentChainId]
+                    val usedChains = usedChainIds()
+                    val usedPhrases = usedPhraseIds()
+
+                    // Destination must be a FREE chain slot: empty AND not referenced by any track.
+                    val chainStart = currentChainId + 1
+                    val dstChainId = ((chainStart..255) + (0 until chainStart)).firstOrNull {
+                        it !in usedChains && project.chains[it].phraseRefs.all { ref -> ref == -1 }
+                    }
+
+                    // Deep clone: every unique phrase the chain references gets its own FREE slot
+                    // (empty AND unreferenced — a used-but-empty phrase like a pad spacer must not be
+                    // overwritten) so the cloned chain is fully independent. Duplicate refs map to the
+                    // same clone; `reserved` tracks slots already taken within this clone.
+                    val srcPhraseIds = src.phraseRefs.filter { it != -1 }.distinct()
+                    val reserved = HashSet<Int>()
+                    val phraseMap = HashMap<Int, Int>()
+                    var enoughPhrases = true
+                    for (pid in srcPhraseIds) {
+                        val slot = (0..255).firstOrNull {
+                            it !in reserved && it !in usedPhrases &&
+                                project.phrases[it].steps.all { step -> step.isEmpty() }
+                        }
+                        if (slot == null) { enoughPhrases = false; break }
+                        reserved.add(slot); phraseMap[pid] = slot
+                    }
+
+                    // Capacity is fully checked before any mutation — abort, never half-clone.
+                    when {
+                        dstChainId == null -> {
+                            trackerController.statusMessage = "NO FREE CHAINS"; trackerController.statusSuccess = false
+                        }
+                        !enoughPhrases -> {
+                            trackerController.statusMessage = "NO FREE PHRASES"; trackerController.statusSuccess = false
+                        }
+                        else -> {
+                            for ((srcPid, dstPid) in phraseMap) {
+                                val sp = project.phrases[srcPid]; val dp = project.phrases[dstPid]
+                                sp.steps.forEachIndexed { i, step -> dp.steps[i] = step.copy() }
+                            }
+                            val dst = project.chains[dstChainId]
+                            src.phraseRefs.forEachIndexed { i, ref ->
+                                dst.phraseRefs[i] = if (ref == -1) -1 else phraseMap.getValue(ref)
+                            }
+                            src.transposeValues.copyInto(dst.transposeValues)
+                            track.chainRefs[trackerController.cursorRow] = dstChainId
+                            trackerController.lastEditedChain = dstChainId
+                            trackerController.statusMessage = "CHAIN CLONED"; trackerController.statusSuccess = true
+                            trackerController.projectVersion++
+                        }
                     }
                 }
             }
             ScreenType.CHAIN -> {
-                val chain = trackerController.project.chains[trackerController.currentChain]
+                val project = trackerController.project
+                val chain = project.chains[trackerController.currentChain]
                 val currentPhraseId = chain.phraseRefs[trackerController.cursorRow]
                 if (currentPhraseId != -1) {
+                    // Target the next FREE phrase: empty AND unreferenced (skip used-but-empty ones).
+                    val usedPhrases = usedPhraseIds()
                     val start = currentPhraseId + 1
-                    val nextEmpty = ((start..255) + (0 until start)).firstOrNull { trackerController.project.phrases[it].steps.all { step -> step.isEmpty() } }
+                    val nextEmpty = ((start..255) + (0 until start)).firstOrNull {
+                        it !in usedPhrases && project.phrases[it].steps.all { step -> step.isEmpty() }
+                    }
                     if (nextEmpty != null) {
-                        val src = trackerController.project.phrases[currentPhraseId]; val dst = trackerController.project.phrases[nextEmpty]
+                        val src = project.phrases[currentPhraseId]; val dst = project.phrases[nextEmpty]
                         src.steps.forEachIndexed { i, step -> dst.steps[i] = step.copy() }
                         chain.phraseRefs[trackerController.cursorRow] = nextEmpty; trackerController.lastEditedPhrase = nextEmpty; trackerController.projectVersion++
                     }
                 }
             }
             ScreenType.PHRASE -> {
+                val project = trackerController.project
                 val srcPhraseId = trackerController.currentPhrase
+                // Target the next FREE phrase: empty AND unreferenced (and never the source itself).
+                val usedPhrases = usedPhraseIds()
                 val start = srcPhraseId + 1
-                val nextEmpty = ((start..255) + (0 until start)).firstOrNull { trackerController.project.phrases[it].steps.all { step -> step.isEmpty() } }
+                val nextEmpty = ((start..255) + (0 until start)).firstOrNull {
+                    it != srcPhraseId && it !in usedPhrases &&
+                        project.phrases[it].steps.all { step -> step.isEmpty() }
+                }
                 if (nextEmpty != null) {
-                    val src = trackerController.project.phrases[srcPhraseId]; val dst = trackerController.project.phrases[nextEmpty]
+                    val src = project.phrases[srcPhraseId]; val dst = project.phrases[nextEmpty]
                     src.steps.forEachIndexed { i, step -> dst.steps[i] = step.copy() }
                     trackerController.currentPhrase = nextEmpty; trackerController.projectVersion++
                 }
