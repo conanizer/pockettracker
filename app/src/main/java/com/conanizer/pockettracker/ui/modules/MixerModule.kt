@@ -26,16 +26,16 @@ import kotlin.math.log10
  *   Master values below master meter at original y position
  *
  * SEND SECTION (lower ~half):
- *   DEL meter (col 0 pos) + REV meter (col 1 pos) — stereo, display-only
- *   To the right:  REV xx  MIX xx   ← same row as original master volume position
- *                  DEL xx  EQ  xx
- *                       OTT/DST xx
- *   "DEL" / "REV" labels below send meters
+ *   REV meter (left) + DEL meter (right), side by side.
+ *   Each: "REV"/"DEL" header ABOVE the meter, wet value BELOW it.
  *
- * Cursor:  columns 0-7 = tracks (active only at mixerMasterRow==0)
- *          column 8 = master (active at any row)
- * Master rows: 0=MIX vol, 1=EQ slot, 2=OTT/DUST depth, 3=LIM pre-gain
- * DPAD DOWN from track col auto-jumps to master col row 1 (EQ).
+ * Cursor model (mixerMasterRow, cursorColumn):
+ *   row 0: cols 0-7 = track volumes, col 8 = master MIX volume
+ *   row 1: col 0 = REV wet, col 1 = DEL wet, col 8 = master EQ slot
+ *   row 2: col 8 = master OTT/DUST depth
+ *   row 3: col 8 = master LIM pre-gain
+ * Navigation: DOWN from a track → REV; REV →(R)→ DEL →(R)→ EQ;
+ *   EQ/OTT/DST/LIM →(L)→ DEL; UP from REV/DEL → first track.
  */
 class MixerModule : TrackerModule {
     override val width  = 620
@@ -57,10 +57,11 @@ class MixerModule : TrackerModule {
     // Master meter — keeps original height; starts at same top as tracks
     private val MASTER_METER_H  = 200
 
-    // Send section — aligned with master value rows so meters sit beside the text
+    // Send section — REV/DEL headers ABOVE the meters, wet values BELOW them.
     private val SEND_METER_TOP  = 234    // = MROW0_Y: meters start at the REV+MIX value row
-    private val SEND_METER_H    = 112    // 234 + 112 + 4 = 350 → labels at same y as before
-    private val SEND_LABEL_Y    = 350
+    private val SEND_METER_H    = 112    // 234 + 112 + 4 = 350 → value row sits just below
+    private val SEND_HEADER_Y   = 216    // SEND_METER_TOP - 18: header labels above the meters
+    private val SEND_VALUE_Y    = 350    // just below the send meters: REV/DEL wet values
 
     // All stereo bars (tracks AND master) use the same slim dimensions
     private val BAR_W   = 20
@@ -74,10 +75,6 @@ class MixerModule : TrackerModule {
     private val MROW1_Y = MROW0_Y + ROW_HEIGHT
     private val MROW2_Y = MROW1_Y + ROW_HEIGHT
     private val MROW3_Y = MROW2_Y + ROW_HEIGHT
-
-    // Send value display (REV wet / DEL wet — read-only, between send meters and master)
-    private val SEND_VAL_LABEL_X = FIRST_METER_X + 2 * METER_SPACING + 8   // = 124
-    private val SEND_VAL_VALUE_X = SEND_VAL_LABEL_X + 55                    // = 179
 
     // Master value text positions
     private val MSTR_LABEL_X = MASTER_X - 65
@@ -141,9 +138,9 @@ class MixerModule : TrackerModule {
             s.masterPeaks.getOrElse(1) { 0f },
             scale, masterSel, false, t, 16, 17)
 
-        // ── Send return meters: REV left, DEL right ────────────────────────
+        // ── Send return meters: REV left, DEL right (both on send row 1) ───
         val revSendSel = s.mixerMasterRow == 1 && s.cursorColumn == 0
-        val delSendSel = s.mixerMasterRow == 2 && s.cursorColumn == 0
+        val delSendSel = s.mixerMasterRow == 1 && s.cursorColumn == 1
         drawStereoMeter(
             x + FIRST_METER_X, y + SEND_METER_TOP, SEND_METER_H,
             s.reverbPeaks.getOrElse(0) { 0f }, s.reverbPeaks.getOrElse(1) { 0f },
@@ -153,23 +150,20 @@ class MixerModule : TrackerModule {
             s.delayPeaks.getOrElse(0) { 0f }, s.delayPeaks.getOrElse(1) { 0f },
             scale, delSendSel, false, t, 20, 21)
 
-        // Send channel labels below meters
         val charW = 5 * FONT_SCALE + CHAR_SPACING
         val revCX = x + FIRST_METER_X + (BAR_W + BAR_SEP + BAR_W) / 2
         val delCX = x + FIRST_METER_X + METER_SPACING + (BAR_W + BAR_SEP + BAR_W) / 2
-        drawBitmapText("REV", revCX - (3 * charW) / 2, y + SEND_LABEL_Y,
+
+        // Header labels ABOVE the meters
+        drawBitmapText("REV", revCX - (3 * charW) / 2, y + SEND_HEADER_Y,
             scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("DEL", delCX - (3 * charW) / 2, y + SEND_LABEL_Y,
+        drawBitmapText("DEL", delCX - (3 * charW) / 2, y + SEND_HEADER_Y,
             scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
 
-        // ── Send return volume: REV and DEL (left of master values) ──────────
-        drawBitmapText("REV", x + SEND_VAL_LABEL_X, y + MROW0_Y,
-            scale, if (revSendSel) Color(t.textCursor) else Color(t.textParam), CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(s.project.reverbWet.toHex2(), x + SEND_VAL_VALUE_X, y + MROW0_Y,
+        // Wet values BELOW the meters (highlighted when selected)
+        drawBitmapText(s.project.reverbWet.toHex2(), revCX - (2 * charW) / 2, y + SEND_VALUE_Y,
             scale, if (revSendSel) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("DEL", x + SEND_VAL_LABEL_X, y + MROW1_Y,
-            scale, if (delSendSel) Color(t.textCursor) else Color(t.textParam), CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(s.project.delayWet.toHex2(), x + SEND_VAL_VALUE_X, y + MROW1_Y,
+        drawBitmapText(s.project.delayWet.toHex2(), delCX - (2 * charW) / 2, y + SEND_VALUE_Y,
             scale, if (delSendSel) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
 
         // ── Master value rows (at original position, aligned with send section) ──
@@ -337,14 +331,13 @@ class MixerModule : TrackerModule {
             else
                 CursorContextFactory.hexByte(state.project.masterVolume, 0, 255)
         }
-        // Send rows 1-2, col 0: return volume
-        if (state.cursorColumn == 0) return when (state.mixerMasterRow) {
-            1 -> CursorContextFactory.hexByte(state.project.reverbWet, 0, 255)
-            2 -> CursorContextFactory.hexByte(state.project.delayWet,  0, 255)
-            else -> CursorContextFactory.none()
-        }
+        // Send row (row 1): REV (col 0) / DEL (col 1) — side by side under their meters
+        if (state.mixerMasterRow == 1 && state.cursorColumn == 0)
+            return CursorContextFactory.hexByte(state.project.reverbWet, 0, 255)
+        if (state.mixerMasterRow == 1 && state.cursorColumn == 1)
+            return CursorContextFactory.hexByte(state.project.delayWet, 0, 255)
         // Col 8 (master): EQ, OTT/DUST, or LIM
-        return when (state.mixerMasterRow) {
+        if (state.cursorColumn == 8) return when (state.mixerMasterRow) {
             1 -> CursorContextFactory.hexByte(
                 currentValue = if (state.project.masterEqSlot < 0) -1 else state.project.masterEqSlot,
                 min = 0, max = 127, emptyValue = -1, canDelete = true, canInsert = true
@@ -356,6 +349,7 @@ class MixerModule : TrackerModule {
             3 -> CursorContextFactory.hexByte(state.project.limiterPreGain, 0, 255)
             else -> CursorContextFactory.none()
         }
+        return CursorContextFactory.none()
     }
 
     fun handleInput(
@@ -387,13 +381,13 @@ class MixerModule : TrackerModule {
         when (action) {
             is InputAction.SET_VALUE -> {
                 when {
-                    // Send return volumes (rows 1-2, col 0)
+                    // Send return volumes (row 1): REV col 0, DEL col 1
                     state.mixerMasterRow == 1 && state.cursorColumn == 0 -> {
                         state.project.reverbWet = action.value.coerceIn(0, 255)
                         onProjectModified()
                         return InputResult(modified = true, reverbWetChanged = true)
                     }
-                    state.mixerMasterRow == 2 && state.cursorColumn == 0 -> {
+                    state.mixerMasterRow == 1 && state.cursorColumn == 1 -> {
                         state.project.delayWet = action.value.coerceIn(0, 255)
                         onProjectModified()
                         return InputResult(modified = true, delayWetChanged = true)

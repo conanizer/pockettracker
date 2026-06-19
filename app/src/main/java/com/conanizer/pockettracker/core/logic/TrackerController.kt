@@ -764,7 +764,15 @@ class TrackerController(
                 // At pair 0, row 0 — stay at top (no wrap)
             }
             ScreenType.MIXER -> {
-                if (mixerMasterRow > 0) mixerMasterRow--
+                when {
+                    // REV / DEL (send row) → first track
+                    mixerMasterRow == 1 && (mixerCursorColumn == 0 || mixerCursorColumn == 1) -> {
+                        mixerMasterRow = 0
+                        mixerCursorColumn = 0
+                    }
+                    // Master column: EQ→MIX, OTT→EQ, LIM→OTT (col 8 stays)
+                    mixerMasterRow > 0 -> mixerMasterRow--
+                }
             }
             ScreenType.EFFECTS -> {
                 if (effectsCursorRow > 0) effectsCursorRow--
@@ -842,13 +850,15 @@ class TrackerController(
                 // At pair 1, last row — stay at bottom (no wrap)
             }
             ScreenType.MIXER -> {
-                if (mixerMasterRow < 3) {
-                    mixerMasterRow++
-                    // Send rows (1-2) only have col 0 (REV/DEL) and col 8 (master).
-                    // Track cols 1-7 snap to col 0 (send); col 8 stays on master.
-                    if (mixerMasterRow > 0 && mixerCursorColumn in 1..7) mixerCursorColumn = 0
-                    // LIM row (3) is master-only: col 0 has no send, snap to master.
-                    if (mixerMasterRow == 3 && mixerCursorColumn == 0) mixerCursorColumn = 8
+                when {
+                    // Track meters → REV (send row, col 0)
+                    mixerMasterRow == 0 && mixerCursorColumn < 8 -> {
+                        mixerMasterRow = 1
+                        mixerCursorColumn = 0
+                    }
+                    // Master column: MIX→EQ→OTT→LIM (col 8 stays)
+                    mixerCursorColumn == 8 && mixerMasterRow < 3 -> mixerMasterRow++
+                    // REV / DEL: nothing below → stay
                 }
             }
             ScreenType.EFFECTS -> {
@@ -883,12 +893,19 @@ class TrackerController(
                 }
             }
             ScreenType.MIXER -> {
-                if (mixerMasterRow == 0) {
-                    // Track row wraps: track 0 → master, master → track 0
-                    mixerCursorColumn = if (mixerCursorColumn > 0) mixerCursorColumn - 1 else 8
-                } else {
-                    // Send rows: only col 0 (send) and col 8 (master) — wrap between them
-                    if (mixerCursorColumn == 8) mixerCursorColumn = 0
+                when {
+                    mixerMasterRow == 0 -> {
+                        // Track row wraps: track 0 → master, master → track 0
+                        mixerCursorColumn = if (mixerCursorColumn > 0) mixerCursorColumn - 1 else 8
+                    }
+                    // DEL → REV
+                    mixerMasterRow == 1 && mixerCursorColumn == 1 -> mixerCursorColumn = 0
+                    // Master column (EQ/OTT/DST/LIM) → DEL
+                    mixerCursorColumn == 8 -> {
+                        mixerMasterRow = 1
+                        mixerCursorColumn = 1
+                    }
+                    // REV (col 0): nothing to the left → stay
                 }
             }
             ScreenType.TABLE -> {
@@ -929,12 +946,16 @@ class TrackerController(
                 }
             }
             ScreenType.MIXER -> {
-                if (mixerMasterRow == 0) {
-                    // Track row wraps: master → track 0, track 7 → master
-                    mixerCursorColumn = if (mixerCursorColumn < 8) mixerCursorColumn + 1 else 0
-                } else {
-                    // Send rows: only col 0 (send) and col 8 (master) — wrap between them
-                    if (mixerCursorColumn == 0) mixerCursorColumn = 8
+                when {
+                    mixerMasterRow == 0 -> {
+                        // Track row wraps: master → track 0, track 7 → master
+                        mixerCursorColumn = if (mixerCursorColumn < 8) mixerCursorColumn + 1 else 0
+                    }
+                    // REV → DEL
+                    mixerMasterRow == 1 && mixerCursorColumn == 0 -> mixerCursorColumn = 1
+                    // DEL → EQ (master column)
+                    mixerMasterRow == 1 && mixerCursorColumn == 1 -> mixerCursorColumn = 8
+                    // Master column (col 8) already rightmost → stay
                 }
             }
             ScreenType.TABLE -> {

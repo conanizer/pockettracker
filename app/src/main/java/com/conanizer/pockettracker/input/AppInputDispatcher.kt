@@ -538,6 +538,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val settingsState = SettingsState(
                     cursorRow = trackerController.settingsCursorRow,
                     cursorColumn = trackerController.settingsCursorColumn,
+                    hasPhysicalButtons = deviceAdapter.hasPhysicalGameButtons(),
                     layoutMode = layoutMode,
                     scalingMode = scalingMode,
                     overlayFiles = overlayFiles,
@@ -558,6 +559,8 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val action = handlerFunction(context)
                 val result = settingsModule.handleInput(settingsState, action)
                 if (result.modified) {
+                    result.layoutMode?.let          { layoutMode          = it }
+                    result.scalingMode?.let         { scalingMode         = it }
                     result.overlayName?.let         { overlayName         = it }
                     result.overlayStrength?.let     { overlayStrength     = it }
                     result.buttonSoundEnabled?.let  { buttonSoundEnabled  = it }
@@ -1344,28 +1347,9 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     }
 
     private fun handleConfirmASettings() {
+        // All value rows change via A+dpad (handled through getCursorContext/handleInput).
+        // Single A is reserved for action rows only:
         when (trackerController.settingsCursorRow) {
-            0 -> {
-                val hasPhysical = deviceAdapter.hasPhysicalGameButtons()
-                layoutMode = when (layoutMode) {
-                    DeviceAdapter.LayoutMode.FULL            -> DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
-                    DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
-                    DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 -> if (hasPhysical) DeviceAdapter.LayoutMode.FULL else DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
-                    DeviceAdapter.LayoutMode.TOUCH_PORTRAIT  -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
-                }
-            }
-            1 -> {
-                scalingMode = when (scalingMode) {
-                    DeviceAdapter.ScalingMode.INTEGER  -> DeviceAdapter.ScalingMode.BILINEAR
-                    DeviceAdapter.ScalingMode.BILINEAR -> DeviceAdapter.ScalingMode.INTEGER
-                }
-            }
-            // row 2 = OVERLAY: A+dpad handled via generic getCursorContext/handleInput
-            3 -> { if (trackerController.settingsCursorColumn == 1) buttonSoundEnabled = !buttonSoundEnabled }
-            4 -> { if (trackerController.settingsCursorColumn == 1) buttonVibroEnabled = !buttonVibroEnabled }
-            5 -> { insertBefore = !insertBefore }
-            6 -> { cursorRemember = !cursorRemember }
-            7 -> { notePreviewEnabled = !notePreviewEnabled }
             9 -> {
                 themeEditorState = ThemeEditorState(isOpen = true)
             }
@@ -1383,7 +1367,6 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     }
                 }
             }
-            11 -> { autosaveResumeAuto = !autosaveResumeAuto }
         }
     }
 
@@ -1895,7 +1878,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 }
             }
             ScreenType.MIXER -> {
-                if (trackerController.mixerMasterRow == 1) {
+                if (trackerController.mixerMasterRow == 1 && trackerController.mixerCursorColumn == 8) {
                     val slot = trackerController.project.masterEqSlot
                     openEqEditor(if (slot < 0) 0 else slot, EqCallerContext.MasterEq)
                 }

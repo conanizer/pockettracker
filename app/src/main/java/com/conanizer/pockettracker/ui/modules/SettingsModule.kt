@@ -20,8 +20,11 @@ import com.conanizer.pockettracker.ui.toHex2
  * SETTINGS SCREEN MODULE
  *
  * Rows (0-10):
- *   0  — LAYOUT    (cycle: FULLSCREEN / TOUCH LANDSCAPE / AMIGA PORTRAIT)
- *   1  — SCALING   (cycle: INT / BILINEAR)
+ *   0  — LAYOUT    (A+dpad: FULLSCREEN / TOUCH LANDSCAPE / AMIGA PORTRAIT)
+ *   1  — SCALING   (A+dpad: INT / BILINEAR)
+ *
+ * All value rows change via A+dpad. Single A is reserved for actions only:
+ * row 9 (THEME, opens editor) and row 10 (TEMPLATE, save/clear).
  *   2  — OVERLAY   (col1: file name / OFF; col2: STR 00-FF)
  *   3  — BTN SOUND (col1: ON/OFF; col2: VOL 00-FF)
  *   4  — BTN VIBRO (col1: ON/OFF; col2: POW 00-FF)
@@ -252,12 +255,43 @@ class SettingsModule : TrackerModule {
     // CURSOR CONTEXT
     // ═══════════════════════════════════════════════════════════════════
 
+    // Layout modes selectable via A+dpad on the LAYOUT row. On touch-only devices FULL is
+    // excluded — it hides the virtual controls, which would leave the device with no input.
+    // (TOUCH_PORTRAIT is intentionally omitted: it is a legacy state that was never reachable.)
+    private fun layoutModeList(hasPhysical: Boolean): List<DeviceAdapter.LayoutMode> =
+        if (hasPhysical)
+            listOf(DeviceAdapter.LayoutMode.FULL,
+                   DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE,
+                   DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2)
+        else
+            listOf(DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE,
+                   DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2)
+
     fun getCursorContext(state: SettingsState): CursorContext {
         if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
 
         return when (state.cursorRow) {
-            0  -> CursorContextFactory.readOnly()   // LAYOUT: A key cycles
-            1  -> CursorContextFactory.readOnly()   // SCALING: A key cycles
+            0  -> CursorContext(
+                valueType = CursorValueType.HEX_BYTE,   // LAYOUT — A+dpad cycles selectable modes
+                capabilities = CursorCapabilities(
+                    canIncrement = true, canDecrement = true,
+                    canIncrementFast = false, canDecrementFast = false
+                ),
+                currentValue = layoutModeList(state.hasPhysicalButtons)
+                    .indexOf(state.layoutMode).coerceAtLeast(0),
+                minValue = 0,
+                maxValue = (layoutModeList(state.hasPhysicalButtons).size - 1).coerceAtLeast(0),
+                smallStep = 1, largeStep = 1, emptyValue = -1
+            )
+            1  -> CursorContext(
+                valueType = CursorValueType.HEX_BYTE,   // SCALING — A+dpad toggles INT / BILINEAR
+                capabilities = CursorCapabilities(
+                    canIncrement = true, canDecrement = true,
+                    canIncrementFast = false, canDecrementFast = false
+                ),
+                currentValue = if (state.scalingMode == DeviceAdapter.ScalingMode.BILINEAR) 1 else 0,
+                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
+            )
             2  -> when (state.cursorColumn) {
                 1 -> {
                     val options = listOf("OFF") + state.overlayFiles
@@ -360,6 +394,16 @@ class SettingsModule : TrackerModule {
         action: InputAction
     ): InputResult {
         when (state.cursorRow) {
+            0 -> if (action is InputAction.SET_VALUE) {   // LAYOUT
+                val modes = layoutModeList(state.hasPhysicalButtons)
+                return InputResult(modified = true,
+                    layoutMode = modes.getOrElse(action.value) { modes.first() })
+            }
+            1 -> if (action is InputAction.SET_VALUE) {   // SCALING
+                return InputResult(modified = true,
+                    scalingMode = if (action.value > 0) DeviceAdapter.ScalingMode.BILINEAR
+                                  else DeviceAdapter.ScalingMode.INTEGER)
+            }
             2 -> when (state.cursorColumn) {   // OVERLAY
                 1 -> if (action is InputAction.SET_VALUE) {
                     val options = listOf("OFF") + state.overlayFiles
@@ -407,6 +451,8 @@ class SettingsModule : TrackerModule {
 
     data class InputResult(
         val modified: Boolean,
+        val layoutMode: DeviceAdapter.LayoutMode? = null,
+        val scalingMode: DeviceAdapter.ScalingMode? = null,
         val overlayName: String? = null,
         val overlayStrength: Int? = null,
         val buttonSoundEnabled: Boolean? = null,
@@ -428,6 +474,7 @@ class SettingsModule : TrackerModule {
 data class SettingsState(
     val cursorRow: Int = 0,
     val cursorColumn: Int = 1,
+    val hasPhysicalButtons: Boolean = true,
     val layoutMode: DeviceAdapter.LayoutMode = DeviceAdapter.LayoutMode.FULL,
     val scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER,
     val overlayFiles: List<String> = emptyList(),
