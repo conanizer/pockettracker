@@ -2118,7 +2118,10 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     when (trackerController.currentScreen) {
                         ScreenType.PHRASE  -> trackerController.playPhrase(trackerController.currentPhrase)
                         ScreenType.CHAIN   -> trackerController.playChain(trackerController.currentChain)
-                        ScreenType.SONG, ScreenType.MIXER, ScreenType.EFFECTS, ScreenType.PROJECT, ScreenType.SETTINGS -> trackerController.playSong()
+                        // SONG: start from the highlighted row (manual behaviour). Other screens
+                        // have no song cursor, so they start from the top.
+                        ScreenType.SONG    -> trackerController.playSong(startRow = trackerController.cursorRow)
+                        ScreenType.MIXER, ScreenType.EFFECTS, ScreenType.PROJECT, ScreenType.SETTINGS -> trackerController.playSong()
                         else -> trackerController.togglePlayback()
                     }
                 }

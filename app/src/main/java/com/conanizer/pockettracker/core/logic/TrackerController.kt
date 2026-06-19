@@ -421,7 +421,7 @@ class TrackerController(
             when (currentScreen) {
                 ScreenType.PHRASE -> playPhrase(currentPhrase)
                 ScreenType.CHAIN -> playChain(currentChain)
-                ScreenType.SONG -> playSong()
+                ScreenType.SONG -> playSong(startRow = cursorRow)  // start from highlighted row
                 else -> playPhrase(currentPhrase) // default
             }
         }
