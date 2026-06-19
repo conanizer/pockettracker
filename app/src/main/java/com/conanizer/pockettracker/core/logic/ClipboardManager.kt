@@ -291,7 +291,7 @@ class ClipboardManager(
         endRow: Int,
         endColumn: Int
     ) {
-        val table = project.tables[tableId]
+        val table = project.tables[tableId.coerceIn(0, project.tables.size - 1)]
         val items = mutableListOf<TableRowClipItem>()
 
         val minRow = minOf(startRow, endRow)
@@ -498,7 +498,7 @@ class ClipboardManager(
         cursorColumn: Int,
         data: TableRowsData
     ): PasteResult {
-        val table = project.tables[tableId]
+        val table = project.tables[tableId.coerceIn(0, project.tables.size - 1)]
         var itemsPasted = 0
 
         for (item in data.items) {
@@ -728,7 +728,7 @@ class ClipboardManager(
         endRow: Int,
         endColumn: Int
     ): DeleteResult {
-        val table = project.tables[tableId]
+        val table = project.tables[tableId.coerceIn(0, project.tables.size - 1)]
         val minRow = minOf(startRow, endRow)
         val maxRow = maxOf(startRow, endRow)
         val minCol = minOf(startColumn, endColumn)

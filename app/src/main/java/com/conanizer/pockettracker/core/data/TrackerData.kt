@@ -431,7 +431,7 @@ data class Instrument(
     var sampleFilePath: String? = null,  // Path to loaded WAV file (null = use resource)
 
     // Table parameters
-    var tableId: Int = -1,          // -1 = no table, 0-255 = table ID
+    var tableId: Int = -1,          // -1 = no table, 0-127 = table ID
     var tableTicRate: Int = 0x06,   // Default: 6 tics per row (2 rows per phrase step at 12 tics/step)
 
     // Modulation slots (4 per instrument)
@@ -593,9 +593,10 @@ data class Project(
     // 8 tracks
     val tracks: Array<Track> = Array(8) { Track(it) },
 
-    // Instruments (256 slots, all identical — sampleFilePath = null means empty)
-    val instruments: Array<Instrument> = Array(256) { index ->
-        // All 256 instrument slots use the same layout:
+    // Instruments (128 slots, 0x00–0x7F, all identical — sampleFilePath = null means empty).
+    // 128 rather than 256 to align with the MIDI program range.
+    val instruments: Array<Instrument> = Array(128) { index ->
+        // All 128 instrument slots use the same layout:
         // name = "INSTXX", sampleId = index (slot ID), sampleFilePath = null (nothing loaded yet)
         // "empty" state is determined by sampleFilePath == null
         Instrument(
@@ -605,11 +606,11 @@ data class Project(
         )
     },
 
-    // Tables (256 slots, like phrases)
-    val tables: Array<Table> = Array(256) { Table(it) },
+    // Tables (128 slots, 0x00–0x7F, like phrases)
+    val tables: Array<Table> = Array(128) { Table(it) },
 
-    // Grooves (256 slots)
-    val grooves: Array<Groove> = Array(256) { Groove(it) }
+    // Grooves (128 slots, 0x00–0x7F)
+    val grooves: Array<Groove> = Array(128) { Groove(it) }
 ) {
     /** Convert the project-global transpose byte to signed semitones. See [byteToSignedSemitones]. */
     fun getTransposeSemitones(): Int = byteToSignedSemitones(transpose)

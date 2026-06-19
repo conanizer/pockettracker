@@ -1049,8 +1049,8 @@ class TrackerController(
 
         // Implicit table mapping (instrument i → table i) + explicit tableId override
         for (instId in usedInstrumentIds) {
+            val inst = project.instruments.getOrNull(instId) ?: continue
             usedTableIds.add(instId)
-            val inst = project.instruments[instId]
             if (inst.tableId >= 0) usedTableIds.add(inst.tableId)
         }
 

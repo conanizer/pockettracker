@@ -237,7 +237,7 @@ object CursorContextFactory {
      * Same behavior as volume: A+left/right cycles through full range
      */
     fun instrument(currentValue: Int) =
-        hexByte(currentValue).copy(valueType = CursorValueType.INSTRUMENT_REF)
+        hexByte(currentValue, 0, 127).copy(valueType = CursorValueType.INSTRUMENT_REF)
 
     /**
      * Effect type (cycles through: ---, ARP, KIL, OFF, RPT, VOL)
@@ -273,7 +273,7 @@ object CursorContextFactory {
      * @param currentValue Effect value (0-255)
      * @param fxSlot Which FX slot (1, 2, or 3)
      */
-    fun effectValue(currentValue: Int, fxSlot: Int) = CursorContext(
+    fun effectValue(currentValue: Int, fxSlot: Int, max: Int = 255) = CursorContext(
         valueType = CursorValueType.EFFECT_VALUE,
         capabilities = CursorCapabilities(
             canIncrement = true,
@@ -284,7 +284,7 @@ object CursorContextFactory {
         ),
         currentValue = currentValue,
         minValue = 0,
-        maxValue = 255,
+        maxValue = max,
         smallStep = 1,
         largeStep = 16,
         fxSlot = fxSlot

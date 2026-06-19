@@ -487,7 +487,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                             trackerController.lastEditedVolume = step.volume
                             trackerController.lastEditedInstrument = step.instrument
                             if (notePreviewEnabled && result.lastEditedNote != null) {
-                                val instrument = trackerController.project.instruments[step.instrument.coerceIn(0, 255)]
+                                val instrument = trackerController.project.instruments[step.instrument.coerceIn(0, 127)]
                                 val sr = audioEngine.getDeviceSampleRate().toLong().coerceAtLeast(44100L)
                                 val stepFrames = (60000.0 / trackerController.project.tempo / 4.0 * sr / 1000.0).toLong()
                                 audioEngine.previewNoteWithTimeout(instrument, step.note, trackerController.project, stepFrames)
@@ -1700,7 +1700,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 step.volume = trackerController.lastEditedVolume
                 trackerController.projectVersion++
                 if (notePreviewEnabled && step.note != Note.EMPTY) {
-                    val instrument = trackerController.project.instruments[step.instrument.coerceIn(0, 255)]
+                    val instrument = trackerController.project.instruments[step.instrument.coerceIn(0, 127)]
                     val sr = audioEngine.getDeviceSampleRate().toLong().coerceAtLeast(44100L)
                     val msPerStep = 60000.0 / trackerController.project.tempo / 4.0
                     val phraseDurationFrames = (msPerStep * sr / 1000.0 * 16).toLong()
@@ -2296,10 +2296,10 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             when (trackerController.currentScreen) {
                 ScreenType.CHAIN -> { trackerController.currentChain = if (trackerController.currentChain > 0) trackerController.currentChain - 1 else 255; trackerController.lastEditedChain = trackerController.currentChain }
                 ScreenType.PHRASE -> { trackerController.currentPhrase = if (trackerController.currentPhrase > 0) trackerController.currentPhrase - 1 else 255; trackerController.lastEditedPhrase = trackerController.currentPhrase }
-                ScreenType.INSTRUMENT -> { val n = if (trackerController.currentInstrument > 0) trackerController.currentInstrument - 1 else 255; trackerController.currentInstrument = n; trackerController.lastEditedInstrument = n; instrumentController.currentInstrument = n }
-                ScreenType.MODS -> { val n = if (trackerController.currentInstrument > 0) trackerController.currentInstrument - 1 else 255; trackerController.currentInstrument = n; trackerController.lastEditedInstrument = n; instrumentController.currentInstrument = n }
-                ScreenType.TABLE  -> { val n = if (trackerController.currentTable > 0) trackerController.currentTable - 1 else 255; trackerController.currentTable = n; trackerController.lastEditedTable = n }
-                ScreenType.GROOVE -> { trackerController.currentGroove = if (trackerController.currentGroove > 0) trackerController.currentGroove - 1 else 255 }
+                ScreenType.INSTRUMENT -> { val n = if (trackerController.currentInstrument > 0) trackerController.currentInstrument - 1 else 127; trackerController.currentInstrument = n; trackerController.lastEditedInstrument = n; instrumentController.currentInstrument = n }
+                ScreenType.MODS -> { val n = if (trackerController.currentInstrument > 0) trackerController.currentInstrument - 1 else 127; trackerController.currentInstrument = n; trackerController.lastEditedInstrument = n; instrumentController.currentInstrument = n }
+                ScreenType.TABLE  -> { val n = if (trackerController.currentTable > 0) trackerController.currentTable - 1 else 127; trackerController.currentTable = n; trackerController.lastEditedTable = n }
+                ScreenType.GROOVE -> { trackerController.currentGroove = if (trackerController.currentGroove > 0) trackerController.currentGroove - 1 else 127 }
                 else -> { }
             }
         }
@@ -2315,10 +2315,10 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             when (trackerController.currentScreen) {
                 ScreenType.CHAIN -> { trackerController.currentChain = if (trackerController.currentChain < 255) trackerController.currentChain + 1 else 0; trackerController.lastEditedChain = trackerController.currentChain }
                 ScreenType.PHRASE -> { trackerController.currentPhrase = if (trackerController.currentPhrase < 255) trackerController.currentPhrase + 1 else 0; trackerController.lastEditedPhrase = trackerController.currentPhrase }
-                ScreenType.INSTRUMENT -> { val n = if (trackerController.currentInstrument < 255) trackerController.currentInstrument + 1 else 0; trackerController.currentInstrument = n; trackerController.lastEditedInstrument = n; instrumentController.currentInstrument = n }
-                ScreenType.MODS -> { val n = if (trackerController.currentInstrument < 255) trackerController.currentInstrument + 1 else 0; trackerController.currentInstrument = n; trackerController.lastEditedInstrument = n; instrumentController.currentInstrument = n }
-                ScreenType.TABLE  -> { val n = if (trackerController.currentTable < 255) trackerController.currentTable + 1 else 0; trackerController.currentTable = n; trackerController.lastEditedTable = n }
-                ScreenType.GROOVE -> { trackerController.currentGroove = if (trackerController.currentGroove < 255) trackerController.currentGroove + 1 else 0 }
+                ScreenType.INSTRUMENT -> { val n = if (trackerController.currentInstrument < 127) trackerController.currentInstrument + 1 else 0; trackerController.currentInstrument = n; trackerController.lastEditedInstrument = n; instrumentController.currentInstrument = n }
+                ScreenType.MODS -> { val n = if (trackerController.currentInstrument < 127) trackerController.currentInstrument + 1 else 0; trackerController.currentInstrument = n; trackerController.lastEditedInstrument = n; instrumentController.currentInstrument = n }
+                ScreenType.TABLE  -> { val n = if (trackerController.currentTable < 127) trackerController.currentTable + 1 else 0; trackerController.currentTable = n; trackerController.lastEditedTable = n }
+                ScreenType.GROOVE -> { trackerController.currentGroove = if (trackerController.currentGroove < 127) trackerController.currentGroove + 1 else 0 }
                 else -> { }
             }
         }

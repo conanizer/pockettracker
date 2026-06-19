@@ -571,7 +571,7 @@ class PlaybackController(
             }
 
             // Fall back to exact framesPerStep (no groove) to avoid rounding drift.
-            val currentGroove = project.grooves[trackState.grooveId.coerceIn(0, 255)]
+            val currentGroove = project.grooves[trackState.grooveId.coerceIn(0, project.grooves.size - 1)]
             val currentGrooveActive = currentGroove.activeLength() > 0
 
             val stepDuration = if (currentGrooveActive) {
@@ -980,7 +980,7 @@ class PlaybackController(
         // Instrument and phrase volumes are passed separately to C++ as mod sources.
         // C++ multiplies them via the fixed VOL route: TABLE_VOL × phraseVol × instrVol.
         // Track × master are applied in the C++ mix loop in real-time.
-        val instrument = project.instruments[effectiveStep.instrument]
+        val instrument = project.instruments[effectiveStep.instrument.coerceIn(0, project.instruments.size - 1)]
         val instrVol  = VolumeUtils.hexToFloat(instrument.volume)
         val phraseVol = params.volume  // already 0.0–1.0 from resolveStepParams
 

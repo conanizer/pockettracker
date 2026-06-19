@@ -244,7 +244,7 @@ class AudioEngine(
         val tableTicRate = instrument.tableTicRate
 
         // Force reload table when previewing (user may have just edited it)
-        if (tableId >= 0 && project != null && tableId < 256) {
+        if (tableId >= 0 && project != null && tableId < project.tables.size) {
             forceReloadTable(project.tables[tableId])
         }
 
@@ -358,7 +358,7 @@ class AudioEngine(
         val tableId = instrument.id
         val tableTicRate = instrument.tableTicRate
 
-        if (project != null && tableId < 256) forceReloadTable(project.tables[tableId])
+        if (project != null && tableId < project.tables.size) forceReloadTable(project.tables[tableId])
 
         val tempo = project?.tempo ?: 120
         pushInstrumentModulation(instrument, tempo)
@@ -476,7 +476,7 @@ class AudioEngine(
         if (note == Note.EMPTY) return
         if (trackId in 0..7) phraseTrackMask = phraseTrackMask or (1 shl trackId)
 
-        val instrument = if (instrumentId in 0..255) {
+        val instrument = if (instrumentId in project.instruments.indices) {
             project.instruments[instrumentId]
         } else {
             logger.w(TAG, "❌ Invalid instrumentId=$instrumentId, skipping note")
@@ -522,7 +522,7 @@ class AudioEngine(
             // Table setup — same logic as sampler path
             val sfTableId = if (tableIdOverride >= 0) tableIdOverride else instrumentId
             val sfTicRate = instrument.tableTicRate
-            if (sfTableId in 0..255) {
+            if (sfTableId in project.tables.indices) {
                 ensureTableLoaded(project.tables[sfTableId])
             }
 
@@ -554,7 +554,7 @@ class AudioEngine(
         val tableId = if (tableIdOverride >= 0) tableIdOverride else instrumentId
         val tableTicRate = instrument.tableTicRate
 
-        if (tableId in 0..255) {
+        if (tableId in project.tables.indices) {
             ensureTableLoaded(project.tables[tableId])
         }
 

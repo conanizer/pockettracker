@@ -244,11 +244,11 @@ class PhraseEditorModule : TrackerModule {
             2 -> CursorContextFactory.volume(step.volume)
             3 -> CursorContextFactory.instrument(step.instrument)
             4 -> CursorContextFactory.effectType(step.fx1Type, 1)
-            5 -> CursorContextFactory.effectValue(step.fx1Value, 1)
+            5 -> CursorContextFactory.effectValue(step.fx1Value, 1, EffectProcessor.effectValueMax(step.fx1Type))
             6 -> CursorContextFactory.effectType(step.fx2Type, 2)
-            7 -> CursorContextFactory.effectValue(step.fx2Value, 2)
+            7 -> CursorContextFactory.effectValue(step.fx2Value, 2, EffectProcessor.effectValueMax(step.fx2Type))
             8 -> CursorContextFactory.effectType(step.fx3Type, 3)
-            9 -> CursorContextFactory.effectValue(step.fx3Value, 3)
+            9 -> CursorContextFactory.effectValue(step.fx3Value, 3, EffectProcessor.effectValueMax(step.fx3Type))
             else -> CursorContextFactory.none()
         }
     }

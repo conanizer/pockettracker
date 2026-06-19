@@ -74,7 +74,7 @@ class InstrumentController(
      * @return New instrument ID
      */
     fun navigatePrevious(onInstrumentChanged: ((Int) -> Unit)? = null): Int {
-        currentInstrument = if (currentInstrument > 0) currentInstrument - 1 else 255
+        currentInstrument = if (currentInstrument > 0) currentInstrument - 1 else 127
         lastEditedInstrument = currentInstrument
         onInstrumentChanged?.invoke(currentInstrument)
         logger.d(TAG, "⬅️ Navigate to instrument ${formatHex(currentInstrument)}")
@@ -89,7 +89,7 @@ class InstrumentController(
      * @return New instrument ID
      */
     fun navigateNext(onInstrumentChanged: ((Int) -> Unit)? = null): Int {
-        currentInstrument = if (currentInstrument < 255) currentInstrument + 1 else 0
+        currentInstrument = if (currentInstrument < 127) currentInstrument + 1 else 0
         lastEditedInstrument = currentInstrument
         onInstrumentChanged?.invoke(currentInstrument)
         logger.d(TAG, "➡️ Navigate to instrument ${formatHex(currentInstrument)}")
@@ -101,7 +101,7 @@ class InstrumentController(
      * Used when navigating from other screens (phrase → instrument)
      */
     fun jumpToInstrument(instrumentId: Int) {
-        currentInstrument = instrumentId.coerceIn(0, 255)
+        currentInstrument = instrumentId.coerceIn(0, 127)
         lastEditedInstrument = currentInstrument
         logger.d(TAG, "🎯 Jump to instrument ${formatHex(currentInstrument)}")
     }
@@ -331,7 +331,7 @@ class InstrumentController(
      * @param tableId Table to use for preview (overrides instrument's default tableId)
      */
     fun previewInstrumentWithTable(project: Project, instrumentId: Int, tableId: Int) {
-        val instrument = project.instruments[instrumentId.coerceIn(0, 255)]
+        val instrument = project.instruments[instrumentId.coerceIn(0, 127)]
 
         logger.d(TAG, "🎵 Previewing instrument ${formatHex(instrumentId)} with table ${formatHex(tableId)}: root=${instrument.root}, detune=0x${formatHex(instrument.detune)}")
 
@@ -764,7 +764,7 @@ class InstrumentController(
         val fc = fileController ?: run { setStatus("NO FILE CTRL", false); return }
         val instrument = project.instruments[currentInstrument]
         // Use the explicitly assigned table, or fall back to the instrument's natural table (id == index)
-        val effectiveTableId = if (instrument.tableId in 0..255) instrument.tableId else instrument.id
+        val effectiveTableId = if (instrument.tableId in project.tables.indices) instrument.tableId else instrument.id
         val candidateRows = project.tables[effectiveTableId].rows
         // Only embed table data if it has non-default content (avoid bloating every preset)
         val hasContent = candidateRows.any { r -> r.transpose != 0 || r.volume != -1 || r.fx1Type != 0 }

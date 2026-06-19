@@ -312,7 +312,7 @@ class TableModule : TrackerModule {
             4 -> CursorContextFactory.hexByte(    // FX1 Value
                 currentValue = state.table.rows[state.cursorRow].fx1Value,
                 min = 0,
-                max = 255
+                max = EffectProcessor.effectValueMax(state.table.rows[state.cursorRow].fx1Type)
             )
             5 -> {  // FX2 Type
                 val row = state.table.rows[state.cursorRow]
@@ -321,7 +321,7 @@ class TableModule : TrackerModule {
             6 -> CursorContextFactory.hexByte(    // FX2 Value
                 currentValue = state.table.rows[state.cursorRow].fx2Value,
                 min = 0,
-                max = 255
+                max = EffectProcessor.effectValueMax(state.table.rows[state.cursorRow].fx2Type)
             )
             7 -> {  // FX3 Type
                 val row = state.table.rows[state.cursorRow]
@@ -330,7 +330,7 @@ class TableModule : TrackerModule {
             8 -> CursorContextFactory.hexByte(    // FX3 Value
                 currentValue = state.table.rows[state.cursorRow].fx3Value,
                 min = 0,
-                max = 255
+                max = EffectProcessor.effectValueMax(state.table.rows[state.cursorRow].fx3Type)
             )
             else -> CursorContextFactory.none()
         }

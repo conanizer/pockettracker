@@ -106,6 +106,11 @@ class EffectProcessor(
 
         /** Effect code → 3-letter name, or "---" for NONE/unknown. */
         fun effectName(code: Int): String = FX_NAMES[code] ?: "---"
+
+        /** Max value (inclusive) for an effect's parameter byte. Effects that reference the table
+         *  or groove pools cap at 0x7F (128 slots, 0x00–0x7F); all others use the full 0xFF range. */
+        fun effectValueMax(effectType: Int): Int =
+            if (effectType == FX_TBL || effectType == FX_GRV) 127 else 255
     }
 
     fun resolveStepParams(
