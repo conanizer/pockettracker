@@ -56,6 +56,7 @@ fun qwertyLayoutLabel(layout: Int): String = if (layout == 0) "ABC" else "123"
  */
 enum class QwertyContext {
     PROJECT_NAME,   // Apply text as project name
+    INSTRUMENT_NAME, // Apply text as the current instrument's name (blank reverts to "INSTxx")
     FILE_RENAME,    // Rename file at contextExtra path (keep original extension)
     FOLDER_CREATE,  // Create folder in contextExtra directory with typed name
     RESAMPLE,       // Render selection to WAV with typed name as base name

@@ -465,6 +465,13 @@ data class Instrument(
     /** True if this slot is configured as a SoundFont instrument. */
     fun isSoundfont(): Boolean = instrumentType == InstrumentType.SOUNDFONT
 
+    /** Auto-generated slot name, "INSTxx". */
+    fun defaultName(): String = "INST${id.toHex2()}"
+
+    /** True while the name is still the auto-generated "INSTxx" — treated as "unset": the instrument
+     *  screen shows it blank, and loading a sample/SF2 overwrites it with the file's name. */
+    fun hasDefaultName(): Boolean = name == defaultName()
+
     /**
      * True when this slot holds nothing — no sample WAV and no SoundFont — so it is free to claim for a
      * new sample. `sampleFilePath == null` alone is NOT "empty": a configured SoundFont also nulls

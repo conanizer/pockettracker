@@ -1135,13 +1135,19 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                     }
                                     "LOAD_SOURCE" -> {
                                         val ext = item.file.extension.lowercase()
+                                        // Default-named slots adopt the loaded file's name; custom names are kept.
+                                        fun autoName() = trackerController.project.instruments[trackerController.currentInstrument].run {
+                                            if (hasDefaultName()) name = item.file.nameWithoutExtension.take(20)
+                                        }
                                         if (ext == "sf2" || ext == "sf3") {
                                             instrumentController.loadSoundfont(trackerController.project, item.file.absolutePath)
+                                            autoName()
                                             trackerController.projectVersion++
                                             trackerController.currentScreen = previousScreen
                                         } else if (ext == "wav") {
                                             val result = instrumentController.loadSampleFromFile(trackerController.project, item.file.absolutePath)
                                             if (result is LoadResult.Success) {
+                                                autoName()
                                                 trackerController.projectVersion++
                                                 trackerController.currentScreen = previousScreen
                                             } else {
@@ -1400,37 +1406,37 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     )
                 }
             }
-            5 -> when (trackerController.instrumentCursorColumn) {
-                2 -> {
+            5 -> {
+                val isSF = instrument.instrumentType == InstrumentType.SOUNDFONT
+                val srcCol = trackerController.instrumentCursorColumn
+                // Swapped layout: LOAD = sampler col 3 / SF col 2 (its only button); EDIT (sampler) = col 2.
+                if ((isSF && srcCol == 2) || (!isSF && srcCol == 3)) {
                     instrumentFileBrowserAction = "LOAD_SOURCE"
                     previousScreen = trackerController.currentScreen
                     trackerController.currentScreen = ScreenType.FILE_BROWSER
-                    if (instrument.instrumentType == InstrumentType.SOUNDFONT) {
+                    if (isSF) {
                         val soundfontsDir = File(fileController.getSoundfontsDirectory())
                         fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtensions = listOf("sf2", "sf3"), mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), soundfontsDir)
                     } else {
                         val samplesDir = File(fileController.getSamplesDirectory())
                         fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtensions = listOf("wav") + FileBrowserModule.VIDEO_EXTENSIONS, mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), samplesDir)
                     }
-                }
-                3 -> {
+                } else if (!isSF && srcCol == 2) {
+                    // EDIT → sample editor (sampler only; SoundFonts have no editable waveform)
                     val inst = trackerController.project.instruments[trackerController.currentInstrument]
-                    // Sample editor is sampler-only — SoundFont instruments have no editable waveform.
-                    if (inst.instrumentType != InstrumentType.SOUNDFONT) {
-                        val sampleId = trackerController.currentInstrument
-                        sampleEditorState = SampleEditorState(
-                            sampleId = sampleId,
-                            instrumentId = trackerController.currentInstrument,
-                            sampleName = inst.sampleFilePath?.substringAfterLast('/')
-                                ?.substringBeforeLast('.') ?: "",
-                            sampleFilePath = inst.sampleFilePath,
-                            cursorRow = 1,
-                            cursorCol = 0,
-                            isModified = false
-                        )
-                        previousScreen = trackerController.currentScreen
-                        trackerController.currentScreen = ScreenType.SAMPLE_EDITOR
-                    }
+                    val sampleId = trackerController.currentInstrument
+                    sampleEditorState = SampleEditorState(
+                        sampleId = sampleId,
+                        instrumentId = trackerController.currentInstrument,
+                        sampleName = inst.sampleFilePath?.substringAfterLast('/')
+                            ?.substringBeforeLast('.') ?: "",
+                        sampleFilePath = inst.sampleFilePath,
+                        cursorRow = 1,
+                        cursorCol = 0,
+                        isModified = false
+                    )
+                    previousScreen = trackerController.currentScreen
+                    trackerController.currentScreen = ScreenType.SAMPLE_EDITOR
                 }
             }
         }
@@ -1888,6 +1894,23 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val isSF  = instr.instrumentType == InstrumentType.SOUNDFONT
                 val row   = trackerController.instrumentCursorRow
                 val col   = trackerController.instrumentCursorColumn
+                if (row == 1) {  // NAME row → edit the instrument name (like the project name)
+                    val currentName = if (instr.hasDefaultName()) "" else instr.name.trimEnd()
+                    qwertyKeyboardState = QwertyKeyboardState(
+                        isOpen = true,
+                        text = currentName,
+                        maxLength = 20,
+                        textCursor = currentName.length.coerceAtMost(20),
+                        keyCursorRow = 0,
+                        keyCursorCol = 0,
+                        layout = 0,
+                        fieldLabel = "INSTRUMENT NAME:",
+                        originalText = currentName,
+                        insertBefore = insertBefore,
+                        context = QwertyContext.INSTRUMENT_NAME
+                    )
+                    return
+                }
                 val onEq  = (!isSF && row == 13 && col == 3) || (isSF && row == 14 && col == 1)
                 if (onEq) {
                     val slot = instr.eqSlot
@@ -1909,6 +1932,11 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             val typedText = qwertyKeyboardState.text.trimEnd()
             when (qwertyKeyboardState.context) {
                 QwertyContext.PROJECT_NAME -> { trackerController.project.name = typedText; trackerController.projectVersion++ }
+                QwertyContext.INSTRUMENT_NAME -> {
+                    val inst = trackerController.project.instruments[trackerController.currentInstrument]
+                    inst.name = typedText.ifBlank { inst.defaultName() }  // cleared name reverts to "INSTxx"
+                    trackerController.projectVersion++
+                }
                 QwertyContext.FILE_RENAME -> {
                     val oldPath = qwertyKeyboardState.contextExtra
                     val newBaseName = typedText.ifEmpty { File(oldPath).nameWithoutExtension }

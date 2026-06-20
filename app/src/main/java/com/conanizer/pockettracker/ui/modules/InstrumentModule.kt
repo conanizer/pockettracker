@@ -419,14 +419,17 @@ class InstrumentModule : TrackerModule {
         if (isCursorOnRow) drawRowBg(x, y, scale, t)
         drawBitmapText("NAME", nameColumnX, textY, scale,
             if (isCursorOnRow) Color(t.textCursor) else Color(t.textParam), CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(instrumentState.instrument.name, valueColumnX, textY, scale,
+        // "______" until a sample/SF2 is loaded (or the user names it via SELECT); otherwise the name.
+        val displayName = if (instrumentState.instrument.hasDefaultName()) "______" else instrumentState.instrument.name
+        drawBitmapText(displayName, valueColumnX, textY, scale,
             if (isCursorOnRow) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
     }
 
     /**
-     * Row 3: section header + filename + action buttons.
-     * Sampler: SAMPLE | filename | LOAD (col 2) | EDIT (col 3)
-     * Soundfont: SF | filename | LOAD (col 2)
+     * Row 5: section header + action buttons. The loaded file name now lives on the NAME row,
+     * so this row no longer shows the filename.
+     * Sampler: SMPL | EDIT (col 3, aligned with the FX value column) | LOAD (col 2)
+     * Soundfont: SF | LOAD (col 2)
      */
     private fun DrawScope.drawSectionSourceRow(
         x: Int, y: Int, scale: Int,
@@ -440,23 +443,21 @@ class InstrumentModule : TrackerModule {
         val isCursorOnRow  = cursorRow == currentRow
         if (isCursorOnRow) drawRowBg(x, y, scale, t)
 
-        val header    = if (isSoundFont) "SF" else "SMPL"
-        val sourcePath = if (isSoundFont) instrument.soundfontPath else instrument.sampleFilePath
-        val filename  = if (sourcePath != null) File(sourcePath).nameWithoutExtension else "empty"
-        val loadX     = x + SRC_LOAD_OFFSET
-        val editX     = x + SRC_EDIT_OFFSET
-        val fileX     = x + SRC_FILENAME_OFFSET
+        val header = if (isSoundFont) "SF" else "SMPL"
+        val loadX  = x + SRC_LOAD_OFFSET
+        val editX  = x + 150  // aligned with the DRIVE/CRUSH/DWNSMPL value column
+        // Left-to-right: EDIT (sampler) is the left col 2; LOAD is col 3 (sampler) / col 2 (SF, its only button).
+        val loadCol = if (isSoundFont) 2 else 3
 
         drawBitmapText(header, nameColumnX, textY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(filename, fileX - 15, textY, scale, Color(t.textValue), CHAR_SPACING, FONT_SCALE)
-        drawBitmapText("LOAD", loadX - 5, textY, scale,
-            if (isCursorOnRow && cursorColumn == 2) Color(t.textCursor) else Color(t.textValue),
-            CHAR_SPACING, FONT_SCALE)
         if (!isSoundFont) {
-            drawBitmapText("EDIT", editX - 20, textY, scale,
-                if (isCursorOnRow && cursorColumn == 3) Color(t.textCursor) else Color(t.textValue),
+            drawBitmapText("EDIT", editX, textY, scale,
+                if (isCursorOnRow && cursorColumn == 2) Color(t.textCursor) else Color(t.textValue),
                 CHAR_SPACING, FONT_SCALE)
         }
+        drawBitmapText("LOAD", loadX - 5, textY, scale,
+            if (isCursorOnRow && cursorColumn == loadCol) Color(t.textCursor) else Color(t.textValue),
+            CHAR_SPACING, FONT_SCALE)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
