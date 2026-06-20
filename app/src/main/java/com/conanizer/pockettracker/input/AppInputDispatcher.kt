@@ -1400,7 +1400,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     )
                 }
             }
-            3 -> when (trackerController.instrumentCursorColumn) {
+            5 -> when (trackerController.instrumentCursorColumn) {
                 2 -> {
                     instrumentFileBrowserAction = "LOAD_SOURCE"
                     previousScreen = trackerController.currentScreen

@@ -24,10 +24,10 @@ import java.io.File
  * Sampler row layout (0-15):
  *   0  TYPE + LOAD + SAVE
  *   1  NAME (instrument.name, read-only)
- *   2  SPACER
- *   3  SAMPLE section: filename + LOAD WAV (col 2) + EDIT (col 3)
- *   4  ROOT + DETUNE + TIC  (triple: col 1 / 3 / 5)
- *   5  VOL + PAN  (dual: col 1 / 3)
+ *   2  ROOT + DETUNE + TIC  (triple: col 1 / 3 / 5)
+ *   3  VOL + PAN  (dual: col 1 / 3)
+ *   4  SPACER
+ *   5  SAMPLE section: filename + LOAD WAV (col 2) + EDIT (col 3)
  *   6  SPACER
  *   7  DRIVE + FILTER
  *   8  CRUSH + FREQ
@@ -42,11 +42,11 @@ import java.io.File
  * Soundfont row layout (0-14):
  *   0  TYPE + LOAD + SAVE
  *   1  NAME
- *   2  SPACER
- *   3  SF section: SF filename + LOAD SF2 (col 2)
- *   4  PRESET  (combined index + name)
- *   5  ROOT + DETUNE + TIC
- *   6  VOL + PAN
+ *   2  ROOT + DETUNE + TIC
+ *   3  VOL + PAN
+ *   4  SPACER
+ *   5  SF section: SF filename + LOAD SF2 (col 2)
+ *   6  PRESET  (combined index + name)
  *   7  SPACER
  *   8  DRIVE + FILTER
  *   9  CRUSH + FREQ
@@ -114,10 +114,29 @@ class InstrumentModule : TrackerModule {
         drawNameRow(x, rowY, scale, nameColumnX, valueColumnX, instrumentState, currentRow, t)
         rowY += ROW_HEIGHT; currentRow++
 
-        // ── ROW 2: SPACER ────────────────────────────────────────────────────
+        // ── ROW 2: ROOT + DETUNE + TIC ───────────────────────────────────────
+        drawTripleParameterRow(
+            x, rowY, scale, nameColumnX,
+            "ROOT",   instrument.root.toString(),
+            "DETUNE", instrument.detune.toHex2(),
+            "TIC",    instrument.tableTicRate.toHex2(),
+            instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
+        )
         rowY += ROW_HEIGHT; currentRow++
 
-        // ── ROW 3: SAMPLE / SF section row ───────────────────────────────────
+        // ── ROW 3: VOL + PAN ──────────────────────────────────────────────────
+        drawDualParameterRow(
+            x, rowY, scale, nameColumnX, valueColumnX,
+            "VOL", instrument.volume.toHex2(),
+            "PAN", instrument.pan.toHex2(),
+            instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
+        )
+        rowY += ROW_HEIGHT; currentRow++
+
+        // ── ROW 4: SPACER ─────────────────────────────────────────────────────
+        rowY += ROW_HEIGHT; currentRow++
+
+        // ── ROW 5: SAMPLE / SF section row ───────────────────────────────────
         drawSectionSourceRow(
             x, rowY, scale, nameColumnX,
             instrument,
@@ -126,7 +145,7 @@ class InstrumentModule : TrackerModule {
         )
         rowY += ROW_HEIGHT; currentRow++
 
-        // ── ROW 4 (SF only): PRESET combined ─────────────────────────────────
+        // ── ROW 6 (SF only): PRESET combined ─────────────────────────────────
         if (isSoundFont) {
             val presetCount  = instrumentState.soundfontPresetCount
             val presetIdx    = instrumentState.soundfontPresetIndex
@@ -141,25 +160,6 @@ class InstrumentModule : TrackerModule {
                 if (isCursor) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
             rowY += ROW_HEIGHT; currentRow++
         }
-
-        // ── ROW 4/5 (sampler/SF): ROOT + DETUNE + TIC ────────────────────────
-        drawTripleParameterRow(
-            x, rowY, scale, nameColumnX,
-            "ROOT",   instrument.root.toString(),
-            "DETUNE", instrument.detune.toHex2(),
-            "TIC",    instrument.tableTicRate.toHex2(),
-            instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
-        )
-        rowY += ROW_HEIGHT; currentRow++
-
-        // ── ROW 5/6: VOL + PAN ────────────────────────────────────────────────
-        drawDualParameterRow(
-            x, rowY, scale, nameColumnX, valueColumnX,
-            "VOL", instrument.volume.toHex2(),
-            "PAN", instrument.pan.toHex2(),
-            instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
-        )
-        rowY += ROW_HEIGHT; currentRow++
 
         // ── ROW 6/7: SPACER ───────────────────────────────────────────────────
         rowY += ROW_HEIGHT; currentRow++
@@ -448,7 +448,7 @@ class InstrumentModule : TrackerModule {
         val fileX     = x + SRC_FILENAME_OFFSET
 
         drawBitmapText(header, nameColumnX, textY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(filename, fileX - 15, textY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText(filename, fileX - 15, textY, scale, Color(t.textValue), CHAR_SPACING, FONT_SCALE)
         drawBitmapText("LOAD", loadX - 5, textY, scale,
             if (isCursorOnRow && cursorColumn == 2) Color(t.textCursor) else Color(t.textValue),
             CHAR_SPACING, FONT_SCALE)
@@ -472,16 +472,7 @@ class InstrumentModule : TrackerModule {
         return when {
             row == 0 -> CursorContextFactory.readOnly()
             row == 1 -> CursorContextFactory.readOnly()
-            row == 2 -> CursorContextFactory.none()
-            row == 3 -> CursorContextFactory.readOnly()  // buttons handled in MainActivity
-
-            isSoundFont && row == 4 -> {
-                val maxIdx = (state.soundfontPresetCount - 1).coerceAtLeast(0)
-                if (col == 1) CursorContextFactory.hexByte(state.soundfontPresetIndex, 0, maxIdx)
-                else CursorContextFactory.none()
-            }
-
-            row == 4 + sfOffset -> when (col) {  // ROOT + DETUNE + TIC
+            row == 2 -> when (col) {  // ROOT + DETUNE + TIC
                 1 -> {
                     val isEmpty = state.instrument.root == Note.EMPTY
                     CursorContextFactory.note(if (isEmpty) 0 else state.instrument.root.toMidi(), isEmpty)
@@ -491,10 +482,19 @@ class InstrumentModule : TrackerModule {
                 else -> CursorContextFactory.none()
             }
 
-            row == 5 + sfOffset -> when (col) {  // VOL + PAN
+            row == 3 -> when (col) {  // VOL + PAN
                 1 -> CursorContextFactory.hexByte(state.instrument.volume, 0, 255)
                 3 -> CursorContextFactory.hexByte(state.instrument.pan, 0, 255)
                 else -> CursorContextFactory.none()
+            }
+
+            row == 4 -> CursorContextFactory.none()       // SPACER
+            row == 5 -> CursorContextFactory.readOnly()   // SAMPLE/SF source buttons (handled in MainActivity)
+
+            isSoundFont && row == 6 -> {  // PRESET
+                val maxIdx = (state.soundfontPresetCount - 1).coerceAtLeast(0)
+                if (col == 1) CursorContextFactory.hexByte(state.soundfontPresetIndex, 0, maxIdx)
+                else CursorContextFactory.none()
             }
 
             row == 6 + sfOffset -> CursorContextFactory.none()  // SPACER
@@ -584,17 +584,10 @@ class InstrumentModule : TrackerModule {
         val col         = state.cursorColumn
 
         when {
-            row in 0..3 -> { /* handled in MainActivity */ }
+            row == 0 || row == 1 -> { /* TYPE / NAME — handled in MainActivity */ }
+            row == 4 || row == 5 -> { /* SPACER / source buttons — handled in MainActivity */ }
 
-            isSoundFont && row == 4 -> when (col) {
-                1 -> when (action) {
-                    is InputAction.SET_VALUE ->
-                        instrumentController.setSoundfontPresetByIndex(state.instrument, action.value)
-                    else -> {}
-                }
-            }
-
-            row == 4 + sfOffset -> when (col) {  // ROOT + DETUNE + TIC
+            row == 2 -> when (col) {  // ROOT + DETUNE + TIC
                 1 -> when (action) {
                     is InputAction.SET_VALUE ->
                         instrumentController.updateRoot(state.instrument, Note.fromMidi(action.value))
@@ -614,7 +607,7 @@ class InstrumentModule : TrackerModule {
                 }
             }
 
-            row == 5 + sfOffset -> when (col) {  // VOL + PAN
+            row == 3 -> when (col) {  // VOL + PAN
                 1 -> when (action) {
                     is InputAction.SET_VALUE ->
                         instrumentController.updateVolume(state.instrument, action.value)
@@ -623,6 +616,14 @@ class InstrumentModule : TrackerModule {
                 3 -> when (action) {
                     is InputAction.SET_VALUE ->
                         instrumentController.updatePan(state.instrument, action.value)
+                    else -> {}
+                }
+            }
+
+            isSoundFont && row == 6 -> when (col) {  // PRESET
+                1 -> when (action) {
+                    is InputAction.SET_VALUE ->
+                        instrumentController.setSoundfontPresetByIndex(state.instrument, action.value)
                     else -> {}
                 }
             }

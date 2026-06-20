@@ -722,10 +722,10 @@ class TrackerController(
                 val oldColumn = instrumentCursorColumn
                 val isSoundFont = project.instruments[currentInstrument].instrumentType == InstrumentType.SOUNDFONT
                 val maxRow = if (isSoundFont) 14 else 15
-                val tripleRow = if (isSoundFont) 5 else 4
-                val dualParamRows = if (isSoundFont) setOf(0, 6, 8, 9, 10) else setOf(0, 5, 7, 8, 9, 11, 12, 13, 14)
+                val tripleRow = 2  // ROOT+DETUNE+TIC (both types, above the SF PRESET row)
+                val dualParamRows = if (isSoundFont) setOf(0, 3, 8, 9, 10) else setOf(0, 3, 7, 8, 9, 11, 12, 13, 14)
                 instrumentCursorRow = when {
-                    instrumentCursorRow == 3 -> 1                       // Skip spacer (row 2) both types
+                    instrumentCursorRow == 5 -> 3                       // Skip spacer (row 4), land on VOL/PAN (row 3)
                     isSoundFont && instrumentCursorRow == 8 -> 6        // Skip SF spacer (row 7)
                     !isSoundFont && instrumentCursorRow == 7 -> 5       // Skip sampler spacer (row 6)
                     isSoundFont && instrumentCursorRow == 12 -> 10      // Skip SF spacer (row 11)
@@ -734,7 +734,7 @@ class TrackerController(
                     else -> maxRow
                 }
                 instrumentCursorColumn = when {
-                    instrumentCursorRow == 3 -> 2
+                    instrumentCursorRow == 5 -> 2  // source row → LOAD button (col 2)
                     instrumentCursorRow == tripleRow -> when {
                         (oldRow in dualParamRows || oldRow == tripleRow) && oldColumn == 3 -> 3
                         oldRow == tripleRow && oldColumn == 5 -> 5
@@ -810,10 +810,10 @@ class TrackerController(
                 val oldColumn = instrumentCursorColumn
                 val isSoundFont = project.instruments[currentInstrument].instrumentType == InstrumentType.SOUNDFONT
                 val maxRow = if (isSoundFont) 14 else 15
-                val tripleRow = if (isSoundFont) 5 else 4
-                val dualParamRows = if (isSoundFont) setOf(0, 6, 8, 9, 10) else setOf(0, 5, 7, 8, 9, 11, 12, 13, 14)
+                val tripleRow = 2  // ROOT+DETUNE+TIC (both types, above the SF PRESET row)
+                val dualParamRows = if (isSoundFont) setOf(0, 3, 8, 9, 10) else setOf(0, 3, 7, 8, 9, 11, 12, 13, 14)
                 instrumentCursorRow = when {
-                    instrumentCursorRow == 1 -> 3                       // Skip spacer (row 2) both types
+                    instrumentCursorRow == 3 -> 5                       // Skip spacer (row 4), land on source (row 5)
                     isSoundFont && instrumentCursorRow == 6 -> 8        // Skip SF spacer (row 7)
                     !isSoundFont && instrumentCursorRow == 5 -> 7       // Skip sampler spacer (row 6)
                     isSoundFont && instrumentCursorRow == 10 -> 12      // Skip SF spacer (row 11)
@@ -822,7 +822,7 @@ class TrackerController(
                     else -> 0
                 }
                 instrumentCursorColumn = when {
-                    instrumentCursorRow == 3 -> 2
+                    instrumentCursorRow == 5 -> 2  // source row → LOAD button (col 2)
                     instrumentCursorRow == tripleRow -> when {
                         (oldRow in dualParamRows || oldRow == tripleRow) && oldColumn == 3 -> 3
                         oldRow == tripleRow && oldColumn == 5 -> 5
@@ -1090,11 +1090,11 @@ class TrackerController(
 
     private fun getInstrumentCursorLeftColumn(row: Int, currentColumn: Int): Int {
         val isSoundFont = project.instruments[currentInstrument].instrumentType == InstrumentType.SOUNDFONT
-        val tripleRow = if (isSoundFont) 5 else 4
-        val dualParamRows = if (isSoundFont) setOf(0, 6, 8, 9, 10) else setOf(0, 5, 7, 8, 9, 11, 12, 13, 14)
+        val tripleRow = 2  // ROOT+DETUNE+TIC (both types, above the SF PRESET row)
+        val dualParamRows = if (isSoundFont) setOf(0, 3, 8, 9, 10) else setOf(0, 3, 7, 8, 9, 11, 12, 13, 14)
         return when {
             row == 0 -> (currentColumn - 1).coerceAtLeast(1)           // 3→2→1
-            row == 3 -> (currentColumn - 1).coerceAtLeast(2)           // 3→2 (min col 2)
+            row == 5 -> (currentColumn - 1).coerceAtLeast(2)           // source row: 3→2 (min col 2)
             row == tripleRow -> (currentColumn - 2).coerceAtLeast(1)   // 5→3→1
             row in dualParamRows -> 1                                   // jump 3→1
             else -> 1
@@ -1103,13 +1103,13 @@ class TrackerController(
 
     private fun getInstrumentCursorRightColumn(row: Int, currentColumn: Int): Int {
         val isSoundFont = project.instruments[currentInstrument].instrumentType == InstrumentType.SOUNDFONT
-        val tripleRow = if (isSoundFont) 5 else 4
-        val dualParamRows = if (isSoundFont) setOf(0, 6, 8, 9, 10) else setOf(0, 5, 7, 8, 9, 11, 12, 13, 14)
+        val tripleRow = 2  // ROOT+DETUNE+TIC (both types, above the SF PRESET row)
+        val dualParamRows = if (isSoundFont) setOf(0, 3, 8, 9, 10) else setOf(0, 3, 7, 8, 9, 11, 12, 13, 14)
         return when {
             row == 0 -> (currentColumn + 1).coerceAtMost(3)            // 1→2→3
             // Source row: sampler has LOAD (2) + EDIT (3); SF has LOAD only (no editable waveform),
             // so cap at col 2 — otherwise right-from-LOAD lands on the hidden EDIT and the cursor vanishes.
-            row == 3 -> (currentColumn + 1).coerceAtMost(if (isSoundFont) 2 else 3)
+            row == 5 -> (currentColumn + 1).coerceAtMost(if (isSoundFont) 2 else 3)  // source row
             row == tripleRow -> (currentColumn + 2).coerceAtMost(5)    // 1→3→5
             row in dualParamRows -> 3                                   // jump 1→3
             else -> 1
