@@ -444,20 +444,18 @@ class InstrumentModule : TrackerModule {
         if (isCursorOnRow) drawRowBg(x, y, scale, t)
 
         val header = if (isSoundFont) "SF" else "SMPL"
-        val loadX  = x + SRC_LOAD_OFFSET
-        val editX  = x + 150  // aligned with the DRIVE/CRUSH/DWNSMPL value column
-        // Left-to-right: EDIT (sampler) is the left col 2; LOAD is col 3 (sampler) / col 2 (SF, its only button).
-        val loadCol = if (isSoundFont) 2 else 3
+        val loadX  = x + 150  // LOAD aligned with the DRIVE/CRUSH/DWNSMPL value column (col 2, left)
+        val editX  = x + 335  // EDIT to the right of LOAD (col 3)
 
         drawBitmapText(header, nameColumnX, textY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("LOAD", loadX, textY, scale,
+            if (isCursorOnRow && cursorColumn == 2) Color(t.textCursor) else Color(t.textValue),
+            CHAR_SPACING, FONT_SCALE)
         if (!isSoundFont) {
             drawBitmapText("EDIT", editX, textY, scale,
-                if (isCursorOnRow && cursorColumn == 2) Color(t.textCursor) else Color(t.textValue),
+                if (isCursorOnRow && cursorColumn == 3) Color(t.textCursor) else Color(t.textValue),
                 CHAR_SPACING, FONT_SCALE)
         }
-        drawBitmapText("LOAD", loadX - 5, textY, scale,
-            if (isCursorOnRow && cursorColumn == loadCol) Color(t.textCursor) else Color(t.textValue),
-            CHAR_SPACING, FONT_SCALE)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

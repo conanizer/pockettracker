@@ -734,7 +734,7 @@ class TrackerController(
                     else -> maxRow
                 }
                 instrumentCursorColumn = when {
-                    instrumentCursorRow == 5 -> if (isSoundFont) 2 else 3  // source row → LOAD button
+                    instrumentCursorRow == 5 -> 2  // source row → LOAD button (col 2)
                     instrumentCursorRow == tripleRow -> when {
                         (oldRow in dualParamRows || oldRow == tripleRow) && oldColumn == 3 -> 3
                         oldRow == tripleRow && oldColumn == 5 -> 5
@@ -822,7 +822,7 @@ class TrackerController(
                     else -> 0
                 }
                 instrumentCursorColumn = when {
-                    instrumentCursorRow == 5 -> if (isSoundFont) 2 else 3  // source row → LOAD button
+                    instrumentCursorRow == 5 -> 2  // source row → LOAD button (col 2)
                     instrumentCursorRow == tripleRow -> when {
                         (oldRow in dualParamRows || oldRow == tripleRow) && oldColumn == 3 -> 3
                         oldRow == tripleRow && oldColumn == 5 -> 5

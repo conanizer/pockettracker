@@ -1406,37 +1406,36 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     )
                 }
             }
-            5 -> {
-                val isSF = instrument.instrumentType == InstrumentType.SOUNDFONT
-                val srcCol = trackerController.instrumentCursorColumn
-                // Swapped layout: LOAD = sampler col 3 / SF col 2 (its only button); EDIT (sampler) = col 2.
-                if ((isSF && srcCol == 2) || (!isSF && srcCol == 3)) {
+            5 -> when (trackerController.instrumentCursorColumn) {
+                2 -> {  // LOAD (col 2, left)
                     instrumentFileBrowserAction = "LOAD_SOURCE"
                     previousScreen = trackerController.currentScreen
                     trackerController.currentScreen = ScreenType.FILE_BROWSER
-                    if (isSF) {
+                    if (instrument.instrumentType == InstrumentType.SOUNDFONT) {
                         val soundfontsDir = File(fileController.getSoundfontsDirectory())
                         fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtensions = listOf("sf2", "sf3"), mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), soundfontsDir)
                     } else {
                         val samplesDir = File(fileController.getSamplesDirectory())
                         fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtensions = listOf("wav") + FileBrowserModule.VIDEO_EXTENSIONS, mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), samplesDir)
                     }
-                } else if (!isSF && srcCol == 2) {
-                    // EDIT → sample editor (sampler only; SoundFonts have no editable waveform)
+                }
+                3 -> {  // EDIT → sample editor (col 3, right; sampler only — SoundFonts have no editable waveform)
                     val inst = trackerController.project.instruments[trackerController.currentInstrument]
-                    val sampleId = trackerController.currentInstrument
-                    sampleEditorState = SampleEditorState(
-                        sampleId = sampleId,
-                        instrumentId = trackerController.currentInstrument,
-                        sampleName = inst.sampleFilePath?.substringAfterLast('/')
-                            ?.substringBeforeLast('.') ?: "",
-                        sampleFilePath = inst.sampleFilePath,
-                        cursorRow = 1,
-                        cursorCol = 0,
-                        isModified = false
-                    )
-                    previousScreen = trackerController.currentScreen
-                    trackerController.currentScreen = ScreenType.SAMPLE_EDITOR
+                    if (inst.instrumentType != InstrumentType.SOUNDFONT) {
+                        val sampleId = trackerController.currentInstrument
+                        sampleEditorState = SampleEditorState(
+                            sampleId = sampleId,
+                            instrumentId = trackerController.currentInstrument,
+                            sampleName = inst.sampleFilePath?.substringAfterLast('/')
+                                ?.substringBeforeLast('.') ?: "",
+                            sampleFilePath = inst.sampleFilePath,
+                            cursorRow = 1,
+                            cursorCol = 0,
+                            isModified = false
+                        )
+                        previousScreen = trackerController.currentScreen
+                        trackerController.currentScreen = ScreenType.SAMPLE_EDITOR
+                    }
                 }
             }
         }
