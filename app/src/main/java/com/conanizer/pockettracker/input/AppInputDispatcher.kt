@@ -39,6 +39,8 @@ import com.conanizer.pockettracker.ui.modules.FileBrowserModule
 import com.conanizer.pockettracker.ui.modules.GrooveModule
 import com.conanizer.pockettracker.ui.modules.GrooveState
 import com.conanizer.pockettracker.ui.modules.InstrumentModule
+import com.conanizer.pockettracker.ui.modules.InstrumentPoolModule
+import com.conanizer.pockettracker.ui.modules.InstrumentPoolState
 import com.conanizer.pockettracker.ui.modules.InstrumentState
 import com.conanizer.pockettracker.ui.modules.MixerModule
 import com.conanizer.pockettracker.ui.modules.MixerState
@@ -110,6 +112,7 @@ data class AppControllers(
     val projectModule: ProjectModule,
     val settingsModule: SettingsModule,
     val instrumentModule: InstrumentModule,
+    val instrumentPoolModule: InstrumentPoolModule,
     val mixerModule: MixerModule,
     val effectModule: EffectModule,
     val eqModule: EqModule,
@@ -182,6 +185,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     private val projectModule get() = ctrl.projectModule
     private val settingsModule get() = ctrl.settingsModule
     private val instrumentModule get() = ctrl.instrumentModule
+    private val instrumentPoolModule get() = ctrl.instrumentPoolModule
     private val mixerModule get() = ctrl.mixerModule
     private val effectModule get() = ctrl.effectModule
     private val eqModule get() = ctrl.eqModule
@@ -639,6 +643,17 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val result = instrumentModule.handleInput(instrumentState, action, instrumentController)
                 if (result.modified) trackerController.projectVersion++
             }
+            ScreenType.INST_POOL -> {
+                val poolState = InstrumentPoolState(
+                    project = trackerController.project,
+                    selectedInstrument = trackerController.currentInstrument,
+                    cursorColumn = trackerController.poolCursorColumn
+                )
+                val context = instrumentPoolModule.getCursorContext(poolState)
+                val action = handlerFunction(context)
+                if (instrumentPoolModule.handleInput(poolState, action, instrumentController))
+                    trackerController.projectVersion++
+            }
             ScreenType.MIXER -> {
                 val mixerState = MixerState(
                     project = trackerController.project,
@@ -1072,6 +1087,8 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
 
             ScreenType.INSTRUMENT -> handleConfirmAInstrument()
 
+            ScreenType.INST_POOL -> handleConfirmAInstrumentPool()
+
             ScreenType.SAMPLE_EDITOR -> handleConfirmASampleEditor()
 
             ScreenType.PHRASE -> handleConfirmAPhrase()
@@ -1126,7 +1143,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                     }
                                 }
                             }
-                            ScreenType.INSTRUMENT -> {
+                            ScreenType.INSTRUMENT, ScreenType.INST_POOL -> {
                                 when (instrumentFileBrowserAction) {
                                     "LOAD_PRESET" -> {
                                         instrumentController.loadPreset(trackerController.project, item.file.absolutePath)
@@ -1373,6 +1390,34 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     }
                 }
             }
+        }
+    }
+
+    private fun handleConfirmAInstrumentPool() {
+        // A on the NAME column of an empty slot loads a source into it (M8: tap EDIT on an empty
+        // slot). The selected pool row IS currentInstrument, so the existing LOAD_SOURCE flow loads
+        // into the right slot, auto-names it, and returns here. The browser is filtered by the slot's
+        // instrument type — SoundFont slots browse .sf2/.sf3, sampler slots browse .wav (matching the
+        // INSTRUMENT screen's LOAD). Other columns edit via A+dpad.
+        if (trackerController.poolCursorColumn != 0) return
+        val inst = trackerController.project.instruments[trackerController.currentInstrument]
+        val isSF = inst.instrumentType == InstrumentType.SOUNDFONT
+        // "Empty" = no source loaded for the current type. Loaded slots are managed on the INSTRUMENT screen.
+        if (isSF) { if (inst.soundfontPath != null) return } else { if (!inst.isFree()) return }
+        instrumentController.currentInstrument = trackerController.currentInstrument
+        instrumentFileBrowserAction = "LOAD_SOURCE"
+        previousScreen = trackerController.currentScreen
+        trackerController.currentScreen = ScreenType.FILE_BROWSER
+        fileBrowserState = if (isSF) {
+            fileBrowserModule.navigateToFolder(
+                fileBrowserState.copy(fileExtensions = listOf("sf2", "sf3"),
+                    mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""),
+                File(fileController.getSoundfontsDirectory()))
+        } else {
+            fileBrowserModule.navigateToFolder(
+                fileBrowserState.copy(fileExtensions = listOf("wav") + FileBrowserModule.VIDEO_EXTENSIONS,
+                    mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""),
+                File(fileController.getSamplesDirectory()))
         }
     }
 
@@ -1916,6 +1961,14 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     openEqEditor(if (slot < 0) 0 else slot, EqCallerContext.InstrumentEq(trackerController.currentInstrument))
                 }
             }
+            ScreenType.INST_POOL -> {
+                // SELECT on the EQ column opens the per-instrument EQ editor; other columns: no-op
+                // (intentionally NOT the default "jump to main screen" behaviour).
+                if (trackerController.poolCursorColumn == 4) {
+                    val slot = trackerController.project.instruments[trackerController.currentInstrument].eqSlot
+                    openEqEditor(if (slot < 0) 0 else slot, EqCallerContext.InstrumentEq(trackerController.currentInstrument))
+                }
+            }
             else -> {
                 if (trackerController.currentScreen !in MAIN_ROW_SCREENS) {
                     trackerController.currentScreen = when (trackerController.previousColumn) {
@@ -2074,7 +2127,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     val selectedFile = fileBrowserState.items[fileBrowserState.cursor].file
                     if (selectedFile.isFile) {
                         val ext = selectedFile.extension.lowercase()
-                        if (ext == "wav" && previousScreen == ScreenType.INSTRUMENT) {
+                        if (ext == "wav" && (previousScreen == ScreenType.INSTRUMENT || previousScreen == ScreenType.INST_POOL)) {
                             trackerController.previewSampleFile(selectedFile.absolutePath)
                         } else if (videoExtractor.isSupportedVideo(selectedFile.absolutePath)) {
                             fileBrowserState = fileBrowserState.copy(statusMessage = "EXTRACTING PREVIEW...", statusSuccess = true)
@@ -2135,6 +2188,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 }
             }
             ScreenType.INSTRUMENT -> trackerController.previewInstrument()
+            ScreenType.INST_POOL -> trackerController.previewInstrument()
             ScreenType.TABLE -> trackerController.previewInstrumentWithTable(trackerController.currentTable, trackerController.currentTable)
             ScreenType.MODS  -> trackerController.previewInstrument()
             else -> {
@@ -2308,6 +2362,10 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 1 -> sampleEditorState.copy(selectionEnd = sampleEditorState.totalFrames.toLong())
                 else -> sampleEditorState
             }
+        } else if (trackerController.currentScreen == ScreenType.INST_POOL && trackerController.poolCursorColumn == 0) {
+            // A+B on the NAME column clears the instrument slot (M8: EDIT+OPTION clears instrument).
+            instrumentController.clearInstrument(trackerController.project, trackerController.currentInstrument)
+            trackerController.projectVersion++
         } else {
             handleGenericInput { ctx -> trackerController.inputController.handleABCombo(ctx) }
         }
@@ -2350,8 +2408,14 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             }
         }
     }
-    fun handleBUp()    { if (trackerController.currentScreen == ScreenType.SONG) trackerController.moveSongBigUp() }
-    fun handleBDown()  { if (trackerController.currentScreen == ScreenType.SONG) trackerController.moveSongBigDown() }
+    fun handleBUp()    { when (trackerController.currentScreen) {
+        ScreenType.SONG      -> trackerController.moveSongBigUp()
+        ScreenType.INST_POOL -> trackerController.poolBigUp()
+        else -> {} } }
+    fun handleBDown()  { when (trackerController.currentScreen) {
+        ScreenType.SONG      -> trackerController.moveSongBigDown()
+        ScreenType.INST_POOL -> trackerController.poolBigDown()
+        else -> {} } }
     fun handleRUp() {
         if (confirmDialogOpen()) return
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.copy(layout = 0).withClampedCol(); return }

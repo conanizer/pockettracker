@@ -94,6 +94,7 @@ PocketTracker/
 │   ├── ChainEditorModule.kt        ✅
 │   ├── SongEditorModule.kt         ✅
 │   ├── InstrumentModule.kt         ✅
+│   ├── InstrumentPoolModule.kt     ✅ Instrument Pool overview (NAME + V/RV/DE/EQ per slot)
 │   ├── SampleEditorModule.kt       ✅ Full-screen waveform editor
 │   ├── TableModule.kt              ✅
 │   ├── GrooveModule.kt             ✅
@@ -676,12 +677,30 @@ Modifier.drawWithContent {
 ### 5×5 Screen Grid
 
 ```
-Row 0:         -      SCALE   INST_POOL    -
+Row 0:         -      SCALE   INST_POOL  (INST)*
 Row 1:     PROJECT   GROOVE     MODS     PROJECT
 Row 2:      SONG     CHAIN    PHRASE   INSTRUMENT  TABLE
 Row 3:     MIXER     MIXER    MIXER      MIXER     MIXER
 Row 4:    EFFECTS   EFFECTS  EFFECTS    EFFECTS   EFFECTS
 ```
+
+`(INST)*` at row 0 / col 4 is a **contextual fast-jump cell**, shown only while on INST_POOL (or
+on the instrument screen reached from it). See "Instrument Pool fast-jump" below.
+
+### Instrument Pool fast-jump (INST_POOL ↔ INSTRUMENT)
+
+The Instrument Pool sits at row 0 / col 3 (above MODS / INSTRUMENT). It pairs horizontally with a
+contextual INSTRUMENT cell at row 0 / col 4 for quickly bouncing between the two views (M8-style):
+
+- **From INST_POOL:** R+RIGHT → INSTRUMENT (the row-0 instrument); R+LEFT → PHRASE; R+DOWN → MODS.
+- **From the row-0 instrument** (entered via R+RIGHT from the pool): R+LEFT → back to INST_POOL;
+  R+DOWN → MODS; R+UP / R+RIGHT stay put.
+- The normal row-2 INSTRUMENT keeps all its usual navigation (R+LEFT → PHRASE, R+RIGHT → TABLE,
+  R+UP → MODS, R+DOWN → MIXER).
+
+This is implemented with `TrackerController.instrumentFromPool` — set true only on the pool→instrument
+R+RIGHT jump and cleared (in the `currentScreen` setter) the moment you move off INSTRUMENT any other
+way. The nav map highlights the row-0 cell (not the row-2 instrument) while the flag is set.
 
 **Navigation Logic (Before Refactoring — was in MainActivity.kt):**
 ```kotlin

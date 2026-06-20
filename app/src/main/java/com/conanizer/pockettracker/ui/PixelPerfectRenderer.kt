@@ -42,6 +42,8 @@ import com.conanizer.pockettracker.ui.modules.FileBrowserModule
 import com.conanizer.pockettracker.ui.modules.GrooveModule
 import com.conanizer.pockettracker.ui.modules.GrooveState
 import com.conanizer.pockettracker.ui.modules.InstrumentModule
+import com.conanizer.pockettracker.ui.modules.InstrumentPoolModule
+import com.conanizer.pockettracker.ui.modules.InstrumentPoolState
 import com.conanizer.pockettracker.ui.modules.InstrumentState
 import com.conanizer.pockettracker.ui.modules.MixerModule
 import com.conanizer.pockettracker.ui.modules.MixerState
@@ -135,6 +137,8 @@ fun PixelPerfectTracker(
     instrumentCursorColumn: Int,
     instrumentStatusMessage: String,
     instrumentStatusSuccess: Boolean,
+    poolCursorColumn: Int = 0,
+    instrumentFromPool: Boolean = false,
     fileBrowserState: FileBrowserModule.State? = null,
     sampleEditorState: SampleEditorState? = null,
     // Copy/paste state
@@ -361,6 +365,8 @@ fun PixelPerfectTracker(
                         instrumentCursorColumn = instrumentCursorColumn,
                         instrumentStatusMessage = instrumentStatusMessage,
                         instrumentStatusSuccess = instrumentStatusSuccess,
+                        poolCursorColumn = poolCursorColumn,
+                        instrumentFromPool = instrumentFromPool,
                         fileBrowserState = fileBrowserState,
                         sampleEditorState = sampleEditorState,
                         selectionInfo = selectionInfo,
@@ -435,6 +441,7 @@ class TrackerLayout {
     private val phraseEditor = PhraseEditorModule()
     private val navigationMap = NavigationMapModule()
     private val instrumentModule = InstrumentModule()
+    private val instrumentPoolModule = InstrumentPoolModule()
     private val mixerModule = MixerModule()
     private val chainEditor = ChainEditorModule()
     private val songEditor = SongEditorModule()
@@ -477,6 +484,8 @@ class TrackerLayout {
         instrumentCursorColumn: Int = 1,
         instrumentStatusMessage: String = "",
         instrumentStatusSuccess: Boolean = true,
+        poolCursorColumn: Int = 0,
+        instrumentFromPool: Boolean = false,
         fileBrowserState: FileBrowserModule.State? = null,  // File browser state
         sampleEditorState: SampleEditorState? = null,
         // Copy/paste state
@@ -808,6 +817,25 @@ class TrackerLayout {
                     }
 
                     // ===================================
+                    // INSTRUMENT POOL SCREEN: list of all instrument slots + mixer columns
+                    // ===================================
+                    ScreenType.INST_POOL -> {
+                        with(instrumentPoolModule) {
+                            draw(
+                                x = moduleX,
+                                y = currentY,
+                                scale = scale,
+                                state = InstrumentPoolState(
+                                    project = project,
+                                    selectedInstrument = currentInstrument,
+                                    cursorColumn = poolCursorColumn,
+                                    appTheme = appTheme
+                                )
+                            )
+                        }
+                    }
+
+                    // ===================================
                     // TABLE SCREEN: Show table editor
                     // ===================================
                     ScreenType.TABLE -> {
@@ -1023,6 +1051,7 @@ class TrackerLayout {
                     state = NavigationMapState(
                         currentScreen = currentScreen,
                         sourceColumn = previousColumn,
+                        instrumentFromPool = instrumentFromPool,
                         appTheme = appTheme
                     )
                 )

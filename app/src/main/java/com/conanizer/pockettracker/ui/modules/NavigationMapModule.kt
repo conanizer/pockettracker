@@ -88,6 +88,15 @@ class NavigationMapModule : TrackerModule {
         // ===================================
         val grid = buildGrid(currentCol)
 
+        // The Instrument Pool has a fast-jump INSTRUMENT cell at row 0 / col 4 (to the right of the
+        // pool, which sits at row 0 / col 3). It shows both while ON the pool and while on the
+        // INSTRUMENT screen entered FROM the pool — in the latter case that cell is the "current"
+        // position (highlighted), not the normal row-2 instrument.
+        val onPoolInstrument = navState.currentScreen == ScreenType.INSTRUMENT && navState.instrumentFromPool
+        if (navState.currentScreen == ScreenType.INST_POOL || onPoolInstrument) {
+            grid[0][4] = ScreenType.INSTRUMENT
+        }
+
         // ===================================
         // STEP 4: Draw all cells
         // ===================================
@@ -97,12 +106,17 @@ class NavigationMapModule : TrackerModule {
                 val cellX = x + (col * CELL_WIDTH)
                 val cellY = y + (row * CELL_HEIGHT)
 
+                // When on the pool-jump instrument, the highlighted cell is row-0/col-4, NOT the
+                // normal row-2 instrument (both share ScreenType.INSTRUMENT).
+                val isCurrent = if (onPoolInstrument) (row == 0 && col == 4)
+                                else (screenAtCell == navState.currentScreen)
+
                 drawNavigationCell(
                     cellX = cellX,
                     cellY = cellY,
                     scale = scale,
                     screen = screenAtCell,
-                    isCurrentScreen = (screenAtCell == navState.currentScreen),
+                    isCurrentScreen = isCurrent,
                     row = row,
                     col = col,
                     t = t
@@ -221,7 +235,7 @@ class NavigationMapModule : TrackerModule {
             ScreenType.GROOVE -> "G"
             ScreenType.SCALE -> "S"
             ScreenType.MODS -> "M"
-            ScreenType.INST_POOL -> "PI"
+            ScreenType.INST_POOL -> "P"
             ScreenType.MIXER -> "V"
             ScreenType.EFFECTS -> "X"
             ScreenType.FILE_BROWSER -> "FB"
@@ -238,5 +252,6 @@ class NavigationMapModule : TrackerModule {
 data class NavigationMapState(
     val currentScreen: ScreenType,
     val sourceColumn: Int,  // Which column we came from (0-4)
+    val instrumentFromPool: Boolean = false,  // on INSTRUMENT, entered via the pool's R+RIGHT
     val appTheme: AppTheme = AppTheme.Companion.CLASSIC
 )

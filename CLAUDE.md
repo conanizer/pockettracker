@@ -174,6 +174,7 @@ The UI uses a custom pixel-perfect rendering system built on Jetpack Compose Can
 - `ChainEditorModule`: Chain editing screen
 - `SongEditorModule`: Song arrangement screen
 - `InstrumentModule`: Instrument editing
+- `InstrumentPoolModule`: Overview list of all 128 instrument slots with a per-slot mixer strip (NAME + V/RV/DE/EQ); load/clear/preview/edit. Reached above INSTRUMENT (INST_POOL screen).
 - `SampleEditorModule`: Full-screen waveform editor (opened from Instrument screen)
 - `MixerModule`: 8 tracks + master with dBFS meters
 - `EffectModule`: Global send effects config (reverb/delay/EQ)
@@ -291,7 +292,7 @@ Each module receives state objects and renders itself independently.
 ```
       0         1         2         3         4
 ┌─────────────────────────────────────────────────┐
-│ ----      ----      SCALE   INST_POOL   ----   │ 0  (only on PHRASE / INSTRUMENT)
+│ ----      ----      SCALE   INST_POOL  (INST)* │ 0  (only on PHRASE / INSTRUMENT)
 │                                                  │
 │ PROJ      PROJ     GROOVE     MODS      ----   │ 1  (GROOVE/MODS only on their column)
 │                                                  │
@@ -307,11 +308,18 @@ Each module receives state objects and renders itself independently.
 - R + DPAD: Move between screens
 - Release R: Jump to selected screen
 
+**Instrument Pool fast-jump:** `(INST)*` at row 0 / col 4 is contextual — shown only on INST_POOL (or
+the instrument reached from it). From INST_POOL: R+RIGHT → INSTRUMENT, R+LEFT → PHRASE, R+DOWN → MODS.
+From that row-0 instrument: R+LEFT → INST_POOL, R+DOWN → MODS, R+UP/R+RIGHT stay. The normal row-2
+INSTRUMENT is unchanged. Driven by `TrackerController.instrumentFromPool` (set on the R+RIGHT jump,
+cleared in the `currentScreen` setter when leaving INSTRUMENT).
+
 **Popup screens (not in nav grid — opened contextually):**
 - SETTINGS: opened from PROJECT screen
 - SAMPLE_EDITOR: opened from INSTRUMENT screen
 
 **Implemented Screens:**
+- Row 0: INST_POOL ✅ (above INSTRUMENT)
 - Row 1: PROJECT ✅
 - Row 2: SONG ✅, CHAIN ✅, PHRASE ✅, INSTRUMENT ✅, TABLE ✅
 - Row 3: MIXER ✅

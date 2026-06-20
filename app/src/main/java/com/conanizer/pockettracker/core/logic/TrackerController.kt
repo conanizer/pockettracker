@@ -28,10 +28,16 @@ class TrackerController(
             stateObserver.onStateChanged()
         }
 
+    // True while the INSTRUMENT screen was reached via R+RIGHT from the Instrument Pool — makes
+    // R+LEFT from INSTRUMENT jump back to the pool (instead of PHRASE). Cleared on any move off
+    // INSTRUMENT (handled in the currentScreen setter below).
+    var instrumentFromPool = false
+
     var currentScreen = ScreenType.SONG
         set(value) {
             field = value
             stateObserver.onStateChanged()
+            if (value != ScreenType.INSTRUMENT) instrumentFromPool = false
             if (value == ScreenType.INSTRUMENT) {
                 instrumentController.syncToLastEdited(project)
             }
@@ -138,6 +144,14 @@ class TrackerController(
     var instrumentCursorColumn = 1
         set(value) {
             field = value
+            stateObserver.onStateChanged()
+        }
+
+    // Instrument Pool cursor column (0 = NAME, 1 = VOL, 2 = REV, 3 = DEL, 4 = EQ).
+    // The selected ROW is `currentInstrument` (shared with the INSTRUMENT view).
+    var poolCursorColumn = 0
+        set(value) {
+            field = value.coerceIn(0, 4)
             stateObserver.onStateChanged()
         }
 
@@ -507,6 +521,9 @@ class TrackerController(
             getScreenColumn(currentScreen)
         }
 
+        // Row-0 instrument (entered from the pool): nothing above it — stay.
+        if (currentScreen == ScreenType.INSTRUMENT && instrumentFromPool) return Pair(ScreenType.INSTRUMENT, 3)
+
         return when (currentScreen) {
             // FROM ROW 4 (Effects) → UP TO ROW 3 (Mixer)
             ScreenType.EFFECTS -> Pair(ScreenType.MIXER, currentCol)
@@ -543,6 +560,9 @@ class TrackerController(
             getScreenColumn(currentScreen)
         }
 
+        // Row-0 instrument (entered from the pool) drops to MODS, like the pool to its left.
+        if (currentScreen == ScreenType.INSTRUMENT && instrumentFromPool) return Pair(ScreenType.MODS, 3)
+
         return when (currentScreen) {
             // FROM ROW 0 → DOWN TO ROW 1
             ScreenType.SCALE -> Pair(ScreenType.GROOVE, 2)
@@ -574,6 +594,12 @@ class TrackerController(
     fun navigateLeft(currentScreen: ScreenType, previousColumn: Int): Pair<ScreenType, Int> {
         // EFFECTS has no side doors
         if (currentScreen == ScreenType.EFFECTS) return Pair(currentScreen, previousColumn)
+
+        // Instrument Pool fast-jump pair: INST_POOL ←→ INSTRUMENT (R+RIGHT/R+LEFT).
+        // From the pool, R+LEFT exits left to PHRASE. From an INSTRUMENT entered via the pool, R+LEFT
+        // returns to the pool (normal INSTRUMENT R+LEFT still goes to PHRASE — see instrumentFromPool).
+        if (currentScreen == ScreenType.INST_POOL) return Pair(ScreenType.PHRASE, 2)
+        if (currentScreen == ScreenType.INSTRUMENT && instrumentFromPool) return Pair(ScreenType.INST_POOL, 3)
 
         // Row 1 (PROJECT, GROOVE, MODS) and Row 3 (MIXER): jump to row-2 screen one column left
         val contextCol = when (currentScreen) {
@@ -608,6 +634,12 @@ class TrackerController(
     fun navigateRight(currentScreen: ScreenType, previousColumn: Int): Pair<ScreenType, Int> {
         // EFFECTS has no side doors
         if (currentScreen == ScreenType.EFFECTS) return Pair(currentScreen, previousColumn)
+
+        // Instrument Pool fast-jump: R+RIGHT from the pool jumps to the INSTRUMENT screen and marks it
+        // so R+LEFT returns to the pool. (The setter clears the flag on any other move off INSTRUMENT.)
+        if (currentScreen == ScreenType.INST_POOL) { instrumentFromPool = true; return Pair(ScreenType.INSTRUMENT, 3) }
+        // Row-0 instrument (from the pool): nothing to its right — stay (don't fall through to TABLE).
+        if (currentScreen == ScreenType.INSTRUMENT && instrumentFromPool) return Pair(ScreenType.INSTRUMENT, 3)
 
         // Row 1 (PROJECT, GROOVE, MODS) and Row 3 (MIXER): jump to row-2 screen one column right
         val contextCol = when (currentScreen) {
@@ -698,10 +730,24 @@ class TrackerController(
                 ScreenType.TABLE      -> { tableCursorRow = 0; tableCursorColumn = 1 }
                 ScreenType.GROOVE     -> { grooveCursorRow = 0 }
                 ScreenType.MODS       -> { modCursorRow = 0; modCursorPair = 0; modCursorSide = 0 }
+                ScreenType.INST_POOL  -> { poolCursorColumn = 0 }
                 else -> {}
             }
         }
     }
+
+    /** Move the Instrument Pool selection (= currentInstrument), keeping the controllers in sync.
+     *  Single-step DPAD wraps 00↔7F; B+UP/DOWN paging clamps at the ends (like the song screen). */
+    private fun setPoolSelection(n: Int) {
+        currentInstrument = n                     // setter also updates lastEditedInstrument + notifies
+        instrumentController.currentInstrument = n
+    }
+    private fun movePoolSelection(delta: Int) {
+        val size = project.instruments.size
+        setPoolSelection(((currentInstrument + delta) % size + size) % size)  // wrap
+    }
+    fun poolBigUp()   = setPoolSelection((currentInstrument - 16).coerceIn(0, project.instruments.size - 1))
+    fun poolBigDown() = setPoolSelection((currentInstrument + 16).coerceIn(0, project.instruments.size - 1))
 
     fun moveCursorUp() {
         when (currentScreen) {
@@ -774,6 +820,7 @@ class TrackerController(
                     mixerMasterRow > 0 -> mixerMasterRow--
                 }
             }
+            ScreenType.INST_POOL -> movePoolSelection(-1)
             ScreenType.EFFECTS -> {
                 if (effectsCursorRow > 0) effectsCursorRow--
             }
@@ -861,6 +908,7 @@ class TrackerController(
                     // REV / DEL: nothing below → stay
                 }
             }
+            ScreenType.INST_POOL -> movePoolSelection(1)
             ScreenType.EFFECTS -> {
                 if (effectsCursorRow < 7) effectsCursorRow++
             }
@@ -907,6 +955,9 @@ class TrackerController(
                     }
                     // REV (col 0): nothing to the left → stay
                 }
+            }
+            ScreenType.INST_POOL -> {
+                if (poolCursorColumn > 0) poolCursorColumn--
             }
             ScreenType.TABLE -> {
                 if (tableCursorColumn > 1) tableCursorColumn--
@@ -957,6 +1008,9 @@ class TrackerController(
                     mixerMasterRow == 1 && mixerCursorColumn == 1 -> mixerCursorColumn = 8
                     // Master column (col 8) already rightmost → stay
                 }
+            }
+            ScreenType.INST_POOL -> {
+                if (poolCursorColumn < 4) poolCursorColumn++
             }
             ScreenType.TABLE -> {
                 if (tableCursorColumn < 8) tableCursorColumn++

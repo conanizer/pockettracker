@@ -109,7 +109,7 @@ The tracker automatically adjusts behavior based on what you're editing:
 Hold R and press directions to navigate the 5x5 screen grid:
 
 ```
-Row 0:         -      SCALE   INST_POOL    -
+Row 0:         -      SCALE   INST_POOL  (INST)*
 Row 1:     PROJECT   GROOVE     MODS     PROJECT
 Row 2:      SONG     CHAIN    PHRASE   INSTRUMENT  TABLE
 Row 3:     MIXER     MIXER    MIXER      MIXER     MIXER
@@ -118,6 +118,30 @@ Row 4:    EFFECTS   EFFECTS  EFFECTS    EFFECTS   EFFECTS
 
 - Main screens (SONG/CHAIN/PHRASE/INSTRUMENT/TABLE) are on Row 2
 - PROJECT, MIXER, EFFECTS span multiple columns
+- `(INST)*` is a contextual fast-jump cell shown only while on INST_POOL (see below)
+
+### Instrument Pool fast-jump (INST_POOL ↔ INSTRUMENT)
+
+The Instrument Pool (row 0 / col 3) pairs with a contextual INSTRUMENT cell to its right for quickly
+bouncing between the pool and the instrument view:
+
+- **From INST_POOL:** R+RIGHT → INSTRUMENT, R+LEFT → PHRASE, R+DOWN → MODS.
+- **From the instrument reached that way:** R+LEFT → back to INST_POOL, R+DOWN → MODS, R+UP/R+RIGHT stay.
+- The normal (row-2) INSTRUMENT is unchanged: R+LEFT → PHRASE, R+RIGHT → TABLE, R+UP → MODS, R+DOWN → MIXER.
+
+### Instrument Pool screen controls
+
+A list of all 128 instrument slots with a short mixer strip per slot: `## NAME V RV DE EQ`. The
+selected row IS the project's current instrument (shared with the INSTRUMENT view).
+
+- **UP / DOWN** — move the selection (wraps 00↔7F); **B+UP / B+DOWN** — fast-scroll ±16 (clamps at ends).
+- **LEFT / RIGHT** — move between columns (NAME → V → RV → DE → EQ).
+- **A + DPAD** — edit the value under the cursor (V/RV/DE = 00–FF, EQ = 00–7F).
+- **A** on the NAME column of an **empty** slot — load a source (sampler slots browse .wav, SoundFont
+  slots browse .sf2/.sf3); the slot is auto-named from the file.
+- **A + B** on the NAME column — clear the slot (keeps its instrument type).
+- **SELECT** on the EQ column — open the per-instrument EQ editor.
+- **START** — preview the selected instrument (when stopped).
 
 ---
 

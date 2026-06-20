@@ -81,6 +81,7 @@ import com.conanizer.pockettracker.ui.modules.EqModule
 import com.conanizer.pockettracker.ui.modules.FileBrowserModule
 import com.conanizer.pockettracker.ui.modules.GrooveModule
 import com.conanizer.pockettracker.ui.modules.InstrumentModule
+import com.conanizer.pockettracker.ui.modules.InstrumentPoolModule
 import com.conanizer.pockettracker.ui.modules.MixerModule
 import com.conanizer.pockettracker.ui.modules.ModulationModule
 import com.conanizer.pockettracker.ui.modules.PhraseEditorModule
@@ -402,6 +403,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val projectModule = remember { ProjectModule() }
     val settingsModule = remember { SettingsModule() }
     val instrumentModule = remember { InstrumentModule() }
+    val instrumentPoolModule = remember { InstrumentPoolModule() }
     val mixerModule = remember { MixerModule() }
     val effectModule = remember { EffectModule() }
     val eqModule     = remember { EqModule() }
@@ -863,7 +865,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             fileController, renderController, clipboardManager, deviceAdapter,
             videoExtractor, fileSystem, coroutineScope,
             chainEditorModule, phraseEditorModule, songEditorModule, projectModule,
-            settingsModule, instrumentModule, mixerModule, effectModule, eqModule,
+            settingsModule, instrumentModule, instrumentPoolModule, mixerModule, effectModule, eqModule,
             tableModule, grooveModule, modulationModule, fileBrowserModule, sampleEditorModule
         )
     }
@@ -969,6 +971,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val instrumentCursorColumn = stateVersion.let { trackerController.instrumentCursorColumn }
     val instrumentStatusMessage = stateVersion.let { trackerController.statusMessage }
     val instrumentStatusSuccess = stateVersion.let { trackerController.statusSuccess }
+    val poolCursorColumn = stateVersion.let { trackerController.poolCursorColumn }
+    val instrumentFromPool = stateVersion.let { trackerController.instrumentFromPool }
 
     val selectionInfo = stateVersion.let { trackerController.inputController.getSelectionInfo() }
     val clipboardInfo = stateVersion.let { clipboardManager.getClipboardInfo() }
@@ -1006,6 +1010,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         instrumentCursorColumn = instrumentCursorColumn,
         instrumentStatusMessage = instrumentStatusMessage,
         instrumentStatusSuccess = instrumentStatusSuccess,
+        poolCursorColumn = poolCursorColumn,
+        instrumentFromPool = instrumentFromPool,
         fileBrowserState = fileBrowserState,
         sampleEditorState = sampleEditorState,
         selectionInfo = selectionInfo,

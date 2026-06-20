@@ -144,6 +144,23 @@ class InstrumentController(
         logger.d(TAG, "🗑️ All soundfonts unloaded for project change")
     }
 
+    /** Reset instrument slot [id] to empty (Instrument Pool A+B), keeping its instrument TYPE so a
+     *  SoundFont slot stays a (now empty) SoundFont slot. Frees its sample PCM and, if it was the last
+     *  user of a SoundFont, that SF2's native slot too (mirrors setInstrumentType's free). */
+    fun clearInstrument(project: Project, id: Int) {
+        val old = project.instruments[id]
+        val sfPath = old.soundfontPath
+        val keepType = old.instrumentType
+        project.instruments[id] = Instrument(id = id).apply { instrumentType = keepType }
+        audioEngine.clearSample(id)
+        if (sfPath != null && project.instruments.none { it.soundfontPath == sfPath }) {
+            sfSlotMap[sfPath]?.let { slot -> audioEngine.backend.unloadSoundfont(slot) }
+            sfSlotMap.remove(sfPath)
+        }
+        stateObserver.onStateChanged()
+        logger.d(TAG, "🗑️ Cleared instrument slot $id (type kept: $keepType)")
+    }
+
     /**
      * Load sample from file into current instrument
      *
