@@ -454,6 +454,10 @@ class AudioEngine(
         trackId: Int,
         volume: Float = 1.0f,
         phraseVol: Float = 1.0f,
+        // MIDI velocity (0–127) for the SF2 path: when ≥0 it drives TSF's velocity directly and the
+        // SF channel volume is left at 1.0 (TSF applies its own velocity curve). -1 = legacy: derive
+        // velocity from `volume` (used by retrig/arp). The sampler path ignores this.
+        midiVelocity: Int = -1,
         pan: Float = 0.5f,
         project: Project,
         startPointOverride: Int = -1,
@@ -495,7 +499,12 @@ class AudioEngine(
             // (otherwise note==root + (60-root) would always collapse to C-4, ignoring ROOT).
             val transpose = if (isRootAudition) 0 else (60 - instrument.root.toMidi())
             val midiNote = (baseMidi + transpose).coerceIn(0, 127)
-            val velocity = (volume * 127).toInt().coerceIn(1, 127)
+            // VOL column = MIDI velocity → TSF applies its own (dB) velocity curve. When a velocity
+            // is supplied, the SF channel volume (noteVol) stays at 1.0 so we don't double-curve;
+            // instrument-vol/Vxx arrives via phraseVol. Legacy callers (retrig/arp) pass -1.
+            val velocity  = if (midiVelocity >= 0) midiVelocity.coerceIn(1, 127)
+                            else (volume * 127).toInt().coerceIn(1, 127)
+            val sfNoteVol = if (midiVelocity >= 0) 1.0f else volume
             // Detune (same encoding as sampler): high nibble = semitones, low nibble = 1/16th, centred at 0x80.
             // Applied to the SF voice as a fractional pitch-wheel offset (sampler bakes it into baseFreq instead).
             val sfDetune = (instrument.detune shr 4).toFloat() + (instrument.detune and 0x0F) / 16.0f - 8.0f
@@ -529,7 +538,7 @@ class AudioEngine(
             backend.resumeStream()
             backend.scheduleSoundfontNote(
                 targetFrame, trackId, slot,
-                midiNote, velocity, volume, pan,
+                midiNote, velocity, sfNoteVol, pan,
                 instrument.sfBank, instrument.sfPreset,
                 pslInitialOffset, pslDurationFrames, pbnRatePerFrame, vibratoSpeed, vibratoDepth,
                 phraseVol = phraseVol,

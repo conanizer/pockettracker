@@ -634,7 +634,7 @@ class ClipboardManager(
             for (col in minCol..maxCol) {
                 when (col) {
                     1 -> { step.note = Note.EMPTY; itemsDeleted++ }
-                    2 -> { step.volume = 0xFF; itemsDeleted++ }
+                    2 -> { step.volume = 0x7F; itemsDeleted++ }  // 7F = max velocity (default)
                     3 -> { step.instrument = 0; itemsDeleted++ }
                     4 -> { step.fx1Type = 0; itemsDeleted++ }
                     5 -> { step.fx1Value = 0; itemsDeleted++ }

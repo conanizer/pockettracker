@@ -79,7 +79,7 @@ data class Note(
 data class PhraseStep(
     var note: Note = Note.EMPTY,
     var instrument: Int = 0x00,  // 00-FF (256 instrument slots)
-    var volume: Int = 0xFF,      // 00-FF (FF = max)
+    var volume: Int = 0x7F,      // 00-7F MIDI velocity (7F = max); sampler uses a squared curve, SF2 → TSF
     var fx1Type: Int = 0x00,     // Effect type (Milestone 2: NOW EDITABLE!)
     var fx1Value: Int = 0x00,    // Effect value
     var fx2Type: Int = 0x00,

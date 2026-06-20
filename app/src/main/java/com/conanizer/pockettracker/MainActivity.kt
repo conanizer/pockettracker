@@ -693,7 +693,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         val isPhrase = trackerController.currentScreen == ScreenType.PHRASE
         if (wasPhraseScreen && !isPhrase) {
             trackerController.lastEditedNote = com.conanizer.pockettracker.core.data.Note.fromMidi(60) // C-4
-            trackerController.lastEditedVolume = 0xFF
+            trackerController.lastEditedVolume = 0x7F  // max velocity (VOL column is now 0x00-0x7F)
         }
         wasPhraseScreen = isPhrase
     }

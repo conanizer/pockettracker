@@ -233,7 +233,7 @@ class TrackerController(
 
     var lastEditedNote = Note.fromString("C-4")
 
-    var lastEditedVolume = 0xFF
+    var lastEditedVolume = 0x7F
 
     var lastEditedTranspose = 0
 
@@ -358,7 +358,7 @@ class TrackerController(
         lastEditedChain = 0
         lastEditedPhrase = 0
         lastEditedNote = Note.fromString("C-4")
-        lastEditedVolume = 0xFF
+        lastEditedVolume = 0x7F
         lastEditedTranspose = 0
         lastEditedInstrument = 0
         lastEditedTable = 0

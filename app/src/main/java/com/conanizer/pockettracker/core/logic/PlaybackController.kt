@@ -974,15 +974,19 @@ class PlaybackController(
         // overwrite an FX slot / the note+instrument). See applyChanceAndRandomize().
         val (effectiveStep, skipNote) = applyChanceAndRandomize(step, trackState)
 
-        val defaultVolume = effectiveStep.volume / 255.0f
-        val params = effectProcessor.resolveStepParams(effectiveStep, targetFrame, defaultVolume)
-
-        // Instrument and phrase volumes are passed separately to C++ as mod sources.
-        // C++ multiplies them via the fixed VOL route: TABLE_VOL × phraseVol × instrVol.
-        // Track × master are applied in the C++ mix loop in real-time.
         val instrument = project.instruments[effectiveStep.instrument.coerceIn(0, project.instruments.size - 1)]
         val instrVol  = VolumeUtils.hexToFloat(instrument.volume)
-        val phraseVol = params.volume  // already 0.0–1.0 from resolveStepParams
+
+        // The VOL column is MIDI velocity (0–127). Sampler: a squared curve applied as gain on the
+        // note.volume channel. SF2: the raw velocity is sent to TSF (AudioEngine splits by type).
+        val velocityByte = effectiveStep.volume.coerceIn(0, 127)
+        val velocityGain = (velocityByte / 127f) * (velocityByte / 127f)
+
+        // Instrument-volume stage: instrument VOL, or a Vxx override (Vxx stays 0–255). Rides the
+        // phraseVol channel (MOD_SRC_PHRASE_VOL) so mid-note Vxx animation keeps working. Final C++
+        // gain = velocityGain × instrVolWithVxx × table × track × master.
+        val params = effectProcessor.resolveStepParams(effectiveStep, targetFrame, defaultVolume = instrVol)
+        val instrVolWithVxx = params.volume
 
         // Get instrument pan (hex 0x00-0xFF → float 0.0-1.0)
         val instrumentPan = VolumeUtils.hexToFloat(instrument.pan)
@@ -1121,9 +1125,9 @@ class PlaybackController(
             }
 
             // Debug: Log the full volume chain so we can verify what reaches the audio engine
-            if (TRACE) logger.d(TAG, "🔊 Volume chain: instrVol=${"%.4f".format(instrVol)}" +
-                    " phraseVol=${"%.4f".format(phraseVol)}" +
-                    " (C++ multiplies: TABLE_VOL × phraseVol × instrVol)")
+            if (TRACE) logger.d(TAG, "🔊 Volume chain: velocityGain=${"%.4f".format(velocityGain)}" +
+                    " instrVolWithVxx=${"%.4f".format(instrVolWithVxx)} velocity=$velocityByte" +
+                    " (C++ gain: velocityGain × instrVolWithVxx × table × track × master)")
 
             // Schedule the note — unified path handles both SAMPLER and SOUNDFONT.
             // AudioEngine.scheduleNote() routes to backend.scheduleSoundfontNote() for SF
@@ -1133,8 +1137,9 @@ class PlaybackController(
                 note = note,
                 instrumentId = effectiveStep.instrument,
                 trackId = trackId,
-                volume = instrVol,
-                phraseVol = phraseVol,
+                volume = velocityGain,
+                phraseVol = instrVolWithVxx,
+                midiVelocity = velocityByte,
                 pan = instrumentPan,
                 project = project,
                 startPointOverride = params.startPoint,
@@ -1154,7 +1159,7 @@ class PlaybackController(
             // Update track state with this note (for persistent REPEAT retrigger)
             trackState.lastNote = note
             trackState.lastInstrument = effectiveStep.instrument
-            trackState.lastVolume = instrVol * phraseVol  // Combined for REPEAT retrigger
+            trackState.lastVolume = velocityGain * instrVolWithVxx  // Combined for REPEAT retrigger
             trackState.lastStartPoint = params.startPoint
             trackState.lastPan = instrumentPan
             trackState.lastNoteMidi = note.toMidi()
@@ -1193,8 +1198,8 @@ class PlaybackController(
             // Vxx on empty step: schedule phraseVol update at the step's target frame so the
             // change fires sample-accurately (PlaybackController runs ahead of the audio clock).
             if (params.volumeFromVxx) {
-                audioEngine.scheduleTrackPhraseVol(effectiveTargetFrame, trackId, phraseVol)
-                if (TRACE) logger.d(TAG, "🔊 Vxx on empty step: track=$trackId phraseVol=$phraseVol at frame=$effectiveTargetFrame")
+                audioEngine.scheduleTrackPhraseVol(effectiveTargetFrame, trackId, instrVolWithVxx)
+                if (TRACE) logger.d(TAG, "🔊 Vxx on empty step: track=$trackId instrVol=$instrVolWithVxx at frame=$effectiveTargetFrame")
             }
 
             // Handle PBN (Pitch Bend) - modify currently playing voice
@@ -1312,7 +1317,7 @@ class PlaybackController(
 
             // Set base volume for the new ramp
             trackState.repeatBaseVolume = when {
-                hasNote -> instrVol * phraseVol  // New note: fresh start at combined note volume
+                hasNote -> velocityGain * instrVolWithVxx  // New note: fresh start at combined note volume
                 savedRampVolume >= 0f -> savedRampVolume  // RPT-to-RPT on empty step: continue from last ramp position
                 else -> trackState.lastVolume  // Fallback: use last played note volume
             }
@@ -1517,8 +1522,10 @@ class PlaybackController(
                 step = effectiveStep,
                 params = params,
                 transposeSemitones = transposeSemitones,
-                instrVol = instrVol,
-                phraseVol = phraseVol,
+                // Velocity gain + instrument-vol(+Vxx) combine the same way inside the helper
+                // (volume × phraseVol), so the arp note matches the main note's loudness.
+                instrVol = velocityGain,
+                phraseVol = instrVolWithVxx,
                 finalPan = instrumentPan
             )
         }

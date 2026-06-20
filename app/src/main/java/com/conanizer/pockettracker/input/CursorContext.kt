@@ -230,7 +230,7 @@ object CursorContextFactory {
      * Volume (00-FF)
      */
     fun volume(currentValue: Int) =
-        hexByte(currentValue).copy(valueType = CursorValueType.VOLUME)
+        hexByte(currentValue, 0, 127).copy(valueType = CursorValueType.VOLUME)  // MIDI velocity 0x00-0x7F
 
     /**
      * Instrument reference (00-FF hex byte)
