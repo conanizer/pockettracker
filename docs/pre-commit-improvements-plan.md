@@ -17,6 +17,37 @@ Effort: **S**/**M**/**L**. Open decisions marked 🟡 (need a call before coding
 
 ---
 
+## Build progress — 2026-06-21
+
+On branch `code-review-3-round2`, each item device-tested before its commit. Build order so far:
+**10 → 5 → 12 → 8 → 6 → 7.** Remaining: **2, 4, 1, 9, 13, 3.**
+
+- ✅ **#10 File browser** (`b3e161f`) — date `YY-MM-DD → DD-MM-YY`; shared `FileBrowserModule.clipName()`:
+  list names clip to 20 (18+`..`), DELETE prompt to 16 so it stays inside the 640px line.
+- ✅ **#5 " >" affordance** (`dec6add`) — generalised past the plan into a shared
+  `EditorHelpers.drawEqCell()` so every EQ cell renders identically (value `--`=textEmpty / hex=textValue /
+  focused=textCursor, bare `>` that never dims). Wired on instrument, instrument pool (arrow on the
+  selected row only; value columns nudged 6px left), mixer master, effects reverb/delay input, and
+  sample-editor EQ. SETTINGS `>` / EDIT `>` were the developer's own edits, folded in.
+- ✅ **#12 Selection cursor** (`0997460`) — `handleDPadNavigation` moves the cursor with `selectionEnd`
+  on PHRASE/CHAIN/SONG (guarded on the edge actually moving); SONG scroll follows the cursor. Copy/cut/
+  delete still read the selection bounds and paste re-anchors at the cursor, so behaviour is unchanged.
+- ✅ **#8 Sample-editor SNAP** (`9fd3145`) — `findZeroCrossing` gains a `dir` param (forward / backward /
+  nearest). A directional search seeded from the already-stepped frame always lands at or past it, so the
+  marker can't snap back and stick (worst at 1× zoom). Threaded through JNI → IAudioBackend / AudioEngine
+  / OboeAudioBackend; the 4 marker-move handlers pass `dir = ±1`.
+- ✅ **#6 AUDIO LOADING screen** (`76042b1`) — removed; the UI renders immediately while the Oboe stream
+  opens on an IO thread. `AudioEngine.isReady` (`@Volatile`, set after `backend.create()`) gates the
+  visualizer poll methods and START/playback so nothing touches the engine before it exists.
+- ✅ **#7 A+B = reset to default** (`556edf1`) — `CursorContext.defaultValue` + `NO_DEFAULT`;
+  `handleABCombo` returns `SET_VALUE(default)` for non-deletable cells, reusing each module's existing
+  SET_VALUE handler. ~40 cells wired to their data-class defaults (instrument / phrase VOL / mixer / pool
+  / effects / mods / chain transpose). Deletable cells unchanged. Chain transpose confirmed
+  two's-complement (`00` = no transpose); a stale dead `0x80` display line was removed. **Deferred:**
+  EQ band FREQ/GAIN/Q (→ #13), delay TIME sync-mode, groove / settings / sample-editor params.
+
+---
+
 ## 1. Sampler: read MP3 + audit WAV format coverage
 
 **Goal:** Load `.mp3` files as samples; document/extend which WAV encodings are supported.
@@ -185,7 +216,7 @@ A/B on every screen for regressions).
 
 ---
 
-## 5. " >" sub-screen affordance on EQ cells  **[partly done]**
+## 5. " >" sub-screen affordance on EQ cells  **✅ shipped (dec6add)**
 
 **Goal:** Show " >" where a cell opens a further screen (consistent with the new A-opens convention).
 
@@ -208,7 +239,7 @@ column on the pool's tight mixer strip.
 
 ---
 
-## 6. Remove the "AUDIO LOADING…" startup screen
+## 6. Remove the "AUDIO LOADING…" startup screen  **✅ shipped (76042b1)**
 
 **Goal:** No loading screen (it lingers on the Miyoo Flip).
 
@@ -235,7 +266,7 @@ column on the pool's tight mixer strip.
 
 ---
 
-## 7. A+B = reset value to default
+## 7. A+B = reset value to default  **✅ shipped (556edf1)**
 
 **Goal:** A+B snaps a value back to its default. Today A+B = **delete/clear** (`InputController.handleABCombo`,
 `:216`) which already does the right thing for cells with an "empty" default; this extends it to
@@ -286,7 +317,7 @@ today's behavior (no regression). Verify selection-mode A+B still deletes the se
 
 ---
 
-## 8. Sample editor — selection marker sticks at 1× zoom with SNAP on
+## 8. Sample editor — selection marker sticks at 1× zoom with SNAP on  **✅ shipped (9fd3145)**
 
 **Goal:** A small marker move always advances even with SNAP on.
 
@@ -372,7 +403,7 @@ Work involved:
 
 ---
 
-## 10. File browser — filename truncation  **[date partly done]**
+## 10. File browser — filename truncation  **✅ shipped (b3e161f)**
 
 **Goal:** Long names truncate instead of running under the size/date columns.
 
@@ -391,7 +422,7 @@ Work involved:
 
 ---
 
-## 12. Copy/paste — cursor follows the selection edge
+## 12. Copy/paste — cursor follows the selection edge  **✅ shipped (0997460)**
 
 **Goal:** In selection mode the cursor moves with the growing edge (so after exiting, the cursor is still
 on-screen — fixes the SONG "jump back" past row 16).
