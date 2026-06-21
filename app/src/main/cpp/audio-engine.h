@@ -26,6 +26,15 @@ public:
 
     void loadSample(int id, const float* data, int length);
     void loadSampleStereo(int id, const float* left, const float* right, int length);
+
+    // Streaming sample load — decode a compressed file (e.g. MP3) chunk-by-chunk straight into native
+    // memory so the whole PCM never has to live on the Java heap. begin allocates the slot from an
+    // (over-)estimated frame count; fillSampleChunk writes interleaved 16-bit chunks in place; finalize
+    // publishes the real length; cancel frees a partial load on decode failure. One load at a time.
+    bool beginSampleLoad(int id, int channels, int estimatedFrames);
+    void fillSampleChunk(int id, const int16_t* interleaved, int frameCount, int channels);
+    int  finalizeSampleLoad(int id);
+    void cancelSampleLoad(int id);
     // Decode a WAV file straight into native sample memory (no Java-heap round trip). Handles the
     // same formats as the Kotlin parser it replaces for file loads — 16/24/32-bit PCM, 32-bit float,
     // mono/stereo, WAVE_FORMAT_EXTENSIBLE. Returns the WAV sample rate (>0) on success, 0 on failure.
@@ -356,6 +365,13 @@ private:
     float* sampleClipboard      = nullptr; // cross-operation copy/paste buffer (left)
     float* sampleClipboardRight = nullptr; // copy/paste buffer (right channel; null = mono clip)
     int    sampleClipboardLength = 0;
+
+    // Streaming-load cursor (see beginSampleLoad). Touched only on the decode thread; the audio thread
+    // never reads these — it sees the slot via sampleLengths[id], which stays 0 until finalize.
+    int streamLoadId       = -1;  // slot currently being streamed into, or -1
+    int streamLoadChannels = 0;   // 1 or 2
+    int streamLoadCapacity = 0;   // allocated frames in samples[streamLoadId]
+    int streamLoadFilled   = 0;   // frames written so far (becomes sampleLengths on finalize)
 
     // Replace the working buffers for `id` with a new left + optional right of length newLen, freeing the
     // old buffers. Keeps left/right and their shared length in lockstep so the stereo mix path can never

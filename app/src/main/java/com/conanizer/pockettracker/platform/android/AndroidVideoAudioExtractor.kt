@@ -84,6 +84,155 @@ class AndroidVideoAudioExtractor : IVideoAudioExtractor {
         }
     }
 
+    override fun extractAudioToSink(
+        path: String,
+        maxDurationSec: Int,
+        sink: IVideoAudioExtractor.PcmSink
+    ): Result<IVideoAudioExtractor.StreamInfo> {
+        if (!File(path).exists()) {
+            return Result.failure(IVideoAudioExtractor.ExtractionError.FileNotFound(path))
+        }
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(path)
+            val audioTrackIndex = (0 until extractor.trackCount).firstOrNull { i ->
+                extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+            } ?: return Result.failure(
+                IVideoAudioExtractor.ExtractionError.NoAudioTrack("No audio track found in: $path")
+            )
+            extractor.selectTrack(audioTrackIndex)
+            val format = extractor.getTrackFormat(audioTrackIndex)
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: "audio/unknown"
+            val sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            val channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION))
+                format.getLong(MediaFormat.KEY_DURATION) else 0L
+
+            // Pre-sizing the native buffer needs the duration. Without it, bail so the caller can fall
+            // back to extractAudio (the whole-file path), which doesn't need a size up front.
+            if (durationUs <= 0L) {
+                return Result.failure(
+                    IVideoAudioExtractor.ExtractionError.DecodeFailed("No duration metadata: $path")
+                )
+            }
+            if (maxDurationSec > 0 && durationUs > maxDurationSec * 1_000_000L) {
+                return Result.failure(
+                    IVideoAudioExtractor.ExtractionError.FileTooLong((durationUs / 1_000_000L).toInt(), maxDurationSec)
+                )
+            }
+
+            val sourceFormat = "$mime ${sampleRate}Hz ${if (channelCount == 1) "mono" else "stereo"}"
+            // Over-estimate by +1 s so encoder delay/padding can't overrun the allocation (excess is clamped).
+            val estimatedFrames = ((durationUs / 1_000_000.0) * sampleRate).toInt() + sampleRate
+            sink.onFormat(sampleRate, channelCount, estimatedFrames)
+
+            val frames = decodeToSink(extractor, format, mime, channelCount, sink)
+                ?: return Result.failure(
+                    IVideoAudioExtractor.ExtractionError.DecodeFailed("MediaCodec decode failed for: $path")
+                )
+            return Result.success(
+                IVideoAudioExtractor.StreamInfo(sampleRate, channelCount, frames, sourceFormat)
+            )
+        } catch (e: Exception) {
+            return Result.failure(
+                IVideoAudioExtractor.ExtractionError.DecodeFailed(e.message ?: "Unknown error")
+            )
+        } finally {
+            extractor.release()
+        }
+    }
+
+    /**
+     * MediaCodec decode loop that streams each decoded block to [sink] instead of accumulating it.
+     * Kept parallel to [decode] (which builds FloatArrays for the WAV-extract path) so the working
+     * video/preview path stays untouched. Returns total frames decoded, or null on failure.
+     */
+    private fun decodeToSink(
+        extractor: MediaExtractor,
+        format: MediaFormat,
+        mime: String,
+        channelCount: Int,
+        sink: IVideoAudioExtractor.PcmSink
+    ): Int? {
+        val codec = try {
+            MediaCodec.createDecoderByType(mime)
+        } catch (e: Exception) {
+            return null
+        }
+        try {
+            codec.configure(format, null, null, 0)
+            codec.start()
+        } catch (e: Exception) {
+            codec.release()
+            return null
+        }
+        val bufferInfo = MediaCodec.BufferInfo()
+        val timeoutUs = 10_000L
+        var inputDone = false
+        var outputDone = false
+        var isFloat = false
+        var totalFrames = 0
+        var chunk = ShortArray(8192)   // reused per block; grown if a block is larger
+        try {
+            while (!outputDone) {
+                if (!inputDone) {
+                    val inIdx = codec.dequeueInputBuffer(timeoutUs)
+                    if (inIdx >= 0) {
+                        val inBuf = codec.getInputBuffer(inIdx)!!
+                        val size = extractor.readSampleData(inBuf, 0)
+                        if (size < 0) {
+                            codec.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inputDone = true
+                        } else {
+                            codec.queueInputBuffer(inIdx, 0, size, extractor.sampleTime, 0)
+                            extractor.advance()
+                        }
+                    }
+                }
+                val outIdx = codec.dequeueOutputBuffer(bufferInfo, timeoutUs)
+                when {
+                    outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        val of = codec.outputFormat
+                        if (of.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
+                            isFloat = of.getInteger(MediaFormat.KEY_PCM_ENCODING) ==
+                                    android.media.AudioFormat.ENCODING_PCM_FLOAT
+                        }
+                    }
+                    outIdx >= 0 -> {
+                        val outBuf = codec.getOutputBuffer(outIdx)
+                        if (outBuf != null && bufferInfo.size > 0) {
+                            outBuf.position(bufferInfo.offset)
+                            outBuf.limit(bufferInfo.offset + bufferInfo.size)
+                            outBuf.order(ByteOrder.LITTLE_ENDIAN)
+                            val sampleCount = if (isFloat) bufferInfo.size / 4 else bufferInfo.size / 2
+                            if (sampleCount > chunk.size) chunk = ShortArray(sampleCount)
+                            if (isFloat) {
+                                val fb = outBuf.asFloatBuffer()
+                                var i = 0
+                                while (fb.hasRemaining()) {
+                                    chunk[i++] = (fb.get().coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+                                }
+                            } else {
+                                outBuf.asShortBuffer().get(chunk, 0, sampleCount)
+                            }
+                            val frameCount = sampleCount / channelCount
+                            if (frameCount > 0) {
+                                sink.onChunk(chunk, frameCount, channelCount)
+                                totalFrames += frameCount
+                            }
+                        }
+                        codec.releaseOutputBuffer(outIdx, false)
+                        if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
+                    }
+                }
+            }
+        } finally {
+            codec.stop()
+            codec.release()
+        }
+        return if (totalFrames > 0) totalFrames else null
+    }
+
     /**
      * Run the MediaCodec decode loop.
      * Returns Pair(left, right?) normalized to -1.0..1.0, or null on failure.

@@ -38,6 +38,28 @@ interface IVideoAudioExtractor {
     fun extractAudio(path: String, maxDurationSec: Int = 60): Result<ExtractionResult>
 
     /**
+     * Streaming sink for [extractAudioToSink]: receives decoded interleaved 16-bit PCM block-by-block so
+     * the whole file never has to be buffered at once.
+     */
+    interface PcmSink {
+        /** Called once before any chunk, with the source format and an over-estimate of the total frame count. */
+        fun onFormat(sampleRate: Int, channels: Int, estimatedFrames: Int)
+        /** One decoded block: [interleaved] holds [frameCount]*[channels] samples. The buffer is reused — copy, don't retain. */
+        fun onChunk(interleaved: ShortArray, frameCount: Int, channels: Int)
+    }
+
+    /** Final metadata returned by [extractAudioToSink] ([frames] = actual frames streamed). */
+    data class StreamInfo(val sampleRate: Int, val channels: Int, val frames: Int, val sourceFormat: String)
+
+    /**
+     * Decode [path] straight to [sink] without buffering the whole file in one place. Mirrors
+     * [extractAudio]'s format handling. Requires duration metadata (to pre-size the destination);
+     * returns [ExtractionError.DecodeFailed] if it is absent so the caller can fall back to [extractAudio].
+     * @param maxDurationSec 0 = no length limit.
+     */
+    fun extractAudioToSink(path: String, maxDurationSec: Int, sink: PcmSink): Result<StreamInfo>
+
+    /**
      * Quick check whether a file is a supported video/audio container format.
      * Based on extension only — does not read file contents.
      */

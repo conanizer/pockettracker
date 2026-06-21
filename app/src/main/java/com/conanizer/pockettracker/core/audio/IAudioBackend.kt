@@ -50,6 +50,23 @@ interface IAudioBackend {
     fun loadSampleStereo(id: Int, left: FloatArray, right: FloatArray)
 
     /**
+     * Streaming sample load — decode a compressed file straight into native slot [id] chunk-by-chunk so
+     * the whole PCM never lives on the Java heap. Call order: [beginSampleLoad] once, [fillSampleChunk]
+     * per decoded block, then [finalizeSampleLoad]. On decode failure call [cancelSampleLoad] to free the
+     * partial buffer. One load at a time.
+     *
+     * @param channels 1 or 2; @param estimatedFrames over-estimate of total frames (allocation size).
+     * @return false if allocation failed (OOM) — abort the load.
+     */
+    fun beginSampleLoad(id: Int, channels: Int, estimatedFrames: Int): Boolean
+    /** Write one decoded block: [interleaved] holds [frameCount]*[channels] 16-bit samples (buffer may be reused). */
+    fun fillSampleChunk(id: Int, interleaved: ShortArray, frameCount: Int, channels: Int)
+    /** Publish the streamed sample at its real length. @return the frame count now playable. */
+    fun finalizeSampleLoad(id: Int): Int
+    /** Free a partially-streamed buffer after a failed/aborted decode. */
+    fun cancelSampleLoad(id: Int)
+
+    /**
      * Decode a WAV file directly into native sample slot [id] — no Java-heap round trip. Supports
      * 16/24/32-bit PCM, 32-bit float, mono/stereo, WAVE_FORMAT_EXTENSIBLE. Returns the WAV's sample
      * rate (>0) on success, 0 on failure. Keeping the decode native lets multi-MB samples load on

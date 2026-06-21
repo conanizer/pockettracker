@@ -10,6 +10,7 @@ import com.conanizer.pockettracker.core.data.Table
 import com.conanizer.pockettracker.core.data.TICS_PER_STEP
 import com.conanizer.pockettracker.core.data.VolumeUtils
 import com.conanizer.pockettracker.core.logging.ILogger
+import com.conanizer.pockettracker.core.media.IVideoAudioExtractor
 import com.conanizer.pockettracker.core.resources.IResourceLoader
 import java.io.File
 import kotlin.math.pow
@@ -149,6 +150,52 @@ class AudioEngine(
             logger.e(TAG, "❌ Error loading in-memory sample: ${e.message}")
             false
         }
+    }
+
+    /**
+     * Load a compressed/container file (e.g. MP3) into instrument slot [instrumentId]. Prefers the
+     * STREAMING path — the extractor decodes block-by-block straight into native memory, so the whole
+     * PCM never lands on the Java heap (which previously capped loads at a few MB and left the heap
+     * inflated). Falls back to the whole-file decode for sources the streaming path can't pre-size
+     * (no duration metadata). Sets the sample-rate-compensation ratio either way. Returns success.
+     */
+    fun loadSampleCompressed(instrumentId: Int, path: String, extractor: IVideoAudioExtractor): Boolean {
+        val sink = object : IVideoAudioExtractor.PcmSink {
+            override fun onFormat(sampleRate: Int, channels: Int, estimatedFrames: Int) {
+                backend.beginSampleLoad(instrumentId, channels, estimatedFrames)
+            }
+            override fun onChunk(interleaved: ShortArray, frameCount: Int, channels: Int) {
+                backend.fillSampleChunk(instrumentId, interleaved, frameCount, channels)
+            }
+        }
+        val streamed = try {
+            extractor.extractAudioToSink(path, maxDurationSec = 0, sink)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+        if (streamed.isSuccess) {
+            val info = streamed.getOrThrow()
+            val frames = backend.finalizeSampleLoad(instrumentId)
+            if (frames > 0) {
+                sampleRateRatios[instrumentId] = getDeviceSampleRate().toFloat() / info.sampleRate.toFloat()
+                originalSampleRateRatios.remove(instrumentId)
+                logger.d(TAG, "✅ Streamed compressed sample: id=$instrumentId frames=$frames rate=${info.sampleRate} (${info.sourceFormat})")
+                return true
+            }
+            backend.cancelSampleLoad(instrumentId)
+            return false
+        }
+
+        // Fallback: whole-file decode (handles sources without duration metadata). Free any partial first.
+        backend.cancelSampleLoad(instrumentId)
+        logger.d(TAG, "↩︎ Streaming unavailable (${streamed.exceptionOrNull()?.message}); whole-file decode")
+        val result = extractor.extractAudio(path, maxDurationSec = 0)
+        if (result.isFailure) {
+            logger.e(TAG, "❌ Compressed load failed: ${result.exceptionOrNull()?.message}")
+            return false
+        }
+        val audio = result.getOrThrow()
+        return loadSampleData(instrumentId, audio.samples, audio.samplesRight, audio.sampleRate)
     }
 
     // WAV file decoding now happens in C++ (backend.loadSampleFromWav → AudioEngine::loadSampleFromWavFile)

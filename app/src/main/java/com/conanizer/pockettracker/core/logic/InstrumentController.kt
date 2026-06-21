@@ -277,21 +277,12 @@ class InstrumentController(
         logger.d(TAG, "📂 Decoding compressed sample: inst=${formatHex(currentInstrument)}, path=$filePath")
         setStatus("Decoding...", success = true)
 
-        // maxDurationSec = 0 → no length cap. Removed during the testing stage so we can probe the real
-        // memory limits before settling on a final cap; very large files may OOM on low-RAM devices for now.
-        val result = extractor.extractAudio(filePath, maxDurationSec = 0)
-        if (result.isFailure) {
-            val msg = result.exceptionOrNull()?.message ?: "Decode failed"
-            setStatus("Load failed: $msg", success = false)
-            logger.e(TAG, "❌ Compressed decode failed: $msg")
-            return LoadResult.Error(msg)
-        }
-        val audio = result.getOrThrow()
-
-        if (!audioEngine.loadSampleData(instrument.id, audio.samples, audio.samplesRight, audio.sampleRate)) {
+        // Streams the decode straight into native memory (no length cap during the testing stage); see
+        // AudioEngine.loadSampleCompressed. The whole PCM never hits the Java heap.
+        if (!audioEngine.loadSampleCompressed(instrument.id, filePath, extractor)) {
             setStatus("Failed to load sample", success = false)
-            logger.e(TAG, "❌ Engine rejected decoded sample")
-            return LoadResult.Error("Engine load failed")
+            logger.e(TAG, "❌ Compressed decode/load failed (see log)")
+            return LoadResult.Error("Decode failed")
         }
 
         instrument.sampleFilePath = filePath
@@ -300,7 +291,7 @@ class InstrumentController(
 
         val filename = filePath.substringAfterLast('/').substringBeforeLast('.')
         setStatus("Loaded: $filename", success = true)
-        logger.d(TAG, "✅ Compressed sample loaded in-memory (${audio.sourceFormat})")
+        logger.d(TAG, "✅ Compressed sample loaded ($filename)")
         return LoadResult.Success
     }
 
@@ -895,9 +886,8 @@ class InstrumentController(
                     instrument.sampleFilePath = path
                     val ext = path.substringAfterLast('.', "").lowercase()
                     val ok = if (ext == "mp3") {
-                        // Compressed source — re-decode in-memory (no WAV exists), like reloadProjectSamples.
-                        val r = extractor.extractAudio(path, maxDurationSec = 0)   // no cap (see loadSampleFromCompressed)
-                        if (r.isSuccess) { val a = r.getOrThrow(); audioEngine.loadSampleData(instrument.id, a.samples, a.samplesRight, a.sampleRate) } else false
+                        // Compressed source — re-decode straight into native memory (no WAV exists).
+                        audioEngine.loadSampleCompressed(instrument.id, path, extractor)
                     } else {
                         audioEngine.loadSampleFromFile(instrument.id, path)
                     }

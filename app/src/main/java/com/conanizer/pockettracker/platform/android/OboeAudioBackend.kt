@@ -62,6 +62,16 @@ class OboeAudioBackend : IAudioBackend {
         Log.d(TAG, "📦 Loaded stereo sample $id (${left.size} frames)")
     }
 
+    override fun beginSampleLoad(id: Int, channels: Int, estimatedFrames: Int): Boolean =
+        native_beginSampleLoad(id, channels, estimatedFrames)
+
+    override fun fillSampleChunk(id: Int, interleaved: ShortArray, frameCount: Int, channels: Int) =
+        native_fillSampleChunk(id, interleaved, frameCount, channels)
+
+    override fun finalizeSampleLoad(id: Int): Int = native_finalizeSampleLoad(id)
+
+    override fun cancelSampleLoad(id: Int) = native_cancelSampleLoad(id)
+
     override fun loadSampleFromWav(id: Int, path: String): Int {
         val rate = native_loadSampleFromWav(id, path)
         Log.d(TAG, "📦 Loaded WAV sample $id from $path (rate=$rate)")
@@ -507,6 +517,10 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_delete()
     private external fun native_loadSample(sampleId: Int, sampleData: FloatArray)
     private external fun native_loadSampleStereo(sampleId: Int, leftData: FloatArray, rightData: FloatArray)
+    private external fun native_beginSampleLoad(id: Int, channels: Int, estimatedFrames: Int): Boolean
+    private external fun native_fillSampleChunk(id: Int, interleaved: ShortArray, frameCount: Int, channels: Int)
+    private external fun native_finalizeSampleLoad(id: Int): Int
+    private external fun native_cancelSampleLoad(id: Int)
     private external fun native_loadSampleFromWav(id: Int, path: String): Int
     private external fun native_hasStereoData(sampleId: Int): Boolean
     private external fun native_clearAllSamples()

@@ -291,13 +291,9 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val filePath = instrument.sampleFilePath!!
                 val ext = filePath.substringAfterLast('.', "").lowercase()
                 val loaded = if (ext == "mp3") {
-                    // No WAV was ever written for a compressed source — re-decode it in-memory each
-                    // time the project is reopened (synchronous, like the native WAV loads around it).
-                    val r = videoExtractor.extractAudio(filePath, maxDurationSec = 0)   // no cap (see loadSampleFromCompressed)
-                    if (r.isSuccess) {
-                        val a = r.getOrThrow()
-                        audioEngine.loadSampleData(instrument.id, a.samples, a.samplesRight, a.sampleRate)
-                    } else false
+                    // No WAV was ever written for a compressed source — re-decode it (streaming straight
+                    // into native memory) each time the project is reopened.
+                    audioEngine.loadSampleCompressed(instrument.id, filePath, videoExtractor)
                 } else {
                     audioEngine.loadSampleFromFile(instrument.id, filePath)
                 }

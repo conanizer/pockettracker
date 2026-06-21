@@ -201,6 +201,84 @@ void AudioEngine::loadSampleStereo(int id, const float* left, const float* right
     LOGD("Sample %d: %d frames (stereo)", id, length);
 }
 
+bool AudioEngine::beginSampleLoad(int id, int channels, int estimatedFrames) {
+    if (id < 0 || id >= 256 || estimatedFrames < 1) return false;
+    int ch = (channels >= 2) ? 2 : 1;
+    // Allocate the destination up front so chunks fill it in place — no whole-file PCM on the Java heap
+    // and no second native copy at finalize. std::nothrow: a real OOM returns false instead of aborting
+    // (native new aborts under -fno-exceptions). Not zero-filled: sampleLengths stays 0 until finalize,
+    // and finalize publishes only the frames actually written, so the unfilled tail is never read.
+    float* newL = new (std::nothrow) float[estimatedFrames];
+    float* newR = (ch == 2) ? new (std::nothrow) float[estimatedFrames] : nullptr;
+    if (!newL || (ch == 2 && !newR)) { delete[] newL; delete[] newR; return false; }
+
+    std::lock_guard<std::mutex> lock(sampleEditMutex);
+    // Stop any voice on this slot, then free every stale per-slot buffer (mirror loadSampleFromWavFile).
+    for (int v = 0; v < MAX_VOICES; v++) {
+        if (voices[v].instrId == id && voices[v].isActive) voices[v].stop();
+    }
+    delete[] samples[id];
+    delete[] samplesRight[id];
+    delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
+    delete[] sampleBackupsRight[id];   sampleBackupsRight[id] = nullptr;
+    sampleBackupLengths[id] = 0;
+    delete[] originalSamples[id];      originalSamples[id] = nullptr;
+    delete[] originalSamplesRight[id]; originalSamplesRight[id] = nullptr;
+    originalSampleLengths[id] = 0;
+    samples[id]       = newL;
+    samplesRight[id]  = newR;
+    sampleLengths[id] = 0;             // not playable until finalize
+    streamLoadId       = id;
+    streamLoadChannels = ch;
+    streamLoadCapacity = estimatedFrames;
+    streamLoadFilled   = 0;
+    return true;
+}
+
+void AudioEngine::fillSampleChunk(int id, const int16_t* interleaved, int frameCount, int channels) {
+    // No lock: begin left sampleLengths[id]=0 so no voice reads this slot until finalize; we only write
+    // the already-allocated buffer in place. Clamp to capacity (a duration under-estimate drops the tail).
+    if (id != streamLoadId || !samples[id] || !interleaved || frameCount < 1) return;
+    int n = frameCount;
+    if (streamLoadFilled + n > streamLoadCapacity) n = streamLoadCapacity - streamLoadFilled;
+    if (n <= 0) return;
+    float* L = samples[id];
+    float* R = samplesRight[id];
+    const int base = streamLoadFilled;
+    if (channels >= 2) {
+        for (int i = 0; i < n; i++) {
+            L[base + i] = interleaved[(size_t)i * channels] / 32768.0f;
+            if (R) R[base + i] = interleaved[(size_t)i * channels + 1] / 32768.0f;
+        }
+    } else {
+        for (int i = 0; i < n; i++) L[base + i] = interleaved[i] / 32768.0f;
+    }
+    streamLoadFilled += n;
+}
+
+int AudioEngine::finalizeSampleLoad(int id) {
+    if (id != streamLoadId) return 0;
+    std::lock_guard<std::mutex> lock(sampleEditMutex);
+    sampleLengths[id] = streamLoadFilled;   // publish actual frames; the unfilled tail is never reached
+    int frames = streamLoadFilled;
+    streamLoadId = -1; streamLoadChannels = 0; streamLoadCapacity = 0; streamLoadFilled = 0;
+    LOGD("Streaming sample load: id=%d %d frames", id, frames);
+    return frames;
+}
+
+void AudioEngine::cancelSampleLoad(int id) {
+    // Decode failed/aborted — free the partially-filled buffer so it doesn't linger or play as garbage.
+    if (id != streamLoadId) return;
+    std::lock_guard<std::mutex> lock(sampleEditMutex);
+    for (int v = 0; v < MAX_VOICES; v++) {
+        if (voices[v].instrId == id && voices[v].isActive) voices[v].stop();
+    }
+    delete[] samples[id];      samples[id] = nullptr;
+    delete[] samplesRight[id]; samplesRight[id] = nullptr;
+    sampleLengths[id] = 0;
+    streamLoadId = -1; streamLoadChannels = 0; streamLoadCapacity = 0; streamLoadFilled = 0;
+}
+
 // Decode one WAV sample at `p` to a normalized float in [-1, 1). Mirrors AudioEngine.kt
 // parseWavBuffer's `decode()` byte-for-byte (little-endian, identical divisors) so a native file
 // load is bit-identical to the old Java decode.
