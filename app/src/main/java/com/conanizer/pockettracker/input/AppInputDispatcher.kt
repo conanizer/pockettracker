@@ -73,6 +73,7 @@ import com.conanizer.pockettracker.ui.overlays.fxMoveCursorLeft
 import com.conanizer.pockettracker.ui.overlays.fxMoveCursorRight
 import com.conanizer.pockettracker.ui.overlays.fxMoveCursorUp
 import com.conanizer.pockettracker.ui.overlays.insertCurrentKey
+import com.conanizer.pockettracker.ui.overlays.isOnActionRow
 import com.conanizer.pockettracker.ui.overlays.moveCursorDown
 import com.conanizer.pockettracker.ui.overlays.moveCursorLeft
 import com.conanizer.pockettracker.ui.overlays.moveCursorRight
@@ -1002,7 +1003,13 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
 
     fun handleButtonA() {
         if (qwertyKeyboardState.isOpen) {
-            qwertyKeyboardState = qwertyKeyboardState.insertCurrentKey()
+            if (qwertyKeyboardState.isOnActionRow()) {
+                // On-screen ABORT/APPLY buttons mirror physical SELECT/START.
+                if (qwertyKeyboardState.keyCursorCol == 0) qwertyKeyboardState = QwertyKeyboardState()  // ABORT
+                else handleStart()                                                                       // APPLY
+            } else {
+                qwertyKeyboardState = qwertyKeyboardState.insertCurrentKey()
+            }
             return
         }
         if (showCleanDialog) {

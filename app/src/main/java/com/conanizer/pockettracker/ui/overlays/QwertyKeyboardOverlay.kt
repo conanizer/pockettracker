@@ -7,15 +7,15 @@ package com.conanizer.pockettracker.ui.overlays
  * on any character cell in a text input row (e.g., NAME row in PROJECT screen).
  *
  * Controls:
- *   DPAD         — move keyboard cursor (wraps horizontally per row)
- *   A            — type the highlighted character
+ *   DPAD         — move keyboard cursor (3 aligned 10-key rows, then SPACE, then ABORT/APPLY)
+ *   A            — type the highlighted character; on the ABORT/APPLY row, cancel/apply
  *   B            — delete (backspace or forward-delete, depends on INSERT MODE setting)
  *   R+DPAD DOWN  — switch to numbers/symbols layout
  *   R+DPAD UP    — switch back to letters layout
  *   R+DPAD LEFT  — move text cursor left
  *   R+DPAD RIGHT — move text cursor right
- *   SELECT       — cancel (discard changes, close keyboard)
- *   START        — apply (save text, close keyboard)
+ *   SELECT       — cancel (discard changes, close keyboard) — same as the ABORT button
+ *   START        — apply (save text, close keyboard) — same as the APPLY button
  *
  * TODO: L+B — enter copy/paste text mode (future)
  */
@@ -24,21 +24,27 @@ package com.conanizer.pockettracker.ui.overlays
 // KEYBOARD LAYOUT DATA
 // ============================================================================
 
+// Three equal 10-wide key rows so columns line up — DPAD up/down stays in one column instead of
+// drifting diagonally. The space row + the virtual ABORT/APPLY action row are special-cased in nav.
+
 /** QWERTY letter rows (layout = 0) */
 val QWERTY_ROWS_LETTERS: List<List<Char>> = listOf(
     listOf('Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'),
-    listOf('A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'),
-    listOf('Z', 'X', 'C', 'V', 'B', 'N', 'M'),
+    listOf('A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', '"'),
+    listOf('Z', 'X', 'C', 'V', 'B', 'N', 'M', '-', '_', '/'),
     listOf(' ')   // Space bar
 )
 
-/** Numbers + supported symbols row (layout = 1) */
+/** Numbers + supported symbols row (layout = 1) — same 10-wide shape as the letters layout */
 val QWERTY_ROWS_SYMBOLS: List<List<Char>> = listOf(
     listOf('1', '2', '3', '4', '5', '6', '7', '8', '9', '0'),
     listOf('!', '#', '%', '/', '=', '+', '?', '.', '-', '_'),
-    listOf('<', '>', '(', ')', '[', ']', ':', '|', '"'),
+    listOf('<', '>', '(', ')', '[', ']', ':', '|', '"', ','),
     listOf(' ')   // Space bar
 )
+
+/** Number of buttons on the virtual ABORT/APPLY action row (col 0 = ABORT, col 1 = APPLY). */
+const val QWERTY_ACTION_COLS = 2
 
 /** Returns the key rows for a given layout index (0=letters, 1=symbols). */
 fun qwertyRowsForLayout(layout: Int): List<List<Char>> =
@@ -109,11 +115,27 @@ data class QwertyKeyboardState(
 // HELPER FUNCTIONS
 // ============================================================================
 
+/** Row index of the virtual ABORT/APPLY action row — one past the last char row (the space row). */
+fun QwertyKeyboardState.actionRowIndex(): Int = qwertyRowsForLayout(layout).size
+
+/** True when the keyboard cursor is on the ABORT/APPLY action row. */
+fun QwertyKeyboardState.isOnActionRow(): Boolean = keyCursorRow == actionRowIndex()
+
+/** Total navigable rows = char rows (incl. the space row) + the action row. */
+fun QwertyKeyboardState.totalRows(): Int = qwertyRowsForLayout(layout).size + 1
+
+/** Number of columns on the row the cursor is on (the action row has [QWERTY_ACTION_COLS]). */
+private fun QwertyKeyboardState.currentRowCols(): Int =
+    if (isOnActionRow()) QWERTY_ACTION_COLS
+    else qwertyRowsForLayout(layout).getOrNull(keyCursorRow)?.size ?: 1
+
 /**
- * Returns the character at the keyboard cursor position for the given state,
- * or null if the cursor is on the space bar row.
+ * Returns the character at the keyboard cursor position for the given state.
+ * The space row returns ' '; the action row has no character (returns ' ', but A is special-cased
+ * to ABORT/APPLY in the dispatcher and never inserts here).
  */
 fun QwertyKeyboardState.currentKey(): Char {
+    if (isOnActionRow()) return ' '
     val rows = qwertyRowsForLayout(layout)
     val row = rows.getOrNull(keyCursorRow) ?: return ' '
     return row.getOrElse(keyCursorCol.coerceIn(0, row.size - 1)) { ' ' }
@@ -124,27 +146,23 @@ fun QwertyKeyboardState.currentKey(): Char {
  * Called whenever keyCursorRow changes so the column stays valid.
  */
 fun QwertyKeyboardState.withClampedCol(): QwertyKeyboardState {
-    val rows = qwertyRowsForLayout(layout)
-    val rowSize = rows.getOrNull(keyCursorRow)?.size ?: 1
-    val clamped = keyCursorCol.coerceIn(0, rowSize - 1)
+    val clamped = keyCursorCol.coerceIn(0, currentRowCols() - 1)
     return if (clamped == keyCursorCol) this else copy(keyCursorCol = clamped)
 }
 
 /**
- * Move the keyboard cursor up. Wraps from row 0 to the last row.
+ * Move the keyboard cursor up. Wraps from row 0 to the action row (last navigable row).
  */
 fun QwertyKeyboardState.moveCursorUp(): QwertyKeyboardState {
-    val rows = qwertyRowsForLayout(layout)
-    val newRow = if (keyCursorRow == 0) rows.size - 1 else keyCursorRow - 1
+    val newRow = if (keyCursorRow == 0) totalRows() - 1 else keyCursorRow - 1
     return copy(keyCursorRow = newRow).withClampedCol()
 }
 
 /**
- * Move the keyboard cursor down. Wraps from last row to row 0.
+ * Move the keyboard cursor down. Wraps from the action row back to row 0.
  */
 fun QwertyKeyboardState.moveCursorDown(): QwertyKeyboardState {
-    val rows = qwertyRowsForLayout(layout)
-    val newRow = (keyCursorRow + 1) % rows.size
+    val newRow = (keyCursorRow + 1) % totalRows()
     return copy(keyCursorRow = newRow).withClampedCol()
 }
 
@@ -152,8 +170,7 @@ fun QwertyKeyboardState.moveCursorDown(): QwertyKeyboardState {
  * Move the keyboard cursor left. Wraps from the leftmost key to the rightmost key of the same row.
  */
 fun QwertyKeyboardState.moveCursorLeft(): QwertyKeyboardState {
-    val rows = qwertyRowsForLayout(layout)
-    val rowSize = rows.getOrNull(keyCursorRow)?.size ?: 1
+    val rowSize = currentRowCols()
     val newCol = if (keyCursorCol == 0) rowSize - 1 else keyCursorCol - 1
     return copy(keyCursorCol = newCol)
 }
@@ -162,8 +179,7 @@ fun QwertyKeyboardState.moveCursorLeft(): QwertyKeyboardState {
  * Move the keyboard cursor right. Wraps from the rightmost key to the leftmost key of the same row.
  */
 fun QwertyKeyboardState.moveCursorRight(): QwertyKeyboardState {
-    val rows = qwertyRowsForLayout(layout)
-    val rowSize = rows.getOrNull(keyCursorRow)?.size ?: 1
+    val rowSize = currentRowCols()
     val newCol = (keyCursorCol + 1) % rowSize
     return copy(keyCursorCol = newCol)
 }
@@ -177,6 +193,7 @@ fun QwertyKeyboardState.moveCursorRight(): QwertyKeyboardState {
  * text cursor advances by 1.
  */
 fun QwertyKeyboardState.insertCurrentKey(): QwertyKeyboardState {
+    if (isOnActionRow()) return this   // ABORT/APPLY buttons don't type a character
     if (text.length >= maxLength) return this
     val ch = currentKey()
     val insertAt = if (insertBefore) textCursor else (textCursor + 1).coerceAtMost(text.length)

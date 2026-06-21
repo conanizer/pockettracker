@@ -1176,10 +1176,11 @@ class TrackerLayout {
         val charW = 5 * fs + cs  // 23px per char slot
 
         // ── Box geometry ──────────────────────────────────────────────────────
+        // boxH fits header + text row + 5 key/control rows (3 letters, SPACE, ABORT/APPLY).
         val boxW = 470
-        val boxH = 195
+        val boxH = 228
         val boxX = (DESIGN_WIDTH_PX - boxW) / 2    // 85
-        val boxY = (DESIGN_HEIGHT_PX - boxH) / 2   // 142
+        val boxY = (DESIGN_HEIGHT_PX - boxH) / 2   // 126
 
         // Inner usable area (5px padding each side)
         val innerX = boxX + 5
@@ -1268,7 +1269,7 @@ class TrackerLayout {
             val row = rows[rowIdx]
             val rowY = rowBaseY + rowIdx * (cellH + rowGap)
 
-            if (rowIdx == 3) {
+            if (rowIdx == rows.lastIndex) {
                 // Space bar: single wide key, centered
                 val spaceW = 7 * cellW   // 322px wide
                 val spaceX = boxX + (boxW - spaceW) / 2
@@ -1297,14 +1298,11 @@ class TrackerLayout {
                     fontScale = fs
                 )
             } else {
-                // Normal key row: offset to center shorter rows
-                val rowTotalW = row.size * cellW
-                val rowOffsetX = (innerW - rowTotalW) / 2
-                val rowStartX = innerX + rowOffsetX
-
+                // Normal key row on a fixed 10-column grid (left-aligned), so DPAD up/down stays in
+                // one column. Ragged rows simply leave their trailing columns empty.
                 for (colIdx in row.indices) {
                     val keyChar = row[colIdx]
-                    val cellX = rowStartX + colIdx * cellW
+                    val cellX = innerX + colIdx * cellW
                     val isCursor = (state.keyCursorRow == rowIdx && state.keyCursorCol == colIdx)
 
                     // Key background
@@ -1337,6 +1335,46 @@ class TrackerLayout {
                     )
                 }
             }
+        }
+
+        // ── ABORT / APPLY action row (virtual row index = rows.size) ──────────
+        // Two buttons selectable with A; physical SELECT=abort / START=apply still work and are
+        // shown in the labels so the bindings are discoverable.
+        val actionRowIdx = rows.size
+        val actionRowY = rowBaseY + actionRowIdx * (cellH + rowGap)
+        val actionFs = 3
+        val actionCharW = 5 * actionFs + cs
+        val actionGap = 10
+        val actionBtnW = (innerW - actionGap) / 2   // two buttons fill the inner width
+        val actionLabels = listOf("ABORT(SEL)", "APPLY(START)")
+        for (col in 0 until actionLabels.size) {
+            val btnX = innerX + col * (actionBtnW + actionGap)
+            val isCursor = (state.keyCursorRow == actionRowIdx && state.keyCursorCol == col)
+
+            drawRect(
+                color = if (isCursor) Color(t.textCursor.darken(0.27f)) else Color(t.meterBackground),
+                topLeft = Offset((btnX * scale).toFloat(), (actionRowY * scale).toFloat()),
+                size = Size((actionBtnW * scale).toFloat(), (cellH * scale).toFloat())
+            )
+            if (isCursor) {
+                drawRect(
+                    color = Color(t.textCursor),
+                    topLeft = Offset((btnX * scale).toFloat(), (actionRowY * scale).toFloat()),
+                    size = Size((actionBtnW * scale).toFloat(), (cellH * scale).toFloat()),
+                    style = Stroke(width = scale.toFloat())
+                )
+            }
+            val label = actionLabels[col]
+            val labelW = label.length * actionCharW
+            drawBitmapText(
+                text = label,
+                x = btnX + (actionBtnW - labelW) / 2,
+                y = actionRowY + (cellH - 5 * actionFs) / 2,
+                scale = scale,
+                color = if (isCursor) Color(t.textCursor) else Color(t.textParam),
+                spacing = cs,
+                fontScale = actionFs
+            )
         }
     }
 
