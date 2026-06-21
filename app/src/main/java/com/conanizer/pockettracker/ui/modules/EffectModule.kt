@@ -13,6 +13,7 @@ import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.logic.InputAction
 import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.drawEqCell
 import com.conanizer.pockettracker.ui.toHex2
 
 data class EffectState(
@@ -126,8 +127,6 @@ class EffectModule : TrackerModule {
             else    -> Color(t.textValue)
         }
 
-        fun eqText(slot: Int) = if (slot < 0) "--" else slot.toHex2()
-
         drawBitmapText("EFFECTS", x + LABEL_X, rowY(0), scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
 
         drawBitmapText("MASTER FX", x + LABEL_X, rowY(2), scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
@@ -151,8 +150,7 @@ class EffectModule : TrackerModule {
 
         val revEqSel = s.cursorRow == ROW_REV_EQ
         drawBitmapText("INP EQ", x + LABEL_X, rowY(8), scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(eqText(proj.reverbInputEq), x + VALUE_X, rowY(8), scale,
-            valueColor(revEqSel, proj.reverbInputEq < 0), CHAR_SPACING, FONT_SCALE)
+        drawEqCell(x + VALUE_X, rowY(8), scale, proj.reverbInputEq, revEqSel, t)
 
         drawBitmapText("DELAY",  x + LABEL_X, rowY(10), scale, Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
 
@@ -178,8 +176,7 @@ class EffectModule : TrackerModule {
 
         val dlyEqSel = s.cursorRow == ROW_DLY_EQ
         drawBitmapText("INP EQ", x + LABEL_X, rowY(14), scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(eqText(proj.delayInputEq), x + VALUE_X, rowY(14), scale,
-            valueColor(dlyEqSel, proj.delayInputEq < 0), CHAR_SPACING, FONT_SCALE)
+        drawEqCell(x + VALUE_X, rowY(14), scale, proj.delayInputEq, dlyEqSel, t)
     }
 
     fun getCursorContext(state: EffectState): CursorContext {

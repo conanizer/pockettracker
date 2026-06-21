@@ -187,7 +187,7 @@ class ProjectModule : TrackerModule {
             nameColumnX = nameColumnX,
             valueColumnX = valueColumnX,
             parameterName = "SYSTEM",
-            parameterValue = "SETTINGS",
+            parameterValue = "SETTINGS >",
             isCursorOnName = projectState.cursorRow == currentRow && projectState.cursorColumn == 0,
             isCursorOnValue = projectState.cursorRow == currentRow && projectState.cursorColumn == 1,
             t = t
@@ -201,7 +201,7 @@ class ProjectModule : TrackerModule {
         rowY += ROW_HEIGHT * 2
         val ramTenths = (projectState.sampleRamBytes * 10 + 524288) / 1048576
         drawBitmapText(
-            text = "SAMPLE RAM",
+            text = "USED RAM",
             x = nameColumnX,
             y = rowY + TEXT_PADDING,
             scale = scale,

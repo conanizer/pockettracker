@@ -14,6 +14,7 @@ import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.logic.InputAction
 import com.conanizer.pockettracker.core.logic.InstrumentController
 import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.drawEqCell
 import com.conanizer.pockettracker.ui.toHex1
 import com.conanizer.pockettracker.ui.toHex2
 import java.io.File
@@ -212,13 +213,16 @@ class InstrumentModule : TrackerModule {
                 t = t)
             rowY += ROW_HEIGHT; currentRow++
 
-            // ROW 14: EQ
-            val eqStr = if (instrument.eqSlot < 0) "--" else instrument.eqSlot.toHex2()
-            drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
-                "EQ", eqStr,
-                isCursorOnName  = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
-                isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1,
-                t = t)
+            // ROW 14: EQ — value dims to textParam when unassigned; " >" opens the EQ editor.
+            run {
+                val textY = rowY + TEXT_PADDING
+                val onRow = instrumentState.cursorRow == currentRow
+                if (onRow) drawRowBg(x, rowY, scale, t)
+                val eqCursor = onRow && instrumentState.cursorColumn == 1
+                drawBitmapText("EQ", nameColumnX, textY, scale,
+                    if (onRow) Color(t.textCursor) else Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+                drawEqCell(valueColumnX, textY, scale, instrument.eqSlot, eqCursor, t)
+            }
         } else {
             // ROW 11: START + REV
             drawDualParameterRow(
@@ -238,14 +242,22 @@ class InstrumentModule : TrackerModule {
             )
             rowY += ROW_HEIGHT; currentRow++
 
-            // ROW 13: REVERSE + EQ
-            val eqStr = if (instrument.eqSlot < 0) "--" else instrument.eqSlot.toHex2()
-            drawDualParameterRow(
-                x, rowY, scale, nameColumnX, valueColumnX,
-                "REVERSE", if (instrument.reverse) "on" else "off",
-                "EQ",      eqStr,
-                instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
-            )
+            // ROW 13: REVERSE + EQ — EQ needs the dim-"--"/bright-" >" treatment, so the EQ half is
+            // drawn manually instead of through the generic dual-row helper.
+            run {
+                val textY = rowY + TEXT_PADDING
+                val onRow = instrumentState.cursorRow == currentRow
+                if (onRow) drawRowBg(x, rowY, scale, t)
+                val revCursor = onRow && instrumentState.cursorColumn == 1
+                drawBitmapText("REVERSE", nameColumnX, textY, scale,
+                    if (revCursor) Color(t.textCursor) else Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+                drawBitmapText(if (instrument.reverse) "on" else "off", valueColumnX, textY, scale,
+                    if (revCursor) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
+                val eqCursor = onRow && instrumentState.cursorColumn == 3
+                drawBitmapText("EQ", nameColumnX + 230, textY, scale,
+                    if (eqCursor) Color(t.textCursor) else Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+                drawEqCell(valueColumnX + 220, textY, scale, instrument.eqSlot, eqCursor, t)
+            }
             rowY += ROW_HEIGHT; currentRow++
 
             // ROW 14: LOOP + SLICE
@@ -452,7 +464,7 @@ class InstrumentModule : TrackerModule {
             if (isCursorOnRow && cursorColumn == 2) Color(t.textCursor) else Color(t.textValue),
             CHAR_SPACING, FONT_SCALE)
         if (!isSoundFont) {
-            drawBitmapText("EDIT", editX, textY, scale,
+            drawBitmapText("EDIT >", editX, textY, scale,
                 if (isCursorOnRow && cursorColumn == 3) Color(t.textCursor) else Color(t.textValue),
                 CHAR_SPACING, FONT_SCALE)
         }

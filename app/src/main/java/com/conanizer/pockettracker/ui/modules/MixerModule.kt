@@ -11,6 +11,7 @@ import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.logic.InputAction
 import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.drawEqCell
 import com.conanizer.pockettracker.ui.toHex2
 import kotlin.math.log10
 
@@ -168,7 +169,6 @@ class MixerModule : TrackerModule {
 
         // ── Master value rows (at original position, aligned with send section) ──
         val eqSlot     = s.project.masterEqSlot
-        val eqText     = if (eqSlot < 0) "--" else eqSlot.toHex2()
         val isOtt      = s.project.masterBusFx == 0
         val depthLabel = if (isOtt) "OTT" else "DST"
         val depthText  = (if (isOtt) s.project.ottDepth else s.project.dustDepth).toHex2()
@@ -184,14 +184,10 @@ class MixerModule : TrackerModule {
         drawBitmapText(s.project.masterVolume.toHex2(), x + MSTR_VALUE_X, y + MROW0_Y,
             scale, if (mixSel) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
 
-        // Row 1: EQ slot editable (right)
+        // Row 1: EQ slot editable (right) — value + ">" opens the EQ editor
         drawBitmapText("EQ", x + MSTR_LABEL_X, y + MROW1_Y,
             scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
-        drawBitmapText(eqText, x + MSTR_VALUE_X, y + MROW1_Y,
-            scale, if (eqSel) Color(t.textCursor) else if (eqSlot < 0) Color(t.textEmpty) else Color(
-                t.textValue
-            ),
-            CHAR_SPACING, FONT_SCALE)
+        drawEqCell(x + MSTR_VALUE_X, y + MROW1_Y, scale, eqSlot, eqSel, t)
 
         // Row 2: OTT/DUST depth editable (right only)
         drawBitmapText(depthLabel, x + MSTR_LABEL_X, y + MROW2_Y,

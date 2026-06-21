@@ -1,6 +1,7 @@
 package com.conanizer.pockettracker.ui
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.conanizer.pockettracker.core.logic.EffectProcessor
 import com.conanizer.pockettracker.core.data.Chain
 import com.conanizer.pockettracker.core.data.PhraseStep
@@ -96,5 +97,37 @@ fun clearSongChainRef(track: Track, row: Int) {
  */
 fun getTrackIndex(cursorColumn: Int): Int {
     return (cursorColumn - 1).coerceIn(0, 7)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EQ CELL  (shared by instrument, instrument pool, mixer, effects, sample editor)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Draws an EQ slot value ("--" when unassigned, hex when set) plus a trailing ">" affordance that
+ * signals the cell opens the EQ editor. Used by every EQ cell so they all look identical.
+ *  - value: textEmpty when "--", textValue when set, textCursor when focused.
+ *  - ">":   textCursor when focused, else textValue (never dims with the value) — drawn right after
+ *           the 2-char value.
+ *
+ * @param valueX    left x of the value; the ">" follows 2 chars later.
+ * @param isCursor  true when the cursor is on this EQ cell (highlights value + arrow).
+ * @param showArrow false hides the ">" (the instrument pool hides it on its non-selected rows).
+ */
+fun DrawScope.drawEqCell(
+    valueX: Int, textY: Int, scale: Int,
+    eqSlot: Int, isCursor: Boolean, t: AppTheme, showArrow: Boolean = true
+) {
+    val eqStr = if (eqSlot < 0) "--" else eqSlot.toHex2()
+    val valueColor = when {
+        isCursor   -> Color(t.textCursor)
+        eqSlot < 0 -> Color(t.textEmpty)
+        else       -> Color(t.textValue)
+    }
+    drawBitmapText(eqStr, valueX, textY, scale, valueColor, CHAR_SPACING, FONT_SCALE)
+    if (showArrow) {
+        drawBitmapText(">", valueX + 2 * (5 * FONT_SCALE + CHAR_SPACING), textY, scale,
+            if (isCursor) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
+    }
 }
 

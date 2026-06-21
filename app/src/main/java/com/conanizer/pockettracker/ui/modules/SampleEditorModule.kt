@@ -14,6 +14,7 @@ import com.conanizer.pockettracker.ui.TEXT_PADDING
 import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.core.logic.InputAction
 import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.drawEqCell
 import com.conanizer.pockettracker.ui.toHex2
 import com.conanizer.pockettracker.ui.toHex8
 
@@ -385,12 +386,16 @@ class SampleEditorModule : TrackerModule {
             CHAR_SPACING,
             FONT_SCALE
         )
-        val valStr = if (s.fxType == 4) SYNC_TYPES[s.syncType] else s.fxValue.toHex2()
-        drawBitmapText(valStr,                 x + 290, ty, scale,
-            if (cur && s.cursorCol == 1) Color(t.textCursor) else Color(t.textValue),
-            CHAR_SPACING,
-            FONT_SCALE
-        )
+        // Col 1 value: EQ (fxType 3) shows the slot + ">" (opens the EQ editor) like every other EQ
+        // cell; other FX types show their hex amount or the SYNC sub-type.
+        if (s.fxType == 3) {
+            drawEqCell(x + 290, ty, scale, s.fxValue, cur && s.cursorCol == 1, t)
+        } else {
+            val valStr = if (s.fxType == 4) SYNC_TYPES[s.syncType] else s.fxValue.toHex2()
+            drawBitmapText(valStr, x + 290, ty, scale,
+                if (cur && s.cursorCol == 1) Color(t.textCursor) else Color(t.textValue),
+                CHAR_SPACING, FONT_SCALE)
+        }
         drawBitmapText("APPLY",                x + 440, ty, scale,
             if (cur && s.cursorCol == 2) Color(t.textCursor) else Color(t.textValue),
             CHAR_SPACING,

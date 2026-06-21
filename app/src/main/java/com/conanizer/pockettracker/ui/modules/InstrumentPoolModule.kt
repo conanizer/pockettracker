@@ -12,6 +12,7 @@ import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.logic.InputAction
 import com.conanizer.pockettracker.core.logic.InstrumentController
 import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.drawEqCell
 import com.conanizer.pockettracker.ui.toHex2
 
 /**
@@ -40,14 +41,14 @@ class InstrumentPoolModule : TrackerModule {
 
     // Column x offsets (from module left edge). The module is drawn at screen-x 10 and clipped at
     // screen-x 509, so the visible table spans ~10..509. The four value columns (V/RV/DE/EQ) are
-    // packed tightly (50px apart); ID and EQ are positioned so the left margin (corner→##) and the
-    // right margin (EQ→corner) are both ~14px (balanced).
+    // packed tightly (50px apart). The block sits 6px left of centre-balanced so the EQ cell on the
+    // selected row has room for a trailing ">" (opens the EQ editor) before the right clip.
     private val ID_X   = 14
     private val NAME_X = 56
-    private val VOL_X  = 303
-    private val REV_X  = 353
-    private val DEL_X  = 403
-    private val EQ_X   = 453
+    private val VOL_X  = 297
+    private val REV_X  = 347
+    private val DEL_X  = 397
+    private val EQ_X   = 447
 
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val s = state as? InstrumentPoolState ?: return
@@ -65,7 +66,7 @@ class InstrumentPoolModule : TrackerModule {
 
         // Column header row
         val headerY = y + ROW_HEIGHT + 14
-        drawBitmapText("##",  x + ID_X,   headerY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+        drawBitmapText("# ",  x + ID_X,   headerY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText("NAME", x + NAME_X, headerY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText("V",  x + VOL_X, headerY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
         drawBitmapText("RV", x + REV_X, headerY, scale, Color(t.textParam), CHAR_SPACING, FONT_SCALE)
@@ -116,11 +117,10 @@ class InstrumentPoolModule : TrackerModule {
         drawBitmapText(instrument.volume.toHex2(),     x + VOL_X, textY, scale, colColor(1), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(instrument.reverbSend.toHex2(), x + REV_X, textY, scale, colColor(2), CHAR_SPACING, FONT_SCALE)
         drawBitmapText(instrument.delaySend.toHex2(),  x + DEL_X, textY, scale, colColor(3), CHAR_SPACING, FONT_SCALE)
-        val eqStr = if (instrument.eqSlot < 0) "--" else instrument.eqSlot.toHex2()
-        drawBitmapText(eqStr, x + EQ_X, textY, scale,
-            if (isSelectedRow && s.cursorColumn == 4) Color(t.textCursor)
-            else if (instrument.eqSlot < 0) Color(t.textEmpty) else Color(t.textValue),
-            CHAR_SPACING, FONT_SCALE)
+        // EQ value + ">" (opens the EQ editor); the arrow shows only on the selected row, where there's
+        // room before the right clip. Shared renderer keeps it identical to every other EQ cell.
+        val eqCursor = isSelectedRow && s.cursorColumn == 4
+        drawEqCell(x + EQ_X, textY, scale, instrument.eqSlot, eqCursor, t, showArrow = isSelectedRow)
     }
 
     // ═══════════════════════════════════════════════════════════════════
