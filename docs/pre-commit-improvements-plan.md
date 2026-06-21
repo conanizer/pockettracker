@@ -20,7 +20,7 @@ Effort: **S**/**M**/**L**. Open decisions marked 🟡 (need a call before coding
 ## Build progress — 2026-06-21
 
 On branch `code-review-3-round2`, each item device-tested before its commit. Build order so far:
-**10 → 5 → 12 → 8 → 6 → 7.** Remaining: **2, 4, 1, 9, 13, 3.**
+**10 → 5 → 12 → 8 → 6 → 7 → 2 → 4.** Remaining: **1, 9, 13, 3.**
 
 - ✅ **#10 File browser** (`b3e161f`) — date `YY-MM-DD → DD-MM-YY`; shared `FileBrowserModule.clipName()`:
   list names clip to 20 (18+`..`), DELETE prompt to 16 so it stays inside the 640px line.
@@ -45,6 +45,22 @@ On branch `code-review-3-round2`, each item device-tested before its commit. Bui
   / effects / mods / chain transpose). Deletable cells unchanged. Chain transpose confirmed
   two's-complement (`00` = no transpose); a stale dead `0x80` display line was removed. **Deferred:**
   EQ band FREQ/GAIN/Q (→ #13), delay TIME sync-mode, groove / settings / sample-editor params.
+- ✅ **#2 Visualizers** (`a6495e6`) — enum trimmed to `SCOPE/FLAT/OCTA/OCTA_FULL/SPECTRUM/SPECTRUM_PEAKS`
+  (dropped BARS/PEAKS/MIRROR + `drawMirror` + `waveformToBarAmps`; `drawBarAmps` stays for the SPECT modes).
+  New **OCTA_FULL** ("OCTA.F") forces all 8 lanes on (mask `0xFF`, no preview lane). **SCOPE** restyled to
+  the OCTA pixel-dot wave via a shared `drawWaveDots`. **OCTA gap colour:** the strip fills `t.background`
+  and each lane paints its own `t.vizBackground` panel, so gaps read as background. **SPECT release fix:**
+  the ticker keeps redrawing for `SPECTRUM_RELEASE_FRAMES` (75 ≈ 1.2 s) after audio stops so the bars +
+  peak dots fall to silence on every screen. Old themes naming a removed mode coerce to SCOPE
+  (`coerceInputValues = true` on both `AppTheme` decode sites). Cursor-cycle range auto-derives from
+  `values().size`; docs (manual + dev-status) updated.
+- ✅ **#4 Qwerty overlay** (`d89f6ac`) — letters + symbols are now three equal **10-wide** rows on a fixed
+  10-col grid (`innerX + col*cellW`), so DPAD up/down stays in one column. New virtual **ABORT/APPLY action
+  row** under SPACE: A selects (col 0 abort = SELECT, col 1 apply = `handleStart()` reused, no dup); labels
+  show the `(SEL)`/`(START)` bindings and the physical buttons still work. Cursor model gains
+  `actionRowIndex` / `isOnActionRow` / `totalRows` / `currentRowCols`; nav wraps over `totalRows` and clamps
+  the 2-button row; `insertCurrentKey` guarded so the action row never types. Symbols row 3 gained `,` to
+  reach 10 (every key verified against `BitmapFont5x5`; `;` had no glyph). Box grew 195→228 px to fit the row.
 
 ---
 
@@ -91,7 +107,7 @@ On branch `code-review-3-round2`, each item device-tested before its commit. Bui
 
 ---
 
-## 2. Visualizers: prune, add, restyle, fix spectrum release
+## 2. Visualizers: prune, add, restyle, fix spectrum release  **✅ shipped (a6495e6)**
 
 **Goal:** Drop MIRROR/BARS/PEAKS; add OCTA FULL; restyle SCOPE + OCTA gaps for a ProTracker look;
 make SPECT / SPECT.P decay smoothly after stop on every screen.
@@ -183,7 +199,7 @@ A/B on every screen for regressions).
 
 ---
 
-## 4. Qwerty overlay — column-aligned layout + on-screen ABORT/APPLY
+## 4. Qwerty overlay — column-aligned layout + on-screen ABORT/APPLY  **✅ shipped (d89f6ac)**
 
 **Goal:** Column-aligned keyboard (no diagonal drift) and visible APPLY/ABORT buttons.
 
