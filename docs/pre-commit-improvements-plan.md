@@ -72,6 +72,23 @@ On branch `code-review-3-round2`, each item device-tested before its commit. Bui
   testing stage so real memory limits can be probed — video-extract paths keep their 60 s/30 s caps; huge
   MP3s may OOM for now. **8-bit WAV:** `decodeWavSample` unsigned 8-bit branch (center 128) + `isPcm` gate,
   making the manual's pre-existing "8-bit" claim real. File browser now surfaces the real decode error.
+  - **Follow-up `945e084`** — removing the cap (`maxDurationSec = 0`) exposed a latent overflow: with no
+    cap `maxSamples = Int.MAX_VALUE` and `maxSamples * channelCount` wrapped negative, so *every* MP3
+    decoded to empty. Fixed by computing the interleaved-sample limit as a `Long`.
+  - **Follow-up `5845331` (streaming load)** — the whole-file decode capped loads at ~5–7 MB and left the
+    JVM heap inflated (boxed-`Short` accumulator). Reworked to **stream straight into native memory**:
+    new C++ `beginSampleLoad`/`fillSampleChunk`/`finalizeSampleLoad`/`cancelSampleLoad` (slot allocated
+    from the duration estimate, filled in place, length 0 until finalize so the audio thread can't race),
+    `IVideoAudioExtractor.extractAudioToSink` + `PcmSink` (parallel to `decode()`; video/preview untouched),
+    `AudioEngine.loadSampleCompressed` (drives the sink, sets the rate ratio, falls back to the whole-file
+    decode when there's no duration metadata). MP3 load/reload/autosave/preset all route through it. PCM now
+    lives in native memory (freed on clear / new project); Java heap holds one block. Device-tested OK.
+  - **Known rough edges / future work (developer: "a bit quirky", revisit later):** no final size cap yet
+    (a very long MP3 still allocates a large native buffer — pick a sane cap once limits are characterised);
+    **preview** still uses the whole-file boxed path (`extractAudio`), so previewing a huge MP3 still bloats
+    the heap transiently; the no-duration fallback also uses the boxed path; duration-estimate clamp can drop
+    a few ms of tail and encoder priming samples aren't skipped (minor leading artifact). Characterise the
+    exact quirk before the next pass.
 
 ---
 
