@@ -1082,23 +1082,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         overlayName = overlayName
     )
 
-    // Show a loading screen until the Oboe stream is open.
-    // Audio init can take a long time on some devices (e.g. GammaCoreOS / Miyoo Flip)
-    // because AAudio's first-open triggers C2 codec enumeration. Running it on Dispatchers.IO
-    // keeps the UI thread free so this screen is visible immediately.
-    if (!audioReady) {
-        Box(
-            modifier = Modifier.fillMaxSize().background(Color.Black),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "AUDIO LOADING...",
-                color = Color(0xFF00CC00),
-                fontSize = 14.sp
-            )
-        }
-        return
-    }
+    // The Oboe stream opens on a background IO thread; the UI renders immediately rather than behind a
+    // loading screen. That first open can take many seconds on some devices (e.g. GammaCoreOS / Miyoo
+    // Flip, where AAudio's open triggers C2 codec enumeration), which is exactly why we don't block on
+    // it. Audio-dependent effects key off audioReady, the visualizer poll no-ops until
+    // audioEngine.isReady, and START/playback is gated the same way — so nothing touches the engine
+    // before it exists.
 
     val hapticView = LocalView.current
     CompositionLocalProvider(

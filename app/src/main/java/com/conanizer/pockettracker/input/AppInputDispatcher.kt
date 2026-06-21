@@ -2129,6 +2129,11 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             return
         }
 
+        // Everything below (playback + previews) needs the audio engine. Ignore START until the stream
+        // is open — the UI now shows during the (sometimes slow) first stream-open instead of a loading
+        // screen, so START can be pressed before the engine exists. Text/overlay START handled above.
+        if (!audioEngine.isReady) return
+
         when (trackerController.currentScreen) {
             ScreenType.FILE_BROWSER -> {
                 if (fileBrowserState.items.isNotEmpty()) {

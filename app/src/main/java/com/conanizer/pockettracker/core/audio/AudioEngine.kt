@@ -73,10 +73,17 @@ class AudioEngine(
     // Injected by PlaybackController so scheduleNote() can route SF instruments without Android dependency.
     var sfSlotProvider: ((soundfontPath: String) -> Int?)? = null
 
+    // True once backend.create() has opened the native stream. The UI now renders during the
+    // (sometimes multi-second) first stream-open instead of behind a loading screen, so the visualizer
+    // poll methods below — and START playback — must no-op until this flips.
+    @Volatile var isReady = false
+        private set
+
     fun create(): Boolean {
         val success = backend.create()
         if (success) {
             logger.d(TAG, "✅ Audio engine created successfully")
+            isReady = true
             loadAllSamples()
         } else {
             logger.e(TAG, "❌ Failed to create audio engine")
@@ -413,6 +420,7 @@ class AudioEngine(
     }
 
     fun updateWaveformWithDecay(isPlaying: Boolean) {
+        if (!isReady) return
         if (!isPlaying) {
             backend.decayWaveform()
         }
@@ -420,6 +428,7 @@ class AudioEngine(
     }
 
     fun updateTrackWaveforms() {
+        if (!isReady) return
         backend.getTrackWaveforms(trackWaveformBufferFlat, activeTrackFlags)
         for (t in 0 until 9) {
             trackWaveformBufferFlat.copyInto(trackWaveformBuffers[t], 0, t * 620, (t + 1) * 620)
@@ -427,6 +436,7 @@ class AudioEngine(
     }
 
     fun updateSpectrum() {
+        if (!isReady) return
         val result = backend.getSpectrumMagnitudes(spectrumBuffer.size)
         result.copyInto(spectrumBuffer, 0, 0, minOf(result.size, spectrumBuffer.size))
     }
@@ -1058,6 +1068,7 @@ class AudioEngine(
     }
 
     fun close() {
+        isReady = false
         backend.close()
     }
 }
