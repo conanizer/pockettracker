@@ -98,6 +98,11 @@ const val DESIGN_WIDTH_PX = 640
 // refresh loop stops forcing redraws. ~ -54 dBFS — visually indistinguishable from a flat line.
 private const val SCOPE_SILENCE_THRESHOLD = 0.002f
 
+// SPECTRUM/SPECTRUM_PEAKS bars decay at BAR_DECAY=0.90/frame inside the module draw, not in the engine
+// buffer the silence gate watches. So after audio stops we keep forcing redraws for this many frames
+// (~1.2 s at 60 fps) — long enough for both the bars and the peak-hold dots to slide fully to silence.
+private const val SPECTRUM_RELEASE_FRAMES = 75
+
 /**
  * CompositionLocal that carries the current LayoutMode down the composition tree.
  * Set via CompositionLocalProvider in PocketTrackerApp; read in PixelPerfectTracker
@@ -240,17 +245,26 @@ fun PixelPerfectTracker(
     // the flattened scope, then full-screen redraws stop entirely.
     LaunchedEffect(Unit) {
         var wasAudible = true
+        var spectrumTail = 0   // frames of forced redraw left so SPECTRUM bars fall smoothly after stop
         while (true) {
             audioEngine.updateWaveformWithDecay(currentIsPlaying)
-            if (currentVizType == VisualizerType.OCTA) audioEngine.updateTrackWaveforms()
-            if (currentVizType == VisualizerType.SPECTRUM ||
-                currentVizType == VisualizerType.SPECTRUM_PEAKS) audioEngine.updateSpectrum()
+            val octa = currentVizType == VisualizerType.OCTA || currentVizType == VisualizerType.OCTA_FULL
+            val spectrum = currentVizType == VisualizerType.SPECTRUM ||
+                           currentVizType == VisualizerType.SPECTRUM_PEAKS
+            if (octa) audioEngine.updateTrackWaveforms()
+            if (spectrum) audioEngine.updateSpectrum()
 
-            val audible = currentIsPlaying ||
+            val rawAudible = currentIsPlaying ||
                 audioEngine.waveformBuffer.any { abs(it) > SCOPE_SILENCE_THRESHOLD }
+            // Spectrum bars decay in the module draw, so without this they freeze mid-fall when the
+            // master waveform goes quiet. Re-arm the tail while audible, then burn it down once silent.
+            if (spectrum && rawAudible) spectrumTail = SPECTRUM_RELEASE_FRAMES
+            val audible = rawAudible || (spectrum && spectrumTail > 0)
+
             if (audible) {
                 oscilloscopeTicker++
                 wasAudible = true
+                if (!rawAudible) spectrumTail--   // counting down the release tail
                 delay(16L)            // ~60 fps while something moves
             } else {
                 if (wasAudible) {     // active → idle edge: draw the now-flat scope one last time
@@ -589,6 +603,7 @@ class TrackerLayout {
         // oscilloscope ticker loop (6.1), not here — the draw only reads the latest snapshot.
         // We still need these flags to pick what to hand the oscilloscope module.
         val isOcta = appTheme.visualizerType == VisualizerType.OCTA
+        val isOctaFull = appTheme.visualizerType == VisualizerType.OCTA_FULL
         val isSpectrum = appTheme.visualizerType == VisualizerType.SPECTRUM ||
                          appTheme.visualizerType == VisualizerType.SPECTRUM_PEAKS
 
@@ -603,13 +618,18 @@ class TrackerLayout {
                 state = OscilloscopeState(
                     waveformBuffer = audioEngine.waveformBuffer,
                     appTheme = appTheme,
-                    trackWaveforms = if (isOcta) audioEngine.trackWaveformBuffers else null,
-                    // Tracks 0-7 from the scheduled-track mask; the preview lane (bit 8) only when
-                    // stopped, so it never crowds the song scopes during playback.
-                    activeTrackMask = if (isOcta) {
-                        val base = audioEngine.phraseTrackMask and 0xFF
-                        if (!isPlaying && audioEngine.previewLaneActive) base or (1 shl 8) else base
-                    } else 0,
+                    trackWaveforms = if (isOcta || isOctaFull) audioEngine.trackWaveformBuffers else null,
+                    // OCTA: tracks 0-7 from the scheduled-track mask; the preview lane (bit 8) only when
+                    // stopped, so it never crowds the song scopes during playback. OCTA_FULL: all 8
+                    // lanes forced on regardless of what's scheduled (no preview lane).
+                    activeTrackMask = when {
+                        isOctaFull -> 0xFF
+                        isOcta -> {
+                            val base = audioEngine.phraseTrackMask and 0xFF
+                            if (!isPlaying && audioEngine.previewLaneActive) base or (1 shl 8) else base
+                        }
+                        else -> 0
+                    },
                     spectrumData = if (isSpectrum) audioEngine.spectrumBuffer else null
                 )
             )

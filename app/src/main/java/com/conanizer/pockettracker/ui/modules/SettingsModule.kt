@@ -144,11 +144,9 @@ class SettingsModule : TrackerModule {
         // ── ROW 8: VISUALIZER ─────────────────────────────────────────
         val vizText = when (s.visualizerType) {
             VisualizerType.SCOPE          -> "SCOPE"
-            VisualizerType.BARS           -> "BARS"
-            VisualizerType.PEAKS          -> "PEAKS"
-            VisualizerType.MIRROR         -> "MIRROR"
             VisualizerType.FLAT           -> "FLAT"
             VisualizerType.OCTA           -> "OCTA"
+            VisualizerType.OCTA_FULL      -> "OCTA.F"
             VisualizerType.SPECTRUM       -> "SPECT"
             VisualizerType.SPECTRUM_PEAKS -> "SPCT.P"
         }

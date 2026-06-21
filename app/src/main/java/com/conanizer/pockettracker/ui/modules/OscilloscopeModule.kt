@@ -3,20 +3,18 @@ package com.conanizer.pockettracker.ui.modules
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import com.conanizer.pockettracker.ui.theme.AppTheme
 import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.ui.theme.VisualizerType
 import com.conanizer.pockettracker.ui.darken
-import kotlin.math.abs
 
 /**
  * VISUALIZER MODULE
  *
- * Top bar visualizer (620×70). Dispatches to one of five render modes based on
- * appTheme.visualizerType. All modes receive the same FloatArray waveform data.
+ * Top bar visualizer (620×70). Dispatches to one of six render modes based on
+ * appTheme.visualizerType (SCOPE / FLAT / OCTA / OCTA_FULL / SPECTRUM / SPECTRUM_PEAKS).
+ * SCOPE and OCTA share the same ProTracker-style pixel-dot wave (drawWaveDots).
  *
  * Default size: 620×70 pixels
  */
@@ -36,22 +34,22 @@ class OscilloscopeModule(
 
         const val PEAK_HOLD_FRAMES = 30
 
-        // BARS/PEAKS: LED-style segment height and gap (in pixels)
+        // SPECTRUM: LED-style segment height and gap (in pixels)
         const val SEGMENT_H = 2
         const val SEG_GAP   = 1
         const val SEG_STEP  = SEGMENT_H + SEG_GAP  // 3px per LED cell
 
-        // BARS/PEAKS smoothing: instant attack, exponential decay (~333ms fall at 60fps)
+        // SPECTRUM smoothing: instant attack, exponential decay (~333ms fall at 60fps)
         const val BAR_DECAY = 0.90f
 
         // OCTA: gap between track scopes (in pixels)
         const val OCTA_TRACK_GAP = 10
     }
 
-    // PEAKS mode state — persists between frames (module instance lives in TrackerLayout)
+    // SPECTRUM_PEAKS peak-hold state — persists between frames (module instance lives in TrackerLayout)
     private val peakValues = FloatArray(NUM_BARS)
     private val peakDecayCounters = IntArray(NUM_BARS)
-    // Smoothed bar amplitudes for BARS/PEAKS/SPECTRUM/SPECTRUM_PEAKS (instant attack, slow fall)
+    // Smoothed bar amplitudes for SPECTRUM / SPECTRUM_PEAKS (instant attack, slow fall)
     private val barSmoothed = FloatArray(NUM_BARS)
 
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
@@ -59,19 +57,22 @@ class OscilloscopeModule(
         val waveformData = oscState?.waveformBuffer ?: (state as? FloatArray) ?: FloatArray(width)
         val t = oscState?.appTheme ?: AppTheme.Companion.CLASSIC
 
+        // ProTracker look: OCTA modes fill the whole strip with `background` so the inter-scope gaps
+        // read as background, then drawOcta paints each scope's own `vizBackground` panel. Every other
+        // mode fills the strip with `vizBackground` as before.
+        val isOcta = t.visualizerType == VisualizerType.OCTA ||
+                     t.visualizerType == VisualizerType.OCTA_FULL
         drawRect(
-            color = Color(t.vizBackground),
+            color = Color(if (isOcta) t.background else t.vizBackground),
             topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
             size = Size((width * scale).toFloat(), (height * scale).toFloat())
         )
 
         when (t.visualizerType) {
             VisualizerType.SCOPE          -> drawScope(x, y, scale, waveformData, t)
-            VisualizerType.BARS           -> drawBarAmps(x, y, scale, waveformToBarAmps(waveformData), t, peakMode = false)
-            VisualizerType.PEAKS          -> drawBarAmps(x, y, scale, waveformToBarAmps(waveformData), t, peakMode = true)
-            VisualizerType.MIRROR         -> drawMirror(x, y, scale, waveformData, t)
             VisualizerType.FLAT           -> drawFlat(x, y, scale, t)
-            VisualizerType.OCTA           -> drawOcta(x, y, scale, oscState?.trackWaveforms, oscState?.activeTrackMask ?: 0, t)
+            VisualizerType.OCTA,
+            VisualizerType.OCTA_FULL      -> drawOcta(x, y, scale, oscState?.trackWaveforms, oscState?.activeTrackMask ?: 0, t)
             VisualizerType.SPECTRUM       -> drawBarAmps(x, y, scale, oscState?.spectrumData ?: FloatArray(NUM_BARS), t, peakMode = false)
             VisualizerType.SPECTRUM_PEAKS -> drawBarAmps(x, y, scale, oscState?.spectrumData ?: FloatArray(NUM_BARS), t, peakMode = true)
         }
@@ -79,34 +80,37 @@ class OscilloscopeModule(
 
     private fun DrawScope.drawScope(x: Int, y: Int, scale: Int, waveformData: FloatArray, t: AppTheme) {
         val centerY = y + height / 2
+        val maxAmplitude = (height / 2) - 4
         drawLine(
             color = Color(t.vizCenterLine),
             start = Offset((x * scale).toFloat(), (centerY * scale).toFloat()),
             end = Offset(((x + width) * scale).toFloat(), (centerY * scale).toFloat()),
             strokeWidth = scale.toFloat()
         )
-
-        // Single path — 619 individual drawLine calls caused RenderThread stack overflow
-        // on Android 11 (Adreno GPU driver consumes more native stack per draw command).
-        val maxAmplitude = (height / 2) - 8
-        val path = Path()
-        for (i in 0 until width) {
-            val sample = (waveformData[i % waveformData.size] * WAVEFORM_GAIN).coerceIn(-1f, 1f)
-            val px = ((x + i) * scale).toFloat()
-            val py = ((centerY + sample * maxAmplitude) * scale).toFloat()
-            if (i == 0) path.moveTo(px, py) else path.lineTo(px, py)
-        }
-        drawPath(path = path, color = Color(t.vizWave), style = Stroke(width = scale.toFloat()))
+        // ProTracker-style pixel dots — same look as each OCTA lane, but spanning the full width.
+        drawWaveDots(x, width, waveformData, centerY, maxAmplitude, Color(t.vizWave), scale)
     }
 
-    private fun waveformToBarAmps(waveformData: FloatArray): FloatArray {
-        val samplesPerBar = waveformData.size.toFloat() / NUM_BARS
-        return FloatArray(NUM_BARS) { i ->
-            val startSample = (i * samplesPerBar).toInt()
-            val endSample = ((i + 1) * samplesPerBar).toInt().coerceAtMost(waveformData.size)
-            var sum = 0f
-            for (s in startSample until endSample) sum += abs(waveformData[s])
-            ((sum / (endSample - startSample).coerceAtLeast(1)) * WAVEFORM_GAIN).coerceIn(0f, 1f)
+    /**
+     * Draw one waveform as integer-quantized pixel dots (one drawRect per x). Shared by SCOPE
+     * (full width) and OCTA (per-lane). SCOPE previously used a continuous Path stroke — added back
+     * when 619 individual drawLine calls overflowed the RenderThread native stack on Android 11
+     * (Adreno driver). The dot loop is one drawRect per x, which OCTA has always used safely, so it
+     * avoids both the drawLine overflow and the Path while keeping SCOPE consistent with OCTA.
+     */
+    private fun DrawScope.drawWaveDots(
+        scopeX: Int, scopeWidth: Int, waveData: FloatArray,
+        centerY: Int, maxAmplitude: Int, waveColor: Color, scale: Int
+    ) {
+        for (i in 0 until scopeWidth) {
+            val waveIdx = (i.toLong() * waveData.size / scopeWidth).toInt().coerceIn(0, waveData.size - 1)
+            val sample = (waveData[waveIdx] * WAVEFORM_GAIN).coerceIn(-1f, 1f)
+            val dotY = centerY + (sample * maxAmplitude).toInt()
+            drawRect(
+                color = waveColor,
+                topLeft = Offset(((scopeX + i) * scale).toFloat(), (dotY * scale).toFloat()),
+                size = Size(scale.toFloat(), scale.toFloat())
+            )
         }
     }
 
@@ -168,38 +172,6 @@ class OscilloscopeModule(
         }
     }
 
-    private fun DrawScope.drawMirror(x: Int, y: Int, scale: Int, waveformData: FloatArray, t: AppTheme) {
-        val centerY = y + height / 2
-        val maxAmplitude = (height / 2) - 4
-
-        drawLine(
-            color = Color(t.vizCenterLine),
-            start = Offset((x * scale).toFloat(), (centerY * scale).toFloat()),
-            end = Offset(((x + width) * scale).toFloat(), (centerY * scale).toFloat()),
-            strokeWidth = scale.toFloat()
-        )
-
-        val topPath = Path()
-        val bottomPath = Path()
-        for (i in 0 until width) {
-            val sample = (waveformData[i % waveformData.size] * WAVEFORM_GAIN).coerceIn(-1f, 1f)
-            val px = ((x + i) * scale).toFloat()
-            val offset = sample * maxAmplitude
-            val topPy    = ((centerY - offset) * scale).toFloat()
-            val bottomPy = ((centerY + offset) * scale).toFloat()
-            if (i == 0) {
-                topPath.moveTo(px, topPy)
-                bottomPath.moveTo(px, bottomPy)
-            } else {
-                topPath.lineTo(px, topPy)
-                bottomPath.lineTo(px, bottomPy)
-            }
-        }
-        val stroke = Stroke(width = scale.toFloat())
-        drawPath(path = topPath,    color = Color(t.vizWave), style = stroke)
-        drawPath(path = bottomPath, color = Color(t.vizWave), style = stroke)
-    }
-
     private fun DrawScope.drawFlat(x: Int, y: Int, scale: Int, t: AppTheme) {
         drawLine(
             color = Color(t.vizCenterLine),
@@ -217,11 +189,19 @@ class OscilloscopeModule(
     ) {
         val centerY = y + height / 2
         val maxAmplitude = (height / 2) - 4
+        val waveColor = Color(t.vizWave)
+        val centerColor = Color(t.vizCenterLine)
+        val panelColor = Color(t.vizBackground)
 
         if (trackWaveforms == null || activeTrackMask == 0) {
-            // Nothing scheduled — draw center line only
+            // Nothing scheduled — one full-width panel + center line (the strip itself is `background`).
+            drawRect(
+                color = panelColor,
+                topLeft = Offset((x * scale).toFloat(), (y * scale).toFloat()),
+                size = Size((width * scale).toFloat(), (height * scale).toFloat())
+            )
             drawLine(
-                color = Color(t.vizCenterLine),
+                color = centerColor,
                 start = Offset((x * scale).toFloat(), (centerY * scale).toFloat()),
                 end = Offset(((x + width) * scale).toFloat(), (centerY * scale).toFloat()),
                 strokeWidth = scale.toFloat()
@@ -230,17 +210,23 @@ class OscilloscopeModule(
         }
 
         // 0-7 = song tracks, 8 = preview lane (only set when stopped — see PixelPerfectRenderer).
+        // OCTA_FULL forces mask 0xFF (all 8 tracks) regardless of what's scheduled.
         val activeTracks = (0 until 9).filter { (activeTrackMask shr it) and 1 == 1 }
         val count = activeTracks.size
         // Each track scope gets an equal share of the width, minus gaps between them
         val totalGap = OCTA_TRACK_GAP * (count - 1)
         val trackW = (width - totalGap) / count
-        val waveColor = Color(t.vizWave)
-        val centerColor = Color(t.vizCenterLine)
 
         activeTracks.forEachIndexed { idx, trackId ->
             val scopeX = x + idx * (trackW + OCTA_TRACK_GAP)
             val waveData = trackWaveforms[trackId]
+
+            // ProTracker panel for this scope (the gaps between panels stay `background`)
+            drawRect(
+                color = panelColor,
+                topLeft = Offset((scopeX * scale).toFloat(), (y * scale).toFloat()),
+                size = Size((trackW * scale).toFloat(), (height * scale).toFloat())
+            )
 
             // Center line for this scope
             drawLine(
@@ -250,17 +236,7 @@ class OscilloscopeModule(
                 strokeWidth = scale.toFloat()
             )
 
-            // ProTracker-style: individual pixel dots, no interpolation between samples
-            for (i in 0 until trackW) {
-                val waveIdx = (i.toLong() * waveData.size / trackW).toInt().coerceIn(0, waveData.size - 1)
-                val sample = (waveData[waveIdx] * WAVEFORM_GAIN).coerceIn(-1f, 1f)
-                val dotY = centerY + (sample * maxAmplitude).toInt()
-                drawRect(
-                    color = waveColor,
-                    topLeft = Offset(((scopeX + i) * scale).toFloat(), (dotY * scale).toFloat()),
-                    size = Size(scale.toFloat(), scale.toFloat())
-                )
-            }
+            drawWaveDots(scopeX, trackW, waveData, centerY, maxAmplitude, waveColor, scale)
         }
     }
 }

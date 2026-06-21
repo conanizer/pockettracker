@@ -1241,7 +1241,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                             ScreenType.SETTINGS -> {
                                 if (instrumentFileBrowserAction == "LOAD_THEME" && item.file.extension.lowercase() == "ptt") {
                                     try {
-                                        val loaded = Json { ignoreUnknownKeys = true }.decodeFromString<AppTheme>(item.file.readText())
+                                        val loaded = Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromString<AppTheme>(item.file.readText())
                                         appTheme = loaded.copy(visualizerType = appTheme.visualizerType)
                                         instrumentFileBrowserAction = ""
                                         trackerController.currentScreen = previousScreen

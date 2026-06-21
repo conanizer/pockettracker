@@ -108,16 +108,14 @@ The entire UI renders at a fixed **640×480** pixel canvas, letterboxed on large
 └──────────────────────────────┴─────────────────┘
 ```
 
-**Visualizer** — the top bar displays real-time audio. It has eight display modes you can switch in SETTINGS:
+**Visualizer** — the top bar displays real-time audio. It has six display modes you can switch in SETTINGS:
 
 | Mode | What it shows |
 |---|---|
-| SCOPE | Classic oscilloscope waveform |
-| BARS | 40-column bar spectrum (frequency bands) |
-| PEAKS | Bar spectrum with peak-hold dots |
-| MIRROR | Waveform mirrored top and bottom |
+| SCOPE | Classic oscilloscope waveform (ProTracker-style pixel dots) |
 | FLAT | Blank bar (saves battery / CPU) |
-| OCTA | 8 mini-scopes side by side, one per active track |
+| OCTA | Mini-scopes side by side, one per active track |
+| OCTA.F | All 8 track scopes at once (active or not) |
 | SPECT | 40-bin FFT spectrum |
 | SPCT.P | FFT spectrum with peak-hold dots |
 
@@ -984,7 +982,7 @@ The SETTINGS screen is opened from the PROJECT screen (cursor on SETTINGS row, p
 | KB INSERT | BEFORE / AFTER | Where the QWERTY keyboard inserts characters in name fields. |
 | CURSOR | REMEMBER / REFRESH | Whether cursor position is preserved when switching between screens. |
 | NOTE PREV | ON / OFF | Play the note at its pitch when you insert it on the PHRASE screen — useful for hearing what you're placing without pressing START. |
-| VISUALIZER | SCOPE / BARS / PEAKS / MIRROR / FLAT / OCTA / SPECT / SPCT.P | Visualizer mode for the top bar (see §3 for descriptions). |
+| VISUALIZER | SCOPE / FLAT / OCTA / OCTA.F / SPECT / SPCT.P | Visualizer mode for the top bar (see §3 for descriptions). |
 | THEME | theme name > | Shows the current theme name. Press A to open the THEME EDITOR. |
 | TEMPLATE | SAVE / CLEAR | SAVE stores the current project as a template for new projects. CLEAR removes the saved template. |
 

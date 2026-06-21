@@ -526,7 +526,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val _appTheme = remember {
         val savedJson = prefs.getString("app_theme", null)
         val initial = if (savedJson != null) {
-            try { Json { ignoreUnknownKeys = true }.decodeFromString<AppTheme>(savedJson) }
+            // coerceInputValues: a removed visualizer name (BARS/PEAKS/MIRROR) from an older build
+            // falls back to the field default (SCOPE) instead of throwing away the whole saved theme.
+            try { Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromString<AppTheme>(savedJson) }
             catch (_: Exception) { AppTheme.CLASSIC }
         } else { AppTheme.CLASSIC }
         mutableStateOf(initial)

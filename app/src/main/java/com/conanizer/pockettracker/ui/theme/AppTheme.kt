@@ -3,7 +3,7 @@ package com.conanizer.pockettracker.ui.theme
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class VisualizerType { SCOPE, BARS, PEAKS, MIRROR, FLAT, OCTA, SPECTRUM, SPECTRUM_PEAKS }
+enum class VisualizerType { SCOPE, FLAT, OCTA, OCTA_FULL, SPECTRUM, SPECTRUM_PEAKS }
 
 /**
  * Tracker UI color scheme.

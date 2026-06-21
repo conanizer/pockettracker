@@ -76,7 +76,7 @@ Week 16:     MVP Release
 - **Table Screen** - 16-row mini-sequencer per instrument
 - **Groove Screen** - Step-timing patterns for swing/shuffle (256 grooves)
 - **Modulation Screen** - 4-slot envelope/LFO editor per instrument
-- **Settings Screen** - Layout mode, scaling, screen overlay, button sound/volume, vibration, keyboard insert mode, cursor persistence, note preview; VISUALIZER row (A+dpad cycles all 8 modes: SCOPE/BARS/PEAKS/MIRROR/FLAT/OCTA/SPECT/SPCT.P); THEME row (A opens theme editor). BTN SOUND and BTN VIBRO each show their volume/power value in the same row. OVERLAY row cycles PNG files from `assets/overlays/` (plus OFF); STR column controls opacity 00-FF.
+- **Settings Screen** - Layout mode, scaling, screen overlay, button sound/volume, vibration, keyboard insert mode, cursor persistence, note preview; VISUALIZER row (A+dpad cycles the 6 modes: SCOPE/FLAT/OCTA/OCTA.F/SPECT/SPCT.P); THEME row (A opens theme editor). BTN SOUND and BTN VIBRO each show their volume/power value in the same row. OVERLAY row cycles PNG files from `assets/overlays/` (plus OFF); STR column controls opacity 00-FF.
 
 ### Effects (All Complete)
 - **ARP/ARC** - Arpeggio with UP/DOWN/PINGPONG/RANDOM modes and speed control
@@ -376,7 +376,9 @@ All slice-related features from plan-sample-editor-v2.md §6–§7.5 are now ful
 - **BARS / PEAKS** — LED-style vertical bars driven from waveform amplitude. Bars rendered as stacked 2-px segments with 1-px gaps from bottom up (SEGMENT_H=2, SEG_STEP=3). Instant-attack / exponential-decay smoothing (BAR_DECAY=0.90 per frame, ~333ms fall) prevents eye-straining rapid changes. PEAKS mode adds a peak-hold marker (holds 30 frames, then decays one LED at a time).
 - **SPECTRUM / SPECTRUM_PEAKS** — Same LED bar rendering but driven by FFT frequency data (40 log-spaced bins, 20 Hz–20 kHz). Left bars = low frequencies, right = high. Same smoothing and peak-hold as BARS/PEAKS.
 
-**Visualizer control change:** VISUALIZER row in settings now uses A+dpad (up/down) to cycle modes instead of bare A press. Cursor context changed to incremental HEX_BYTE 0–7.
+**Visualizer control change:** VISUALIZER row in settings now uses A+dpad (up/down) to cycle modes instead of bare A press. Cursor context is an incremental HEX_BYTE 0–(N−1), derived from `VisualizerType.values().size`.
+
+**Visualizer prune + restyle (2026-06-21, pre-commit round 2 #2):** Enum trimmed to `{ SCOPE, FLAT, OCTA, OCTA_FULL, SPECTRUM, SPECTRUM_PEAKS }` — **BARS / PEAKS / MIRROR removed** (and their `drawBarAmps`-for-waveform / `drawMirror` / `waveformToBarAmps` paths; `drawBarAmps` itself stays for the SPECT modes). New **OCTA_FULL** ("OCTA.F") forces all 8 track scopes on (mask `0xFF`, no preview lane) regardless of `phraseTrackMask`. **SCOPE** restyled to the same ProTracker pixel-dot wave as OCTA via a shared `drawWaveDots`. **OCTA gap colour:** the strip fills with `theme.background`, each scope paints its own `theme.vizBackground` panel, so the inter-scope gaps read as background. **SPECT release fix:** the oscilloscope ticker keeps forcing redraws for `SPECTRUM_RELEASE_FRAMES` (75) after audio stops so the smoothing bars + peak dots fall to silence instead of freezing mid-drop on every screen. Old themes naming a removed mode coerce to SCOPE (`coerceInputValues = true` on both `AppTheme` decode sites).
 
 **Bug fixes — settings screen:**
 - R+dpad no longer navigates screens while SETTINGS is the active screen
