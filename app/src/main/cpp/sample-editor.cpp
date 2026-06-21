@@ -625,18 +625,25 @@ void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRat
     if (samplesRight[id]) applyToChannel(samplesRight[id]);
 }
 
-int AudioEngine::findZeroCrossing(int id, int frame, int searchRadius) {
+int AudioEngine::findZeroCrossing(int id, int frame, int dir, int searchRadius) {
     if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] < 2) return frame;
     const float* buf = samples[id];
     const int    len = sampleLengths[id];
-    // Scan outward from `frame` in both directions simultaneously.
-    for (int d = 0; d <= searchRadius; d++) {
-        int fwd = frame + d;
-        int bwd = frame - d;
-        if (fwd >= 1 && fwd < len &&
-            ((buf[fwd - 1] < 0.0f) != (buf[fwd] < 0.0f))) return fwd;
-        if (d > 0 && bwd >= 1 && bwd < len &&
-            ((buf[bwd - 1] < 0.0f) != (buf[bwd] < 0.0f))) return bwd;
+    auto isCrossing = [&](int i) {
+        return i >= 1 && i < len && ((buf[i - 1] < 0.0f) != (buf[i] < 0.0f));
+    };
+    // dir > 0: forward only; dir < 0: backward only; dir == 0: nearest (both ways).
+    // Directional search is seeded from the already-stepped `frame`, so the result is always at or
+    // past `frame` in the move direction — a marker can never snap back behind itself and stick (#8).
+    if (dir > 0) {
+        for (int d = 0; d <= searchRadius; d++) if (isCrossing(frame + d)) return frame + d;
+    } else if (dir < 0) {
+        for (int d = 0; d <= searchRadius; d++) if (isCrossing(frame - d)) return frame - d;
+    } else {
+        for (int d = 0; d <= searchRadius; d++) {
+            if (isCrossing(frame + d)) return frame + d;
+            if (d > 0 && isCrossing(frame - d)) return frame - d;
+        }
     }
     return frame;
 }

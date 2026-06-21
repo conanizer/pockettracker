@@ -97,8 +97,10 @@ public:
     void timeStretchSample(int id, float ratio);
     // Destructive whole-sample DSP: fxType 0=OTT, 1=DUST, 2=DRIVE. fxValue 0-255.
     void applySampleFx(int id, int fxType, int fxValue, float sampleRate, int limiterPreGain = 0);
-    // Returns the nearest zero-crossing frame within ±searchRadius of `frame`, or `frame` if none found.
-    int  findZeroCrossing(int id, int frame, int searchRadius = 512);
+    // Zero-crossing search near `frame`. dir>0 = forward only, dir<0 = backward only, dir==0 = nearest
+    // (both ways); returns `frame` if none within searchRadius. Directional keeps marker snapping
+    // monotonic so a small move can't snap back and stick.
+    int  findZeroCrossing(int id, int frame, int dir = 0, int searchRadius = 512);
     // Spectral-flux transient detection. Returns count; outMarkers[] filled with frame positions.
     // sensitivity 0x00 = few markers (high threshold), 0xFF = many markers (low threshold).
     int  detectTransients(int id, int sensitivity, int* outMarkers, int maxMarkers);

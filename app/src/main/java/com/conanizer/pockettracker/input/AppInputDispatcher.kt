@@ -2232,7 +2232,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         } else if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.cursorRow in 3..8) {
             val step = maxOf(1L, sampleEditorState.totalFrames.toLong() / (256L shl sampleEditorState.zoomLevel))
             val maxFrame = sampleEditorState.totalFrames.toLong()
-            fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled) audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt()).toLong() else f
+            fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled) audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt(), dir = 1).toLong() else f
             sampleEditorState = if (sampleEditorState.cursorCol == 0) {
                 val raw = (sampleEditorState.selectionStart + step).coerceAtMost(sampleEditorState.selectionEnd - 1L)
                 sampleEditorState.copy(selectionStart = snapFrame(raw).coerceAtMost(sampleEditorState.selectionEnd - 1L))
@@ -2273,7 +2273,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             fxHelperState = fxHelperState.fxMoveCursorDown()
         } else if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.cursorRow in 3..8) {
             val step = maxOf(1L, sampleEditorState.totalFrames.toLong() / (256L shl sampleEditorState.zoomLevel))
-            fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled) audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt()).toLong() else f
+            fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled) audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt(), dir = -1).toLong() else f
             sampleEditorState = if (sampleEditorState.cursorCol == 0) {
                 val raw = (sampleEditorState.selectionStart - step).coerceAtLeast(0L)
                 sampleEditorState.copy(selectionStart = snapFrame(raw).coerceAtMost(sampleEditorState.selectionEnd - 1L))
@@ -2313,7 +2313,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             fxHelperState = fxHelperState.fxMoveCursorLeft()
         } else if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.cursorRow in 3..8) {
             val step = maxOf(1L, sampleEditorState.totalFrames.toLong() / (16L shl sampleEditorState.zoomLevel))
-            fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled) audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt()).toLong() else f
+            fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled) audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt(), dir = -1).toLong() else f
             sampleEditorState = if (sampleEditorState.cursorCol == 0) {
                 val raw = (sampleEditorState.selectionStart - step).coerceAtLeast(0L)
                 sampleEditorState.copy(selectionStart = snapFrame(raw).coerceAtMost(sampleEditorState.selectionEnd - 1L))
@@ -2338,7 +2338,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         } else if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.cursorRow in 3..8) {
             val step = maxOf(1L, sampleEditorState.totalFrames.toLong() / (16L shl sampleEditorState.zoomLevel))
             val maxFrame = sampleEditorState.totalFrames.toLong()
-            fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled) audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt()).toLong() else f
+            fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled) audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt(), dir = 1).toLong() else f
             sampleEditorState = if (sampleEditorState.cursorCol == 0) {
                 val raw = (sampleEditorState.selectionStart + step).coerceAtMost(sampleEditorState.selectionEnd - 1L)
                 sampleEditorState.copy(selectionStart = snapFrame(raw).coerceAtMost(sampleEditorState.selectionEnd - 1L))

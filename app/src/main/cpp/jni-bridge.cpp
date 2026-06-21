@@ -1114,8 +1114,8 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1downs
 
 JNIEXPORT jint JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1findZeroCrossing(
-        JNIEnv*, jobject, jint id, jint frame) {
-    return engine ? (jint)engine->findZeroCrossing((int)id, (int)frame) : frame;
+        JNIEnv*, jobject, jint id, jint frame, jint dir) {
+    return engine ? (jint)engine->findZeroCrossing((int)id, (int)frame, (int)dir) : frame;
 }
 
 JNIEXPORT void JNICALL

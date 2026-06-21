@@ -773,7 +773,7 @@ class AudioEngine(
         backend.applySampleFx(instrumentId, fxType, fxValue, sampleRate, limiterPreGain)
     }
 
-    fun findZeroCrossing(instrumentId: Int, frame: Int): Int = backend.findZeroCrossing(instrumentId, frame)
+    fun findZeroCrossing(instrumentId: Int, frame: Int, dir: Int = 0): Int = backend.findZeroCrossing(instrumentId, frame, dir)
     fun detectTransients(instrumentId: Int, sensitivity: Int): IntArray = backend.detectTransients(instrumentId, sensitivity)
 
     fun getOriginalSampleRate(instrumentId: Int): Int {
