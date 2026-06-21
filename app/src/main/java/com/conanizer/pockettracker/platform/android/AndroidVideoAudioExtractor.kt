@@ -110,7 +110,11 @@ class AndroidVideoAudioExtractor : IVideoAudioExtractor {
             return null
         }
 
-        val maxSamples = if (maxDurationSec > 0) maxDurationSec * sampleRate else Int.MAX_VALUE
+        // Total interleaved-sample cap as a Long so the no-cap sentinel can't overflow: maxDurationSec = 0
+        // means "no limit", and Int.MAX_VALUE * channelCount would wrap to a negative Int and stall the
+        // read loop (decode returns empty → every MP3 fails).
+        val maxTotalSamples: Long =
+            if (maxDurationSec > 0) maxDurationSec.toLong() * sampleRate * channelCount else Long.MAX_VALUE
         val accumulator = mutableListOf<Short>()  // interleaved PCM shorts
         val bufferInfo = MediaCodec.BufferInfo()
         val timeoutUs = 10_000L
@@ -153,7 +157,7 @@ class AndroidVideoAudioExtractor : IVideoAudioExtractor {
                         if (outputBuffer != null && bufferInfo.size > 0) {
                             outputBuffer.position(bufferInfo.offset)
                             outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
-                            readPcmBuffer(outputBuffer, isFloat, accumulator, maxSamples * channelCount)
+                            readPcmBuffer(outputBuffer, isFloat, accumulator, maxTotalSamples)
                         }
                         codec.releaseOutputBuffer(outputIndex, false)
 
@@ -161,7 +165,7 @@ class AndroidVideoAudioExtractor : IVideoAudioExtractor {
                             outputDone = true
                         }
                         // Stop early if we've hit the duration cap
-                        if (accumulator.size >= maxSamples * channelCount) {
+                        if (accumulator.size >= maxTotalSamples) {
                             outputDone = true
                         }
                     }
@@ -186,7 +190,7 @@ class AndroidVideoAudioExtractor : IVideoAudioExtractor {
         buffer: ByteBuffer,
         isFloat: Boolean,
         accumulator: MutableList<Short>,
-        maxTotalSamples: Int
+        maxTotalSamples: Long
     ) {
         buffer.order(ByteOrder.LITTLE_ENDIAN)
         if (isFloat) {
