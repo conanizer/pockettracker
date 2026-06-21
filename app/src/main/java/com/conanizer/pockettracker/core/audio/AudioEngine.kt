@@ -127,6 +127,30 @@ class AudioEngine(
         }
     }
 
+    /**
+     * Load already-decoded PCM (e.g. from an MP3/container via the audio extractor) straight into a
+     * persistent instrument slot — no intermediate WAV file. Sets the same sample-rate-compensation
+     * ratio loadSampleFromFile does, so playback pitch is correct for non-device-rate sources
+     * (a 48 kHz MP3 would otherwise play ~8.8% sharp on a 44.1 kHz device).
+     */
+    fun loadSampleData(instrumentId: Int, samples: FloatArray, samplesRight: FloatArray?, sampleRate: Int): Boolean {
+        return try {
+            if (samples.isEmpty() || sampleRate <= 0) return false
+            if (samplesRight != null && samplesRight.size == samples.size) {
+                backend.loadSampleStereo(instrumentId, samples, samplesRight)
+            } else {
+                backend.loadSample(instrumentId, samples)
+            }
+            sampleRateRatios[instrumentId] = getDeviceSampleRate().toFloat() / sampleRate.toFloat()
+            originalSampleRateRatios.remove(instrumentId)
+            logger.d(TAG, "✅ Loaded in-memory sample: id=$instrumentId frames=${samples.size} rate=$sampleRate stereo=${samplesRight != null}")
+            true
+        } catch (e: Exception) {
+            logger.e(TAG, "❌ Error loading in-memory sample: ${e.message}")
+            false
+        }
+    }
+
     // WAV file decoding now happens in C++ (backend.loadSampleFromWav → AudioEngine::loadSampleFromWavFile)
     // so a multi-MB sample never has to fit in the capped Java heap (REVIEW-3 6.2). The old Kotlin
     // loadWavFileFromPath/parseWavBuffer were removed once the native path was device-confirmed.

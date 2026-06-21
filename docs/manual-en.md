@@ -1329,6 +1329,8 @@ Behaves identically to ADSR — same ATK/DEC/SUS/REL parameters.
 - Sample rates: any — PocketTracker compensates pitch for non-44100 Hz files automatically
 - Loaded via: INSTRUMENT screen → SAMPLE field → A button → file browser
 - SF2 files are loaded the same way
+- `.mp3` files load directly as samples — decoded to PCM in memory, with **no WAV file written** and no slice markers. The instrument remembers the `.mp3` path, so it is re-decoded automatically each time the project is reopened. No length limit is enforced at present (testing stage) — very large files may run out of memory on low-RAM devices.
+- Audio from video/container files (`.mp4`, `.mkv`, `.m4a`, …) can also be loaded — that path *extracts* the audio, prompts for a name, and saves it as a WAV in the Samples folder, then loads that WAV (so it gains a reusable file and survives reload without re-decoding).
 
 ### WAV exports
 

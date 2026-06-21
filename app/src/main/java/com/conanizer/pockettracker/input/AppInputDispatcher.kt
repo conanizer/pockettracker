@@ -289,9 +289,22 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 }
             } else if (instrument.sampleFilePath != null) {
                 val filePath = instrument.sampleFilePath!!
-                if (audioEngine.loadSampleFromFile(instrument.id, filePath)) {
+                val ext = filePath.substringAfterLast('.', "").lowercase()
+                val loaded = if (ext == "mp3") {
+                    // No WAV was ever written for a compressed source — re-decode it in-memory each
+                    // time the project is reopened (synchronous, like the native WAV loads around it).
+                    val r = videoExtractor.extractAudio(filePath, maxDurationSec = 0)   // no cap (see loadSampleFromCompressed)
+                    if (r.isSuccess) {
+                        val a = r.getOrThrow()
+                        audioEngine.loadSampleData(instrument.id, a.samples, a.samplesRight, a.sampleRate)
+                    } else false
+                } else {
+                    audioEngine.loadSampleFromFile(instrument.id, filePath)
+                }
+                if (loaded) {
                     audioEngine.updateInstrumentPlaybackParams(instrument)
-                    instrument.sliceMarkers = WavWriter.readCuePoints(filePath).map { it.toLong() }
+                    // Cue points only exist in WAV files; compressed sources have none.
+                    if (ext != "mp3") instrument.sliceMarkers = WavWriter.readCuePoints(filePath).map { it.toLong() }
                     loadedCount++
                 } else {
                     failedCount++
@@ -1161,7 +1174,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                             ScreenType.INSTRUMENT, ScreenType.INST_POOL -> {
                                 when (instrumentFileBrowserAction) {
                                     "LOAD_PRESET" -> {
-                                        instrumentController.loadPreset(trackerController.project, item.file.absolutePath)
+                                        instrumentController.loadPreset(trackerController.project, item.file.absolutePath, videoExtractor)
                                         trackerController.projectVersion++
                                         trackerController.currentScreen = previousScreen
                                     }
@@ -1184,6 +1197,23 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                                 trackerController.currentScreen = previousScreen
                                             } else {
                                                 fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
+                                            }
+                                        } else if (ext == "mp3") {
+                                            // Compressed audio → decode in-memory (no WAV written); instrument keeps the .mp3 path.
+                                            val srcPath = item.file.absolutePath
+                                            fileBrowserState = fileBrowserState.copy(statusMessage = "DECODING...", statusSuccess = true)
+                                            coroutineScope.launch(Dispatchers.Default) {
+                                                val result = instrumentController.loadSampleFromCompressed(trackerController.project, srcPath, videoExtractor)
+                                                withContext(Dispatchers.Main) {
+                                                    if (result is LoadResult.Success) {
+                                                        autoName()
+                                                        trackerController.projectVersion++
+                                                        trackerController.currentScreen = previousScreen
+                                                    } else {
+                                                        val why = (result as? LoadResult.Error)?.message ?: "LOAD FAILED"
+                                                        fileBrowserState = fileBrowserState.copy(statusMessage = why.uppercase().take(40), statusSuccess = false)
+                                                    }
+                                                }
                                             }
                                         } else if (videoExtractor.isSupportedVideo(item.file.absolutePath)) {
                                             val suggestedName = item.file.nameWithoutExtension + "_audio"
@@ -1224,6 +1254,22 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                                 trackerController.currentScreen = previousScreen
                                             } else {
                                                 fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
+                                            }
+                                        } else if (ext == "mp3") {
+                                            // Compressed audio → decode in-memory (no WAV written); instrument keeps the .mp3 path.
+                                            val srcPath = item.file.absolutePath
+                                            fileBrowserState = fileBrowserState.copy(statusMessage = "DECODING...", statusSuccess = true)
+                                            coroutineScope.launch(Dispatchers.Default) {
+                                                val result = instrumentController.loadSampleFromCompressed(trackerController.project, srcPath, videoExtractor)
+                                                withContext(Dispatchers.Main) {
+                                                    if (result is LoadResult.Success) {
+                                                        trackerController.projectVersion++
+                                                        trackerController.currentScreen = previousScreen
+                                                    } else {
+                                                        val why = (result as? LoadResult.Error)?.message ?: "LOAD FAILED"
+                                                        fileBrowserState = fileBrowserState.copy(statusMessage = why.uppercase().take(40), statusSuccess = false)
+                                                    }
+                                                }
                                             }
                                         } else if (videoExtractor.isSupportedVideo(item.file.absolutePath)) {
                                             val suggestedName = item.file.nameWithoutExtension + "_audio"
@@ -1430,7 +1476,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 File(fileController.getSoundfontsDirectory()))
         } else {
             fileBrowserModule.navigateToFolder(
-                fileBrowserState.copy(fileExtensions = listOf("wav") + FileBrowserModule.VIDEO_EXTENSIONS,
+                fileBrowserState.copy(fileExtensions = listOf("wav", "mp3") + FileBrowserModule.VIDEO_EXTENSIONS,
                     mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""),
                 File(fileController.getSamplesDirectory()))
         }
@@ -1476,7 +1522,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                         fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtensions = listOf("sf2", "sf3"), mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), soundfontsDir)
                     } else {
                         val samplesDir = File(fileController.getSamplesDirectory())
-                        fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtensions = listOf("wav") + FileBrowserModule.VIDEO_EXTENSIONS, mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), samplesDir)
+                        fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtensions = listOf("wav", "mp3") + FileBrowserModule.VIDEO_EXTENSIONS, mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), samplesDir)
                     }
                 }
                 3 -> {  // EDIT → sample editor (col 3, right; sampler only — SoundFonts have no editable waveform)
@@ -2149,17 +2195,20 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                         val ext = selectedFile.extension.lowercase()
                         if (ext == "wav" && (previousScreen == ScreenType.INSTRUMENT || previousScreen == ScreenType.INST_POOL)) {
                             trackerController.previewSampleFile(selectedFile.absolutePath)
-                        } else if (videoExtractor.isSupportedVideo(selectedFile.absolutePath)) {
+                        } else if (ext == "mp3" || videoExtractor.isSupportedVideo(selectedFile.absolutePath)) {
                             fileBrowserState = fileBrowserState.copy(statusMessage = "EXTRACTING PREVIEW...", statusSuccess = true)
                             coroutineScope.launch(Dispatchers.Default) {
-                                val result = videoExtractor.extractAudio(selectedFile.absolutePath, maxDurationSec = 30)
+                                // MP3 preview: no cap (testing stage). Video containers keep the 30 s preview cap.
+                                val previewCap = if (ext == "mp3") 0 else 30
+                                val result = videoExtractor.extractAudio(selectedFile.absolutePath, maxDurationSec = previewCap)
                                 withContext(Dispatchers.Main) {
                                     if (result.isSuccess) {
                                         val audio = result.getOrThrow()
                                         audioEngine.previewSampleData(audio.samples, audio.sampleRate, audio.samplesRight)
                                         fileBrowserState = fileBrowserState.copy(statusMessage = "", statusSuccess = true)
                                     } else {
-                                        fileBrowserState = fileBrowserState.copy(statusMessage = "PREVIEW FAILED", statusSuccess = false)
+                                        val why = result.exceptionOrNull()?.message ?: "PREVIEW FAILED"
+                                        fileBrowserState = fileBrowserState.copy(statusMessage = why.uppercase().take(40), statusSuccess = false)
                                     }
                                 }
                             }

@@ -212,6 +212,9 @@ static inline float decodeWavSample(const uint8_t* p, int audioFormat, int bitsP
         std::memcpy(&out, &u, sizeof(out));
         return out;
     }
+    if (bitsPerSample == 8) {                                // PCM 8-bit, UNSIGNED (center 128)
+        return (p[0] - 128) / 128.0f;                        // native-only: the dead Java decode had no 8-bit case
+    }
     if (bitsPerSample == 16) {                               // PCM 16-bit
         int16_t v = (int16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
         return v / 32768.0f;
@@ -286,7 +289,7 @@ int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
         return 0;
     }
     bool isFloat = (audioFormat == 3 && bitsPerSample == 32);
-    bool isPcm   = (audioFormat == 1 && (bitsPerSample == 16 || bitsPerSample == 24 || bitsPerSample == 32));
+    bool isPcm   = (audioFormat == 1 && (bitsPerSample == 8 || bitsPerSample == 16 || bitsPerSample == 24 || bitsPerSample == 32));
     if (!isFloat && !isPcm) {
         LOGE("loadSampleFromWavFile: unsupported format=%d bits=%d %s", audioFormat, bitsPerSample, path);
         fclose(f);

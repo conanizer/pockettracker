@@ -257,6 +257,53 @@ class InstrumentController(
         return loadSampleFromFile(project, wavPath)
     }
 
+    /**
+     * Decode a compressed/container audio file (e.g. MP3) straight into the current instrument slot —
+     * no intermediate WAV is written. The instrument keeps the ORIGINAL file path, so the decode is
+     * repeated on project reload (see AppInputDispatcher.reloadProjectSamples). Decoded audio carries
+     * no cue/slice metadata, so slice markers are cleared. The extractor's duration cap is the OOM
+     * guard (a too-long file fails gracefully via FileTooLong).
+     *
+     * @param project   Project containing the instrument data
+     * @param filePath  Absolute path to the compressed file (e.g. .mp3)
+     * @param extractor Platform-specific audio decoder
+     */
+    fun loadSampleFromCompressed(
+        project: Project,
+        filePath: String,
+        extractor: IVideoAudioExtractor
+    ): LoadResult {
+        val instrument = project.instruments[currentInstrument]
+        logger.d(TAG, "📂 Decoding compressed sample: inst=${formatHex(currentInstrument)}, path=$filePath")
+        setStatus("Decoding...", success = true)
+
+        // maxDurationSec = 0 → no length cap. Removed during the testing stage so we can probe the real
+        // memory limits before settling on a final cap; very large files may OOM on low-RAM devices for now.
+        val result = extractor.extractAudio(filePath, maxDurationSec = 0)
+        if (result.isFailure) {
+            val msg = result.exceptionOrNull()?.message ?: "Decode failed"
+            setStatus("Load failed: $msg", success = false)
+            logger.e(TAG, "❌ Compressed decode failed: $msg")
+            return LoadResult.Error(msg)
+        }
+        val audio = result.getOrThrow()
+
+        if (!audioEngine.loadSampleData(instrument.id, audio.samples, audio.samplesRight, audio.sampleRate)) {
+            setStatus("Failed to load sample", success = false)
+            logger.e(TAG, "❌ Engine rejected decoded sample")
+            return LoadResult.Error("Engine load failed")
+        }
+
+        instrument.sampleFilePath = filePath
+        instrument.sampleId = currentInstrument
+        instrument.sliceMarkers = emptyList()   // compressed audio carries no cue points
+
+        val filename = filePath.substringAfterLast('/').substringBeforeLast('.')
+        setStatus("Loaded: $filename", success = true)
+        logger.d(TAG, "✅ Compressed sample loaded in-memory (${audio.sourceFormat})")
+        return LoadResult.Success
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // PREVIEW
     // ═══════════════════════════════════════════════════════════════════════════
@@ -792,10 +839,11 @@ class InstrumentController(
 
     /**
      * Load a .pti preset file into the current instrument slot.
-     * Auto-loads the source file (WAV or SF2) from the stored path.
-     * If the source is missing, loads parameters only and shows a warning.
+     * Auto-loads the source file (WAV, MP3 or SF2) from the stored path; MP3 sources are decoded
+     * in-memory (same as a fresh MP3 load, since no WAV was ever written). If the source is missing,
+     * loads parameters only and shows a warning.
      */
-    fun loadPreset(project: Project, filePath: String) {
+    fun loadPreset(project: Project, filePath: String, extractor: IVideoAudioExtractor) {
         val fc = fileController ?: run { setStatus("NO FILE CTRL", false); return }
         val preset = fc.loadInstrumentPreset(filePath) ?: run {
             setStatus("LOAD FAILED", false)
@@ -845,12 +893,20 @@ class InstrumentController(
                 val path = src.sampleFilePath
                 if (path != null) {
                     instrument.sampleFilePath = path
-                    val ok = audioEngine.loadSampleFromFile(instrument.id, path)
+                    val ext = path.substringAfterLast('.', "").lowercase()
+                    val ok = if (ext == "mp3") {
+                        // Compressed source — re-decode in-memory (no WAV exists), like reloadProjectSamples.
+                        val r = extractor.extractAudio(path, maxDurationSec = 0)   // no cap (see loadSampleFromCompressed)
+                        if (r.isSuccess) { val a = r.getOrThrow(); audioEngine.loadSampleData(instrument.id, a.samples, a.samplesRight, a.sampleRate) } else false
+                    } else {
+                        audioEngine.loadSampleFromFile(instrument.id, path)
+                    }
                     if (!ok) {
                         setStatus("SRC MISSING: ${path.substringAfterLast('/')}", false)
                     } else {
                         instrument.sampleId = currentInstrument
-                        instrument.sliceMarkers = WavWriter.readCuePoints(path).map { it.toLong() }
+                        // Cue points only exist in WAV files; compressed sources have none.
+                        instrument.sliceMarkers = if (ext == "mp3") emptyList() else WavWriter.readCuePoints(path).map { it.toLong() }
                         // Push all parameters (filter, drive, start/end, etc.) to C++ for this slot
                         audioEngine.updateInstrumentPlaybackParams(instrument)
                         setStatus("LOADED: ${src.name}", true)
