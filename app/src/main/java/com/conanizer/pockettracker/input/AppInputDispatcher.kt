@@ -920,12 +920,20 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 }
                 // SONG is 256 rows deep (16 visible); PHRASE/CHAIN/TABLE are a single 16-row screen.
                 val maxRow = if (trackerController.currentScreen == ScreenType.SONG) 255 else 15
+                val edgeBefore = trackerController.inputController.selectionEnd
                 trackerController.inputController.expandSelection(direction, maxRow, maxColumn)
-                if (trackerController.currentScreen == ScreenType.SONG) {
-                    // Cursor stays anchored in selection mode, so scroll to follow the growing edge.
-                    trackerController.inputController.selectionEnd?.let {
-                        trackerController.scrollSongToRow(it.row)
-                    }
+                // Move the cursor with the selection's active edge so it stays on screen — fixes the
+                // SONG case where the anchored cursor scrolled out of view once the edge passed row 16.
+                // Only when the edge actually moved, so hitting a clamp (or DPAD in SCREEN-select mode)
+                // can't teleport the cursor. Copy/cut/delete use the selection bounds (not the cursor),
+                // so what's affected is unchanged; paste re-anchors wherever the user navigates next.
+                val edge = trackerController.inputController.selectionEnd
+                val sc = trackerController.currentScreen
+                if (edge != null && edge != edgeBefore &&
+                    (sc == ScreenType.PHRASE || sc == ScreenType.CHAIN || sc == ScreenType.SONG)) {
+                    trackerController.cursorRow = edge.row
+                    trackerController.cursorColumn = edge.column
+                    if (sc == ScreenType.SONG) trackerController.scrollSongToRow(edge.row)
                 }
                 return
             }
