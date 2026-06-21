@@ -20,7 +20,7 @@ Effort: **S**/**M**/**L**. Open decisions marked 🟡 (need a call before coding
 ## Build progress — 2026-06-21
 
 On branch `code-review-3-round2`, each item device-tested before its commit. Build order so far:
-**10 → 5 → 12 → 8 → 6 → 7 → 2 → 4.** Remaining: **1, 9, 13, 3.**
+**10 → 5 → 12 → 8 → 6 → 7 → 2 → 4 → 1.** Remaining: **9, 13, 3.**
 
 - ✅ **#10 File browser** (`b3e161f`) — date `YY-MM-DD → DD-MM-YY`; shared `FileBrowserModule.clipName()`:
   list names clip to 20 (18+`..`), DELETE prompt to 16 so it stays inside the 640px line.
@@ -61,10 +61,21 @@ On branch `code-review-3-round2`, each item device-tested before its commit. Bui
   `actionRowIndex` / `isOnActionRow` / `totalRows` / `currentRowCols`; nav wraps over `totalRows` and clamps
   the 2-button row; `insertCurrentKey` guarded so the action row never types. Symbols row 3 gained `,` to
   reach 10 (every key verified against `BitmapFont5x5`; `;` had no glyph). Box grew 195→228 px to fit the row.
+- ✅ **#1 MP3 + 8-bit WAV** (`2d1734d`) — **MP3** decodes via the existing MediaCodec extractor straight
+  into the slot (`AudioEngine.loadSampleData` sets the sample-rate ratio so 48 kHz files stay in tune) —
+  the plan's literal "loadSampleStereo, skip the WAV parser" path. **No WAV is written**; the instrument
+  keeps the `.mp3` path, so it's re-decoded on every open. Wired into load (both confirm branches,
+  backgrounded on `Dispatchers.Default`), preview, `reloadProjectSamples`, autosave recovery and `.pti`
+  `loadPreset` (now takes the extractor); sample editor + WAV export reuse the in-engine buffer untouched.
+  A WAV-materialising route (reusing the video extract→WAV flow) was built first, then reverted per the
+  developer's **"in-memory, no file"** choice. Length **cap removed** (`maxDurationSec = 0`) for the
+  testing stage so real memory limits can be probed — video-extract paths keep their 60 s/30 s caps; huge
+  MP3s may OOM for now. **8-bit WAV:** `decodeWavSample` unsigned 8-bit branch (center 128) + `isPcm` gate,
+  making the manual's pre-existing "8-bit" claim real. File browser now surfaces the real decode error.
 
 ---
 
-## 1. Sampler: read MP3 + audit WAV format coverage
+## 1. Sampler: read MP3 + audit WAV format coverage  **✅ shipped (2d1734d)**
 
 **Goal:** Load `.mp3` files as samples; document/extend which WAV encodings are supported.
 
