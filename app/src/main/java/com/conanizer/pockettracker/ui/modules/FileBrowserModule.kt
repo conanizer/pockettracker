@@ -69,7 +69,7 @@ class FileBrowserModule : TrackerModule {
     private val TEXT_PADDING = 3
 
     // Date formatter
-    private val dateFormat = SimpleDateFormat("yy-MM-dd", Locale.US)
+    private val dateFormat = SimpleDateFormat("dd-MM-yy", Locale.US)
 
     /**
      * Browser item types - what can appear in the file list
@@ -325,7 +325,7 @@ class FileBrowserModule : TrackerModule {
             BrowserMode.DELETE -> {
                 val item = browserState.items.getOrNull(browserState.cursor)
                 drawBitmapText(
-                    text = "DELETE ${item?.displayName}? A=YES B=NO",
+                    text = "DELETE ${clipName(item?.displayName ?: "", 16)}? A=YES B=NO",
                     x = x + 10,
                     y = topBarY1 + TEXT_PADDING,
                     scale = scale,
@@ -450,8 +450,10 @@ class FileBrowserModule : TrackerModule {
                 )
             }
 
-            // Draw item name (truncate if too long)
-            val displayText = item.displayName.take(30)
+            // Draw item name — truncate so long names don't run under the size/date columns.
+            // ~20 chars fit before the size column (x+30..x+370 at 17px/char); clipName shows 18+".."
+            // past that so the user can tell a name is clipped (matches the instrument pool's NAME).
+            val displayText = clipName(item.displayName, 20)
             drawBitmapText(
                 text = displayText,
                 x = x + 30,
@@ -521,7 +523,7 @@ class FileBrowserModule : TrackerModule {
             val countText = "${browserState.cursor + 1}/${browserState.items.size}"
             drawBitmapText(
                 text = countText,
-                x = x + 560,
+                x = x + 550,
                 y = bottomBarY + TEXT_PADDING,
                 scale = scale,
                 color = Color(t.textParam),
@@ -541,6 +543,12 @@ class FileBrowserModule : TrackerModule {
             else -> "${bytes / (1024 * 1024)}MB"
         }
     }
+
+    /** Clip a name to [maxChars], marking truncation with a trailing ".." (replacing the last 2 chars).
+     *  Shared by the file list (max 20 — clears the size column) and the DELETE prompt (max 16 — fits the
+     *  status line: "DELETE <name>? A=YES B=NO" must stay within the 640px width). */
+    private fun clipName(name: String, maxChars: Int): String =
+        if (name.length > maxChars) name.take(maxChars - 2) + ".." else name
 }
 
 /**
