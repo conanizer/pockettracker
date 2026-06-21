@@ -488,14 +488,14 @@ class InstrumentModule : TrackerModule {
                     val isEmpty = state.instrument.root == Note.EMPTY
                     CursorContextFactory.note(if (isEmpty) 0 else state.instrument.root.toMidi(), isEmpty)
                 }
-                3 -> CursorContextFactory.hexByte(state.instrument.detune, 0, 255)
-                5 -> CursorContextFactory.hexByte(state.instrument.tableTicRate, 0, 255)
+                3 -> CursorContextFactory.hexByte(state.instrument.detune, 0, 255, default = 0x80)
+                5 -> CursorContextFactory.hexByte(state.instrument.tableTicRate, 0, 255, default = 0x06)
                 else -> CursorContextFactory.none()
             }
 
             row == 3 -> when (col) {  // VOL + PAN
-                1 -> CursorContextFactory.hexByte(state.instrument.volume, 0, 255)
-                3 -> CursorContextFactory.hexByte(state.instrument.pan, 0, 255)
+                1 -> CursorContextFactory.hexByte(state.instrument.volume, 0, 255, default = 0xFF)
+                3 -> CursorContextFactory.hexByte(state.instrument.pan, 0, 255, default = 0x80)
                 else -> CursorContextFactory.none()
             }
 
@@ -511,21 +511,21 @@ class InstrumentModule : TrackerModule {
             row == 6 + sfOffset -> CursorContextFactory.none()  // SPACER
 
             row == 7 + sfOffset -> when (col) {  // DRIVE + FILTER
-                1 -> CursorContextFactory.hexByte(state.instrument.drive, 0, 255)
+                1 -> CursorContextFactory.hexByte(state.instrument.drive, 0, 255, default = 0x00)
                 3 -> CursorContextFactory.toggleTernary(
                     state.instrument.filterType, listOf("off", "lp", "hp", "bp"))
                 else -> CursorContextFactory.none()
             }
 
             row == 8 + sfOffset -> when (col) {  // CRUSH + FREQ
-                1 -> CursorContextFactory.hexNibble(state.instrument.crush)
-                3 -> CursorContextFactory.hexByte(state.instrument.filterCut, 0, 255)
+                1 -> CursorContextFactory.hexNibble(state.instrument.crush, default = 0)
+                3 -> CursorContextFactory.hexByte(state.instrument.filterCut, 0, 255, default = 0x00)
                 else -> CursorContextFactory.none()
             }
 
             row == 9 + sfOffset -> when (col) {  // DWNSMPL + RES
-                1 -> CursorContextFactory.hexNibble(state.instrument.downsample)
-                3 -> CursorContextFactory.hexByte(state.instrument.filterRes, 0, 255)
+                1 -> CursorContextFactory.hexNibble(state.instrument.downsample, default = 0)
+                3 -> CursorContextFactory.hexByte(state.instrument.filterRes, 0, 255, default = 0x00)
                 else -> CursorContextFactory.none()
             }
 
@@ -533,9 +533,9 @@ class InstrumentModule : TrackerModule {
 
             // Soundfont-specific tail
             isSoundFont && row == 12 -> if (col == 0) CursorContextFactory.readOnly()
-                else CursorContextFactory.hexByte(state.instrument.reverbSend, 0, 255)
+                else CursorContextFactory.hexByte(state.instrument.reverbSend, 0, 255, default = 0x00)
             isSoundFont && row == 13 -> if (col == 0) CursorContextFactory.readOnly()
-                else CursorContextFactory.hexByte(state.instrument.delaySend, 0, 255)
+                else CursorContextFactory.hexByte(state.instrument.delaySend, 0, 255, default = 0x00)
             isSoundFont && row == 14 -> if (col == 0) CursorContextFactory.readOnly()
                 else CursorContextFactory.hexByte(
                     if (state.instrument.eqSlot < 0) 0 else state.instrument.eqSlot,
@@ -545,13 +545,13 @@ class InstrumentModule : TrackerModule {
 
             // Sampler-specific tail
             !isSoundFont && row == 11 -> when (col) {  // START + REV
-                1 -> CursorContextFactory.hexByte(state.instrument.sampleStart, 0, 255)
-                3 -> CursorContextFactory.hexByte(state.instrument.reverbSend, 0, 255)
+                1 -> CursorContextFactory.hexByte(state.instrument.sampleStart, 0, 255, default = 0x00)
+                3 -> CursorContextFactory.hexByte(state.instrument.reverbSend, 0, 255, default = 0x00)
                 else -> CursorContextFactory.none()
             }
             !isSoundFont && row == 12 -> when (col) {  // END + DEL
-                1 -> CursorContextFactory.hexByte(state.instrument.sampleEnd, 0, 255)
-                3 -> CursorContextFactory.hexByte(state.instrument.delaySend, 0, 255)
+                1 -> CursorContextFactory.hexByte(state.instrument.sampleEnd, 0, 255, default = 0xFF)
+                3 -> CursorContextFactory.hexByte(state.instrument.delaySend, 0, 255, default = 0x00)
                 else -> CursorContextFactory.none()
             }
             !isSoundFont && row == 13 -> when (col) {  // REVERSE + EQ
@@ -573,7 +573,7 @@ class InstrumentModule : TrackerModule {
             }
             !isSoundFont && row == 15 -> {  // LOOP ST
                 if (col == 0) CursorContextFactory.readOnly()
-                else CursorContextFactory.hexByte(state.instrument.loopStart, 0, 255)
+                else CursorContextFactory.hexByte(state.instrument.loopStart, 0, 255, default = 0x00)
             }
 
             else -> CursorContextFactory.none()

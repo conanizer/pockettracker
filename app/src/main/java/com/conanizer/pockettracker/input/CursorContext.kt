@@ -2,6 +2,9 @@ package com.conanizer.pockettracker.input
 
 import com.conanizer.pockettracker.core.logic.EffectProcessor
 
+/** Sentinel for [CursorContext.defaultValue]: this cell has no A+B "reset to default" target. */
+const val NO_DEFAULT = Int.MIN_VALUE
+
 /**
  * CURSOR CONTEXT SYSTEM
  *
@@ -98,7 +101,8 @@ data class CursorContext(
     val smallStep: Int = 1,                 // Step for normal A/B
     val largeStep: Int = 16,                // Step for A+LEFT/RIGHT
     val emptyValue: Int = 0xFF,             // Value that means "empty"
-    val fxSlot: Int = 0                     // For effects: which FX slot (1, 2, or 3)
+    val fxSlot: Int = 0,                    // For effects: which FX slot (1, 2, or 3)
+    val defaultValue: Int = NO_DEFAULT      // A+B resets a non-deletable value to this (NO_DEFAULT = none)
 ) {
     /**
      * Helper: Is the current value empty?
@@ -184,7 +188,7 @@ object CursorContextFactory {
      * Small step: 1 semitone
      * Large step: 12 semitones (1 octave)
      */
-    fun transpose(currentValue: Int, isEmpty: Boolean = false) = CursorContext(
+    fun transpose(currentValue: Int, isEmpty: Boolean = false, default: Int = NO_DEFAULT) = CursorContext(
         valueType = CursorValueType.SEMITONE_OFFSET,
         capabilities = CursorCapabilities(
             canIncrement = !isEmpty,
@@ -198,7 +202,8 @@ object CursorContextFactory {
         maxValue = 255,
         smallStep = 1,      // 1 semitone
         largeStep = 12,     // 1 octave
-        emptyValue = 0x80   // Center value (no transpose)
+        emptyValue = 0x80,  // vestigial display value; 0x00 is no-transpose (two's-complement)
+        defaultValue = if (isEmpty) NO_DEFAULT else default
     )
 
     /**
@@ -230,7 +235,7 @@ object CursorContextFactory {
      * Volume (00-FF)
      */
     fun volume(currentValue: Int) =
-        hexByte(currentValue, 0, 127).copy(valueType = CursorValueType.VOLUME)  // MIDI velocity 0x00-0x7F
+        hexByte(currentValue, 0, 127, default = 0x7F).copy(valueType = CursorValueType.VOLUME)  // MIDI velocity 0x00-0x7F
 
     /**
      * Instrument reference (00-FF hex byte)
@@ -301,7 +306,8 @@ object CursorContextFactory {
         emptyValue: Int = -1,
         canDelete: Boolean = false,
         canInsert: Boolean = false,
-        canCreate: Boolean = false
+        canCreate: Boolean = false,
+        default: Int = NO_DEFAULT
     ): CursorContext {
         val isEmpty = currentValue == emptyValue
         return CursorContext(
@@ -321,7 +327,8 @@ object CursorContextFactory {
             maxValue = max,
             smallStep = 1,
             largeStep = 16,
-            emptyValue = emptyValue
+            emptyValue = emptyValue,
+            defaultValue = default
         )
     }
 
@@ -334,7 +341,7 @@ object CursorContextFactory {
      * Large step: 4 (0→4→8→C→0)
      * No empty value: always valid (0-F)
      */
-    fun hexNibble(currentValue: Int): CursorContext {
+    fun hexNibble(currentValue: Int, default: Int = NO_DEFAULT): CursorContext {
         val currentNibble = currentValue and 0x0F  // Mask to 0-15
         return CursorContext(
             valueType = CursorValueType.HEX_NIBBLE,
@@ -350,7 +357,8 @@ object CursorContextFactory {
             maxValue = 15,      // F
             smallStep = 1,
             largeStep = 4,      // Quarter of range
-            emptyValue = -1     // Not used for nibbles
+            emptyValue = -1,    // Not used for nibbles
+            defaultValue = default
         )
     }
 

@@ -323,15 +323,15 @@ class MixerModule : TrackerModule {
         // Row 0: track volumes (cols 0-7) or master MIX (col 8)
         if (state.mixerMasterRow == 0) {
             return if (state.cursorColumn < 8)
-                CursorContextFactory.hexByte(state.project.tracks[state.cursorColumn].volume, 0, 255)
+                CursorContextFactory.hexByte(state.project.tracks[state.cursorColumn].volume, 0, 255, default = 0xFF)
             else
-                CursorContextFactory.hexByte(state.project.masterVolume, 0, 255)
+                CursorContextFactory.hexByte(state.project.masterVolume, 0, 255, default = 0xFF)
         }
         // Send row (row 1): REV (col 0) / DEL (col 1) — side by side under their meters
         if (state.mixerMasterRow == 1 && state.cursorColumn == 0)
-            return CursorContextFactory.hexByte(state.project.reverbWet, 0, 255)
+            return CursorContextFactory.hexByte(state.project.reverbWet, 0, 255, default = 0x80)
         if (state.mixerMasterRow == 1 && state.cursorColumn == 1)
-            return CursorContextFactory.hexByte(state.project.delayWet, 0, 255)
+            return CursorContextFactory.hexByte(state.project.delayWet, 0, 255, default = 0x80)
         // Col 8 (master): EQ, OTT/DUST, or LIM
         if (state.cursorColumn == 8) return when (state.mixerMasterRow) {
             1 -> CursorContextFactory.hexByte(
@@ -340,9 +340,9 @@ class MixerModule : TrackerModule {
             )
             2 -> {
                 val depth = if (state.project.masterBusFx == 0) state.project.ottDepth else state.project.dustDepth
-                CursorContextFactory.hexByte(depth, 0, 255)
+                CursorContextFactory.hexByte(depth, 0, 255, default = 0x00)
             }
-            3 -> CursorContextFactory.hexByte(state.project.limiterPreGain, 0, 255)
+            3 -> CursorContextFactory.hexByte(state.project.limiterPreGain, 0, 255, default = 0x00)
             else -> CursorContextFactory.none()
         }
         return CursorContextFactory.none()

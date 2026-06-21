@@ -188,8 +188,8 @@ class EffectModule : TrackerModule {
                 currentValue = proj.masterBusFx,
                 minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1
             )
-            ROW_REV_SIZE -> CursorContextFactory.hexByte(proj.reverbFeedback,   min = 0, max = 255)
-            ROW_REV_DAMP -> CursorContextFactory.hexByte(proj.reverbDamp,       min = 0, max = 255)
+            ROW_REV_SIZE -> CursorContextFactory.hexByte(proj.reverbFeedback,   min = 0, max = 255, default = 0x60)
+            ROW_REV_DAMP -> CursorContextFactory.hexByte(proj.reverbDamp,       min = 0, max = 255, default = 0x80)
             ROW_REV_EQ   -> CursorContextFactory.hexByte(
                 currentValue = if (proj.reverbInputEq < 0) -1 else proj.reverbInputEq,
                 min = 0, max = 127, emptyValue = -1, canDelete = true, canInsert = true
@@ -197,9 +197,9 @@ class EffectModule : TrackerModule {
             ROW_DLY_TIME -> if (proj.delaySync)
                 CursorContextFactory.hexByte(proj.delayTime.coerceIn(0, 11), min = 0, max = 11)
             else
-                CursorContextFactory.hexByte(proj.delayTime, min = 0, max = 255)
-            ROW_DLY_FDBK -> CursorContextFactory.hexByte(proj.delayFeedback,   min = 0, max = 255)
-            ROW_DLY_REV  -> CursorContextFactory.hexByte(proj.delayReverbSend, min = 0, max = 255)
+                CursorContextFactory.hexByte(proj.delayTime, min = 0, max = 255, default = 0x40)
+            ROW_DLY_FDBK -> CursorContextFactory.hexByte(proj.delayFeedback,   min = 0, max = 255, default = 0x60)
+            ROW_DLY_REV  -> CursorContextFactory.hexByte(proj.delayReverbSend, min = 0, max = 255, default = 0x00)
             ROW_DLY_EQ   -> CursorContextFactory.hexByte(
                 currentValue = if (proj.delayInputEq < 0) -1 else proj.delayInputEq,
                 min = 0, max = 127, emptyValue = -1, canDelete = true, canInsert = true

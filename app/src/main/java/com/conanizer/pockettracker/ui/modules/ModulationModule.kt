@@ -245,7 +245,7 @@ class ModulationModule : TrackerModule {
                 largeStep = 1
             )
             2 -> if (slot.type == ModType.NONE) CursorContextFactory.readOnly()
-                 else CursorContextFactory.hexByte(slot.amount, 0, 255)   // AMT
+                 else CursorContextFactory.hexByte(slot.amount, 0, 255, default = 0x80)   // AMT
             3 -> when {
                 slot.rowCount() < 4  -> CursorContextFactory.readOnly()
                 slot.type == ModType.LFO -> CursorContext(                // OSC shape
@@ -257,7 +257,7 @@ class ModulationModule : TrackerModule {
                     smallStep = 1,
                     largeStep = 1
                 )
-                else -> CursorContextFactory.hexByte(slot.attack, 0, 255) // ATK
+                else -> CursorContextFactory.hexByte(slot.attack, 0, 255, default = 0x00) // ATK
             }
             4 -> when {
                 slot.rowCount() < 5  -> CursorContextFactory.readOnly()
@@ -271,20 +271,20 @@ class ModulationModule : TrackerModule {
                     largeStep = 1
                 )
                 slot.type == ModType.AHD || slot.type == ModType.DRUM ->
-                    CursorContextFactory.hexByte(slot.hold, 0, 255)       // HOLD
-                else -> CursorContextFactory.hexByte(slot.decay, 0, 255)  // DEC (ADSR)
+                    CursorContextFactory.hexByte(slot.hold, 0, 255, default = 0x00)       // HOLD
+                else -> CursorContextFactory.hexByte(slot.decay, 0, 255, default = 0x00)  // DEC (ADSR)
             }
             5 -> when {
                 slot.rowCount() < 6  -> CursorContextFactory.readOnly()
                 slot.type == ModType.LFO ->
-                    CursorContextFactory.hexByte(slot.lfoFreq, 0, 255)    // FREQ
+                    CursorContextFactory.hexByte(slot.lfoFreq, 0, 255, default = 0x40)    // FREQ
                 slot.type == ModType.AHD || slot.type == ModType.DRUM ->
-                    CursorContextFactory.hexByte(slot.decay, 0, 255)      // DEC (AHD)
-                else -> CursorContextFactory.hexByte(slot.sustain, 0, 255)// SUS (ADSR)
+                    CursorContextFactory.hexByte(slot.decay, 0, 255, default = 0x00)      // DEC (AHD)
+                else -> CursorContextFactory.hexByte(slot.sustain, 0, 255, default = 0x80)// SUS (ADSR)
             }
             6 -> when {
                 slot.rowCount() < 7  -> CursorContextFactory.readOnly()
-                else -> CursorContextFactory.hexByte(slot.release, 0, 255)// REL (ADSR)
+                else -> CursorContextFactory.hexByte(slot.release, 0, 255, default = 0x00)// REL (ADSR)
             }
             else -> CursorContextFactory.readOnly()
         }

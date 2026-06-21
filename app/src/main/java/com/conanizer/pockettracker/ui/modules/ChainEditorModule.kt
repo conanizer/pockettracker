@@ -118,7 +118,6 @@ class ChainEditorModule : TrackerModule {
                 index == state.cursorRow && state.cursorColumn == 2 -> Color(t.textCursor)
                 state.selectionMode && state.isCellSelected(index, 2) -> Color(t.vizWave)
                 isEmpty -> Color(t.textEmpty)
-                transposeValue == 0x80 -> Color(t.textParam)
                 else -> Color(t.textParam)
             },
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
@@ -131,7 +130,8 @@ class ChainEditorModule : TrackerModule {
             1 -> CursorContextFactory.phraseRef(state.chain.phraseRefs[state.cursorRow], canCreate = true)
             2 -> CursorContextFactory.transpose(
                 state.chain.transposeValues[state.cursorRow],
-                isEmpty = state.chain.phraseRefs[state.cursorRow] == -1
+                isEmpty = state.chain.phraseRefs[state.cursorRow] == -1,
+                default = 0x00
             )
             else -> CursorContextFactory.none()
         }

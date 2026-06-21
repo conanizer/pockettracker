@@ -130,9 +130,9 @@ class InstrumentPoolModule : TrackerModule {
     fun getCursorContext(state: InstrumentPoolState): CursorContext {
         val inst = state.project.instruments[state.selectedInstrument]
         return when (state.cursorColumn) {
-            1 -> CursorContextFactory.hexByte(inst.volume, 0, 255)
-            2 -> CursorContextFactory.hexByte(inst.reverbSend, 0, 255)
-            3 -> CursorContextFactory.hexByte(inst.delaySend, 0, 255)
+            1 -> CursorContextFactory.hexByte(inst.volume, 0, 255, default = 0xFF)
+            2 -> CursorContextFactory.hexByte(inst.reverbSend, 0, 255, default = 0x00)
+            3 -> CursorContextFactory.hexByte(inst.delaySend, 0, 255, default = 0x00)
             4 -> CursorContextFactory.hexByte(
                 if (inst.eqSlot < 0) 0 else inst.eqSlot,
                 min = 0, max = 127, emptyValue = -1,

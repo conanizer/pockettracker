@@ -2,6 +2,7 @@ package com.conanizer.pockettracker.core.logic
 
 import com.conanizer.pockettracker.input.CursorContext
 import com.conanizer.pockettracker.input.CursorValueType
+import com.conanizer.pockettracker.input.NO_DEFAULT
 import com.conanizer.pockettracker.core.logging.ILogger
 
 class InputController(
@@ -214,7 +215,12 @@ class InputController(
     }
 
     fun handleABCombo(context: CursorContext): InputAction {
-        return if (context.capabilities.canDelete) InputAction.DELETE else InputAction.NONE
+        // Deletable cells clear to empty (their default). Non-deletable cells with a defined default
+        // (PAN, DRIVE, VOL, sends, …) reset to it; SET_VALUE reuses each module's existing handleInput.
+        if (context.capabilities.canDelete) return InputAction.DELETE
+        if (context.defaultValue != NO_DEFAULT && context.isEditable())
+            return InputAction.SET_VALUE(context.defaultValue)
+        return InputAction.NONE
     }
 
     fun handleAACombo(context: CursorContext): InputAction {
