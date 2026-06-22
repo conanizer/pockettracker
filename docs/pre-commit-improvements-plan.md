@@ -20,7 +20,7 @@ Effort: **S**/**M**/**L**. Open decisions marked 🟡 (need a call before coding
 ## Build progress — 2026-06-21
 
 On branch `code-review-3-round2`, each item device-tested before its commit. Build order so far:
-**10 → 5 → 12 → 8 → 6 → 7 → 2 → 4 → 1.** Remaining: **9, 13, 3.**
+**10 → 5 → 12 → 8 → 6 → 7 → 2 → 4 → 1 → 9.** Remaining: **13, 3.**
 
 - ✅ **#10 File browser** (`b3e161f`) — date `YY-MM-DD → DD-MM-YY`; shared `FileBrowserModule.clipName()`:
   list names clip to 20 (18+`..`), DELETE prompt to 16 so it stays inside the 640px line.
@@ -89,6 +89,17 @@ On branch `code-review-3-round2`, each item device-tested before its commit. Bui
     the heap transiently; the no-duration fallback also uses the boxed path; duration-estimate clamp can drop
     a few ms of tail and encoder priming samples aren't skipped (minor leading artifact). Characterise the
     exact quirk before the next pass.
+- ✅ **#9 Instrument rows + LOOP END** (`e4d2f63`) — **UI:** SLICE moved up into a `VOL+SLICE+PAN` triple
+  (row 3); sampler tail regrouped to `11 REV+DEL · 12 EQ (opens editor) · 13 LOOP+START · 14 LOOP ST+END ·
+  15 LOOP END+REVERSE` (the developer's final pairing: left column = loop progression, right = sample range).
+  Row 3 is now a second triple row, so the cursor-nav `tripleRows`/`dualParamRows` sets gained it; EQ-open
+  SELECT moved to row 12 col 1; SoundFont layout untouched. **Audio:** new `Instrument.loopEnd` (default
+  `FF` = legacy "loop to sample end"). Loop region is now `[LOOP ST, LOOP END]`; with an ADSR VOL envelope,
+  note-off/`KIL` sets a `loopReleasing` flag so the voice leaves the loop and plays `[LOOP END, END]` once as
+  the release tail (forward + ping-pong + reverse, via `triggerNoteOff` and `Voice::noteOff`). `loopEnd`
+  threaded through `setInstrumentParams` end-to-end (Kotlin → JNI ×3 → C++) and the offline WAV-export path;
+  old projects deserialize `FF` so nothing changes. Manual: parameter table + new "Loop region & release
+  tail" section. Native rebuild required (pre-commit hook only checks Kotlin).
 
 ---
 
@@ -389,7 +400,7 @@ sample-editor UX fix; no audio-path impact.
 
 ---
 
-## 9. Instrument screen (sampler) — row reorganization
+## 9. Instrument screen (sampler) — row reorganization  **✅ shipped (e4d2f63)**
 
 **Goal:** Regroup sampler rows; add SLICE to the VOL row and a new LOOP END row.
 
@@ -409,6 +420,10 @@ is **stale**, ignore it):
 ```
 Moves: SLICE → row 3 (becomes a triple like ROOT/DET/TIC); REV+DEL → 11; EQ alone → 12; START+END → 13;
 LOOP+REVERSE → 14; LOOP ST + **LOOP END** → 15.
+
+> **As shipped (e4d2f63):** rows 11–12 are as planned (REV+DEL, EQ); the developer re-paired the last three
+> in device testing to `13 LOOP+START · 14 LOOP ST+END · 15 LOOP END+REVERSE` — left column = loop
+> progression (LOOP → LOOP ST → LOOP END), right column = sample range/playback (START → END → REVERSE).
 
 **Changes**
 - Rewrite the sampler tail in `draw` (use `drawTripleParameterRow` for row 3; regroup 11-15).
