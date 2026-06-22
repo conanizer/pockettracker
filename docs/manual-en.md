@@ -164,9 +164,16 @@ The navigation map always shows where you are.
 | Screen | How to open |
 |---|---|
 | SAMPLE EDITOR | INSTRUMENT screen → cursor on SAMPLE → SELECT |
-| EQ EDITOR | INSTRUMENT / MIXER / EFFECTS screen → cursor on EQ row → SELECT |
+| EQ EDITOR | INSTRUMENT / INST.POOL / MIXER / EFFECTS → cursor on EQ cell → **A** (or SELECT). Close with **B** (or SELECT). |
 | SETTINGS | PROJECT screen → cursor on SETTINGS row → A |
 | THEME EDITOR | SETTINGS screen → cursor on THEME row → A |
+
+> [!NOTE]
+> **A opens, B goes back.** On cells that lead to another screen — the **EQ** cell and the **NAME**
+> cell on PROJECT/INSTRUMENT — a quick **tap of A** opens the editor, while **holding A + a direction**
+> still edits the value on that same cell (e.g. the EQ slot number). The open fires when you *release* A,
+> so a held A never opens by accident. Inside the EQ EDITOR, **B closes** it and **B + LEFT/RIGHT** still
+> cycles the EQ preset slot.
 
 ---
 
@@ -431,7 +438,7 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 
 | Parameter | Range | Description |
 |---|---|---|
-| NAME | — | Instrument name. |
+| NAME | — | Instrument name. Press A (or SELECT) to edit it on the keyboard overlay. |
 | SAMPLE | path | WAV or SF2 file. Press A to open file browser; SELECT to open SAMPLE EDITOR. |
 | ROOT | C-0 – B-9 | The pitch of the sample as recorded. |
 | DETUNE | 00–FF | Fine tuning. `80` = center (no detune). |
@@ -449,7 +456,7 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 | RES | 00–FF | Filter resonance. `00` = none. |
 | DRIVE | 00–FF | Soft-clipping overdrive. `00` = off. |
 | CRUSH | 00–FF | Bit-depth crusher. `00` = off. |
-| EQ | — | Press SELECT to open the EQ EDITOR for this instrument. |
+| EQ | — | Press A (or SELECT) to open the EQ EDITOR for this instrument. A + UP/DOWN picks the EQ slot. |
 
 > [!TIP]
 > **ROOT** is the most important tuning parameter. Set it to the actual pitch of your sample (e.g., `A-4` for a 440 Hz sine). If notes sound in the wrong octave, ROOT is usually the reason.
@@ -598,7 +605,7 @@ Applied to the whole sample (or selection) offline — rendered immediately, wit
 
 | FX | Description |
 |---|---|
-| EQ | Apply the EQ settings (opens EQ EDITOR first). |
+| EQ | Tap A (or SELECT) on the slot cell to open the EQ EDITOR and dial it in; then APPLY bakes the EQ into the sample. |
 | DUST | Lo-fi effect chain: shelf EQ → low-pass → tube saturation → FET compression → wow/drift → bitcrush → soft-clip. |
 | DRIVE | Soft-clipping overdrive. |
 | OTT | 3-band bidirectional compressor. |
@@ -865,7 +872,7 @@ The master column also has stereo send peak meters showing REV and DEL bus level
 | D-pad UP/DOWN | Move between rows (track volume, or REV/DEL/VOL in master) |
 | A + UP/DOWN | Increase / decrease value by 1 |
 | A + LEFT/RIGHT | Increase / decrease value by 16 |
-| SELECT (on any row) | Open EQ EDITOR for that track |
+| A or SELECT (on the master EQ cell) | Open EQ EDITOR. A + UP/DOWN picks the EQ slot. |
 
 ---
 
@@ -881,7 +888,7 @@ Navigate here: **R+DOWN** from MIXER, or **R+DOWN** twice from any Row 2 screen.
 |---|---|
 | SIZE | Room size (`00`–`FF`). Higher = longer reverb tail. |
 | DAMP | High-frequency damping (`00`–`FF`). Higher = darker reverb. |
-| EQ | Press SELECT to open the EQ EDITOR for the reverb return. |
+| EQ | Press A (or SELECT) to open the EQ EDITOR for the reverb return. |
 
 The reverb return volume is set on the MIXER screen (REV row in master column).
 
@@ -892,7 +899,7 @@ The reverb return volume is set on the MIXER screen (REV row in master column).
 | TIME | Delay time. **SYNC off:** free time `00`–`FF` = 0–2000 ms. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). See [Appendix E](#appendix-e-parameter-reference--units--ranges). |
 | FDBK | Feedback amount (`00`–`FF`). Higher = more repeats. |
 | REV | Amount of delay output sent into the reverb bus (`00`–`FF`). Delay is processed before reverb, so this cross-routing is zero-latency. |
-| EQ | Press SELECT to open the EQ EDITOR for the delay return. |
+| EQ | Press A (or SELECT) to open the EQ EDITOR for the delay return. |
 
 The delay return volume is set on the MIXER screen (DEL row in master column).
 
@@ -915,7 +922,7 @@ Per-instrument effects (filter, drive, crush) are set on the INSTRUMENT screen.
 
 ## 17. EQ EDITOR
 
-The EQ EDITOR is a full-screen overlay that opens when you press **SELECT** on an EQ row in the INSTRUMENT, MIXER, or EFFECTS screens.
+The EQ EDITOR is a full-screen overlay that opens when you press **A** (or SELECT) on an EQ cell in the INSTRUMENT, INST.POOL, MIXER, EFFECTS, or SAMPLE EDITOR (EQ-effect slot) screens.
 
 It applies a 3-band parametric equalizer (biquad filter, per the Audio EQ Cookbook). A real-time spectrum analyzer (KissFFT, ~20 fps) shows the signal relevant to the current EQ context — instrument output when opened from INSTRUMENT, delay bus from EFFECTS delay, reverb bus from EFFECTS reverb, or master bus from MIXER/master — with the computed frequency response curve overlaid.
 
@@ -959,7 +966,8 @@ See [Appendix E](#appendix-e-parameter-reference--units--ranges) for the full ma
 | A + UP/DOWN | Edit value (small step — GAIN: ±0.1 dB) |
 | A + LEFT/RIGHT | Edit value (large step — GAIN: ±1.0 dB) |
 | A + B | Reset parameter to default (FREQ mid · GAIN 0 dB · Q mid) |
-| B | Close EQ EDITOR and apply changes |
+| B + LEFT/RIGHT | Switch EQ preset slot (the slot shown in the top row) |
+| B | Close EQ EDITOR and apply changes (SELECT also closes) |
 
 
 ---
@@ -974,7 +982,7 @@ Navigate here: **R+UP** from SONG or CHAIN.
 
 | Parameter | Description |
 |---|---|
-| NAME | Project name (up to 12 characters). A+UP/DOWN cycles characters. |
+| NAME | Project name. Tap A (or SELECT) to edit it on the keyboard overlay; hold A + UP/DOWN cycles the character under the cursor in place. |
 | TEMPO | BPM. |
 | TRANSPOSE | Global semitone offset applied to all tracks. |
 
@@ -1533,7 +1541,7 @@ All 256 slots (00–FF) start empty in a new project. There are no bundled defau
 | Screen | How to open |
 |---|---|
 | SAMPLE EDITOR | INSTRUMENT → cursor on SAMPLE → SELECT |
-| EQ EDITOR | INSTRUMENT / MIXER / EFFECTS → cursor on EQ → SELECT |
+| EQ EDITOR | INSTRUMENT / INST.POOL / MIXER / EFFECTS → cursor on EQ → A (or SELECT); close with B (or SELECT) |
 | SETTINGS | PROJECT → cursor on SETTINGS → A |
 | THEME EDITOR | SETTINGS → cursor on THEME → A |
 
@@ -1634,7 +1642,8 @@ All 256 slots (00–FF) start empty in a new project. There are no bundled defau
 |---|---|
 | A (on SAMPLE) | Open file browser |
 | SELECT (on SAMPLE) | Open SAMPLE EDITOR |
-| SELECT (on EQ) | Open EQ EDITOR |
+| A or SELECT (on NAME) | Edit instrument name |
+| A or SELECT (on EQ) | Open EQ EDITOR |
 | A + UP / DOWN | Edit current parameter |
 | A + B | Reset to default |
 | B + LEFT / RIGHT | Previous / next instrument |
@@ -1648,6 +1657,7 @@ All 256 slots (00–FF) start empty in a new project. There are no bundled defau
 | A + LEFT / RIGHT | Zoom in / out |
 | D-pad LEFT / RIGHT | Scroll (when zoomed) |
 | D-pad (on marker row) | Move selection marker |
+| A or SELECT (on EQ-effect slot) | Open EQ EDITOR |
 | START | Preview sample |
 | B | Close (discard unsaved changes) |
 
@@ -1697,11 +1707,13 @@ All 256 slots (00–FF) start empty in a new project. There are no bundled defau
 | D-pad UP / DOWN | Move between rows |
 | A + UP / DOWN | ±1 |
 | A + LEFT / RIGHT | ±16 |
-| SELECT | Open EQ EDITOR for this track |
+| A or SELECT (on master EQ) | Open EQ EDITOR |
 
 ---
 
 ### EQ EDITOR
+
+Open with **A** (or SELECT) on an EQ cell.
 
 | Input | Action |
 |---|---|
@@ -1709,7 +1721,8 @@ All 256 slots (00–FF) start empty in a new project. There are no bundled defau
 | D-pad UP / DOWN | Move between parameters |
 | A + UP / DOWN | Edit value |
 | A + LEFT / RIGHT | Large step |
-| B | Close and apply |
+| B + LEFT / RIGHT | Switch EQ preset slot |
+| B | Close and apply (SELECT also closes) |
 
 ---
 

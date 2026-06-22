@@ -140,7 +140,8 @@ selected row IS the project's current instrument (shared with the INSTRUMENT vie
 - **A** on the NAME column of an **empty** slot — load a source (sampler slots browse .wav, SoundFont
   slots browse .sf2/.sf3); the slot is auto-named from the file.
 - **A + B** on the NAME column — clear the slot (keeps its instrument type).
-- **SELECT** on the EQ column — open the per-instrument EQ editor.
+- **A** (tap) or **SELECT** on the EQ column — open the per-instrument EQ editor (A+DPAD still picks
+  the slot; the open is deferred to A-release so the two don't clash). Inside the editor, **B** closes it.
 - **START** — preview the selected instrument (when stopped).
 
 ---

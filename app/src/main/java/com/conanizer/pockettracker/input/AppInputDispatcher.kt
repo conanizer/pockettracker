@@ -436,6 +436,107 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         trackerController.projectVersion++
     }
 
+    // ── Sub-screen opening (item 3) ──────────────────────────────────────────
+    //    Cells whose single-A opens a further screen (EQ editor / qwerty name editor). A is deferred
+    //    to release on these cells by the InputMapper (see currentCellOpensSubScreen) so a held
+    //    A+DPAD / A+B on the same cell still edits/resets the value; SELECT stays an alias.
+
+    private fun openProjectNameEditor() {
+        val currentName = trackerController.project.name.trimEnd()
+        qwertyKeyboardState = QwertyKeyboardState(
+            isOpen = true,
+            text = currentName,
+            maxLength = 20,
+            textCursor = currentName.length.coerceAtMost(20),
+            keyCursorRow = 0,
+            keyCursorCol = 0,
+            layout = 0,
+            fieldLabel = "PROJECT NAME:",
+            originalText = currentName,
+            insertBefore = insertBefore,
+            context = QwertyContext.PROJECT_NAME
+        )
+    }
+
+    private fun openInstrumentNameEditor() {
+        val instr = trackerController.project.instruments[trackerController.currentInstrument]
+        val currentName = if (instr.hasDefaultName()) "" else instr.name.trimEnd()
+        qwertyKeyboardState = QwertyKeyboardState(
+            isOpen = true,
+            text = currentName,
+            maxLength = 20,
+            textCursor = currentName.length.coerceAtMost(20),
+            keyCursorRow = 0,
+            keyCursorCol = 0,
+            layout = 0,
+            fieldLabel = "INSTRUMENT NAME:",
+            originalText = currentName,
+            insertBefore = insertBefore,
+            context = QwertyContext.INSTRUMENT_NAME
+        )
+    }
+
+    /**
+     * Opens (or, when [peek], just detects) the sub-screen for the cell under the cursor. Covers the
+     * EQ-value cells on INSTRUMENT/INST_POOL/MIXER/EFFECTS, the SAMPLE_EDITOR EQ-effect slot cell, and
+     * the PROJECT/INSTRUMENT NAME cells. (The SAMPLE_EDITOR NAME row keeps its own A-handler; its other
+     * A-confirm rows — crop/copy/APPLY/… — are left alone, so only the EQ slot cell defers here.)
+     *
+     * @param peek true = report only, no side effects (used by the InputMapper defer predicate).
+     * @return true when the cursor is on a sub-screen-opening cell.
+     */
+    private fun openSubScreenAtCursor(peek: Boolean): Boolean {
+        val proj = trackerController.project
+        when (trackerController.currentScreen) {
+            ScreenType.PROJECT ->
+                if (trackerController.projectCursorRow == 2 && trackerController.projectCursorColumn >= 1) {
+                    if (!peek) openProjectNameEditor()
+                    return true
+                }
+            ScreenType.INSTRUMENT -> {
+                val instr = proj.instruments[trackerController.currentInstrument]
+                val isSF  = instr.instrumentType == InstrumentType.SOUNDFONT
+                val row   = trackerController.instrumentCursorRow
+                val col   = trackerController.instrumentCursorColumn
+                if (row == 1) { if (!peek) openInstrumentNameEditor(); return true }
+                if ((!isSF && row == 12 && col == 1) || (isSF && row == 14 && col == 1)) {
+                    if (!peek) openEqEditor(instr.eqSlot.coerceAtLeast(0), EqCallerContext.InstrumentEq(trackerController.currentInstrument))
+                    return true
+                }
+            }
+            ScreenType.INST_POOL ->
+                if (trackerController.poolCursorColumn == 4) {
+                    if (!peek) openEqEditor(proj.instruments[trackerController.currentInstrument].eqSlot.coerceAtLeast(0), EqCallerContext.InstrumentEq(trackerController.currentInstrument))
+                    return true
+                }
+            ScreenType.MIXER ->
+                if (trackerController.mixerMasterRow == 1 && trackerController.mixerCursorColumn == 8) {
+                    if (!peek) openEqEditor(proj.masterEqSlot.coerceAtLeast(0), EqCallerContext.MasterEq)
+                    return true
+                }
+            ScreenType.EFFECTS -> when (trackerController.effectsCursorRow) {
+                EffectModule.ROW_REV_EQ -> { if (!peek) openEqEditor(proj.reverbInputEq.coerceAtLeast(0), EqCallerContext.ReverbInputEq); return true }
+                EffectModule.ROW_DLY_EQ -> { if (!peek) openEqEditor(proj.delayInputEq.coerceAtLeast(0), EqCallerContext.DelayInputEq); return true }
+            }
+            ScreenType.SAMPLE_EDITOR ->
+                // Only the EQ-effect slot cell (row 16, col 1, EQ selected). Col 2 = APPLY keeps its
+                // A-action; A+DPAD on col 1 still picks the slot.
+                if (sampleEditorState.cursorRow == 16 && sampleEditorState.cursorCol == 1 && sampleEditorState.fxType == 3) {
+                    if (!peek) openEqEditor(sampleEditorState.fxValue.coerceIn(0, 127), EqCallerContext.SampleEditorFx)
+                    return true
+                }
+            else -> {}
+        }
+        return false
+    }
+
+    /** Defer predicate for single-A: true when the cursor cell opens a sub-screen and no overlay/dialog
+     *  already owns the A button. */
+    private fun currentCellOpensSubScreen(): Boolean {
+        if (qwertyKeyboardState.isOpen || eqEditorState.isOpen || themeEditorState.isOpen || confirmDialogOpen()) return false
+        return openSubScreenAtCursor(peek = true)
+    }
+
     fun handleGenericInput(handlerFunction: (CursorContext) -> InputAction) {
         if (themeEditorState.isOpen) return
         if (eqEditorState.isOpen) {
@@ -1101,6 +1202,10 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             }
             return
         }
+
+        // Item 3: A on a sub-screen-opening cell opens it. The InputMapper has already deferred this
+        // to release for those cells, so a held A+DPAD/A+B on the same cell edits/resets instead.
+        if (openSubScreenAtCursor(peek = false)) return
 
         when (trackerController.currentScreen) {
             ScreenType.FILE_BROWSER -> handleConfirmAFileBrowser()
@@ -1844,6 +1949,9 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     }
     fun handleButtonB() {
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.deleteChar(); return }
+        // Item 3: B closes the EQ editor (deferred to release by the InputMapper so B+DPAD preset
+        // cycling inside it still works). SELECT remains an alias (handleSelect).
+        if (eqEditorState.isOpen) { eqEditorState = EqEditorState(); return }
         if (showCleanDialog) { showCleanDialog = false; return }
         if (showNewProjectDialog) { showNewProjectDialog = false; return }
         if (showRecoveryDialog) { showRecoveryDialog = false; fileController.clearAutosave(); return }  // B = discard recovery
@@ -1929,22 +2037,8 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             ScreenType.CHAIN -> { }
             ScreenType.PHRASE -> { }
             ScreenType.PROJECT -> {
-                if (trackerController.projectCursorRow == 2 && trackerController.projectCursorColumn >= 1) {
-                    val currentName = trackerController.project.name.trimEnd()
-                    qwertyKeyboardState = QwertyKeyboardState(
-                        isOpen = true,
-                        text = currentName,
-                        maxLength = 20,
-                        textCursor = currentName.length.coerceAtMost(20),
-                        keyCursorRow = 0,
-                        keyCursorCol = 0,
-                        layout = 0,
-                        fieldLabel = "PROJECT NAME:",
-                        originalText = currentName,
-                        insertBefore = insertBefore,
-                        context = QwertyContext.PROJECT_NAME
-                    )
-                }
+                // SELECT alias for the item-3 deferred-A open (shared helper).
+                if (trackerController.projectCursorRow == 2 && trackerController.projectCursorColumn >= 1) openProjectNameEditor()
             }
             ScreenType.SAMPLE_EDITOR -> {
                 if (sampleEditorState.cursorRow == 16 && sampleEditorState.fxType == 3) {
@@ -1995,23 +2089,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val isSF  = instr.instrumentType == InstrumentType.SOUNDFONT
                 val row   = trackerController.instrumentCursorRow
                 val col   = trackerController.instrumentCursorColumn
-                if (row == 1) {  // NAME row → edit the instrument name (like the project name)
-                    val currentName = if (instr.hasDefaultName()) "" else instr.name.trimEnd()
-                    qwertyKeyboardState = QwertyKeyboardState(
-                        isOpen = true,
-                        text = currentName,
-                        maxLength = 20,
-                        textCursor = currentName.length.coerceAtMost(20),
-                        keyCursorRow = 0,
-                        keyCursorCol = 0,
-                        layout = 0,
-                        fieldLabel = "INSTRUMENT NAME:",
-                        originalText = currentName,
-                        insertBefore = insertBefore,
-                        context = QwertyContext.INSTRUMENT_NAME
-                    )
-                    return
-                }
+                if (row == 1) { openInstrumentNameEditor(); return }  // NAME row → qwerty (item-3 shared helper)
                 val onEq  = (!isSF && row == 12 && col == 1) || (isSF && row == 14 && col == 1)
                 if (onEq) {
                     val slot = instr.eqSlot
@@ -3001,6 +3079,10 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         onAA        = { handleAA() },
         onLBA       = { handleLBA() },
         onLR        = { handleLR() },
-        onAReleased = { handleAReleased() }
+        onAReleased = { handleAReleased() },
+        // Item 3: defer single-A to release on sub-screen-opening cells; defer single-B to release
+        // while the EQ editor is open (B = close). Keeps the A/B + DPAD combos on those cells intact.
+        deferAToRelease = { currentCellOpensSubScreen() },
+        deferBToRelease = { eqEditorState.isOpen }
     )
 }

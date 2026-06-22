@@ -98,7 +98,14 @@ data class ButtonHandlers(
     val onLBA: () -> Unit,          // L+B+A: Clone chain/phrase to next unused ID
 
     // A button release (for modal overlays that close when A is released)
-    val onAReleased: () -> Unit = {}  // Called when A button is released
+    val onAReleased: () -> Unit = {},  // Called when A button is released
+
+    // Press-vs-release deferral (item 3): when the cursor is on a cell whose single-A opens a
+    // sub-screen (deferA) or while a sub-screen wants B = close (deferB), the InputMapper holds the
+    // single A/B action until release. This keeps the A+DPAD/A+B (edit/reset) and B+DPAD (preset
+    // cycle) combos on the SAME cell from being pre-empted by the single action firing on press.
+    val deferAToRelease: () -> Boolean = { false },
+    val deferBToRelease: () -> Boolean = { false }
 )
 
 /**
@@ -163,6 +170,12 @@ class InputMapper(
     private var isBPressed = false  // Track B button to prevent B+direction old behavior
     private var isSelectPressed = false  // Track SELECT button for SELECT+button combos
 
+    // Deferred single-press tracking (item 3). Set on an A/B press that the dispatcher wants held
+    // until release (deferAToRelease / deferBToRelease). Cleared the moment an A/B + combo fires; on
+    // release, if still set, the single action runs then. See handleButtonAction.
+    private var aPressedAlone = false
+    private var bPressedAlone = false
+
     // Track which buttons are currently held (for combinations)
     private val heldButtons = mutableSetOf<VirtualButton>()
 
@@ -223,6 +236,8 @@ class InputMapper(
         isAPressed = false
         isBPressed = false
         isSelectPressed = false
+        aPressedAlone = false
+        bPressedAlone = false
         heldButtons.clear()
         pressedKeys.clear()
     }
@@ -408,7 +423,21 @@ class InputMapper(
         // Cancel key repeat on any key release (D-PAD, A, B)
         if (action == ButtonAction.RELEASED) {
             if (button == VirtualButton.A) {
+                // Deferred single-A (item 3): A was pressed on a sub-screen-opening cell and no
+                // A-combo intervened, so fire the open now (on release) instead of on press.
+                if (aPressedAlone) {
+                    aPressedAlone = false
+                    buttonHandlers.onButtonA()
+                }
                 buttonHandlers.onAReleased()
+            }
+            if (button == VirtualButton.B) {
+                // Deferred single-B (item 3): mirror of A — closes the EQ editor on release so the
+                // B+DPAD preset cycle inside it isn't pre-empted by an immediate close.
+                if (bPressedAlone) {
+                    bPressedAlone = false
+                    buttonHandlers.onButtonB()
+                }
             }
             when (button) {
                 VirtualButton.DPAD_UP, VirtualButton.DPAD_DOWN,
@@ -432,32 +461,38 @@ class InputMapper(
         // When A is held, directions change values instead of moving cursor
         if (isAPressed && !isLPressed && !isRPressed) {
             logger?.d(TAG, "A is held, checking for combos with button=$button")
+            // An A-combo consumes the hold, so the single-A action must NOT also fire on release.
             when (button) {
                 VirtualButton.B -> {
                     logger?.d(TAG, "A+B (delete)")
+                    aPressedAlone = false
                     buttonHandlers.onAB()
                     return
                 }
                 VirtualButton.DPAD_UP -> {
                     logger?.d(TAG, "A+UP (increment by small step)")
+                    aPressedAlone = false
                     buttonHandlers.onAUp()
                     startKeyRepeat { buttonHandlers.onAUp() }
                     return
                 }
                 VirtualButton.DPAD_DOWN -> {
                     logger?.d(TAG, "A+DOWN (decrement by small step)")
+                    aPressedAlone = false
                     buttonHandlers.onADown()
                     startKeyRepeat { buttonHandlers.onADown() }
                     return
                 }
                 VirtualButton.DPAD_RIGHT -> {
                     logger?.d(TAG, "A+RIGHT (increment by large step)")
+                    aPressedAlone = false
                     buttonHandlers.onARight()
                     startKeyRepeat { buttonHandlers.onARight() }
                     return
                 }
                 VirtualButton.DPAD_LEFT -> {
                     logger?.d(TAG, "A+LEFT (decrement by large step)")
+                    aPressedAlone = false
                     buttonHandlers.onALeft()
                     startKeyRepeat { buttonHandlers.onALeft() }
                     return
@@ -469,27 +504,32 @@ class InputMapper(
         // B + direction combinations (item cycling: chain/phrase/instrument)
         // When B is held, LEFT/RIGHT cycle through items instead of normal navigation
         if (isBPressed && !isLPressed && !isRPressed && !isAPressed) {
+            // A B-combo consumes the hold, so the single-B action must NOT also fire on release.
             when (button) {
                 VirtualButton.DPAD_LEFT -> {
                     logger?.d(TAG, "B+LEFT (previous item)")
+                    bPressedAlone = false
                     buttonHandlers.onBLeft()
                     startKeyRepeat { buttonHandlers.onBLeft() }
                     return
                 }
                 VirtualButton.DPAD_RIGHT -> {
                     logger?.d(TAG, "B+RIGHT (next item)")
+                    bPressedAlone = false
                     buttonHandlers.onBRight()
                     startKeyRepeat { buttonHandlers.onBRight() }
                     return
                 }
                 VirtualButton.DPAD_UP -> {
                     logger?.d(TAG, "B+UP (page up)")
+                    bPressedAlone = false
                     buttonHandlers.onBUp()
                     startKeyRepeat { buttonHandlers.onBUp() }
                     return
                 }
                 VirtualButton.DPAD_DOWN -> {
                     logger?.d(TAG, "B+DOWN (page down)")
+                    bPressedAlone = false
                     buttonHandlers.onBDown()
                     startKeyRepeat { buttonHandlers.onBDown() }
                     return
@@ -651,6 +691,14 @@ class InputMapper(
         // =====================================================================
 
         if (button == VirtualButton.A && !isLPressed && !isRPressed) {
+            // Item 3: on a cell whose single-A opens a sub-screen, hold the action until release so a
+            // following A+DPAD/A+B (edit/reset) on the same cell isn't pre-empted by an immediate open.
+            // Defer cells are never double-tap (insert) cells, so the A,A path is skipped for them.
+            if (buttonHandlers.deferAToRelease()) {
+                aPressedAlone = true
+                lastAPress = 0L  // a deferred tap must not arm a stray double-tap on the next A
+                return
+            }
             val now = System.currentTimeMillis()
             if (now - lastAPress < doubleTapWindow) {
                 // Double-tap detected!
@@ -668,6 +716,12 @@ class InputMapper(
 
         // Handle B button alone (not as modifier)
         if (button == VirtualButton.B && !isLPressed && !isRPressed && !isAPressed) {
+            // Item 3: defer to release when a sub-screen wants B = close (EQ editor) so the B+DPAD
+            // preset cycle inside it isn't pre-empted by an immediate close.
+            if (buttonHandlers.deferBToRelease()) {
+                bPressedAlone = true
+                return
+            }
             logger?.d(TAG, "Single B press")
             buttonHandlers.onButtonB()
             return
