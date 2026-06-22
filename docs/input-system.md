@@ -2,7 +2,7 @@
 
 PocketTracker uses a hybrid input system combining M8's editing precision with LGPT's dual-modifier approach. The generic input handler ensures consistent behavior across all screens.
 
-**Last Updated:** 2026-03-19
+**Last Updated:** 2026-06-22
 
 ---
 
@@ -99,7 +99,7 @@ The tracker automatically adjusts behavior based on what you're editing:
 | CHAIN_REF | 00-FF | 1 | 16 | Yes |
 | VOLUME | 00-FF | 1 | 16 | Yes |
 | SEMITONE_OFFSET | 00-FF | 1 semitone | 12 semitones | Yes |
-| NOTE | C-0 to B-9 | 1 semitone | 12 semitones | No (clamps) |
+| NOTE | C-0 to G-9 | 1 semitone | 12 semitones | No (clamps) |
 | HEX_NIBBLE | 0-F | 1 | - | Yes |
 
 ---
@@ -165,7 +165,7 @@ selected row IS the project's current instrument (shared with the INSTRUMENT vie
 | **A+B (in selection)** | Delete (no clipboard) + exit |
 | **L alone** | Cancel selection (no copy) |
 
-**Screens supported:** PHRASE, CHAIN, SONG
+**Screens supported:** PHRASE, CHAIN, SONG, TABLE
 
 **Selection increment:** A+DPAD applies to all selected rows in active column.
 
@@ -192,26 +192,29 @@ START                   Play / Stop
 ```
 L + A                   Paste (outside selection) / Cut (in selection)
 L + B                   Enter selection mode / Cycle mode
+L + B + A               Clone current item (deep clone)
 L + LEFT/RIGHT          Navigate to prev/next chain or phrase
-L + START               Play all tracks from beginning
 L + UP/DOWN             Jump to next/prev populated row
 ```
 
-### Tier 3: R Modifier (Navigation & Performance)
+### Tier 3: R Modifier (Navigation)
 
 ```
 R + UP/DOWN/LEFT/RIGHT  Navigate between screens
-R + A                   Clone current item
-R + B                   Reset value to default
-R + START               Play from current cursor position
 ```
 
-### Tier 4: L + R Combinations (Advanced)
+### Planned (placeholders in code, not yet wired)
+
+These combinations exist as TODO stubs in `ButtonHandlers.kt` but are currently no-ops. They're listed
+here so they aren't mistaken for working controls:
 
 ```
-L + R + SELECT          Return to project/file screen
-L + R + A               Create snapshot
-L + R + B               Recall snapshot
+L + START               Play all tracks from beginning      (planned)
+R + START               Play from current cursor position   (planned)
+R + B                   Reset value to default              (planned)
+L + R + SELECT          Return to project/file screen       (planned)
+L + R + A               Create snapshot                     (planned)
+L + R + B               Recall snapshot                     (planned)
 ```
 
 ---

@@ -12,7 +12,7 @@ All notable changes to PocketTracker are documented here.
 - Per-instrument chain: SVF resonant filter (LP / HP / BP) + bitcrush + drive; constant-power stereo pan
 - Stereo send buses — DaisySP ReverbSc + ping-pong delay; master bus — OTT 3-band compressor + DaisySP soft limiter
 - Modulation engine: 4 slots per instrument, types AHD / ADSR / LFO / DRUM / TRIG, 10 destinations including mod-to-mod routing
-- Groove quantization (256 grooves, per-track assignment)
+- Groove quantization (128 grooves, per-track assignment)
 - Offline WAV export (full-song multi-track render)
 
 ### Sample editor
@@ -25,7 +25,7 @@ All notable changes to PocketTracker are documented here.
 
 ### Sequencer
 - Hierarchical structure: Song → Chain → Phrase → Step, 256 phrases / 256 chains / 8 tracks
-- 17 effects: ARP, ARC, OFF, VOL, KIL, REP, PSL, PBN, PVB, PVX, DEL, CHA, RND, RNL, TBL, THO, GRV, TIC, HOP
+- 21 effects: ARP, ARC, OFF, VOL, KIL, RPT, PSL, PBN, PVB, PVX, PIT, SLI, DEL, CHA, RND, RNL, TBL, THO, GRV, TIC, HOP
 - Tables (16-row mini-sequencer per instrument), Grooves (step-timing patterns for swing/shuffle)
 - M8-style copy/paste: CELL → ROW → SCREEN selection; copy, cut, paste, delete, selection increment
 
@@ -41,7 +41,7 @@ All notable changes to PocketTracker are documented here.
 
 ### UI
 - Pixel-perfect 640×480 rendering with integer scaling and letterboxing
-- 8 visualizer modes: SCOPE, BARS, PEAKS, MIRROR, FLAT, OCTA, SPECT, SPCT.P
+- 6 visualizer modes: SCOPE, FLAT, OCTA, OCTA.F, SPECT, SPCT.P
 - Theme system with 4 built-in themes (CLASSIC / AMBER / BLUE / MONO) and `.ptt` theme file support
 - Screen overlay system — PNG overlays (e.g. CRT scanlines) from `assets/overlays/`
 - 4 layout modes: FULL, TOUCH PORTRAIT, TOUCH LANDSCAPE, TOUCH PORTRAIT2; auto-rotation

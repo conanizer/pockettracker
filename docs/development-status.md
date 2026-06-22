@@ -74,7 +74,7 @@ Week 16:     MVP Release
 - **EQ Editor Screen** - Full-screen 3-band parametric EQ editor. Header row at top (EQ slot, caller context, hint). Below: KissFFT real-time spectrum analyzer (master output, ~20fps) with mathematically-computed biquad frequency response curve overlaid. Bottom third: 3-column band editor (one column per band, TYPE/FREQ/GAIN/Q as rows). DPAD LEFT/RIGHT switches bands; UP/DOWN navigates params within a band.
 - **Mixer Screen** - 8 tracks + master with true dBFS meters; REV/DEL return volume (rows 1-2 in master col); stereo peak meters for REV/DEL send channels (`sendPeaks[4]`: revL/revR/delL/delR)
 - **Table Screen** - 16-row mini-sequencer per instrument
-- **Groove Screen** - Step-timing patterns for swing/shuffle (256 grooves)
+- **Groove Screen** - Step-timing patterns for swing/shuffle (128 grooves)
 - **Modulation Screen** - 4-slot envelope/LFO editor per instrument
 - **Settings Screen** - Layout mode, scaling, screen overlay, button sound/volume, vibration, keyboard insert mode, cursor persistence, note preview; VISUALIZER row (A+dpad cycles the 6 modes: SCOPE/FLAT/OCTA/OCTA.F/SPECT/SPCT.P); THEME row (A opens theme editor). BTN SOUND and BTN VIBRO each show their volume/power value in the same row. OVERLAY row cycles PNG files from `assets/overlays/` (plus OFF); STR column controls opacity 00-FF.
 
@@ -83,10 +83,12 @@ Week 16:     MVP Release
 - **OFF** - Sample start point offset
 - **VOL** - Volume automation
 - **KIL** - Kill voice immediately
-- **REP** - Retrigger (single shot or volume-ramp mode)
+- **RPT** - Retrigger (single shot or volume-ramp mode)
 - **PSL** - Pitch slide / portamento
 - **PBN** - Pitch bend (continuous up or down)
 - **PVB/PVX** - Vibrato (standard and extreme)
+- **PIT** - Pitch offset in semitones (never affects slice index)
+- **SLI** - Slice index override (works even when SLICE mode is off)
 - **DEL** - Delay note by N ticks
 - **CHA** - Probability gate
 - **RND/RNL** - Randomize FX values
@@ -100,7 +102,7 @@ Week 16:     MVP Release
 - Selection mode (L+B to enter/cycle: CELL -> ROW -> SCREEN)
 - Copy (B in selection), Cut (L+A in selection), Paste (L+A outside)
 - Delete selection (A+B in selection)
-- Works on PHRASE, CHAIN, SONG screens
+- Works on PHRASE, CHAIN, SONG, TABLE screens
 - Selection increment (A+DPAD applies to all selected rows)
 
 ### Layout System
@@ -112,7 +114,7 @@ Week 16:     MVP Release
 ### Data Model
 - Hierarchical: Project -> Song -> Chain -> Phrase -> Step
 - 256 phrases, 256 chains, 8 tracks
-- 256 instruments, 256 tables, 256 grooves
+- 128 instruments, 128 tables, 128 grooves
 - ModSlot[4] per instrument
 - JSON serialization with forward migration
 - Platform-agnostic (no Android dependencies)
@@ -136,7 +138,7 @@ Week 16:     MVP Release
 
 ## Architecture Debt (Post-MVP)
 
-- **Table processing is duplicated** — sampler and SF voices each have their own table row-advance loop in `audio-engine.cpp`. Both operate on `IAudioVoice` fields and contain identical logic (HOP, TIC, transpose, volume). Should be unified into a single `processTableTick(IAudioVoice&)` called from one loop. `isReleasingOnly` should move up to `IAudioVoice` as part of this. See `docs/plan-module-system.md` for details.
+- **Table processing is duplicated** — sampler and SF voices each have their own table row-advance loop in `audio-engine.cpp`. Both operate on `IAudioVoice` fields and contain identical logic (HOP, TIC, transpose, volume). Should be unified into a single `processTableTick(IAudioVoice&)` called from one loop. `isReleasingOnly` should move up to `IAudioVoice` as part of this.
 
 - **Mod-to-mod routing is a fixed ring** — slot M can only modulate slot (M+1)%4. A true 4×4 matrix (each modulator targets any of the other three) would cost just 16 extra bytes per voice. Current ring is intentional for simplicity, but limits expressive patches. Document this clearly in the user manual before release.
 
@@ -148,11 +150,11 @@ Week 16:     MVP Release
 
 - **Sample editor dry preview still passes through master bus** — `previewInstrumentDry()` bypasses per-instrument effects (EQ slot, reverb/delay sends, modulation) but master chain (OTT/DUST/limiter/preamp) still applies because it is on the shared summed output. A true "completely dry" preview requires either a separate dry output bus in C++ or a `bypassMasterForDryPreview` atomic flag in `processAudioBlock` that skips `masterChain.process()` for the duration of the preview. Needs changes in `audio-engine.h`, `audio-engine.cpp`, `native-audio.cpp` (JNI), `IAudioBackend.kt`, and `OboeAudioBackend.kt`.
 
-- **God-methods deferred from the code review (2026-06)** — `AppInputDispatcher.handleButtonA` (~720 lines) and the retrigger block inside `PlaybackController.scheduleStepWithEffects` (~165 lines) are the two remaining oversized methods. Both are in critical, untested paths (the main input dispatch + the real-time, side-effecting scheduler), so blind text extraction is high-risk. Best decomposed incrementally in an IDE with the app running. The cheaper extractions (CHA/RND preprocessing, FX-slot accessors, value-edit unification) were already done. See `docs/code-review/REVIEW.md` findings 2.2 / 3.2.
+- **God-methods deferred from the code review (2026-06)** — `AppInputDispatcher.handleButtonA` (~720 lines) and the retrigger block inside `PlaybackController.scheduleStepWithEffects` (~165 lines) are the two remaining oversized methods. Both are in critical, untested paths (the main input dispatch + the real-time, side-effecting scheduler), so blind text extraction is high-risk. Best decomposed incrementally in an IDE with the app running. The cheaper extractions (CHA/RND preprocessing, FX-slot accessors, value-edit unification) were already done. See `docs/internal/code-review/REVIEW.md` findings 2.2 / 3.2.
 
 - **Wide JNI facade (review 4.1)** — `IAudioBackend` (~100 methods) / `OboeAudioBackend` / `jni-bridge.cpp` / `AudioEngine.kt` mirror each other; many `AudioEngine` methods are pure 1-line forwards (mostly sample-editor ops). Could be grouped behind an `ISampleEditorBackend` to shrink the surface. "Not urgent" — adding one engine call means touching four files (now documented in `technical-architecture.md`).
 
-- **Session resume on app-killing ROMs (Review #3 5.3 follow-up)** — the Miyoo Flip and Ayaneo Pocket Air Mini kill the app's process when backgrounded (the Xiaomi 12T Pro / MIUI keeps it warm), so the app cold-starts to a blank project on return. **Mostly addressed** by the per-device SETTINGS **RESUME** setting: **AUTO** silently auto-resumes the autosave on launch (no prompt) on the killing devices, **ASK** keeps the "RECOVER WORK?" prompt on warm phones. **Remaining deferred piece:** AUTO resumes *unsaved/recovered* work only — a cleanly-saved-then-killed session still lands blank. Closing it means a rolling "last session" (autosave written on save too, cleared only by NEW) so AUTO resumes saved work as well; moderate change, the dirty-flag-after-resume detail needs settling. See `docs/code-review/REVIEW-3.md` "5.3 follow-up".
+- **Session resume on app-killing ROMs (Review #3 5.3 follow-up)** — the Miyoo Flip and Ayaneo Pocket Air Mini kill the app's process when backgrounded (the Xiaomi 12T Pro / MIUI keeps it warm), so the app cold-starts to a blank project on return. **Mostly addressed** by the per-device SETTINGS **RESUME** setting: **AUTO** silently auto-resumes the autosave on launch (no prompt) on the killing devices, **ASK** keeps the "RECOVER WORK?" prompt on warm phones. **Remaining deferred piece:** AUTO resumes *unsaved/recovered* work only — a cleanly-saved-then-killed session still lands blank. Closing it means a rolling "last session" (autosave written on save too, cleared only by NEW) so AUTO resumes saved work as well; moderate change, the dirty-flag-after-resume detail needs settling. See `docs/internal/code-review/REVIEW-3.md` "5.3 follow-up".
 
 ---
 
@@ -169,7 +171,7 @@ Week 16:     MVP Release
 - [ ] Controls guide (full reference)
 - [ ] Short demo video
 - [ ] Known issues list
-- [x] DSP settings guide (`docs/dsp-settings-guide.md`) — internal constants and character notes for every DSP unit
+- [x] DSP settings guide (`docs/internal/dsp-settings-guide.md`) — internal constants and character notes for every DSP unit
 
 ---
 
@@ -177,7 +179,7 @@ Week 16:     MVP Release
 
 ### Review #3 Fixes (2026-06-15 → 06-17)
 
-Third full-repo review (full record + per-batch fix log in `docs/code-review/REVIEW-3.md`), focused on
+Third full-repo review (full record + per-batch fix log in `docs/internal/code-review/REVIEW-3.md`), focused on
 fresh bugs in less-trodden instrument/render/slot paths, low-end memory, and the long-deferred structure
 work. Findings 1.1–4.2 device-tested and merged to `main`; the autosave work (5.2 + 5.3) is on branch
 `code-review-3-round2`, device-tested, pending merge.
@@ -218,7 +220,7 @@ work. Findings 1.1–4.2 device-tested and merged to `main`; the autosave work (
 
 ### Review #2 Fixes (Complete - 2026-06-15)
 
-Second full staged code review (full record + per-batch fix log in `docs/code-review/REVIEW-2.md`),
+Second full staged code review (full record + per-batch fix log in `docs/internal/code-review/REVIEW-2.md`),
 focused on crash-class races, 1 GB-device performance/memory, and build optimization. All findings
 implemented and device-tested on the Miyoo Flip across 8 batches (branches merged to `main`).
 
@@ -247,7 +249,7 @@ implemented and device-tested on the Miyoo Flip across 8 batches (branches merge
 
 ### Code Review Fixes (Complete - 2026-06-12)
 
-Staged 7-stage code review (full record in `docs/code-review/REVIEW.md`), merged via PR #8. All
+Staged 7-stage code review (full record in `docs/internal/code-review/REVIEW.md`), merged via PR #8. All
 findings scoped as code fixes are resolved; remaining items are deferred refactors (see Architecture
 Debt) and non-code advisories.
 
@@ -317,7 +319,7 @@ UNDO works via the existing `backupSample` / `undoSample` mechanism.
 - `OVERLAP_MS` (15 ms) — crossfade. Keep at ~25-40% of SEQUENCE_MS to avoid clicks or comb filter.
 - `SEEK_MS` (0) — splice search. 0 = pure cyclic Akai. 10-15 = intelligent/smoother mode.
 
-**DSP settings guide** (`docs/dsp-settings-guide.md`) created alongside — documents tweakable internal
+**DSP settings guide** (`docs/internal/dsp-settings-guide.md`) created alongside — documents tweakable internal
 constants for every DSP unit (TSTRETCH, DRIVE, CRUSH, Filter SVF, OTT, DUST, Reverb, Delay, Limiter).
 
 ---
@@ -353,7 +355,7 @@ Implementation details:
 
 ### Sample Editor — Slicing System (Complete - 2026-05-16)
 
-All slice-related features from plan-sample-editor-v2.md §6–§7.5 are now fully implemented:
+All slice-related features from docs/internal/plan-sample-editor-v2.md §6–§7.5 are now fully implemented:
 
 - **Transient detection**: KissFFT spectral flux onset detection via `detectTransients()` JNI. SENS field (00-FF) controls threshold. Auto-fires when switching to TRANSIENT mode or changing sensitivity; skipped when WAV cue markers are already present.
 - **Slice markers on waveform**: vertical tick marks drawn in TRANSIENT mode (with active-marker highlight) and in OFF mode (read-only display of WAV cue markers, no detection).
@@ -490,7 +492,7 @@ Standardised all screen modules to a single consistent style (new modules led, o
 
 ### Extension Pack 3 (Complete - 2026-03-13)
 - Fixes & UX updates (table vol range, FX cycling, key repeat, selection increment)
-- New effects (DEL, CHA, RND, RNL, TBL, THO, GRV, REP XY rework)
+- New effects (DEL, CHA, RND, RNL, TBL, THO, GRV, RPT XY rework)
 - Groove screen
 - Modulation screen & engine (AHD, ADSR, LFO, DRUM, TRIG)
 - Selection resampling
@@ -549,7 +551,7 @@ Standardised all screen modules to a single consistent style (new modules led, o
 - **Editable range: C-0 (MIDI 12) to G-9 (MIDI 127)** — the note/ROOT cursor is limited to this window so the ugly negative bottom octave (C--1..B-1) is hidden and the top stays within the real MIDI ceiling. `Note.fromMidi` accepts the full 0..127; only the cursor bounds are clamped (`CursorContext.note()`).
 
 ### Instrument Slots
-- All 256 slots (00-FF) are identical in structure
+- All 128 slots (00-7F) are identical in structure
 - All start empty (`sampleFilePath = null`) — no bundled default samples
 - Users load samples into any slot via the file browser
 - Each instrument has independent ROOT+DETUNE tuning
@@ -564,7 +566,7 @@ Standardised all screen modules to a single consistent style (new modules led, o
 - [x] Chain phrases with transpose
 - [x] Arrange songs with 8 tracks
 - [x] Save and load projects
-- [x] All effects working (17+ effects)
+- [x] All effects working (21 effects)
 - [x] Modulation system (4 slots per instrument)
 - [x] Tables and grooves
 

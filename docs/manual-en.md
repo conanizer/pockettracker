@@ -250,9 +250,9 @@ Hold **B** and press LEFT/RIGHT to switch between items of the same type without
 |---|---|
 | CHAIN | Previous / next chain (00–FF) |
 | PHRASE | Previous / next phrase (00–FF) |
-| INSTRUMENT | Previous / next instrument (00–FF) |
-| TABLE | Previous / next table (00–FF) |
-| GROOVE | Previous / next groove (00–FF) |
+| INSTRUMENT | Previous / next instrument (00–7F) |
+| TABLE | Previous / next table (00–7F) |
+| GROOVE | Previous / next groove (00–7F) |
 
 ---
 
@@ -402,10 +402,10 @@ The phrase editor has 16 rows (steps 00–0F) and 5 columns:
 |---|---|
 | N | Note (`C-4`, `F#3`, etc.). `---` = no note. |
 | V | Volume (`00`–`FF`). Always set — `FF` = full, applied on top of instrument VOL. |
-| I | Instrument ID (`00`–`FF`). Always set — no empty state. |
-| FX1/FX2/FX3 | Effect type + value (e.g., `REP 03`, `ARP 47`) |
+| I | Instrument ID (`00`–`7F`). Always set — no empty state. |
+| FX1/FX2/FX3 | Effect type + value (e.g., `RPT 03`, `ARP 47`) |
 
-Notes are written as pitch + octave: `C-4`, `C#4`, `D-4`, … `B-9`. Range is **C-0 to B-9**. Middle C = `C-4` (MIDI note 60).
+Notes are written as pitch + octave: `C-4`, `C#4`, `D-4`, … `G-9`. Range is **C-0 to G-9**. Middle C = `C-4` (MIDI note 60).
 
 ### Controls
 
@@ -424,7 +424,7 @@ Notes are written as pitch + octave: `C-4`, `C#4`, `D-4`, … `B-9`. Range is **
 Each FX slot has two parts: **type** (3-letter code) and **value** (2-digit hex). Use A+UP/DOWN on the type to cycle through available effects. Effects are listed in §21.
 
 > [!WARNING]
-> Some effects (**ARP**, **REP**, **PBN**, **PVB**, **PVX**) **persist across steps that have no note** — they keep running on empty rows. They are cancelled by: a new note on the same track, any effect in the same FX column, setting the effect to `00`, or **KIL**.
+> Some effects (**ARP**, **RPT**, **PBN**, **PVB**, **PVX**) **persist across steps that have no note** — they keep running on empty rows. They are cancelled by: a new note on the same track, any effect in the same FX column, setting the effect to `00`, or **KIL**.
 
 ---
 
@@ -440,7 +440,7 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 |---|---|---|
 | NAME | — | Instrument name. Press A (or SELECT) to edit it on the keyboard overlay. |
 | SAMPLE | path | WAV or SF2 file. Press A to open file browser; SELECT to open SAMPLE EDITOR. |
-| ROOT | C-0 – B-9 | The pitch of the sample as recorded. |
+| ROOT | C-0 – G-9 | The pitch of the sample as recorded. |
 | DETUNE | 00–FF | Fine tuning. `80` = center (no detune). |
 | VOL | 00–FF | Base volume. `FF` = full. |
 | PAN | 00–FF | Stereo pan. `00` = full left, `80` = center, `FF` = full right. |
@@ -517,7 +517,7 @@ Without an ADSR envelope the loop repeats indefinitely until the voice is killed
 
 ### Navigating instruments
 
-- **B + LEFT/RIGHT** — switch between instruments 00–FF
+- **B + LEFT/RIGHT** — switch between instruments 00–7F
 - **R+UP** from INSTRUMENT → MODULATION screen
 - **A** on SAMPLE field → opens file browser
 - **SELECT** on SAMPLE field → opens SAMPLE EDITOR
@@ -529,7 +529,10 @@ Without an ADSR envelope the loop repeats indefinitely until the voice is killed
 | D-pad UP/DOWN | Move through files / folders |
 | A | Load file or enter folder |
 | B | Go up one directory level |
-| START | Preview highlighted WAV file |
+| START | Preview highlighted WAV / MP3 / video file |
+
+MP3 and video files load as samples too: an MP3 decodes in place; a video file is **converted** to a WAV
+in the Samples folder. See §23 → *Audio from video files*.
 
 ---
 
@@ -1011,20 +1014,22 @@ WAV exports are saved to `/Documents/PocketTracker/Renders/` with auto-increment
 
 The SETTINGS screen is opened from the PROJECT screen (cursor on SETTINGS row, press A). Press **B** to return to PROJECT.
 
+All value rows are edited with **A + D-pad**. A single **A** press is reserved for the two action rows: THEME (opens the editor) and TEMPLATE (SAVE / CLEAR).
+
 | Setting | Options | Description |
 |---|---|---|
-| LAYOUT | FULLSCREEN / T.PORT / TOUCH LANDSCAPE / AMIGA PORTRAIT | UI layout mode. FULLSCREEN = no virtual controls (physical buttons only). Touch layouts add on-screen buttons; AMIGA PORTRAIT is a themed retro skin for 20:9 phones. |
+| LAYOUT | FULLSCREEN / T.LAND / AMIGA PORT | UI layout mode. FULLSCREEN = no virtual controls (physical buttons only). T.LAND adds on-screen buttons in landscape; AMIGA PORT is a themed retro portrait skin for 20:9 phones. |
 | SCALING | INT / BILINEAR | Screen scaling algorithm. INT = crisp pixel-perfect integer scaling. BILINEAR = smooth subpixel scaling. |
-| BTN SOUND | ON / OFF | Play a click sound on button press. |
-| BTN VOL | 00–FF | Click sound volume. |
-| BTN VIBRO | ON / OFF | Haptic feedback on button press (where supported). |
-| VIBRO POW | 00–FF | Vibration intensity. `FF` = strongest. |
+| OVERLAY | file name / OFF (+ STR) | Screen-overlay PNG drawn over the tracker (e.g. CRT scanlines), cycled from `assets/overlays/`. The **STR** sub-column to its right sets opacity (`00`–`FF`). |
+| BTN SOUND | ON / OFF (+ VOL) | Play a click sound on button press. The **VOL** sub-column to its right sets click volume (`00`–`FF`). |
+| BTN VIBRO | ON / OFF (+ POW) | Haptic feedback on button press (where supported). The **POW** sub-column to its right sets vibration intensity (`00`–`FF`). |
 | KB INSERT | BEFORE / AFTER | Where the QWERTY keyboard inserts characters in name fields. |
 | CURSOR | REMEMBER / REFRESH | Whether cursor position is preserved when switching between screens. |
 | NOTE PREV | ON / OFF | Play the note at its pitch when you insert it on the PHRASE screen — useful for hearing what you're placing without pressing START. |
 | VISUALIZER | SCOPE / FLAT / OCTA / OCTA.F / SPECT / SPCT.P | Visualizer mode for the top bar (see §3 for descriptions). |
 | THEME | theme name > | Shows the current theme name. Press A to open the THEME EDITOR. |
 | TEMPLATE | SAVE / CLEAR | SAVE stores the current project as a template for new projects. CLEAR removes the saved template. |
+| RESUME | ASK / AUTO | What happens to unsaved work after the app is killed in the background. **ASK** shows a "RECOVER WORK?" prompt on the next launch; **AUTO** silently restores the autosave (use on ROMs that kill the app when backgrounded, e.g. Miyoo Flip / Ayaneo). |
 
 Layout and scaling mode are persisted across app restarts. The auto-detected layout on startup depends on whether physical gamepad buttons are detected.
 
@@ -1165,6 +1170,7 @@ Switches the current track to use groove `XX` from this step onward.
 
 - In a **phrase**: jumps to phrase step `Y`, limited to `X` times before falling through.
 - In a **table**: jumps to table row `Y`.
+- `HOP FF`: **stops the track** for the rest of the song (no jump).
 
 `HOP 00` at the end of a section = infinite loop of that section.
 
@@ -1172,7 +1178,7 @@ Switches the current track to use groove `XX` from this step onward.
 
 ### KIL `00` — Kill
 
-Immediately stops the sample on this track and cancels all persistent effects (ARP, REP, pitch effects).
+Immediately stops the sample on this track and cancels all persistent effects (ARP, RPT, pitch effects).
 
 ---
 
@@ -1229,7 +1235,7 @@ Same as PVB but 4× deeper and 2× faster.
 
 ---
 
-### REP `XY` — Repeat (Retrigger)
+### RPT `XY` — Repeat (Retrigger)
 
 - **Y = 0 (simple mode):** retrigger every `X` ticks.
 - **Y ≠ 0 (volume ramp mode):** retrigger every `Y` ticks.
@@ -1239,7 +1245,7 @@ Same as PVB but 4× deeper and 2× faster.
 Persists across steps. Cancel with new note, new FX in same column, or KIL.
 
 > [!WARNING]
-> REP **persists** across steps that have no note. A new note, any effect in the same FX column, or **KIL** will cancel it. Steps with a note trigger a fresh sample play and end the retrigger sequence.
+> RPT **persists** across steps that have no note. A new note, any effect in the same FX column, or **KIL** will cancel it. Steps with a note trigger a fresh sample play and end the retrigger sequence.
 
 ---
 
@@ -1371,7 +1377,27 @@ Behaves identically to ADSR — same ATK/DEC/SUS/REL parameters.
 - Loaded via: INSTRUMENT screen → SAMPLE field → A button → file browser
 - SF2 files are loaded the same way
 - `.mp3` files load directly as samples — decoded to PCM in memory, with **no WAV file written** and no slice markers. The instrument remembers the `.mp3` path, so it is re-decoded automatically each time the project is reopened. No length limit is enforced at present (testing stage) — very large files may run out of memory on low-RAM devices.
-- Audio from video/container files (`.mp4`, `.mkv`, `.m4a`, …) can also be loaded — that path *extracts* the audio, prompts for a name, and saves it as a WAV in the Samples folder, then loads that WAV (so it gains a reusable file and survives reload without re-decoding).
+- **Video / container files** (`.mp4`, `.mkv`, `.webm`, `.3gp`, `.m4a`, `.mov`) can be **converted** to samples — the audio track is extracted and saved as a WAV. See *Audio from video files* below.
+
+### Audio from video files
+
+PocketTracker can pull the audio track out of a video (or audio-container) file and turn it into a
+sample — handy for grabbing a sound straight from a clip without a separate converter app.
+
+- **Supported containers:** `.mp4`, `.mkv`, `.webm`, `.3gp`, `.m4a`, `.mov`. The audio track is decoded
+  with the device's built-in codecs (usually AAC).
+- **How:** INSTRUMENT (or INST_POOL) screen → **SAMPLE** field → **A** → file browser → highlight a video
+  file → **A**. A keyboard appears, pre-filled with `<filename>_audio`; edit the name if you like, then
+  confirm.
+- **What happens:** the first audio track is extracted, **saved as a WAV** in
+  `/Documents/PocketTracker/Samples/` (stereo preserved, at the file's own sample rate) and loaded into
+  the current instrument. The status line shows `CONVERTED: <NAME>.WAV`.
+- Because a real WAV is written, the instrument gets a normal, reusable sample file and reopens without
+  re-decoding — the key difference from `.mp3`, which is decoded in memory on every load.
+- **Preview first:** highlight a video file and press **START** to hear it before converting.
+- **Length limits:** conversion extracts up to **60 seconds**; preview is capped at **30 seconds**.
+  Longer files report *"Audio too long"*. A file with no audio track — or a codec the device can't
+  decode — reports an error and nothing is saved.
 
 ### WAV exports
 
@@ -1488,13 +1514,13 @@ C  C# D  D# E  F  F# G  G# A  A# B
 00 01 02 03 04 05 06 07 08 09 0A 0B
 ```
 
-Middle C = `C-4` = MIDI note 60. Full range: `C-0` to `B-9`.
+Middle C = `C-4` = MIDI note 60. Full range: `C-0` to `G-9`.
 
 ---
 
 ## Appendix C: Instrument Slots
 
-All 256 slots (00–FF) start empty in a new project. There are no bundled default samples. Slots without a loaded sample play silence. Slot names are auto-generated as `INST00`–`INSTFF`.
+All 128 slots (00–7F) start empty in a new project. There are no bundled default samples. Slots without a loaded sample play silence. Slot names are auto-generated as `INST00`–`INST7F`.
 
 ---
 
@@ -1755,7 +1781,7 @@ Open with **A** (or SELECT) on an EQ cell.
 | PBN | Pitch Bend | `XX` | 00–7F up, 80–FF down — **persists** |
 | PVB | Vibrato | `XY` | X=speed, Y=depth — **persists** |
 | PVX | Extreme Vibrato | `XY` | 4× deeper, 2× faster than PVB |
-| REP | Repeat/Retrigger | `XY` | Y=0: every X ticks; Y≠0: fade — **persists** |
+| RPT | Repeat/Retrigger | `XY` | Y=0: every X ticks; Y≠0: fade — **persists** |
 | RND | Randomize | `XY` | Randomizes previous FX value |
 | RNL | Randomize Left | `XY` | Randomizes FX in column to the left |
 | SLI | Slice Index | `XX` | Direct slice selection |
@@ -1793,7 +1819,7 @@ Note offsets:  C   C#  D   D#  E   F   F#  G   G#  A   A#  B
 
 What every numeric parameter actually means: the value you edit on screen (its hex/raw range)
 and the real-world unit it maps to. For the DSP internals behind these — the constants you can
-change in source to reshape an effect's character — see `docs/dsp-settings-guide.md`.
+change in source to reshape an effect's character — see `docs/internal/dsp-settings-guide.md`.
 
 > **How to read the "raw" column:** unless noted, parameters are edited as two hex digits
 > `00`–`FF` (0–255). A+UP/DOWN steps by the small step; A+LEFT/RIGHT by the large step;
@@ -1807,7 +1833,7 @@ change in source to reshape an effect's character — see `docs/dsp-settings-gui
 | Mod **SUS** | MODULATION (ADSR/TRIG) | `00`–`FF` | 0–100 % level | Sustain **level**, not a time (`FF` = hold at full depth). |
 | Mod **AMT** | MODULATION (all) | `00`–`FF` | 0–100 % depth | How much the destination is moved. |
 | Delay **TIME** (free) | EFFECTS, SYNC off | `00`–`FF` | 0–2000 ms | ≈ 7.8 ms per step. Default `40` ≈ 500 ms. |
-| Delay **TIME** (sync) | EFFECTS, SYNC on | `00`–`0B` | 12 subdivisions | BPM-locked: `00`=1/1 `01`=1/2 `02`=1/4 `03`=1/8 `04`=1/16 `05`=1/32 `06`=1/4T `07`=1/8T `08`=1/16T `09`=1/4. `0A`=1/8. `0B`=1/16. |
+| Delay **TIME** (sync) | EFFECTS, SYNC on | `00`–`0B` | 12 subdivisions | BPM-locked. Straight: `00`=1/1, `01`=1/2, `02`=1/4, `03`=1/8, `04`=1/16, `05`=1/32. Triplet: `06`=1/4T, `07`=1/8T, `08`=1/16T. Dotted: `09`=1/4., `0A`=1/8., `0B`=1/16. (the trailing dot = a dotted note). |
 | Delay **FDBK** | EFFECTS | `00`–`FF` | 0–100 % feedback | Near `FF` ≈ near-infinite repeats. |
 | Instrument / Table **TIC** | INSTRUMENT, TABLE | — | tics per step | See §12; sets how many tics each table/retrigger step lasts. |
 
@@ -1837,7 +1863,7 @@ change in source to reshape an effect's character — see `docs/dsp-settings-gui
 | Mixer track / master **VOL** | MIXER | `00`–`FF` | silent … +6 dB | `80` = unity (0 dB). |
 | Reverb **SIZE** | EFFECTS | `00`–`FF` | 0.0 – 1.0 feedback | Not a time — higher feedback = longer tail. |
 | Master **DEPTH** (OTT/DUST) | EFFECTS | `00`–`FF` | 0–100 % wet | `00` = bypass. |
-| Sample-editor **LIM** pre-gain | SAMPLE EDITOR (offline LIM FX) | `00`–`FF` | +0 … +12 dB | `1.0 + (v/255)×3.0` linear (×1 … ×4). The always-on master-bus limiter is fixed (not user-set) — see `dsp-settings-guide.md`. |
+| Sample-editor **LIM** pre-gain | SAMPLE EDITOR (offline LIM FX) | `00`–`FF` | +0 … +12 dB | `1.0 + (v/255)×3.0` linear (×1 … ×4). The always-on master-bus limiter is fixed (not user-set) — see `docs/internal/dsp-settings-guide.md`. |
 
 ---
 

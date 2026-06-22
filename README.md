@@ -19,7 +19,7 @@ PocketTracker is a portable music tracker in the tradition of LSDJ, M8, and Litt
 - Per-instrument chain: SVF filter (LP / HP / BP) + bitcrush + drive; constant-power pan
 - Stereo send buses — reverb + ping-pong delay; master bus — OTT 3-band compressor + limiter
 - Modulation engine: 4 slots per instrument (AHD / ADSR / LFO / DRUM / TRIG), 10 destinations including mod-to-mod routing
-- Groove quantization (256 grooves, per-track)
+- Groove quantization (128 grooves, per-track)
 
 ### Sample editor
 - Waveform view with zoom; non-destructive SOURCE (LEFT / RIGHT / STEREO / MONO) and RATE (HIGH / NORM / LOFI)

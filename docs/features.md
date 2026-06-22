@@ -13,7 +13,7 @@ What you can do, what's coming before release, and what's planned for later.
 - Transpose phrases per chain slot — sequence the same phrase in different keys
 - Select cells, rows, or entire screens and copy, cut, paste, or delete them (M8-style selection)
 - Set swing and shuffle per track or globally with groove patterns
-- 256 phrases, 256 chains, 8 tracks, 256 grooves
+- 256 phrases, 256 chains, 8 tracks, 128 grooves
 - Use HOP to jump between phrases mid-sequence — create odd time signatures and generative loops
 
 ### Sequence Effects
@@ -27,6 +27,8 @@ Write these into any phrase step to shape how a note plays:
 - **Pitch slide** — glide to the next note (portamento)
 - **Pitch bend** — continuous pitch movement up or down
 - **Vibrato** — wobble pitch at standard or extreme depth
+- **Pitch offset** — transpose a note by a fixed number of semitones (never affects slice index)
+- **Slice index** — jump straight to a specific slice (works even when slice mode is off)
 - **Delay** — push a note forward by N ticks
 - **Chance** — probability gate: set odds the note actually plays
 - **Randomize** — randomize any other FX value on the fly
@@ -40,7 +42,7 @@ Each instrument has its own 16-row mini-sequencer. It loops continuously while t
 
 ### Instruments
 
-- **Sampler**: load any WAV file (mono or stereo); set root note, detune, volume, pan
+- **Sampler**: load any WAV or MP3 file (mono or stereo); set root note, detune, volume, pan
 - **SoundFont**: load SF2 files; edit envelope (attack, decay, sustain, release), filter cutoff and resonance
 - Loop modes: no loop, forward loop, ping-pong loop
 - Reverse playback
@@ -86,7 +88,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 ### File Management
 
 - Built-in file browser: navigate folders, sort files, preview samples before loading
-- Extract audio from video files directly in the browser
+- Convert video files to samples — extract the audio track (`.mp4`, `.mkv`, `.webm`, `.m4a`, `.mov`) to a WAV right in the file browser, with a preview before converting
 - Rename files (SELECT+A to enter rename with on-screen QWERTY)
 - Delete files and folders (SELECT+B with confirmation)
 - On-screen QWERTY keyboard for naming projects and files
@@ -99,7 +101,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 
 - Theme editor: full RGB palette for every UI color; save and load themes as .ptt files
 - Several built-in themes to start from
-- 8 visualizer modes for the top bar: oscilloscope, octascope (one scope per active track), bars, peaks with hold, mirror, flat, frequency spectrum, spectrum with peak hold
+- 6 visualizer modes for the top bar: oscilloscope, flat line, octascope (one scope per active track), full octascope (all 8 track scopes forced on), frequency spectrum, spectrum with peak hold
 
 ### Controls
 

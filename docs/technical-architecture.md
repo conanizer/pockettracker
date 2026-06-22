@@ -66,6 +66,8 @@ PocketTracker/
 │   ├── audio/
 │   │   ├── IAudioBackend.kt        ✅ Interface — portable
 │   │   └── AudioEngine.kt          ✅ Platform-agnostic coordinator
+│   ├── data/
+│   │   └── TrackerData.kt          ✅ Pure data structures (PORTABLE)
 │   ├── logic/
 │   │   ├── TrackerController.kt    ✅ Navigation, screen state
 │   │   ├── InputController.kt      ✅ Button handling, selection
@@ -80,49 +82,60 @@ PocketTracker/
 │       ├── IFileSystem.kt          ✅ File I/O interface
 │       └── FileInfo.kt             ✅ Platform-agnostic file metadata
 │
+├── input/
+│   ├── AppInputDispatcher.kt       Button-handler logic; wired via AppControllers + AppStateRefs
+│   ├── ButtonHandlers.kt           Input mapping, key combos, key repeat
+│   └── CursorContext.kt            Value-type system + factory methods
+│
 ├── platform/android/
-│   ├── MainActivity.kt             Thin (~1069 lines) — creates backends, wires dispatcher, renders UI
-│   ├── AppInputDispatcher.kt       All button handlers (~2108 lines); wired via AppControllers + AppStateRefs
 │   ├── OboeAudioBackend.kt         ✅ Oboe JNI implementation
 │   ├── AndroidResourceLoader.kt    ✅ R.raw.* loader
 │   ├── AndroidFileSystem.kt        ✅ Scoped storage implementation
 │   └── DeviceAdapter.kt            Android InputDevice API
 │
-├── (root package — com.conanizer.pockettracker)
+├── ui/
 │   ├── EditorHelpers.kt            ✅ Shared rendering utilities (toHex2, toHex8, rowBgColor, darken(), clearEffect…)
-│   ├── PhraseEditorModule.kt       ✅ Portable rendering
-│   ├── ChainEditorModule.kt        ✅
-│   ├── SongEditorModule.kt         ✅
-│   ├── InstrumentModule.kt         ✅
-│   ├── InstrumentPoolModule.kt     ✅ Instrument Pool overview (NAME + V/RV/DE/EQ per slot)
-│   ├── SampleEditorModule.kt       ✅ Full-screen waveform editor
-│   ├── TableModule.kt              ✅
-│   ├── GrooveModule.kt             ✅
-│   ├── ModulationModule.kt         ✅
-│   ├── MixerModule.kt              ✅
-│   ├── EffectModule.kt             ✅ Global send effects (reverb/delay/EQ config)
-│   ├── EqModule.kt                 ✅ 3-band parametric EQ editor (overlay screen)
-│   ├── SettingsModule.kt           ✅ Layout/scaling/overlay/haptics/cursor settings (11 rows)
-│   └── ProjectModule.kt            ✅
+│   ├── PixelPerfectRenderer.kt     Compose rendering + pixel font
+│   └── modules/
+│       ├── PhraseEditorModule.kt   ✅ Portable rendering
+│       ├── ChainEditorModule.kt    ✅
+│       ├── SongEditorModule.kt     ✅
+│       ├── InstrumentModule.kt     ✅
+│       ├── InstrumentPoolModule.kt ✅ Instrument Pool overview (NAME + V/RV/DE/EQ per slot)
+│       ├── SampleEditorModule.kt   ✅ Full-screen waveform editor
+│       ├── TableModule.kt          ✅
+│       ├── GrooveModule.kt         ✅
+│       ├── ModulationModule.kt     ✅
+│       ├── MixerModule.kt          ✅
+│       ├── EffectModule.kt         ✅ Global send effects (reverb/delay/EQ config)
+│       ├── EqModule.kt             ✅ 3-band parametric EQ editor (overlay screen)
+│       ├── SettingsModule.kt       ✅ Layout/scaling/overlay/haptics/cursor settings (12 rows)
+│       └── ProjectModule.kt        ✅
 │
-├── TrackerData.kt                  ✅ Pure data structures (PORTABLE)
-├── PixelPerfectRenderer.kt         Compose rendering + pixel font
+├── MainActivity.kt                 ✅ Root package — thin coordinator (backends + UI wiring)
+│
 └── app/src/main/cpp/               C++ audio engine (PORTABLE)
     ├── audio-engine.cpp / .h       Main engine: processAudioBlock, onAudioReady, renderOffline
     ├── jni-bridge.cpp              JNI entry points only (thin wrapper)
+    ├── native-audio.cpp            15-line stub redirect (legacy entry point)
     ├── sampler-voice.h             Per-voice state for sample-playback voices
     ├── soundfont-voice.h / .cpp    Per-voice state for SF2/TinySoundFont voices
-    ├── mod-system.h                Modulation routing (modSourceValues → modDestValues)
     ├── note-queue.h                Sample-accurate note scheduling queue
-    ├── filter.h                    calculateBiquadCoeffs() (Audio EQ Cookbook)
     ├── audio-defs.h                PARAM_* constants, voice structs
-    ├── tsf.h                       TinySoundFont (single-header SF2 synth)
+    ├── mods/                       Modulation engine (split out of audio-engine.cpp)
+    │   ├── mod-system.h            Routing (modSourceValues → modDestValues)
+    │   ├── mod-runner.h            runModMatrix() orchestration
+    │   ├── modules/                AHD/ADSR/LFO/pitch-slide/vibrato tick functions
+    │   └── primitives/             lfo-oscillator.h (shared LFO/vibrato shaping)
+    ├── vendor/
+    │   └── tsf/tsf.h               TinySoundFont (single-header SF2 synth)
     └── effects/                    DSP module system (three-layer architecture)
         ├── instrument-chain.h      Per-voice chain: Crush → Drive → Filter
         ├── send-chain.h            Stereo send buses: reverb (DaisySP ReverbSc) + delay (ping-pong)
         ├── master-chain.h          Final output bus: masterEq → OttModule|DustChain → LimiterModule
         ├── primitives/
-        │   ├── biquad.h            BiquadState: state-only, coeffs passed at call time (kept for future use)
+        │   ├── biquad.h            BiquadState: state-only, coeffs passed at call time
+        │   ├── filter.h            calculateBiquadCoeffs() (Audio EQ Cookbook)
         │   └── daisysp/            Vendored DaisySP (MIT): svf.h, svf.cpp, dsp.h
         └── modules/
             ├── filter-module.h     FilterModule: LP/HP/BP via daisysp::Svf, setParams() + processMono/Stereo
@@ -132,6 +145,11 @@ PocketTracker/
 ---
 
 ## Target Architecture (After Refactoring)
+
+> **Historical / forward-looking.** This was the original refactoring target and the Linux-port plan.
+> The refactoring is done — the **Current Architecture** file tree above is the authoritative present-day
+> layout. The diagrams below are kept for the cross-platform layering rationale (some still name
+> `native-audio.cpp`, now a 15-line stub; the real engine is `audio-engine.cpp`).
 
 ### Layered Architecture with Platform Abstraction
 
@@ -294,7 +312,7 @@ add it to `processAudioBlock()`. NEVER add processing logic directly to `onAudio
 - ✅ Global frame counter for precise timing
 - ✅ Resonant biquad filters (LP/HP/BP using Audio EQ Cookbook)
 - ✅ Effects chain: Downsample (pre-interp, inline) → Interpolate → Crush → Drive → Filter → Volume
-- ✅ DSP module system: three-layer (Primitive / Module / Chain) — see `docs/plan-dsp-modules.md`
+- ✅ DSP module system: three-layer (Primitive / Module / Chain)
 - ✅ Waveform capture for oscilloscope visualization
 - ✅ SoundFont (SF2) instruments via TinySoundFont (TSF) — see below
 
@@ -432,13 +450,13 @@ ops are the bulk of the pure pass-throughs; finding 4.1 notes they could later b
 - KIL/REL: ADSR release and TSF-native release both work after KIL — ADSR path defers `tsf_channel_note_off` until release completes; TSF REL path uses immediate note_off + silence detection
 - Table effects (HOP, TIC, transpose, volume) work identically to sampler; table arpeggio continues through release tail
 
-**Module System (see `docs/plan-module-system.md`):**
+**Module System:**
 - Phase 0–3: ✅ File split + source/dest arrays + unified routing loop
 - Phase 5–8: ✅ SF mod parity + per-channel render + per-instrument FX + preset overrides
 - Phase 4 (SCALAR mod type): ⏳ Deferred post-MVP
 
 **Architecture debt:**
-- Table processing loop is still duplicated (sampler loop + SF loop). Unification into `processTableTick(IAudioVoice&)` is the next step. See `docs/plan-module-system.md` → Known Architecture Debt.
+- Table processing loop is still duplicated (sampler loop + SF loop). Unification into `processTableTick(IAudioVoice&)` is the next step.
 
 **Linux Implementation (Future):**
 ```cpp
@@ -476,8 +494,8 @@ data class PhraseStep(
     var note: Note = Note.EMPTY,
     var instrument: Int = 0x00,
     var volume: Int = 0xFF,
-    val fx1Type: Int = 0x00,
-    val fx1Value: Int = 0x00,
+    var fx1Type: Int = 0x00,
+    var fx1Value: Int = 0x00,
     // ... fx2, fx3
 )
 
@@ -485,7 +503,7 @@ data class PhraseStep(
 data class Phrase(val id: Int, val steps: Array<PhraseStep>)
 
 @Serializable
-data class Chain(val id: Int, val phraseRefs: IntArray, val transpose: IntArray)
+data class Chain(val id: Int, val phraseRefs: IntArray, val transposeValues: IntArray)
 
 @Serializable
 data class Instrument(
@@ -498,13 +516,15 @@ data class Instrument(
 @Serializable
 data class Project(
     var name: String = "UNTITLED",
-    var tempo: Int = 120,
+    var tempo: Int = 128,
     val phrases: Array<Phrase>,
     val chains: Array<Chain>,
     val instruments: Array<Instrument>,
-    val song: Song
+    val tracks: Array<Track>
 )
 ```
+
+*(Simplified for illustration — `core/data/TrackerData.kt` is authoritative for exact fields, types, and defaults. Pools are sized in `Project`: 256 phrases / 256 chains, 128 instruments / tables / grooves.)*
 
 **Why this is great:**
 - ✅ No Context, no Resources, no Android APIs
@@ -902,7 +922,7 @@ kotlin {
 | **UI** | Jetpack Compose | Android-specific |
 | **Language** | Kotlin 1.9+ | Primary language |
 | **Audio** | C++ with Oboe (OpenSL ES / AAudio) | Already portable! ✅ |
-| **SF2 Synth** | TinySoundFont (TSF) | Single-header, embedded in native-audio.cpp |
+| **SF2 Synth** | TinySoundFont (TSF) | Single-header, vendored at `vendor/tsf/tsf.h` |
 | **Build** | Gradle 8.x | Android build system |
 | **Native Build** | CMake 3.22.1+ | C++ compilation |
 | **Serialization** | Kotlinx Serialization | JSON save/load |
@@ -1005,6 +1025,7 @@ See **REFACTORING_ROADMAP.md** for detailed step-by-step refactoring plan.
 ---
 
 **Version History:**
+- v2.7 (2026-06-22): Doc fact-check (DOCS-REVIEW round 2) — corrected the file tree (`input/`, `ui/`, `ui/modules/`, `core/data/`; C++ `mods/`, `vendor/tsf/`, `effects/primitives/filter.h`); fixed the data-model sample (no `Song` class → `tracks`, `transposeValues`, tempo `128`, fx fields `var`); SettingsModule now 12 rows; removed dead `plan-dsp-modules.md` / `plan-module-system.md` links; modulation files repointed to `audio-engine.cpp` + `mods/`; marked the Target Architecture section historical.
 - v2.6 (2026-06-06): Screen overlay system added (Rendering System section); SettingsModule updated to 11 rows; `drawWithContent` compositing pattern documented.
 - v2.5 (2026-05-18): Fact-checked against codebase — fixed ToC duplicate "10.", send/master-chain stub labels, ADSR release status, SCALAR mod type, package name, private member convention, Modules/ directory path, SampleEditorModule added to file tree.
 - v2.4 (2026-05-05): Module code style unified — `.toHex2()`, `rowBgColor()`, factory-only `getCursorContext()`; EffectModule/EqModule/SettingsModule added to file tree; coding conventions updated to reflect current standards.
@@ -1068,7 +1089,7 @@ See `REFACTORING_ROADMAP.md` Phase 4 for step-by-step implementation guide.
 ## Modulation Engine
 
 **Implemented in:** Phase 4 of MVP Extension Pack 3
-**Files:** `native-audio.cpp` (C++), `AudioEngine.kt`, `IAudioBackend.kt`, `TrackerData.kt`
+**Files:** `audio-engine.cpp` + `mods/` headers (C++), `AudioEngine.kt`, `IAudioBackend.kt`, `TrackerData.kt`
 
 ### Overview
 

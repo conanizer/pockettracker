@@ -18,16 +18,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 📋 Quick Reference
 
-### Current Project State (April 2026)
+### Current Project State (June 2026)
 
-**Status:** All Extension Packs COMPLETE. Testing & Polish phase. Target release: April 2026.
+**Status:** All Extension Packs COMPLETE. Testing & Polish phase. Target release: TBD (original April 2026 target missed — see docs/development-status.md).
 
 **Completed:**
 - ✅ Audio engine (professional-grade, sample-accurate)
 - ✅ All UI screens working
 - ✅ Playback system complete
 - ✅ Architecture refactoring COMPLETE
-- ✅ Effects system (17+ effects including pitch, table, groove, modulation)
+- ✅ Effects system (21 effects including pitch, table, groove, modulation)
 - ✅ Copy/paste system (M8-style selection)
 - ✅ MVP Expansion #1: Mixer, VOL/PAN, Stereo, WAV Export
 - ✅ Extension Pack 2: Tables, HOP/TIC, Pitch Effects
@@ -40,7 +40,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. ~~All above~~ ✅ DONE
 2. **Testing & polish** ← CURRENT
 3. Documentation & demo video
-4. MVP release (April 2026)
+4. MVP release (TBD)
 
 ---
 
@@ -143,7 +143,7 @@ PhraseStep (note, instrument, volume, 3 effect slots)
 ```
 
 **Data Models (TrackerData.kt):**
-- `Note`: MIDI-based note representation (C-0 to B-9), converts to frequency
+- `Note`: MIDI-based note representation (editable range C-0 to G-9), converts to frequency
 - `PhraseStep`: Single row in phrase (note + instrument + volume + 3 FX slots)
 - `Phrase`: 16 steps, identified by ID (0-255)
 - `Chain`: 16 phrase references with per-slot transpose values
@@ -182,7 +182,7 @@ The UI uses a custom pixel-perfect rendering system built on Jetpack Compose Can
 - `TableModule`: 16-row mini-sequencer per instrument
 - `GrooveModule`: Step-timing patterns (swing/shuffle)
 - `ModulationModule`: 4-slot envelope/LFO editor per instrument
-- `SettingsModule`: Layout, scaling, screen overlay, button sound/vibration, cursor settings (opened from Project screen). 11 rows (0-10): LAYOUT, SCALING, OVERLAY (+ STR column), BTN SOUND (+ VOL column), BTN VIBRO (+ POW column), KB INSERT, CURSOR, NOTE PREV, VISUALIZER, THEME, TEMPLATE.
+- `SettingsModule`: Layout, scaling, screen overlay, button sound/vibration, cursor settings (opened from Project screen). 12 rows (0-11): LAYOUT, SCALING, OVERLAY (+ STR column), BTN SOUND (+ VOL column), BTN VIBRO (+ POW column), KB INSERT, CURSOR, NOTE PREV, VISUALIZER, THEME, TEMPLATE, RESUME.
 - `ProjectModule`: Project settings (tempo, name, save/load)
 - `NavigationMapModule`: 80×105px navigation grid display
 - `FileBrowserModule`: File/folder navigation
@@ -230,7 +230,7 @@ Each module receives state objects and renders itself independently.
 - Loaded via `AndroidFileSystem` (implements `IFileSystem`)
 - True stereo WAV playback; SOURCE setting selects LEFT/RIGHT/STEREO/MONO non-destructively
 - Automatic sample rate detection and compensation
-- 256 instrument slots (all identical, all user-loadable, no bundled defaults — all start empty)
+- 128 instrument slots (0x00–0x7F, all identical, all user-loadable, no bundled defaults — all start empty)
 
 **Current Implementation:**
 - `FileController.kt` + `IFileSystem` / `AndroidFileSystem` — portable save/load
@@ -260,7 +260,7 @@ Each module receives state objects and renders itself independently.
 
 ### ✅ COMPLETE: MVP Expansion
 
-**See:** `MVP_EXPANSION_PLAN.md` for full details
+**See:** `docs/development-status.md` for full details
 
 - [x] Instrument VOL/PAN editable in UI
 - [x] True stereo pan (constant-power law) in C++ audio engine
@@ -564,7 +564,7 @@ Categories:
 ```
 Read in this order:
 1. docs/development-status.md - What's done
-2. Current task document (MVP_EXPANSION_PACK_3.md or relevant plan doc)
+2. Current task document (relevant plan under docs/internal/, if any)
 3. docs/technical-architecture.md - How it should work
 ```
 
@@ -697,7 +697,7 @@ project.phrases[0] = project.phrases[0].copy(
 - [ ] Demo video recorded
 - [ ] No known crash bugs
 
-**See:** `MVP_EXPANSION_PLAN.md` for detailed checklist
+**See:** `docs/development-status.md` for detailed checklist
 
 ---
 
@@ -713,5 +713,5 @@ project.phrases[0] = project.phrases[0].copy(
 
 ---
 
-**Version:** 1.2 (Fact-checked against codebase)
-**Last Updated:** 2026-05-18
+**Version:** 1.3 (Fact-checked against codebase)
+**Last Updated:** 2026-06-22
