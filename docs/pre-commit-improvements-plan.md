@@ -19,8 +19,28 @@ Effort: **S**/**M**/**L**. Open decisions marked 🟡 (need a call before coding
 
 ## Build progress — 2026-06-21
 
-On branch `code-review-3-round2`, each item device-tested before its commit. Build order so far:
-**10 → 5 → 12 → 8 → 6 → 7 → 2 → 4 → 1 → 9 → 13.** Remaining: **3.**
+On branch `code-review-3-round2`, each item device-tested before its commit. Build order:
+**10 → 5 → 12 → 8 → 6 → 7 → 2 → 4 → 1 → 9 → 13 → 3.** **All 12 items shipped.**
+
+- ✅ **#3 A opens / B back (press-vs-release)** (`2825c89`) — device-tested on every screen incl. the
+  SAMPLE_EDITOR EQ tap-A. Pre-commit hook confirmed Kotlin compiles.
+  Generic deferral added to the InputMapper: `deferAToRelease` / `deferBToRelease` predicates (new
+  `ButtonHandlers` fields) + `aPressedAlone` / `bPressedAlone`. On an A/B press the single action is
+  **held**; it fires on **release** only if no A/B-combo intervened (each combo clears the flag).
+  Dispatcher wires `deferAToRelease = currentCellOpensSubScreen()` and `deferBToRelease = eqEditorState.isOpen`.
+  New `openSubScreenAtCursor(peek)` is the single source of truth for the sub-screen-opening cells —
+  **EQ cells on INSTRUMENT/INST_POOL/MIXER/EFFECTS** + **PROJECT/INSTRUMENT NAME** — called from
+  `handleButtonA` (deferred-A path) and reused by `handleSelect` (the SELECT alias, via the extracted
+  `openProjectNameEditor` / `openInstrumentNameEditor`). `handleButtonB` now closes the EQ editor (B,
+  deferred so B+LEFT/RIGHT preset cycling survives; SELECT still closes). **Scope choices:** (a) on the
+  **SAMPLE_EDITOR**, tap-A opens the EQ editor only on the **EQ-effect slot cell** (row 16 · col 1 ·
+  fxType EQ) — col 2 = APPLY keeps its destructive A-action and the NAME row keeps its own A-handler;
+  the editor closes on B globally. *(Added at the developer's request for full consistency after the
+  other screens were device-tested.)* (b) Implemented as a direct
+  dispatcher predicate rather than the planned `CursorContext.opensSubScreenOnA` flag — reading the flag
+  would mean building heavy state objects (MixerState/InstrumentState/…) on every button press; the
+  direct check reads the same cursor state for free. Behaviour matches the plan. Manual + input-system
+  docs updated (A opens / B closes). **Test every A/B on every screen for regressions before commit.**
 
 - ✅ **#10 File browser** (`b3e161f`) — date `YY-MM-DD → DD-MM-YY`; shared `FileBrowserModule.clipName()`:
   list names clip to 20 (18+`..`), DELETE prompt to 16 so it stays inside the 640px line.
@@ -208,7 +228,7 @@ make SPECT / SPECT.P decay smoothly after stop on every screen.
 
 ---
 
-## 3. Controls consistency — A opens sub-screens, B goes back (press-vs-release)
+## 3. Controls consistency — A opens sub-screens, B goes back (press-vs-release)  ✅ shipped (2825c89)
 
 **Goal:** Make **A = open / B = back** consistent for the overlay-opening cells, without losing the
 A+DPAD (edit) and B+DPAD (preset scroll) combos that share those buttons. Mechanism: a single A/B
