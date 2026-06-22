@@ -884,6 +884,7 @@ class AudioEngine(
         reverse: Boolean,
         loopMode: Int,
         loopStart: Int,
+        loopEnd: Int,
         drive: Int,
         crush: Int,
         downsample: Int,
@@ -892,7 +893,7 @@ class AudioEngine(
         filterRes: Int
     ) {
         backend.setInstrumentParams(
-            instrumentId, startPoint, endPoint, reverse, loopMode, loopStart,
+            instrumentId, startPoint, endPoint, reverse, loopMode, loopStart, loopEnd,
             drive, crush, downsample, filterType, filterCut, filterRes
         )
     }
@@ -918,6 +919,7 @@ class AudioEngine(
             reverse = instrument.reverse,
             loopMode = loopModeInt,
             loopStart = instrument.loopStart,
+            loopEnd = instrument.loopEnd,
             drive = instrument.drive,
             crush = instrument.crush,
             downsample = instrument.downsample,

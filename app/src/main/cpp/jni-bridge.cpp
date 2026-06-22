@@ -84,11 +84,11 @@ Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1getSampleRate(JNIEnv
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1setInstrumentParams(
         JNIEnv *env, jobject thiz, jint instrumentId, jint start, jint end,
-        jboolean reverse, jint loopMode, jint loopStart,
+        jboolean reverse, jint loopMode, jint loopStart, jint loopEnd,
         jint drive, jint crush, jint downsample,
         jint filterType, jint filterCut, jint filterRes) {
     if (engine) {
-        engine->setInstrumentParams(instrumentId, start, end, reverse, loopMode, loopStart,
+        engine->setInstrumentParams(instrumentId, start, end, reverse, loopMode, loopStart, loopEnd,
                                     drive, crush, downsample, filterType, filterCut, filterRes);
     }
 }
@@ -354,11 +354,11 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getWa
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setInstrumentParams(
         JNIEnv *env, jobject thiz, jint instrumentId, jint start, jint end,
-        jboolean reverse, jint loopMode, jint loopStart,
+        jboolean reverse, jint loopMode, jint loopStart, jint loopEnd,
         jint drive, jint crush, jint downsample,
         jint filterType, jint filterCut, jint filterRes) {
     if (engine) {
-        engine->setInstrumentParams(instrumentId, start, end, reverse, loopMode, loopStart,
+        engine->setInstrumentParams(instrumentId, start, end, reverse, loopMode, loopStart, loopEnd,
                                     drive, crush, downsample, filterType, filterCut, filterRes);
     }
 }
@@ -853,7 +853,7 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setSo
         JNIEnv *env, jobject thiz, jint sampleId, jint filterType, jint filterCut, jint filterRes) {
     if (engine) {
         engine->setInstrumentParams((int)sampleId,
-            0, 255, false, 0, 0, // start, end, reverse, loop, loopSt
+            0, 255, false, 0, 0, 255, // start, end, reverse, loop, loopSt, loopEnd
             0, 0, 0,             // drive, crush, downsample
             (int)filterType, (int)filterCut, (int)filterRes);
     }

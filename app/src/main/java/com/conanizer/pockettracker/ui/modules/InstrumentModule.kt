@@ -26,7 +26,7 @@ import java.io.File
  *   0  TYPE + LOAD + SAVE
  *   1  NAME (instrument.name, read-only)
  *   2  ROOT + DETUNE + TIC  (triple: col 1 / 3 / 5)
- *   3  VOL + PAN  (dual: col 1 / 3)
+ *   3  VOL + SLICE + PAN  (triple: col 1 / 3 / 5)
  *   4  SPACER
  *   5  SAMPLE section: filename + LOAD WAV (col 2) + EDIT (col 3)
  *   6  SPACER
@@ -34,11 +34,11 @@ import java.io.File
  *   8  CRUSH + FREQ
  *   9  DWNSMPL + RES
  *  10  SPACER
- *  11  START + REV
- *  12  END + DEL
- *  13  REVERSE + EQ
- *  14  LOOP
- *  15  LOOP ST
+ *  11  REV + DEL
+ *  12  EQ  (col 1; " >" opens the EQ editor)
+ *  13  LOOP + START
+ *  14  LOOP ST + END
+ *  15  LOOP END + REVERSE
  *
  * Soundfont row layout (0-14):
  *   0  TYPE + LOAD + SAVE
@@ -125,13 +125,24 @@ class InstrumentModule : TrackerModule {
         )
         rowY += ROW_HEIGHT; currentRow++
 
-        // ── ROW 3: VOL + PAN ──────────────────────────────────────────────────
-        drawDualParameterRow(
-            x, rowY, scale, nameColumnX, valueColumnX,
-            "VOL", instrument.volume.toHex2(),
-            "PAN", instrument.pan.toHex2(),
-            instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
-        )
+        // ── ROW 3: VOL + PAN (soundfont) / VOL + SLICE + PAN (sampler) ───────
+        if (isSoundFont) {
+            drawDualParameterRow(
+                x, rowY, scale, nameColumnX, valueColumnX,
+                "VOL", instrument.volume.toHex2(),
+                "PAN", instrument.pan.toHex2(),
+                instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
+            )
+        } else {
+            val sliceModeStr = listOf("OFF", "CUT", "TRU")[instrument.slicingMode.coerceIn(0, 2)]
+            drawTripleParameterRow(
+                x, rowY, scale, nameColumnX,
+                "VOL",   instrument.volume.toHex2(),
+                "SLICE", sliceModeStr,
+                "PAN",   instrument.pan.toHex2(),
+                instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
+            )
+        }
         rowY += ROW_HEIGHT; currentRow++
 
         // ── ROW 4: SPACER ─────────────────────────────────────────────────────
@@ -224,58 +235,52 @@ class InstrumentModule : TrackerModule {
                 drawEqCell(valueColumnX, textY, scale, instrument.eqSlot, eqCursor, t)
             }
         } else {
-            // ROW 11: START + REV
+            // ROW 11: REV + DEL (send levels)
             drawDualParameterRow(
                 x, rowY, scale, nameColumnX, valueColumnX,
-                "START", instrument.sampleStart.toHex2(),
-                "REV",   instrument.reverbSend.toHex2(),
-                instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
-            )
-            rowY += ROW_HEIGHT; currentRow++
-
-            // ROW 12: END + DEL
-            drawDualParameterRow(
-                x, rowY, scale, nameColumnX, valueColumnX,
-                "END", instrument.sampleEnd.toHex2(),
+                "REV", instrument.reverbSend.toHex2(),
                 "DEL", instrument.delaySend.toHex2(),
                 instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
             )
             rowY += ROW_HEIGHT; currentRow++
 
-            // ROW 13: REVERSE + EQ — EQ needs the dim-"--"/bright-" >" treatment, so the EQ half is
-            // drawn manually instead of through the generic dual-row helper.
+            // ROW 12: EQ (alone, col 1) — value dims to "--" when unassigned; " >" opens the EQ editor.
             run {
                 val textY = rowY + TEXT_PADDING
                 val onRow = instrumentState.cursorRow == currentRow
                 if (onRow) drawRowBg(x, rowY, scale, t)
-                val revCursor = onRow && instrumentState.cursorColumn == 1
-                drawBitmapText("REVERSE", nameColumnX, textY, scale,
-                    if (revCursor) Color(t.textCursor) else Color(t.textParam), CHAR_SPACING, FONT_SCALE)
-                drawBitmapText(if (instrument.reverse) "on" else "off", valueColumnX, textY, scale,
-                    if (revCursor) Color(t.textCursor) else Color(t.textValue), CHAR_SPACING, FONT_SCALE)
-                val eqCursor = onRow && instrumentState.cursorColumn == 3
-                drawBitmapText("EQ", nameColumnX + 230, textY, scale,
-                    if (eqCursor) Color(t.textCursor) else Color(t.textParam), CHAR_SPACING, FONT_SCALE)
-                drawEqCell(valueColumnX + 220, textY, scale, instrument.eqSlot, eqCursor, t)
+                val eqCursor = onRow && instrumentState.cursorColumn == 1
+                drawBitmapText("EQ", nameColumnX, textY, scale,
+                    if (onRow) Color(t.textCursor) else Color(t.textParam), CHAR_SPACING, FONT_SCALE)
+                drawEqCell(valueColumnX, textY, scale, instrument.eqSlot, eqCursor, t)
             }
             rowY += ROW_HEIGHT; currentRow++
 
-            // ROW 14: LOOP + SLICE
-            val sliceModeStr = listOf("OFF", "CUT", "TRU")[instrument.slicingMode]
+            // ROW 13: LOOP + START
             drawDualParameterRow(
                 x, rowY, scale, nameColumnX, valueColumnX,
-                "LOOP", instrument.loopMode,
-                "SLICE", sliceModeStr,
+                "LOOP",  instrument.loopMode,
+                "START", instrument.sampleStart.toHex2(),
                 instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
             )
             rowY += ROW_HEIGHT; currentRow++
 
-            // ROW 15: LOOP ST
-            drawParameterRow(x, rowY, scale, nameColumnX, valueColumnX,
+            // ROW 14: LOOP ST + END
+            drawDualParameterRow(
+                x, rowY, scale, nameColumnX, valueColumnX,
                 "LOOP ST", instrument.loopStart.toHex2(),
-                isCursorOnName  = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 0,
-                isCursorOnValue = instrumentState.cursorRow == currentRow && instrumentState.cursorColumn == 1,
-                t = t)
+                "END",     instrument.sampleEnd.toHex2(),
+                instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
+            )
+            rowY += ROW_HEIGHT; currentRow++
+
+            // ROW 15: LOOP END + REVERSE
+            drawDualParameterRow(
+                x, rowY, scale, nameColumnX, valueColumnX,
+                "LOOP END", instrument.loopEnd.toHex2(),
+                "REVERSE",  if (instrument.reverse) "on" else "off",
+                instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
+            )
         }
 
         // ── Status message ────────────────────────────────────────────────────
@@ -493,9 +498,17 @@ class InstrumentModule : TrackerModule {
                 else -> CursorContextFactory.none()
             }
 
-            row == 3 -> when (col) {  // VOL + PAN
+            row == 3 -> if (isSoundFont) when (col) {  // VOL + PAN
                 1 -> CursorContextFactory.hexByte(state.instrument.volume, 0, 255, default = 0xFF)
                 3 -> CursorContextFactory.hexByte(state.instrument.pan, 0, 255, default = 0x80)
+                else -> CursorContextFactory.none()
+            } else when (col) {  // VOL + SLICE + PAN (triple)
+                1 -> CursorContextFactory.hexByte(state.instrument.volume, 0, 255, default = 0xFF)
+                3 -> {
+                    val sliceModes = listOf("OFF", "CUT", "TRU")
+                    CursorContextFactory.toggleTernary(sliceModes[state.instrument.slicingMode.coerceIn(0, 2)], sliceModes)
+                }
+                5 -> CursorContextFactory.hexByte(state.instrument.pan, 0, 255, default = 0x80)
                 else -> CursorContextFactory.none()
             }
 
@@ -544,36 +557,31 @@ class InstrumentModule : TrackerModule {
                     canInsert = state.instrument.eqSlot < 0)
 
             // Sampler-specific tail
-            !isSoundFont && row == 11 -> when (col) {  // START + REV
-                1 -> CursorContextFactory.hexByte(state.instrument.sampleStart, 0, 255, default = 0x00)
-                3 -> CursorContextFactory.hexByte(state.instrument.reverbSend, 0, 255, default = 0x00)
-                else -> CursorContextFactory.none()
-            }
-            !isSoundFont && row == 12 -> when (col) {  // END + DEL
-                1 -> CursorContextFactory.hexByte(state.instrument.sampleEnd, 0, 255, default = 0xFF)
+            !isSoundFont && row == 11 -> when (col) {  // REV + DEL
+                1 -> CursorContextFactory.hexByte(state.instrument.reverbSend, 0, 255, default = 0x00)
                 3 -> CursorContextFactory.hexByte(state.instrument.delaySend, 0, 255, default = 0x00)
                 else -> CursorContextFactory.none()
             }
-            !isSoundFont && row == 13 -> when (col) {  // REVERSE + EQ
-                1 -> CursorContextFactory.toggleBinary(state.instrument.reverse)
-                3 -> CursorContextFactory.hexByte(
+            !isSoundFont && row == 12 -> if (col == 1) CursorContextFactory.hexByte(  // EQ (alone)
                     if (state.instrument.eqSlot < 0) 0 else state.instrument.eqSlot,
                     min = 0, max = 127, emptyValue = -1,
                     canDelete = state.instrument.eqSlot >= 0,
                     canInsert = state.instrument.eqSlot < 0)
-                else -> CursorContextFactory.none()
-            }
-            !isSoundFont && row == 14 -> when (col) {  // LOOP + SLICE
+                else CursorContextFactory.none()
+            !isSoundFont && row == 13 -> when (col) {  // LOOP + START
                 1 -> CursorContextFactory.toggleTernary(state.instrument.loopMode, listOf("off", "fwd", "png"))
-                3 -> {
-                    val sliceModes = listOf("OFF", "CUT", "TRU")
-                    CursorContextFactory.toggleTernary(sliceModes[state.instrument.slicingMode.coerceIn(0, 2)], sliceModes)
-                }
+                3 -> CursorContextFactory.hexByte(state.instrument.sampleStart, 0, 255, default = 0x00)
                 else -> CursorContextFactory.none()
             }
-            !isSoundFont && row == 15 -> {  // LOOP ST
-                if (col == 0) CursorContextFactory.readOnly()
-                else CursorContextFactory.hexByte(state.instrument.loopStart, 0, 255, default = 0x00)
+            !isSoundFont && row == 14 -> when (col) {  // LOOP ST + END
+                1 -> CursorContextFactory.hexByte(state.instrument.loopStart, 0, 255, default = 0x00)
+                3 -> CursorContextFactory.hexByte(state.instrument.sampleEnd, 0, 255, default = 0xFF)
+                else -> CursorContextFactory.none()
+            }
+            !isSoundFont && row == 15 -> when (col) {  // LOOP END + REVERSE
+                1 -> CursorContextFactory.hexByte(state.instrument.loopEnd, 0, 255, default = 0xFF)
+                3 -> CursorContextFactory.toggleBinary(state.instrument.reverse)
+                else -> CursorContextFactory.none()
             }
 
             else -> CursorContextFactory.none()
@@ -618,13 +626,29 @@ class InstrumentModule : TrackerModule {
                 }
             }
 
-            row == 3 -> when (col) {  // VOL + PAN
+            row == 3 -> if (isSoundFont) when (col) {  // VOL + PAN
                 1 -> when (action) {
                     is InputAction.SET_VALUE ->
                         instrumentController.updateVolume(state.instrument, action.value)
                     else -> {}
                 }
                 3 -> when (action) {
+                    is InputAction.SET_VALUE ->
+                        instrumentController.updatePan(state.instrument, action.value)
+                    else -> {}
+                }
+            } else when (col) {  // VOL + SLICE + PAN (triple)
+                1 -> when (action) {
+                    is InputAction.SET_VALUE ->
+                        instrumentController.updateVolume(state.instrument, action.value)
+                    else -> {}
+                }
+                3 -> when (action) {
+                    is InputAction.SET_VALUE ->
+                        instrumentController.updateSlicingMode(state.instrument, action.value)
+                    else -> {}
+                }
+                5 -> when (action) {
                     is InputAction.SET_VALUE ->
                         instrumentController.updatePan(state.instrument, action.value)
                     else -> {}
@@ -703,22 +727,10 @@ class InstrumentModule : TrackerModule {
             }
 
             // Sampler tail rows
-            !isSoundFont && row == 11 -> when (col) {  // START + REV
+            !isSoundFont && row == 11 -> when (col) {  // REV + DEL
                 1 -> when (action) {
-                    is InputAction.SET_VALUE ->
-                        instrumentController.updateSampleStart(state.instrument, action.value)
-                    else -> {}
-                }
-                3 -> when (action) {
                     is InputAction.SET_VALUE ->
                         instrumentController.updateReverbSend(state.instrument, action.value)
-                    else -> {}
-                }
-            }
-            !isSoundFont && row == 12 -> when (col) {  // END + DEL
-                1 -> when (action) {
-                    is InputAction.SET_VALUE ->
-                        instrumentController.updateSampleEnd(state.instrument, action.value)
                     else -> {}
                 }
                 3 -> when (action) {
@@ -727,23 +739,16 @@ class InstrumentModule : TrackerModule {
                     else -> {}
                 }
             }
-            !isSoundFont && row == 13 -> when (col) {  // REVERSE + EQ
-                1 -> when (action) {
-                    is InputAction.SET_VALUE ->
-                        instrumentController.updateReverse(state.instrument, action.value == 1)
-                    else -> {}
-                }
-                3 -> when (action) {
-                    is InputAction.SET_VALUE ->
-                        instrumentController.updateEqSlot(state.instrument, action.value)
-                    is InputAction.DELETE ->
-                        instrumentController.updateEqSlot(state.instrument, -1)
-                    is InputAction.INSERT_DEFAULT ->
-                        instrumentController.updateEqSlot(state.instrument, 0)
-                    else -> {}
-                }
+            !isSoundFont && row == 12 -> when (action) {  // EQ (alone)
+                is InputAction.SET_VALUE ->
+                    instrumentController.updateEqSlot(state.instrument, action.value)
+                is InputAction.DELETE ->
+                    instrumentController.updateEqSlot(state.instrument, -1)
+                is InputAction.INSERT_DEFAULT ->
+                    instrumentController.updateEqSlot(state.instrument, 0)
+                else -> {}
             }
-            !isSoundFont && row == 14 -> when (col) {  // LOOP + SLICE
+            !isSoundFont && row == 13 -> when (col) {  // LOOP + START
                 1 -> when (action) {
                     is InputAction.SET_VALUE -> {
                         val loopModes = listOf("off", "fwd", "png")
@@ -754,15 +759,33 @@ class InstrumentModule : TrackerModule {
                 }
                 3 -> when (action) {
                     is InputAction.SET_VALUE ->
-                        instrumentController.updateSlicingMode(state.instrument, action.value)
+                        instrumentController.updateSampleStart(state.instrument, action.value)
                     else -> {}
                 }
-                else -> {}
             }
-            !isSoundFont && row == 15 -> when (action) {  // LOOP ST
-                is InputAction.SET_VALUE ->
-                    instrumentController.updateLoopStart(state.instrument, action.value)
-                else -> {}
+            !isSoundFont && row == 14 -> when (col) {  // LOOP ST + END
+                1 -> when (action) {
+                    is InputAction.SET_VALUE ->
+                        instrumentController.updateLoopStart(state.instrument, action.value)
+                    else -> {}
+                }
+                3 -> when (action) {
+                    is InputAction.SET_VALUE ->
+                        instrumentController.updateSampleEnd(state.instrument, action.value)
+                    else -> {}
+                }
+            }
+            !isSoundFont && row == 15 -> when (col) {  // LOOP END + REVERSE
+                1 -> when (action) {
+                    is InputAction.SET_VALUE ->
+                        instrumentController.updateLoopEnd(state.instrument, action.value)
+                    else -> {}
+                }
+                3 -> when (action) {
+                    is InputAction.SET_VALUE ->
+                        instrumentController.updateReverse(state.instrument, action.value == 1)
+                    else -> {}
+                }
             }
         }
 
@@ -776,17 +799,17 @@ class InstrumentModule : TrackerModule {
  * STATE DATA FOR INSTRUMENT SCREEN
  *
  * cursorRow:
- *   SAMPLER: 0=TYPE, 1=NAME, 2=SPACER, 3=SAMPLE section, 4=ROOT+DET+TIC,
- *            5=VOL+PAN, 6=SPACER, 7=DRIVE+FILTER, 8=CRUSH+FREQ, 9=DWNSMPL+RES,
- *            10=SPACER, 11=START+REV, 12=END+DEL, 13=REVERSE+EQ, 14=LOOP, 15=LOOP ST
- *   SOUNDFONT: 0=TYPE, 1=NAME, 2=SPACER, 3=SF section, 4=PRESET, 5=ROOT+DET+TIC,
- *              6=VOL+PAN, 7=SPACER, 8=DRIVE+FILTER, 9=CRUSH+FREQ, 10=DWNSMPL+RES,
- *              11=SPACER, 12=REV, 13=DEL, 14=EQ
+ *   SAMPLER:   0=TYPE, 1=NAME, 2=ROOT+DET+TIC, 3=VOL+SLICE+PAN, 4=SPACER, 5=SAMPLE section,
+ *              6=SPACER, 7=DRIVE+FILTER, 8=CRUSH+FREQ, 9=DWNSMPL+RES, 10=SPACER, 11=REV+DEL,
+ *              12=EQ, 13=LOOP+START, 14=LOOP ST+END, 15=LOOP END+REVERSE
+ *   SOUNDFONT: 0=TYPE, 1=NAME, 2=ROOT+DET+TIC, 3=VOL+PAN, 4=SPACER, 5=SF section, 6=PRESET,
+ *              7=SPACER, 8=DRIVE+FILTER, 9=CRUSH+FREQ, 10=DWNSMPL+RES, 11=SPACER, 12=REV,
+ *              13=DEL, 14=EQ
  *
  * cursorColumn:
  *   0=name label, 1=value1, 2=button/name2, 3=value2/button
- *   Triple rows additionally use: 5=value3
- *   Row 3 source section: cursor lives at col 2 (LOAD) or col 3 (EDIT, sampler only)
+ *   Triple rows (2 and, on the sampler, 3) additionally use: 5=value3
+ *   Row 5 source section: cursor lives at col 2 (LOAD) or col 3 (EDIT, sampler only)
  */
 data class InstrumentState(
     val instrument: Instrument,

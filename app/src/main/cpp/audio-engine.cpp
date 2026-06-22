@@ -1415,7 +1415,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             int sl = voice.sampleLength;
             voice.actualStart     = std::max(0,             std::min((int)(rawStart * sl / 255.0f), sl - 2));
             voice.actualEnd       = std::max(voice.actualStart + 1, std::min((int)(rawEnd * sl / 255.0f), sl - 1));
-            voice.actualLoopStart = std::max(voice.actualStart, std::min((int)(rawLoop * sl / 255.0f), voice.actualEnd));
+            voice.actualLoopStart = std::max(voice.actualStart, std::min((int)(rawLoop * sl / 255.0f), voice.actualEnd - 1));
+            voice.actualLoopEnd   = std::max(voice.actualLoopStart + 1, std::min((int)((float)voice.loopEndNorm * sl / 255.0f), voice.actualEnd));
         }
 
         for (int i = 0; i < numFrames; i++) {
@@ -1569,7 +1570,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
             if (!voice.isActive) break;
 
-            if (voice.loopMode == 2) {
+            // Active looping is bounded by LOOP END (region [loopStart, loopEnd]). Once loopReleasing
+            // is set (ADSR note-off on a looping voice) the loop is abandoned: every mode runs forward
+            // to actualEnd so the [loopEnd, end] tail plays out under the release envelope, then fades.
+            if (voice.loopMode == 2 && !voice.loopReleasing) {
                 if (voice.loopingBack) {
                     voice.position -= modulatedRate;
                     if (voice.position <= voice.actualLoopStart) {
@@ -1578,12 +1582,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     }
                 } else {
                     voice.position += modulatedRate;
-                    if (voice.position >= voice.actualEnd) {
+                    if (voice.position >= voice.actualLoopEnd) {
                         voice.loopingBack = true;
-                        voice.position = (float)voice.actualEnd;
+                        voice.position = (float)voice.actualLoopEnd;
                     }
                 }
-            } else if (voice.reverse) {
+            } else if (voice.reverse && !voice.loopReleasing) {
                 voice.position -= modulatedRate;
                 if (voice.position <= voice.actualStart) {
                     if (voice.loopMode == 1) {
@@ -1596,8 +1600,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 }
             } else {
                 voice.position += modulatedRate;
-                if (voice.position >= voice.actualEnd) {
-                    if (voice.loopMode == 1) {
+                bool activeForwardLoop = (voice.loopMode == 1 && !voice.loopReleasing);
+                float fwdBoundary = activeForwardLoop ? (float)voice.actualLoopEnd : (float)voice.actualEnd;
+                if (voice.position >= fwdBoundary) {
+                    if (activeForwardLoop) {
                         voice.position = (float)voice.actualLoopStart;
                     } else {
                         voice.position = (float)(voice.actualEnd - 1);
@@ -2408,7 +2414,10 @@ void AudioEngine::triggerNoteOff(int trackId) {
                 }
             }
         }
-        if (!hasRelease) {
+        if (hasRelease) {
+            // Looping voice: leave the loop so the [loopEnd, end] tail plays out under the release env.
+            if (voices[v].loopMode != 0) voices[v].loopReleasing = true;
+        } else {
             voices[v].stop();
         }
     }

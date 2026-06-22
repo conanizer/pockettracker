@@ -408,6 +408,7 @@ class RenderController(
                 reverse       = instrument.reverse,
                 loopMode      = loopModeInt,
                 loopStart     = instrument.loopStart,
+                loopEnd       = instrument.loopEnd,
                 drive         = instrument.drive,
                 crush         = instrument.crush,
                 downsample    = instrument.downsample,

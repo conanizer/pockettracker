@@ -27,9 +27,14 @@ struct Voice : public IAudioVoice {
     int actualStart;     // Actual sample index to start from
     int actualEnd;       // Actual sample index to end at
     int actualLoopStart; // Actual sample index to loop from
+    int actualLoopEnd;   // Actual sample index the loop wraps at (top of [loopStart, loopEnd])
+    int loopEndNorm;     // Loop end as the raw 0-255 instrument value (actualLoopEnd recomputed per block)
     bool reverse;        // Play backwards
     int loopMode;        // 0=off, 1=forward, 2=ping-pong
     bool loopingBack;    // For ping-pong mode direction
+    // Set when an ADSR release begins on a looping voice: the loop is abandoned and playback runs
+    // from the current position through to actualEnd (the [loopEnd, end] tail) under the release env.
+    bool loopReleasing;
 
     // Per-voice effect chain (filter, and future drive/crush modules)
     InstrumentChain chain;
@@ -84,8 +89,8 @@ struct Voice : public IAudioVoice {
               position(0), trackId(-1), playbackRate(1.0f), basePlaybackRate(1.0f), volume(1.0f),
               panLeft(0.707f), panRight(0.707f),
               prevPanLeft(0.707f), prevPanRight(0.707f),
-              actualStart(0), actualEnd(0), actualLoopStart(0),
-              reverse(false), loopMode(0), loopingBack(false),
+              actualStart(0), actualEnd(0), actualLoopStart(0), actualLoopEnd(0), loopEndNorm(255),
+              reverse(false), loopMode(0), loopingBack(false), loopReleasing(false),
               tableId(-1), tableRow(0), lastProcessedRow(-1), tableTicRate(6), tableTicCounter(0),
               tableTranspose(0.0f), tableVolume(1.0f),
               noteOctave(-1), notePitch(0),
@@ -126,17 +131,23 @@ struct Voice : public IAudioVoice {
         actualStart = (int)(((int64_t)effectiveStartPoint * length) / 255);
         actualEnd   = (int)(((int64_t)effectiveEndPoint   * length) / 255);
         actualLoopStart = (int)(((int64_t)instrParams.loopStart * length) / 255);
+        actualLoopEnd   = (int)(((int64_t)instrParams.loopEnd   * length) / 255);
 
         // Clamp to valid range
         actualStart = std::max(0, std::min(actualStart, length - 1));
         actualEnd = std::max(0, std::min(actualEnd, length - 1));
-        actualLoopStart = std::max(actualStart, std::min(actualLoopStart, actualEnd));
 
         // Ensure start < end
         if (actualStart >= actualEnd) {
             actualStart = 0;
             actualEnd = length - 1;
         }
+
+        // Loop region: loopStart ∈ [start, end-1], loopEnd ∈ [loopStart+1, end] (always a non-empty loop).
+        actualLoopStart = std::max(actualStart, std::min(actualLoopStart, actualEnd - 1));
+        actualLoopEnd   = std::max(actualLoopStart + 1, std::min(actualLoopEnd, actualEnd));
+        loopEndNorm     = instrParams.loopEnd;
+        loopReleasing   = false;
 
         // Set playback parameters
         reverse = instrParams.reverse;
@@ -295,7 +306,12 @@ struct Voice : public IAudioVoice {
                 hasRelease = true;
             }
         }
-        if (!hasRelease) stop();
+        if (hasRelease) {
+            // Looping voice: abandon the loop so playback runs out into the [loopEnd, end] tail.
+            if (loopMode != 0) loopReleasing = true;
+        } else {
+            stop();
+        }
     }
 
     void setVolume(float v) override { volume = v; params.setBase(PARAM_VOL, v); }

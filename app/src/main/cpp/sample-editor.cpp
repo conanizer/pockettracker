@@ -735,7 +735,7 @@ void AudioEngine::setMasterEqSlot(int slot) {
             preset.bands[b].gainDb, preset.bands[b].q);
 }
 
-void AudioEngine::setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt,
+void AudioEngine::setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt, int loopEn,
                                       int drv, int crsh, int dwn, int fType, int fCut, int fRes) {
     if (instrumentId < 0 || instrumentId >= 256) return;
 
@@ -744,6 +744,7 @@ void AudioEngine::setInstrumentParams(int instrumentId, int start, int end, bool
     instrumentParams[instrumentId].reverse = rev;
     instrumentParams[instrumentId].loopMode = loop;
     instrumentParams[instrumentId].loopStart = loopSt;
+    instrumentParams[instrumentId].loopEnd = loopEn;
     instrumentParams[instrumentId].drive = drv;
     instrumentParams[instrumentId].crush = crsh;
     instrumentParams[instrumentId].downsample = dwn;
@@ -751,6 +752,6 @@ void AudioEngine::setInstrumentParams(int instrumentId, int start, int end, bool
     instrumentParams[instrumentId].filterCut = fCut;
     instrumentParams[instrumentId].filterRes = fRes;
 
-    LOGD("Instrument %d params: start=%d, end=%d, rev=%d, loop=%d, loopStart=%d, drive=%d, crush=%d, downsample=%d, filter=%d, cut=%d, res=%d",
-         instrumentId, start, end, rev, loop, loopSt, drv, crsh, dwn, fType, fCut, fRes);
+    LOGD("Instrument %d params: start=%d, end=%d, rev=%d, loop=%d, loopStart=%d, loopEnd=%d, drive=%d, crush=%d, downsample=%d, filter=%d, cut=%d, res=%d",
+         instrumentId, start, end, rev, loop, loopSt, loopEn, drv, crsh, dwn, fType, fCut, fRes);
 }

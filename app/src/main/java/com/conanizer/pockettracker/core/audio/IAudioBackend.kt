@@ -266,6 +266,7 @@ interface IAudioBackend {
      * @param reverse Play backwards if true
      * @param loopMode 0=off, 1=forward loop, 2=ping-pong loop
      * @param loopStart Loop restart position (0-255)
+     * @param loopEnd Loop wrap position (0-255, 255=sample end); with ADSR, [loopEnd, end] is the release tail
      * @param drive Distortion amount (0-255)
      * @param crush Bit crushing amount (0-15, 0=16-bit, 15=1-bit)
      * @param downsample Downsampling factor (0-15, 0=no downsampling)
@@ -280,6 +281,7 @@ interface IAudioBackend {
         reverse: Boolean,
         loopMode: Int,
         loopStart: Int,
+        loopEnd: Int,
         drive: Int,
         crush: Int,
         downsample: Int,

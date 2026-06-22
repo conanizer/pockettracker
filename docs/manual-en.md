@@ -439,7 +439,9 @@ Navigate here with **R+RIGHT** from PHRASE. Use **B+LEFT/RIGHT** to switch betwe
 | START | 00–FF | Sample start point (fraction of sample length). |
 | END | 00–FF | Sample end point. |
 | LOOP | OFF / FWD / PNG | Loop mode: off, forward, ping-pong. |
-| REV | OFF / ON | Reverse playback. |
+| LOOP ST | 00–FF | Loop start point (fraction of sample length). |
+| LOOP END | 00–FF | Loop end point. `FF` = sample end. Loop region is [LOOP ST, LOOP END] — see below. |
+| REVERSE | OFF / ON | Reverse playback. |
 | SLICE | OFF / CUT / TRU | Slice playback mode (see below). |
 | FILTER | LP / HP / BP / OFF | Resonant SVF filter type. |
 | CUT | 00–FF | Filter cutoff frequency. `FF` = open. |
@@ -487,6 +489,23 @@ When slice markers exist on the sample (set via the SAMPLE EDITOR), the SLICE pa
 | OFF | Normal pitch playback — markers are ignored. |
 | CUT | Note pitch selects a slice (C-4 relative to ROOT = slice 0). Plays from slice start to the next marker, then stops. |
 | TRU | Same slice selection; plays from slice start to end of sample. |
+
+### Loop region & release tail
+
+When **LOOP** is FWD or PNG, playback flows **START → LOOP END** once, then repeats the region **[LOOP ST, LOOP END]**. The sample's **END** no longer bounds the loop — it bounds the *release tail*.
+
+If the instrument also has an **ADSR** volume envelope (MODULATION screen), releasing the note — the note-off at the end of its step, or a **KIL** (`K00`) effect — leaves the loop and plays **LOOP END → END** once as the release tail, under the ADSR release stage. The sample therefore splits into three regions:
+
+| Region | Role |
+|---|---|
+| START → LOOP ST | Intro — played once. |
+| LOOP ST → LOOP END | Sustain loop — repeats while the note is held. |
+| LOOP END → END | Release tail — played once on note-off (ADSR only). |
+
+Without an ADSR envelope the loop repeats indefinitely until the voice is killed or stolen, and the release tail is never used.
+
+> [!NOTE]
+> Set **LOOP END** below **END** to reserve a release tail. Leaving **LOOP END = FF** makes the loop run to the sample end (the classic behaviour) with no separate tail.
 
 ### Navigating instruments
 

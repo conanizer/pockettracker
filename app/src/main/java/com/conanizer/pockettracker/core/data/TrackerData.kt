@@ -428,6 +428,10 @@ data class Instrument(
     var reverse: Boolean = false,  // Reverse playback
     var loopMode: String = "off",  // "off", "fwd" (forward), "png" (ping-pong)
     var loopStart: Int = 0x00,  // 00-FF loop start point
+    // 00-FF loop end point (FF = sample end). The loop runs [loopStart, loopEnd]; with an ADSR VOL
+    // envelope, on note-off the voice leaves the loop and plays [loopEnd, sampleEnd] as the release tail.
+    // Default FF reproduces the old "loop to sample end" behaviour for projects saved before this field.
+    var loopEnd: Int = 0xFF,
     var sampleFilePath: String? = null,  // Path to loaded WAV file (null = use resource)
 
     // Table parameters

@@ -550,6 +550,16 @@ class InstrumentController(
         logger.d(TAG, "🎛️ Updated LOOP START: 0x${formatHex(instrument.loopStart)}")
     }
 
+    /**
+     * Update loop end point. The loop runs [loopStart, loopEnd]; with an ADSR VOL envelope the
+     * [loopEnd, sampleEnd] region becomes the release tail played on note-off.
+     */
+    fun updateLoopEnd(instrument: Instrument, loopEnd: Int) {
+        instrument.loopEnd = loopEnd.coerceIn(0, 255)
+        audioEngine.updateInstrumentPlaybackParams(instrument)
+        logger.d(TAG, "🎛️ Updated LOOP END: 0x${formatHex(instrument.loopEnd)}")
+    }
+
     fun updateSlicingMode(instrument: Instrument, mode: Int) {
         instrument.slicingMode = mode.coerceIn(0, 2)
         stateObserver.onStateChanged()
@@ -862,6 +872,7 @@ class InstrumentController(
         instrument.reverse         = src.reverse
         instrument.loopMode        = src.loopMode
         instrument.loopStart       = src.loopStart
+        instrument.loopEnd         = src.loopEnd
         instrument.tableTicRate    = src.tableTicRate
         instrument.slicingMode     = src.slicingMode
         instrument.sfBank          = src.sfBank

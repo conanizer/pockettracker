@@ -45,7 +45,7 @@ public:
     // Free all buffers for a single slot (used when a slot is repurposed, e.g. sampler → SoundFont).
     void clearSample(int id);
 
-    void setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt,
+    void setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt, int loopEn,
                              int drv, int crsh, int dwn, int fType, int fCut, int fRes);
 
     void triggerNote(int sampleId, int trackId, float freq, float baseFreq, float vol, float pan = 0.5f);

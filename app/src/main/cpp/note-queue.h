@@ -308,6 +308,7 @@ struct InstrumentParams {
     bool reverse;       // Play backwards
     int loopMode;       // 0=off, 1=forward, 2=ping-pong
     int loopStart;      // 0-255 (normalized position)
+    int loopEnd;        // 0-255 (normalized position); loop region top. 255 = sample end (legacy).
 
     // Distortion/bitcrusher parameters
     int drive;          // 0-255 (pre-gain boost)
@@ -329,7 +330,7 @@ struct InstrumentParams {
     float delaySend  = 0.0f;
 
     InstrumentParams() : startPoint(0), endPoint(255), reverse(false),
-                         loopMode(0), loopStart(0), drive(0), crush(0), downsample(0),
+                         loopMode(0), loopStart(0), loopEnd(255), drive(0), crush(0), downsample(0),
                          filterType(0), filterCut(128), filterRes(0), filterDrive(128),
                          eqActive(false), reverbSend(0.0f), delaySend(0.0f) {}
 };

@@ -2012,7 +2012,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     )
                     return
                 }
-                val onEq  = (!isSF && row == 13 && col == 3) || (isSF && row == 14 && col == 1)
+                val onEq  = (!isSF && row == 12 && col == 1) || (isSF && row == 14 && col == 1)
                 if (onEq) {
                     val slot = instr.eqSlot
                     openEqEditor(if (slot < 0) 0 else slot, EqCallerContext.InstrumentEq(trackerController.currentInstrument))
