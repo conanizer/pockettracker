@@ -348,7 +348,7 @@ data class Groove(
 data class EqBand(
     var type: Int = 0,    // 0=off 1=loshelf 2=lowcut(hiPass) 3=bell 4=hishelf 5=hicut(loPass)
     var freq: Int = 0x80, // 00-FF → log 20Hz–20kHz
-    var gain: Int = 0x80, // 00-FF → −12dB to +12dB (80 = 0dB)
+    var gain: Int = 120,  // 0..240 → −12.0dB to +12.0dB (120 = 0dB, 0.1 dB/step)
     var q: Int = 0x80     // 00-FF → log 0.1–10.0
 )
 

@@ -41,8 +41,9 @@ data class EqState(
  * Cursor: band = cursorRow/4 (column), param = cursorRow%4 (row within column)
  *   DPAD UP/DOWN    — move between params within the active band column
  *   DPAD LEFT/RIGHT — switch between band columns
- *   A + DPAD UP/DN  — +1 / −1
- *   A + DPAD LT/RT  — +16 / −16 (TYPE: ±1)
+ *   A + DPAD UP/DN  — small step (GAIN: ±0.1 dB · FREQ: display-aware ±1 · TYPE/Q: ±1)
+ *   A + DPAD LT/RT  — large step (GAIN: ±1.0 dB · FREQ: ±16 · Q: ±16 · TYPE: ±1)
+ *   A + B           — reset to default (FREQ 0x80 · GAIN 0 dB · Q 0x80)
  *   B + DPAD LT/RT  — prev/next EQ preset slot
  *   SELECT          — close
  */
@@ -263,8 +264,8 @@ class EqModule : TrackerModule {
                 val valText = when {
                     band == null -> "--"
                     pi == 0      -> EQ_BAND_TYPE_NAMES.getOrElse(band.type) { "???" }
-                    pi == 1      -> formatFreqHz(20f * 1000f.pow(band.freq / 255f))
-                    pi == 2      -> formatGainDb((band.gain - 128f) / 128f * 12f)
+                    pi == 1      -> formatFreqHz(freqHzFromHex(band.freq))
+                    pi == 2      -> formatGainDb(band.gain / 10f - 12f)
                     else         -> band.q.toHex2()
                 }
                 drawBitmapText(valText, bandX[bi] + 6, rowY + 3, scale, valueCol, CHAR_SPACING, FONT_SCALE)
@@ -292,9 +293,9 @@ class EqModule : TrackerModule {
                 minValue = 0, maxValue = EQ_BAND_TYPE_NAMES.size - 1,
                 smallStep = 1, largeStep = 1
             )
-            1 -> CursorContextFactory.hexByte(band.freq, min = 0, max = 255)
-            2 -> CursorContextFactory.hexByte(band.gain, min = 0, max = 255)
-            3 -> CursorContextFactory.hexByte(band.q,    min = 0, max = 255)
+            1 -> CursorContextFactory.freq(band.freq, default = 0x80)
+            2 -> CursorContextFactory.gainDb(band.gain, default = 120)   // 0..240 = −12.0..+12.0 dB
+            3 -> CursorContextFactory.hexByte(band.q, min = 0, max = 255, default = 0x80)
             else -> CursorContextFactory.none()
         }
     }
@@ -305,8 +306,8 @@ class EqModule : TrackerModule {
         val band   = preset.bands.getOrNull(state.cursorBand)           ?: return InputResult(modified = false)
         when (state.cursorParam) {
             0 -> band.type = action.value.coerceIn(0, EQ_BAND_TYPE_NAMES.size - 1)
-            1 -> band.freq = action.value.coerceIn(0, 255)
-            2 -> band.gain = action.value.coerceIn(0, 255)
+            1 -> band.freq = stepFreqDisplayAware(band.freq, action.value.coerceIn(0, 255))
+            2 -> band.gain = action.value.coerceIn(0, 240)   // 0..240 = −12.0..+12.0 dB (0.1 dB/step)
             3 -> band.q    = action.value.coerceIn(0, 255)
         }
         onProjectModified()
@@ -327,7 +328,7 @@ class EqModule : TrackerModule {
 
     private fun bandGainDb(band: EqBand, freq: Float, sampleRate: Float): Float {
         val fc    = 20f * (1000f).pow(band.freq / 255f)        // log 20-20kHz
-        val gainDb = (band.gain - 128f) / 128f * 12f           // -12..+12 dB
+        val gainDb = band.gain / 10f - 12f                     // 0..240 = -12.0..+12.0 dB
         val q     = 0.1f * (100f).pow(band.q / 255f)           // log 0.1-10
 
         // LOWCUT/HICUT use DaisySP SVF (not biquad) — match SVF transfer function exactly
@@ -469,6 +470,31 @@ class EqModule : TrackerModule {
     private fun freqToPixel(freq: Float): Int {
         val t = ln(freq / 20f) / ln(1000f)  // log base-1000 of (freq/20)
         return (t * (width - 1)).toInt().coerceIn(0, width - 1)
+    }
+
+    /** EQ freq hex (0-255) → Hz, log-mapped 20Hz..20kHz. */
+    private fun freqHzFromHex(hex: Int): Float = 20f * 1000f.pow(hex / 255f)
+
+    /**
+     * Display-aware FREQ stepping (item 13b).
+     *
+     * Freq storage is 0-255 over 20Hz–20kHz (log), so one step is ~2.7% — finer than the kHz
+     * readout near 1 kHz, where a single A+UP/DOWN can leave the shown value unchanged ("stuck"
+     * at 1× zoom in the old behaviour). For a one-hex move we keep advancing in the pressed
+     * direction until [formatFreqHz] produces a different string, bounded by 0..255. Multi-hex
+     * moves (A+LEFT/RIGHT and A+B reset-to-default) are applied exactly.
+     */
+    private fun stepFreqDisplayAware(old: Int, target: Int): Int {
+        if (abs(target - old) != 1) return target          // only single small steps nudge
+        val dir = target - old                             // +1 or −1
+        val oldLabel = formatFreqHz(freqHzFromHex(old))
+        var v = target
+        while (formatFreqHz(freqHzFromHex(v)) == oldLabel) {
+            val next = v + dir
+            if (next !in 0..255) break
+            v = next
+        }
+        return v
     }
 
     private fun formatFreqHz(hz: Float): String {

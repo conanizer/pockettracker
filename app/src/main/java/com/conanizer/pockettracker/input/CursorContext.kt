@@ -34,6 +34,10 @@ enum class CursorValueType {
     NOTE,               // Musical note (C-4, D#5, etc.)
     VOLUME,             // Volume (00-FF)
 
+    // Continuous physical-unit values (clamp at bounds, no wrap)
+    GAIN,               // EQ gain in dB (stored 0..240 = −12.0..+12.0 dB; one step = 0.1 dB)
+    FREQ,               // EQ frequency (stored 0..255 = log 20Hz..20kHz; stepping is display-aware)
+
     // Reference types
     PHRASE_REF,         // Reference to a phrase (can be empty --)
     CHAIN_REF,          // Reference to a chain (can be empty --)
@@ -243,6 +247,51 @@ object CursorContextFactory {
      */
     fun instrument(currentValue: Int) =
         hexByte(currentValue, 0, 127).copy(valueType = CursorValueType.INSTRUMENT_REF)
+
+    /**
+     * EQ gain in dB (item 13a).
+     * Storage 0..240 = −12.0..+12.0 dB, so one small step is exactly 0.1 dB and a large step 1.0 dB.
+     * Clamps at the bounds (GAIN is not in the wrapping set in [InputController.stepValue]).
+     * Default (A+B reset) = 120 (0 dB).
+     */
+    fun gainDb(currentValue: Int, default: Int = 120) = CursorContext(
+        valueType = CursorValueType.GAIN,
+        capabilities = CursorCapabilities(
+            canIncrement = true,
+            canDecrement = true,
+            canIncrementFast = true,   // +1.0 dB
+            canDecrementFast = true    // −1.0 dB
+        ),
+        currentValue = currentValue,
+        minValue = 0,
+        maxValue = 240,
+        smallStep = 1,      // 0.1 dB
+        largeStep = 10,     // 1.0 dB
+        emptyValue = -1,
+        defaultValue = default
+    )
+
+    /**
+     * EQ frequency (item 13b).
+     * Storage stays 0..255 (log 20Hz..20kHz). Clamps at the bounds (FREQ is not in the wrapping
+     * set). The module applies display-aware stepping so a single step always changes the shown Hz.
+     */
+    fun freq(currentValue: Int, default: Int = NO_DEFAULT) = CursorContext(
+        valueType = CursorValueType.FREQ,
+        capabilities = CursorCapabilities(
+            canIncrement = true,
+            canDecrement = true,
+            canIncrementFast = true,
+            canDecrementFast = true
+        ),
+        currentValue = currentValue,
+        minValue = 0,
+        maxValue = 255,
+        smallStep = 1,
+        largeStep = 16,
+        emptyValue = -1,
+        defaultValue = default
+    )
 
     /**
      * Effect type (cycles through: ---, ARP, KIL, OFF, RPT, VOL)

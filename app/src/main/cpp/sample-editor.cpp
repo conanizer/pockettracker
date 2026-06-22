@@ -653,7 +653,7 @@ void AudioEngine::setEqBand(int slot, int band, int type, int freqHex, int gainH
     auto& b = eqPresets[slot].bands[band];
     b.type   = type;
     b.freqHz = 20.0f * powf(1000.0f, freqHex / 255.0f);
-    b.gainDb = (gainHex / 255.0f) * 24.0f - 12.0f;
+    b.gainDb = gainHex / 10.0f - 12.0f;   // gainHex 0..240 → −12.0..+12.0 dB (0.1 dB/step)
     b.q      = 0.1f  * powf(100.0f,  qHex   / 255.0f);
 }
 

@@ -401,7 +401,7 @@ interface IAudioBackend {
     // EQ PRESET METHODS
     // ===================================
 
-    // Set one band of a global EQ preset (0-127). freqHex/gainHex/qHex: 00-FF.
+    // Set one band of a global EQ preset (0-127). freqHex/qHex: 00-FF; gainHex: 0-240 (−12.0..+12.0 dB).
     fun setEqBand(slot: Int, band: Int, type: Int, freqHex: Int, gainHex: Int, qHex: Int)
     // Map an instrument to an EQ preset slot (-1 = off). Copies preset at next note trigger.
     fun setInstrumentEqSlot(instrId: Int, slot: Int)

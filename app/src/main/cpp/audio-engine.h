@@ -228,7 +228,7 @@ public:
 
     // Set one band of an EQ preset slot (hex params converted to Hz/dB/Q internally).
     // slot: 0-127, band: 0-2, type: 0=off 1=loShelf 2=bell 3=hiShelf
-    // freqHex: 00-FF → 20–20kHz log, gainHex: 00-FF → −12..+12 dB, qHex: 00-FF → 0.1–10 log
+    // freqHex: 00-FF → 20–20kHz log, gainHex: 0-240 → −12.0..+12.0 dB (0.1 dB/step), qHex: 00-FF → 0.1–10 log
     void setEqBand(int slot, int band, int type, int freqHex, int gainHex, int qHex);
 
     // Map an instrument to an EQ preset slot (-1 = off).

@@ -35,6 +35,7 @@
 26. [Appendix B: Note Names](#appendix-b-note-names)
 27. [Appendix C: Instrument Slots](#appendix-c-instrument-slots)
 28. [Appendix D: Controls Cheat Sheet](#appendix-d-controls-cheat-sheet)
+29. [Appendix E: Parameter Reference — units & ranges](#appendix-e-parameter-reference--units--ranges)
 
 ---
 
@@ -888,7 +889,7 @@ The reverb return volume is set on the MIXER screen (REV row in master column).
 
 | Parameter | Description |
 |---|---|
-| TIME | Delay time (`00`–`FF`) in musical subdivisions. |
+| TIME | Delay time. **SYNC off:** free time `00`–`FF` = 0–2000 ms. **SYNC on:** `00`–`0B` selects a BPM-locked subdivision (1/1 … 1/16.). See [Appendix E](#appendix-e-parameter-reference--units--ranges). |
 | FDBK | Feedback amount (`00`–`FF`). Higher = more repeats. |
 | REV | Amount of delay output sent into the reverb bus (`00`–`FF`). Delay is processed before reverb, so this cross-routing is zero-latency. |
 | EQ | Press SELECT to open the EQ EDITOR for the delay return. |
@@ -926,6 +927,17 @@ It applies a 3-band parametric equalizer (biquad filter, per the Audio EQ Cookbo
 
 Each band has 4 parameters: TYPE, FREQ, GAIN, Q.
 
+### Parameters
+
+| Param | Range | Unit | Notes |
+|---|---|---|---|
+| TYPE | — | — | Band shape (see table below). |
+| FREQ | `00`–`FF` | 20 Hz – 20 kHz (log) | A single A+UP/DOWN step always changes the displayed Hz. |
+| GAIN | `00`–`F0` | **−12.0 … +12.0 dB** | Small step **0.1 dB**, large step **1.0 dB**. `0.0 dB` is the default. |
+| Q | `00`–`FF` | 0.1 – 10.0 (log) | Bandwidth; higher = narrower. |
+
+See [Appendix E](#appendix-e-parameter-reference--units--ranges) for the full mapping.
+
 ### Band types
 
 | Type | Description |
@@ -944,8 +956,9 @@ Each band has 4 parameters: TYPE, FREQ, GAIN, Q.
 |---|---|
 | D-pad LEFT/RIGHT | Switch between bands (1–3) |
 | D-pad UP/DOWN | Move between parameters (TYPE, FREQ, GAIN, Q) |
-| A + UP/DOWN | Edit value |
-| A + LEFT/RIGHT | Edit value (large step) |
+| A + UP/DOWN | Edit value (small step — GAIN: ±0.1 dB) |
+| A + LEFT/RIGHT | Edit value (large step — GAIN: ±1.0 dB) |
+| A + B | Reset parameter to default (FREQ mid · GAIN 0 dB · Q mid) |
 | B | Close EQ EDITOR and apply changes |
 
 
@@ -1284,7 +1297,8 @@ Sets the step volume to `XX` at the exact tick this command fires. Useful in tab
 
 ## 22. Modulation Reference
 
-See §14 for how to edit mod slots.
+See §14 for how to edit mod slots, and [Appendix E](#appendix-e-parameter-reference--units--ranges)
+for exact units and ranges (envelope times are in **tics**, so they track project BPM).
 
 ### AHD Envelope
 
@@ -1759,6 +1773,58 @@ Note offsets:  C   C#  D   D#  E   F   F#  G   G#  A   A#  B
 - **VOL/PAN center** = `80` (unity / center pan)
 - **+1 octave** = +12 semitones = `0C`
 - **+1 perfect fifth** = +7 semitones = `07`
+
+---
+
+## Appendix E: Parameter Reference — units & ranges
+
+What every numeric parameter actually means: the value you edit on screen (its hex/raw range)
+and the real-world unit it maps to. For the DSP internals behind these — the constants you can
+change in source to reshape an effect's character — see `docs/dsp-settings-guide.md`.
+
+> **How to read the "raw" column:** unless noted, parameters are edited as two hex digits
+> `00`–`FF` (0–255). A+UP/DOWN steps by the small step; A+LEFT/RIGHT by the large step;
+> A+B resets to the default.
+
+### Time parameters
+
+| Parameter | Where | Raw | Maps to | Notes |
+|---|---|---|---|---|
+| Mod **ATK / HOLD / DEC / REL** | MODULATION (AHD/ADSR/DRUM/TRIG) | `00`–`FF` | value × 1 **tic** | Tempo-relative. 1 tic = 1/12 of a step ≈ **10 ms at 120 BPM** (scales inversely with BPM). `00` = instant. Max (`FF`) ≈ 2.7 s at 120 BPM. ADSR/TRIG have no HOLD; AHD/DRUM have no SUS/REL. |
+| Mod **SUS** | MODULATION (ADSR/TRIG) | `00`–`FF` | 0–100 % level | Sustain **level**, not a time (`FF` = hold at full depth). |
+| Mod **AMT** | MODULATION (all) | `00`–`FF` | 0–100 % depth | How much the destination is moved. |
+| Delay **TIME** (free) | EFFECTS, SYNC off | `00`–`FF` | 0–2000 ms | ≈ 7.8 ms per step. Default `40` ≈ 500 ms. |
+| Delay **TIME** (sync) | EFFECTS, SYNC on | `00`–`0B` | 12 subdivisions | BPM-locked: `00`=1/1 `01`=1/2 `02`=1/4 `03`=1/8 `04`=1/16 `05`=1/32 `06`=1/4T `07`=1/8T `08`=1/16T `09`=1/4. `0A`=1/8. `0B`=1/16. |
+| Delay **FDBK** | EFFECTS | `00`–`FF` | 0–100 % feedback | Near `FF` ≈ near-infinite repeats. |
+| Instrument / Table **TIC** | INSTRUMENT, TABLE | — | tics per step | See §12; sets how many tics each table/retrigger step lasts. |
+
+> **Beat-sync note:** all modulation envelope times are expressed in **tics**, so they already
+> follow project BPM — speeding up the tempo shortens every envelope proportionally. Only the
+> delay has an explicit fraction-sync (`1/8`, `1/4T`, …); a fraction-sync mode for LFO **FREQ**
+> is a possible future addition (not in this build).
+
+### Frequency parameters
+
+| Parameter | Where | Raw | Maps to | Notes |
+|---|---|---|---|---|
+| Filter **CUT** | INSTRUMENT | `00`–`FF` | 20 Hz – 20 kHz, log | `20 × 1000^(v/255)`. ≈ +2.7 % per step. |
+| Filter **RES** | INSTRUMENT | `00`–`FF` | 0.0 – 1.0, linear | Resonance amount. |
+| EQ **FREQ** | EQ EDITOR | `00`–`FF` | 20 Hz – 20 kHz, log | Same curve as filter CUT. ≈ +2.7 % per step, so a single small step always advances the displayed Hz (display-aware stepping). |
+| EQ **GAIN** | EQ EDITOR | `00`–`F0` (0–240) | **−12.0 … +12.0 dB** | **0.1 dB per small step**, 1.0 dB per large step. `120` (`78`) = 0 dB (default). |
+| EQ **Q** | EQ EDITOR | `00`–`FF` | 0.1 – 10.0, log | `0.1 × 100^(v/255)`. Higher = narrower band. |
+| Reverb **DAMP** | EFFECTS | `00`–`FF` | 200 Hz – 20 kHz, log | `200 × 100^(v/255)` HF damping cutoff. Lower = darker. |
+| LFO **FREQ** | MODULATION | `00`–`FF` | ≈ 0.08 – 20 Hz, linear | `(v+1) × 20 / 256`. |
+
+### Gain / level parameters
+
+| Parameter | Where | Raw | Maps to | Notes |
+|---|---|---|---|---|
+| Instrument **VOL** | INSTRUMENT | `00`–`FF` | 0 – max | `FF` default (full). |
+| Instrument **PAN** | INSTRUMENT | `00`–`FF` | L … center … R | `80` = center (default). |
+| Mixer track / master **VOL** | MIXER | `00`–`FF` | silent … +6 dB | `80` = unity (0 dB). |
+| Reverb **SIZE** | EFFECTS | `00`–`FF` | 0.0 – 1.0 feedback | Not a time — higher feedback = longer tail. |
+| Master **DEPTH** (OTT/DUST) | EFFECTS | `00`–`FF` | 0–100 % wet | `00` = bypass. |
+| Sample-editor **LIM** pre-gain | SAMPLE EDITOR (offline LIM FX) | `00`–`FF` | +0 … +12 dB | `1.0 + (v/255)×3.0` linear (×1 … ×4). The always-on master-bus limiter is fixed (not user-set) — see `dsp-settings-guide.md`. |
 
 ---
 

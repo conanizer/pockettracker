@@ -2421,6 +2421,10 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 }
                 trackerController.inputController.exitSelectionMode()
             }
+        } else if (eqEditorState.isOpen) {
+            // EQ overlay open → A+B resets the band param to its default (mirrors the other A-combo
+            // handlers, which all check eqEditorState.isOpen before the screen-specific branches).
+            handleGenericInput { ctx -> trackerController.inputController.handleABCombo(ctx) }
         } else if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.cursorRow == 8) {
             sampleEditorState = when (sampleEditorState.cursorCol) {
                 0 -> sampleEditorState.copy(selectionStart = 0L)
