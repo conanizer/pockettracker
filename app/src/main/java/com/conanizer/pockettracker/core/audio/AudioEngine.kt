@@ -522,6 +522,13 @@ class AudioEngine(
         backend.killTrack(trackId)
     }
 
+    // Silence any in-progress audition (instrument/sample/note preview). All previews play on the
+    // dedicated PREVIEW_TRACK_ID voice, so this never touches song playback (tracks 0-7). Backs the
+    // "press any button to stop preview" UX — see AppInputDispatcher.stopActivePreview().
+    fun stopPreview() {
+        backend.killTrack(PREVIEW_TRACK_ID)
+    }
+
     fun scheduleKill(frame: Long, trackId: Int) {
         backend.scheduleKill(frame, trackId)
     }

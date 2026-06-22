@@ -3043,6 +3043,25 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         }
     }
 
+    // Backs the "press any button to stop preview" UX (ButtonHandlers.onStopPreview). The InputMapper
+    // has already excluded START and A-held edit presses, so here we only need to silence the audition
+    // when the current screen is one that can start a preview. Previews play on a dedicated voice, so
+    // this never affects song playback. The EQ editor counts when opened over an instrument, where its
+    // band edits sweep a held preview live.
+    private fun stopActivePreview() {
+        if (!audioEngine.isReady) return
+        val previewScreen = when (trackerController.currentScreen) {
+            ScreenType.FILE_BROWSER,
+            ScreenType.INSTRUMENT,
+            ScreenType.INST_POOL,
+            ScreenType.MODS,
+            ScreenType.TABLE -> true
+            ScreenType.PHRASE -> notePreviewEnabled
+            else -> false
+        } || (eqEditorState.isOpen && eqEditorState.callerContext is EqCallerContext.InstrumentEq)
+        if (previewScreen) audioEngine.stopPreview()
+    }
+
     fun createButtonHandlers(): ButtonHandlers = ButtonHandlers(
         onDPadUp    = { handleDPadUp() },
         onDPadDown  = { handleDPadDown() },
@@ -3080,6 +3099,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         onLBA       = { handleLBA() },
         onLR        = { handleLR() },
         onAReleased = { handleAReleased() },
+        onStopPreview = { stopActivePreview() },
         // Item 3: defer single-A to release on sub-screen-opening cells; defer single-B to release
         // while the EQ editor is open (B = close). Keeps the A/B + DPAD combos on those cells intact.
         deferAToRelease = { currentCellOpensSubScreen() },

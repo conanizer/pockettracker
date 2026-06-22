@@ -100,6 +100,12 @@ data class ButtonHandlers(
     // A button release (for modal overlays that close when A is released)
     val onAReleased: () -> Unit = {},  // Called when A button is released
 
+    // Fired on every "plain" button PRESS — any press that is not START and not made while A is held.
+    // Lets the dispatcher silence an in-progress preview from the current screen. A-involved presses
+    // (A alone, A+DPAD value edits, A+B, A,A) and START are excluded by the InputMapper so editing —
+    // including live EQ-band sweeps — and (re)starting a preview are never interrupted.
+    val onStopPreview: () -> Unit = {},
+
     // Press-vs-release deferral (item 3): when the cursor is on a cell whose single-A opens a
     // sub-screen (deferA) or while a sub-screen wants B = close (deferB), the InputMapper holds the
     // single A/B action until release. This keeps the A+DPAD/A+B (edit/reset) and B+DPAD (preset
@@ -446,6 +452,16 @@ class InputMapper(
                 else -> {}
             }
             return
+        }
+
+        // Stop any active preview on a "plain" press, so a long-ringing audition can be silenced
+        // without leaving the screen. Exempt: START (it re-starts the preview) and any press made
+        // while A is held — which covers A alone plus the A+DPAD / A+B / A,A edit combos (isAPressed
+        // is already true here for the A button itself). That keeps editing audible, including live
+        // EQ-band sweeps that update the held preview in real time. The dispatcher decides whether the
+        // current screen actually has a preview to stop.
+        if (button != VirtualButton.START && !isAPressed) {
+            buttonHandlers.onStopPreview()
         }
 
         logger?.d(TAG, "handleButtonAction: button=$button, isA=$isAPressed, isB=$isBPressed, isL=$isLPressed, isR=$isRPressed, isSEL=$isSelectPressed")
