@@ -20,7 +20,7 @@ Effort: **S**/**M**/**L**. Open decisions marked 🟡 (need a call before coding
 ## Build progress — 2026-06-21
 
 On branch `code-review-3-round2`, each item device-tested before its commit. Build order so far:
-**10 → 5 → 12 → 8 → 6 → 7 → 2 → 4 → 1 → 9.** Remaining: **13, 3.**
+**10 → 5 → 12 → 8 → 6 → 7 → 2 → 4 → 1 → 9 → 13.** Remaining: **3.**
 
 - ✅ **#10 File browser** (`b3e161f`) — date `YY-MM-DD → DD-MM-YY`; shared `FileBrowserModule.clipName()`:
   list names clip to 20 (18+`..`), DELETE prompt to 16 so it stays inside the 640px line.
@@ -100,6 +100,19 @@ On branch `code-review-3-round2`, each item device-tested before its commit. Bui
   threaded through `setInstrumentParams` end-to-end (Kotlin → JNI ×3 → C++) and the offline WAV-export path;
   old projects deserialize `FF` so nothing changes. Manual: parameter table + new "Loop region & release
   tail" section. Native rebuild required (pre-commit hook only checks Kotlin).
+- ✅ **#13 EQ real units + param docs** (`6deadde`) —
+  **13a GAIN remap:** `EqBand.gain` storage moved `00-FF`→**`0-240` = −12.0..+12.0 dB** (0.1 dB/step,
+  `120`=0 dB default). New `CursorValueType.GAIN` + `CursorContextFactory.gainDb()` (clamps, not in the
+  wrap set). Updated EQ display + viz math (`band.gain/10f - 12f`), C++ `setEqBand` (`gainHex/10 - 12`),
+  `EqBand` default, and the two API doc comments. **13b FREQ:** new `CursorValueType.FREQ` +
+  `freq()` factory (clamps); `EqModule.stepFreqDisplayAware()` keeps a single step advancing the `0-255`
+  value until `formatFreqHz` shows a different string (bounded). **Item-7 leftover:** EQ FREQ/GAIN/Q now
+  have A+B defaults (`0x80` / `120` / `0x80`); `handleAB()` gained an `eqEditorState.isOpen` branch so the
+  reset reaches the EQ module on every host screen (mirrors the other A-combo handlers). **13c docs:** new
+  **Appendix E "Parameter Reference — units & ranges"** in `manual-en.md` (time/freq/gain tables, tics
+  explainer, beat-sync note) + §17 EQ params/controls + §16 delay TIME both-modes fix; cross-refs to
+  `dsp-settings-guide.md`. Native rebuild required. **House-rule:** developer pre-converts existing
+  project/template EQ gains (old `0x80` would now read as +0.8 dB → set to `120` for 0 dB) — no migration code.
 
 ---
 
