@@ -580,11 +580,15 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         onDispose { buttonSoundManager.release() }
     }
 
-    // Theme — starts as DARK (immediate), loads AMIGA PNGs in background
+    // Theme — starts as AMIGA color fallback (immediate), loads button-skin PNGs in
+    // background. The AMIGA PORT 2 layout mode selects the amiga-2 skin (darker A/B);
+    // every other mode uses the original amiga skin. Reloads when the mode changes.
+    val useAmiga2Skin = layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2B
     var theme by remember { mutableStateOf<DeviceTheme>(DeviceTheme.AMIGA) }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(useAmiga2Skin) {
         withContext(Dispatchers.IO) {
-            val loaded = ThemeLoader.loadAmigaTheme(context)
+            val loaded = if (useAmiga2Skin) ThemeLoader.loadAmiga2Theme(context)
+                         else ThemeLoader.loadAmigaTheme(context)
             withContext(Dispatchers.Main) { theme = loaded }
         }
     }
@@ -602,7 +606,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     LaunchedEffect(configuration.orientation) {
         when {
             (layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT ||
-             layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2) &&
+             layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 ||
+             layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2B) &&
                     configuration.orientation == Configuration.ORIENTATION_LANDSCAPE ->
                 layoutMode = DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
 
@@ -1122,7 +1127,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     inputMapper = inputMapper,
                     focusRequester = focusRequester
                 )
-            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 ->
+            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2,
+            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2B ->
                 PortraitLayout2WithVirtualButtons(
                     layoutConfig = effectiveLayoutConfig,
                     scalingMode = scalingMode,

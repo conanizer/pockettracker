@@ -19,8 +19,8 @@ import com.conanizer.pockettracker.ui.toHex2
 /**
  * SETTINGS SCREEN MODULE
  *
- * Rows (0-10):
- *   0  — LAYOUT    (A+dpad: FULLSCREEN / TOUCH LANDSCAPE / AMIGA PORTRAIT)
+ * Rows (0-11):
+ *   0  — LAYOUT    (A+dpad: FULLSCREEN / TOUCH LANDSCAPE / AMIGA PORTRAIT / AMIGA PORT 2)
  *   1  — SCALING   (A+dpad: INT / BILINEAR)
  *
  * All value rows change via A+dpad. Single A is reserved for actions only:
@@ -75,10 +75,11 @@ class SettingsModule : TrackerModule {
 
         // ── ROW 0: LAYOUT ──────────────────────────────────────────────
         val layoutText = when (s.layoutMode) {
-            DeviceAdapter.LayoutMode.FULL            -> "FULLSCREEN"
-            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT  -> "T.PORT"
-            DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE -> "T.LAND"
-            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 -> "AMIGA PORT"
+            DeviceAdapter.LayoutMode.FULL             -> "FULLSCREEN"
+            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT   -> "T.PORT"
+            DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE  -> "T.LAND"
+            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2  -> "AMIGA PORT"
+            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2B -> "AMIGA PORT 2"
         }
         drawParameterRow(x, rowY, scale, nameColumnX, val1ColumnX, t,
             "LAYOUT", layoutText,
@@ -260,10 +261,12 @@ class SettingsModule : TrackerModule {
         if (hasPhysical)
             listOf(DeviceAdapter.LayoutMode.FULL,
                    DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE,
-                   DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2)
+                   DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2,
+                   DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2B)
         else
             listOf(DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE,
-                   DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2)
+                   DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2,
+                   DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2B)
 
     fun getCursorContext(state: SettingsState): CursorContext {
         if (state.cursorColumn == 0) return CursorContextFactory.readOnly()

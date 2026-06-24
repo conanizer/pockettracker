@@ -518,7 +518,7 @@ fun PortraitLayout2WithVirtualButtons(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFBF9971))   // fills sides (case C) and any bottom gap
+            .background(theme.casingFillColor)   // fills sides (case C) and any bottom gap
             .focusRequester(focusRequester)
             .inputHandler(inputMapper)
             .focusable(),

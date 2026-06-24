@@ -14,6 +14,10 @@ data class DeviceTheme(
     val buttonPressedColor: Color,
     val buttonLabelColor: Color,
 
+    // Solid fill shown on the case sides / bottom gap behind the skin panels (portrait-2 layout).
+    // Defaults to the original hardcoded beige so existing skins look unchanged.
+    val casingFillColor: Color = Color(0xFFBF9971),
+
     // Bezel border thickness.
     // Use screenBezelThicknessX (in skin X-units) when a bezel PNG is present — this keeps
     // the padding proportional to the scaled PNG border on every device/density.
@@ -35,6 +39,10 @@ data class DeviceTheme(
     val buttonBackingImage:  ImageBitmap? = null,
     val buttonSquareNormal:  ImageBitmap? = null,
     val buttonSquarePressed: ImageBitmap? = null,
+    // Optional darker square variant — used for A/B only (e.g. amiga-2 skin).
+    // Null → fall back to the regular square images above.
+    val buttonSquareNormalDark:  ImageBitmap? = null,
+    val buttonSquarePressedDark: ImageBitmap? = null,
     val buttonWideNormal:    ImageBitmap? = null,
     val buttonWidePressed:   ImageBitmap? = null,
 

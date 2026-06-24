@@ -322,6 +322,7 @@ private fun VirtualBtnThemed(
     modifier: Modifier,
     theme: DeviceTheme,
     isWide: Boolean = false,
+    isDark: Boolean = false,   // A/B use the darker square PNG when the skin provides one
     baseFontSizeSp: TextUnit,
     textOffsetXDp: Float,
     textOffsetYDp: Float,
@@ -331,10 +332,12 @@ private fun VirtualBtnThemed(
     val buttonEvent = LocalButtonEventCallback.current
 
     val image = when {
-        isWide &&  pressed  -> theme.buttonWidePressed
-        isWide && !pressed  -> theme.buttonWideNormal
-        !isWide &&  pressed -> theme.buttonSquarePressed
-        else                -> theme.buttonSquareNormal
+        isWide &&  pressed -> theme.buttonWidePressed
+        isWide && !pressed -> theme.buttonWideNormal
+        isDark &&  pressed -> theme.buttonSquarePressedDark ?: theme.buttonSquarePressed
+        isDark && !pressed -> theme.buttonSquareNormalDark  ?: theme.buttonSquareNormal
+        pressed            -> theme.buttonSquarePressed
+        else               -> theme.buttonSquareNormal
     }
 
     val topOffsetDp = textOffsetYDp + if (pressed) pressedOffsetDp else 0f
@@ -444,10 +447,12 @@ fun VirtualControlsPortrait2(
             Row(modifier = Modifier.fillMaxWidth().height(cellDp)) {
                 VirtualBtnThemed(inputMapper, VirtualButton.L_SHIFT, "L Shift",
                     Modifier.weight(1f).fillMaxHeight(), theme, isWide = true,
-                    smallSp, wideOffXDp, offYDp, pressedDp)
+                    baseFontSizeSp = smallSp, textOffsetXDp = wideOffXDp,
+                    textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
                 VirtualBtnThemed(inputMapper, VirtualButton.R_SHIFT, "R Shift",
                     Modifier.weight(1f).fillMaxHeight(), theme, isWide = true,
-                    smallSp, wideOffXDp, offYDp, pressedDp)
+                    baseFontSizeSp = smallSp, textOffsetXDp = wideOffXDp,
+                    textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
             }
 
             // Row 2: [empty][↑][B][A]
@@ -458,11 +463,11 @@ fun VirtualControlsPortrait2(
                     baseFontSizeSp = largeSp, textOffsetXDp = sqOffXDp,
                     textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
                 VirtualBtnThemed(inputMapper, VirtualButton.B, "B",
-                    Modifier.weight(1f).fillMaxHeight(), theme,
+                    Modifier.weight(1f).fillMaxHeight(), theme, isDark = true,
                     baseFontSizeSp = largeSp, textOffsetXDp = sqOffXDp,
                     textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
                 VirtualBtnThemed(inputMapper, VirtualButton.A, "A",
-                    Modifier.weight(1f).fillMaxHeight(), theme,
+                    Modifier.weight(1f).fillMaxHeight(), theme, isDark = true,
                     baseFontSizeSp = largeSp, textOffsetXDp = sqOffXDp,
                     textOffsetYDp = offYDp, pressedOffsetDp = pressedDp)
             }
