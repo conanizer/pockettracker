@@ -28,9 +28,10 @@ class DeviceAdapter(private val context: Context) {
     }
 
     /** User-selectable layout modes. Persisted as UI state in PocketTrackerApp. */
-    // TOUCH_PORTRAIT2B is identical to TOUCH_PORTRAIT2 layout-wise; it only selects the
-    // amiga-2 button skin (darker A/B). Asset A/B test — may be removed later.
-    enum class LayoutMode { FULL, TOUCH_PORTRAIT, TOUCH_LANDSCAPE, TOUCH_PORTRAIT2, TOUCH_PORTRAIT2B }
+    // Three real layouts: FULL (handheld fullscreen), TOUCH_LANDSCAPE, TOUCH_PORTRAIT2 (the retro
+    // portrait skin). TOUCH_PORTRAIT is a retired legacy layout kept only for save migration.
+    // The portrait skin's NORMAL/DARK look is now a separate DeviceSkin theme, not a layout mode.
+    enum class LayoutMode { FULL, TOUCH_PORTRAIT, TOUCH_LANDSCAPE, TOUCH_PORTRAIT2 }
 
     /** Scaling mode for the game screen. INTEGER = crisp pixel-perfect, BILINEAR = fill screen. */
     enum class ScalingMode { INTEGER, BILINEAR }
@@ -174,8 +175,7 @@ class DeviceAdapter(private val context: Context) {
             }
             LayoutMode.TOUCH_PORTRAIT  -> calculatePortraitLayout(deviceWidth, deviceHeight)
             LayoutMode.TOUCH_LANDSCAPE -> calculateLandscapeLayout(deviceWidth, deviceHeight)
-            LayoutMode.TOUCH_PORTRAIT2,
-            LayoutMode.TOUCH_PORTRAIT2B -> calculatePortrait2Layout(deviceWidth, deviceHeight)
+            LayoutMode.TOUCH_PORTRAIT2 -> calculatePortrait2Layout(deviceWidth, deviceHeight)
         }
     }
 

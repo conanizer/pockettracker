@@ -97,6 +97,7 @@ import com.conanizer.pockettracker.ui.overlays.EqEditorState
 import com.conanizer.pockettracker.ui.overlays.FxHelperState
 import com.conanizer.pockettracker.ui.overlays.QwertyKeyboardState
 import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.ui.theme.DeviceSkin
 import com.conanizer.pockettracker.ui.theme.DeviceTheme
 import java.io.File
 
@@ -427,13 +428,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val savedScalingName = remember { prefs.getString("scaling_mode", null) }
 
     val initialLayoutMode = remember {
-        val saved = if (savedLayoutName != null) {
-            DeviceAdapter.LayoutMode.entries.firstOrNull { it.name == savedLayoutName } ?: autoLayoutMode
+        // Legacy "TOUCH_PORTRAIT2B" was the amiga-2 skin masquerading as a layout — it is now the
+        // PORTRAIT layout with the DARK theme (skin handled separately below).
+        val savedName = if (savedLayoutName == "TOUCH_PORTRAIT2B") "TOUCH_PORTRAIT2" else savedLayoutName
+        val saved = if (savedName != null) {
+            DeviceAdapter.LayoutMode.entries.firstOrNull { it.name == savedName } ?: autoLayoutMode
         } else {
             autoLayoutMode
         }
         when {
-            // TOUCH_PORTRAIT is retired from the active cycle — migrate to AMIGA PORTRAIT
+            // TOUCH_PORTRAIT is retired from the active cycle — migrate to PORTRAIT
             saved == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT ->
                 DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
             // FULLSCREEN on a touch-only device would trap the user with no virtual buttons
@@ -455,11 +459,27 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val _scalingMode = remember { mutableStateOf(initialScalingMode) }
     var scalingMode  by _scalingMode
 
+    // Selected device skin (theme) for skinned layouts. Persisted independently of the layout so it
+    // is remembered when switching layouts away and back, and across restarts. Legacy installs that
+    // had "AMIGA PORT 2" selected default to the DARK skin.
+    val initialPortraitSkinId = remember {
+        prefs.getString("portrait_skin", null)
+            ?: if (savedLayoutName == "TOUCH_PORTRAIT2B") DeviceSkin.AMIGA_DARK.id
+               else DeviceSkin.AMIGA_NORMAL.id
+    }
+    val _portraitSkinId = remember { mutableStateOf(initialPortraitSkinId) }
+    var portraitSkinId  by _portraitSkinId
+
     LaunchedEffect(layoutMode) {
         prefs.edit().putString("layout_mode", layoutMode.name).apply()
+        trackerController.settingsLayoutHasThemes =
+            SettingsModule.skinsForLayout(layoutMode).isNotEmpty()
     }
     LaunchedEffect(scalingMode) {
         prefs.edit().putString("scaling_mode", scalingMode.name).apply()
+    }
+    LaunchedEffect(portraitSkinId) {
+        prefs.edit().putString("portrait_skin", portraitSkinId).apply()
     }
 
     val _buttonSoundEnabled = remember { mutableStateOf(prefs.getBoolean("button_sound", true)) }
@@ -580,15 +600,18 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         onDispose { buttonSoundManager.release() }
     }
 
-    // Theme — starts as AMIGA color fallback (immediate), loads button-skin PNGs in
-    // background. The AMIGA PORT 2 layout mode selects the amiga-2 skin (darker A/B);
-    // every other mode uses the original amiga skin. Reloads when the mode changes.
-    val useAmiga2Skin = layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2B
+    // Device skin (chrome PNGs/colors). Starts as the AMIGA color fallback (immediate), then loads
+    // the selected skin's PNGs in the background. The skin is chosen by the current layout's theme
+    // list + portraitSkinId; unskinned layouts fall back to AMIGA_NORMAL (never actually shown there).
+    // Reloads when the resolved skin changes.
+    val currentSkin = remember(layoutMode, portraitSkinId) {
+        val skins = SettingsModule.skinsForLayout(layoutMode)
+        skins.firstOrNull { it.id == portraitSkinId } ?: skins.firstOrNull() ?: DeviceSkin.AMIGA_NORMAL
+    }
     var theme by remember { mutableStateOf<DeviceTheme>(DeviceTheme.AMIGA) }
-    LaunchedEffect(useAmiga2Skin) {
+    LaunchedEffect(currentSkin.id) {
         withContext(Dispatchers.IO) {
-            val loaded = if (useAmiga2Skin) ThemeLoader.loadAmiga2Theme(context)
-                         else ThemeLoader.loadAmigaTheme(context)
+            val loaded = ThemeLoader.loadSkin(context, currentSkin)
             withContext(Dispatchers.Main) { theme = loaded }
         }
     }
@@ -606,8 +629,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     LaunchedEffect(configuration.orientation) {
         when {
             (layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT ||
-             layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 ||
-             layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2B) &&
+             layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2) &&
                     configuration.orientation == Configuration.ORIENTATION_LANDSCAPE ->
                 layoutMode = DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
 
@@ -880,7 +902,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         AppStateRefs(
             _fileBrowserState, _sampleEditorState, _qwertyKeyboardState,
             _fxHelperState, _eqEditorState, _eqSpectrumData,
-            _layoutMode, _scalingMode, _isRendering, _isStemsRendering, _renderProgress,
+            _layoutMode, _portraitSkinId, _scalingMode, _isRendering, _isStemsRendering, _renderProgress,
             _showCleanDialog, _cleanDialogTarget, _cleanDialogCursor,
             _lastAInsertPosition, _insertBefore, _instrumentFileBrowserAction,
             _previousScreen, _buttonSoundEnabled, _buttonSoundVolume,
@@ -1086,7 +1108,8 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         overlayBitmap = overlayBitmap,
         overlayStrength = overlayStrength,
         overlayFiles = overlayFiles,
-        overlayName = overlayName
+        overlayName = overlayName,
+        portraitSkinId = portraitSkinId
     )
 
     // The Oboe stream opens on a background IO thread; the UI renders immediately rather than behind a
@@ -1127,8 +1150,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
                     inputMapper = inputMapper,
                     focusRequester = focusRequester
                 )
-            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2,
-            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2B ->
+            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 ->
                 PortraitLayout2WithVirtualButtons(
                     layoutConfig = effectiveLayoutConfig,
                     scalingMode = scalingMode,

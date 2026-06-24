@@ -135,6 +135,10 @@ class TrackerController(
             stateObserver.onStateChanged()
         }
 
+    // True when the current layout has a selectable device skin (theme), enabling the LAYOUT row's
+    // second column. Plain Boolean (no Android types) — kept in sync by the UI layer on layout change.
+    var settingsLayoutHasThemes = false
+
     var instrumentCursorRow = 0
         set(value) {
             field = value
@@ -988,8 +992,10 @@ class TrackerController(
                 projectCursorColumn = getProjectCursorRightColumn(projectCursorRow, projectCursorColumn)
             }
             ScreenType.SETTINGS -> {
-                // rows 2 (OVERLAY), 3 (BTN SOUND), 4 (BTN VIBRO), 10 (TEMPLATE) have a second column
-                val hasSecondCol = settingsCursorRow in setOf(2, 3, 4, 10)
+                // rows 2 (OVERLAY), 3 (BTN SOUND), 4 (BTN VIBRO), 10 (TEMPLATE) have a second column,
+                // and row 0 (LAYOUT) gains a theme column when the current layout is skinned.
+                val hasSecondCol = settingsCursorRow in setOf(2, 3, 4, 10) ||
+                        (settingsCursorRow == 0 && settingsLayoutHasThemes)
                 settingsCursorColumn = if (hasSecondCol && settingsCursorColumn < 2) 2 else settingsCursorColumn
             }
             ScreenType.INSTRUMENT -> {

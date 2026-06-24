@@ -133,6 +133,7 @@ class AppStateRefs(
     val eqEditorState: MutableState<EqEditorState>,
     val eqSpectrumData: MutableState<FloatArray?>,
     val layoutMode: MutableState<DeviceAdapter.LayoutMode>,
+    val portraitSkinId: MutableState<String>,
     val scalingMode: MutableState<DeviceAdapter.ScalingMode>,
     val isRendering: MutableState<Boolean>,
     val isStemsRendering: MutableState<Boolean>,
@@ -204,6 +205,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     private var eqEditorState by refs.eqEditorState
     private var eqSpectrumData by refs.eqSpectrumData
     private var layoutMode by refs.layoutMode
+    private var portraitSkinId by refs.portraitSkinId
     private var scalingMode by refs.scalingMode
     private var isRendering by refs.isRendering
     private var isStemsRendering by refs.isStemsRendering
@@ -655,6 +657,8 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     cursorColumn = trackerController.settingsCursorColumn,
                     hasPhysicalButtons = deviceAdapter.hasPhysicalGameButtons(),
                     layoutMode = layoutMode,
+                    currentSkinId = portraitSkinId,
+                    availableSkins = SettingsModule.skinsForLayout(layoutMode),
                     scalingMode = scalingMode,
                     overlayFiles = overlayFiles,
                     overlayName = overlayName,
@@ -675,6 +679,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val result = settingsModule.handleInput(settingsState, action)
                 if (result.modified) {
                     result.layoutMode?.let          { layoutMode          = it }
+                    result.skinId?.let              { portraitSkinId      = it }
                     result.scalingMode?.let         { scalingMode         = it }
                     result.overlayName?.let         { overlayName         = it }
                     result.overlayStrength?.let     { overlayStrength     = it }

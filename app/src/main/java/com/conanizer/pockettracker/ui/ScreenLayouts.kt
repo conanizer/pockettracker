@@ -127,7 +127,8 @@ data class TrackerScreenParams(
     val overlayBitmap: ImageBitmap? = null,
     val overlayStrength: Int = 128,
     val overlayFiles: List<String> = emptyList(),
-    val overlayName: String = "OFF"
+    val overlayName: String = "OFF",
+    val portraitSkinId: String = "amiga"
 )
 
 /** Thin wrapper — forwards every field of [params] to [PixelPerfectTracker], then draws screen overlay. */
@@ -224,7 +225,8 @@ private fun TrackerScreen(params: TrackerScreenParams, modifier: Modifier = Modi
             soundfontPresetIndex = params.soundfontPresetIndex,
             overlayFiles = params.overlayFiles,
             overlayName = params.overlayName,
-            overlayStrength = params.overlayStrength
+            overlayStrength = params.overlayStrength,
+            portraitSkinId = params.portraitSkinId
         )
     } // end outer Box
 }

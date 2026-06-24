@@ -5,6 +5,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.conanizer.pockettracker.ui.theme.AppTheme
+import com.conanizer.pockettracker.ui.theme.DeviceSkin
 import com.conanizer.pockettracker.input.CursorCapabilities
 import com.conanizer.pockettracker.input.CursorContext
 import com.conanizer.pockettracker.input.CursorContextFactory
@@ -20,7 +21,8 @@ import com.conanizer.pockettracker.ui.toHex2
  * SETTINGS SCREEN MODULE
  *
  * Rows (0-11):
- *   0  — LAYOUT    (A+dpad: FULLSCREEN / TOUCH LANDSCAPE / AMIGA PORTRAIT / AMIGA PORT 2)
+ *   0  — LAYOUT    (col1 A+dpad: FULLSCREEN / LANDSCAPE / PORTRAIT;
+ *                   col2 A+dpad: theme/skin cycle — only when the layout is skinned, e.g. PORTRAIT → NORMAL/DARK)
  *   1  — SCALING   (A+dpad: INT / BILINEAR)
  *
  * All value rows change via A+dpad. Single A is reserved for actions only:
@@ -37,6 +39,14 @@ import com.conanizer.pockettracker.ui.toHex2
  *   11 — RESUME    (ASK=show RECOVER WORK? prompt / AUTO=silently restore autosave)
  */
 class SettingsModule : TrackerModule {
+
+    companion object {
+        // Which device skins (themes) are available for a given layout. Only the retro PORTRAIT layout
+        // is skinned today; FULLSCREEN/LANDSCAPE use plain virtual buttons with no theme.
+        fun skinsForLayout(mode: DeviceAdapter.LayoutMode): List<DeviceSkin> =
+            if (mode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2) DeviceSkin.ALL else emptyList()
+    }
+
     override val width = 510
     override val height = 392
 
@@ -73,18 +83,26 @@ class SettingsModule : TrackerModule {
 
         var row = 0
 
-        // ── ROW 0: LAYOUT ──────────────────────────────────────────────
+        // ── ROW 0: LAYOUT (+ theme switch when the layout is skinned) ──
         val layoutText = when (s.layoutMode) {
-            DeviceAdapter.LayoutMode.FULL             -> "FULLSCREEN"
-            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT   -> "T.PORT"
-            DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE  -> "T.LAND"
-            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2  -> "AMIGA PORT"
-            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2B -> "AMIGA PORT 2"
+            DeviceAdapter.LayoutMode.FULL            -> "FULLSCREEN"
+            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT  -> "T.PORT"
+            DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE -> "LANDSCAPE"
+            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 -> "PORTRAIT"
         }
-        drawParameterRow(x, rowY, scale, nameColumnX, val1ColumnX, t,
-            "LAYOUT", layoutText,
-            s.cursorRow == row && s.cursorColumn == 0,
-            s.cursorRow == row && s.cursorColumn == 1)
+        if (s.availableSkins.isNotEmpty()) {
+            // Second value = theme name (NORM
+            // / DARK), drawn with no sublabel header.
+            val skinText = s.availableSkins.firstOrNull { it.id == s.currentSkinId }?.displayName ?: ""
+            drawDualParamRow(x, rowY, scale, nameColumnX, val1ColumnX, subLabelX, val2ColumnX, t,
+                "LAYOUT", layoutText, "", skinText,
+                s.cursorRow == row, s.cursorColumn)
+        } else {
+            drawParameterRow(x, rowY, scale, nameColumnX, val1ColumnX, t,
+                "LAYOUT", layoutText,
+                s.cursorRow == row && s.cursorColumn == 0,
+                s.cursorRow == row && s.cursorColumn == 1)
+        }
         rowY += ROW_HEIGHT; row++
 
         // ── ROW 1: SCALING ─────────────────────────────────────────────
@@ -261,29 +279,41 @@ class SettingsModule : TrackerModule {
         if (hasPhysical)
             listOf(DeviceAdapter.LayoutMode.FULL,
                    DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE,
-                   DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2,
-                   DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2B)
+                   DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2)
         else
             listOf(DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE,
-                   DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2,
-                   DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2B)
+                   DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2)
 
     fun getCursorContext(state: SettingsState): CursorContext {
         if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
 
         return when (state.cursorRow) {
-            0  -> CursorContext(
-                valueType = CursorValueType.HEX_BYTE,   // LAYOUT — A+dpad cycles selectable modes
-                capabilities = CursorCapabilities(
-                    canIncrement = true, canDecrement = true,
-                    canIncrementFast = false, canDecrementFast = false
-                ),
-                currentValue = layoutModeList(state.hasPhysicalButtons)
-                    .indexOf(state.layoutMode).coerceAtLeast(0),
-                minValue = 0,
-                maxValue = (layoutModeList(state.hasPhysicalButtons).size - 1).coerceAtLeast(0),
-                smallStep = 1, largeStep = 1, emptyValue = -1
-            )
+            0  -> when (state.cursorColumn) {
+                2 -> if (state.availableSkins.isEmpty()) CursorContextFactory.readOnly()
+                     else CursorContext(
+                        valueType = CursorValueType.HEX_BYTE,   // THEME — A+dpad cycles available skins
+                        capabilities = CursorCapabilities(
+                            canIncrement = true, canDecrement = true,
+                            canIncrementFast = false, canDecrementFast = false
+                        ),
+                        currentValue = state.availableSkins
+                            .indexOfFirst { it.id == state.currentSkinId }.coerceAtLeast(0),
+                        minValue = 0, maxValue = (state.availableSkins.size - 1).coerceAtLeast(0),
+                        smallStep = 1, largeStep = 1, emptyValue = -1
+                     )
+                else -> CursorContext(
+                    valueType = CursorValueType.HEX_BYTE,   // LAYOUT — A+dpad cycles selectable modes
+                    capabilities = CursorCapabilities(
+                        canIncrement = true, canDecrement = true,
+                        canIncrementFast = false, canDecrementFast = false
+                    ),
+                    currentValue = layoutModeList(state.hasPhysicalButtons)
+                        .indexOf(state.layoutMode).coerceAtLeast(0),
+                    minValue = 0,
+                    maxValue = (layoutModeList(state.hasPhysicalButtons).size - 1).coerceAtLeast(0),
+                    smallStep = 1, largeStep = 1, emptyValue = -1
+                )
+            }
             1  -> CursorContext(
                 valueType = CursorValueType.HEX_BYTE,   // SCALING — A+dpad toggles INT / BILINEAR
                 capabilities = CursorCapabilities(
@@ -395,10 +425,16 @@ class SettingsModule : TrackerModule {
         action: InputAction
     ): InputResult {
         when (state.cursorRow) {
-            0 -> if (action is InputAction.SET_VALUE) {   // LAYOUT
-                val modes = layoutModeList(state.hasPhysicalButtons)
-                return InputResult(modified = true,
-                    layoutMode = modes.getOrElse(action.value) { modes.first() })
+            0 -> when (state.cursorColumn) {
+                2 -> if (action is InputAction.SET_VALUE) {   // THEME (skin)
+                    return InputResult(modified = true,
+                        skinId = state.availableSkins.getOrNull(action.value)?.id ?: state.currentSkinId)
+                }
+                else -> if (action is InputAction.SET_VALUE) {   // LAYOUT
+                    val modes = layoutModeList(state.hasPhysicalButtons)
+                    return InputResult(modified = true,
+                        layoutMode = modes.getOrElse(action.value) { modes.first() })
+                }
             }
             1 -> if (action is InputAction.SET_VALUE) {   // SCALING
                 return InputResult(modified = true,
@@ -453,6 +489,7 @@ class SettingsModule : TrackerModule {
     data class InputResult(
         val modified: Boolean,
         val layoutMode: DeviceAdapter.LayoutMode? = null,
+        val skinId: String? = null,
         val scalingMode: DeviceAdapter.ScalingMode? = null,
         val overlayName: String? = null,
         val overlayStrength: Int? = null,
@@ -477,6 +514,8 @@ data class SettingsState(
     val cursorColumn: Int = 1,
     val hasPhysicalButtons: Boolean = true,
     val layoutMode: DeviceAdapter.LayoutMode = DeviceAdapter.LayoutMode.FULL,
+    val currentSkinId: String = DeviceSkin.AMIGA_NORMAL.id,
+    val availableSkins: List<DeviceSkin> = emptyList(),
     val scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER,
     val overlayFiles: List<String> = emptyList(),
     val overlayName: String = "OFF",

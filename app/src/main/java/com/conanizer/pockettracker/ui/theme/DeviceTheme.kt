@@ -73,3 +73,35 @@ data class DeviceTheme(
         )
     }
 }
+
+/**
+ * A selectable device skin (theme) for a layout. Pure data — describes WHICH assets/colors fill the
+ * layout's fixed slots, not how the layout is structured. ThemeLoader.loadSkin() turns one of these
+ * into a fully-loaded DeviceTheme. Add a new skin = add a folder under assets/themes/ + one entry here.
+ *
+ * soundSet is reserved for future per-theme button sounds; it is unused today (all skins share the
+ * res/raw button sounds loaded by ButtonSoundManager).
+ */
+data class DeviceSkin(
+    val id: String,              // persisted key, e.g. "amiga"
+    val displayName: String,     // shown in Settings, e.g. "NORMAL"
+    val assetFolder: String,     // assets path, e.g. "themes/amiga"
+    val labelColor: Color,       // button label color
+    val casingFillColor: Color,  // solid fill shown behind/around the skin panels
+    val soundSet: String? = null
+) {
+    companion object {
+        // NORM = beige amiga skin (bg r225 g208 b186), near-black labels, dark A/B buttons.
+        val AMIGA_NORMAL = DeviceSkin(
+            id = "amiga", displayName = "NORM", assetFolder = "themes/amiga",
+            labelColor = Color(0xFF0D0D0D), casingFillColor = Color(0xFFE1D0BA)
+        )
+        // DARK = slate amiga-2 skin, white labels, dark A/B buttons.
+        val AMIGA_DARK = DeviceSkin(
+            id = "amiga-2", displayName = "DARK", assetFolder = "themes/amiga-2",
+            labelColor = Color.White, casingFillColor = Color(0xFF56606C)
+        )
+        val ALL = listOf(AMIGA_NORMAL, AMIGA_DARK)
+        fun byId(id: String?): DeviceSkin? = ALL.firstOrNull { it.id == id }
+    }
+}

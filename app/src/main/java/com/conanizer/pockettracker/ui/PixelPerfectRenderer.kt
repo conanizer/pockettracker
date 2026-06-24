@@ -216,7 +216,9 @@ fun PixelPerfectTracker(
     // Overlay settings (for settings screen display)
     overlayFiles: List<String> = emptyList(),
     overlayName: String = "OFF",
-    overlayStrength: Int = 128
+    overlayStrength: Int = 128,
+    // Selected device skin (for the LAYOUT row's theme column)
+    portraitSkinId: String = "amiga"
 ) {
     // Playback state
     var playbackRow by remember { mutableStateOf(0) }
@@ -434,7 +436,8 @@ fun PixelPerfectTracker(
                         themeEditorState     = themeEditorState,
                         overlayFiles         = overlayFiles,
                         overlayName          = overlayName,
-                        overlayStrength      = overlayStrength
+                        overlayStrength      = overlayStrength,
+                        portraitSkinId       = portraitSkinId
                     )
                 }
             }
@@ -576,7 +579,9 @@ class TrackerLayout {
         // Overlay settings (for settings screen display)
         overlayFiles: List<String> = emptyList(),
         overlayName: String = "OFF",
-        overlayStrength: Int = 128
+        overlayStrength: Int = 128,
+        // Selected device skin (for the LAYOUT row's theme column)
+        portraitSkinId: String = "amiga"
     ) {
         val t = appTheme
         // ===================================
@@ -943,6 +948,8 @@ class TrackerLayout {
                                     cursorRow = settingsCursorRow,
                                     cursorColumn = settingsCursorColumn,
                                     layoutMode = layoutMode,
+                                    currentSkinId = portraitSkinId,
+                                    availableSkins = SettingsModule.skinsForLayout(layoutMode),
                                     scalingMode = scalingMode,
                                     overlayFiles = overlayFiles,
                                     overlayName = overlayName,
