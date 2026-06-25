@@ -1,9 +1,21 @@
 #pragma once
-#include <android/log.h>
 
 #define LOG_TAG "NativeAudio"
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+
+// Platform logging shim (REVIEW-4 4.5). On Android the engine logs through <android/log.h> exactly as
+// before; on any other platform (the planned Linux port) it falls back to stderr — so this header, and
+// every engine translation unit that includes it, no longer hard-depends on the Android log API. The
+// __ANDROID__ branch is byte-identical to the previous unconditional code, so the Android build is
+// unchanged. (The larger Oboe coupling in audio-engine.{h,cpp} is a separate, still-deferred split.)
+#ifdef __ANDROID__
+#  include <android/log.h>
+#  define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
+#  define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#else
+#  include <cstdio>
+#  define LOGD(...) do { fprintf(stderr, "[D/" LOG_TAG "] "); fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } while (0)
+#  define LOGE(...) do { fprintf(stderr, "[E/" LOG_TAG "] "); fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } while (0)
+#endif
 
 // LOGT — trace-level log for hot paths (note triggers, table processing, etc.).
 // Disabled by default to avoid flooding logcat during playback.

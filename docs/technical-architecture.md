@@ -327,6 +327,17 @@ add it to `processAudioBlock()`. NEVER add processing logic directly to `onAudio
 > 2. Create ALSA/PulseAudio backend implementing same interface
 > 3. Rest of the audio code stays EXACTLY the same!
 
+> **Reality check (REVIEW-4 4.5):** the portability seam is real on the *Kotlin* side (`IAudioBackend`),
+> but the **C++ `AudioEngine` is not yet decoupled from Oboe** — it `#include`s `<oboe/Oboe.h>`,
+> *is* the callback (`class AudioEngine : public oboe::AudioStreamDataCallback`), owns the
+> `std::shared_ptr<oboe::AudioStream>`, and runs the device-specific stream-open ladder in
+> `openStream()`. So step 1 above isn't done in C++ yet, and the audio code does **not** "stay exactly
+> the same": the Linux port needs the engine split into a portable `AudioEngineCore` (voices,
+> scheduling, `processAudioBlock`, all DSP — no Oboe) and a thin Android `OboeAudioEngine` shell that
+> owns the stream and forwards `onAudioReady → core.processAudioBlock`. Logging is already shimmed for
+> non-Android (`audio-defs.h`, REVIEW-4 4.5); the Oboe split is the remaining, larger piece (deferred
+> post-MVP).
+
 ### JNI Interface (Before Refactoring — now wrapped behind IAudioBackend/OboeAudioBackend)
 
 ```kotlin
