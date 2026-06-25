@@ -515,10 +515,14 @@ interface IAudioBackend {
      * Used for THO (Table Hop) effect from phrase on empty steps -
      * jumps the currently playing voice's table to a specific row.
      *
+     * Schedule a table-row jump (THO on an empty step) at the exact frame. Applied to the active
+     * sampler voice on the audio thread (4.3: no off-thread voices[] write).
+     *
+     * @param targetFrame Audio frame at which to apply the jump
      * @param trackId Which track to modify (0-7)
      * @param row Target table row (0-15)
      */
-    fun setVoiceTableRow(trackId: Int, row: Int)
+    fun scheduleVoiceTableRow(targetFrame: Long, trackId: Int, row: Int)
 
     /**
      * Schedule a phraseVol update at exact frame (Vxx effect on empty steps).
@@ -539,28 +543,26 @@ interface IAudioBackend {
     fun setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int)
 
     /**
-     * Set continuous pitch bend for a voice (PBN effect).
+     * Schedule a continuous pitch bend (PBN on an empty step) at the exact frame. Applied to the
+     * active voice on the audio thread (4.3). Use semitonesPerTick = 0 to stop bending.
      *
-     * Bends the pitch continuously at a specified rate until stopped or a new note.
-     * Use semitonesPerTick = 0 to stop bending.
-     *
+     * @param targetFrame Audio frame at which to apply the bend
      * @param trackId Which track to apply pitch bend (0-7)
      * @param semitonesPerTick Rate of pitch change per tick (positive = up, negative = down)
      * @param tempo Current tempo in BPM (needed for timing calculations)
      */
-    fun setPitchBend(trackId: Int, semitonesPerTick: Float, tempo: Int)
+    fun schedulePitchBend(targetFrame: Long, trackId: Int, semitonesPerTick: Float, tempo: Int)
 
     /**
-     * Set vibrato for a voice (PVB/PVX effect).
+     * Schedule vibrato (PVB/PVX on an empty step) at the exact frame. Applied to the active voice
+     * on the audio thread (4.3). Use depth = 0 to stop vibrato.
      *
-     * Applies a sine wave LFO modulation to the pitch.
-     * Use depth = 0 to stop vibrato.
-     *
+     * @param targetFrame Audio frame at which to apply the vibrato
      * @param trackId Which track to apply vibrato (0-7)
      * @param speed LFO frequency in Hz (typically 2-20 Hz)
      * @param depth Modulation depth in semitones (typically 0.1-2.0, up to 8 for extreme)
      */
-    fun setVibrato(trackId: Int, speed: Float, depth: Float)
+    fun scheduleVibrato(targetFrame: Long, trackId: Int, speed: Float, depth: Float)
 
     /**
      * Clear all pitch modulation for a voice.

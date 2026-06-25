@@ -1004,8 +1004,9 @@ class AudioEngine(
 
     fun getVoiceTableId(trackId: Int): Int = backend.getVoiceTableId(trackId)
 
-    fun setVoiceTableRow(trackId: Int, row: Int) {
-        backend.setVoiceTableRow(trackId, row)
+    // Uses the sample-accurate queue so the THO hop fires at the correct step frame (4.3).
+    fun scheduleVoiceTableRow(targetFrame: Long, trackId: Int, row: Int) {
+        backend.scheduleVoiceTableRow(targetFrame, trackId, row)
     }
 
     // Uses sample-accurate queue so the Vxx change fires at the correct step boundary.
@@ -1017,12 +1018,14 @@ class AudioEngine(
         backend.setPitchSlide(trackId, targetSemitones, durationTicks, tempo)
     }
 
-    fun setPitchBend(trackId: Int, semitonesPerTick: Float, tempo: Int) {
-        backend.setPitchBend(trackId, semitonesPerTick, tempo)
+    // Uses the sample-accurate queue so mid-note PBN/PVB/PVX fire at the correct step frame and
+    // the voices[] write happens on the audio thread (4.3).
+    fun schedulePitchBend(targetFrame: Long, trackId: Int, semitonesPerTick: Float, tempo: Int) {
+        backend.schedulePitchBend(targetFrame, trackId, semitonesPerTick, tempo)
     }
 
-    fun setVibrato(trackId: Int, speed: Float, depth: Float) {
-        backend.setVibrato(trackId, speed, depth)
+    fun scheduleVibrato(targetFrame: Long, trackId: Int, speed: Float, depth: Float) {
+        backend.scheduleVibrato(targetFrame, trackId, speed, depth)
     }
 
     fun clearPitchMod(trackId: Int) {

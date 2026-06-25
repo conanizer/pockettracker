@@ -180,8 +180,8 @@ public:
     // Get table ID for a voice
     int getVoiceTableId(int trackId);
 
-    // Set table row for a voice (THO effect from phrase on empty step)
-    void setVoiceTableRow(int trackId, int row);
+    // Schedule a table-row jump (THO on an empty step) for the active sampler voice at targetFrame.
+    void scheduleVoiceTableRow(int64_t targetFrame, int trackId, int row);
 
     // Schedule a phraseVol update at exact frame (Vxx effect on empty steps)
     void scheduleTrackPhraseVol(int64_t targetFrame, int trackId, float phraseVol);
@@ -284,11 +284,12 @@ public:
     // Set pitch slide for a voice (PSL effect).
     void setPitchSlide(int trackId, float targetSemitones, float durationTicks, int tempo);
 
-    // Set continuous pitch bend (PBN effect).
-    void setPitchBend(int trackId, float semitonesPerStep, int tempo);
+    // Schedule a continuous pitch bend (PBN on an empty step) at targetFrame — applied on the
+    // audio thread via paramUpdateQueue (4.3: no off-thread voices[] write). ~0 stops the bend.
+    void schedulePitchBend(int64_t targetFrame, int trackId, float semitonesPerStep, int tempo);
 
-    // Set vibrato (PVB/PVX effect). depth=0 stops vibrato.
-    void setVibrato(int trackId, float speed, float depth);
+    // Schedule vibrato (PVB/PVX on an empty step) at targetFrame. depth=0 stops vibrato.
+    void scheduleVibrato(int64_t targetFrame, int trackId, float speed, float depth);
 
     // Clear all pitch modulation for a voice (PSL/PBN/PVB/PVX reset).
     void clearPitchMod(int trackId);

@@ -381,8 +381,8 @@ class OboeAudioBackend : IAudioBackend {
         return native_getVoiceTableId(trackId)
     }
 
-    override fun setVoiceTableRow(trackId: Int, row: Int) {
-        native_setVoiceTableRow(trackId, row)
+    override fun scheduleVoiceTableRow(targetFrame: Long, trackId: Int, row: Int) {
+        native_scheduleVoiceTableRow(targetFrame, trackId, row)
     }
 
     override fun scheduleTrackPhraseVol(targetFrame: Long, trackId: Int, phraseVol: Float) {
@@ -394,8 +394,8 @@ class OboeAudioBackend : IAudioBackend {
         Log.d(TAG, "🎵 Pitch slide: track=$trackId, target=$targetSemitones, duration=$durationTicks ticks")
     }
 
-    override fun setPitchBend(trackId: Int, semitonesPerTick: Float, tempo: Int) {
-        native_setPitchBend(trackId, semitonesPerTick, tempo)
+    override fun schedulePitchBend(targetFrame: Long, trackId: Int, semitonesPerTick: Float, tempo: Int) {
+        native_schedulePitchBend(targetFrame, trackId, semitonesPerTick, tempo)
         if (semitonesPerTick == 0f) {
             Log.d(TAG, "🎵 Pitch bend stopped: track=$trackId")
         } else {
@@ -403,8 +403,8 @@ class OboeAudioBackend : IAudioBackend {
         }
     }
 
-    override fun setVibrato(trackId: Int, speed: Float, depth: Float) {
-        native_setVibrato(trackId, speed, depth)
+    override fun scheduleVibrato(targetFrame: Long, trackId: Int, speed: Float, depth: Float) {
+        native_scheduleVibrato(targetFrame, trackId, speed, depth)
         if (depth < 0.01f) {
             Log.d(TAG, "🎵 Vibrato stopped: track=$trackId")
         } else {
@@ -625,12 +625,12 @@ class OboeAudioBackend : IAudioBackend {
     )
     private external fun native_getVoiceTableRow(trackId: Int): Int
     private external fun native_getVoiceTableId(trackId: Int): Int
-    private external fun native_setVoiceTableRow(trackId: Int, row: Int)
+    private external fun native_scheduleVoiceTableRow(targetFrame: Long, trackId: Int, row: Int)
     private external fun native_scheduleTrackPhraseVol(targetFrame: Long, trackId: Int, phraseVol: Float)
 
     private external fun native_setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int)
-    private external fun native_setPitchBend(trackId: Int, semitonesPerTick: Float, tempo: Int)
-    private external fun native_setVibrato(trackId: Int, speed: Float, depth: Float)
+    private external fun native_schedulePitchBend(targetFrame: Long, trackId: Int, semitonesPerTick: Float, tempo: Int)
+    private external fun native_scheduleVibrato(targetFrame: Long, trackId: Int, speed: Float, depth: Float)
     private external fun native_clearPitchMod(trackId: Int)
     private external fun native_setInitialPitchOffset(trackId: Int, semitones: Float)
 

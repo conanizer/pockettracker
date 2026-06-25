@@ -1029,8 +1029,8 @@ class PlaybackController(
             val targetRow = params.tableHopTarget % 16  // 0-15
             trackState.lastTableStartRow = targetRow
             if (!hasNote) {
-                // No note: jump the active voice's table row directly
-                audioEngine.setVoiceTableRow(trackId, targetRow)
+                // No note: jump the active voice's table row at the step frame (sample-accurate, 4.3)
+                audioEngine.scheduleVoiceTableRow(effectiveTargetFrame, trackId, targetRow)
                 if (TRACE) logger.d(TAG, "📋 THO: Jumped active voice table to row $targetRow (no note)")
             } else {
                 if (TRACE) logger.d(TAG, "📋 THO: Will start table at row $targetRow (with note)")
@@ -1208,7 +1208,7 @@ class PlaybackController(
             if (params.pbnValue != null) {
                 if (params.pbnValue == 0) {
                     // PBN 00: Stop pitch bend
-                    audioEngine.setPitchBend(trackId, 0f, tempo)
+                    audioEngine.schedulePitchBend(effectiveTargetFrame, trackId, 0f, tempo)
                     trackState.pitchBendActive = false
                     if (TRACE) logger.d(TAG, "🎵 PBN 00: Pitch bend stopped (mid-note)")
                 } else {
@@ -1217,7 +1217,7 @@ class PlaybackController(
                     } else {
                         -((params.pbnValue and 0x7F) / 16f)
                     }
-                    audioEngine.setPitchBend(trackId, semitonesPerTick, tempo)
+                    audioEngine.schedulePitchBend(effectiveTargetFrame, trackId, semitonesPerTick, tempo)
                     trackState.pitchBendActive = true
                     val direction = if (params.pbnValue < 0x80) "UP" else "DOWN"
                     if (TRACE) logger.d(TAG, "🎵 PBN ${params.pbnValue.toString(16).uppercase().padStart(2, '0')}: " +
@@ -1228,7 +1228,7 @@ class PlaybackController(
             // Handle PVB (Vibrato) - modify currently playing voice
             if (params.pvbValue != null) {
                 if (params.pvbValue == 0) {
-                    audioEngine.setVibrato(trackId, 0f, 0f)
+                    audioEngine.scheduleVibrato(effectiveTargetFrame, trackId, 0f, 0f)
                     trackState.vibratoActive = false
                     if (TRACE) logger.d(TAG, "🎵 PVB 00: Vibrato stopped (mid-note)")
                 } else {
@@ -1236,7 +1236,7 @@ class PlaybackController(
                     val depthNibble = params.pvbValue and 0x0F
                     val speed = (2f + speedNibble * 0.5f) * (tempo / 120f)  // tempo-synced (see note-path PVB)
                     val depth = depthNibble * 0.125f
-                    audioEngine.setVibrato(trackId, speed, depth)
+                    audioEngine.scheduleVibrato(effectiveTargetFrame, trackId, speed, depth)
                     trackState.vibratoActive = true
                     if (TRACE) logger.d(TAG, "🎵 PVB ${params.pvbValue.toString(16).uppercase().padStart(2, '0')}: " +
                             "Vibrato (mid-note)")
@@ -1246,7 +1246,7 @@ class PlaybackController(
             // Handle PVX (Extreme Vibrato) - modify currently playing voice
             if (params.pvxValue != null) {
                 if (params.pvxValue == 0) {
-                    audioEngine.setVibrato(trackId, 0f, 0f)
+                    audioEngine.scheduleVibrato(effectiveTargetFrame, trackId, 0f, 0f)
                     trackState.vibratoActive = false
                     if (TRACE) logger.d(TAG, "🎵 PVX 00: Extreme vibrato stopped (mid-note)")
                 } else {
@@ -1254,7 +1254,7 @@ class PlaybackController(
                     val depthNibble = params.pvxValue and 0x0F
                     val speed = (2f + speedNibble * 0.5f) * 2f * (tempo / 120f)  // 2x, tempo-synced
                     val depth = depthNibble * 0.125f * 4f
-                    audioEngine.setVibrato(trackId, speed, depth)
+                    audioEngine.scheduleVibrato(effectiveTargetFrame, trackId, speed, depth)
                     trackState.vibratoActive = true
                     if (TRACE) logger.d(TAG, "🎵 PVX ${params.pvxValue.toString(16).uppercase().padStart(2, '0')}: " +
                             "EXTREME vibrato (mid-note)")

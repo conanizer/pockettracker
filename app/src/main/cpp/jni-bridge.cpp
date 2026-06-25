@@ -632,10 +632,10 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1sched
 }
 
 JNIEXPORT void JNICALL
-Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setVoiceTableRow(
-        JNIEnv *env, jobject thiz, jint trackId, jint row) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleVoiceTableRow(
+        JNIEnv *env, jobject thiz, jlong targetFrame, jint trackId, jint row) {
     if (engine) {
-        engine->setVoiceTableRow(trackId, row);
+        engine->scheduleVoiceTableRow(targetFrame, trackId, row);
     }
 }
 
@@ -674,18 +674,18 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setPi
 }
 
 JNIEXPORT void JNICALL
-Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setPitchBend(
-        JNIEnv *env, jobject thiz, jint trackId, jfloat semitonesPerTick, jint tempo) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1schedulePitchBend(
+        JNIEnv *env, jobject thiz, jlong targetFrame, jint trackId, jfloat semitonesPerTick, jint tempo) {
     if (engine) {
-        engine->setPitchBend(trackId, semitonesPerTick, tempo);
+        engine->schedulePitchBend(targetFrame, trackId, semitonesPerTick, tempo);
     }
 }
 
 JNIEXPORT void JNICALL
-Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setVibrato(
-        JNIEnv *env, jobject thiz, jint trackId, jfloat speed, jfloat depth) {
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleVibrato(
+        JNIEnv *env, jobject thiz, jlong targetFrame, jint trackId, jfloat speed, jfloat depth) {
     if (engine) {
-        engine->setVibrato(trackId, speed, depth);
+        engine->scheduleVibrato(targetFrame, trackId, speed, depth);
     }
 }
 

@@ -689,18 +689,44 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     for (int32_t frame = 0; frame < numFrames; frame++) {
         int64_t currentFrame = blockStartFrame + frame;
 
-        // Process scheduled parameter updates (e.g. Vxx phraseVol on empty steps)
+        // Apply scheduled parameter updates at their exact frame. Running here (on the audio
+        // thread) is what makes live PBN/PVB/PVX/THO race-free (4.3): the look-ahead scheduler only
+        // enqueues; the voices[] mutation happens below, where the mix loop is the sole writer.
         while (paramIdx < paramBatch.size() && paramBatch[paramIdx].targetFrame <= currentFrame) {
             ScheduledParamUpdate upd = paramBatch[paramIdx++];
-            // Apply to sampler voices
-            for (int v = 0; v < MAX_VOICES; v++) {
-                if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
-                    voices[v].modSourceValues[(ModSourceId)upd.sourceId] = upd.value;
+            switch (upd.action) {
+                case PARAM_UPDATE_PITCH_BEND: {           // PBN on empty step
+                    IAudioVoice* pv = findActiveVoiceForTrack(upd.trackId);
+                    if (pv) pv->setPitchBendRaw(upd.value);
                     break;
                 }
-            }
-            if (upd.trackId >= 0 && upd.trackId < 8 && sfVoices[upd.trackId].isActive) {
-                sfVoices[upd.trackId].modSourceValues[(ModSourceId)upd.sourceId] = upd.value;
+                case PARAM_UPDATE_VIBRATO: {              // PVB/PVX on empty step
+                    IAudioVoice* pv = findActiveVoiceForTrack(upd.trackId);
+                    if (pv) pv->setVibratoRaw(upd.value, upd.value2);
+                    break;
+                }
+                case PARAM_UPDATE_TABLE_ROW: {            // THO on empty step (sampler voices only)
+                    for (int v = 0; v < MAX_VOICES; v++) {
+                        if (voices[v].isActive && voices[v].trackId == upd.trackId) {
+                            voices[v].tableRow = (int)upd.value % 16;
+                            voices[v].lastProcessedRow = -1;  // re-apply the row immediately
+                            break;
+                        }
+                    }
+                    break;
+                }
+                default: {                                // PARAM_UPDATE_MOD_SOURCE — Vxx phraseVol
+                    for (int v = 0; v < MAX_VOICES; v++) {
+                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
+                            voices[v].modSourceValues[(ModSourceId)upd.sourceId] = upd.value;
+                            break;
+                        }
+                    }
+                    if (upd.trackId >= 0 && upd.trackId < 8 && sfVoices[upd.trackId].isActive) {
+                        sfVoices[upd.trackId].modSourceValues[(ModSourceId)upd.sourceId] = upd.value;
+                    }
+                    break;
+                }
             }
         }
 
@@ -2126,16 +2152,9 @@ int AudioEngine::getVoiceTableId(int trackId) {
     return -1;
 }
 
-void AudioEngine::setVoiceTableRow(int trackId, int row) {
-    for (int v = 0; v < MAX_VOICES; v++) {
-        if (voices[v].isActive && voices[v].trackId == trackId) {
-            voices[v].tableRow = row % 16;
-            voices[v].lastProcessedRow = -1;
-            LOGD("📋 THO: Set voice %d (track %d) table row to %d", v, trackId, voices[v].tableRow);
-            return;
-        }
-    }
-    LOGD("📋 THO: No active voice on track %d, ignoring", trackId);
+void AudioEngine::scheduleVoiceTableRow(int64_t targetFrame, int trackId, int row) {
+    // 4.3: enqueue; the audio thread applies it to voices[] in the drain loop (see processAudioBlock).
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, (float)row, PARAM_UPDATE_TABLE_ROW, 0.0f });
 }
 
 void AudioEngine::scheduleTrackPhraseVol(int64_t targetFrame, int trackId, float phraseVol) {
@@ -2364,30 +2383,21 @@ void AudioEngine::setPitchSlide(int trackId, float targetSemitones, float durati
     LOGD("🎵 Pitch slide: track=%d, to=%.2f over %.0f frames", trackId, targetSemitones, totalFrames);
 }
 
-void AudioEngine::setPitchBend(int trackId, float semitonesPerStep, int tempo) {
-    IAudioVoice* v = findActiveVoiceForTrack(trackId);
-    if (!v) return;
-    if (fabsf(semitonesPerStep) < 0.0001f) {
-        v->setPitchBendRaw(0.0f);
-        LOGD("🎵 Pitch bend stopped: track=%d", trackId);
-    } else {
+void AudioEngine::schedulePitchBend(int64_t targetFrame, int trackId, float semitonesPerStep, int tempo) {
+    // Convert the per-step bend rate to per-frame here (sample-rate/tempo known on this thread),
+    // then enqueue the raw rate; the audio thread applies it to the active voice (4.3). 0 = stop.
+    float ratePerFrame = 0.0f;
+    if (fabsf(semitonesPerStep) >= 0.0001f) {
         float sr = stream ? (float)stream->getSampleRate() : 44100.0f;
         float framesPerStep = sr / (tempo / 60.0f * 4.0f * 12.0f) * 12.0f;
-        float ratePerFrame = semitonesPerStep / framesPerStep;
-        v->setPitchBendRaw(ratePerFrame);
-        LOGD("🎵 Pitch bend: track=%d, rate=%.4f semitones/step", trackId, semitonesPerStep);
+        ratePerFrame = semitonesPerStep / framesPerStep;
     }
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, ratePerFrame, PARAM_UPDATE_PITCH_BEND, 0.0f });
 }
 
-void AudioEngine::setVibrato(int trackId, float speed, float depth) {
-    IAudioVoice* v = findActiveVoiceForTrack(trackId);
-    if (!v) return;
-    v->setVibratoRaw(speed, depth);
-    if (depth < 0.01f) {
-        LOGD("🎵 Vibrato stopped: track=%d", trackId);
-    } else {
-        LOGD("🎵 Vibrato: track=%d, speed=%.1fHz, depth=%.2f semitones", trackId, speed, depth);
-    }
+void AudioEngine::scheduleVibrato(int64_t targetFrame, int trackId, float speed, float depth) {
+    // 4.3: enqueue speed+depth; the audio thread applies setVibratoRaw in the drain loop. depth=0 stops.
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, speed, PARAM_UPDATE_VIBRATO, depth });
 }
 
 void AudioEngine::clearPitchMod(int trackId) {

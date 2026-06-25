@@ -232,12 +232,24 @@ public:
     }
 };
 
+// Action discriminator for ScheduledParamUpdate. 4.3: live PBN/PVB/PVX/THO mutations are routed
+// through this queue so the voices[] write happens on the audio thread (no off-thread race) and
+// lands at the exact step frame instead of whenever the look-ahead scheduler reached the step.
+enum ParamUpdateAction {
+    PARAM_UPDATE_MOD_SOURCE = 0,  // write modSourceValues[sourceId] = value (Vxx phraseVol)
+    PARAM_UPDATE_PITCH_BEND,      // active voice: setPitchBendRaw(value)        [PBN]
+    PARAM_UPDATE_VIBRATO,         // active voice: setVibratoRaw(value, value2)  [PVB/PVX]
+    PARAM_UPDATE_TABLE_ROW,       // active sampler voice: tableRow = (int)value [THO]
+};
+
 // Scheduled parameter update (e.g. Vxx on empty step — update phraseVol at exact frame)
 struct ScheduledParamUpdate {
     int64_t targetFrame;     // Exact audio frame to apply the update
     int trackId;             // Which track's active voice to update
-    int sourceId;            // ModSourceId to write (e.g. MOD_SRC_PHRASE_VOL)
-    float value;             // New value to write
+    int sourceId;            // ModSourceId to write (PARAM_UPDATE_MOD_SOURCE)
+    float value;             // New value: mod-source value / bend rate / vibrato speed / table row
+    int action = PARAM_UPDATE_MOD_SOURCE;  // discriminator (default keeps Vxx call sites unchanged)
+    float value2 = 0.0f;     // second arg: vibrato depth (PARAM_UPDATE_VIBRATO)
 
     bool operator>(const ScheduledParamUpdate& other) const {
         return targetFrame > other.targetFrame;
