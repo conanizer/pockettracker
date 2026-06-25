@@ -5,29 +5,44 @@
 #include <climits>
 #include <vector>
 #include "audio-engine.h"
+#include "oboe-audio-engine.h"  // Android (Oboe) backend that owns the stream + drives the core
 #include "vendor/tsf/tsf.h"  // API declarations only (tsf_close, tsf_load_filename, etc.)
 
 // JNI requires env and thiz in every function signature, but most thin wrappers don't use them.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-parameter"
 
-static AudioEngine* engine = nullptr;
+static AudioEngine* engine = nullptr;          // portable DSP core (no Oboe)
+static OboeAudioEngine* oboeShell = nullptr;   // Android backend: owns the output stream + callback
+
+// Create the portable core + its Oboe backend and start the stream. Returns true on success, false if
+// an engine already exists (matches the old "create once" guard).
+static bool createAudioEngine() {
+    if (engine) return false;
+    engine = new AudioEngine();
+    oboeShell = new OboeAudioEngine(engine);
+    return oboeShell->openStream();
+}
+
+// Tear down in the safe order: the shell's destructor stops/closes the stream (so no callback can run)
+// and detaches the core's resume hook BEFORE the core it points at is freed. delete on null is a no-op.
+static void deleteAudioEngine() {
+    delete oboeShell;
+    oboeShell = nullptr;
+    delete engine;
+    engine = nullptr;
+}
 
 extern "C" {
 
 JNIEXPORT jboolean JNICALL
 Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1create(JNIEnv *env, jobject thiz) {
-    if (!engine) {
-        engine = new AudioEngine();
-        return engine->openStream() ? JNI_TRUE : JNI_FALSE;
-    }
-    return JNI_FALSE;
+    return createAudioEngine() ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1delete(JNIEnv *env, jobject thiz) {
-    delete engine;
-    engine = nullptr;
+    deleteAudioEngine();
 }
 
 JNIEXPORT void JNICALL
@@ -119,8 +134,8 @@ Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1clearScheduledNotes(
 
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1resumeStream(JNIEnv *env, jobject thiz) {
-    if (engine) {
-        engine->resumeStream();
+    if (oboeShell) {
+        oboeShell->resumeStream();
     }
 }
 
@@ -144,18 +159,13 @@ Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1getWaveform(JNIEnv *
 
 JNIEXPORT jboolean JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1create(JNIEnv *env, jobject thiz) {
-    if (!engine) {
-        engine = new AudioEngine();
-        return engine->openStream() ? JNI_TRUE : JNI_FALSE;
-    }
-    return JNI_FALSE;
+    return createAudioEngine() ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1delete(JNIEnv *env, jobject thiz) {
     if (engine) {
-        delete engine;
-        engine = nullptr;
+        deleteAudioEngine();
         LOGD("✅ Audio engine deleted");
     }
 }
@@ -303,8 +313,8 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1clear
 
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1resumeStream(JNIEnv *env, jobject thiz) {
-    if (engine) {
-        engine->resumeStream();
+    if (oboeShell) {
+        oboeShell->resumeStream();
     }
 }
 

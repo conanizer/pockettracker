@@ -506,7 +506,7 @@ Standardised all screen modules to a single consistent style (new modules led, o
 
 ### Early Post-MVP (With Mentor)
 - Advanced copy/paste (instrument settings)
-- Linux port (GTK/Qt UI with same controllers)
+- Linux port (GTK/Qt UI with same controllers) — the C++ audio engine is now decoupled from Oboe (REVIEW-4 4.5): `AudioEngine` is the portable core, `OboeAudioEngine` the Android backend, so the port is a drop-in sibling backend rather than an engine rewrite
 - Braids synthesizers (Mutable Instruments integration)
 - Filter automation (CUT, RES effects)
 

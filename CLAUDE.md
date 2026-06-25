@@ -199,8 +199,8 @@ Each module receives state objects and renders itself independently.
 - High-level functions: `playPhrase()`, `playChain()`, `playSong()`
 - Note scheduling with sample-accurate frame timing
 
-**C++ Layer (`audio-engine.cpp`):**
-- Oboe-based audio stream (44.1kHz, OpenSL ES preferred, AAudio fallback)
+**C++ Layer (portable `AudioEngine` core in `audio-engine.cpp` + Android `OboeAudioEngine` backend in `oboe-audio-engine.cpp`):**
+- Oboe-based audio stream (44.1kHz, OpenSL ES preferred, AAudio fallback) — owned by `OboeAudioEngine`, the **only** Oboe-coupled TU
 - Sample-accurate priority queue (`std::priority_queue<ScheduledNote>`)
 - 8-voice polyphony with per-track voice stealing
 - Linear interpolation for pitch-shifting (professional quality)
@@ -210,7 +210,8 @@ Each module receives state objects and renders itself independently.
 - Master bus: OTT 3-band compressor + DaisySP soft limiter
 - Stereo send buses: DaisySP ReverbSc + ping-pong delay
 - Real-time waveform capture for oscilloscope
-- `native-audio.cpp` is a 15-line stub redirect — all code lives in `audio-engine.cpp`
+- **Engine/Oboe split (REVIEW-4 4.5):** `AudioEngine` (`audio-engine.{h,cpp}`) is platform-agnostic — voices, scheduling, all DSP (`processAudioBlock`), no Oboe/Android deps. `OboeAudioEngine` (`oboe-audio-engine.{h,cpp}`) owns the stream and forwards `onAudioReady → core.processLiveBlock(...)`. A Linux port adds a sibling backend (e.g. `AlsaAudioEngine`) driving the same core. Names mirror the Kotlin layer (`AudioEngine` = portable, `Oboe*` = Android).
+- `native-audio.cpp` is a 15-line stub redirect — all DSP/scheduling lives in `audio-engine.cpp`
 
 **Key Features:**
 - Frame-precise triggering (no timing jitter)

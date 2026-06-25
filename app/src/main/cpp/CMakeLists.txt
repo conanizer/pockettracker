@@ -12,6 +12,7 @@ add_library(pockettracker SHARED
         soundfont-voice.cpp
         sample-editor.cpp
         audio-engine.cpp
+        oboe-audio-engine.cpp
         jni-bridge.cpp
         transient-detector.cpp
         kissfft/kiss_fft.c

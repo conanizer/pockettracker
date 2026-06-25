@@ -114,8 +114,9 @@ PocketTracker/
 │
 ├── MainActivity.kt                 ✅ Root package — thin coordinator (backends + UI wiring)
 │
-└── app/src/main/cpp/               C++ audio engine (PORTABLE)
-    ├── audio-engine.cpp / .h       Main engine: processAudioBlock, onAudioReady, renderOffline
+└── app/src/main/cpp/               C++ audio engine
+    ├── audio-engine.cpp / .h       PORTABLE core (no Oboe): processAudioBlock, processLiveBlock, renderOffline
+    ├── oboe-audio-engine.cpp / .h  Android backend: owns the Oboe stream, onAudioReady → core.processLiveBlock (only Oboe TU)
     ├── jni-bridge.cpp              JNI entry points only (thin wrapper)
     ├── native-audio.cpp            15-line stub redirect (legacy entry point)
     ├── sampler-voice.h             Per-voice state for sample-playback voices
@@ -327,16 +328,19 @@ add it to `processAudioBlock()`. NEVER add processing logic directly to `onAudio
 > 2. Create ALSA/PulseAudio backend implementing same interface
 > 3. Rest of the audio code stays EXACTLY the same!
 
-> **Reality check (REVIEW-4 4.5):** the portability seam is real on the *Kotlin* side (`IAudioBackend`),
-> but the **C++ `AudioEngine` is not yet decoupled from Oboe** — it `#include`s `<oboe/Oboe.h>`,
-> *is* the callback (`class AudioEngine : public oboe::AudioStreamDataCallback`), owns the
-> `std::shared_ptr<oboe::AudioStream>`, and runs the device-specific stream-open ladder in
-> `openStream()`. So step 1 above isn't done in C++ yet, and the audio code does **not** "stay exactly
-> the same": the Linux port needs the engine split into a portable `AudioEngineCore` (voices,
-> scheduling, `processAudioBlock`, all DSP — no Oboe) and a thin Android `OboeAudioEngine` shell that
-> owns the stream and forwards `onAudioReady → core.processAudioBlock`. Logging is already shimmed for
-> non-Android (`audio-defs.h`, REVIEW-4 4.5); the Oboe split is the remaining, larger piece (deferred
-> post-MVP).
+> **Status (REVIEW-4 4.5 — done):** the C++ engine is now split, so step 1 above is real on both sides.
+> - **`audio-engine.{h,cpp}` — portable core (`class AudioEngine`):** voices, note scheduling, the
+>   sample-accurate queues and ALL DSP (`processAudioBlock`). No `<oboe/*>` or `<android/*>` — logging
+>   goes through the `audio-defs.h` shim. It caches the device rate (`setDeviceSampleRate`) and wakes a
+>   paused stream through a `resumeHook` instead of touching a stream object.
+> - **`oboe-audio-engine.{h,cpp}` — Android backend (`class OboeAudioEngine : oboe::AudioStreamDataCallback`):**
+>   the *only* Oboe-coupled TU. Owns the `std::shared_ptr<oboe::AudioStream>`, runs the device-specific
+>   stream-open ladder, and in `onAudioReady` forwards the buffer to `core->processLiveBlock(...)`.
+>
+> So the Linux port is now a **drop-in backend**: add a sibling (e.g. `AlsaAudioEngine` / `SdlAudioEngine`)
+> that owns its own stream and calls the same `processLiveBlock()` — `audio-engine.{h,cpp}` is recompiled
+> unchanged. (Naming mirrors the Kotlin layer: `AudioEngine` = portable on both sides, `Oboe*` = Android.)
+> The seam was also real on the Kotlin side already (`IAudioBackend`).
 
 ### JNI Interface (Before Refactoring — now wrapped behind IAudioBackend/OboeAudioBackend)
 

@@ -52,7 +52,8 @@ AudioEngine::AudioEngine() {
 }
 
 AudioEngine::~AudioEngine() {
-    closeStream();
+    // The platform backend (OboeAudioEngine) owns and closes the output stream; the core just frees
+    // its buffers. jni-bridge destroys the shell first so no callback can run during this teardown.
     for (int i = 0; i < 256; i++) {
         if (samples[i])              delete[] samples[i];
         if (samplesRight[i])         delete[] samplesRight[i];
@@ -67,79 +68,8 @@ AudioEngine::~AudioEngine() {
     delete[] fxPreviewBackupRight;
 }
 
-bool AudioEngine::openStream() {
-    // OpenSL ES does NOT trigger CCodec/C2 codec enumeration that spams 2000+ log lines
-    // and blocks for up to 35 seconds on some Android ROMs (e.g. GammaCoreOS on Miyoo Flip).
-    // Try OpenSL ES first; fall back to AAudio only if OpenSL ES is unavailable.
-
-    oboe::AudioStreamBuilder builder;
-    builder.setDataCallback(this);
-    builder.setFormat(oboe::AudioFormat::Float);
-    builder.setChannelCount(oboe::ChannelCount::Stereo);
-    builder.setSampleRate(44100);
-
-    // Attempt 1: OpenSL ES LowLatency Exclusive (best latency, no CCodec spam).
-    builder.setAudioApi(oboe::AudioApi::OpenSLES);
-    builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
-    builder.setSharingMode(oboe::SharingMode::Exclusive);
-    oboe::Result result = builder.openStream(stream);
-
-    // Attempt 2: OpenSL ES LowLatency Shared.
-    if (result != oboe::Result::OK) {
-        LOGD("openStream: OpenSLES exclusive failed (%s), trying OpenSLES shared LowLatency",
-             oboe::convertToText(result));
-        builder.setSharingMode(oboe::SharingMode::Shared);
-        result = builder.openStream(stream);
-    }
-
-    // Attempt 3: OpenSL ES None/Shared (maximum OpenSL ES compatibility).
-    if (result != oboe::Result::OK) {
-        LOGD("openStream: OpenSLES LowLatency failed (%s), trying OpenSLES None/Shared",
-             oboe::convertToText(result));
-        builder.setPerformanceMode(oboe::PerformanceMode::None);
-        builder.setSharingMode(oboe::SharingMode::Shared);
-        result = builder.openStream(stream);
-    }
-
-    // Attempt 4: AAudio LowLatency Exclusive (fallback; may trigger CCodec on some ROMs).
-    if (result != oboe::Result::OK) {
-        LOGD("openStream: OpenSLES failed (%s), falling back to AAudio LowLatency Exclusive",
-             oboe::convertToText(result));
-        builder.setAudioApi(oboe::AudioApi::Unspecified);
-        builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
-        builder.setSharingMode(oboe::SharingMode::Exclusive);
-        result = builder.openStream(stream);
-    }
-
-    if (result != oboe::Result::OK) {
-        LOGE("openStream: all attempts failed: %s", oboe::convertToText(result));
-        return false;
-    }
-
-    LOGD("Stream opened: %d Hz, bufSz=%d, api=%s, perf=%s, sharing=%s",
-         stream->getSampleRate(),
-         stream->getBufferSizeInFrames(),
-         oboe::convertToText(stream->getAudioApi()),
-         oboe::convertToText(stream->getPerformanceMode()),
-         oboe::convertToText(stream->getSharingMode()));
-
-    result = stream->requestStart();
-    if (result != oboe::Result::OK) {
-        LOGE("Failed to start: %s", oboe::convertToText(result));
-        return false;
-    }
-
-    LOGD("Stream started OK");
-    return true;
-}
-
-void AudioEngine::closeStream() {
-    if (stream) {
-        stream->stop();
-        stream->close();
-        stream.reset();
-    }
-}
+// Stream lifecycle (openStream/closeStream/resumeStream) and the audio callback now live in the
+// platform backend, oboe-audio-engine.cpp. The core is backend-agnostic (REVIEW-4 4.5).
 
 void AudioEngine::loadSample(int id, const float* data, int length) {
     if (id < 0 || id >= 256) return;
@@ -522,7 +452,7 @@ void AudioEngine::clearAllSamples() {
 void AudioEngine::triggerNote(int sampleId, int trackId, float freq, float baseFreq, float vol, float pan) {
     if (sampleId < 0 || sampleId >= 256 || !samples[sampleId]) return;
 
-    resumeStream();
+    requestResume();
 
     for (int i = 0; i < MAX_VOICES; i++) {
         if (voices[i].trackId == trackId) {
@@ -533,7 +463,7 @@ void AudioEngine::triggerNote(int sampleId, int trackId, float freq, float baseF
     for (int i = 0; i < MAX_VOICES; i++) {
         if (!voices[i].isActive) {
             float rate = freq / baseFreq;
-            float sampleRate = stream ? (float)stream->getSampleRate() : 44100.0f;
+            float sampleRate = (float)getSampleRate();
             voices[i].trigger(samples[sampleId], samplesRight[sampleId], sampleLengths[sampleId], trackId, rate, vol, 1.0f, pan,
                               instrumentParams[sampleId], sampleRate);
             voices[i].instrId = sampleId;
@@ -587,20 +517,11 @@ void AudioEngine::getTrackActiveNotes(int* out, int trackCount) {
 }
 
 int AudioEngine::getSampleRate() {
-    if (stream) {
-        return stream->getSampleRate();
-    }
-    // Match every other fallback in the engine (triggerNote, setPitchSlide/Bend,
-    // updateVoiceModulation, the Kotlin layer) — 48000 here made rate/pitch math ~8.8% off
-    // if Kotlin cached this before the stream opened.
-    return 44100; // Default fallback
-}
-
-void AudioEngine::resumeStream() {
-    if (stream && stream->getState() == oboe::StreamState::Paused) {
-        stream->start();
-        LOGD("Stream resumed");
-    }
+    // Cached from the platform backend at stream-open (setDeviceSampleRate). Defaults to 44100 until
+    // then — matching every other fallback in the engine (triggerNote, setPitchSlide/Bend,
+    // updateVoiceModulation, the Kotlin layer); 48000 here once made rate/pitch math ~8.8% off if
+    // Kotlin cached this before the stream opened.
+    return deviceSampleRate.load(std::memory_order_relaxed);
 }
 
 // ARM FZ (Flush-to-Zero) bit eliminates denormal CPU stalls. Must be set per-thread
@@ -622,8 +543,9 @@ static void setFlushToZeroForCurrentThread() {
 #endif
 }
 
-// ALL audio DSP lives here. onAudioReady and renderOffline are thin wrappers.
-// Rule: NEVER add audio processing logic directly to onAudioReady or renderOffline.
+// ALL audio DSP lives here. processLiveBlock (live, via the platform backend's callback) and
+// renderOffline (WAV export) are thin wrappers.
+// Rule: NEVER add audio processing logic directly to processLiveBlock or renderOffline.
 void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCount, float sampleRate) {
     for (int t = 0; t < 8; t++) { framePeaksPerTrackL[t] = 0.0f; framePeaksPerTrackR[t] = 0.0f; }
     frameSendPeakRevL = frameSendPeakRevR = frameSendPeakDelL = frameSendPeakDelR = 0.0f;
@@ -653,7 +575,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
     // Per-block scratch (send buses, OCTA accumulators, instrument-spectrum sum) lives on the engine
     // object now, not the audio-thread stack (REVIEW-4 4.4) — declared in the header. (Re)initialised
-    // here exactly as the former stack locals were; MAX_BLOCK is the class cap and onAudioReady/
+    // here exactly as the former stack locals were; MAX_BLOCK is the class cap and processLiveBlock/
     // renderOffline chunk larger requests, so only [0,numFrames) is ever touched.
     memset(revSendBufL, 0, frameBytes); memset(revSendBufR, 0, frameBytes);
     memset(dlySendBufL, 0, frameBytes); memset(dlySendBufR, 0, frameBytes);
@@ -1901,15 +1823,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     globalFrameCounter.store(blockStartFrame + numFrames, std::memory_order_relaxed);
 }
 
-oboe::DataCallbackResult AudioEngine::onAudioReady(
-        oboe::AudioStream *audioStream,
-        void *audioData,
-        int32_t numFrames) {
+void AudioEngine::processLiveBlock(float* output, int numFrames, int channelCount, float sampleRate) {
 
     setFlushToZeroForCurrentThread();
-
-    float *output = static_cast<float*>(audioData);
-    int channelCount = audioStream->getChannelCount();
 
     for (int i = 0; i < numFrames * channelCount; i++) {
         output[i] = 0.0f;
@@ -1917,10 +1833,9 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
 
     // During offline WAV render: output silence and let renderOffline process the queue.
     if (isOfflineRendering.load()) {
-        return oboe::DataCallbackResult::Continue;
+        return;
     }
 
-    float sampleRate = (float)audioStream->getSampleRate();
     // Oboe bursts are normally 192-960 frames, but the None/Shared fallback path or unusual
     // ROMs can exceed MAX_BLOCK — and every per-block buffer in processAudioBlock is sized to
     // MAX_BLOCK. Chunk to keep them in bounds (renderOffline already does the same).
@@ -1988,8 +1903,6 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
         sendPeakDelL = fmaxf(sendPeakDelL, frameSendPeakDelL);
         sendPeakDelR = fmaxf(sendPeakDelR, frameSendPeakDelR);
     }
-
-    return oboe::DataCallbackResult::Continue;
 }
 
 int64_t AudioEngine::getCurrentFrame() {
@@ -2376,7 +2289,7 @@ IAudioVoice* AudioEngine::findActiveVoiceForTrack(int trackId) {
 void AudioEngine::setPitchSlide(int trackId, float targetSemitones, float durationTicks, int tempo) {
     IAudioVoice* v = findActiveVoiceForTrack(trackId);
     if (!v) return;
-    float sr = stream ? (float)stream->getSampleRate() : 44100.0f;
+    float sr = (float)getSampleRate();
     float framesPerTic = sr / (tempo / 60.0f * 4.0f * 12.0f);
     float totalFrames = fmaxf(1.0f, framesPerTic * durationTicks);
     v->setPitchSlideRaw(targetSemitones, totalFrames);
@@ -2388,7 +2301,7 @@ void AudioEngine::schedulePitchBend(int64_t targetFrame, int trackId, float semi
     // then enqueue the raw rate; the audio thread applies it to the active voice (4.3). 0 = stop.
     float ratePerFrame = 0.0f;
     if (fabsf(semitonesPerStep) >= 0.0001f) {
-        float sr = stream ? (float)stream->getSampleRate() : 44100.0f;
+        float sr = (float)getSampleRate();
         float framesPerStep = sr / (tempo / 60.0f * 4.0f * 12.0f) * 12.0f;
         ratePerFrame = semitonesPerStep / framesPerStep;
     }

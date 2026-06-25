@@ -1,10 +1,19 @@
 #pragma once
-#include <oboe/Oboe.h>
+// ───────────────────────────────────────────────────────────────────────────────────────────────
+// PORTABLE AUDIO CORE — no platform/Oboe/Android dependencies (REVIEW-4 4.5).
+// This translation unit holds the whole engine: voices, note scheduling, the sample-accurate queues
+// and ALL DSP (processAudioBlock). It must stay backend-agnostic so the Linux port is a drop-in: the
+// Oboe glue (stream open/close, the audio callback) lives ONLY in oboe-audio-engine.{h,cpp}; a future
+// ALSA/JACK/SDL2 backend is a parallel file that calls processLiveBlock() the same way. Do NOT add
+// <oboe/*> or <android/*> includes here — logging already goes through the audio-defs.h shim.
+// ───────────────────────────────────────────────────────────────────────────────────────────────
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <mutex>
+#include <utility>
 #include <vector>
 #include <algorithm>
 #include "sampler-voice.h"
@@ -16,13 +25,19 @@
 // Declared here so audio-engine.cpp and jni-bridge.cpp can reference sfVoices[].
 extern SoundfontVoice sfVoices[8];
 
-class AudioEngine : public oboe::AudioStreamDataCallback {
+class AudioEngine {
 public:
     AudioEngine();
     ~AudioEngine();
 
-    bool openStream();
-    void closeStream();
+    // Cache the backend's device sample rate. Set once by the platform shell (OboeAudioEngine) when the
+    // stream opens, then read by getSampleRate() and the scheduler-thread pitch/tic math — so the core
+    // never has to reach into a platform stream object for it.
+    void setDeviceSampleRate(int sr) { deviceSampleRate.store(sr, std::memory_order_relaxed); }
+
+    // Install a hook the core calls to wake a paused output stream (used by triggerNote). The platform
+    // shell sets this to its resumeStream(); on a backend that never pauses it can stay null (no-op).
+    void setResumeHook(std::function<void()> hook) { resumeHook = std::move(hook); }
 
     void loadSample(int id, const float* data, int length);
     void loadSampleStereo(int id, const float* left, const float* right, int length);
@@ -62,8 +77,6 @@ public:
     void getTrackActiveNotes(int* out, int trackCount);
 
     int getSampleRate();
-
-    void resumeStream();
 
     // ===================================
     // SAMPLE EDITOR OPERATIONS
@@ -117,17 +130,18 @@ public:
     // ===================================
     // CORE AUDIO PROCESSING BLOCK
     // ===================================
-    // ALL audio DSP lives here. onAudioReady and renderOffline are thin wrappers.
-    // Rule: NEVER add audio processing logic directly to onAudioReady or renderOffline.
+    // ALL audio DSP lives here. processLiveBlock and renderOffline are thin wrappers.
+    // Rule: NEVER add audio processing logic directly to processLiveBlock or renderOffline.
     void processAudioBlock(float* output, int numFrames, int channelCount, float sampleRate);
 
     // ===================================
-    // LIVE AUDIO CALLBACK (thin wrapper — no DSP here!)
+    // LIVE BLOCK ENTRY (called by the platform backend's audio callback)
     // ===================================
-    oboe::DataCallbackResult onAudioReady(
-            oboe::AudioStream *audioStream,
-            void *audioData,
-            int32_t numFrames) override;
+    // The platform shell (OboeAudioEngine::onAudioReady) hands its raw output buffer here. This does
+    // everything the old onAudioReady did MINUS the Oboe glue: flush-to-zero, clear the buffer, bail to
+    // silence during offline render, chunk into MAX_BLOCK processAudioBlock calls, then capture the
+    // oscilloscope/spectrum/peak data. Backend-agnostic — no DSP lives in the callback shell.
+    void processLiveBlock(float* output, int numFrames, int channelCount, float sampleRate);
 
     // Get current global frame counter (for scheduling notes from Kotlin)
     int64_t getCurrentFrame();
@@ -330,7 +344,7 @@ public:
     // Get current frame counter
     int64_t getFrameCounter();
 
-    // Offline rendering flag: when true, onAudioReady outputs silence instead of audio.
+    // Offline rendering flag: when true, processLiveBlock outputs silence instead of audio.
     void setOfflineRendering(bool offline);
 
     // Current song tempo (BPM). Used by the standard-mode table advance to compute a
@@ -345,10 +359,17 @@ public:
 private:
     // Maximum frames processAudioBlock can handle in one call — all its per-block buffers
     // (send buses, OCTA accumulators, sfBuf) are sized to this. Callers with potentially
-    // larger blocks (onAudioReady, renderOffline) must chunk.
+    // larger blocks (processLiveBlock, renderOffline) must chunk.
     static constexpr int MAX_BLOCK = 1024;
 
-    std::shared_ptr<oboe::AudioStream> stream;
+    // Device output sample rate, cached from the platform backend (see setDeviceSampleRate). Defaults to
+    // 44100 so getSampleRate()/pitch math stay correct if read before the stream opens — matches every
+    // other 44100 fallback in the engine. Atomic: written by the shell thread, read by the scheduler.
+    std::atomic<int> deviceSampleRate{44100};
+    // Wakes a paused output stream from triggerNote (set by the platform shell; null = no-op backend).
+    std::function<void()> resumeHook;
+    void requestResume() { if (resumeHook) resumeHook(); }
+
     Voice voices[MAX_VOICES];
     float* samples[256];
     float* samplesRight[256];          // right channel for stereo samples (null = mono)
@@ -424,7 +445,7 @@ private:
     // getCurrentFrame() JNI — atomic (relaxed) makes that formally race-free at zero cost on arm64
     // and keeps the planned Linux port correct on unknown hardware (1.8).
     std::atomic<int64_t> globalFrameCounter{0};  // Total frames processed since start
-    std::atomic<bool> isOfflineRendering{false};  // True during WAV export → onAudioReady outputs silence
+    std::atomic<bool> isOfflineRendering{false};  // True during WAV export → processLiveBlock outputs silence
     std::atomic<int> currentTempo{120};  // Song BPM; read by the table-advance to derive framesPerTic
     int stemsMode = 0;  // 0=normal, 1-8=track stem, 9=reverb, 10=delay
 
@@ -447,7 +468,7 @@ private:
     std::atomic<int> instrSpectrumInstrId{-1}; // which instrId to monitor (-1 = none)
     std::mutex spectrumMutex;
 
-    // Per-block per-track peaks: written by processAudioBlock, read by onAudioReady for meters
+    // Per-block per-track peaks: written by processAudioBlock, read by processLiveBlock for meters
     float framePeaksPerTrackL[8] = {0};
     float framePeaksPerTrackR[8] = {0};
     float frameSendPeakRevL = 0.0f, frameSendPeakRevR = 0.0f;
@@ -494,7 +515,7 @@ private:
     // ── Per-block scratch for processAudioBlock (audio-thread-only) ──────────────────────────────
     // Moved off the audio-thread stack (was ~116 KB of locals per call) so a small-stack real-time
     // audio thread — e.g. a Linux ALSA/JACK callback — can't overflow (REVIEW-4 4.4). Safe as shared
-    // members because processAudioBlock is never concurrent: onAudioReady skips it during offline
+    // members because processAudioBlock is never concurrent: processLiveBlock skips it during offline
     // render (isOfflineRendering gate) and the render thread is then its sole caller — the same
     // single-caller invariant the existing voices[]/framePeaks members already rely on. Each is
     // (re)initialised every block exactly as the former stack locals were; nothing persists across blocks.
