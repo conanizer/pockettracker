@@ -328,6 +328,7 @@ class AudioEngine(
 
         // Push current modulation params, EQ, and sends so preview reflects latest UI edits
         val tempo = project?.tempo ?: 120
+        backend.setTempo(tempo)  // tempo-lock the previewed table to the project tempo
         pushInstrumentModulation(instrument, tempo)
         if (project != null) pushInstrumentEqAndSends(instrument, project)
 
@@ -574,6 +575,10 @@ class AudioEngine(
             logger.w(TAG, "❌ Invalid instrumentId=$instrumentId, skipping note")
             return
         }
+
+        // Keep the engine's tempo current so the standard-mode table advance stays tempo-locked.
+        // Covers live playback and offline render (which schedules through this same path).
+        backend.setTempo(project.tempo)
 
         // ── SoundFont path ────────────────────────────────────────────────────────
         // Handled first so arpeggio/repeat retriggers reach SF instruments too.

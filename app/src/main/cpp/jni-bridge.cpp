@@ -754,6 +754,12 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setSt
     if (engine) engine->setStemsMode((int)mode);
 }
 
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setTempo(
+        JNIEnv *env, jobject thiz, jint tempo) {
+    if (engine) engine->setTempo((int)tempo);
+}
+
 // ===================================
 // SOUNDFONT JNI FUNCTIONS
 // ===================================

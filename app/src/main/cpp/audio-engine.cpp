@@ -1075,12 +1075,30 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 shouldAdvance = true;
             }
         } else {
-            // Standard tic mode (01-FB): advance every N tics
-            voice.tableTicCounter++;
-            if (voice.tableTicCounter >= voice.tableTicRate) {
-                voice.tableTicCounter = 0;
+            // Standard tic mode (01-FB): advance one row every `tableTicRate` musical tics.
+            // Frame-accurate and tempo-locked (like the TICFF branch above) so table speed tracks
+            // the sequencer, is identical live vs. offline render, and is independent of the audio
+            // buffer size. framesPerTic = sr / (BPM/60 · 4 steps/beat · 12 tics/step).
+            if (voice.lastProcessedRow == -1) {
+                // Fire the first tic AT trigger so row 0's transpose/vol/FX apply immediately.
+                // Otherwise the voice plays one full row-duration with no table effect, which sounds
+                // like the first row lasts twice as long. Mirrors TIC00's note-on processing.
+                voice.tableFrameAccum = 0.0f;
                 shouldProcessRow = true;
                 shouldAdvance = true;
+            } else {
+                int tempo = currentTempo.load(std::memory_order_relaxed);
+                float framesPerRow = sampleRate / (tempo / 60.0f * 4.0f * 12.0f) * (float)voice.tableTicRate;
+                voice.tableFrameAccum += numFrames;
+                if (framesPerRow > 0.0f && voice.tableFrameAccum >= framesPerRow) {
+                    voice.tableFrameAccum -= framesPerRow;
+                    // A block longer than one row (very fast tables) can't advance >1 row here, so
+                    // drop the extra rather than banking it (which would run away). Normal tic rates
+                    // have framesPerRow >> block, so the remainder carries and the rate stays exact.
+                    if (voice.tableFrameAccum >= framesPerRow) voice.tableFrameAccum = 0.0f;
+                    shouldProcessRow = true;
+                    shouldAdvance = true;
+                }
             }
         }
 
@@ -1239,11 +1257,22 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 shouldAdvance    = true;
             }
         } else {
-            sv.tableTicCounter++;
-            if (sv.tableTicCounter >= sv.tableTicRate) {
-                sv.tableTicCounter = 0;
+            // Standard tic mode (01-FB): frame-accurate, tempo-locked advance (see sampler path).
+            if (sv.lastProcessedRow == -1) {
+                // Fire the first tic at trigger so row 0 applies immediately (see sampler path).
+                sv.tableFrameAccum = 0.0f;
                 shouldProcessRow   = true;
                 shouldAdvance      = true;
+            } else {
+                int tempo = currentTempo.load(std::memory_order_relaxed);
+                float framesPerRow = sampleRate / (tempo / 60.0f * 4.0f * 12.0f) * (float)sv.tableTicRate;
+                sv.tableFrameAccum += numFrames;
+                if (framesPerRow > 0.0f && sv.tableFrameAccum >= framesPerRow) {
+                    sv.tableFrameAccum -= framesPerRow;
+                    if (sv.tableFrameAccum >= framesPerRow) sv.tableFrameAccum = 0.0f;
+                    shouldProcessRow   = true;
+                    shouldAdvance      = true;
+                }
             }
         }
 
@@ -2466,4 +2495,9 @@ int64_t AudioEngine::getFrameCounter() {
 void AudioEngine::setOfflineRendering(bool offline) {
     isOfflineRendering.store(offline);
     LOGD("🎬 Offline rendering: %s", offline ? "ON" : "OFF");
+}
+
+void AudioEngine::setTempo(int tempo) {
+    // Clamp to a sane musical range; the table-advance divides by this so it must be > 0.
+    currentTempo.store(std::max(1, tempo), std::memory_order_relaxed);
 }

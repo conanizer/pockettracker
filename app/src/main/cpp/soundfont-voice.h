@@ -49,6 +49,7 @@ struct SoundfontVoice : public IAudioVoice {
     int   tableTicRate     = 6;
     int   tableTicCounter  = 0;
     float tic200HzAccum    = 0.0f;
+    float tableFrameAccum  = 0.0f;  // Frame accumulator for standard tempo-locked tic mode (01-FB)
     float tableTranspose   = 0.0f;  // current semitones from table row (for debug)
     float tableVolume      = 1.0f;  // current vol multiplier from table row (for debug)
     int   hopRepeatCount   = 0;
@@ -154,6 +155,7 @@ struct SoundfontVoice : public IAudioVoice {
         tableTicRate     = ticRate;
         tableTicCounter  = 0;
         tic200HzAccum    = 0.0f;
+        tableFrameAccum  = 0.0f;
         tableTranspose   = 0.0f;
         tableVolume      = 1.0f;
         hopRepeatCount   = 0;

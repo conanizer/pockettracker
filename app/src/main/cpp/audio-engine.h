@@ -332,6 +332,11 @@ public:
     // Offline rendering flag: when true, onAudioReady outputs silence instead of audio.
     void setOfflineRendering(bool offline);
 
+    // Current song tempo (BPM). Used by the standard-mode table advance to compute a
+    // frame-accurate, tempo-locked tic so table speed matches the sequencer (and render==live,
+    // device-independent). Set by the Kotlin scheduler before any note fires.
+    void setTempo(int tempo);
+
     // Stems render mode: 0=normal full mix, 1-8=track N (0-indexed N-1),
     // 9=reverb-return-only, 10=delay-return-only. OTT/DUST/masterEQ are bypassed for non-zero modes.
     void setStemsMode(int mode) { stemsMode = mode; }
@@ -419,6 +424,7 @@ private:
     // and keeps the planned Linux port correct on unknown hardware (1.8).
     std::atomic<int64_t> globalFrameCounter{0};  // Total frames processed since start
     std::atomic<bool> isOfflineRendering{false};  // True during WAV export → onAudioReady outputs silence
+    std::atomic<int> currentTempo{120};  // Song BPM; read by the table-advance to derive framesPerTic
     int stemsMode = 0;  // 0=normal, 1-8=track stem, 9=reverb, 10=delay
 
     // Oscilloscope waveform buffer (circular buffer for recent output)

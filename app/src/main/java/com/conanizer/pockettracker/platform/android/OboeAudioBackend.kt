@@ -456,6 +456,10 @@ class OboeAudioBackend : IAudioBackend {
         native_setOfflineRendering(rendering)
     }
 
+    override fun setTempo(tempo: Int) {
+        native_setTempo(tempo)
+    }
+
     // SoundFont methods
     override fun loadSoundfont(instrumentId: Int, filePath: String): Int =
         native_loadSoundfont(instrumentId, filePath)
@@ -639,6 +643,7 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_triggerNoteOff(trackId: Int)
     private external fun native_scheduleNoteOff(frame: Long, trackId: Int)
     private external fun native_setOfflineRendering(rendering: Boolean)
+    private external fun native_setTempo(tempo: Int)
 
     // SoundFont JNI declarations
     private external fun native_loadSoundfont(instrumentId: Int, path: String): Int

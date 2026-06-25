@@ -55,6 +55,7 @@ struct Voice : public IAudioVoice {
     int triggerOctave;       // Octave of triggered note (0-9) for TICFC mode
     int triggerPitch;        // Pitch of triggered note (0-11, C=0) for TICFE mode
     float tic200HzAccum;     // Accumulator for 200Hz mode (TICFF)
+    float tableFrameAccum;   // Frame accumulator for standard tempo-locked tic mode (01-FB)
 
     // HOP XY: X = repeat count (0 = infinite), Y = target row
     int hopRepeatCount;      // Number of times left to jump (0 = done or infinite mode)
@@ -94,7 +95,7 @@ struct Voice : public IAudioVoice {
               tableId(-1), tableRow(0), lastProcessedRow(-1), tableTicRate(6), tableTicCounter(0),
               tableTranspose(0.0f), tableVolume(1.0f),
               noteOctave(-1), notePitch(0),
-              triggerOctave(4), triggerPitch(0), tic200HzAccum(0.0f),
+              triggerOctave(4), triggerPitch(0), tic200HzAccum(0.0f), tableFrameAccum(0.0f),
               hopRepeatCount(0), hopTargetRow(-1),
               pitchOffset(0.0f), pitchSlideTarget(0.0f), pitchSlideRate(0.0f), pitchSliding(false),
               vibratoPhase(0.0f), vibratoSpeed(0.0f), vibratoDepth(0.0f), vibratoActive(false),
@@ -242,6 +243,7 @@ struct Voice : public IAudioVoice {
         triggerOctave = noteOctave;
         triggerPitch  = notePitch;
         tic200HzAccum = 0.0f;
+        tableFrameAccum = 0.0f;
 
         // For special TIC modes, set initial table row based on mode
         // These override the startRow parameter

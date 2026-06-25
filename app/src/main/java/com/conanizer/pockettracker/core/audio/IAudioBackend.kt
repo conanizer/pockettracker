@@ -655,6 +655,18 @@ interface IAudioBackend {
      */
     fun setOfflineRendering(rendering: Boolean)
 
+    /**
+     * Set the current song tempo (BPM) on the engine.
+     *
+     * The standard-mode table advance (TIC 01–FB) uses this to compute a frame-accurate,
+     * tempo-locked tic so a table's speed tracks the sequencer, matches between live playback
+     * and offline render, and is independent of the audio buffer size. The scheduler must set
+     * this before any table-bearing note fires (AudioEngine.scheduleNote does so per note).
+     *
+     * @param tempo song tempo in BPM (clamped to ≥ 1 by the engine)
+     */
+    fun setTempo(tempo: Int)
+
     // ── SoundFont methods ──────────────────────────────────────────────────────
 
     /**
