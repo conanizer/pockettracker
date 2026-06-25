@@ -74,8 +74,7 @@ class DeviceAdapter(private val context: Context) {
             val device = InputDevice.getDevice(deviceId) ?: continue
 
             if (device.name == "Virtual") {
-                Log.d("DeviceAdapter", "Skipping: Virtual (emulator UI)")
-                continue
+                continue  // emulator UI pseudo-device — not a real controller
             }
 
             val sources = device.sources
@@ -103,14 +102,11 @@ class DeviceAdapter(private val context: Context) {
             }
         }
 
-        Log.d("DeviceAdapter", "No gaming controls found - virtual buttons needed")
-        return false
+        return false  // no gamepad/joystick — virtual buttons needed
     }
     private fun isLandscapeOrientation(): Boolean {
         val orientation = context.resources.configuration.orientation
-        val isLandscape = orientation == Configuration.ORIENTATION_LANDSCAPE
-        Log.d("DeviceAdapter", "Orientation: ${if (isLandscape) "LANDSCAPE" else "PORTRAIT"}")
-        return isLandscape
+        return orientation == Configuration.ORIENTATION_LANDSCAPE
     }
 
     fun calculateLayout(): LayoutConfig {

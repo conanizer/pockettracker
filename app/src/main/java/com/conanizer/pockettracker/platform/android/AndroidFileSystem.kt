@@ -95,7 +95,9 @@ class AndroidFileSystem(
                 tmpFile.copyTo(File(path), overwrite = true)
                 tmpFile.delete()
             }
-            Log.d(TAG, "✅ Wrote file: $path (${File(path).length()} bytes)")
+            // No success log here: it fires on every write — including the ~3s autosave — and each
+            // high-level caller (saveProject/saveTemplate/writeAutosave) already logs its own result.
+            // (Also drops a File.length() stat per write.)
             true
         } catch (e: Exception) {
             Log.e(TAG, "❌ Failed to write file: ${e.message}")
