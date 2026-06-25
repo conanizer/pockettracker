@@ -27,7 +27,8 @@ data class ResolvedStepParams(
     val pslDuration: Int? = null,
     // PBN: 00=stop, 01-7F=bend up, 80-FF=bend down; rate = (val & 0x7F) / 16 semitones/step
     val pbnValue: Int? = null,
-    // PVB: high nibble=speed (Hz = 2 + x*0.5), low nibble=depth (semitones = y*0.125)
+    // PVB: high nibble=speed, low nibble=depth (semitones = y*0.125). Speed is tempo-synced:
+    // (2 + x*0.5) Hz at 120 BPM, scaled by tempo/120 (PlaybackController), so the wobble tracks BPM.
     val pvbValue: Int? = null,
     // PVX: same format as PVB but 4x depth and 2x speed
     val pvxValue: Int? = null,

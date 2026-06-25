@@ -1102,22 +1102,24 @@ class PlaybackController(
                         "Bend $direction at $pbnRate semitones/step")
             }
 
-            // PVB: Calculate standard vibrato
+            // PVB: Calculate standard vibrato. Speed is tempo-synced — scaled to the project tempo
+            // (referenced at 120 BPM) so the wobble tracks BPM like LGPT's table/HOP vibrato, and maps
+            // cleanly onto a tempo-locked MIDI-clock LFO when MIDI-out lands. Depth stays absolute.
             if (params.pvbValue != null && params.pvbValue != 0) {
                 val speedNibble = (params.pvbValue shr 4) and 0x0F
                 val depthNibble = params.pvbValue and 0x0F
-                vibratoSpeed = 2f + speedNibble * 0.5f
+                vibratoSpeed = (2f + speedNibble * 0.5f) * (project.tempo / 120f)
                 vibratoDepth = depthNibble * 0.125f
                 trackState.vibratoActive = true
                 if (TRACE) logger.d(TAG, "🎵 PVB ${params.pvbValue.toString(16).uppercase().padStart(2, '0')}: " +
                         "Vibrato speed=${vibratoSpeed}Hz, depth=$vibratoDepth semitones")
             }
 
-            // PVX: Calculate extreme vibrato (2x speed, 4x depth)
+            // PVX: Calculate extreme vibrato (2x speed, 4x depth). Speed tempo-synced like PVB.
             if (params.pvxValue != null && params.pvxValue != 0) {
                 val speedNibble = (params.pvxValue shr 4) and 0x0F
                 val depthNibble = params.pvxValue and 0x0F
-                vibratoSpeed = (2f + speedNibble * 0.5f) * 2f  // 2x speed
+                vibratoSpeed = (2f + speedNibble * 0.5f) * 2f * (project.tempo / 120f)  // 2x speed, tempo-synced
                 vibratoDepth = depthNibble * 0.125f * 4f       // 4x depth
                 trackState.vibratoActive = true
                 if (TRACE) logger.d(TAG, "🎵 PVX ${params.pvxValue.toString(16).uppercase().padStart(2, '0')}: " +
@@ -1232,7 +1234,7 @@ class PlaybackController(
                 } else {
                     val speedNibble = (params.pvbValue shr 4) and 0x0F
                     val depthNibble = params.pvbValue and 0x0F
-                    val speed = 2f + speedNibble * 0.5f
+                    val speed = (2f + speedNibble * 0.5f) * (tempo / 120f)  // tempo-synced (see note-path PVB)
                     val depth = depthNibble * 0.125f
                     audioEngine.setVibrato(trackId, speed, depth)
                     trackState.vibratoActive = true
@@ -1250,7 +1252,7 @@ class PlaybackController(
                 } else {
                     val speedNibble = (params.pvxValue shr 4) and 0x0F
                     val depthNibble = params.pvxValue and 0x0F
-                    val speed = (2f + speedNibble * 0.5f) * 2f
+                    val speed = (2f + speedNibble * 0.5f) * 2f * (tempo / 120f)  // 2x, tempo-synced
                     val depth = depthNibble * 0.125f * 4f
                     audioEngine.setVibrato(trackId, speed, depth)
                     trackState.vibratoActive = true
@@ -1345,8 +1347,6 @@ class PlaybackController(
 
         // Apply REPEAT if active
         if (activeRepeatInterval > 0 && trackState.lastNote != Note.EMPTY) {
-            val framesPerTic = stepDuration / TICS_PER_STEP
-
             // Determine note/instrument to retrigger
             val retrigNote = if (hasNote) {
                 if (transposeSemitones != 0) {
@@ -1362,94 +1362,59 @@ class PlaybackController(
             val retrigStartPoint = if (hasNote) params.startPoint else trackState.lastStartPoint
             val rampDelta = REPEAT_RAMP_DELTAS[activeVolRamp.coerceIn(0, 15)]
 
-            if (activeRepeatInterval < TICS_PER_STEP) {
-                // ═══════════════════════════════════════════════════════════════════
-                // SUB-STEP REPEAT: Multiple triggers within this step
-                // ═══════════════════════════════════════════════════════════════════
-                val triggersCount = TICS_PER_STEP / activeRepeatInterval
+            // ═══════════════════════════════════════════════════════════════════
+            // PHASE-CONTINUOUS RETRIGGER
+            // ═══════════════════════════════════════════════════════════════════
+            // All retriggers sit on one grid anchored at repeatStartFrame, firing every
+            // `activeRepeatInterval` ticks across step boundaries (no per-step phase reset) until R00,
+            // a new note, or a new RPT — matching LGPT's tick-resolution retrigger. Frame of grid hit k:
+            //     repeatStartFrame + (k · interval · stepDuration) / TICS_PER_STEP
+            // Multiplying before dividing makes interval == TICS_PER_STEP land EXACTLY on step
+            // boundaries; the old `interval · (stepDuration / TICS_PER_STEP)` truncated ~6 frames per
+            // step, so at interval 0C the ceil rounded the first repeat a whole step late
+            // ("first repeat longer"). It also unifies the old sub-step / multi-step split: walking the
+            // real grid fires every interval that lands in the step, including non-divisors like 07–0B
+            // (which the old `12 / interval` count silently dropped).
+            val stepEndFrame = targetFrame + stepDuration
+            val gridStep = activeRepeatInterval.toLong() * stepDuration  // frames × TICS_PER_STEP per interval
+            val gridDenom = TICS_PER_STEP.toLong()
+            var triggersInStep = 0
+            if (gridStep > 0L) {
+                val framesSinceStart = targetFrame - trackState.repeatStartFrame
+                // First grid index landing at/after this step's start (ceil division, clamped ≥ 0).
+                var k = if (framesSinceStart <= 0L) 0L
+                        else (framesSinceStart * gridDenom + gridStep - 1L) / gridStep
+                while (true) {
+                    val triggerFrame = trackState.repeatStartFrame + (k * gridStep) / gridDenom
+                    if (triggerFrame >= stepEndFrame) break
+                    // Skip the grid hit coinciding with a played note's own trigger (already scheduled
+                    // at tic 0); empty/persistent steps fire on every hit inside the step.
+                    if (triggerFrame >= targetFrame && !(hasNote && triggerFrame == targetFrame)) {
+                        trackState.repeatRetrigCount++
+                        val retrigVolume = (trackState.repeatBaseVolume + trackState.repeatRetrigCount * rampDelta)
+                            .coerceIn(0.0f, 1.0f)
 
-                // If step has note, main trigger is at tic 0 (already scheduled above)
-                // For persistent REPEAT on empty step, schedule trigger at tic 0 too
-                val startTic = if (hasNote) 1 else 0
-
-                for (i in startTic until triggersCount) {
-                    val ticPosition = i * activeRepeatInterval
-                    val retrigFrame = targetFrame + (ticPosition * framesPerTic)
-
-                    // Increment global retrig counter and calculate additive volume ramp
-                    trackState.repeatRetrigCount++
-                    val retrigVolume = (trackState.repeatBaseVolume + trackState.repeatRetrigCount * rampDelta)
-                        .coerceIn(0.0f, 1.0f)
-
-                    audioEngine.scheduleNote(
-                        targetFrame = retrigFrame,
-                        note = retrigNote,
-                        instrumentId = retrigInstrument,
-                        trackId = trackId,
-                        volume = retrigVolume,
-                        pan = retrigPan,
-                        project = project,
-                        startPointOverride = retrigStartPoint,
-                        tableIdOverride = trackState.lastTableOverride,
-                        transposeSemitones = transposeSemitones,
-                        pitSemitones = params.pitSemitones ?: 0,
-                        sliIndex = params.sliIndex ?: -1
-                    )
-                    if (TRACE) logger.d(TAG, "🔁 retrig[${trackState.repeatRetrigCount}] vol=${"%.4f".format(retrigVolume)} " +
-                            "(base=${"%.4f".format(trackState.repeatBaseVolume)}, delta=$rampDelta)")
-                }
-
-                val isPersistent = !hasNote && trackState.hasActiveRepeat()
-                val modeLabel = if (isPersistent) "PERSISTENT" else "step"
-                if (TRACE) logger.d(TAG, "🔁 REPEAT ($modeLabel): ${triggersCount} triggers, interval=$activeRepeatInterval ticks, delta=$rampDelta")
-            } else {
-                // ═══════════════════════════════════════════════════════════════════
-                // MULTI-STEP REPEAT (interval > 12 ticks): Sparse triggers
-                // ═══════════════════════════════════════════════════════════════════
-                val triggerIntervalFrames = activeRepeatInterval * framesPerTic
-                val stepEndFrame = targetFrame + stepDuration
-
-                if (hasNote && newRepeatTicInterval > 0) {
-                    if (TRACE) logger.d(TAG, "🔁 REPEAT (multi-step): started, interval=$activeRepeatInterval ticks")
-                } else {
-                    val framesSinceStart = targetFrame - trackState.repeatStartFrame
-                    if (framesSinceStart >= 0) {
-                        val firstTriggerIndex = ((framesSinceStart + triggerIntervalFrames - 1) / triggerIntervalFrames).toInt()
-                        var triggerFrame = trackState.repeatStartFrame + (firstTriggerIndex * triggerIntervalFrames)
-
-                        var triggersInStep = 0
-                        while (triggerFrame < stepEndFrame) {
-                            if (triggerFrame >= targetFrame) {
-                                // Increment global retrig counter and calculate additive volume ramp
-                                trackState.repeatRetrigCount++
-                                val retrigVolume = (trackState.repeatBaseVolume + trackState.repeatRetrigCount * rampDelta)
-                                    .coerceIn(0.0f, 1.0f)
-
-                                audioEngine.scheduleNote(
-                                    targetFrame = triggerFrame,
-                                    note = retrigNote,
-                                    instrumentId = retrigInstrument,
-                                    trackId = trackId,
-                                    volume = retrigVolume,
-                                    pan = retrigPan,
-                                    project = project,
-                                    startPointOverride = retrigStartPoint,
-                                    tableIdOverride = trackState.lastTableOverride,
-                                    transposeSemitones = transposeSemitones,
-                                    pitSemitones = params.pitSemitones ?: 0,
-                                    sliIndex = params.sliIndex ?: -1
-                                )
-                                triggersInStep++
-                            }
-                            triggerFrame += triggerIntervalFrames
-                        }
-
-                        if (triggersInStep > 0) {
-                            if (TRACE) logger.d(TAG, "🔁 REPEAT (PERSISTENT multi-step): $triggersInStep trigger(s)")
-                        }
+                        audioEngine.scheduleNote(
+                            targetFrame = triggerFrame,
+                            note = retrigNote,
+                            instrumentId = retrigInstrument,
+                            trackId = trackId,
+                            volume = retrigVolume,
+                            pan = retrigPan,
+                            project = project,
+                            startPointOverride = retrigStartPoint,
+                            tableIdOverride = trackState.lastTableOverride,
+                            transposeSemitones = transposeSemitones,
+                            pitSemitones = params.pitSemitones ?: 0,
+                            sliIndex = params.sliIndex ?: -1
+                        )
+                        triggersInStep++
                     }
+                    k++
                 }
             }
+            if (TRACE) logger.d(TAG, "🔁 REPEAT: $triggersInStep trigger(s) this step, " +
+                    "interval=$activeRepeatInterval ticks, delta=$rampDelta")
         }
 
         // ═══════════════════════════════════════════════════════════════════════════
