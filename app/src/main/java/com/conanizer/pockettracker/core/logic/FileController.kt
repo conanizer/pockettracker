@@ -247,32 +247,48 @@ class FileController(
      * Throwing JSON-parse errors propagate to each caller's try/catch and become LoadResult.Error.
      */
     private fun decodeAndMigrate(jsonString: String, label: String): LoadResult {
-        val project = json.decodeFromString<Project>(jsonString)
-        validateProjectStructure(project)?.let { err ->
-            logger.e(TAG, "❌ Invalid project ($label): $err")
-            return LoadResult.Error(err)
-        }
+        val decoded = json.decodeFromString<Project>(jsonString)
+        val project = normalizeProject(decoded, label)
         migrateProject(project)
         logger.d(TAG, "✅ Project loaded: $label")
         return LoadResult.Success(project)
     }
 
     /**
-     * Guard against truncated / hand-edited / corrupt files. Deserialization with
-     * ignoreUnknownKeys=true happily produces wrong-sized arrays (e.g. "tracks":[]), which would
-     * otherwise crash with an opaque IndexOutOfBounds deep in playback. Returns an error message,
-     * or null if the structure is valid.
+     * Repair, don't reject. Deserialization with ignoreUnknownKeys=true happily produces wrong-sized
+     * pools — a project saved before the instrument/table/groove pools were reduced 256 → 128, a
+     * truncated/hand-edited file, or "tracks":[] — which would otherwise crash with an opaque
+     * IndexOutOfBounds deep in playback (or, with a strict size check, fail to load at all). Truncate
+     * over-long pools and pad short ones with fresh defaults borrowed from a default Project (so the
+     * padding can never drift from the canonical sizes in TrackerData.kt). The file then loads with
+     * whatever the current model can represent. (REVIEW-4 4.1 legacy path + 4.6.)
+     *
+     * Refs that point past a truncated pool (e.g. an old phrase step naming instrument 0xC8 after the
+     * 256→128 reduction) are already clamped/skipped at schedule time — PlaybackController.scheduleStep
+     * coerces the instrument id and AudioEngine.scheduleNote bound-checks it — so truncation can't
+     * crash playback.
+     *
+     * Returns the input unchanged (no allocation) when every pool already matches — the normal case.
      */
-    private fun validateProjectStructure(p: Project): String? {
-        fun check(name: String, actual: Int, expected: Int): String? =
-            if (actual != expected) "Corrupt project: expected $expected $name, got $actual" else null
-        return check("phrases", p.phrases.size, 256)
-            ?: check("chains", p.chains.size, 256)
-            ?: check("tracks", p.tracks.size, 8)
-            ?: check("instruments", p.instruments.size, 256)
-            ?: check("tables", p.tables.size, 256)
-            ?: check("grooves", p.grooves.size, 256)
-            ?: check("EQ presets", p.eqPresets.size, 128)
+    private fun normalizeProject(p: Project, label: String): Project {
+        if (p.phrases.size == 256 && p.chains.size == 256 && p.tracks.size == 8 &&
+            p.instruments.size == 128 && p.tables.size == 128 &&
+            p.grooves.size == 128 && p.eqPresets.size == 128) return p
+
+        val d = Project()  // canonical-sized default pools to borrow padding elements from
+        val fixed = p.copy(
+            phrases     = Array(256) { i -> p.phrases.getOrElse(i)     { d.phrases[i] } },
+            chains      = Array(256) { i -> p.chains.getOrElse(i)      { d.chains[i] } },
+            tracks      = Array(8)   { i -> p.tracks.getOrElse(i)      { d.tracks[i] } },
+            instruments = Array(128) { i -> p.instruments.getOrElse(i) { d.instruments[i] } },
+            tables      = Array(128) { i -> p.tables.getOrElse(i)      { d.tables[i] } },
+            grooves     = Array(128) { i -> p.grooves.getOrElse(i)     { d.grooves[i] } },
+            eqPresets   = Array(128) { i -> p.eqPresets.getOrElse(i)   { d.eqPresets[i] } }
+        )
+        logger.d(TAG, "📦 Normalized pools ($label) → canonical: phrases ${p.phrases.size}, " +
+            "chains ${p.chains.size}, tracks ${p.tracks.size}, instruments ${p.instruments.size}, " +
+            "tables ${p.tables.size}, grooves ${p.grooves.size}, eq ${p.eqPresets.size}")
+        return fixed
     }
 
     private fun migrateProject(project: Project) {
