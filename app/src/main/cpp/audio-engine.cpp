@@ -651,19 +651,16 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     const bool spectrumWanted   = !offlineRender && (nowMsec - lastSpectrumReadMs.load(std::memory_order_relaxed))      < CAPTURE_IDLE_MS;
     const size_t frameBytes     = (size_t)numFrames * sizeof(float);
 
-    // Send-bus accumulation buffers (stereo, panned contributions from all voices). Always needed
-    // (reverb/delay always run). MAX_BLOCK is a class constant; onAudioReady/renderOffline chunk
-    // larger requests, so only [0,numFrames) is ever touched.
-    float revSendBufL[MAX_BLOCK], revSendBufR[MAX_BLOCK];
-    float dlySendBufL[MAX_BLOCK], dlySendBufR[MAX_BLOCK];
+    // Per-block scratch (send buses, OCTA accumulators, instrument-spectrum sum) lives on the engine
+    // object now, not the audio-thread stack (REVIEW-4 4.4) — declared in the header. (Re)initialised
+    // here exactly as the former stack locals were; MAX_BLOCK is the class cap and onAudioReady/
+    // renderOffline chunk larger requests, so only [0,numFrames) is ever touched.
     memset(revSendBufL, 0, frameBytes); memset(revSendBufR, 0, frameBytes);
     memset(dlySendBufL, 0, frameBytes); memset(dlySendBufR, 0, frameBytes);
 
-    // Per-track waveform accumulators for OCTA visualizer (+1 preview lane). The 64 KB+ pair is the
-    // bulk of the per-block memset and is read only by OCTA — zero/fill it only when OCTA is shown.
-    float trackWaveAccumL[TRACK_WAVEFORM_COUNT][MAX_BLOCK];
-    float trackWaveAccumR[TRACK_WAVEFORM_COUNT][MAX_BLOCK];
-    bool  trackWasActive[TRACK_WAVEFORM_COUNT] = {};
+    // The 64 KB+ OCTA accumulator pair is read only by OCTA — zero/fill it only when OCTA is shown.
+    // trackWasActive is reset every block (matches the former `= {}` init; read under octaWanted below).
+    memset(trackWasActive, 0, sizeof(trackWasActive));
     if (octaWanted) {
         for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) {
             memset(trackWaveAccumL[t], 0, frameBytes);
@@ -674,7 +671,6 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // Per-instrument spectrum accumulator (mono sum of one instrument's voices) — only when the
     // EQ screen is monitoring an instrument.
     int   monitoredInstrId = instrSpectrumInstrId.load(std::memory_order_relaxed);
-    float instrSpectrumTempL[MAX_BLOCK];
     if (monitoredInstrId >= 0) memset(instrSpectrumTempL, 0, frameBytes);
 
     // 1.3: drain each queue ONCE for the whole block (one lock each) into reusable batch buffers,
@@ -1618,7 +1614,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     } // sampleEditMutex try_lock scope
 
     {
-        float sfBuf[2048];  // 1024 frames * 2 channels — safe for any Oboe buffer size
+        // sfBuf (per-track SF render, MAX_BLOCK frames * 2 channels) is an engine member now
+        // (REVIEW-4 4.4); it is memset per use below before each tsf render.
         float masterVol = masterVolSnapshot;
 
         for (int t = 0; t < 8; t++) {
@@ -1783,8 +1780,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
     // SEND BUSES: delay first so its output can feed into reverb, then reverb
     {
-        float revWetL[MAX_BLOCK], revWetR[MAX_BLOCK];
-        float dlyWetL[MAX_BLOCK], dlyWetR[MAX_BLOCK];
+        // revWet*/dlyWet* are engine members now (REVIEW-4 4.4); process() fully overwrites them.
         delaySend.process(dlySendBufL, dlySendBufR, dlyWetL, dlyWetR, numFrames);
         if (delayToReverbSend > 0.0001f) {
             for (int i = 0; i < numFrames; i++) {

@@ -484,6 +484,23 @@ private:
     int   trackWaveformIndex = 0;
     bool  trackHasVoice[TRACK_WAVEFORM_COUNT] = {};
 
+    // ── Per-block scratch for processAudioBlock (audio-thread-only) ──────────────────────────────
+    // Moved off the audio-thread stack (was ~116 KB of locals per call) so a small-stack real-time
+    // audio thread — e.g. a Linux ALSA/JACK callback — can't overflow (REVIEW-4 4.4). Safe as shared
+    // members because processAudioBlock is never concurrent: onAudioReady skips it during offline
+    // render (isOfflineRendering gate) and the render thread is then its sole caller — the same
+    // single-caller invariant the existing voices[]/framePeaks members already rely on. Each is
+    // (re)initialised every block exactly as the former stack locals were; nothing persists across blocks.
+    float revSendBufL[MAX_BLOCK], revSendBufR[MAX_BLOCK];   // panned reverb-send sum
+    float dlySendBufL[MAX_BLOCK], dlySendBufR[MAX_BLOCK];   // panned delay-send sum
+    float revWetL[MAX_BLOCK], revWetR[MAX_BLOCK];           // reverb wet output
+    float dlyWetL[MAX_BLOCK], dlyWetR[MAX_BLOCK];           // delay wet output
+    float instrSpectrumTempL[MAX_BLOCK];                   // mono sum of a monitored instrument's voices
+    float sfBuf[MAX_BLOCK * 2];                             // per-track SF render (interleaved stereo)
+    float trackWaveAccumL[TRACK_WAVEFORM_COUNT][MAX_BLOCK]; // OCTA per-track accumulators
+    float trackWaveAccumR[TRACK_WAVEFORM_COUNT][MAX_BLOCK];
+    bool  trackWasActive[TRACK_WAVEFORM_COUNT];             // OCTA: lane had a non-fading voice this block
+
     // Downsampling for oscilloscope (capture every Nth sample)
     // Lower = faster scrolling (more zoomed in), Higher = slower scrolling (more time visible)
     // Adjust this value to control oscilloscope speed:
