@@ -140,6 +140,7 @@ class RenderController(
         } finally {
             audioBackend.stopAll()
             audioBackend.clearScheduledNotes()
+            restoreMasterEq(project)
             audioBackend.setOfflineRendering(false)  // Always re-enable live playback
         }
     }
@@ -211,6 +212,7 @@ class RenderController(
         } finally {
             audioBackend.stopAll()
             audioBackend.clearScheduledNotes()
+            restoreMasterEq(project)
             audioBackend.setOfflineRendering(false)
         }
     }
@@ -342,6 +344,7 @@ class RenderController(
             audioBackend.setStemsMode(0)
             audioBackend.stopAll()
             audioBackend.clearScheduledNotes()
+            restoreMasterEq(project)
             audioBackend.setOfflineRendering(false)
         }
     }
@@ -361,6 +364,16 @@ class RenderController(
         else
             audioBackend.setDustDepthForRender(project.dustDepth)
         audioBackend.setLimiterPreGain(project.limiterPreGain)
+        // Start from the configured master EQ so an EQM effect in the song animates from the right
+        // baseline (and a prior render's EQM override can't bleed into this one). restoreMasterEq()
+        // in each finally returns the live bus to this slot after export.
+        audioBackend.setMasterEqSlot(project.masterEqSlot)
+    }
+
+    /** Return the master bus EQ to the project's configured slot after a render (an EQM effect in the
+     *  song mutates the global master EQ; without this the live bus would stay on the last EQM preset). */
+    private fun restoreMasterEq(project: Project) {
+        audioBackend.setMasterEqSlot(project.masterEqSlot)
     }
 
     private fun findSongBounds(project: Project): Pair<Int, Int> {

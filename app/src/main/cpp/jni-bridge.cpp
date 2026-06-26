@@ -657,6 +657,43 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1sched
     }
 }
 
+// ── REVIEW-5 live per-note / mixer FX (PAN / REV / DEL / BCK / EQN / EQM) ──
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleVoicePan(
+        JNIEnv *env, jobject thiz, jlong targetFrame, jint trackId, jfloat pan) {
+    if (engine) engine->scheduleVoicePan(targetFrame, trackId, pan);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleVoiceReverbSend(
+        JNIEnv *env, jobject thiz, jlong targetFrame, jint trackId, jfloat send) {
+    if (engine) engine->scheduleVoiceReverbSend(targetFrame, trackId, send);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleVoiceDelaySend(
+        JNIEnv *env, jobject thiz, jlong targetFrame, jint trackId, jfloat send) {
+    if (engine) engine->scheduleVoiceDelaySend(targetFrame, trackId, send);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleVoiceReverse(
+        JNIEnv *env, jobject thiz, jlong targetFrame, jint trackId, jboolean reverse, jboolean restart) {
+    if (engine) engine->scheduleVoiceReverse(targetFrame, trackId, reverse, restart);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleVoiceEqSlot(
+        JNIEnv *env, jobject thiz, jlong targetFrame, jint trackId, jint slot) {
+    if (engine) engine->scheduleVoiceEqSlot(targetFrame, trackId, slot);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleMasterEqSlotAt(
+        JNIEnv *env, jobject thiz, jlong targetFrame, jint slot) {
+    if (engine) engine->scheduleMasterEqSlot(targetFrame, slot);
+}
+
 JNIEXPORT jint JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getVoiceTableRow(
         JNIEnv *env, jobject thiz, jint trackId) {

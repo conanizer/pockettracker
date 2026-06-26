@@ -245,7 +245,7 @@ class ModulationModule : TrackerModule {
                 largeStep = 1
             )
             2 -> if (slot.type == ModType.NONE) CursorContextFactory.readOnly()
-                 else CursorContextFactory.hexByte(slot.amount, 0, 255, default = 0x80)   // AMT
+                 else CursorContextFactory.hexByte(slot.amount, 0, 255, default = 0xFF)   // AMT
             3 -> when {
                 slot.rowCount() < 4  -> CursorContextFactory.readOnly()
                 slot.type == ModType.LFO -> CursorContext(                // OSC shape

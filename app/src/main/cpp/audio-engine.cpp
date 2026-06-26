@@ -637,6 +637,61 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     }
                     break;
                 }
+                case PARAM_UPDATE_PAN: {                  // PAN — per-note pan override
+                    IAudioVoice* pv = findActiveVoiceForTrack(upd.trackId);
+                    if (pv) pv->setPan(upd.value);
+                    break;
+                }
+                case PARAM_UPDATE_REVERB_SEND: {          // REV — per-note reverb send
+                    for (int v = 0; v < MAX_VOICES; v++)
+                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId)
+                            voices[v].reverbSend = upd.value;
+                    if (upd.trackId >= 0 && upd.trackId < 8 && sfVoices[upd.trackId].isActive)
+                        sfVoices[upd.trackId].instrParams.reverbSend = upd.value;
+                    break;
+                }
+                case PARAM_UPDATE_DELAY_SEND: {           // DEL — per-note delay send
+                    for (int v = 0; v < MAX_VOICES; v++)
+                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId)
+                            voices[v].delaySend = upd.value;
+                    if (upd.trackId >= 0 && upd.trackId < 8 && sfVoices[upd.trackId].isActive)
+                        sfVoices[upd.trackId].instrParams.delaySend = upd.value;
+                    break;
+                }
+                case PARAM_UPDATE_REVERSE: {              // BCK — playback direction (sampler only)
+                    bool rev     = (upd.value  != 0.0f);
+                    bool restart = (upd.value2 != 0.0f);
+                    for (int v = 0; v < MAX_VOICES; v++) {
+                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
+                            Voice& vo = voices[v];
+                            vo.reverse = rev;
+                            if (restart) {
+                                // With-note BCK: (re)start at the boundary the new direction reads FROM, so a
+                                // "play backwards" note begins at the sample's end instead of instantly hitting
+                                // actualStart and fading out. Mid-note BCK (restart=false) keeps the live position
+                                // so direction flips are continuous (scratching).
+                                vo.position = rev ? (float)(vo.actualEnd > vo.actualStart ? vo.actualEnd - 1 : vo.actualStart)
+                                                  : (float)vo.actualStart;
+                            }
+                            break;
+                        }
+                    }
+                    break;
+                }
+                case PARAM_UPDATE_EQ_SLOT: {              // EQN — per-note EQ preset
+                    int slot = (int)upd.value;
+                    for (int v = 0; v < MAX_VOICES; v++)
+                        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
+                            applyEqPresetToChain(voices[v].chain, slot); break;
+                        }
+                    if (upd.trackId >= 0 && upd.trackId < 8 && sfVoices[upd.trackId].isActive)
+                        applyEqPresetToChain(sfVoices[upd.trackId].chain, slot);
+                    break;
+                }
+                case PARAM_UPDATE_MASTER_EQ: {            // EQM — master/mixer EQ preset (global)
+                    setMasterEqSlot((int)upd.value);
+                    break;
+                }
                 default: {                                // PARAM_UPDATE_MOD_SOURCE — Vxx phraseVol
                     for (int v = 0; v < MAX_VOICES; v++) {
                         if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
@@ -2074,6 +2129,50 @@ void AudioEngine::scheduleTrackPhraseVol(int64_t targetFrame, int trackId, float
     paramUpdateQueue.schedule({ targetFrame, trackId, (int)MOD_SRC_PHRASE_VOL, phraseVol });
 }
 
+// ── REVIEW-5 live per-note / mixer FX — all enqueue onto the same sample-accurate paramUpdateQueue,
+// so the voices[] / masterEq mutation happens on the audio thread at the exact step frame (no race),
+// and they replay identically during offline render (renderOffline drains the same queue). ──────────
+
+void AudioEngine::scheduleVoicePan(int64_t targetFrame, int trackId, float pan) {                 // PAN
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, pan, PARAM_UPDATE_PAN, 0.0f });
+}
+
+void AudioEngine::scheduleVoiceReverbSend(int64_t targetFrame, int trackId, float send) {          // REV
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, send, PARAM_UPDATE_REVERB_SEND, 0.0f });
+}
+
+void AudioEngine::scheduleVoiceDelaySend(int64_t targetFrame, int trackId, float send) {           // DEL
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, send, PARAM_UPDATE_DELAY_SEND, 0.0f });
+}
+
+void AudioEngine::scheduleVoiceReverse(int64_t targetFrame, int trackId, bool reverse, bool restart) {  // BCK
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, reverse ? 1.0f : 0.0f,
+                                PARAM_UPDATE_REVERSE, restart ? 1.0f : 0.0f });
+}
+
+void AudioEngine::scheduleVoiceEqSlot(int64_t targetFrame, int trackId, int slot) {                // EQN
+    paramUpdateQueue.schedule({ targetFrame, trackId, 0, (float)slot, PARAM_UPDATE_EQ_SLOT, 0.0f });
+}
+
+void AudioEngine::scheduleMasterEqSlot(int64_t targetFrame, int slot) {                            // EQM
+    paramUpdateQueue.schedule({ targetFrame, -1, 0, (float)slot, PARAM_UPDATE_MASTER_EQ, 0.0f });
+}
+
+// Apply a global EQ preset (slot 0-127, <0 = bypass) to a live voice's inline EQ. The voice's
+// chain.eq was already sp_pareq_init'd at trigger (chain.reset), so we only re-set band params.
+// Mirrors setInstrumentEqSlot's preset→bands copy, but writes straight into a playing voice (EQN).
+void AudioEngine::applyEqPresetToChain(InstrumentChain& chain, int slot) {
+    if (slot < 0 || slot >= 128) { chain.eq.active = false; return; }
+    const EqPresetBank& preset = eqPresets[slot];
+    bool any = false;
+    for (int i = 0; i < 3; i++) {
+        chain.eq.bands[i].setParams(preset.bands[i].type, preset.bands[i].freqHz,
+                                    preset.bands[i].gainDb, preset.bands[i].q);
+        if (preset.bands[i].type != 0) any = true;
+    }
+    chain.eq.active = any;
+}
+
 static const int SPECTRUM_FFT_SIZE = 2048;
 
 // Shared FFT helper — takes FFT_SIZE samples already copied from the circular buffer by the caller
@@ -2366,7 +2465,10 @@ void AudioEngine::triggerNoteOff(int trackId) {
             // Looping voice: leave the loop so the [loopEnd, end] tail plays out under the release env.
             if (voices[v].loopMode != 0) voices[v].loopReleasing = true;
         } else {
-            voices[v].stop();
+            // No release envelope: fade out over DECLICK_SAMPLES instead of a hard stop, so KIL (and any
+            // soft note-off on a release-less voice) is click-free. startFadeOut keeps the slot reserved
+            // and the main mix loop frees it when the fade finishes — same path voice-stealing uses.
+            voices[v].startFadeOut();
         }
     }
 }

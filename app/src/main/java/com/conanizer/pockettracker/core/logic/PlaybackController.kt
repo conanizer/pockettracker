@@ -166,6 +166,10 @@ class PlaybackController(
 
     private val trackStates = Array(8) { TrackState() }
 
+    // True once an EQM effect has overridden the master/mixer EQ during this playback. stop() then
+    // restores the master EQ to the project's configured slot (EQM is a transient performance override).
+    private var eqmActive = false
+
     companion object {
         const val LOOKAHEAD_MS = 50L
         const val BUFFER_PHRASES = 2
@@ -318,6 +322,15 @@ class PlaybackController(
         isPlaying = false
         playbackMode = PlaybackMode.STOPPED
         playbackCursor = 0
+        // Restore the master EQ to the mixer-configured slot, undoing any transient EQM override
+        // (the EQM queue entries are dropped by clearScheduledNotes below, so the bus would otherwise
+        // stay stuck on the last EQM preset). Guarded on currentProject: the offline-render path can
+        // also set eqmActive, but it restores its own master EQ in RenderController, so a null/stale
+        // project here must NOT push a wrong slot.
+        if (eqmActive) {
+            currentProject?.let { audioEngine.setMasterEqSlot(it.masterEqSlot) }
+            eqmActive = false
+        }
         audioEngine.clearScheduledNotes()
         audioEngine.stopAll()
         chainRowStartFrames.clear()
@@ -990,6 +1003,10 @@ class PlaybackController(
 
         // Get instrument pan (hex 0x00-0xFF → float 0.0-1.0)
         val instrumentPan = VolumeUtils.hexToFloat(instrument.pan)
+        // PAN fx overrides the pan for THIS note only (00=L, 80=center, FF=R). With a note it is baked
+        // into the trigger pan; on an empty step it is pushed to the live voice via the param queue
+        // (STEP 2.3). The next note without PAN reverts to the instrument's PAN automatically.
+        val notePan = params.panValue?.let { it / 255f } ?: instrumentPan
 
         // ═══════════════════════════════════════════════════════════════════════════
         // STEP 2.1: Apply DEL (Delay) effect - offset the target frame
@@ -1142,7 +1159,7 @@ class PlaybackController(
                 volume = velocityGain,
                 phraseVol = instrVolWithVxx,
                 midiVelocity = velocityByte,
-                pan = instrumentPan,
+                pan = notePan,
                 project = project,
                 startPointOverride = params.startPoint,
                 pslInitialOffset = pslInitialOffset,
@@ -1163,7 +1180,7 @@ class PlaybackController(
             trackState.lastInstrument = effectiveStep.instrument
             trackState.lastVolume = velocityGain * instrVolWithVxx  // Combined for REPEAT retrigger
             trackState.lastStartPoint = params.startPoint
-            trackState.lastPan = instrumentPan
+            trackState.lastPan = notePan  // RPT/ARP retriggers inherit this note's PAN override
             trackState.lastNoteMidi = note.toMidi()
 
             // Clear old pitch mod tracking state (new note resets)
@@ -1173,19 +1190,55 @@ class PlaybackController(
         }
 
 
-        // Handle KILL effect - schedule kill at the specified frame (offset by DEL if present)
+        // Handle KILL effect - schedule kill at the specified frame.
+        // KIL xx adds xx ticks of latency before the stop fires (00 = at the row, 0C = one step later);
+        // any LAT delay on the same step shifts the whole row (incl. its kill) on top of that.
         if (params.killAtFrame != null) {
-            val killFrame = if (delayTicks > 0) {
-                val framesPerTic = stepDuration / TICS_PER_STEP
-                params.killAtFrame + delayTicks * framesPerTic
-            } else {
-                params.killAtFrame
-            }
+            val framesPerTic = stepDuration / TICS_PER_STEP
+            val killFrame = params.killAtFrame + (delayTicks + params.killOffsetTicks) * framesPerTic
             // scheduleNoteOff (soft kill) at the sample-accurate kill frame.
             // triggerNoteOff transitions ADSR to Release so the release tail plays after K00.
             // For AHD / DRUM / no-mod voices it hard-stops the voice (no release to play).
             audioEngine.scheduleNoteOff(killFrame, trackId)
             trackState.clearPitchMod()
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // STEP 2.3: Live per-note / mixer FX (PAN / REV / DEL / BCK / EQN / EQM)
+        // ═══════════════════════════════════════════════════════════════════════════
+        // All routed through the sample-accurate param queue (4.3 pattern): the voice / master-EQ
+        // mutation runs on the audio thread at the exact frame, and replays in offline render.
+        // PAN with a note is baked into the trigger pan above; the rest target the just-triggered
+        // voice, so on a note step they fire one frame later — the drain loop applies params BEFORE
+        // notes within a frame, so a +1 lands them on the new voice instead of the previous one. On
+        // empty steps they hit the already-playing voice at the step frame. EQM is global.
+        run {
+            val triggeredNote = hasNote && !skipNote
+            val voiceFxFrame = if (triggeredNote) effectiveTargetFrame + 1 else effectiveTargetFrame
+
+            if (!triggeredNote && params.panValue != null) {
+                audioEngine.scheduleVoicePan(effectiveTargetFrame, trackId, params.panValue / 255f)
+            }
+            if (params.reverbSendValue != null) {
+                audioEngine.scheduleVoiceReverbSend(voiceFxFrame, trackId, params.reverbSendValue / 255f)
+            }
+            if (params.delaySendValue != null) {
+                audioEngine.scheduleVoiceDelaySend(voiceFxFrame, trackId, params.delaySendValue / 255f)
+            }
+            if (params.bckValue != null) {
+                // BCK 00 = reverse, 01 = forward. With a note, restart from the new direction's boundary
+                // (a "play backwards" note begins at the sample end); mid-note keeps position for scratching.
+                audioEngine.scheduleVoiceReverse(voiceFxFrame, trackId,
+                    reverse = params.bckValue == 0, restart = triggeredNote)
+            }
+            if (params.eqnSlot != null) {
+                audioEngine.scheduleVoiceEqSlot(voiceFxFrame, trackId, params.eqnSlot)
+            }
+            if (params.eqmSlot != null) {
+                // Master/mixer EQ — global, persists until the next EQM; restored to the mixer value on stop().
+                audioEngine.scheduleMasterEqSlotAt(effectiveTargetFrame, params.eqmSlot)
+                eqmActive = true
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════════════════
@@ -1358,7 +1411,7 @@ class PlaybackController(
                 trackState.lastNote
             }
             val retrigInstrument = if (hasNote) effectiveStep.instrument else trackState.lastInstrument
-            val retrigPan = if (hasNote) instrumentPan else trackState.lastPan
+            val retrigPan = if (hasNote) notePan else trackState.lastPan
             val retrigStartPoint = if (hasNote) params.startPoint else trackState.lastStartPoint
             val rampDelta = REPEAT_RAMP_DELTAS[activeVolRamp.coerceIn(0, 15)]
 
@@ -1491,7 +1544,7 @@ class PlaybackController(
                 // (volume × phraseVol), so the arp note matches the main note's loudness.
                 instrVol = velocityGain,
                 phraseVol = instrVolWithVxx,
-                finalPan = instrumentPan
+                finalPan = notePan
             )
         }
 

@@ -389,6 +389,31 @@ class OboeAudioBackend : IAudioBackend {
         native_scheduleTrackPhraseVol(targetFrame, trackId, phraseVol)
     }
 
+    // ── REVIEW-5 live per-note / mixer FX (PAN / REV / DEL / BCK / EQN / EQM) ──
+    override fun scheduleVoicePan(targetFrame: Long, trackId: Int, pan: Float) {
+        native_scheduleVoicePan(targetFrame, trackId, pan)
+    }
+
+    override fun scheduleVoiceReverbSend(targetFrame: Long, trackId: Int, send: Float) {
+        native_scheduleVoiceReverbSend(targetFrame, trackId, send)
+    }
+
+    override fun scheduleVoiceDelaySend(targetFrame: Long, trackId: Int, send: Float) {
+        native_scheduleVoiceDelaySend(targetFrame, trackId, send)
+    }
+
+    override fun scheduleVoiceReverse(targetFrame: Long, trackId: Int, reverse: Boolean, restart: Boolean) {
+        native_scheduleVoiceReverse(targetFrame, trackId, reverse, restart)
+    }
+
+    override fun scheduleVoiceEqSlot(targetFrame: Long, trackId: Int, slot: Int) {
+        native_scheduleVoiceEqSlot(targetFrame, trackId, slot)
+    }
+
+    override fun scheduleMasterEqSlotAt(targetFrame: Long, slot: Int) {
+        native_scheduleMasterEqSlotAt(targetFrame, slot)
+    }
+
     override fun setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int) {
         native_setPitchSlide(trackId, targetSemitones, durationTicks, tempo)
         Log.d(TAG, "🎵 Pitch slide: track=$trackId, target=$targetSemitones, duration=$durationTicks ticks")
@@ -627,6 +652,12 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_getVoiceTableId(trackId: Int): Int
     private external fun native_scheduleVoiceTableRow(targetFrame: Long, trackId: Int, row: Int)
     private external fun native_scheduleTrackPhraseVol(targetFrame: Long, trackId: Int, phraseVol: Float)
+    private external fun native_scheduleVoicePan(targetFrame: Long, trackId: Int, pan: Float)
+    private external fun native_scheduleVoiceReverbSend(targetFrame: Long, trackId: Int, send: Float)
+    private external fun native_scheduleVoiceDelaySend(targetFrame: Long, trackId: Int, send: Float)
+    private external fun native_scheduleVoiceReverse(targetFrame: Long, trackId: Int, reverse: Boolean, restart: Boolean)
+    private external fun native_scheduleVoiceEqSlot(targetFrame: Long, trackId: Int, slot: Int)
+    private external fun native_scheduleMasterEqSlotAt(targetFrame: Long, slot: Int)
 
     private external fun native_setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int)
     private external fun native_schedulePitchBend(targetFrame: Long, trackId: Int, semitonesPerTick: Float, tempo: Int)

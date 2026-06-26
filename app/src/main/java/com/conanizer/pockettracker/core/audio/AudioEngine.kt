@@ -1014,6 +1014,24 @@ class AudioEngine(
         backend.scheduleTrackPhraseVol(targetFrame, trackId, phraseVol)
     }
 
+    // ── REVIEW-5 live per-note / mixer FX — sample-accurate, applied on the audio thread (4.3 pattern) ──
+    fun scheduleVoicePan(targetFrame: Long, trackId: Int, pan: Float) =
+        backend.scheduleVoicePan(targetFrame, trackId, pan)
+    fun scheduleVoiceReverbSend(targetFrame: Long, trackId: Int, send: Float) =
+        backend.scheduleVoiceReverbSend(targetFrame, trackId, send)
+    fun scheduleVoiceDelaySend(targetFrame: Long, trackId: Int, send: Float) =
+        backend.scheduleVoiceDelaySend(targetFrame, trackId, send)
+    fun scheduleVoiceReverse(targetFrame: Long, trackId: Int, reverse: Boolean, restart: Boolean) =
+        backend.scheduleVoiceReverse(targetFrame, trackId, reverse, restart)
+    fun scheduleVoiceEqSlot(targetFrame: Long, trackId: Int, slot: Int) =
+        backend.scheduleVoiceEqSlot(targetFrame, trackId, slot)
+    fun scheduleMasterEqSlotAt(targetFrame: Long, slot: Int) =
+        backend.scheduleMasterEqSlotAt(targetFrame, slot)
+
+    /** Apply a master EQ preset immediately (used to restore the mixer's master EQ when playback stops,
+     *  undoing any transient EQM override). -1 = bypass. */
+    fun setMasterEqSlot(slot: Int) = backend.setMasterEqSlot(slot)
+
     fun setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int) {
         backend.setPitchSlide(trackId, targetSemitones, durationTicks, tempo)
     }

@@ -82,14 +82,14 @@ Week 16:     MVP Release
 - **ARP/ARC** - Arpeggio with UP/DOWN/PINGPONG/RANDOM modes and speed control
 - **OFF** - Sample start point offset
 - **VOL** - Volume automation
-- **KIL** - Kill voice immediately
+- **KIL** - Kill voice; `XX` = latency in ticks before the stop (00=now, 0C=next step); click-free fade
 - **RPT** - Retrigger (single shot or volume-ramp mode)
 - **PSL** - Pitch slide / portamento
 - **PBN** - Pitch bend (continuous up or down)
 - **PVB/PVX** - Vibrato (standard and extreme)
 - **PIT** - Pitch offset in semitones (never affects slice index)
 - **SLI** - Slice index override (works even when SLICE mode is off)
-- **DEL** - Delay note by N ticks
+- **LAT** - Delay note trigger by N ticks (formerly DEL)
 - **CHA** - Probability gate
 - **RND/RNL** - Randomize FX values
 - **TBL** - Override table ID
@@ -97,6 +97,11 @@ Week 16:     MVP Release
 - **GRV** - Groove assign per track
 - **TIC** - Table tick rate + special modes
 - **HOP** - Phrase/table jump (odd time signatures)
+- **PAN** - Per-note pan override (next note reverts to instrument pan)
+- **BCK** - Sampler playback direction (00=reverse, 01=forward); live scratch toggle
+- **REV/DEL** - Per-note reverb / delay send (this note only)
+- **EQN/EQM** - Per-note EQ preset / master-mixer EQ preset (EQM persists until next EQM, resets on stop)
+- All live FX route through the sample-accurate `ParamUpdateQueue` (audio-thread-applied; work in WAV render)
 
 ### Copy/Paste (M8-Style)
 - Selection mode (L+B to enter/cycle: CELL -> ROW -> SCREEN)

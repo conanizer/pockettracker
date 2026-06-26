@@ -200,6 +200,14 @@ public:
     // Schedule a phraseVol update at exact frame (Vxx effect on empty steps)
     void scheduleTrackPhraseVol(int64_t targetFrame, int trackId, float phraseVol);
 
+    // ── REVIEW-5 live per-note / mixer FX (all routed through the sample-accurate param queue) ──
+    void scheduleVoicePan(int64_t targetFrame, int trackId, float pan);                // PAN xx
+    void scheduleVoiceReverbSend(int64_t targetFrame, int trackId, float send);        // REV xx
+    void scheduleVoiceDelaySend(int64_t targetFrame, int trackId, float send);         // DEL xx
+    void scheduleVoiceReverse(int64_t targetFrame, int trackId, bool reverse, bool restart);  // BCK
+    void scheduleVoiceEqSlot(int64_t targetFrame, int trackId, int slot);              // EQN xx
+    void scheduleMasterEqSlot(int64_t targetFrame, int slot);                          // EQM xx
+
     // Get waveform data for oscilloscope display
     void getWaveform(float* outBuffer, int bufferSize);
 
@@ -408,6 +416,8 @@ private:
     // sample-editor op must hold the returned lock while mutating/freeing the slot's buffers so
     // the audio thread's try_lock fails (one silent block) instead of reading freed memory.
     std::unique_lock<std::mutex> beginSampleEdit(int id);
+    // Apply a global EQ preset (0-127, <0 = bypass) to a live voice's inline EQ (EQN effect).
+    void applyEqPresetToChain(InstrumentChain& chain, int slot);
     InstrumentParams instrumentParams[256];
     InstrumentModSlot instrumentModSlots[256][4]; // [sampleId][slotIndex]
     // Per-instrument SF2 ADSR envelope override (REVIEW-3 5.1 SF de-dup): stored keyed by instrument id

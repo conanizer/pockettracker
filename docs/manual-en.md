@@ -1154,9 +1154,9 @@ CHA can appear in any FX column and gates any specific target independently of i
 
 ---
 
-### DEL `XX` — Delay
+### LAT `XX` — Latency
 
-Delays the step by `XX` ticks. All events on that row trigger later than normal.
+Delays the step trigger by `XX` ticks. All events on that row fire later than normal.
 
 ---
 
@@ -1176,9 +1176,17 @@ Switches the current track to use groove `XX` from this step onward.
 
 ---
 
-### KIL `00` — Kill
+### KIL `XX` — Kill
 
-Immediately stops the sample on this track and cancels all persistent effects (ARP, RPT, pitch effects).
+Stops the sample on this track and cancels all persistent effects (ARP, RPT, pitch effects).
+
+`XX` delays the stop by that many ticks:
+
+- `KIL 00` = stop on this row.
+- `KIL 06` = stop half a step later (6 of 12 ticks).
+- `KIL 0C` = stop one full step later (the start of the next row).
+
+If the instrument has an **ADSR** volume envelope, KIL triggers its **release** stage instead (see §11).
 
 ---
 
@@ -1306,6 +1314,55 @@ Sets the table tick rate:
 ### VOL `XX` — Volume Automation
 
 Sets the step volume to `XX` at the exact tick this command fires. Useful in table rows for volume animation.
+
+---
+
+### PAN `XX` — Pan
+
+Overrides the stereo pan for **this note only**. `00` = hard left, `80` = center, `FF` = hard right. The
+next note on the track (without a PAN) reverts to the pan set on the INSTRUMENT screen. On an empty step it
+moves the currently-playing voice.
+
+---
+
+### BCK `0X` — Playback Direction
+
+Sets the sampler playback direction live (sampler instruments only):
+
+- `BCK 00` = play **backward**. On a step with a note it starts from the sample's end.
+- `BCK 01` = play **forward**.
+
+Placed on an **empty step** it flips direction from the voice's **current position** (it does not restart),
+so toggling `BCK 00` / `BCK 01` on successive rows lets you "scratch" a sample back and forth.
+
+---
+
+### REV `XX` — Reverb Send (per note)
+
+Sends **this note only** to the reverb bus at level `XX` (`00`–`FF`), independent of the instrument's own
+reverb send and without affecting later notes. Configure the reverb itself on the EFFECTS screen.
+
+---
+
+### DEL `XX` — Delay Send (per note)
+
+Sends **this note only** to the delay bus at level `XX` (`00`–`FF`), independent of the instrument's own
+delay send.
+
+---
+
+### EQN `XX` — EQ (per note)
+
+Applies EQ preset slot `XX` (`00`–`7F`) to **this note only**. Edit the presets in the EQ EDITOR (§17).
+A preset with all bands off = no EQ.
+
+---
+
+### EQM `XX` — EQ (mixer / master)
+
+Switches the **master bus** EQ to preset slot `XX` (`00`–`7F`) during playback. It **persists** until the
+next `EQM`, then resets to the master EQ configured on the MIXER screen when playback stops. Use it to
+automate the master EQ across a song (e.g. a filter-sweep build-up).
 
 ---
 
@@ -1771,10 +1828,10 @@ Open with **A** (or SELECT) on an EQ cell.
 | ARP | Arpeggio | `XY` = intervals | Persists — cancel with `ARP 00` |
 | ARC | Arpeggio Config | `XY` | High nibble=mode (0=UP 1=DN 2=PP 3=RND), low=speed |
 | CHA | Chance | `XY` | X=probability (0=never F=always), Y=target (0=note 1=FX1 2=FX2 3=FX3) |
-| DEL | Delay | `XX` ticks | Delays row trigger |
+| LAT | Latency | `XX` ticks | Delays row trigger |
 | GRV | Groove | `XX` | Assigns groove to this track |
 | HOP | Hop/Jump | `XY` | Jumps to step Y, X times max |
-| KIL | Kill | `00` | Stops sample, cancels all persistent FX |
+| KIL | Kill | `XX` ticks | Stop after XX ticks (00=now, 0C=next step) |
 | OFF | Offset | `XX` | Sample start position jump |
 | PIT | Pitch Offset | `XX` signed | 00–7F up, 80–FF down |
 | PSL | Pitch Slide | `XX` ticks | Portamento |
@@ -1789,6 +1846,12 @@ Open with **A** (or SELECT) on an EQ cell.
 | THO | Table Hop | `XX` | Jump table to row 0X |
 | TIC | Tick Rate | `XX` | Table speed (00=trigger 06=default FC=octave FE=note FF=200Hz) |
 | VOL | Volume | `XX` | Immediate volume at this tick |
+| PAN | Pan | `XX` | Per-note pan (00=L 80=center FF=R); next note reverts |
+| BCK | Direction | `0X` | Sampler: 00=reverse 01=forward; flip live to scratch |
+| REV | Reverb Send | `XX` | Per-note reverb send level |
+| DEL | Delay Send | `XX` | Per-note delay send level |
+| EQN | EQ (note) | `XX` | Per-note EQ preset slot (00–7F) |
+| EQM | EQ (mixer) | `XX` | Master EQ preset slot; holds till next EQM, resets on stop |
 
 ---
 
@@ -1831,7 +1894,7 @@ change in source to reshape an effect's character — see `docs/internal/dsp-set
 |---|---|---|---|---|
 | Mod **ATK / HOLD / DEC / REL** | MODULATION (AHD/ADSR/DRUM/TRIG) | `00`–`FF` | value × 1 **tic** | Tempo-relative. 1 tic = 1/12 of a step ≈ **10 ms at 120 BPM** (scales inversely with BPM). `00` = instant. Max (`FF`) ≈ 2.7 s at 120 BPM. ADSR/TRIG have no HOLD; AHD/DRUM have no SUS/REL. |
 | Mod **SUS** | MODULATION (ADSR/TRIG) | `00`–`FF` | 0–100 % level | Sustain **level**, not a time (`FF` = hold at full depth). |
-| Mod **AMT** | MODULATION (all) | `00`–`FF` | 0–100 % depth | How much the destination is moved. |
+| Mod **AMT** | MODULATION (all) | `00`–`FF` | 0–100 % depth | How much the destination is moved. Defaults to `FF` (full) on a new slot. |
 | Delay **TIME** (free) | EFFECTS, SYNC off | `00`–`FF` | 0–2000 ms | ≈ 7.8 ms per step. Default `40` ≈ 500 ms. |
 | Delay **TIME** (sync) | EFFECTS, SYNC on | `00`–`0B` | 12 subdivisions | BPM-locked. Straight: `00`=1/1, `01`=1/2, `02`=1/4, `03`=1/8, `04`=1/16, `05`=1/32. Triplet: `06`=1/4T, `07`=1/8T, `08`=1/16T. Dotted: `09`=1/4., `0A`=1/8., `0B`=1/16. (the trailing dot = a dotted note). |
 | Delay **FDBK** | EFFECTS | `00`–`FF` | 0–100 % feedback | Near `FF` ≈ near-infinite repeats. |

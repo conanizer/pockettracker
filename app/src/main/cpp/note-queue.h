@@ -240,6 +240,13 @@ enum ParamUpdateAction {
     PARAM_UPDATE_PITCH_BEND,      // active voice: setPitchBendRaw(value)        [PBN]
     PARAM_UPDATE_VIBRATO,         // active voice: setVibratoRaw(value, value2)  [PVB/PVX]
     PARAM_UPDATE_TABLE_ROW,       // active sampler voice: tableRow = (int)value [THO]
+    // REVIEW-5 live per-note / mixer FX — all applied on the audio thread at the exact step frame.
+    PARAM_UPDATE_PAN,             // active voice: setPan(value)                 [PAN]
+    PARAM_UPDATE_REVERB_SEND,     // active voice: reverbSend = value            [REV]
+    PARAM_UPDATE_DELAY_SEND,      // active voice: delaySend = value             [DEL]
+    PARAM_UPDATE_REVERSE,         // active sampler voice: reverse=(value!=0); value2!=0 → snap pos to new-dir boundary [BCK]
+    PARAM_UPDATE_EQ_SLOT,         // active voice: apply eqPresets[(int)value] to chain.eq ((int)value<0 = bypass) [EQN]
+    PARAM_UPDATE_MASTER_EQ,       // global: apply master EQ preset (int)value ((int)value<0 = bypass) [EQM]
 };
 
 // Scheduled parameter update (e.g. Vxx on empty step — update phraseVol at exact frame)

@@ -529,6 +529,21 @@ interface IAudioBackend {
      */
     fun scheduleTrackPhraseVol(targetFrame: Long, trackId: Int, phraseVol: Float)
 
+    // ── REVIEW-5 live per-note / mixer FX — all applied on the audio thread at the exact step frame ──
+    /** PAN: per-note pan override (0.0=L, 0.5=center, 1.0=R) on the active voice. */
+    fun scheduleVoicePan(targetFrame: Long, trackId: Int, pan: Float)
+    /** REV: per-note reverb send level (0.0-1.0) on the active voice. */
+    fun scheduleVoiceReverbSend(targetFrame: Long, trackId: Int, send: Float)
+    /** DEL: per-note delay send level (0.0-1.0) on the active voice. */
+    fun scheduleVoiceDelaySend(targetFrame: Long, trackId: Int, send: Float)
+    /** BCK: sampler playback direction. restart=true (re)starts from the new direction's boundary
+     *  (a "play backwards" note begins at the sample end); restart=false keeps the live position. */
+    fun scheduleVoiceReverse(targetFrame: Long, trackId: Int, reverse: Boolean, restart: Boolean)
+    /** EQN: apply a global EQ preset slot (0-127, <0=bypass) to the active voice's inline EQ. */
+    fun scheduleVoiceEqSlot(targetFrame: Long, trackId: Int, slot: Int)
+    /** EQM: apply a global EQ preset slot (0-127, <0=bypass) to the master bus at the exact frame. */
+    fun scheduleMasterEqSlotAt(targetFrame: Long, slot: Int)
+
     /**
      * Set pitch slide for a voice (PSL effect).
      *

@@ -69,9 +69,11 @@ import com.conanizer.pockettracker.ui.modules.ThemeEditorDrawState
 import com.conanizer.pockettracker.ui.modules.ThemeEditorModule
 import com.conanizer.pockettracker.ui.modules.ThemeEditorState
 import com.conanizer.pockettracker.ui.overlays.EqEditorState
+import com.conanizer.pockettracker.ui.overlays.FX_GRID_COLS
 import com.conanizer.pockettracker.ui.overlays.FxHelperState
 import com.conanizer.pockettracker.ui.overlays.QwertyKeyboardState
 import com.conanizer.pockettracker.ui.overlays.descriptionLines
+import com.conanizer.pockettracker.ui.overlays.fxIndexToCell
 import com.conanizer.pockettracker.ui.overlays.qwertyRowsForLayout
 import com.conanizer.pockettracker.ui.theme.AppTheme
 import com.conanizer.pockettracker.ui.theme.VisualizerType
@@ -1409,9 +1411,9 @@ class TrackerLayout {
 
         // ── Box geometry ─────────────────────────────────────────────────────
         val boxW = 580
-        val boxH = 222
+        val boxH = 243                             // 4 desc rows + header + 5 grid rows (one taller than before)
         val boxX = (DESIGN_WIDTH_PX - boxW) / 2    // 30
-        val boxY = (DESIGN_HEIGHT_PX - boxH) / 2   // 129
+        val boxY = (DESIGN_HEIGHT_PX - boxH) / 2
         val innerX = boxX + 10
 
         // ── Semi-transparent backdrop ─────────────────────────────────────────
@@ -1466,17 +1468,16 @@ class TrackerLayout {
             fontScale = fs
         )
 
-        // ── Effect grid (6 cols × 4 rows) ─────────────────────────────────────
+        // ── Effect grid (6 cols × 5 rows; last row centered) ──────────────────
         val gridY = headerY + rowH + 8           // after header + spacer
         val cellW = 80
-        val gridCols = 6
+        val gridCols = FX_GRID_COLS
         val gridW = gridCols * cellW             // 480px
         val gridX = boxX + (boxW - gridW) / 2   // center in box
 
         val effectTypes = EffectProcessor.EFFECT_TYPES
         for (i in effectTypes.indices) {
-            val row = i / gridCols
-            val col = i % gridCols
+            val (row, col) = fxIndexToCell(i)    // last row is horizontally centered
             val cellX = gridX + col * cellW
             val cellY = gridY + row * rowH
 

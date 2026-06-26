@@ -68,6 +68,7 @@ import com.conanizer.pockettracker.ui.overlays.QwertyKeyboardState
 import com.conanizer.pockettracker.ui.overlays.cursorBand
 import com.conanizer.pockettracker.ui.overlays.cursorParam
 import com.conanizer.pockettracker.ui.overlays.deleteChar
+import com.conanizer.pockettracker.ui.overlays.fxHelperOpenedAt
 import com.conanizer.pockettracker.ui.overlays.fxMoveCursorDown
 import com.conanizer.pockettracker.ui.overlays.fxMoveCursorLeft
 import com.conanizer.pockettracker.ui.overlays.fxMoveCursorRight
@@ -261,7 +262,40 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         audioBackend.setMasterFx(project.masterBusFx)
         audioBackend.setDustDepth(project.dustDepth)
         audioBackend.setLimiterPreGain(project.limiterPreGain)
+        pushGlobalEffectsToBackend()
         Log.d("VolumeSync", "Synced all track/master volumes to audio backend")
+    }
+
+    /**
+     * Re-push the GLOBAL send/EQ settings that live only in the native engine: the 128-slot EQ preset
+     * bank, the reverb and delay buses (+ their input EQ and the delay→reverb send), and the master EQ.
+     * None of these are stored per-voice, and the native bank persists across project loads, so a load
+     * or autosave-recovery would otherwise leave them at the PREVIOUS project's (or default) values
+     * until the user nudged each control — exactly why reloaded reverb/delay sound default and every EQ
+     * preset sounds bypassed. Called from syncVolumesToAudioBackend() (load + app start only, never a hot
+     * path). Per-instrument EQ slots / send levels are applied at note-trigger (pushInstrumentEqAndSends),
+     * but that needs this bank populated first.
+     */
+    private fun pushGlobalEffectsToBackend() {
+        val project = trackerController.project
+        // EQ preset bank — push every slot/band so a previous project's presets are fully overwritten,
+        // including cleared (type=0) bands.
+        for (slot in project.eqPresets.indices) {
+            val bands = project.eqPresets[slot].bands
+            for (band in 0 until 3) {
+                val b = bands[band]
+                audioBackend.setEqBand(slot, band, b.type, b.freq, b.gain, b.q)
+            }
+        }
+        // Reverb / delay send buses (+ input EQ, delay→reverb send). A negative input-EQ slot bypasses.
+        audioBackend.setReverbParams(project.reverbFeedback, project.reverbDamp, project.reverbWet)
+        audioBackend.setReverbInputEq(project.reverbInputEq)
+        audioBackend.setDelayParams(project.delayTime, project.delayFeedback, project.delaySync,
+            project.tempo.toFloat(), project.delayWet)
+        audioBackend.setDelayInputEq(project.delayInputEq)
+        audioBackend.setDelayReverbSend(project.delayReverbSend)
+        // Master EQ (-1 = bypass).
+        audioBackend.setMasterEqSlot(project.masterEqSlot)
     }
 
     fun reloadProjectSamples() {
@@ -2382,7 +2416,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             }
         } else if (isOnFxTypeColumn()) {
             val idx = getCurrentFxTypeIndex()
-            fxHelperState = FxHelperState(isOpen = true, cursorRow = idx / 5, cursorCol = idx % 5)
+            fxHelperState = fxHelperOpenedAt(idx)
         } else if (trackerController.currentScreen == ScreenType.INSTRUMENT &&
                    trackerController.instrumentCursorRow == 0 &&
                    trackerController.instrumentCursorColumn == 1) {
@@ -2423,7 +2457,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             }
         } else if (isOnFxTypeColumn()) {
             val idx = getCurrentFxTypeIndex()
-            fxHelperState = FxHelperState(isOpen = true, cursorRow = idx / 5, cursorCol = idx % 5)
+            fxHelperState = fxHelperOpenedAt(idx)
         } else if (trackerController.currentScreen == ScreenType.INSTRUMENT &&
                    trackerController.instrumentCursorRow == 0 &&
                    trackerController.instrumentCursorColumn == 1) {

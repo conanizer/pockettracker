@@ -275,7 +275,7 @@ enum class ModDest(val displayName: String) {
 data class ModSlot(
     var type: ModType = ModType.NONE,
     var dest: ModDest = ModDest.NONE,
-    var amount: Int = 0x80,      // 00-FF
+    var amount: Int = 0xFF,      // 00-FF (default full — most mods are used at full depth)
 
     // Envelope: AHD, ADSR
     var attack: Int = 0x00,      // 00-FF ticks

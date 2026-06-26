@@ -22,14 +22,18 @@ Write these into any phrase step to shape how a note plays:
 
 - **Arpeggio** — cycle through note intervals automatically (up, down, ping-pong, random)
 - **Volume** — ramp volume within a step
-- **Kill** — stop the note immediately
+- **Pan** — set a note's stereo position; the next note reverts to the instrument pan
+- **Kill** — stop the note, immediately or after a set number of ticks
 - **Retrigger** — stutter the sample with optional volume ramp
+- **Playback direction** — play a sampler note backward or forward; flip it live to "scratch"
 - **Pitch slide** — glide to the next note (portamento)
 - **Pitch bend** — continuous pitch movement up or down
 - **Vibrato** — wobble pitch at standard or extreme depth
 - **Pitch offset** — transpose a note by a fixed number of semitones (never affects slice index)
 - **Slice index** — jump straight to a specific slice (works even when slice mode is off)
-- **Delay** — push a note forward by N ticks
+- **Latency** — push a note's trigger forward by N ticks
+- **Reverb / delay send** — send a single note to the reverb or delay bus, independent of the instrument
+- **EQ (per note / mixer)** — apply an EQ preset to one note, or automate the master EQ across the song
 - **Chance** — probability gate: set odds the note actually plays
 - **Randomize** — randomize any other FX value on the fly
 - **Table override** — switch which table an instrument follows

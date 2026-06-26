@@ -10,6 +10,9 @@ data class ResolvedStepParams(
     // True when set by Vxx effect, not just the step volume column
     val volumeFromVxx: Boolean = false,
     val killAtFrame: Long? = null,
+    // KIL xx: extra latency (in ticks) added between the KIL row and the actual voice stop.
+    // 00 = stop at the row; 0C = one full step later (TICS_PER_STEP). Resolved alongside killAtFrame.
+    val killOffsetTicks: Int = 0,
     // Axx: high nibble = +semitone1, low nibble = +semitone2
     val arpeggioValue: Int? = null,
 
@@ -47,7 +50,21 @@ data class ResolvedStepParams(
     // PIT xx: signed semitone offset applied to pitch (never affects slice index); null = no PIT FX
     val pitSemitones: Int? = null,
     // SLI xx: explicit slice index (0-255); overrides note-based selection; works with SLICE=OFF
-    val sliIndex: Int? = null
+    val sliIndex: Int? = null,
+
+    // ── Live per-note / mixer FX (REVIEW-5) — null = effect not present on this step ──
+    // PAN xx: per-note pan 00-FF (80=center). Overrides instrument pan for this note only.
+    val panValue: Int? = null,
+    // REV xx: per-note reverb send 00-FF. Overrides the instrument's reverb send for this note only.
+    val reverbSendValue: Int? = null,
+    // DEL xx: per-note delay send 00-FF. Overrides the instrument's delay send for this note only.
+    val delaySendValue: Int? = null,
+    // BCK 0/1: sampler playback direction (0=reverse, 1=forward). Live-toggleable for scratching.
+    val bckValue: Int? = null,
+    // EQN xx: per-note EQ preset slot 00-7F. Applies an EQ preset to this note's voice only.
+    val eqnSlot: Int? = null,
+    // EQM xx: master/mixer EQ preset slot 00-7F. Persists until next EQM; reset to mixer value on stop.
+    val eqmSlot: Int? = null
 )
 
 class EffectProcessor(
@@ -66,7 +83,7 @@ class EffectProcessor(
 
         const val FX_ARC = 0x03       // Cxx - Arpeggio Config (mode/speed)
         const val FX_CHA = 0x04       // CHA xy - Chance: x=probability (0-F), y=target FX slot (0=all)
-        const val FX_DEL = 0x05       // DEL xx - Delay row by xx ticks before triggering
+        const val FX_LAT = 0x05       // LAT xx - Latency: delay row trigger by xx ticks (renamed from "DEL")
         const val FX_GRV = 0x07       // GRV xx - Assign groove table xx to this track
         const val FX_HOP = 0x08       // Hxx - HOP: Phrase (jump row on next phrase, FF=stop track), Table (jump row with repeat count)
         const val FX_TIC = 0x09       // Txx - Table tick rate (01-FB = tics/row, FC-FF = special modes)
@@ -87,10 +104,20 @@ class EffectProcessor(
         const val FX_PIT = 0x1D       // PIT xx - Pitch offset in semitones (00-7F=+0..+127, 80-FF=-128..-1); never affects slice index
         const val FX_SLI = 0x1E       // SLI xx - Slice index override (00-FF); works even when SLICE mode is OFF
 
+        // ── Live per-note / mixer FX (REVIEW-5) — all routed through the sample-accurate ParamUpdateQueue ──
+        const val FX_PAN   = 0x1F     // PAN xx - Per-note pan override (00=L, 80=center, FF=R); next note reverts to instrument PAN
+        const val FX_RSEND = 0x20     // REV xx - Per-note reverb send (00-FF); affects only this note, not the instrument
+        const val FX_DSEND = 0x21     // DEL xx - Per-note delay send (00-FF); affects only this note, not the instrument
+        const val FX_BCK   = 0x22     // BCK 0/1 - Sampler playback direction (00=reverse, 01=forward); live scratch toggle
+        const val FX_EQN   = 0x23     // EQN xx - Per-note EQ preset slot (00-7F); affects only this note
+        const val FX_EQM   = 0x24     // EQM xx - Master/mixer EQ preset slot (00-7F); persists until next EQM, resets on stop
+
         val EFFECT_TYPES = listOf(
-            FX_NONE, FX_ARC, FX_CHA, FX_DEL, FX_GRV, FX_HOP, FX_TIC, FX_ARPEGGIO, FX_KILL, FX_OFFSET,
+            FX_NONE, FX_ARC, FX_CHA, FX_LAT, FX_GRV, FX_HOP, FX_TIC, FX_ARPEGGIO, FX_KILL, FX_OFFSET,
             FX_RND, FX_RNL, FX_REPEAT, FX_TBL, FX_THO, FX_VOLUME,
-            FX_PSL, FX_PBN, FX_PVB, FX_PVX, FX_PIT, FX_SLI
+            FX_PSL, FX_PBN, FX_PVB, FX_PVX, FX_PIT, FX_SLI,
+            // Last grid row (centered): the four send/EQ FX
+            FX_PAN, FX_BCK, FX_RSEND, FX_DSEND, FX_EQN, FX_EQM
         )
 
         // Single source of truth for effect code → 3-letter display name, keyed off the FX_* constants
@@ -98,20 +125,24 @@ class EffectProcessor(
         // effectName(); the UI's EditorHelpers.getEffectTypeName() delegates here.
         // NOTE: the on-screen name for FX_REPEAT is "RPT" — the user manual still says "REP" (doc drift).
         val FX_NAMES: Map<Int, String> = mapOf(
-            FX_ARC to "ARC", FX_CHA to "CHA", FX_DEL to "DEL", FX_GRV to "GRV", FX_HOP to "HOP",
+            FX_ARC to "ARC", FX_CHA to "CHA", FX_LAT to "LAT", FX_GRV to "GRV", FX_HOP to "HOP",
             FX_TIC to "TIC", FX_ARPEGGIO to "ARP", FX_KILL to "KIL", FX_OFFSET to "OFF",
             FX_RND to "RND", FX_RNL to "RNL", FX_REPEAT to "RPT", FX_TBL to "TBL", FX_THO to "THO",
             FX_VOLUME to "VOL", FX_PSL to "PSL", FX_PBN to "PBN", FX_PVB to "PVB", FX_PVX to "PVX",
-            FX_PIT to "PIT", FX_SLI to "SLI"
+            FX_PIT to "PIT", FX_SLI to "SLI",
+            FX_PAN to "PAN", FX_RSEND to "REV", FX_DSEND to "DEL", FX_BCK to "BCK",
+            FX_EQN to "EQN", FX_EQM to "EQM"
         )
 
         /** Effect code → 3-letter name, or "---" for NONE/unknown. */
         fun effectName(code: Int): String = FX_NAMES[code] ?: "---"
 
-        /** Max value (inclusive) for an effect's parameter byte. Effects that reference the table
-         *  or groove pools cap at 0x7F (128 slots, 0x00–0x7F); all others use the full 0xFF range. */
+        /** Max value (inclusive) for an effect's parameter byte. Effects that reference the table,
+         *  groove, or EQ preset pools cap at 0x7F (128 slots, 0x00–0x7F); all others use the full
+         *  0xFF range. */
         fun effectValueMax(effectType: Int): Int =
-            if (effectType == FX_TBL || effectType == FX_GRV) 127 else 255
+            if (effectType == FX_TBL || effectType == FX_GRV ||
+                effectType == FX_EQN || effectType == FX_EQM) 127 else 255
     }
 
     fun resolveStepParams(
@@ -123,6 +154,7 @@ class EffectProcessor(
         var volume = defaultVolume
         var volumeFromVxx = false
         var killAtFrame: Long? = null
+        var killOffsetTicks = 0
         var arpeggioValue: Int? = null
         var arcValue: Int? = null
         var repeatCount: Int? = null
@@ -142,6 +174,12 @@ class EffectProcessor(
         var grooveId: Int? = null
         var pitSemitones: Int? = null
         var sliIndex: Int? = null
+        var panValue: Int? = null
+        var reverbSendValue: Int? = null
+        var delaySendValue: Int? = null
+        var bckValue: Int? = null
+        var eqnSlot: Int? = null
+        var eqmSlot: Int? = null
 
         for (fxSlot in 1..3) {
             val (type, value) = step.fx(fxSlot)
@@ -160,7 +198,8 @@ class EffectProcessor(
 
                 FX_KILL -> {
                     killAtFrame = baseFrame
-                    if (TRACE) logger.d(TAG, "🔪 KILL effect: scheduled at frame $baseFrame")
+                    killOffsetTicks = value  // xx = ticks of latency before the stop fires (00 = at the row)
+                    if (TRACE) logger.d(TAG, "🔪 KILL effect: scheduled at frame $baseFrame (+$value ticks)")
                 }
 
                 FX_ARPEGGIO -> {
@@ -250,9 +289,39 @@ class EffectProcessor(
                     }
                 }
 
-                FX_DEL -> {
+                FX_LAT -> {
                     delayTicks = value
-                    if (TRACE) logger.d(TAG, "⏳ DEL effect: delay $value ticks")
+                    if (TRACE) logger.d(TAG, "⏳ LAT effect: delay trigger by $value ticks")
+                }
+
+                FX_PAN -> {
+                    panValue = value
+                    if (TRACE) logger.d(TAG, "🎚️ PAN effect: pan=$value (80=center)")
+                }
+
+                FX_RSEND -> {
+                    reverbSendValue = value
+                    if (TRACE) logger.d(TAG, "🌫️ REV effect: per-note reverb send=$value")
+                }
+
+                FX_DSEND -> {
+                    delaySendValue = value
+                    if (TRACE) logger.d(TAG, "🔁 DEL effect: per-note delay send=$value")
+                }
+
+                FX_BCK -> {
+                    bckValue = value
+                    if (TRACE) logger.d(TAG, "⏪ BCK effect: direction=${if (value == 0) "reverse" else "forward"}")
+                }
+
+                FX_EQN -> {
+                    eqnSlot = value
+                    if (TRACE) logger.d(TAG, "🎛️ EQN effect: per-note EQ slot=$value")
+                }
+
+                FX_EQM -> {
+                    eqmSlot = value
+                    if (TRACE) logger.d(TAG, "🎛️ EQM effect: master EQ slot=$value")
                 }
 
                 FX_CHA -> {
@@ -317,6 +386,7 @@ class EffectProcessor(
             volume = volume,
             volumeFromVxx = volumeFromVxx,
             killAtFrame = killAtFrame,
+            killOffsetTicks = killOffsetTicks,
             arpeggioValue = arpeggioValue,
             arcValue = arcValue,
             repeatCount = repeatCount,
@@ -334,7 +404,13 @@ class EffectProcessor(
             tableHopTarget = tableHopTarget,
             grooveId = grooveId,
             pitSemitones = pitSemitones,
-            sliIndex = sliIndex
+            sliIndex = sliIndex,
+            panValue = panValue,
+            reverbSendValue = reverbSendValue,
+            delaySendValue = delaySendValue,
+            bckValue = bckValue,
+            eqnSlot = eqnSlot,
+            eqmSlot = eqmSlot
         )
     }
 }
