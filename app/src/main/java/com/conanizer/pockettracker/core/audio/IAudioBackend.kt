@@ -78,6 +78,18 @@ interface IAudioBackend {
      */
     fun loadSampleFromWav(id: Int, path: String): Int
 
+    /**
+     * Decode a compressed audio file (mp3/flac/ogg) natively into sample slot [id] via the vendored
+     * dr_mp3 / dr_flac / stb_vorbis decoders — no Java heap, no MediaCodec. Dispatches by file
+     * extension. Returns the source sample rate (>0) on success, 0 on failure (incl. unsupported
+     * extension). M4A/AAC is NOT handled here — it stays on the MediaCodec extractor (no clean native
+     * AAC decoder; the OS decoder also sidesteps AAC patent licensing).
+     *
+     * @param id Sample slot (0-255)
+     * @param path Absolute filesystem path to the .mp3 / .flac / .ogg file
+     */
+    fun loadSampleFromCompressed(id: Int, path: String): Int
+
     /** Returns true if the sample at [id] has a separate right-channel buffer (stereo). */
     fun hasStereoData(id: Int): Boolean
 

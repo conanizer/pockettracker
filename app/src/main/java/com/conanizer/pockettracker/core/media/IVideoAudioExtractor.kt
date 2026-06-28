@@ -66,6 +66,10 @@ interface IVideoAudioExtractor {
     fun isSupportedVideo(path: String): Boolean
 
     companion object {
-        val SUPPORTED_EXTENSIONS = listOf("mp4", "mkv", "webm", "3gp", "m4a", "mov")
+        // True video containers offered "extract audio → WAV". m4a is intentionally absent: it's
+        // handled as an in-place audio sample (decoded via MediaCodec, no WAV) — see
+        // AudioFormats.SAMPLE_EXTENSIONS. The extractor can still DECODE m4a (extractAudio* run
+        // MediaCodec on any path); this list only gates the video→WAV feature.
+        val SUPPORTED_EXTENSIONS = listOf("mp4", "mkv", "webm", "3gp", "mov")
     }
 }

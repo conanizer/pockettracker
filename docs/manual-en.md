@@ -529,10 +529,11 @@ Without an ADSR envelope the loop repeats indefinitely until the voice is killed
 | D-pad UP/DOWN | Move through files / folders |
 | A | Load file or enter folder |
 | B | Go up one directory level |
-| START | Preview highlighted WAV / MP3 / video file |
+| START | Preview highlighted audio (WAV / MP3 / FLAC / OGG / OPUS / M4A) or video file |
 
-MP3 and video files load as samples too: an MP3 decodes in place; a video file is **converted** to a WAV
-in the Samples folder. See §23 → *Audio from video files*.
+Compressed audio (MP3 / FLAC / OGG / Opus / M4A) loads as a sample too — it decodes in place, with no
+WAV written. Video files are instead **converted** to a WAV in the Samples folder. See §23 →
+*Audio from video files*.
 
 ---
 
@@ -1433,16 +1434,17 @@ Behaves identically to ADSR — same ATK/DEC/SUS/REL parameters.
 - Sample rates: any — PocketTracker compensates pitch for non-44100 Hz files automatically
 - Loaded via: INSTRUMENT screen → SAMPLE field → A button → file browser
 - SF2 files are loaded the same way
-- `.mp3` files load directly as samples — decoded to PCM in memory, with **no WAV file written** and no slice markers. The instrument remembers the `.mp3` path, so it is re-decoded automatically each time the project is reopened. No length limit is enforced at present (testing stage) — very large files may run out of memory on low-RAM devices.
-- **Video / container files** (`.mp4`, `.mkv`, `.webm`, `.3gp`, `.m4a`, `.mov`) can be **converted** to samples — the audio track is extracted and saved as a WAV. See *Audio from video files* below.
+- **Compressed audio** (`.mp3`, `.flac`, `.ogg`, `.opus`, `.m4a`) loads directly as a sample — decoded into memory with **no WAV file written** and no slice markers. The instrument remembers the original file path, so it is re-decoded automatically each time the project is reopened. FLAC is lossless, so it is the best choice when you want a small file with no quality loss. (`.opus` and `.m4a` are common voice-recording formats — phone memos, messaging-app exports.)
+- **Video files** (`.mp4`, `.mkv`, `.webm`, `.3gp`, `.mov`) can instead be **converted** to samples — the audio track is extracted and saved as a WAV. See *Audio from video files* below.
 
 ### Audio from video files
 
 PocketTracker can pull the audio track out of a video (or audio-container) file and turn it into a
 sample — handy for grabbing a sound straight from a clip without a separate converter app.
 
-- **Supported containers:** `.mp4`, `.mkv`, `.webm`, `.3gp`, `.m4a`, `.mov`. The audio track is decoded
-  with the device's built-in codecs (usually AAC).
+- **Supported containers:** `.mp4`, `.mkv`, `.webm`, `.3gp`, `.mov`. The audio track is decoded
+  with the device's built-in codecs. (`.m4a` is **not** here — it loads in place as a sample instead;
+  see *Sample files* above.)
 - **How:** INSTRUMENT (or INST_POOL) screen → **SAMPLE** field → **A** → file browser → highlight a video
   file → **A**. A keyboard appears, pre-filled with `<filename>_audio`; edit the name if you like, then
   confirm.
@@ -1450,7 +1452,8 @@ sample — handy for grabbing a sound straight from a clip without a separate co
   `/Documents/PocketTracker/Samples/` (stereo preserved, at the file's own sample rate) and loaded into
   the current instrument. The status line shows `CONVERTED: <NAME>.WAV`.
 - Because a real WAV is written, the instrument gets a normal, reusable sample file and reopens without
-  re-decoding — the key difference from `.mp3`, which is decoded in memory on every load.
+  re-decoding — the key difference from compressed audio (MP3 / FLAC / OGG / M4A), which is decoded in
+  memory on every load.
 - **Preview first:** highlight a video file and press **START** to hear it before converting.
 - **Length limits:** conversion extracts up to **60 seconds**; preview is capped at **30 seconds**.
   Longer files report *"Audio too long"*. A file with no audio track — or a codec the device can't

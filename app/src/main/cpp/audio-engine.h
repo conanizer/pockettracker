@@ -55,6 +55,11 @@ public:
     // mono/stereo, WAVE_FORMAT_EXTENSIBLE. Returns the WAV sample rate (>0) on success, 0 on failure.
     // Lets multi-MB samples load without OOM on the capped Java heap (REVIEW-3 6.2).
     int loadSampleFromWavFile(int id, const char* path);
+    // Decode a compressed audio file (mp3/flac/ogg) natively into native sample memory — no Java heap,
+    // no MediaCodec. Dispatches by file extension to dr_mp3 / dr_flac / stb_vorbis, then publishes via
+    // the same slot path as loadSampleStereo. Returns the source sample rate (>0) on success, 0 on
+    // failure (incl. unsupported extension). M4A/AAC is NOT handled here — it stays on MediaCodec.
+    int loadSampleFromCompressed(int id, const char* path);
     bool hasStereoData(int id);
     void clearAllSamples();
     // Free all buffers for a single slot (used when a slot is repurposed, e.g. sampler → SoundFont).

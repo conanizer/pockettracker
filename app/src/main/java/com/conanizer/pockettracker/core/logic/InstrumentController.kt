@@ -7,6 +7,7 @@ import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.audio.AudioEngine
 import com.conanizer.pockettracker.core.logging.ILogger
+import com.conanizer.pockettracker.core.media.AudioFormats
 import com.conanizer.pockettracker.core.media.IVideoAudioExtractor
 import com.conanizer.pockettracker.core.storage.IFileSystem
 import com.conanizer.pockettracker.core.storage.WavWriter
@@ -195,6 +196,7 @@ class InstrumentController(
             setStatus("Loaded: $filename", success = true)
 
             logger.d(TAG, "✅ Sample loaded successfully")
+            audioEngine.clearPreviewSlots()  // committed a real load → drop the browser audition (slots 254/255)
             LoadResult.Success
         } else {
             setStatus("Failed to load sample", success = false)
@@ -292,6 +294,7 @@ class InstrumentController(
         val filename = filePath.substringAfterLast('/').substringBeforeLast('.')
         setStatus("Loaded: $filename", success = true)
         logger.d(TAG, "✅ Compressed sample loaded ($filename)")
+        audioEngine.clearPreviewSlots()  // committed a real load → drop the browser audition (slots 254/255)
         return LoadResult.Success
     }
 
@@ -896,7 +899,7 @@ class InstrumentController(
                 if (path != null) {
                     instrument.sampleFilePath = path
                     val ext = path.substringAfterLast('.', "").lowercase()
-                    val ok = if (ext == "mp3") {
+                    val ok = if (AudioFormats.isCompressed(ext)) {
                         // Compressed source — re-decode straight into native memory (no WAV exists).
                         audioEngine.loadSampleCompressed(instrument.id, path, extractor)
                     } else {
@@ -906,8 +909,8 @@ class InstrumentController(
                         setStatus("SRC MISSING: ${path.substringAfterLast('/')}", false)
                     } else {
                         instrument.sampleId = currentInstrument
-                        // Cue points only exist in WAV files; compressed sources have none.
-                        instrument.sliceMarkers = if (ext == "mp3") emptyList() else WavWriter.readCuePoints(path).map { it.toLong() }
+                        // Cue points only exist in WAV files; compressed/decoded sources have none.
+                        instrument.sliceMarkers = if (AudioFormats.isCompressed(ext)) emptyList() else WavWriter.readCuePoints(path).map { it.toLong() }
                         // Push all parameters (filter, drive, start/end, etc.) to C++ for this slot
                         audioEngine.updateInstrumentPlaybackParams(instrument)
                         setStatus("LOADED: ${src.name}", true)

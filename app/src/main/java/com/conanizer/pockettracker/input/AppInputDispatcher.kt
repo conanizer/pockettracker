@@ -22,6 +22,7 @@ import com.conanizer.pockettracker.core.logic.InstrumentController
 import com.conanizer.pockettracker.core.logic.LoadResult
 import com.conanizer.pockettracker.core.logic.RenderController
 import com.conanizer.pockettracker.core.logic.TrackerController
+import com.conanizer.pockettracker.core.media.AudioFormats
 import com.conanizer.pockettracker.core.storage.FileSortMode
 import com.conanizer.pockettracker.core.storage.WavWriter
 import com.conanizer.pockettracker.ui.getTrackIndex
@@ -326,17 +327,18 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             } else if (instrument.sampleFilePath != null) {
                 val filePath = instrument.sampleFilePath!!
                 val ext = filePath.substringAfterLast('.', "").lowercase()
-                val loaded = if (ext == "mp3") {
-                    // No WAV was ever written for a compressed source — re-decode it (streaming straight
-                    // into native memory) each time the project is reopened.
+                // mp3/flac/ogg/m4a: no WAV was ever written — re-decode in place each time the project
+                // reopens (native decoder, or MediaCodec for m4a). wav loads via the native WAV path.
+                val isCompressed = AudioFormats.isCompressed(ext)
+                val loaded = if (isCompressed) {
                     audioEngine.loadSampleCompressed(instrument.id, filePath, videoExtractor)
                 } else {
                     audioEngine.loadSampleFromFile(instrument.id, filePath)
                 }
                 if (loaded) {
                     audioEngine.updateInstrumentPlaybackParams(instrument)
-                    // Cue points only exist in WAV files; compressed sources have none.
-                    if (ext != "mp3") instrument.sliceMarkers = WavWriter.readCuePoints(filePath).map { it.toLong() }
+                    // Cue points only exist in WAV files; compressed/decoded sources have none.
+                    if (!isCompressed) instrument.sliceMarkers = WavWriter.readCuePoints(filePath).map { it.toLong() }
                     loadedCount++
                 } else {
                     failedCount++
@@ -1201,6 +1203,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.showConfirmClose) {
             audioEngine.restoreFxPreviewBackup()
             audioEngine.freeSampleUndo(sampleEditorState.instrumentId)  // editor closing — undo unreachable (REVIEW-3 1.1)
+            audioEngine.clearPreviewSlots()                             // free the editor's source-preview scratch (slot 254)
             sampleEditorState = sampleEditorState.copy(showConfirmClose = false, isModified = false)
             trackerController.currentScreen = previousScreen
             return
@@ -1338,8 +1341,8 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                             } else {
                                                 fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
                                             }
-                                        } else if (ext == "mp3") {
-                                            // Compressed audio → decode in-memory (no WAV written); instrument keeps the .mp3 path.
+                                        } else if (AudioFormats.isCompressed(ext)) {
+                                            // Compressed audio (mp3/flac/ogg/m4a) → decode in place (no WAV written); instrument keeps its original path.
                                             val srcPath = item.file.absolutePath
                                             fileBrowserState = fileBrowserState.copy(statusMessage = "DECODING...", statusSuccess = true)
                                             coroutineScope.launch(Dispatchers.Default) {
@@ -1395,8 +1398,8 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                             } else {
                                                 fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
                                             }
-                                        } else if (ext == "mp3") {
-                                            // Compressed audio → decode in-memory (no WAV written); instrument keeps the .mp3 path.
+                                        } else if (AudioFormats.isCompressed(ext)) {
+                                            // Compressed audio (mp3/flac/ogg/m4a) → decode in place (no WAV written); instrument keeps its original path.
                                             val srcPath = item.file.absolutePath
                                             fileBrowserState = fileBrowserState.copy(statusMessage = "DECODING...", statusSuccess = true)
                                             coroutineScope.launch(Dispatchers.Default) {
@@ -1616,7 +1619,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 File(fileController.getSoundfontsDirectory()))
         } else {
             fileBrowserModule.navigateToFolder(
-                fileBrowserState.copy(fileExtensions = listOf("wav", "mp3") + FileBrowserModule.VIDEO_EXTENSIONS,
+                fileBrowserState.copy(fileExtensions = AudioFormats.SAMPLE_EXTENSIONS + FileBrowserModule.VIDEO_EXTENSIONS,
                     mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""),
                 File(fileController.getSamplesDirectory()))
         }
@@ -1662,7 +1665,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                         fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtensions = listOf("sf2", "sf3"), mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), soundfontsDir)
                     } else {
                         val samplesDir = File(fileController.getSamplesDirectory())
-                        fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtensions = listOf("wav", "mp3") + FileBrowserModule.VIDEO_EXTENSIONS, mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), samplesDir)
+                        fileBrowserState = fileBrowserModule.navigateToFolder(fileBrowserState.copy(fileExtensions = AudioFormats.SAMPLE_EXTENSIONS + FileBrowserModule.VIDEO_EXTENSIONS, mode = FileBrowserModule.BrowserMode.NORMAL, statusMessage = ""), samplesDir)
                     }
                 }
                 3 -> {  // EDIT → sample editor (col 3, right; sampler only — SoundFonts have no editable waveform)
@@ -2038,13 +2041,17 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 } else {
                     audioEngine.restoreFxPreviewBackup()
                     audioEngine.freeSampleUndo(sampleEditorState.instrumentId)  // editor closing — undo unreachable (REVIEW-3 1.1)
+                    audioEngine.clearPreviewSlots()                             // free the editor's source-preview scratch (slot 254)
                     trackerController.currentScreen = previousScreen
                 }
                 return
             }
             ScreenType.FILE_BROWSER -> {
                 when (fileBrowserState.mode) {
-                    FileBrowserModule.BrowserMode.NORMAL -> trackerController.currentScreen = previousScreen
+                    FileBrowserModule.BrowserMode.NORMAL -> {
+                        audioEngine.clearPreviewSlots()  // free the last browser preview (slot 255) on the way out
+                        trackerController.currentScreen = previousScreen
+                    }
                     else -> fileBrowserState = fileBrowserState.copy(mode = FileBrowserModule.BrowserMode.NORMAL, renameBuffer = "", renameCursor = 0)
                 }
             }
@@ -2308,12 +2315,27 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                         val ext = selectedFile.extension.lowercase()
                         if (ext == "wav" && (previousScreen == ScreenType.INSTRUMENT || previousScreen == ScreenType.INST_POOL)) {
                             trackerController.previewSampleFile(selectedFile.absolutePath)
-                        } else if (ext == "mp3" || videoExtractor.isSupportedVideo(selectedFile.absolutePath)) {
+                        } else if (AudioFormats.isNative(ext)) {
+                            // mp3/flac/ogg/opus: native decode straight into the preview slot — never the
+                            // MediaCodec / boxing path. Off-thread so a long file doesn't block input.
+                            val srcPath = selectedFile.absolutePath
+                            fileBrowserState = fileBrowserState.copy(statusMessage = "DECODING PREVIEW...", statusSuccess = true)
+                            coroutineScope.launch(Dispatchers.Default) {
+                                val ok = audioEngine.previewCompressedFile(srcPath)
+                                withContext(Dispatchers.Main) {
+                                    fileBrowserState = fileBrowserState.copy(
+                                        statusMessage = if (ok) "" else "PREVIEW FAILED",
+                                        statusSuccess = ok
+                                    )
+                                }
+                            }
+                        } else if (ext == "m4a" || videoExtractor.isSupportedVideo(selectedFile.absolutePath)) {
                             fileBrowserState = fileBrowserState.copy(statusMessage = "EXTRACTING PREVIEW...", statusSuccess = true)
                             coroutineScope.launch(Dispatchers.Default) {
-                                // MP3 preview: no cap (testing stage). Video containers keep the 30 s preview cap.
-                                val previewCap = if (ext == "mp3") 0 else 30
-                                val result = videoExtractor.extractAudio(selectedFile.absolutePath, maxDurationSec = previewCap)
+                                // m4a/video preview via MediaCodec. Cap at 30 s — this path buffers the
+                                // decoded PCM, so an uncapped long file could OOM (load is uncapped but
+                                // streams straight to native memory, so it's safe).
+                                val result = videoExtractor.extractAudio(selectedFile.absolutePath, maxDurationSec = 30)
                                 withContext(Dispatchers.Main) {
                                     if (result.isSuccess) {
                                         val audio = result.getOrThrow()

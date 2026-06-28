@@ -78,6 +78,12 @@ class OboeAudioBackend : IAudioBackend {
         return rate
     }
 
+    override fun loadSampleFromCompressed(id: Int, path: String): Int {
+        val rate = native_loadSampleFromCompressed(id, path)
+        Log.d(TAG, "📦 Decoded compressed sample $id from $path (rate=$rate)")
+        return rate
+    }
+
     override fun hasStereoData(id: Int): Boolean = native_hasStereoData(id)
 
     override fun clearAllSamples() {
@@ -553,6 +559,7 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_finalizeSampleLoad(id: Int): Int
     private external fun native_cancelSampleLoad(id: Int)
     private external fun native_loadSampleFromWav(id: Int, path: String): Int
+    private external fun native_loadSampleFromCompressed(id: Int, path: String): Int
     private external fun native_hasStereoData(sampleId: Int): Boolean
     private external fun native_clearAllSamples()
     private external fun native_clearSample(id: Int)

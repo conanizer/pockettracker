@@ -10,6 +10,7 @@ import com.conanizer.pockettracker.core.data.Table
 import com.conanizer.pockettracker.core.data.TICS_PER_STEP
 import com.conanizer.pockettracker.core.data.VolumeUtils
 import com.conanizer.pockettracker.core.logging.ILogger
+import com.conanizer.pockettracker.core.media.AudioFormats
 import com.conanizer.pockettracker.core.media.IVideoAudioExtractor
 import com.conanizer.pockettracker.core.resources.IResourceLoader
 import java.io.File
@@ -153,13 +154,40 @@ class AudioEngine(
     }
 
     /**
-     * Load a compressed/container file (e.g. MP3) into instrument slot [instrumentId]. Prefers the
-     * STREAMING path — the extractor decodes block-by-block straight into native memory, so the whole
-     * PCM never lands on the Java heap (which previously capped loads at a few MB and left the heap
-     * inflated). Falls back to the whole-file decode for sources the streaming path can't pre-size
-     * (no duration metadata). Sets the sample-rate-compensation ratio either way. Returns success.
+     * Load a compressed audio file into instrument slot [instrumentId], decoding to PCM in native
+     * memory (no WAV written). Sets the sample-rate-compensation ratio so a non-device-rate source
+     * (e.g. a 48 kHz file on a 44.1 kHz device) plays at the right pitch. Returns success.
+     *
+     * Dispatch: mp3/flac/ogg/opus decode natively via the bundled decoders (dr_mp3 / dr_flac /
+     * stb_vorbis / libopus) — no Java heap, no MediaCodec, portable to the Linux port. `.ogg` tries
+     * Vorbis then Opus inside the C++ engine, so Opus-in-Ogg is covered natively. m4a/aac — and any
+     * other container — use the MediaCodec extractor path in [loadViaExtractor]. There's no MediaCodec
+     * fallback for the native formats: their decoders cover all real files, and AAC is the only format
+     * with no good native decoder.
      */
     fun loadSampleCompressed(instrumentId: Int, path: String, extractor: IVideoAudioExtractor): Boolean {
+        val ext = path.substringAfterLast('.', "").lowercase()
+        if (AudioFormats.isNative(ext)) {
+            val rate = backend.loadSampleFromCompressed(instrumentId, path)
+            if (rate > 0) {
+                sampleRateRatios[instrumentId] = getDeviceSampleRate().toFloat() / rate.toFloat()
+                originalSampleRateRatios.remove(instrumentId)
+                logger.d(TAG, "✅ Native-decoded $ext sample: id=$instrumentId rate=$rate")
+                return true
+            }
+            logger.e(TAG, "❌ Native $ext decode failed: $path")
+            return false
+        }
+        return loadViaExtractor(instrumentId, path, extractor)
+    }
+
+    /**
+     * MediaCodec path for container formats (m4a/aac, plus anything not handled by a native decoder).
+     * Prefers the STREAMING sink — the extractor decodes block-by-block straight into native memory,
+     * so the whole PCM never lands on the Java heap. Falls back to the whole-file decode for sources
+     * the streaming path can't pre-size (no duration metadata).
+     */
+    private fun loadViaExtractor(instrumentId: Int, path: String, extractor: IVideoAudioExtractor): Boolean {
         val sink = object : IVideoAudioExtractor.PcmSink {
             override fun onFormat(sampleRate: Int, channels: Int, estimatedFrames: Int) {
                 backend.beginSampleLoad(instrumentId, channels, estimatedFrames)
@@ -242,6 +270,44 @@ class AudioEngine(
         } catch (e: Exception) {
             logger.e(TAG, "❌ Error previewing sample: ${e.message}")
             return false
+        }
+    }
+
+    /**
+     * Native preview of a compressed audio file (mp3/flac/ogg) — decodes into the preview slot (255)
+     * via the same native decoders as load, so previewing never touches the MediaCodec / boxing path.
+     * m4a stays on the extractor (decode to floats → [previewSampleData]).
+     */
+    fun previewCompressedFile(filePath: String): Boolean {
+        return try {
+            val file = File(filePath)
+            if (!file.exists() || !file.canRead()) {
+                logger.e(TAG, "Cannot read file: $filePath")
+                return false
+            }
+            // Stop only the previous preview voice — leave song playback untouched.
+            backend.killTrack(PREVIEW_TRACK_ID)
+            val rate = backend.loadSampleFromCompressed(255, filePath)
+            if (rate <= 0) {
+                logger.e(TAG, "❌ Failed to preview (native decode): $filePath")
+                return false
+            }
+            backend.resumeStream()
+            val adjustedBaseFreq = C4_HZ * (getDeviceSampleRate().toFloat() / rate.toFloat())
+            backend.scheduleNote(
+                frame = backend.getCurrentFrame() + 100,
+                sampleId = 255,
+                trackId = PREVIEW_TRACK_ID,
+                freq = C4_HZ,
+                baseFreq = adjustedBaseFreq,
+                vol = 1.0f,
+                pan = 0.5f
+            )
+            logger.d(TAG, "🔊 Preview compressed at C-4: $filePath (rate=$rate)")
+            true
+        } catch (e: Exception) {
+            logger.e(TAG, "❌ Error previewing compressed: ${e.message}")
+            false
         }
     }
 
@@ -766,6 +832,18 @@ class AudioEngine(
         sampleRateRatios.remove(instrumentId)
         originalSampleRateRatios.remove(instrumentId)
         backend.clearSample(instrumentId)
+    }
+
+    /**
+     * Free the scratch/preview sample slots — 254 (sample-editor source preview) and 255 (file-browser
+     * / instrument preview). Each holds a full decoded copy of whatever was last auditioned, which
+     * otherwise lingers until the next preview or project reload. Call when leaving a preview context
+     * (browser/editor) or after committing a real load so a large compressed audition doesn't sit in
+     * RAM. `clearSample` stops any voice on the slot first, so this is safe even mid-preview.
+     */
+    fun clearPreviewSlots() {
+        clearSample(254)
+        clearSample(255)
     }
 
     /** Free the sample editor's single-level undo backup for [instrumentId] (call on editor close — the

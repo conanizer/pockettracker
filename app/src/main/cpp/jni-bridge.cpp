@@ -237,6 +237,17 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadS
     return (jint)rate;
 }
 
+JNIEXPORT jint JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadSampleFromCompressed(
+        JNIEnv *env, jobject thiz, jint id, jstring path) {
+    if (!engine || !path) return 0;
+    const char* pathStr = env->GetStringUTFChars(path, nullptr);
+    if (!pathStr) return 0;
+    int rate = engine->loadSampleFromCompressed((int)id, pathStr);
+    env->ReleaseStringUTFChars(path, pathStr);
+    return (jint)rate;
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1hasStereoData(
         JNIEnv *env, jobject thiz, jint id) {

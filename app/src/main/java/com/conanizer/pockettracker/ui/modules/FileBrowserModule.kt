@@ -55,8 +55,10 @@ class FileBrowserModule : TrackerModule {
         val COLOR_VIDEO = Color(0xFFFFBB55)   // Amber for video/audio container files
         val COLOR_PARENT = Color(0xFFFFAA88)  // Orange for ".."
 
-        // Video/audio container extensions shown alongside WAV in instrument browser
-        val VIDEO_EXTENSIONS = listOf("mp4", "mkv", "webm", "3gp", "m4a", "mov")
+        // True video containers — audio is EXTRACTED and saved as a WAV (separate feature, see
+        // AndroidVideoAudioExtractor). The in-place audio sample formats (wav/mp3/flac/ogg/m4a) live in
+        // core AudioFormats (single source of truth). m4a is an audio sample, NOT a video.
+        val VIDEO_EXTENSIONS = listOf("mp4", "mkv", "webm", "3gp", "mov")
     }
 
     override val width = WIDTH

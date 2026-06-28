@@ -46,7 +46,7 @@ Each instrument has its own 16-row mini-sequencer. It loops continuously while t
 
 ### Instruments
 
-- **Sampler**: load any WAV or MP3 file (mono or stereo); set root note, detune, volume, pan
+- **Sampler**: load any WAV, MP3, FLAC, OGG, Opus or M4A file (mono or stereo); set root note, detune, volume, pan
 - **SoundFont**: load SF2 files; edit envelope (attack, decay, sustain, release), filter cutoff and resonance
 - Loop modes: no loop, forward loop, ping-pong loop
 - Reverse playback
@@ -92,7 +92,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 ### File Management
 
 - Built-in file browser: navigate folders, sort files, preview samples before loading
-- Convert video files to samples — extract the audio track (`.mp4`, `.mkv`, `.webm`, `.m4a`, `.mov`) to a WAV right in the file browser, with a preview before converting
+- Convert video files to samples — extract the audio track (`.mp4`, `.mkv`, `.webm`, `.3gp`, `.mov`) to a WAV right in the file browser, with a preview before converting
 - Rename files (SELECT+A to enter rename with on-screen QWERTY)
 - Delete files and folders (SELECT+B with confirmation)
 - On-screen QWERTY keyboard for naming projects and files

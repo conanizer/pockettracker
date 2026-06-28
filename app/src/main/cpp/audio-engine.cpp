@@ -6,8 +6,10 @@
 #include "mods/modules/pitch-slide-module.h"
 #include "mods/modules/vibrato-module.h"
 #include "effects/primitives/sola-stretch.h"
+#include "audio-decoders.h"
 #include <cstdio>
 #include <cstdint>
+#include <cstring>
 #include <new>
 
 // Definition of the per-track soundfont voice array (extern declared in audio-engine.h)
@@ -383,6 +385,57 @@ int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
     LOGD("loadSampleFromWavFile: id=%d %d frames %s rate=%d bits=%d fmt=%d",
          id, totalFrames, channels == 2 ? "stereo" : "mono", sampleRate, bitsPerSample, audioFormat);
     return sampleRate;
+}
+
+int AudioEngine::loadSampleFromCompressed(int id, const char* path) {
+    if (id < 0 || id >= 256 || !path) return 0;
+
+    // Lowercase the file extension (max 7 chars is plenty for mp3/flac/ogg).
+    const char* dot = std::strrchr(path, '.');
+    if (!dot) return 0;
+    char ext[8] = {0};
+    for (int i = 0; i < 7 && dot[i + 1]; i++) {
+        char c = dot[i + 1];
+        ext[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+    }
+
+    std::vector<float> L, R;
+    int sr = 0;
+    bool ok;
+    if      (std::strcmp(ext, "mp3")  == 0) ok = ptdec::decodeMp3File(path, L, R, sr);
+    else if (std::strcmp(ext, "flac") == 0) ok = ptdec::decodeFlacFile(path, L, R, sr);
+    else if (std::strcmp(ext, "ogg")  == 0) {
+        // An .ogg holds either Vorbis or Opus. Try Vorbis (stb_vorbis); on a miss, retry as Opus.
+        ok = ptdec::decodeOggFile(path, L, R, sr);
+        if (!ok) { L.clear(); R.clear(); ok = ptdec::decodeOpusFile(path, L, R, sr); }
+    }
+    else if (std::strcmp(ext, "opus") == 0) ok = ptdec::decodeOpusFile(path, L, R, sr);
+    else { LOGE("loadSampleFromCompressed: unsupported extension '%s'", ext); return 0; }
+
+    if (!ok || L.empty() || sr <= 0) {
+        LOGE("loadSampleFromCompressed: decode failed (%s)", path);
+        return 0;
+    }
+
+    // loadSample/loadSampleStereo free the sample + RATE caches on slot reuse but NOT the sample-editor
+    // undo backup (loadSampleFromWavFile does). Clear it here too so a stale backup from the slot's
+    // previous sample can't be "undone" onto this one (REVIEW-3 1.2 class).
+    {
+        std::lock_guard<std::mutex> lock(sampleEditMutex);
+        delete[] sampleBackups[id];      sampleBackups[id] = nullptr;
+        delete[] sampleBackupsRight[id]; sampleBackupsRight[id] = nullptr;
+        sampleBackupLengths[id] = 0;
+    }
+
+    // Publish via the existing, tested slot path (voice-stop + buffer free + mutex all handled there).
+    if (!R.empty() && R.size() == L.size())
+        loadSampleStereo(id, L.data(), R.data(), (int)L.size());
+    else
+        loadSample(id, L.data(), (int)L.size());
+
+    LOGD("loadSampleFromCompressed: id=%d %zu frames %s rate=%d (%s)",
+         id, L.size(), R.empty() ? "mono" : "stereo", sr, ext);
+    return sr;
 }
 
 bool AudioEngine::hasStereoData(int id) {
