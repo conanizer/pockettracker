@@ -173,13 +173,12 @@ written**, re-decoded on reload): **MP3 / FLAC / OGG-Vorbis / Opus** via bundled
 (reclassified from "video" to "audio sample"). Replaces the old MediaCodec-only MP3 path (which boxed
 every sample on a fallback → OOM risk on 1 GB devices).
 
-- **Device-tested & working:** MP3, FLAC, M4A, OGG-Vorbis (load/preview/pitch/save/reload/render).
-- **Opus — bundled natively (libopus), builds + runs; one real-file decode still to confirm.**
-  MediaCodec couldn't decode Opus on the target ROMs (LineageOS *and* GammaOS both errored at codec
-  start), so Opus is bundled natively (`.opus` + Opus-in-`.ogg`). The integration compiles and the
-  decoder executes correctly; a successful real-Opus decode wasn't observed only because the test file
-  turned out to be an iPhone **ALAC** voice memo mislabeled `.ogg`, not Opus. ~+1.5–2 MB APK; no
-  runtime cost (one-shot decode at load, outside the audio path).
+- **Device-tested & working:** MP3, FLAC, M4A, OGG-Vorbis, **Opus** (load/preview/pitch/save/reload/render).
+- **Opus — bundled natively (libopus), device-tested.** MediaCodec couldn't decode Opus on the target
+  ROMs (LineageOS *and* GammaOS both errored at codec start), so Opus is bundled natively (`.opus` +
+  Opus-in-`.ogg`). A `.opus` file loads and plays (`✅ Native-decoded opus`). ~+1.5–2 MB APK; no
+  runtime cost (one-shot decode at load, outside the audio path). (The recurring failing test file was
+  a red herring — an iPhone **ALAC** voice memo mislabeled `.ogg`, never Opus.)
 - **Out of scope (by decision):** ALAC (Apple Lossless) and content-sniffing for mislabeled files —
   "it's an Android app, no need to overdo codecs." AAC stays on MediaCodec.
 
