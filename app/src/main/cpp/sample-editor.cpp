@@ -8,7 +8,7 @@
 // SAMPLE EDITOR OPERATIONS
 // ============================================================
 
-// The undo and RATE-HIGH caches are stored as int16 to halve their RAM (REVIEW-3 5.2): they only
+// The undo and RATE-HIGH caches are stored as int16 to halve their RAM: they only
 // ever restore the working buffer, never feed the mix loop. f32->i16 clamps to [-1,1] (so an
 // over-unity working sample — post-normalize/gain — restores at full scale rather than wrapping)
 // and rounds to nearest; i16->f32 uses /32768 to match the WAV decoder, making the round trip
@@ -270,7 +270,7 @@ void AudioEngine::freeSampleUndo(int id) {
     if (id < 0 || id >= 256) return;
     // The undo backup is only ever read by undoSample (UI thread, inside the editor); the audio mix
     // loop never touches it, so no sampleEditMutex is needed. Once the editor closes, undo is
-    // unreachable — free the backup so it doesn't linger in RAM (REVIEW-3 1.1).
+    // unreachable — free the backup so it doesn't linger in RAM.
     // NOTE: originalSamples (the RATE-HIGH cache) is deliberately NOT freed here — it's null when at
     // HIGH and required for lossless restore when at LOFI/NORM, so freeing it would only break RATE.
     delete[] sampleBackups[id];      sampleBackups[id] = nullptr;

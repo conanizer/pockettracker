@@ -61,7 +61,7 @@ class TrackerController(
      * Re-sync the dirty baseline to the current version. Callers that bump projectVersion purely to
      * force a redraw *after* a load completes must call this, otherwise a freshly-loaded (unedited)
      * project reads as dirty — which both shows a spurious "unsaved changes" prompt and triggers a
-     * phantom autosave/recovery (REVIEW-3 5.3). NOT used by recoverFromAutosave (that stays dirty).
+     * phantom autosave/recovery. NOT used by recoverFromAutosave (that stays dirty).
      */
     fun markProjectClean() { savedProjectVersion = projectVersion }
 
@@ -270,7 +270,7 @@ class TrackerController(
         when (result) {
             is FileController.SaveResult.Success -> {
                 savedProjectVersion = projectVersion
-                fileController.clearAutosave()  // work is now safely in a real file (REVIEW-3 5.3)
+                fileController.clearAutosave()  // work is now safely in a real file
                 statusMessage = "SAVED"
                 statusSuccess = true
             }
@@ -291,7 +291,7 @@ class TrackerController(
                 project = result.project
                 projectVersion++
                 savedProjectVersion = projectVersion
-                fileController.clearAutosave()  // working state now matches a real file (REVIEW-3 5.3)
+                fileController.clearAutosave()  // working state now matches a real file
                 statusMessage = "LOADED: $filename"
                 statusSuccess = true
                 resetEditingContext()
@@ -315,7 +315,7 @@ class TrackerController(
                 project = result.project
                 projectVersion++
                 savedProjectVersion = projectVersion
-                fileController.clearAutosave()  // working state now matches a real file (REVIEW-3 5.3)
+                fileController.clearAutosave()  // working state now matches a real file
                 statusMessage = "LOADED: ${fileInfo.nameWithoutExtension}"
                 statusSuccess = true
                 resetEditingContext()
@@ -338,12 +338,12 @@ class TrackerController(
         project = Project(version = 1)
         projectVersion++
         savedProjectVersion = projectVersion
-        fileController.clearAutosave()  // fresh project, nothing to recover (REVIEW-3 5.3)
+        fileController.clearAutosave()  // fresh project, nothing to recover
         statusMessage = "NEW PROJECT"
         statusSuccess = true
 
         instrumentController.clearAllSamples()
-        instrumentController.clearAllSoundfonts()   // free cached SF2s too (REVIEW-3 5.1 leak fix)
+        instrumentController.clearAllSoundfonts()   // free cached SF2s too
 
         resetEditingContext()
     }
@@ -352,7 +352,7 @@ class TrackerController(
      * Load the crash-recovery autosave into the working project, leaving it DIRTY (projectVersion is
      * bumped but savedProjectVersion is NOT, so the user is nudged to Save it under a real name) and
      * deliberately NOT clearing the autosave file. The caller must reload samples afterward (the
-     * autosave stores sample paths, not PCM — see AppInputDispatcher). REVIEW-3 5.3 Phase B.
+     * autosave stores sample paths, not PCM — see AppInputDispatcher).
      */
     fun recoverFromAutosave(): Boolean {
         return when (val result = fileController.loadAutosave()) {

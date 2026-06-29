@@ -81,7 +81,7 @@ git push                       # 6. push
 ```
 
 **Manual test pass after a change:** launch the app, move the cursor (D-pad), test A/B, navigate
-screens (R + D-pad), and play something. Per `CLAUDE.md`, code is verified on a real device
+screens (R + D-pad), and play something. Code is verified on a real device
 (Miyoo Flip / Ayaneo) before committing — compilation success ≠ working code.
 
 ---
@@ -131,19 +131,9 @@ source ~/.bashrc       # reload if you just added the export
 
 ---
 
-## When working with Claude Code
-
-- **Do not run builds automatically** — per `CLAUDE.md`, the developer builds and tests manually.
-  Claude writes the code; the developer verifies on-device.
-- **Context lives in** `CLAUDE.md` (architecture + rules), `docs/development-status.md` (what's done /
-  remaining), and the auto-memory system — not in any session-log file.
-- `.claude/settings.json` holds tool configuration (ignore patterns, permissions).
-
----
-
 ## Additional resources
 
-- **Architecture:** `CLAUDE.md`, `docs/technical-architecture.md`
-- **Status & known issues:** `docs/development-status.md`
+- **Architecture:** `docs/technical-architecture.md`
 - **Controls:** `docs/input-system.md`
+- **Features:** `docs/features.md`
 - **Git history:** `git log --oneline`

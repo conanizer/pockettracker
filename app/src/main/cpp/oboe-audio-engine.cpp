@@ -1,5 +1,5 @@
-// oboe-audio-engine.cpp — Android (Oboe) audio backend. The only Oboe-coupled TU (REVIEW-4 4.5).
-// Stream lifecycle + callback were lifted verbatim out of audio-engine.cpp; behaviour is unchanged.
+// oboe-audio-engine.cpp — Android (Oboe) audio backend. The only Oboe-coupled TU.
+// Owns the Oboe stream lifecycle and the audio callback; all DSP/scheduling lives in the portable core.
 #include "oboe-audio-engine.h"
 #include "audio-engine.h"
 #include "audio-defs.h"  // LOGD/LOGE/LOG_TAG (platform log shim)
@@ -70,8 +70,7 @@ bool OboeAudioEngine::openStream() {
          oboe::convertToText(stream->getSharingMode()));
 
     // Hand the negotiated device rate to the core (it caches it for getSampleRate()/pitch math), and
-    // give it a hook to wake the stream from triggerNote — both were previously implicit when the core
-    // owned the stream.
+    // give it a hook to wake the stream from triggerNote.
     if (core) {
         core->setDeviceSampleRate(stream->getSampleRate());
         core->setResumeHook([this]() { resumeStream(); });

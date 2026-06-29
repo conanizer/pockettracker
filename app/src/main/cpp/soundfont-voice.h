@@ -11,8 +11,8 @@
 // ===================================
 // Design: ONE tsf* instance per SoundfontEntry (per unique SF2 file).
 // Each of the 8 tracks maps to a MIDI channel (0–7) on that shared instance.
-// This eliminates the per-track tsf_load_memory() call that previously stalled the
-// audio callback for hundreds of ms and used 8× the SF2 file size in RAM.
+// One shared instance avoids a per-track tsf_load_memory() call that would otherwise stall the
+// audio callback for hundreds of ms and use 8× the SF2 file size in RAM.
 //
 // Thread safety:
 //   audio thread : triggerNote(), applyPitchMod() — sequential, no lock needed.

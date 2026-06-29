@@ -480,7 +480,7 @@ data class Instrument(
      * True when this slot holds nothing — no sample WAV and no SoundFont — so it is free to claim for a
      * new sample. `sampleFilePath == null` alone is NOT "empty": a configured SoundFont also nulls
      * sampleFilePath, so any code searching for a free slot must use this (otherwise a resample can
-     * overwrite a SoundFont and leave a broken SOUNDFONT-typed slot with a sample — REVIEW-3 2.1).
+     * overwrite a SoundFont and leave a broken SOUNDFONT-typed slot with a sample).
      */
     fun isFree(): Boolean =
         sampleFilePath == null && soundfontPath == null && instrumentType == InstrumentType.SAMPLER

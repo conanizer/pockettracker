@@ -7,7 +7,7 @@ import com.conanizer.pockettracker.core.data.Project
  * Shared song → chain → phrase → step traversal for *static* analysis of the song (e.g. "which
  * instruments does this row range use?"). The render paths each hand-rolled this nested walk together
  * with its bounds guards, so the copies could silently drift; centralizing it removes the duplication
- * and the "did this copy forget the `row < chainRefs.size` guard?" class of bug (REVIEW-3 3.1).
+ * and the "did this copy forget the `row < chainRefs.size` guard?" class of bug.
  *
  * Deliberately NOT used by the two other song walks, which have different semantics on purpose:
  *  - `PlaybackController` — the live scheduler walks by playback position / HOP / checkpoints, a

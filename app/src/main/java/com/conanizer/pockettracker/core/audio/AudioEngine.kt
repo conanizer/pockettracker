@@ -66,8 +66,8 @@ class AudioEngine(
 
     // Sample-rate compensation ratio per slot (deviceRate / wavRate). The playback base frequency
     // (ROOT × ratio / detune) is derived from this on demand via calculateInstrumentBaseFrequency() —
-    // there is no separate base-frequency cache to keep in sync (REVIEW-3 3.2; the dual cache was the
-    // root cause of REVIEW-2's RATE-pitch bug, where one copy went stale while the other stayed right).
+    // there is no separate base-frequency cache to keep in sync, so the rate ratio is the single
+    // source of truth and pitch can't drift from one stale copy.
     private val sampleRateRatios = mutableMapOf<Int, Float>()
     // Original ratios cached for non-destructive RATE mode (cleared when new sample is loaded)
     private val originalSampleRateRatios = mutableMapOf<Int, Float>()
@@ -110,7 +110,7 @@ class AudioEngine(
 
             // Decode entirely in native memory (no Java-heap round trip). A multi-MB sample used to
             // need the whole file ByteArray + both float channels live at once on the capped Java
-            // heap, which OOM-killed large loads even on a 3 GB device (REVIEW-3 6.2). Native returns
+            // heap, which OOM-killed large loads even on a 3 GB device. Native returns
             // the WAV sample rate; the rate-compensation ratio is still computed here.
             val wavRate = backend.loadSampleFromWav(instrumentId, filePath)
             if (wavRate <= 0) {
@@ -227,8 +227,8 @@ class AudioEngine(
     }
 
     // WAV file decoding now happens in C++ (backend.loadSampleFromWav → AudioEngine::loadSampleFromWavFile)
-    // so a multi-MB sample never has to fit in the capped Java heap (REVIEW-3 6.2). The old Kotlin
-    // loadWavFileFromPath/parseWavBuffer were removed once the native path was device-confirmed.
+    // so a multi-MB sample never has to fit in the capped Java heap. WAV parsing is native-only;
+    // there is no Kotlin file-parsing fallback.
     // (previewSampleData further down still takes in-memory floats — resampled audio — which is a
     // separate path with no file to stream.)
 
@@ -243,7 +243,7 @@ class AudioEngine(
             // Stop only the previous preview voice — leave song playback untouched.
             backend.killTrack(PREVIEW_TRACK_ID)
 
-            // Native decode (see loadSampleFromFile / REVIEW-3 6.2) — no Java-heap copy of the file.
+            // Native decode (see loadSampleFromFile) — no Java-heap copy of the file.
             val wavRate = backend.loadSampleFromWav(255, filePath)
             if (wavRate <= 0) {
                 logger.e(TAG, "❌ Failed to preview sample (native WAV decode): $filePath")
@@ -729,7 +729,7 @@ class AudioEngine(
         if (TRACE) logger.d(TAG, "📋 scheduleNote: inst=$instrumentId → sampleId=$sampleId, note=$note, frame=$targetFrame, vol=${"%.4f".format(volume)}, pan=$pan, tableId=$tableId")
 
         // Base frequency = ROOT × sampleRateRatio / detune, computed fresh from the live instrument so
-        // it can never drift from the rate ratio (REVIEW-3 3.2). Slice mode overrides it below.
+        // it can never drift from the rate ratio. Slice mode overrides it below.
         val baseFreq = calculateInstrumentBaseFrequency(instrument)
 
         // Slice playback: triggered by slicingMode (CUT/TRU) or an explicit SLI FX.
@@ -847,7 +847,7 @@ class AudioEngine(
     }
 
     /** Free the sample editor's single-level undo backup for [instrumentId] (call on editor close — the
-     *  undo is unreachable once the editor is gone, so it's just wasted RAM). See REVIEW-3 1.1. */
+     *  undo is unreachable once the editor is gone, so it's just wasted RAM). */
     fun freeSampleUndo(instrumentId: Int) = backend.freeSampleUndo(instrumentId)
 
     fun getSampleLength(instrumentId: Int): Int = backend.getSampleLength(instrumentId)
@@ -902,7 +902,7 @@ class AudioEngine(
     fun getClipboardLength(): Int = backend.getClipboardLength()
     fun downsampleSample(instrumentId: Int, factor: Int) {
         backend.downsampleSample(instrumentId, factor)
-        // Playback base freq is derived from sampleRateRatios at schedule time (REVIEW-3 3.2), so
+        // Playback base freq is derived from sampleRateRatios at schedule time, so
         // scaling the ratio is the whole job — there is no second cache to keep in sync.
         sampleRateRatios[instrumentId]?.let { sampleRateRatios[instrumentId] = it * factor }
     }
@@ -923,7 +923,7 @@ class AudioEngine(
                 sampleRateRatios[instrumentId] = origRatio * factor
             }
         }
-        // Playback base freq is derived from sampleRateRatios at schedule time (REVIEW-3 3.2) — the
+        // Playback base freq is derived from sampleRateRatios at schedule time — the
         // updated ratio above is all that's needed; there's no separate base-frequency cache to scale.
         backend.applyRateMode(instrumentId, factor)
     }
@@ -1021,7 +1021,7 @@ class AudioEngine(
 
     fun applySoundfontEnvelopeOverrides(instrument: Instrument) {
         // Store the override keyed by instrument id; C++ applies it atomically at note trigger
-        // (REVIEW-3 5.1 SF de-dup). No slot/bank/preset needed — the trigger uses the note's own
+        // No slot/bank/preset needed — the trigger uses the note's own
         // bank/preset, so two instruments sharing one de-duplicated handle stay isolated.
         val ov = instrument.sfOverrides
         backend.setSoundfontEnvelopeOverrides(instrument.id,
@@ -1082,7 +1082,7 @@ class AudioEngine(
 
     fun getVoiceTableId(trackId: Int): Int = backend.getVoiceTableId(trackId)
 
-    // Uses the sample-accurate queue so the THO hop fires at the correct step frame (4.3).
+    // Uses the sample-accurate queue so the THO hop fires at the correct step frame.
     fun scheduleVoiceTableRow(targetFrame: Long, trackId: Int, row: Int) {
         backend.scheduleVoiceTableRow(targetFrame, trackId, row)
     }
@@ -1092,7 +1092,7 @@ class AudioEngine(
         backend.scheduleTrackPhraseVol(targetFrame, trackId, phraseVol)
     }
 
-    // ── REVIEW-5 live per-note / mixer FX — sample-accurate, applied on the audio thread (4.3 pattern) ──
+    // ── Live per-note / mixer FX — sample-accurate, applied on the audio thread ──
     fun scheduleVoicePan(targetFrame: Long, trackId: Int, pan: Float) =
         backend.scheduleVoicePan(targetFrame, trackId, pan)
     fun scheduleVoiceReverbSend(targetFrame: Long, trackId: Int, send: Float) =
@@ -1115,7 +1115,7 @@ class AudioEngine(
     }
 
     // Uses the sample-accurate queue so mid-note PBN/PVB/PVX fire at the correct step frame and
-    // the voices[] write happens on the audio thread (4.3).
+    // the voices[] write happens on the audio thread.
     fun schedulePitchBend(targetFrame: Long, trackId: Int, semitonesPerTick: Float, tempo: Int) {
         backend.schedulePitchBend(targetFrame, trackId, semitonesPerTick, tempo)
     }

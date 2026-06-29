@@ -395,7 +395,7 @@ class OboeAudioBackend : IAudioBackend {
         native_scheduleTrackPhraseVol(targetFrame, trackId, phraseVol)
     }
 
-    // ── REVIEW-5 live per-note / mixer FX (PAN / REV / DEL / BCK / EQN / EQM) ──
+    // ── Live per-note / mixer FX (PAN / REV / DEL / BCK / EQN / EQM) ──
     override fun scheduleVoicePan(targetFrame: Long, trackId: Int, pan: Float) {
         native_scheduleVoicePan(targetFrame, trackId, pan)
     }

@@ -52,7 +52,7 @@ data class ResolvedStepParams(
     // SLI xx: explicit slice index (0-255); overrides note-based selection; works with SLICE=OFF
     val sliIndex: Int? = null,
 
-    // ── Live per-note / mixer FX (REVIEW-5) — null = effect not present on this step ──
+    // ── Live per-note / mixer FX — null = effect not present on this step ──
     // PAN xx: per-note pan 00-FF (80=center). Overrides instrument pan for this note only.
     val panValue: Int? = null,
     // REV xx: per-note reverb send 00-FF. Overrides the instrument's reverb send for this note only.
@@ -83,7 +83,7 @@ class EffectProcessor(
 
         const val FX_ARC = 0x03       // Cxx - Arpeggio Config (mode/speed)
         const val FX_CHA = 0x04       // CHA xy - Chance: x=probability (0-F), y=target FX slot (0=all)
-        const val FX_LAT = 0x05       // LAT xx - Latency: delay row trigger by xx ticks (renamed from "DEL")
+        const val FX_LAT = 0x05       // LAT xx - Latency: delay row trigger by xx ticks
         const val FX_GRV = 0x07       // GRV xx - Assign groove table xx to this track
         const val FX_HOP = 0x08       // Hxx - HOP: Phrase (jump row on next phrase, FF=stop track), Table (jump row with repeat count)
         const val FX_TIC = 0x09       // Txx - Table tick rate (01-FB = tics/row, FC-FF = special modes)
@@ -104,7 +104,7 @@ class EffectProcessor(
         const val FX_PIT = 0x1D       // PIT xx - Pitch offset in semitones (00-7F=+0..+127, 80-FF=-128..-1); never affects slice index
         const val FX_SLI = 0x1E       // SLI xx - Slice index override (00-FF); works even when SLICE mode is OFF
 
-        // ── Live per-note / mixer FX (REVIEW-5) — all routed through the sample-accurate ParamUpdateQueue ──
+        // ── Live per-note / mixer FX — all routed through the sample-accurate ParamUpdateQueue ──
         const val FX_PAN   = 0x1F     // PAN xx - Per-note pan override (00=L, 80=center, FF=R); next note reverts to instrument PAN
         const val FX_RSEND = 0x20     // REV xx - Per-note reverb send (00-FF); affects only this note, not the instrument
         const val FX_DSEND = 0x21     // DEL xx - Per-note delay send (00-FF); affects only this note, not the instrument

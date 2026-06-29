@@ -301,7 +301,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
 
     fun reloadProjectSamples() {
         // Start every load/recovery from a clean native slate so the previous project's PCM and
-        // soundfonts don't accumulate (REVIEW-3 5.1). clearAllSamples holds sampleEditMutex and stops
+        // soundfonts don't accumulate. clearAllSamples holds sampleEditMutex and stops
         // voices inside the lock (audio-safe); clearAllSoundfonts frees all SF slots + the path→slot
         // map. Both are repopulated by the load loop below.
         audioEngine.clearAllSamples()
@@ -1097,7 +1097,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     fun handleDPadUp() {
         if (qwertyKeyboardState.isOpen) { qwertyKeyboardState = qwertyKeyboardState.moveCursorUp() }
         // All confirm dialogs are pure A-confirm/B-cancel — swallow DPAD so the cursor can't
-        // move on the screen behind the modal (was only guarding CLEAN, and only Up/Down).
+        // move on the screen behind the modal.
         else if (confirmDialogOpen()) { return }
         else if (themeEditorState.isOpen) {
             val row = themeEditorState.cursorRow
@@ -1173,7 +1173,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 // Compacting replaced unused instruments with empty ones in the data model, but their
                 // native sample/SF2 buffers are still loaded — reload from the compacted project to
                 // actually free them (clearAll + reload). Without this the RAM only drops after a
-                // save+reload. REVIEW-3 5.1.
+                // save+reload.
                 reloadProjectSamples()
             }
             return
@@ -1187,7 +1187,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         if (showRecoveryDialog) {
             showRecoveryDialog = false
             // A = recover: load the autosave (stays dirty so the user is nudged to Save it for real),
-            // then reload its samples — the autosave stores paths, not PCM. REVIEW-3 5.3 Phase B.
+            // then reload its samples — the autosave stores paths, not PCM.
             if (trackerController.recoverFromAutosave()) reloadProjectSamples()
             return
         }
@@ -1202,7 +1202,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         }
         if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.showConfirmClose) {
             audioEngine.restoreFxPreviewBackup()
-            audioEngine.freeSampleUndo(sampleEditorState.instrumentId)  // editor closing — undo unreachable (REVIEW-3 1.1)
+            audioEngine.freeSampleUndo(sampleEditorState.instrumentId)  // editor closing — undo unreachable
             audioEngine.clearPreviewSlots()                             // free the editor's source-preview scratch (slot 254)
             sampleEditorState = sampleEditorState.copy(showConfirmClose = false, isModified = false)
             trackerController.currentScreen = previousScreen
@@ -1272,8 +1272,8 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         }
     }
 
-    // ── Per-screen A-button (confirm/insert) handlers, extracted from handleButtonA (REVIEW-3 4.1). ──
-    //    Pure relocations of the former `when (currentScreen)` branches — behaviour unchanged. The
+    // ── Per-screen A-button (confirm/insert) handlers. ──
+    //    One branch per screen, dispatched from handleButtonA by currentScreen. The
     //    global modal-dialog guards stay in handleButtonA; this is the per-screen orchestration only.
 
     private fun handleConfirmAFileBrowser() {
@@ -1296,7 +1296,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                         trackerController.statusMessage = "LOADED: ${item.file.nameWithoutExtension}"
                                         trackerController.statusSuccess = true
                                         trackerController.projectVersion++
-                                        trackerController.markProjectClean()  // fresh load isn't dirty (REVIEW-3 5.3 fix)
+                                        trackerController.markProjectClean()  // fresh load isn't dirty
                                         trackerController.currentScreen = previousScreen
                                     }
                                     is FileController.LoadResult.Error -> fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
@@ -1455,7 +1455,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                         reloadProjectSamples()
                                         audioEngine.clearLoadedTables()
                                         trackerController.projectVersion++
-                                        trackerController.markProjectClean()  // fresh load isn't dirty (REVIEW-3 5.3 fix)
+                                        trackerController.markProjectClean()  // fresh load isn't dirty
                                         trackerController.currentScreen = previousScreen
                                     }
                                     is FileController.LoadResult.Error -> fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
@@ -2040,7 +2040,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     sampleEditorState = sampleEditorState.copy(showConfirmClose = true)
                 } else {
                     audioEngine.restoreFxPreviewBackup()
-                    audioEngine.freeSampleUndo(sampleEditorState.instrumentId)  // editor closing — undo unreachable (REVIEW-3 1.1)
+                    audioEngine.freeSampleUndo(sampleEditorState.instrumentId)  // editor closing — undo unreachable
                     audioEngine.clearPreviewSlots()                             // free the editor's source-preview scratch (slot 254)
                     trackerController.currentScreen = previousScreen
                 }
@@ -2077,7 +2077,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         if (themeEditorState.isOpen) { themeEditorState = ThemeEditorState(); return }
         if (eqEditorState.isOpen) { eqEditorState = EqEditorState(); return }
         when (trackerController.currentScreen) {
-            // SELECT no longer clears the value under the cursor on the editor screens — deleting a value
+            // SELECT does not clear the value under the cursor on the editor screens — deleting a value
             // is A+B (and selection delete). SELECT is left free here for context actions / future use.
             ScreenType.SONG -> { }
             ScreenType.CHAIN -> { }

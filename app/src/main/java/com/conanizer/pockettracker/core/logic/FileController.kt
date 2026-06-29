@@ -161,7 +161,7 @@ class FileController(
     }
 
     // ========================================
-    // AUTOSAVE (crash-recovery) OPERATIONS — REVIEW-3 5.3
+    // AUTOSAVE (crash-recovery) OPERATIONS
     // ========================================
     // A separate app-private autosave.ptp, written while there is unsaved work and cleared on every
     // clean save/load/new (see TrackerController). serialize/write are split so the caller can run
@@ -261,7 +261,7 @@ class FileController(
      * IndexOutOfBounds deep in playback (or, with a strict size check, fail to load at all). Truncate
      * over-long pools and pad short ones with fresh defaults borrowed from a default Project (so the
      * padding can never drift from the canonical sizes in TrackerData.kt). The file then loads with
-     * whatever the current model can represent. (REVIEW-4 4.1 legacy path + 4.6.)
+     * whatever the current model can represent.
      *
      * Refs that point past a truncated pool (e.g. an old phrase step naming instrument 0xC8 after the
      * 256→128 reduction) are already clamped/skipped at schedule time — PlaybackController.scheduleStep

@@ -1,5 +1,4 @@
 import java.io.File
-import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -24,22 +23,15 @@ android {
         version = release(36)
     }
     val gitCommitCount = "git rev-list --count HEAD".runCommand()?.trim()?.toIntOrNull() ?: 1
-    val gitShortHash = "git rev-parse --short HEAD".runCommand()?.trim() ?: "unknown"
-
-    val localProps = Properties()
-    val localPropsFile = rootProject.file("local.properties")
-    if (localPropsFile.exists()) localProps.load(localPropsFile.inputStream())
-    val githubToken: String = localProps.getProperty("github.token", "")
 
     defaultConfig {
         applicationId = "com.conanizer.pockettracker"
         minSdk = 26
         targetSdk = 34
+        // versionCode = git commit count (monotonic, drives update ordering).
+        // versionName is bumped by hand per release; tag the matching release in git.
         versionCode = gitCommitCount
-        versionName = "0.9.$gitCommitCount ($gitShortHash)"
-
-        buildConfigField("String", "GITHUB_REPO_OWNER", "\"conanizer\"")
-        buildConfigField("String", "GITHUB_REPO_NAME", "\"pockettracker\"")
+        versionName = "0.9.0"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
@@ -61,12 +53,8 @@ android {
     }
 
     buildTypes {
-        debug {
-            buildConfigField("String", "GITHUB_TOKEN", "\"$githubToken\"")
-        }
         release {
-            buildConfigField("String", "GITHUB_TOKEN", "\"\"")  // No token in release builds
-            // 7.2: R8 + resource shrinking. Smaller dex → faster cold start and less code pinned in
+            // R8 + resource shrinking. Smaller dex → faster cold start and less code pinned in
             // RAM on the 1 GB Miyoo. JNI keep rules + kotlinx-serialization keep rules live in
             // proguard-rules.pro. Overlay PNGs are in assets/ (not res/) so resource shrinking
             // leaves them alone.
@@ -89,7 +77,6 @@ android {
     buildFeatures {
         prefab = true
         compose = true
-        buildConfig = true
     }
 }
 
@@ -97,8 +84,6 @@ dependencies {
     //noinspection UseTomlInstead
     implementation("com.google.oboe:oboe:1.10.0")
 
-    val acraVersion = "5.11.3"
-    implementation("ch.acra:acra-core:$acraVersion")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.lifecycle.runtime.ktx)

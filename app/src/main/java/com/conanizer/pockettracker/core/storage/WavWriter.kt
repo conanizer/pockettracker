@@ -163,7 +163,7 @@ object WavWriter {
      * Frame 0 is excluded (it's the implicit sample start, not a slice boundary).
      */
     fun readCuePoints(path: String): IntArray {
-        // 4.1: scan chunk headers with RandomAccessFile, seeking past each chunk body, so only the
+        // Scan chunk headers with RandomAccessFile, seeking past each chunk body, so only the
         // small cue chunk is ever read into memory. Called on every sample load (and once per
         // instrument on project load) — reading the whole multi-MB WAV here was pure GC pressure.
         try {

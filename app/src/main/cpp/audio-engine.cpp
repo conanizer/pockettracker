@@ -30,7 +30,7 @@ AudioEngine::AudioEngine() {
     }
     globalFrameCounter.store(0, std::memory_order_relaxed);
 
-    // Pre-size the per-block drain buffers (1.3) so the audio thread never reallocates them at
+    // Pre-size the per-block drain buffers so the audio thread never reallocates them at
     // runtime. A single ~23 ms block only ever holds a handful of events (a few tracks × retrigs).
     noteBatch.reserve(64);
     killBatch.reserve(64);
@@ -71,7 +71,7 @@ AudioEngine::~AudioEngine() {
 }
 
 // Stream lifecycle (openStream/closeStream/resumeStream) and the audio callback now live in the
-// platform backend, oboe-audio-engine.cpp. The core is backend-agnostic (REVIEW-4 4.5).
+// platform backend, oboe-audio-engine.cpp. The core is backend-agnostic.
 
 void AudioEngine::loadSample(int id, const float* data, int length) {
     if (id < 0 || id >= 256) return;
@@ -363,7 +363,7 @@ int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
     // Swap into the slot under the edit lock (audio thread try_locks it in the mix loop), stopping
     // any voice reading the old buffer first — same discipline as loadSample. Free EVERY stale
     // per-slot buffer, including the undo backup that loadSample/loadSampleStereo leak on reuse
-    // (REVIEW-3 1.2): a fresh file makes the old sample's undo/rate caches meaningless.
+    // A fresh file makes the old sample's undo/rate caches meaningless.
     {
         std::lock_guard<std::mutex> lock(sampleEditMutex);
         for (int v = 0; v < MAX_VOICES; v++) {
@@ -419,7 +419,7 @@ int AudioEngine::loadSampleFromCompressed(int id, const char* path) {
 
     // loadSample/loadSampleStereo free the sample + RATE caches on slot reuse but NOT the sample-editor
     // undo backup (loadSampleFromWavFile does). Clear it here too so a stale backup from the slot's
-    // previous sample can't be "undone" onto this one (REVIEW-3 1.2 class).
+    // previous sample can't be "undone" onto this one.
     {
         std::lock_guard<std::mutex> lock(sampleEditMutex);
         delete[] sampleBackups[id];      sampleBackups[id] = nullptr;
@@ -615,7 +615,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         masterVolSnapshot = masterVolume;
     }
 
-    // 1.2: zero only the [0,numFrames) slice actually used (not the full MAX_BLOCK arrays), and
+    // Zero only the [0,numFrames) slice actually used (not the full MAX_BLOCK arrays), and
     // skip the expensive visualizer accumulators when nobody is watching (see CAPTURE_IDLE_MS).
     // Also skip all visualizer capture during offline WAV export: the live stream is silent so the
     // scopes already read flat, and OCTA would otherwise snapshot random mid-render frames that only
@@ -627,9 +627,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     const size_t frameBytes     = (size_t)numFrames * sizeof(float);
 
     // Per-block scratch (send buses, OCTA accumulators, instrument-spectrum sum) lives on the engine
-    // object now, not the audio-thread stack (REVIEW-4 4.4) — declared in the header. (Re)initialised
-    // here exactly as the former stack locals were; MAX_BLOCK is the class cap and processLiveBlock/
-    // renderOffline chunk larger requests, so only [0,numFrames) is ever touched.
+    // object, not the audio-thread stack — declared in the header. (Re)initialised here every block;
+    // MAX_BLOCK is the class cap and processLiveBlock/renderOffline chunk larger requests, so only
+    // [0,numFrames) is ever touched.
     memset(revSendBufL, 0, frameBytes); memset(revSendBufR, 0, frameBytes);
     memset(dlySendBufL, 0, frameBytes); memset(dlySendBufR, 0, frameBytes);
 
@@ -648,11 +648,11 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     int   monitoredInstrId = instrSpectrumInstrId.load(std::memory_order_relaxed);
     if (monitoredInstrId >= 0) memset(instrSpectrumTempL, 0, frameBytes);
 
-    // 1.3: drain each queue ONCE for the whole block (one lock each) into reusable batch buffers,
+    // Drain each queue ONCE for the whole block (one lock each) into reusable batch buffers,
     // then dispatch from them inside the frame loop with zero locking. The heap pops earliest-first
     // so each batch is already sorted ascending by targetFrame.
     noteBatch.clear(); killBatch.clear(); paramBatch.clear();
-    // Snapshot the frame counter once (1.8: it's atomic; this thread is the only writer, so a single
+    // Snapshot the frame counter once (it's atomic; this thread is the only writer, so a single
     // relaxed load is enough and avoids re-loading it per frame below).
     const int64_t blockStartFrame = globalFrameCounter.load(std::memory_order_relaxed);
     const int64_t blockEnd = blockStartFrame + numFrames - 1;
@@ -665,7 +665,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         int64_t currentFrame = blockStartFrame + frame;
 
         // Apply scheduled parameter updates at their exact frame. Running here (on the audio
-        // thread) is what makes live PBN/PVB/PVX/THO race-free (4.3): the look-ahead scheduler only
+        // thread) is what makes live PBN/PVB/PVX/THO race-free: the look-ahead scheduler only
         // enqueues; the voices[] mutation happens below, where the mix loop is the sole writer.
         while (paramIdx < paramBatch.size() && paramBatch[paramIdx].targetFrame <= currentFrame) {
             ScheduledParamUpdate upd = paramBatch[paramIdx++];
@@ -799,9 +799,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
                     SoundfontVoice& sv = sfVoices[t];
                     float trkVol = trackVolSnapshot[t];
-                    soundfonts[note.sfSlot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // LRU touch (2.4)
+                    soundfonts[note.sfSlot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // LRU touch
                     // This instrument's ADSR override (applied atomically inside triggerNote, before
-                    // note_on) — keyed by instrument id so de-duplicated handles stay isolated (5.1).
+                    // note_on) — keyed by instrument id so de-duplicated handles stay isolated.
                     int eAtk = -1, eDec = -1, eSus = -1, eRel = -1;
                     if (note.sampleId >= 0 && note.sampleId < 256) {
                         const SfEnvOverride& eo = sfEnvOverrides[note.sampleId];
@@ -1165,7 +1165,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 row = tables[voice.tableId].rows[voice.tableRow];
             }
 
-            // playbackRate no longer has transpose baked in; getModulatedPlaybackRate reads
+            // playbackRate does not include transpose; getModulatedPlaybackRate reads
             // modDestValues[PARAM_PITCH] which processRoutes accumulates from TABLE_PITCH.
             int semitones = transposeToSemitones(row.transpose);
             voice.tableTranspose = (float)semitones;  // kept for debug log
@@ -1639,7 +1639,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 framePeaksPerTrackR[voice.trackId] = fmaxf(framePeaksPerTrackR[voice.trackId], fabsf(sampleR));
             }
             // OCTA per-track capture: tracks 0-7 plus the preview lane (PREVIEW_TRACK_ID == PREVIEW_LANE).
-            // Gated on octaWanted (1.2): the accumulators are only zeroed/read when OCTA is shown.
+            // Gated on octaWanted: the accumulators are only zeroed/read when OCTA is shown.
             if (octaWanted && voice.trackId >= 0 && voice.trackId < TRACK_WAVEFORM_COUNT) {
                 if (!voice.isFadingOut) trackWasActive[voice.trackId] = true;
                 trackWaveAccumL[voice.trackId][i] += sampleL;
@@ -1699,8 +1699,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     } // sampleEditMutex try_lock scope
 
     {
-        // sfBuf (per-track SF render, MAX_BLOCK frames * 2 channels) is an engine member now
-        // (REVIEW-4 4.4); it is memset per use below before each tsf render.
+        // sfBuf (per-track SF render, MAX_BLOCK frames * 2 channels) is an engine member; it is
+        // memset per use below before each tsf render.
         float masterVol = masterVolSnapshot;
 
         for (int t = 0; t < 8; t++) {
@@ -1812,7 +1812,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
 
             float trackPeakL = 0.0f, trackPeakR = 0.0f;
-            if (octaWanted) trackWasActive[t] = true;  // OCTA capture only (1.2)
+            if (octaWanted) trackWasActive[t] = true;  // OCTA capture only
             for (int i = 0; i < numFrames; i++) {
                 float sL = sfBuf[i * 2];
                 float sR = sfBuf[i * 2 + 1];
@@ -1850,7 +1850,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
     }
 
-    // Per-track waveform capture for OCTA visualizer — only when OCTA is being displayed (1.2).
+    // Per-track waveform capture for OCTA visualizer — only when OCTA is being displayed.
     if (octaWanted) {
         std::lock_guard<std::mutex> lock(waveformMutex);
         for (int t = 0; t < TRACK_WAVEFORM_COUNT; t++) trackHasVoice[t] = trackWasActive[t];
@@ -1865,7 +1865,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
     // SEND BUSES: delay first so its output can feed into reverb, then reverb
     {
-        // revWet*/dlyWet* are engine members now (REVIEW-4 4.4); process() fully overwrites them.
+        // revWet*/dlyWet* are engine members; process() fully overwrites them.
         delaySend.process(dlySendBufL, dlySendBufR, dlyWetL, dlyWetR, numFrames);
         if (delayToReverbSend > 0.0001f) {
             for (int i = 0; i < numFrames; i++) {
@@ -1874,7 +1874,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
         }
         reverbSend.process(revSendBufL, revSendBufR, revWetL, revWetR, numFrames);
-        // 1.10: only capture when the EQ/spectrum UI is actually polling, and never block the audio
+        // Only capture when the EQ/spectrum UI is actually polling, and never block the audio
         // thread on the UI's read — try_lock and drop this block's data on contention (invisible).
         if (spectrumWanted) {
             std::unique_lock<std::mutex> lock(spectrumMutex, std::try_to_lock);
@@ -1917,7 +1917,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     else
         masterChain.limiter.process(output, numFrames, channelCount);
 
-    // 1.10: only when an instrument is being monitored (EQ screen), and never block on the UI read.
+    // Only when an instrument is being monitored (EQ screen), and never block on the UI read.
     if (monitoredInstrId >= 0) {
         std::unique_lock<std::mutex> lock(spectrumMutex, std::try_to_lock);
         if (lock.owns_lock()) {
@@ -1966,7 +1966,7 @@ void AudioEngine::processLiveBlock(float* output, int numFrames, int channelCoun
         }
     }
 
-    // 1.10: master spectrum ring — only while the spectrum visualizer or EQ screen is polling,
+    // Master spectrum ring — only while the spectrum visualizer or EQ screen is polling,
     // and try_lock so the audio thread never blocks on the UI's 2048-sample copy-out.
     if ((nowMs() - lastSpectrumReadMs.load(std::memory_order_relaxed)) < CAPTURE_IDLE_MS) {
         std::unique_lock<std::mutex> lock(spectrumMutex, std::try_to_lock);
@@ -2174,7 +2174,7 @@ int AudioEngine::getVoiceTableId(int trackId) {
 }
 
 void AudioEngine::scheduleVoiceTableRow(int64_t targetFrame, int trackId, int row) {
-    // 4.3: enqueue; the audio thread applies it to voices[] in the drain loop (see processAudioBlock).
+    // Enqueue; the audio thread applies it to voices[] in the drain loop (see processAudioBlock).
     paramUpdateQueue.schedule({ targetFrame, trackId, 0, (float)row, PARAM_UPDATE_TABLE_ROW, 0.0f });
 }
 
@@ -2182,7 +2182,7 @@ void AudioEngine::scheduleTrackPhraseVol(int64_t targetFrame, int trackId, float
     paramUpdateQueue.schedule({ targetFrame, trackId, (int)MOD_SRC_PHRASE_VOL, phraseVol });
 }
 
-// ── REVIEW-5 live per-note / mixer FX — all enqueue onto the same sample-accurate paramUpdateQueue,
+// ── Live per-note / mixer FX — all enqueue onto the same sample-accurate paramUpdateQueue,
 // so the voices[] / masterEq mutation happens on the audio thread at the exact step frame (no race),
 // and they replay identically during offline render (renderOffline drains the same queue). ──────────
 
@@ -2450,7 +2450,7 @@ void AudioEngine::setPitchSlide(int trackId, float targetSemitones, float durati
 
 void AudioEngine::schedulePitchBend(int64_t targetFrame, int trackId, float semitonesPerStep, int tempo) {
     // Convert the per-step bend rate to per-frame here (sample-rate/tempo known on this thread),
-    // then enqueue the raw rate; the audio thread applies it to the active voice (4.3). 0 = stop.
+    // then enqueue the raw rate; the audio thread applies it to the active voice. 0 = stop.
     float ratePerFrame = 0.0f;
     if (fabsf(semitonesPerStep) >= 0.0001f) {
         float sr = (float)getSampleRate();
@@ -2461,7 +2461,7 @@ void AudioEngine::schedulePitchBend(int64_t targetFrame, int trackId, float semi
 }
 
 void AudioEngine::scheduleVibrato(int64_t targetFrame, int trackId, float speed, float depth) {
-    // 4.3: enqueue speed+depth; the audio thread applies setVibratoRaw in the drain loop. depth=0 stops.
+    // Enqueue speed+depth; the audio thread applies setVibratoRaw in the drain loop. depth=0 stops.
     paramUpdateQueue.schedule({ targetFrame, trackId, 0, speed, PARAM_UPDATE_VIBRATO, depth });
 }
 

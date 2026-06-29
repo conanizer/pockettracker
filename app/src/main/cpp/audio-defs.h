@@ -2,11 +2,9 @@
 
 #define LOG_TAG "NativeAudio"
 
-// Platform logging shim (REVIEW-4 4.5). On Android the engine logs through <android/log.h> exactly as
-// before; on any other platform (the planned Linux port) it falls back to stderr — so this header, and
-// every engine translation unit that includes it, no longer hard-depends on the Android log API. The
-// __ANDROID__ branch is byte-identical to the previous unconditional code, so the Android build is
-// unchanged. (The larger Oboe coupling in audio-engine.{h,cpp} is a separate, still-deferred split.)
+// Platform logging shim. On Android the engine logs through <android/log.h>; on any other platform
+// (e.g. the planned Linux port) it falls back to stderr. Routing the macros through this header keeps
+// every engine translation unit free of a hard dependency on the Android log API.
 #ifdef __ANDROID__
 #  include <android/log.h>
 #  define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)

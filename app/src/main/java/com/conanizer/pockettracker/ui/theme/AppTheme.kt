@@ -11,8 +11,7 @@ enum class VisualizerType { SCOPE, FLAT, OCTA, OCTA_FULL, SPECTRUM, SPECTRUM_PEA
  * Colors stored as ARGB Long (e.g. 0xFF00FF00L) so the data class is JSON-serializable
  * for .ptt theme files. Convert to Compose Color at point of use: Color(theme.vizWave).
  *
- * All defaults match the current hardcoded CLASSIC look exactly — zero visual change
- * until modules are updated to read from theme in Phase 3.
+ * Built-in theme defaults match the CLASSIC palette.
  */
 @Serializable
 data class AppTheme(

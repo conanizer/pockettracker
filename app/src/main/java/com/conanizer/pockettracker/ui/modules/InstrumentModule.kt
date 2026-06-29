@@ -185,7 +185,7 @@ class InstrumentModule : TrackerModule {
         )
         rowY += ROW_HEIGHT; currentRow++
 
-        // ── ROW 8/9: CRUSH + FREQ (renamed from CUT) ──────────────────────────
+        // ── ROW 8/9: CRUSH + FREQ ──────────────────────────
         drawDualParameterRow(
             x, rowY, scale, nameColumnX, valueColumnX,
             "CRUSH", instrument.crush.toHex1(),
@@ -443,8 +443,7 @@ class InstrumentModule : TrackerModule {
     }
 
     /**
-     * Row 5: section header + action buttons. The loaded file name now lives on the NAME row,
-     * so this row no longer shows the filename.
+     * Row 5: section header + action buttons. The loaded file name lives on the NAME row, not here.
      * Sampler: SMPL | EDIT (col 3, aligned with the FX value column) | LOAD (col 2)
      * Soundfont: SF | LOAD (col 2)
      */

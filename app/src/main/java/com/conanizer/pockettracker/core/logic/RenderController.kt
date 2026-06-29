@@ -186,7 +186,7 @@ class RenderController(
             progressCallback?.onProgress(0.3f, "Rendering audio...")
 
             // Honor the project's master bus (OTT *or* DUST) — was hardcoded to OTT, so a DUST project's
-            // resample didn't match playback (REVIEW-3 2.2).
+            // resample didn't match playback.
             applyMasterBusForRender(project)
 
             val sampleRate = audioBackend.getSampleRate()
@@ -354,8 +354,8 @@ class RenderController(
     /**
      * Push the project's master-bus effect (OTT or DUST) + limiter for a clean offline render
      * (the no-warmup-fade *ForRender variants). Both the full-song and selection renders need this so
-     * the export matches playback — the selection path previously hardcoded OTT and silently ignored a
-     * DUST master bus (REVIEW-3 2.2). Stems bypass the master bus (setStemsMode), so they don't use it.
+     * the export matches playback (both OTT and DUST master buses are honoured). Stems bypass the
+     * master bus (setStemsMode), so they don't use it.
      */
     private fun applyMasterBusForRender(project: Project) {
         audioBackend.setMasterFx(project.masterBusFx)
@@ -404,7 +404,7 @@ class RenderController(
                 // SF instrument: ensure instrumentParams[instId] has safe defaults so stale
                 // WAV params from a previous render or project load don't bleed into SF output.
                 // (isSoundfont(), not sampleFilePath == null — the latter is also true for empty
-                // sampler slots, which belong on the sampler path below — REVIEW-3 3.3.)
+                // sampler slots, which belong on the sampler path below.)
                 audioEngine.applySoundfontFilterOverrides(instrument)
                 audioEngine.pushInstrumentModulation(instrument, project.tempo)
                 audioEngine.pushInstrumentEqAndSends(instrument, project)

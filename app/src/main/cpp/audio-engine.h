@@ -1,6 +1,6 @@
 #pragma once
 // ───────────────────────────────────────────────────────────────────────────────────────────────
-// PORTABLE AUDIO CORE — no platform/Oboe/Android dependencies (REVIEW-4 4.5).
+// PORTABLE AUDIO CORE — no platform/Oboe/Android dependencies.
 // This translation unit holds the whole engine: voices, note scheduling, the sample-accurate queues
 // and ALL DSP (processAudioBlock). It must stay backend-agnostic so the Linux port is a drop-in: the
 // Oboe glue (stream open/close, the audio callback) lives ONLY in oboe-audio-engine.{h,cpp}; a future
@@ -53,7 +53,7 @@ public:
     // Decode a WAV file straight into native sample memory (no Java-heap round trip). Handles the
     // same formats as the Kotlin parser it replaces for file loads — 16/24/32-bit PCM, 32-bit float,
     // mono/stereo, WAVE_FORMAT_EXTENSIBLE. Returns the WAV sample rate (>0) on success, 0 on failure.
-    // Lets multi-MB samples load without OOM on the capped Java heap (REVIEW-3 6.2).
+    // Lets multi-MB samples load without OOM on the capped Java heap.
     int loadSampleFromWavFile(int id, const char* path);
     // Decode a compressed audio file (mp3/flac/ogg) natively into native sample memory — no Java heap,
     // no MediaCodec. Dispatches by file extension to dr_mp3 / dr_flac / stb_vorbis, then publishes via
@@ -103,7 +103,7 @@ public:
     void undoSample(int id);
     // Free the single-level undo backup for a slot. Called when the sample editor closes: undo is
     // unreachable once the editor is gone, so the backup is otherwise dead weight — a full-length copy
-    // (×2 for stereo) sitting in RAM until the slot is reloaded (REVIEW-3 1.1).
+    // (×2 for stereo) sitting in RAM until the slot is reloaded.
     void freeSampleUndo(int id);
     // Non-destructive FX preview: saves a clean copy separate from the undo slot.
     // Call saveFxPreviewBackup before applySampleFx for preview; restoreFxPreviewBackup to revert.
@@ -161,7 +161,7 @@ public:
                       float pbnRate = 0.0f, float vibratoSpeed = 0.0f, float vibratoDepth = 0.0f,
                       int tableStartRow = -1);
 
-    // Store a per-instrument SF2 ADSR override (REVIEW-3 5.1 SF de-dup). Keyed by instrument id and
+    // Store a per-instrument SF2 ADSR override. Keyed by instrument id and
     // applied atomically at note trigger, so instruments sharing a de-duplicated handle don't clash.
     void setSoundfontEnvelopeOverride(int instrumentId, int atk, int dec, int sus, int rel);
 
@@ -205,7 +205,7 @@ public:
     // Schedule a phraseVol update at exact frame (Vxx effect on empty steps)
     void scheduleTrackPhraseVol(int64_t targetFrame, int trackId, float phraseVol);
 
-    // ── REVIEW-5 live per-note / mixer FX (all routed through the sample-accurate param queue) ──
+    // ── Live per-note / mixer FX (all routed through the sample-accurate param queue) ──
     void scheduleVoicePan(int64_t targetFrame, int trackId, float pan);                // PAN xx
     void scheduleVoiceReverbSend(int64_t targetFrame, int trackId, float send);        // REV xx
     void scheduleVoiceDelaySend(int64_t targetFrame, int trackId, float send);         // DEL xx
@@ -312,7 +312,7 @@ public:
     void setPitchSlide(int trackId, float targetSemitones, float durationTicks, int tempo);
 
     // Schedule a continuous pitch bend (PBN on an empty step) at targetFrame — applied on the
-    // audio thread via paramUpdateQueue (4.3: no off-thread voices[] write). ~0 stops the bend.
+    // audio thread via paramUpdateQueue (no off-thread voices[] write). ~0 stops the bend.
     void schedulePitchBend(int64_t targetFrame, int trackId, float semitonesPerStep, int tempo);
 
     // Schedule vibrato (PVB/PVX on an empty step) at targetFrame. depth=0 stops vibrato.
@@ -389,7 +389,7 @@ private:
     int    sampleLengths[256];         // ONE length for both channels — samplesRight[id], when non-null,
                                        // always has exactly this length (kept in lockstep by every edit op)
     // Undo + RATE-HIGH caches exist only to RESTORE the working buffer, never to play directly, so
-    // they are stored as int16 to halve their RAM (REVIEW-3 5.2). Bit-exact for the 16-bit-sourced
+    // they are stored as int16 to halve their RAM. Bit-exact for the 16-bit-sourced
     // WAVs that dominate (decoder reads those as v/32768); ~-96 dBFS requantization otherwise.
     int16_t* sampleBackups[256];      // single-level undo buffers (left channel)
     int16_t* sampleBackupsRight[256]; // single-level undo buffers (right channel; null = backup was mono)
@@ -425,7 +425,7 @@ private:
     void applyEqPresetToChain(InstrumentChain& chain, int slot);
     InstrumentParams instrumentParams[256];
     InstrumentModSlot instrumentModSlots[256][4]; // [sampleId][slotIndex]
-    // Per-instrument SF2 ADSR envelope override (REVIEW-3 5.1 SF de-dup): stored keyed by instrument id
+    // Per-instrument SF2 ADSR envelope override: stored keyed by instrument id
     // (always unique) and applied atomically in triggerNote, so two instruments sharing one de-duplicated
     // tsf handle never collide on the shared preset-region patch. -1 = keep the SF2 preset's own value.
     struct SfEnvOverride { int atk = -1, dec = -1, sus = -1, rel = -1; };
@@ -437,7 +437,7 @@ private:
     NoteQueue noteQueue;             // Thread-safe queue of scheduled notes
     KillQueue killQueue;             // Thread-safe queue of scheduled kill events
     ParamUpdateQueue paramUpdateQueue; // Thread-safe queue of scheduled parameter updates
-    // Per-block drain buffers (1.3): the audio callback empties each queue ONCE per block into
+    // Per-block drain buffers: the audio callback empties each queue ONCE per block into
     // these (one lock each) instead of taking the queue mutex every frame. Reused across blocks so
     // the backing allocation persists (no per-block heap churn after warmup). Audio-thread-only.
     std::vector<ScheduledNote>        noteBatch;
@@ -458,7 +458,7 @@ private:
     }
     // Written by the audio/render thread (processAudioBlock), read by the Kotlin scheduler via
     // getCurrentFrame() JNI — atomic (relaxed) makes that formally race-free at zero cost on arm64
-    // and keeps the planned Linux port correct on unknown hardware (1.8).
+    // and keeps the planned Linux port correct on unknown hardware.
     std::atomic<int64_t> globalFrameCounter{0};  // Total frames processed since start
     std::atomic<bool> isOfflineRendering{false};  // True during WAV export → processLiveBlock outputs silence
     std::atomic<int> currentTempo{120};  // Song BPM; read by the table-advance to derive framesPerTic
@@ -528,12 +528,12 @@ private:
     bool  trackHasVoice[TRACK_WAVEFORM_COUNT] = {};
 
     // ── Per-block scratch for processAudioBlock (audio-thread-only) ──────────────────────────────
-    // Moved off the audio-thread stack (was ~116 KB of locals per call) so a small-stack real-time
-    // audio thread — e.g. a Linux ALSA/JACK callback — can't overflow (REVIEW-4 4.4). Safe as shared
+    // Engine members rather than audio-thread-stack locals (~116 KB per call) so a small-stack
+    // real-time audio thread — e.g. a Linux ALSA/JACK callback — can't overflow. Safe as shared
     // members because processAudioBlock is never concurrent: processLiveBlock skips it during offline
     // render (isOfflineRendering gate) and the render thread is then its sole caller — the same
-    // single-caller invariant the existing voices[]/framePeaks members already rely on. Each is
-    // (re)initialised every block exactly as the former stack locals were; nothing persists across blocks.
+    // single-caller invariant the voices[]/framePeaks members rely on. Each is (re)initialised every
+    // block; nothing persists across blocks.
     float revSendBufL[MAX_BLOCK], revSendBufR[MAX_BLOCK];   // panned reverb-send sum
     float dlySendBufL[MAX_BLOCK], dlySendBufR[MAX_BLOCK];   // panned delay-send sum
     float revWetL[MAX_BLOCK], revWetR[MAX_BLOCK];           // reverb wet output

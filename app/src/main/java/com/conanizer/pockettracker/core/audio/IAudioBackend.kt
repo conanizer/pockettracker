@@ -70,8 +70,8 @@ interface IAudioBackend {
      * Decode a WAV file directly into native sample slot [id] — no Java-heap round trip. Supports
      * 16/24/32-bit PCM, 32-bit float, mono/stereo, WAVE_FORMAT_EXTENSIBLE. Returns the WAV's sample
      * rate (>0) on success, 0 on failure. Keeping the decode native lets multi-MB samples load on
-     * low-heap devices without OOM (the byte buffer + both float channels no longer have to fit in
-     * the capped Java heap).
+     * low-heap devices without OOM (the byte buffer + both float channels never have to fit in the
+     * capped Java heap).
      *
      * @param id Sample slot (0-255)
      * @param path Absolute filesystem path to the .wav file
@@ -96,8 +96,8 @@ interface IAudioBackend {
     /**
      * Unload all samples from all instrument slots (0-255).
      *
-     * Called when creating a new project so that instruments that previously had
-     * samples loaded do not play audio with stale data.
+     * Called when creating a new project so instruments do not keep playing
+     * stale sample data from the previous project.
      */
     fun clearAllSamples()
 
@@ -105,7 +105,7 @@ interface IAudioBackend {
     fun clearSample(id: Int)
 
     /** Free the single-level undo backup for slot [id] (called when the sample editor closes — undo is
-     *  unreachable afterwards, so the backup is otherwise wasted RAM). See REVIEW-3 1.1. */
+     *  unreachable afterwards, so the backup is otherwise wasted RAM). */
     fun freeSampleUndo(id: Int)
 
     // Sample editor operations
@@ -528,7 +528,7 @@ interface IAudioBackend {
      * jumps the currently playing voice's table to a specific row.
      *
      * Schedule a table-row jump (THO on an empty step) at the exact frame. Applied to the active
-     * sampler voice on the audio thread (4.3: no off-thread voices[] write).
+     * sampler voice on the audio thread (no off-thread voices[] write).
      *
      * @param targetFrame Audio frame at which to apply the jump
      * @param trackId Which track to modify (0-7)
@@ -541,7 +541,7 @@ interface IAudioBackend {
      */
     fun scheduleTrackPhraseVol(targetFrame: Long, trackId: Int, phraseVol: Float)
 
-    // ── REVIEW-5 live per-note / mixer FX — all applied on the audio thread at the exact step frame ──
+    // ── Live per-note / mixer FX — all applied on the audio thread at the exact step frame ──
     /** PAN: per-note pan override (0.0=L, 0.5=center, 1.0=R) on the active voice. */
     fun scheduleVoicePan(targetFrame: Long, trackId: Int, pan: Float)
     /** REV: per-note reverb send level (0.0-1.0) on the active voice. */
@@ -571,7 +571,7 @@ interface IAudioBackend {
 
     /**
      * Schedule a continuous pitch bend (PBN on an empty step) at the exact frame. Applied to the
-     * active voice on the audio thread (4.3). Use semitonesPerTick = 0 to stop bending.
+     * active voice on the audio thread. Use semitonesPerTick = 0 to stop bending.
      *
      * @param targetFrame Audio frame at which to apply the bend
      * @param trackId Which track to apply pitch bend (0-7)
@@ -582,7 +582,7 @@ interface IAudioBackend {
 
     /**
      * Schedule vibrato (PVB/PVX on an empty step) at the exact frame. Applied to the active voice
-     * on the audio thread (4.3). Use depth = 0 to stop vibrato.
+     * on the audio thread. Use depth = 0 to stop vibrato.
      *
      * @param targetFrame Audio frame at which to apply the vibrato
      * @param trackId Which track to apply vibrato (0-7)
@@ -749,7 +749,7 @@ interface IAudioBackend {
 
     /**
      * Free EVERY soundfont slot at once. Called when the project changes (NEW / load) so cached SF2s
-     * — which cost ≈2× their file size in RAM — don't accumulate across projects (REVIEW-3 5.1).
+     * — which cost ≈2× their file size in RAM — don't accumulate across projects.
      */
     fun clearAllSoundfonts()
 

@@ -194,7 +194,7 @@ class ProjectModule : TrackerModule {
         )
 
         // ─────────────────────────────────────
-        // SAMPLE RAM readout — read-only info line (NOT a cursor row), REVIEW-3 5.1.
+        // SAMPLE RAM readout — read-only info line (NOT a cursor row).
         // Value = native-heap growth since launch (≈ loaded sample + soundfont PCM), supplied by
         // MainActivity. Integer math (tenths of a MB) avoids locale decimal-separator issues.
         // ─────────────────────────────────────

@@ -31,7 +31,7 @@ target_include_directories(opusfile
 target_link_libraries(opusfile PUBLIC opus ogg)
 
 # Add our native library
-# Phase 0 file split: native-audio.cpp has been split into focused modules.
+# The engine is split across focused modules (native-audio.cpp is a thin stub redirect).
 # TSF_IMPLEMENTATION is defined in soundfont-voice.cpp only.
 add_library(pockettracker SHARED
         soundfont-voice.cpp

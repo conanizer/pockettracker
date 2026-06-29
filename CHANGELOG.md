@@ -4,7 +4,7 @@ All notable changes to PocketTracker are documented here.
 
 ---
 
-## [1.0.0] — 2026 (first public release)
+## [0.9.0] — 2026 (first public release)
 
 ### Audio engine
 - Sample-accurate C++ engine via Oboe (<0.02 ms jitter), 8-voice polyphony with per-track voice stealing

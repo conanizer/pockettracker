@@ -668,7 +668,7 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1sched
     }
 }
 
-// ── REVIEW-5 live per-note / mixer FX (PAN / REV / DEL / BCK / EQN / EQM) ──
+// ── Live per-note / mixer FX (PAN / REV / DEL / BCK / EQN / EQM) ──
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1scheduleVoicePan(
         JNIEnv *env, jobject thiz, jlong targetFrame, jint trackId, jfloat pan) {
@@ -829,7 +829,7 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadS
     if (!pathStr) return -1;
 
     // De-dup: if this exact file is already loaded, reuse its slot instead of loading a 2nd copy
-    // (REVIEW-3 5.1). Multiple instruments share one handle — they play on distinct MIDI channels
+    // Multiple instruments share one handle — they play on distinct MIDI channels
     // (= tracks) and apply their ADSR override per-note in triggerNote, so per-instrument state stays
     // isolated. Frees stay reference-guarded (setInstrumentType / clearAllSoundfonts).
     for (int i = 0; i < MAX_SOUNDFONTS; i++) {
@@ -851,7 +851,7 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadS
     }
     if (slot == -1) {
         // Evict the genuinely least-recently-used slot (smallest use tick), not the one with the
-        // smallest instrumentId — that old heuristic could evict the SoundFont playing right now (2.4).
+        // smallest instrumentId, which could evict the SoundFont playing right now.
         uint64_t oldest = UINT64_MAX;
         slot = 0;
         for (int i = 0; i < MAX_SOUNDFONTS; i++) {
@@ -885,7 +885,7 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadS
         tsf_set_output(soundfonts[slot].handle, TSF_STEREO_INTERLEAVED, sampleRate, 0.0f);
         soundfonts[slot].instrumentId = (int)instrumentId;
         soundfonts[slot].filePath = pathStr;
-        soundfonts[slot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // freshly loaded = newest (2.4)
+        soundfonts[slot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // freshly loaded = newest
         LOGD("🎹 Loaded soundfont slot %d: %s (instrumentId=%d)", slot, pathStr, (int)instrumentId);
     }
 
@@ -907,7 +907,7 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setSo
         JNIEnv *env, jobject thiz, jint instrumentId,
         jint atk, jint dec, jint sus, jint rel) {
     // Store the override keyed by instrument id; triggerNote applies it atomically before note_on
-    // (REVIEW-3 5.1 SF de-dup). No slot/bank/preset here — the trigger uses the note's own bank/preset,
+    // No slot/bank/preset here — the trigger uses the note's own bank/preset,
     // so instruments sharing one de-duplicated handle stay isolated.
     if (engine) engine->setSoundfontEnvelopeOverride((int)instrumentId, (int)atk, (int)dec, (int)sus, (int)rel);
 }
@@ -968,7 +968,7 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1clear
         JNIEnv *env, jobject thiz) {
     // Free EVERY soundfont slot — called when the project changes (NEW / load). The 4-slot cache
     // otherwise only reclaims a slot on LRU eviction (a 5th distinct SF2), so a loaded SF2's float
-    // samples (≈2× its file size) stay resident across NEW/load. REVIEW-3 5.1 leak fix. Same per-slot
+    // samples (≈2× its file size) stay resident across NEW/load. Same per-slot
     // body as native_1unloadSoundfont (detach voices, then close under the slot mutex).
     for (int s = 0; s < MAX_SOUNDFONTS; s++) {
         for (int t = 0; t < 8; t++) {

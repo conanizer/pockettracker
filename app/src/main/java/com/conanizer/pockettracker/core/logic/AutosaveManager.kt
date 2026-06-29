@@ -7,11 +7,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * AUTOSAVE MANAGER (crash-recovery) — REVIEW-3 5.3
+ * AUTOSAVE MANAGER (crash-recovery)
  *
  * Persists the working project to an app-private autosave.ptp so a crash, OOM-kill or force-quit
  * doesn't lose unsaved edits. A clean save/load/new clears the file (see TrackerController), so its
- * presence at next launch signals an unclean exit — that's what the (Phase B) recovery prompt keys on.
+ * presence at next launch signals an unclean exit — that's what the recovery prompt keys on.
  *
  * This class owns only the THREADING split, not the trigger: the debounce lives in the caller (a
  * LaunchedEffect keyed on projectVersion). [autosave] serializes on the caller's thread — which must

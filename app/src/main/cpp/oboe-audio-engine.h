@@ -1,6 +1,6 @@
 #pragma once
 // ───────────────────────────────────────────────────────────────────────────────────────────────
-// ANDROID AUDIO BACKEND — the ONLY Oboe-coupled translation unit (REVIEW-4 4.5).
+// ANDROID AUDIO BACKEND — the ONLY Oboe-coupled translation unit.
 // Owns the output stream and IS its oboe::AudioStreamDataCallback. On each callback it hands the raw
 // buffer to the portable AudioEngine core via processLiveBlock(); all DSP/scheduling lives in the core
 // (audio-engine.{h,cpp}), which has no Oboe/Android dependency. A Linux port adds a sibling backend

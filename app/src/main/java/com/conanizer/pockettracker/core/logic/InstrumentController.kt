@@ -137,7 +137,7 @@ class InstrumentController(
      * Unload ALL soundfonts from the audio engine and drop the path→slot map. Called whenever the
      * project changes (new / load) so cached SF2s — which cost ≈2× their file size in RAM — don't
      * accumulate across projects. The 4-slot LRU cache otherwise only frees a slot on eviction
-     * (loading a 5th distinct SF2), so NEW/load would leave the old SF2 resident (REVIEW-3 5.1 fix).
+     * (loading a 5th distinct SF2), so NEW/load would leave the old SF2 resident.
      */
     fun clearAllSoundfonts() {
         audioEngine.backend.clearAllSoundfonts()
@@ -403,7 +403,7 @@ class InstrumentController(
 
     /**
      * Update instrument root note.
-     * Playback base frequency (ROOT × rate ratio / detune) is derived at schedule time (REVIEW-3 3.2).
+     * Playback base frequency (ROOT × rate ratio / detune) is derived at schedule time.
      */
     fun updateRoot(instrument: Instrument, note: Note) {
         instrument.root = note
@@ -413,7 +413,7 @@ class InstrumentController(
 
     /**
      * Update instrument detune parameter.
-     * Playback base frequency (ROOT × rate ratio / detune) is derived at schedule time (REVIEW-3 3.2).
+     * Playback base frequency (ROOT × rate ratio / detune) is derived at schedule time.
      */
     fun updateDetune(instrument: Instrument, detune: Int) {
         instrument.detune = detune.coerceIn(0, 255)
@@ -615,7 +615,7 @@ class InstrumentController(
     fun createResampledInstrument(project: Project, wavPath: String): Int {
         // Find the first genuinely free slot. isFree() (not sampleFilePath == null) so we don't claim a
         // configured SoundFont slot — those also have a null sampleFilePath, and overwriting one would
-        // leave a broken SOUNDFONT-typed instrument with a sample behind it (REVIEW-3 2.1).
+        // leave a broken SOUNDFONT-typed instrument with a sample behind it.
         val slotId = project.instruments.indexOfFirst { it.isFree() }
         if (slotId < 0) {
             setStatus("No empty instrument slot", success = false)
@@ -811,7 +811,7 @@ class InstrumentController(
             val sfPath = instrument.soundfontPath
             instrument.soundfontPath = null
             // Mirror the WAV path: free the SF2's native slot too, else it lingers in RAM after the slot
-            // becomes a sampler (REVIEW-3 5.1). Guard the shared-file case — only unload when no other
+            // becomes a sampler. Guard the shared-file case — only unload when no other
             // instrument still references that SF2 (slots are shared by path via sfSlotMap).
             if (sfPath != null && project.instruments.none { it.soundfontPath == sfPath }) {
                 sfSlotMap[sfPath]?.let { slot -> audioEngine.backend.unloadSoundfont(slot) }

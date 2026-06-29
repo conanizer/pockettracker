@@ -1206,7 +1206,7 @@ class PlaybackController(
         // ═══════════════════════════════════════════════════════════════════════════
         // STEP 2.3: Live per-note / mixer FX (PAN / REV / DEL / BCK / EQN / EQM)
         // ═══════════════════════════════════════════════════════════════════════════
-        // All routed through the sample-accurate param queue (4.3 pattern): the voice / master-EQ
+        // All routed through the sample-accurate param queue: the voice / master-EQ
         // mutation runs on the audio thread at the exact frame, and replays in offline render.
         // PAN with a note is baked into the trigger pan above; the rest target the just-triggered
         // voice, so on a note step they fire one frame later — the drain loop applies params BEFORE

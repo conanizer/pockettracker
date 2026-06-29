@@ -93,10 +93,9 @@ class OscilloscopeModule(
 
     /**
      * Draw one waveform as integer-quantized pixel dots (one drawRect per x). Shared by SCOPE
-     * (full width) and OCTA (per-lane). SCOPE previously used a continuous Path stroke — added back
-     * when 619 individual drawLine calls overflowed the RenderThread native stack on Android 11
-     * (Adreno driver). The dot loop is one drawRect per x, which OCTA has always used safely, so it
-     * avoids both the drawLine overflow and the Path while keeping SCOPE consistent with OCTA.
+     * (full width) and OCTA (per-lane). One drawRect per x (the same approach OCTA uses) avoids both
+     * a continuous Path stroke and the 619 individual drawLine calls that overflow the RenderThread
+     * native stack on Android 11 (Adreno driver), while keeping SCOPE visually consistent with OCTA.
      */
     private fun DrawScope.drawWaveDots(
         scopeX: Int, scopeWidth: Int, waveData: FloatArray,

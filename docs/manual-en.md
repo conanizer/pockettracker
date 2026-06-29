@@ -996,12 +996,13 @@ Navigate here: **R+UP** from SONG or CHAIN.
 |---|---|
 | SAVE | Save project to `.ptp` file (press A to confirm). |
 | LOAD | Open file browser to load a project. |
-| WAV MIX | Render full song to stereo WAV (offline, faster than real-time). |
+| EXPORT — MIX | Render the full song to a stereo WAV (offline, faster than real-time). |
+| EXPORT — STEMS | Render each active track to its own stereo WAV stem, plus reverb and delay send returns. |
 | CLEAN SEQ | Remove unused chains and phrases (with confirmation dialog). |
 | CLEAN INST | Remove unused instruments (with confirmation dialog). |
 | SETTINGS | Open the SETTINGS screen (press A). |
 
-WAV exports are saved to `/Documents/PocketTracker/Renders/` with auto-incremented filenames (`ProjectName_0001.wav`).
+WAV exports are saved to `/Documents/PocketTracker/Renders/` with auto-incremented filenames (`ProjectName_0001.wav`). Stems are written to a per-project subfolder — `Renders/ProjectName/ProjectName_1.wav`, `_2.wav`, … — plus `_reverb.wav` / `_delay.wav` when those sends are in use.
 
 > [!WARNING]
 > **CLEAN SEQ** and **CLEAN INST** are **permanent** — there is no undo. Save your project before running them, in case you remove something you still needed.
@@ -1884,8 +1885,7 @@ Note offsets:  C   C#  D   D#  E   F   F#  G   G#  A   A#  B
 ## Appendix E: Parameter Reference — units & ranges
 
 What every numeric parameter actually means: the value you edit on screen (its hex/raw range)
-and the real-world unit it maps to. For the DSP internals behind these — the constants you can
-change in source to reshape an effect's character — see `docs/internal/dsp-settings-guide.md`.
+and the real-world unit it maps to.
 
 > **How to read the "raw" column:** unless noted, parameters are edited as two hex digits
 > `00`–`FF` (0–255). A+UP/DOWN steps by the small step; A+LEFT/RIGHT by the large step;
@@ -1929,7 +1929,7 @@ change in source to reshape an effect's character — see `docs/internal/dsp-set
 | Mixer track / master **VOL** | MIXER | `00`–`FF` | silent … +6 dB | `80` = unity (0 dB). |
 | Reverb **SIZE** | EFFECTS | `00`–`FF` | 0.0 – 1.0 feedback | Not a time — higher feedback = longer tail. |
 | Master **DEPTH** (OTT/DUST) | EFFECTS | `00`–`FF` | 0–100 % wet | `00` = bypass. |
-| Sample-editor **LIM** pre-gain | SAMPLE EDITOR (offline LIM FX) | `00`–`FF` | +0 … +12 dB | `1.0 + (v/255)×3.0` linear (×1 … ×4). The always-on master-bus limiter is fixed (not user-set) — see `docs/internal/dsp-settings-guide.md`. |
+| Sample-editor **LIM** pre-gain | SAMPLE EDITOR (offline LIM FX) | `00`–`FF` | +0 … +12 dB | `1.0 + (v/255)×3.0` linear (×1 … ×4). The always-on master-bus limiter is fixed (not user-set). |
 
 ---
 

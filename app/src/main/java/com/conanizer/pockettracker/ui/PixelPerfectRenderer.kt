@@ -96,7 +96,7 @@ import kotlin.text.iterator
 // Design constants
 const val DESIGN_WIDTH_PX = 640
 
-// 6.1: below this peak amplitude the captured scope is treated as flat (silent), so the
+// Below this peak amplitude the captured scope is treated as flat (silent), so the
 // refresh loop stops forcing redraws. ~ -54 dBFS — visually indistinguishable from a flat line.
 private const val SCOPE_SILENCE_THRESHOLD = 0.002f
 
@@ -239,9 +239,9 @@ fun PixelPerfectTracker(
     val currentVizType by rememberUpdatedState(appTheme.visualizerType)
 
     // Oscilloscope / visualizer refresh loop (independent of playback position).
-    // 6.1: a single Canvas can only redraw all-or-nothing, so reading the ticker here used to
-    // repaint the entire 640×480 layout 60×/sec FOREVER — even sitting idle on a static phrase
-    // grid, which the review flagged as the dominant battery drain on the handheld. Now the loop
+    // A single Canvas can only redraw all-or-nothing, so unconditionally bumping the ticker here
+    // would repaint the entire 640×480 layout 60×/sec even when idle on a static phrase grid — the
+    // dominant battery drain on the handheld. Instead the loop
     // refreshes the capture buffers and only bumps the ticker (→ redraw) while audio is audible
     // (song/phrase playing OR a one-shot preview still ringing). When idle it keeps polling cheaply
     // for audio onset but does NOT bump the ticker, so the Canvas repaints only on real state
@@ -607,7 +607,7 @@ class TrackerLayout {
         var currentY = SCREEN_SPACER  // Start 6px from top
 
         // Capture buffers (waveform / track waveforms / spectrum) are refreshed by the
-        // oscilloscope ticker loop (6.1), not here — the draw only reads the latest snapshot.
+        // oscilloscope ticker loop, not here — the draw only reads the latest snapshot.
         // We still need these flags to pick what to hand the oscilloscope module.
         val isOcta = appTheme.visualizerType == VisualizerType.OCTA
         val isOctaFull = appTheme.visualizerType == VisualizerType.OCTA_FULL
@@ -1610,10 +1610,10 @@ private val _atlasPaint = Paint().apply {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// GLYPH ATLAS (6.2)
+// GLYPH ATLAS
 // ───────────────────────────────────────────────────────────────────────────
-// A full phrase screen is ~700+ glyphs, and the old per-glyph path emitted up to ~7 drawRect calls
-// each (thousands of draw ops/frame at 60 fps during playback). Instead we pre-render the 128 ASCII
+// A full phrase screen is ~700+ glyphs, and drawing each as up to ~7 drawRect calls would emit
+// thousands of draw ops/frame at 60 fps during playback. Instead we pre-render the 128 ASCII
 // glyphs once into a single 640×5 white-on-transparent ImageBitmap and stamp each glyph with ONE
 // tinted drawImage. FilterQuality.None (nearest-neighbour) keeps the 5×5 cells pixel-perfect at any
 // integer scale, so a single native-resolution atlas covers every fontScale/scale combination.
@@ -1642,7 +1642,7 @@ private val GLYPH_ATLAS: ImageBitmap by lazy {
 }
 
 // Cache one ColorFilter per tint colour. ColorFilter.tint() allocates a JVM object + native peer, so
-// recreating it per glyph would reintroduce exactly the per-frame GC churn 6.3 removed. Theme palettes
+// recreating it per glyph would reintroduce per-frame GC churn. Theme palettes
 // are tiny, so a linear scan of packed ARGB ints (no boxing) is both zero-alloc and fast. Draw-thread
 // only.
 private var tintKeys = IntArray(16)

@@ -1,61 +1,94 @@
 # PocketTracker
 
-**Free, open-source music tracker for Android gaming handhelds**
+**A free, open-source music tracker for Android gaming handhelds and phones.**
 
-PocketTracker is a portable music tracker in the tradition of LSDJ, M8, and Little Piggy Tracker — designed to run on Android handhelds and smartphones.
+PocketTracker is a sample-based tracker built around the classic **Song → Chain → Phrase → Table** workflow — the lineage of the legendary LSDJ, carried forward by its modern reinterpretation, the Dirtywave M8. Make full tracks on the device in your pocket: write patterns, chop and mangle your own samples, shape them with envelopes and effects, mix it all down, and export — no desktop required.
+
+Play it with the physical buttons on your Android handheld, or with on-screen touch controls on your phone — complete with an Amiga-style theme.
 
 > **Note:** This project was developed with AI assistance. If that bothers you, this project isn't for you.
 
-**Status:** Testing & Polish — public release date TBD  
+**Status:** 0.9.0 — first public release (pre-1.0)
 **License:** [GPL-3.0-or-later](LICENSE)
 
 ---
 
 ## Features
 
-### Audio engine
-- Sample-accurate C++ engine (<0.02 ms jitter), 8-voice polyphony with per-track voice stealing
-- WAV instruments (8–32-bit PCM / float, true stereo) + SoundFont (SF2) via TinySoundFont
-- Per-instrument chain: SVF filter (LP / HP / BP) + bitcrush + drive; constant-power pan
-- Stereo send buses — reverb + ping-pong delay; master bus — OTT 3-band compressor + limiter
-- Modulation engine: 4 slots per instrument (AHD / ADSR / LFO / DRUM / TRIG), 10 destinations including mod-to-mod routing
-- Groove quantization (128 grooves, per-track)
+### Sampler that keeps up with you
+Load **WAV, MP3, FLAC, OGG, Opus, or M4A** as instruments — mono or stereo. Set root note, tuning, volume, and pan; loop forward or ping-pong; play forward or reversed; trim start and end non-destructively.
+
+### SoundFont (SF2) instruments
+Drop in any SoundFont and play it like a sampler instrument, with editable attack/decay/sustain/release, filter cutoff, and resonance.
+
+### Built-in video → WAV converter
+Screen-record something off YouTube or your favourite game, then **extract its audio to a sample right inside the file browser** — preview before you convert. Instant crate-digging.
 
 ### Sample editor
-- Waveform view with zoom; non-destructive SOURCE (LEFT / RIGHT / STEREO / MONO) and RATE (HIGH / NORM / LOFI)
-- Destructive ops: crop, copy / cut / paste, normalize, fade, silence, reverse, undo
-- SYNC: **RPITCH** (pitch-shift to BPM) · **TSTRETCH** (SOLA time-stretch, Akai-cyclic)
-- Offline FX: EQ · DUST · DRIVE · OTT; transient detection + slice markers with WAV cue chunk; CHOP export
+A full waveform editor to polish and abuse your samples: crop, copy/paste, normalize, fade, silence, reverse. Repitch to a BPM, or **time-stretch** with an Akai-style SOLA algorithm (yes — that jungle-break grit is on purpose). Detect transients and **slice** your breaks — trigger slices as one-shots, or just drop slice markers (saved into the WAV, compatible with M8, Blackbox, Reaper). Bake effects straight into the sample.
 
-### Workflow
-- Project save / load (`.ptp` JSON), file browser with WAV / video preview, full-song WAV export
-- M8-style copy / paste (CELL → ROW → SCREEN), selection resampling, CLEAN
-- 4 layout modes (FULL / TOUCH PORTRAIT / TOUCH LANDSCAPE / TOUCH PORTRAIT2), auto-rotation, physical gamepad + virtual controls
+### Modulation
+Four slots per instrument — **AHD, ADSR, and LFO** envelopes — routed to volume, pitch, filter, pan, and more. Shape every note.
+
+### Grooves
+Per-track swing and shuffle patterns. Triplets and wonky off-grid timing, confirmed.
+
+### Effects, all the way down
+Overdrive, bitcrusher, resonant filters, and 3-band EQ per instrument. **Reverb and ping-pong delay** as send channels. A master bus with **OTT** (the aggressive "soundgoodizer") or **DUST** (a lo-fi blend from Skoomabwoy that squishes your track into something warmer and grittier). Every one of these can also be printed onto a sample in the editor.
+
+### 8 stereo tracks + a real mixer
+Arrange everything across 8 stereo channels, then balance it on a proper mixer screen with per-track volume, sends, and true dBFS meters.
+
+### Resample & bounce
+Capture whatever the sequencer is playing back into a new sample — layer up drums, freeze a chord into a pad, or flatten a whole section.
+
+### Export
+Render the full song to a **stereo WAV**, or export each track as a **separate stem**.
+
+### Make it yours
+A theme editor with a full colour palette (save/load `.ptt` themes), six visualizer modes for the top bar, multiple layouts for handhelds and phones, and a deep settings screen to bend the app around your workflow.
+
+➡️ Full, detailed list: [`docs/features.md`](docs/features.md)
+
+---
+
+## Under the hood
+
+For the curious: PocketTracker runs a custom sample-accurate C++ audio engine (8-voice polyphony, all DSP native) behind a pixel-perfect 640×480 Compose UI, with a portable core kept separate from the Android layer (a Linux port is planned). Details in [`docs/technical-architecture.md`](docs/technical-architecture.md).
+
+---
+
+## Privacy
+
+PocketTracker requests **no network access** — it has no internet permission at all. No accounts, no analytics, no telemetry, no ads. Everything you make stays on your device.
 
 ---
 
 ## Supported devices
- Almost any Android handheld or smartphone
 
-**Minimum requirements:** Android 8.0 (API 26) · 64-bit · ~512 MB RAM · ~50 MB storage · 640×480 screen
+Almost any Android gaming handheld or phone.
+
+**Minimum requirements:** Android 8.0 (API 26) · 64-bit (arm64-v8a / x86_64) · ~512 MB RAM · ~50 MB storage · 640×480 screen
+
+Tested on the **Miyoo Flip** (1 GB RAM, Android 13) and **Ayaneo Pocket Air Mini** (3 GB RAM, Android 11).
 
 ---
 
 ## Installation
 
-### APK (recommended for end users)
+### APK (recommended for most people)
 
-APK download will be posted here at public release.
+An APK will be posted to [Releases](https://github.com/conanizer/pockettracker/releases) at public release.
 
 ### Build from source
 
-**Requirements:** Android Studio Hedgehog+, NDK 25.1+, CMake 3.22.1+
+**Requirements:** Android Studio (Hedgehog+), Android NDK 25.1+, CMake 3.22.1+
 
 ```bash
 git clone https://github.com/conanizer/pockettracker.git
 cd pockettracker
 ./gradlew assembleDebug          # build
-./gradlew installDebug           # build + install to connected device
+./gradlew installDebug           # build + install to a connected device
 ```
 
 Output APK: `app/build/outputs/apk/debug/`
@@ -68,78 +101,36 @@ Output APK: `app/build/outputs/apk/debug/`
 |---|---|
 | [`docs/manual-en.md`](docs/manual-en.md) | Full user manual |
 | [`docs/input-system.md`](docs/input-system.md) | Complete controls reference |
+| [`docs/features.md`](docs/features.md) | Feature overview |
 | [`docs/technical-architecture.md`](docs/technical-architecture.md) | Architecture overview |
-| [`docs/development-status.md`](docs/development-status.md) | Feature status & known issues |
-
----
-
-## Architecture
-
-Portable core + platform adapters, so the C++ audio engine and business logic are shared:
-
-```
-core/audio/        IAudioBackend, AudioEngine (platform-agnostic)
-core/logic/        TrackerController, PlaybackController, EffectProcessor, …
-core/storage/      IFileSystem, WavWriter
-platform/android/  OboeAudioBackend, AndroidFileSystem, …
-app/src/main/cpp/  audio-engine.cpp — all DSP runs here (<0.02 ms jitter)
-```
-
-A Linux port is planned post-MVP (all interfaces already abstracted).
 
 ---
 
 ## Contributing
 
-Not yet accepting external contributions — approaching first public release. After release:
+Not yet accepting external code contributions — PocketTracker is approaching its first public release. After release:
 
 - Bug reports → GitHub Issues
-- Feature requests → GitHub Discussions
-- Code / docs / examples welcome
+- Feature requests / questions → GitHub Discussions
+- Code, docs, and example projects welcome
 
 ---
 
 ## Credits
 
-### Libraries
+PocketTracker is built on excellent open-source work — Oboe, DaisySP, TinySoundFont, KissFFT, dr_libs, libopus, and more, plus the [skoomaDust](https://github.com/skoomabwoy/skoomaDust) lo-fi chain by [@skoomabwoy](https://github.com/skoomabwoy). Inspired by **M8**, **LGPT**, and **LSDJ**.
 
-| Library | License | Use in PocketTracker |
-|---|---|---|
-| [Oboe](https://github.com/google/oboe) | Apache 2.0 | Low-latency Android audio stream |
-| [DaisySP](https://github.com/electro-smith/DaisySP) | MIT | SVF filter, ReverbSc, DelayLine, Compressor, Limiter, BitCrush |
-| [TinySoundFont](https://github.com/schellingb/TinySoundFont) | MIT | SF2 / SoundFont2 synthesizer (with per-channel rendering fork) |
-| [KissFFT](https://github.com/mborgerding/kissfft) | BSD-3-Clause | FFT for spectrum analyzer and transient detection |
-| [Soundpipe](https://github.com/PaulBatchelor/Soundpipe) (pareq stub) | MIT | Parametric EQ biquad |
-| [skoomaDust](https://github.com/skoomabwoy/skoomaDust) | GPL-3.0 | Lo-fi effect chain; includes APComp FET compressor by Alain Paul (BSD-3-Clause) |
-| [Jetpack Compose](https://developer.android.com/jetpack/compose) | Apache 2.0 | Android UI toolkit |
-| [Kotlinx Serialization](https://github.com/Kotlin/kotlinx.serialization) | Apache 2.0 | JSON project save / load |
-
-### DSP algorithm references
-
-- **SOLA time-stretch** — Roucos & Wilgus (1985), Verhelst & Roelands (1993). The "Akai-cyclic" mode matches the algorithm used in Akai S950 / S1000 samplers; the characteristic grit on jungle breaks is intentional.
-- **Biquad filter design** — Robert Bristow-Johnson, *Audio EQ Cookbook* (1994, rev. 2016).
-- **OTT 3-band compressor** — Parameters matched to the Xfer Records vitOTT plugin. Downward: −27 dBFS / 8:1; upward: −35 dBFS / 4:1; ~8 dB neutral zone.
-- **Spectral flux transient detection** — Brossier et al., "Fast labelling of notes in music signals," ICASSP 2004.
-
-### Contributors
-
-- [@skoomabwoy](https://github.com/skoomabwoy) — authored the [skoomaDust](https://github.com/skoomabwoy/skoomaDust) lo-fi effect chain integrated into PocketTracker; ongoing technical advice throughout the project
-
-### Inspiration
-
-- [Dirtywave M8](https://dirtywave.com/) — the portable tracker that proved the concept
-- [LGPT / Picotracker](https://github.com/Mdashdotdashn/LittleGPTracker) — open-source tracker heritage
-- [LSDJ](https://www.littlesounddj.com/) — Game Boy tracker that defined the form
+Full attributions, licenses, and DSP algorithm references: [`CREDITS.md`](CREDITS.md).
 
 ---
 
 ## License
 
-PocketTracker — free open-source Android music tracker  
+PocketTracker — free, open-source Android music tracker.
 Copyright © 2025–2026 conanizer
 
 This program is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License v3.0** as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 
 This program is distributed in the hope that it will be useful, but **without any warranty**; without even the implied warranty of merchantability or fitness for a particular purpose. See the [GNU General Public License](https://www.gnu.org/licenses/gpl-3.0.html) for details.
 
-Full license text: [`LICENSE`](LICENSE)
+Full license text: [`LICENSE`](LICENSE).

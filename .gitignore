@@ -126,8 +126,10 @@ nul
 *.tmp
 .vscode/
 
-# Claude Code — local settings only (project settings.json is kept)
-.claude/settings.local.json
+# Claude Code — kept local, not published
+/.claude/
+/CLAUDE.md
+/.claudeignore
 
 # Internal / planning docs (kept locally, not for contributors)
 docs/internal/

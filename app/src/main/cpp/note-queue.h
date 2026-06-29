@@ -20,16 +20,16 @@ struct SoundfontEntry {
     std::mutex mutex;            // Protects handle from concurrent audio/JNI access
     int instrumentId = -1;       // Which Instrument slot owns this (-1 = free)
     std::string filePath;
-    std::atomic<uint64_t> lastUsed{0};  // Monotonic use tick for LRU eviction (2.4); 0 = never used
-    // fileData removed: per-track clones are gone; master handle is used directly via MIDI channels.
+    std::atomic<uint64_t> lastUsed{0};  // Monotonic use tick for LRU eviction; 0 = never used
+    // Rendered via the master tsf handle on per-track MIDI channels (no per-track clones).
 };
 
 extern SoundfontEntry soundfonts[MAX_SOUNDFONTS];
 
-// Monotonic "use" tick for true-LRU SoundFont eviction (2.4). Bumped on load and on each note
-// trigger; eviction drops the slot with the smallest tick (genuinely least-recently-used, vs the
-// old "smallest instrumentId" heuristic that could evict the SF playing right now). A function-local
-// static gives one shared counter across translation units with no ODR-prone global definition.
+// Monotonic "use" tick for true-LRU SoundFont eviction. Bumped on load and on each note trigger;
+// eviction drops the slot with the smallest tick (genuinely least-recently-used, so the SF playing
+// right now is never evicted). A function-local static gives one shared counter across translation
+// units with no ODR-prone global definition.
 inline uint64_t nextSfUseTick() {
     static std::atomic<uint64_t> counter{0};
     return counter.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -232,7 +232,7 @@ public:
     }
 };
 
-// Action discriminator for ScheduledParamUpdate. 4.3: live PBN/PVB/PVX/THO mutations are routed
+// Action discriminator for ScheduledParamUpdate. Live PBN/PVB/PVX/THO mutations are routed
 // through this queue so the voices[] write happens on the audio thread (no off-thread race) and
 // lands at the exact step frame instead of whenever the look-ahead scheduler reached the step.
 enum ParamUpdateAction {
@@ -240,7 +240,7 @@ enum ParamUpdateAction {
     PARAM_UPDATE_PITCH_BEND,      // active voice: setPitchBendRaw(value)        [PBN]
     PARAM_UPDATE_VIBRATO,         // active voice: setVibratoRaw(value, value2)  [PVB/PVX]
     PARAM_UPDATE_TABLE_ROW,       // active sampler voice: tableRow = (int)value [THO]
-    // REVIEW-5 live per-note / mixer FX — all applied on the audio thread at the exact step frame.
+    // Live per-note / mixer FX — all applied on the audio thread at the exact step frame.
     PARAM_UPDATE_PAN,             // active voice: setPan(value)                 [PAN]
     PARAM_UPDATE_REVERB_SEND,     // active voice: reverbSend = value            [REV]
     PARAM_UPDATE_DELAY_SEND,      // active voice: delaySend = value             [DEL]
@@ -327,7 +327,7 @@ struct InstrumentParams {
     bool reverse;       // Play backwards
     int loopMode;       // 0=off, 1=forward, 2=ping-pong
     int loopStart;      // 0-255 (normalized position)
-    int loopEnd;        // 0-255 (normalized position); loop region top. 255 = sample end (legacy).
+    int loopEnd;        // 0-255 (normalized position); loop region top. 255 = sample end.
 
     // Distortion/bitcrusher parameters
     int drive;          // 0-255 (pre-gain boost)

@@ -186,7 +186,7 @@ class MainActivity : ComponentActivity() {
 }
 
 // Crash-recovery autosave debounce: write this long after the last edit, so a burst of edits
-// coalesces into a single write (REVIEW-3 5.3, Phase A).
+// coalesces into a single write.
 private const val AUTOSAVE_DEBOUNCE_MS = 3000L
 
 @Composable
@@ -289,7 +289,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // stream triggers Android's C2 codec framework to enumerate ~42 codecs, which can take
     // up to 35 seconds and completely freezes the main thread if done synchronously.
     var audioReady by remember { mutableStateOf(false) }
-    // Native-heap baseline for the PROJECT sample-RAM readout (REVIEW-3 5.1). Captured below right
+    // Native-heap baseline for the PROJECT sample-RAM readout. Captured below right
     // after the engine's fixed DSP is allocated but before any samples load, so the readout can show
     // (current native heap − baseline) ≈ the PCM of the samples/soundfonts the user has loaded.
     // −1 = not captured yet.
@@ -333,7 +333,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     var isStemsRendering by _isStemsRendering
     val _renderProgress = remember { mutableFloatStateOf(0f) }
     var renderProgress by _renderProgress
-    // Sample-RAM readout value for the PROJECT screen (REVIEW-3 5.1) — native-heap growth since the
+    // Sample-RAM readout value for the PROJECT screen — native-heap growth since the
     // startup baseline, refreshed by the poll below while the project screen is visible.
     val _sampleRamBytes = remember { mutableStateOf(0L) }
     var sampleRamBytes by _sampleRamBytes
@@ -502,7 +502,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val _notePreviewEnabled = remember { mutableStateOf(prefs.getBoolean("note_preview", true)) }
     var notePreviewEnabled  by _notePreviewEnabled
 
-    // Autosave recovery behaviour (REVIEW-3 5.3 follow-up). ASK (false) shows the RECOVER WORK?
+    // Autosave recovery behaviour. ASK (false) shows the RECOVER WORK?
     // prompt on launch; AUTO (true) silently restores the autosave with no prompt. Per-device
     // (SharedPreferences, not the project file) so it can differ between handhelds that kill the
     // app on background (AUTO) and phones that keep it warm (ASK).
@@ -673,7 +673,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
     }
 
-    // Crash-recovery autosave (REVIEW-3 5.3, Phase A). Every edit bumps projectVersion, which re-keys
+    // Crash-recovery autosave. Every edit bumps projectVersion, which re-keys
     // this effect: a new edit cancels the pending delay, so a burst of edits coalesces into one write
     // AUTOSAVE_DEBOUNCE_MS after the user pauses. Only writes when dirty (skips load/new/save, which
     // already match a clean file). Playback-agnostic by design — autosave() serializes here on the main
@@ -873,7 +873,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         }
     }
 
-    // Sample-RAM readout poll for the PROJECT screen (REVIEW-3 5.1). While the project screen is shown,
+    // Sample-RAM readout poll for the PROJECT screen. While the project screen is shown,
     // refresh (current native heap − startup baseline) ≈ loaded sample/soundfont RAM. Android's getter
     // is cheap; the State only recomposes when the MB value actually changes. coerceAtLeast(0) guards
     // the brief window before the baseline is captured (and any native shrink below it).
@@ -936,7 +936,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         } catch (e: Exception) { }
     }
 
-    // Crash-recovery at launch (REVIEW-3 5.3 Phase B + RESUME-mode follow-up): an autosave surviving
+    // Crash-recovery at launch: an autosave surviving
     // to launch means the last session didn't exit cleanly (a clean save/load/new deletes it). What we
     // do with it depends on the per-device RESUME setting:
     //   • AUTO  → silently restore it, no prompt (for handhelds that kill the app on background, where
@@ -966,7 +966,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         fileController.clearAutosave()
     }
 
-    // Autosave onStop flush (REVIEW-3 5.3 Phase C). The 3 s debounce can lose the last edits if Android
+    // Autosave onStop flush. The 3 s debounce can lose the last edits if Android
     // kills the backgrounded app (common on the 1 GB Miyoo) before it fires. On ON_STOP, flush
     // synchronously when dirty: onStop runs on the main thread and the process may be killed right
     // after, so we can't await a coroutine — and main is the project's sole mutator, so a direct
