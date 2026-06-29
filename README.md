@@ -2,9 +2,9 @@
 
 **A free, open-source music tracker for Android.**
 
-PocketTracker turns an Android device you already own — your phone, or an inexpensive gaming handheld — into a complete, self-contained music studio. Sketch an idea on the bus, sample something on the couch, and finish a whole track without a desktop or any extra gear.
+PocketTracker turns an Android device you already own — your phone, or an inexpensive gaming handheld — into a self-contained music studio. Write, sample, mix and export complete tracks on the device, with no desktop or extra gear required.
 
-It carries on the spirit of pocket trackers like LSDJ and the Dirtywave M8, with one difference: it's free, open-source, and runs on hardware you've probably already got. The idea is simple — put a real music-making tool in anyone's pocket, with no cost, no account, and nothing standing between you and the first note.
+It carries on the spirit of pocket trackers like LSDJ and the Dirtywave M8. It's free, open-source, and runs on hardware you've probably already got — the goal is to put a capable music-making tool in anyone's pocket, with no cost and no account.
 
 > **Note:** This project was developed with AI assistance. If that bothers you, this project isn't for you.
 
@@ -15,28 +15,31 @@ It carries on the spirit of pocket trackers like LSDJ and the Dirtywave M8, with
 
 ## Features
 
-### A sampler that eats anything
-Load WAV, MP3, M4A, FLAC, OGG or Opus straight in as instruments — most trackers stop at WAV. You can even pull audio out of a video: screen-record a track or some gameplay, then extract its sound to a sample without leaving the app or hunting for a converter. SoundFonts (SF2) load and play like any other instrument too.
+### Instruments
+Two instrument types: a **sampler** that loads WAV, MP3, M4A, FLAC, OGG and Opus files, and a **SoundFont** player for SF2 files.
 
-### Chop, stretch & slice
-A full sample editor lives on the device. Repitch a sample to your project's tempo, or time-stretch it to fit without changing its pitch — handy for lining up breaks and loops. Detect transients to slice a break into individual hits, trigger them across the keyboard, and bake your edits and effects right into the sample.
+### Sampling from video
+Create a sample from a video: extract its audio to a WAV in the file browser — with a preview before you convert — then load it into the sampler.
 
-### Plays like a handheld
-PocketTracker is built around physical buttons and combos — you can make an entire track without touching the screen, the way LSDJ feels on a Game Boy. On a phone or any touchscreen, the same workflow runs on on-screen controls.
+### Sample editor
+Edit samples on the device: trim, fade, normalise, reverse and more. Match a sample to a tempo, either by repitching it or by time-stretching it without changing pitch. Detect transients to slice a break into separate hits, and bake your edits and effects into the sample.
 
-### Effects with character
-Shape each track with overdrive, bitcrushing, filters and EQ, plus reverb and ping-pong delay on sends. On the master, reach for OTT — the aggressive "soundgoodizer" finish — or DUST, a lo-fi chain from [@skoomabwoy](https://github.com/skoomabwoy) that squashes your mix into something warmer and dirtier.
+### Controls
+PocketTracker is made for gaming handhelds with physical buttons — the whole app runs on buttons and button combos. For phones and other touchscreen devices, there's an on-screen control layout.
 
-### Eight stereo tracks, a real mixer & stems
-Arrange your song across eight stereo tracks, balance everything on a proper mixer with sends and true dBFS meters, then export the finished mix as a WAV — or as separate stems to carry into another DAW.
+### Effects
+Per-instrument overdrive, bitcrushing, filtering and a 3-band EQ. Reverb and delay are available as send effects. The master bus offers OTT (a multiband compressor) or DUST, a lo-fi chain by [@skoomabwoy](https://github.com/skoomabwoy), each with a wet/dry control. Many of these can also be baked into a sample in the editor.
 
-### Resample on the fly
-Record whatever the sequencer is playing straight back into a new sample — layer up drums, freeze a chord into a pad, or flatten a whole section to build on.
+### Tracks, mixing & export
+Arrange a song across eight stereo tracks and balance it on a mixer with per-track sends and true dBFS meters. Export the finished mix as a WAV, or export each track as a separate stem.
 
-### Make it yours
-Recolour every element of the interface with the built-in theme editor (Amiga-style look included), choose from six top-bar visualizers, and adapt the layout to your device.
+### Resampling
+Record whatever the sequencer is playing into a new sample — for layering drums, freezing a chord into a pad, or flattening a section to build on.
 
-➡️ Full, detailed feature list: [`docs/features.md`](docs/features.md)
+### Appearance
+Recolour the interface with the theme editor and save palettes as `.ptt` files; several themes are built in. The top bar has six visualizer modes. The phone portrait layout also comes with an Amiga-style skin.
+
+➡️ Full feature list: [`docs/features.md`](docs/features.md)
 
 ---
 

@@ -104,7 +104,7 @@ app/src/main/cpp/                  # C++ audio engine
 ├── vendor/                        Third-party (tsf, dr_mp3, dr_flac, stb_vorbis, opus, opusfile)
 └── effects/                       DSP module system (three-layer)
     ├── instrument-chain.h         Per-voice chain: Crush → Drive → Filter
-    ├── send-chain.h               Stereo send buses: reverb (DaisySP ReverbSc) + ping-pong delay
+    ├── send-chain.h               Stereo send buses: reverb (DaisySP ReverbSc) + stereo delay
     ├── master-chain.h             Output bus: masterEq → OttModule | DustChain → LimiterModule
     ├── primitives/                biquad.h, filter.h (Audio EQ Cookbook), vendored DaisySP
     └── modules/                   FilterModule (LP/HP/BP via daisysp::Svf), DriveModule, BitcrushModule
@@ -166,7 +166,7 @@ never to `onAudioReady`/`renderOffline`, or it will be missing from one of the t
 ### Bus structure
 
 - **Per voice:** instrument chain (Crush → Drive → Filter) + constant-power pan.
-- **Send buses:** stereo reverb (DaisySP ReverbSc) and ping-pong delay; delay output can feed the
+- **Send buses:** stereo reverb (DaisySP ReverbSc) and stereo delay; delay output can feed the
   reverb input with no extra latency.
 - **Master bus:** `masterEq` → OTT 3-band compressor **or** DUST lo-fi chain (switchable) → soft
   peak limiter. The limiter is always on.

@@ -76,7 +76,7 @@ Record what's currently playing in the sequencer into a new sample — capture a
 
 - Mixer screen: volume for each of the 8 tracks and the master, plus send amounts to reverb and delay
 - True dBFS peak meters per track
-- Two send effects: reverb (Schroeder-Moorer algorithm) and ping-pong stereo delay
+- Two send effects: reverb (Schroeder-Moorer algorithm) and a stereo delay
 - Route delay output into the reverb — wet delay signal feeds the reverb input with no extra latency
 - Reverb and delay each have their own 3-band EQ
 - Master bus: OTT 3-band compressor or DUST (lofi/vinyl texture) — switchable, with wet/dry depth control — followed by a soft peak limiter
