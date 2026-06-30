@@ -1,4 +1,5 @@
 import java.io.File
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -23,6 +24,14 @@ android {
         version = release(36)
     }
     val gitCommitCount = "git rev-list --count HEAD".runCommand()?.trim()?.toIntOrNull() ?: 1
+
+    // Release signing reads a gitignored keystore.properties from the repo root. When it's
+    // absent (fresh clone, CI without secrets) the release build falls back to the debug key,
+    // so the build never breaks — see signingConfigs / buildTypes.release below.
+    val keystorePropertiesFile = rootProject.file("keystore.properties")
+    val keystoreProperties = Properties().apply {
+        if (keystorePropertiesFile.exists()) keystorePropertiesFile.inputStream().use { load(it) }
+    }
 
     defaultConfig {
         applicationId = "com.conanizer.pockettracker"
@@ -52,6 +61,19 @@ android {
         }
     }
 
+    signingConfigs {
+        // Only declared when keystore.properties exists; otherwise the release build
+        // below stays on the debug key.
+        if (keystorePropertiesFile.exists()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             // R8 + resource shrinking. Smaller dex → faster cold start and less code pinned in
@@ -64,7 +86,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            // Real release key when keystore.properties is present; debug key otherwise so
+            // the build never breaks without the secrets.
+            signingConfig = if (keystorePropertiesFile.exists())
+                signingConfigs.getByName("release")
+            else
+                signingConfigs.getByName("debug")
         }
     }
     compileOptions {
