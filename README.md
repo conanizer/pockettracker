@@ -1,7 +1,9 @@
 # PocketTracker
 
 <p align="center">
-  <img src="docs/images/PocketTrackerIcon.png" alt="PocketTracker" width="160">
+  <img src="docs/images/logo-dark.png" alt="PocketTracker" height="240">
+  &nbsp;&nbsp;
+  <img src="docs/images/screenshot.png" alt="PocketTracker screenshot" height="240">
 </p>
 
 PocketTracker is a music tracker for Android-based devices — a phone, or a retro gaming handheld will work. It carries on the spirit of trackers like LSDJ and LGPT. It's free, open-source, and runs on hardware you've probably already got — the goal is to put a capable music-making tool in anyone's pocket.
@@ -50,10 +52,6 @@ Almost any Android gaming handheld or phone.
 **Minimum requirements:** Android 8.0 (API 26) · 64-bit (arm64-v8a / x86_64) · ~512 MB RAM · ~50 MB storage · 640×480 screen
 
 Tested on the **Miyoo Flip** (1 GB RAM, GammaOSCore Android 13), **Ayaneo Pocket Air Mini** (3 GB RAM, Android 11) and **Xiaomi 12T Pro** (8 GB RAM, LineageOS Android 16).
-
-<p align="center">
-  <img src="docs/images/testing-devices.jpg" alt="PocketTracker running on the Miyoo Flip, Ayaneo Pocket Air Mini and Xiaomi 12T Pro" width="480">
-</p>
 
 ---
 
