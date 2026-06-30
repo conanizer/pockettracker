@@ -52,7 +52,7 @@ Almost any Android gaming handheld or phone.
 Tested on the **Miyoo Flip** (1 GB RAM, GammaOSCore Android 13), **Ayaneo Pocket Air Mini** (3 GB RAM, Android 11) and **Xiaomi 12T Pro** (8 GB RAM, LineageOS Android 16).
 
 <p align="center">
-  <img src="docs/images/testing-devices.jpg" alt="PocketTracker running on the Miyoo Flip, Ayaneo Pocket Air Mini and Xiaomi 12T Pro" width="100%">
+  <img src="docs/images/testing-devices.jpg" alt="PocketTracker running on the Miyoo Flip, Ayaneo Pocket Air Mini and Xiaomi 12T Pro" width="480">
 </p>
 
 ---
