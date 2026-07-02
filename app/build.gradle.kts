@@ -42,6 +42,10 @@ android {
         versionCode = gitCommitCount
         versionName = "0.9.0"
 
+        // Landscape touch layout is hidden in release (no themed asset for it yet) but kept
+        // in debug builds for testing. Gated in MainActivity / SettingsModule on this flag.
+        buildConfigField("boolean", "LANDSCAPE_LAYOUT", "false")
+
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
@@ -75,6 +79,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Landscape layout stays available in debug for testing.
+            buildConfigField("boolean", "LANDSCAPE_LAYOUT", "true")
+        }
         release {
             // R8 + resource shrinking. Smaller dex → faster cold start and less code pinned in
             // RAM on the 1 GB Miyoo. JNI keep rules + kotlinx-serialization keep rules live in
@@ -104,6 +112,7 @@ android {
     buildFeatures {
         prefab = true
         compose = true
+        buildConfig = true
     }
 }
 

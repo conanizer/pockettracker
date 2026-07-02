@@ -1,5 +1,6 @@
 package com.conanizer.pockettracker.core.logic
 
+import com.conanizer.pockettracker.BuildConfig
 import com.conanizer.pockettracker.core.data.MAIN_ROW_SCREENS
 import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.data.Project
@@ -764,7 +765,9 @@ class TrackerController(
                 projectCursorColumn = 1  // Reset to first value column
             }
             ScreenType.SETTINGS -> {
-                settingsCursorRow = if (settingsCursorRow > 0) settingsCursorRow - 1 else 11
+                var prev = if (settingsCursorRow > 0) settingsCursorRow - 1 else 11
+                if (!BuildConfig.DEBUG && prev == 2) prev = 1   // OVERLAY hidden in release
+                settingsCursorRow = prev
                 settingsCursorColumn = 1
             }
             ScreenType.INSTRUMENT -> {
@@ -854,7 +857,9 @@ class TrackerController(
                 projectCursorColumn = 1
             }
             ScreenType.SETTINGS -> {
-                settingsCursorRow = if (settingsCursorRow < 11) settingsCursorRow + 1 else 0
+                var next = if (settingsCursorRow < 11) settingsCursorRow + 1 else 0
+                if (!BuildConfig.DEBUG && next == 2) next = 3   // OVERLAY hidden in release
+                settingsCursorRow = next
                 settingsCursorColumn = 1
             }
             ScreenType.INSTRUMENT -> {

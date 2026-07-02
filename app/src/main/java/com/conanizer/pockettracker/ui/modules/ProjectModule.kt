@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.conanizer.pockettracker.BuildConfig
 import com.conanizer.pockettracker.ui.theme.AppTheme
 import com.conanizer.pockettracker.input.CursorCapabilities
 import com.conanizer.pockettracker.input.CursorContext
@@ -198,26 +199,29 @@ class ProjectModule : TrackerModule {
         // Value = native-heap growth since launch (≈ loaded sample + soundfont PCM), supplied by
         // MainActivity. Integer math (tenths of a MB) avoids locale decimal-separator issues.
         // ─────────────────────────────────────
-        rowY += ROW_HEIGHT * 2
-        val ramTenths = (projectState.sampleRamBytes * 10 + 524288) / 1048576
-        drawBitmapText(
-            text = "USED RAM",
-            x = nameColumnX,
-            y = rowY + TEXT_PADDING,
-            scale = scale,
-            color = Color(t.textParam),
-            spacing = CHAR_SPACING,
-            fontScale = FONT_SCALE
-        )
-        drawBitmapText(
-            text = "${ramTenths / 10}.${ramTenths % 10} MB",
-            x = valueColumnX,
-            y = rowY + TEXT_PADDING,
-            scale = scale,
-            color = Color(t.textValue),
-            spacing = CHAR_SPACING,
-            fontScale = FONT_SCALE
-        )
+        // Dev-only readout — useful during development, hidden from users in release builds.
+        if (BuildConfig.DEBUG) {
+            rowY += ROW_HEIGHT * 2
+            val ramTenths = (projectState.sampleRamBytes * 10 + 524288) / 1048576
+            drawBitmapText(
+                text = "USED RAM",
+                x = nameColumnX,
+                y = rowY + TEXT_PADDING,
+                scale = scale,
+                color = Color(t.textParam),
+                spacing = CHAR_SPACING,
+                fontScale = FONT_SCALE
+            )
+            drawBitmapText(
+                text = "${ramTenths / 10}.${ramTenths % 10} MB",
+                x = valueColumnX,
+                y = rowY + TEXT_PADDING,
+                scale = scale,
+                color = Color(t.textValue),
+                spacing = CHAR_SPACING,
+                fontScale = FONT_SCALE
+            )
+        }
 
         // ===================================
         // STEP 5: Draw status message at bottom (if any)

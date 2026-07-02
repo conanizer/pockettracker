@@ -2,6 +2,10 @@
 
 import android.Manifest
 import android.content.Intent
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -418,7 +422,10 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
 
     val autoLayoutMode = when {
         !layoutConfig.needsVirtualButtons -> DeviceAdapter.LayoutMode.FULL
-        layoutConfig.isLandscape          -> DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
+        // Landscape auto-selection only when the landscape layout is enabled (debug builds);
+        // otherwise touch devices always come up in the themed portrait layout.
+        BuildConfig.LANDSCAPE_LAYOUT && layoutConfig.isLandscape ->
+            DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
         else                              -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
     }
 
@@ -439,6 +446,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         when {
             // TOUCH_PORTRAIT is retired from the active cycle — migrate to PORTRAIT
             saved == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT ->
+                DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
+            // Landscape is hidden in release — migrate any saved landscape state to PORTRAIT
+            !BuildConfig.LANDSCAPE_LAYOUT && saved == DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE ->
                 DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
             // FULLSCREEN on a touch-only device would trap the user with no virtual buttons
             saved == DeviceAdapter.LayoutMode.FULL && layoutConfig.needsVirtualButtons ->
@@ -463,9 +473,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // is remembered when switching layouts away and back, and across restarts. Legacy installs that
     // had "AMIGA PORT 2" selected default to the DARK skin.
     val initialPortraitSkinId = remember {
-        prefs.getString("portrait_skin", null)
-            ?: if (savedLayoutName == "TOUCH_PORTRAIT2B") DeviceSkin.AMIGA_DARK.id
-               else DeviceSkin.AMIGA_NORMAL.id
+        // New installs default to the DARK Amiga skin. A saved skin pref is always respected;
+        // legacy "AMIGA PORT 2" (TOUCH_PORTRAIT2B) also mapped to DARK, so DARK is the fallback.
+        prefs.getString("portrait_skin", null) ?: DeviceSkin.AMIGA_DARK.id
     }
     val _portraitSkinId = remember { mutableStateOf(initialPortraitSkinId) }
     var portraitSkinId  by _portraitSkinId
@@ -484,7 +494,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
 
     val _buttonSoundEnabled = remember { mutableStateOf(prefs.getBoolean("button_sound", true)) }
     var buttonSoundEnabled  by _buttonSoundEnabled
-    val _buttonSoundVolume  = remember { mutableStateOf(prefs.getInt("button_sound_volume", 255)) }
+    val _buttonSoundVolume  = remember { mutableStateOf(prefs.getInt("button_sound_volume", 0x80)) }
     var buttonSoundVolume   by _buttonSoundVolume
     val _buttonVibroEnabled = remember { mutableStateOf(prefs.getBoolean("button_vibro", true)) }
     var buttonVibroEnabled  by _buttonVibroEnabled
@@ -625,17 +635,40 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         deviceAdapter.calculateLayout(layoutMode)
     }
 
-    // Auto-switch between portrait/landscape virtual-button modes on device flip
-    LaunchedEffect(configuration.orientation) {
-        when {
-            (layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT ||
-             layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2) &&
-                    configuration.orientation == Configuration.ORIENTATION_LANDSCAPE ->
-                layoutMode = DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
+    // Lock touch phones to portrait while the portrait skinned layout is the only touch layout
+    // (release): with the device's auto-rotate on, letting the window flip to landscape just
+    // letterboxes the portrait UI. Handhelds (FULL layout) and debug builds (landscape enabled)
+    // stay unlocked so they keep their native / landscape orientation.
+    val activity = remember(context) {
+        var ctx: Context? = context
+        while (ctx is ContextWrapper && ctx !is Activity) ctx = ctx.baseContext
+        ctx as? Activity
+    }
+    LaunchedEffect(effectiveLayoutConfig.needsVirtualButtons, effectiveLayoutConfig.isLandscape) {
+        activity?.requestedOrientation =
+            if (!BuildConfig.LANDSCAPE_LAYOUT &&
+                effectiveLayoutConfig.needsVirtualButtons &&
+                !effectiveLayoutConfig.isLandscape)
+                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            else
+                ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
 
-            layoutMode == DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE &&
-                    configuration.orientation == Configuration.ORIENTATION_PORTRAIT ->
-                layoutMode = DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
+    // Auto-switch between portrait/landscape virtual-button modes on device flip.
+    // Disabled when the landscape layout is hidden (release) so rotating the phone
+    // never leaves the themed portrait layout.
+    LaunchedEffect(configuration.orientation) {
+        if (BuildConfig.LANDSCAPE_LAYOUT) {
+            when {
+                (layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT ||
+                 layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2) &&
+                        configuration.orientation == Configuration.ORIENTATION_LANDSCAPE ->
+                    layoutMode = DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
+
+                layoutMode == DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE &&
+                        configuration.orientation == Configuration.ORIENTATION_PORTRAIT ->
+                    layoutMode = DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
+            }
         }
     }
 

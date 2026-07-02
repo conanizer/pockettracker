@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.conanizer.pockettracker.BuildConfig
 import com.conanizer.pockettracker.ui.theme.AppTheme
 import com.conanizer.pockettracker.ui.theme.DeviceSkin
 import com.conanizer.pockettracker.input.CursorCapabilities
@@ -116,14 +117,18 @@ class SettingsModule : TrackerModule {
             s.cursorRow == row && s.cursorColumn == 1)
         rowY += ROW_HEIGHT; row++
 
-        // ── ROW 2: OVERLAY ─────────────────────────────────────────────
-        val allOverlays = listOf("OFF") + s.overlayFiles
-        val overlayDisplayName = if (s.overlayName == "OFF") "OFF"
-                                 else s.overlayName.uppercase().take(8)
-        drawDualParamRow(x, rowY, scale, nameColumnX, val1ColumnX, subLabelX, val2ColumnX, t,
-            "OVERLAY", overlayDisplayName, "STR", s.overlayStrength.toHex2(),
-            s.cursorRow == row, s.cursorColumn)
-        rowY += ROW_HEIGHT * 2; row++
+        // ── ROW 2: OVERLAY (debug-only — still raw, hidden in release) ──
+        if (BuildConfig.DEBUG) {
+            val overlayDisplayName = if (s.overlayName == "OFF") "OFF"
+                                     else s.overlayName.uppercase().take(8)
+            drawDualParamRow(x, rowY, scale, nameColumnX, val1ColumnX, subLabelX, val2ColumnX, t,
+                "OVERLAY", overlayDisplayName, "STR", s.overlayStrength.toHex2(),
+                s.cursorRow == row, s.cursorColumn)
+            rowY += ROW_HEIGHT * 2
+        } else {
+            rowY += ROW_HEIGHT   // keep the group gap OVERLAY's spacer used to provide
+        }
+        row++
 
         // ── ROW 3: BTN SOUND ───────────────────────────────────────────
         drawDualParamRow(x, rowY, scale, nameColumnX, val1ColumnX, subLabelX, val2ColumnX, t,
@@ -275,14 +280,18 @@ class SettingsModule : TrackerModule {
     // Layout modes selectable via A+dpad on the LAYOUT row. On touch-only devices FULL is
     // excluded — it hides the virtual controls, which would leave the device with no input.
     // (TOUCH_PORTRAIT is intentionally omitted: it is a legacy state that was never reachable.)
-    private fun layoutModeList(hasPhysical: Boolean): List<DeviceAdapter.LayoutMode> =
-        if (hasPhysical)
+    private fun layoutModeList(hasPhysical: Boolean): List<DeviceAdapter.LayoutMode> {
+        val modes = if (hasPhysical)
             listOf(DeviceAdapter.LayoutMode.FULL,
                    DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE,
                    DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2)
         else
             listOf(DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE,
                    DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2)
+        // Landscape is hidden in release (no themed asset yet); keep it in debug for testing.
+        return if (BuildConfig.LANDSCAPE_LAYOUT) modes
+               else modes.filter { it != DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE }
+    }
 
     fun getCursorContext(state: SettingsState): CursorContext {
         if (state.cursorColumn == 0) return CursorContextFactory.readOnly()
