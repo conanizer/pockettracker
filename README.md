@@ -88,7 +88,7 @@ https://github.com/conanizer/pockettracker
 
 - Bug reports → GitHub Issues
 - Feature requests / questions → GitHub Discussions
-- Or reach me on Discord for any kind of feedback
+- Or reach me on [Discord](https://discord.gg/h5vuewWx2) for any kind of feedback
 
 ---
 
