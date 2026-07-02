@@ -49,16 +49,10 @@ class SongEditorModule : TrackerModule {
         for (i in 0..7) { trackColumns[i] = colX; colX += 30 + 20 }
 
         var rowY = y + TEXT_PADDING
-        // While a status message is live (auto-dismissed after 5s) it takes over the title row,
-        // since the 16 song rows fill the area below — no room for a separate status line.
-        if (songState.statusMessage.isNotEmpty()) {
-            drawBitmapText(songState.statusMessage, x + 10, rowY, scale,
-                if (songState.statusSuccess) Color(t.vizWave) else Color(0xFFff0000),
-                CHAR_SPACING, FONT_SCALE)
-        } else {
-            drawBitmapText("SONG: ${songState.project.name.take(20)}", x + 10, rowY, scale,
-                Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
-        }
+        // Status messages (SAVED / LOADED / ...) are drawn by the global overlay on the
+        // visualizer header (PixelPerfectRenderer) — the title row stays put.
+        drawBitmapText("SONG: ${songState.project.name.take(20)}", x + 10, rowY, scale,
+            Color(t.textTitle), CHAR_SPACING, FONT_SCALE)
 
         rowY = y + ROW_HEIGHT + 14 + TEXT_PADDING
         for (trackId in 0..7) {
@@ -182,7 +176,5 @@ data class SongEditorState(
     val playbackRow: Int = 0,
     val selectionMode: Boolean = false,
     val isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
-    val statusMessage: String = "",
-    val statusSuccess: Boolean = true,
     val appTheme: AppTheme = AppTheme.Companion.CLASSIC
 )

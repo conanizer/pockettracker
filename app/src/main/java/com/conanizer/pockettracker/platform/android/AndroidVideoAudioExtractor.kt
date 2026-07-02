@@ -7,6 +7,7 @@ import com.conanizer.pockettracker.core.media.IVideoAudioExtractor
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.ShortBuffer
 
 /**
  * Android implementation of IVideoAudioExtractor.
@@ -264,7 +265,10 @@ class AndroidVideoAudioExtractor : IVideoAudioExtractor {
         // read loop (decode returns empty → every MP3 fails).
         val maxTotalSamples: Long =
             if (maxDurationSec > 0) maxDurationSec.toLong() * sampleRate * channelCount else Long.MAX_VALUE
-        val accumulator = mutableListOf<Short>()  // interleaved PCM shorts
+        // Interleaved PCM shorts. A growing ShortArray, NOT MutableList<Short>: a 60 s stereo
+        // 48 kHz extract is ~5.8 M samples, and boxing each one is GC-storm/OOM territory on
+        // the 1 GB Miyoo.
+        val accumulator = ShortAccumulator()
         val bufferInfo = MediaCodec.BufferInfo()
         val timeoutUs = 10_000L
         var inputDone = false
@@ -325,20 +329,20 @@ class AndroidVideoAudioExtractor : IVideoAudioExtractor {
             codec.release()
         }
 
-        if (accumulator.isEmpty()) return null
+        if (accumulator.size == 0) return null
 
         // Split interleaved shorts into separate channels
-        return interleavedShortsToChannels(accumulator, channelCount)
+        return interleavedShortsToChannels(accumulator.data, accumulator.size, channelCount)
     }
 
     /**
-     * Read PCM data from a ByteBuffer into the accumulator list.
+     * Read PCM data from a ByteBuffer into the accumulator.
      * Handles both 16-bit short and 32-bit float codec output.
      */
     private fun readPcmBuffer(
         buffer: ByteBuffer,
         isFloat: Boolean,
-        accumulator: MutableList<Short>,
+        accumulator: ShortAccumulator,
         maxTotalSamples: Long
     ) {
         buffer.order(ByteOrder.LITTLE_ENDIAN)
@@ -350,9 +354,8 @@ class AndroidVideoAudioExtractor : IVideoAudioExtractor {
             }
         } else {
             val sb = buffer.asShortBuffer()
-            while (sb.hasRemaining() && accumulator.size < maxTotalSamples) {
-                accumulator.add(sb.get())
-            }
+            val room = (maxTotalSamples - accumulator.size).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            accumulator.addFrom(sb, minOf(sb.remaining(), room))
         }
     }
 
@@ -361,8 +364,12 @@ class AndroidVideoAudioExtractor : IVideoAudioExtractor {
      * Mono → Pair(mono, null). Stereo → Pair(left, right).
      * 3+ channels: left = ch0, right = ch1 (extras discarded).
      */
-    private fun interleavedShortsToChannels(shorts: List<Short>, channelCount: Int): Pair<FloatArray, FloatArray?> {
-        val frameCount = shorts.size / channelCount
+    private fun interleavedShortsToChannels(
+        shorts: ShortArray,
+        sampleCount: Int,
+        channelCount: Int
+    ): Pair<FloatArray, FloatArray?> {
+        val frameCount = sampleCount / channelCount
         val left = FloatArray(frameCount) { i -> (shorts[i * channelCount] / 32768f).coerceIn(-1f, 1f) }
         val right = if (channelCount >= 2) {
             FloatArray(frameCount) { i -> (shorts[i * channelCount + 1] / 32768f).coerceIn(-1f, 1f) }
@@ -370,5 +377,40 @@ class AndroidVideoAudioExtractor : IVideoAudioExtractor {
             null
         }
         return Pair(left, right)
+    }
+
+    /**
+     * Growable primitive short buffer (doubling growth). Replaces MutableList<Short> in the
+     * whole-file decode path so PCM samples are never boxed.
+     */
+    private class ShortAccumulator {
+        var data = ShortArray(INITIAL_CAPACITY)
+            private set
+        var size = 0
+            private set
+
+        private fun ensureCapacity(needed: Int) {
+            if (needed <= data.size) return
+            var newCapacity = data.size * 2
+            if (newCapacity < needed) newCapacity = needed  // also handles Int overflow of the doubling
+            data = data.copyOf(newCapacity)
+        }
+
+        fun add(value: Short) {
+            ensureCapacity(size + 1)
+            data[size++] = value
+        }
+
+        /** Bulk-copy [count] shorts out of [sb] (the 16-bit PCM fast path). */
+        fun addFrom(sb: ShortBuffer, count: Int) {
+            if (count <= 0) return
+            ensureCapacity(size + count)
+            sb.get(data, size, count)
+            size += count
+        }
+
+        companion object {
+            private const val INITIAL_CAPACITY = 1 shl 16  // 64 K samples = 128 KB
+        }
     }
 }

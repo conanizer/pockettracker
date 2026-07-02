@@ -688,9 +688,6 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val lastEditedTranspose = stateVersion.let { trackerController.lastEditedTranspose }
     val projectVersion = stateVersion.let { trackerController.projectVersion }
 
-    val projectStatusMessage = stateVersion.let { trackerController.statusMessage }
-    val projectStatusSuccess = stateVersion.let { trackerController.statusSuccess }
-
     // Auto-dismiss status messages after 5 seconds
     LaunchedEffect(trackerController.statusMessage) {
         if (trackerController.statusMessage.isNotEmpty()) {
@@ -1031,8 +1028,16 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val currentInstrument = stateVersion.let { trackerController.currentInstrument }
     val instrumentCursorRow = stateVersion.let { trackerController.instrumentCursorRow }
     val instrumentCursorColumn = stateVersion.let { trackerController.instrumentCursorColumn }
-    val instrumentStatusMessage = stateVersion.let { trackerController.statusMessage }
-    val instrumentStatusSuccess = stateVersion.let { trackerController.statusSuccess }
+    // Global status overlay (drawn over the visualizer header on every screen):
+    // InstrumentController messages ("SF LOADED", "SRC MISSING", "Decoding...") take priority;
+    // tracker-level messages (project save/load/export) show otherwise.
+    val statusMessage = stateVersion.let {
+        instrumentController.statusMessage.ifEmpty { trackerController.statusMessage }
+    }
+    val statusSuccess = stateVersion.let {
+        if (instrumentController.statusMessage.isNotEmpty()) instrumentController.statusSuccess
+        else trackerController.statusSuccess
+    }
     val poolCursorColumn = stateVersion.let { trackerController.poolCursorColumn }
     val instrumentFromPool = stateVersion.let { trackerController.instrumentFromPool }
 
@@ -1064,14 +1069,12 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         currentPhrase = currentPhrase,
         projectCursorRow = projectCursorRow,
         projectCursorColumn = projectCursorColumn,
-        projectStatusMessage = projectStatusMessage,
-        projectStatusSuccess = projectStatusSuccess,
         projectVersion = projectVersion,
         currentInstrument = currentInstrument,
         instrumentCursorRow = instrumentCursorRow,
         instrumentCursorColumn = instrumentCursorColumn,
-        instrumentStatusMessage = instrumentStatusMessage,
-        instrumentStatusSuccess = instrumentStatusSuccess,
+        statusMessage = statusMessage,
+        statusSuccess = statusSuccess,
         poolCursorColumn = poolCursorColumn,
         instrumentFromPool = instrumentFromPool,
         fileBrowserState = fileBrowserState,

@@ -58,7 +58,17 @@ Tested on the **Miyoo Flip** (1 GB RAM, GammaOSCore Android 13), **Ayaneo Pocket
 
 ## Installation
 
-An APK will be posted to [Releases](https://github.com/conanizer/pockettracker/releases) at public release.
+**One-click (recommended):** install [Obtainium](https://github.com/ImranR98/Obtainium), then tap the badge below on your device. PocketTracker is added straight from GitHub Releases and Obtainium keeps it up to date automatically.
+
+[<img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" alt="Get it on Obtainium" height="54">](https://apps.obtainium.imranr.dev/redirect.html?r=obtainium://add/https://github.com/conanizer/pockettracker)
+
+If the badge doesn't open Obtainium, add this URL as an app source inside Obtainium instead:
+
+```
+https://github.com/conanizer/pockettracker
+```
+
+**Manual:** download the latest APK from [Releases](https://github.com/conanizer/pockettracker/releases) and open it on your device (allow "install from unknown sources" if asked).
 
 ---
 

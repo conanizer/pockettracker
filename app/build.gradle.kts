@@ -8,22 +8,11 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization") version "1.9.0"
 }
 
-fun String.runCommand(workingDir: File = rootDir): String? =
-    ProcessBuilder(split(" "))
-        .directory(workingDir)
-        .redirectErrorStream(true)
-        .start()
-        .inputStream
-        .bufferedReader()
-        .readText()
-        .takeIf { it.isNotBlank() }
-
 android {
     namespace = "com.conanizer.pockettracker"
     compileSdk {
         version = release(36)
     }
-    val gitCommitCount = "git rev-list --count HEAD".runCommand()?.trim()?.toIntOrNull() ?: 1
 
     // Release signing reads a gitignored keystore.properties from the repo root. When it's
     // absent (fresh clone, CI without secrets) the release build falls back to the debug key,
@@ -37,9 +26,11 @@ android {
         applicationId = "com.conanizer.pockettracker"
         minSdk = 26
         targetSdk = 34
-        // versionCode = git commit count (monotonic, drives update ordering).
+        // versionCode is hardcoded per release (900 = v0.9.0; next: 910, 1000, …). F-Droid's
+        // Tags update check and the fastlane changelog filename (changelogs/<versionCode>.txt)
+        // both need a literal value, and 900 outranks any commit-count build ever sideloaded.
         // versionName is bumped by hand per release; tag the matching release in git.
-        versionCode = gitCommitCount
+        versionCode = 900
         versionName = "0.9.0"
 
         // Landscape touch layout is hidden in release (no themed asset for it yet) but kept

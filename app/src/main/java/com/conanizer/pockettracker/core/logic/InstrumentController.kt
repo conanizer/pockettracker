@@ -333,8 +333,9 @@ class InstrumentController(
     fun previewInstrument(project: Project) {
         val instrument = project.instruments[currentInstrument]
 
-        // SOUNDFONT path — route through AudioEngine.scheduleNote so pushInstrumentModulation,
-        // table setup, and all effect params are applied exactly as in phrase playback.
+        // SOUNDFONT path — AudioEngine.previewInstrument's SF branch schedules on the
+        // dedicated preview track (not track 0) and applies mods, tables, and effect
+        // params exactly as in phrase playback.
         if (instrument.instrumentType == InstrumentType.SOUNDFONT) {
             val path = instrument.soundfontPath ?: run {
                 logger.d(TAG, "⏭️ Skipping soundfont preview: no soundfont loaded")
@@ -344,26 +345,8 @@ class InstrumentController(
                 logger.d(TAG, "⏭️ Skipping soundfont preview: slot not in sfSlotMap")
                 return
             }
-            val note = instrument.root
-            logger.d(TAG, "🎵 Previewing soundfont instrument ${formatHex(currentInstrument)} bank=${instrument.sfBank} preset=${instrument.sfPreset} note=$note")
-            audioEngine.backend.resumeStream()
-            val frame = audioEngine.backend.getCurrentFrame() + 2
-            audioEngine.scheduleNote(
-                targetFrame = frame,
-                note = note,
-                instrumentId = currentInstrument,
-                trackId = 0,
-                volume = instrument.volume / 255f,
-                phraseVol = 1.0f,
-                pan = instrument.pan / 255f,
-                project = project,
-                // Audition the root note itself; without this, note==root + the (60-root) phrase
-                // transpose collapses to a fixed C-4 and ROOT has no effect on the SF preview.
-                isRootAudition = true
-            )
-            // Schedule note-off after ~1 second so preview doesn't sustain forever
-            val sampleRate = audioEngine.backend.getSampleRate().takeIf { it > 0 } ?: 44100
-            audioEngine.backend.scheduleKill(frame + sampleRate, 0)
+            logger.d(TAG, "🎵 Previewing soundfont instrument ${formatHex(currentInstrument)} bank=${instrument.sfBank} preset=${instrument.sfPreset}")
+            audioEngine.previewInstrument(instrument, project)
             return
         }
 
@@ -754,19 +737,6 @@ class InstrumentController(
         val path = instrument.soundfontPath ?: return "---"
         val slot = sfSlotMap[path] ?: return "---"
         return audioEngine.backend.getSoundfontPresetName(slot, instrument.sfBank, instrument.sfPreset)
-    }
-
-    /**
-     * Preview a soundfont note for the current instrument.
-     */
-    fun previewSoundfontNote(project: Project, midiNote: Int = 60) {
-        val instrument = project.instruments[currentInstrument]
-        val path = instrument.soundfontPath ?: return
-        val slot = sfSlotMap[path] ?: return
-        val frame = audioEngine.backend.getCurrentFrame() + 2
-        audioEngine.backend.scheduleSoundfontNote(
-            frame, 0, slot, midiNote, 100, 1.0f, 0.5f, instrument.sfBank, instrument.sfPreset
-        )
     }
 
     fun updateSfAttack(instrument: Instrument, value: Int) {

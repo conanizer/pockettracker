@@ -358,9 +358,9 @@ class AudioEngine(
                 tableIdOverride = tableIdOverride,
                 isRootAudition = true
             )
-            // Hard-stop after 2 seconds so SF sustain notes don't ring forever during preview.
-            val sr = backend.getSampleRate().toLong().coerceAtLeast(44100L)
-            backend.scheduleKill(targetFrame + sr * 2, PREVIEW_TRACK_ID)
+            // No timed kill: like the sampler preview, the SF preview rings out naturally
+            // (endlessly for sustained presets) until stopPreview() — the "any button except
+            // START / A-held edits stops the audition" UX — sends the note-off.
             return
         }
 

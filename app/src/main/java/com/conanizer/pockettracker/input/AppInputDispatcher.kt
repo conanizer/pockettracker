@@ -86,6 +86,7 @@ import com.conanizer.pockettracker.ui.overlays.selectedEffectCode
 import com.conanizer.pockettracker.ui.overlays.withClampedCol
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -243,6 +244,13 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
 
     // L+B double-tap timer for file browser select-all
     private var lastFileBrowserLBTime: Long = 0L
+
+    // Sample-editor dry preview: the START handler temporarily writes the selection into the
+    // instrument's sampleStart/End and restores them 100 ms later. A second START inside that
+    // window must first run the pending restore, or it captures the preview-mutated values as
+    // "saved" and makes them permanent. Both fields are main-thread-only.
+    private var samplePreviewRestoreJob: Job? = null
+    private var samplePreviewRestore: (() -> Unit)? = null
 
     private fun computeSliceCuePoints(state: SampleEditorState): IntArray = when (state.sliceMethod) {
         0 -> state.transientMarkers.filter { it > 0 && it < state.totalFrames }.toIntArray()
@@ -670,8 +678,6 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     project = trackerController.project,
                     cursorRow = trackerController.projectCursorRow,
                     cursorColumn = trackerController.projectCursorColumn,
-                    statusMessage = trackerController.statusMessage,
-                    isSuccess = trackerController.statusSuccess,
                     isRendering = isRendering,
                     isStemsRendering = isStemsRendering,
                     renderProgress = renderProgress
@@ -782,8 +788,6 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     instrument = inst,
                     cursorRow = trackerController.instrumentCursorRow,
                     cursorColumn = trackerController.instrumentCursorColumn,
-                    statusMessage = trackerController.statusMessage,
-                    isSuccess = trackerController.statusSuccess,
                     soundfontPresetName = instrumentController.getSoundfontPresetName(
                         trackerController.project
                     ),
@@ -2352,6 +2356,12 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 }
             }
             ScreenType.SAMPLE_EDITOR -> {
+                // Rapid double-START guard: finish the previous preview's deferred restore NOW,
+                // otherwise savedStart/savedEnd below capture the preview selection and the
+                // instrument's real START/END are lost.
+                samplePreviewRestoreJob?.cancel()
+                samplePreviewRestore?.invoke()
+
                 val instId = sampleEditorState.instrumentId
                 val total  = sampleEditorState.totalFrames
                 val inst   = trackerController.project.instruments[instId]
@@ -2382,13 +2392,18 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 audioEngine.previewInstrumentDry(inst)
                 if (previewSlot != instId) inst.sampleId = savedSampleId
                 inst.root = savedRoot
-                coroutineScope.launch {
-                    delay(100)
+                val restore = {
                     inst.sampleStart = savedStart; inst.sampleEnd = savedEnd
                     audioEngine.updateInstrumentPlaybackParams(inst)
                     // Restore effects bypassed for dry preview
                     audioEngine.pushInstrumentEqAndSends(inst, trackerController.project)
                     audioEngine.pushInstrumentModulation(inst, trackerController.project.tempo)
+                    samplePreviewRestore = null
+                }
+                samplePreviewRestore = restore
+                samplePreviewRestoreJob = coroutineScope.launch {
+                    delay(100)
+                    restore()
                 }
             }
             ScreenType.INSTRUMENT -> trackerController.previewInstrument()

@@ -223,22 +223,8 @@ class ProjectModule : TrackerModule {
             )
         }
 
-        // ===================================
-        // STEP 5: Draw status message at bottom (if any)
-        // ===================================
-        if (projectState.statusMessage.isNotEmpty()) {
-            val messageY = y + height - 40
-
-            drawBitmapText(
-                text = projectState.statusMessage,
-                x = nameColumnX,
-                y = messageY,
-                scale = scale,
-                color = if (projectState.isSuccess) Color(t.vizWave) else Color(0xFFff0000),
-                spacing = CHAR_SPACING,
-                fontScale = FONT_SCALE
-            )
-        }
+        // Status messages (SAVED / LOADED / EXPORTED / ...) are drawn by the global overlay
+        // on the visualizer header (PixelPerfectRenderer), not inside this module.
     }
 
     /**
@@ -698,15 +684,11 @@ class ProjectModule : TrackerModule {
  *   - 1+ = Value columns (specific to each row)
  *   For NAME row: 1-20 = character position
  *   For PROJECT row: 1=SAVE, 2=LOAD, 3=NEW
- * @param statusMessage Status message to show at bottom
- * @param isSuccess True if status is success, false if error
  */
 data class ProjectState(
     val project: Project,
     val cursorRow: Int = 0,
     val cursorColumn: Int = 1,  // Start on value, not name
-    val statusMessage: String = "",
-    val isSuccess: Boolean = true,
     val isRendering: Boolean = false,
     val isStemsRendering: Boolean = false,
     val renderProgress: Float = 0f,

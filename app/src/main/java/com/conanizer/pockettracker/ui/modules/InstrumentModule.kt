@@ -282,17 +282,8 @@ class InstrumentModule : TrackerModule {
                 instrumentState.cursorRow, instrumentState.cursorColumn, currentRow, t
             )
         }
-
-        // ── Status message ────────────────────────────────────────────────────
-        if (instrumentState.statusMessage.isNotEmpty()) {
-            drawBitmapText(
-                instrumentState.statusMessage,
-                nameColumnX, y + height - 40,
-                scale,
-                if (instrumentState.isSuccess) Color(t.vizWave) else Color(0xFFff0000),
-                CHAR_SPACING, FONT_SCALE
-            )
-        }
+        // Status messages ("SF LOADED", "SRC MISSING", ...) are drawn by the global overlay
+        // on the visualizer header (PixelPerfectRenderer), not inside this module.
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -814,8 +805,6 @@ data class InstrumentState(
     val instrument: Instrument,
     val cursorRow: Int = 0,
     val cursorColumn: Int = 1,
-    val statusMessage: String = "",
-    val isSuccess: Boolean = true,
     val soundfontPresetName: String = "",
     val soundfontPresetCount: Int = 0,
     val soundfontPresetIndex: Int = 0,

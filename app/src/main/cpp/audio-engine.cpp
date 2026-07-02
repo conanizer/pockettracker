@@ -12,8 +12,9 @@
 #include <cstring>
 #include <new>
 
-// Definition of the per-track soundfont voice array (extern declared in audio-engine.h)
-SoundfontVoice sfVoices[8];
+// Definition of the per-track soundfont voice array (extern declared in audio-engine.h):
+// song tracks 0-7 + the preview lane (track 8).
+SoundfontVoice sfVoices[SF_VOICE_COUNT];
 
 AudioEngine::AudioEngine() {
     for (int i = 0; i < 256; i++) {
@@ -89,6 +90,11 @@ void AudioEngine::loadSample(int id, const float* data, int length) {
 
     if (samples[id]) delete[] samples[id];
     if (samplesRight[id]) { delete[] samplesRight[id]; samplesRight[id] = nullptr; }
+    // New file also invalidates the sample editor's undo backup — keeping it would hold RAM and
+    // let undoSample restore the PREVIOUS sample's audio onto this one.
+    delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
+    delete[] sampleBackupsRight[id];   sampleBackupsRight[id] = nullptr;
+    sampleBackupLengths[id] = 0;
     // New file replaces the original — discard any cached rate-mode original.
     if (originalSamples[id]) {
         delete[] originalSamples[id];
@@ -117,6 +123,10 @@ void AudioEngine::loadSampleStereo(int id, const float* left, const float* right
 
     if (samples[id]) delete[] samples[id];
     if (samplesRight[id]) { delete[] samplesRight[id]; samplesRight[id] = nullptr; }
+    // Same as loadSample: a new file invalidates the old sample's undo backup.
+    delete[] sampleBackups[id];        sampleBackups[id] = nullptr;
+    delete[] sampleBackupsRight[id];   sampleBackupsRight[id] = nullptr;
+    sampleBackupLengths[id] = 0;
     if (originalSamples[id]) {
         delete[] originalSamples[id];
         originalSamples[id] = nullptr;
@@ -362,8 +372,7 @@ int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
 
     // Swap into the slot under the edit lock (audio thread try_locks it in the mix loop), stopping
     // any voice reading the old buffer first — same discipline as loadSample. Free EVERY stale
-    // per-slot buffer, including the undo backup that loadSample/loadSampleStereo leak on reuse
-    // A fresh file makes the old sample's undo/rate caches meaningless.
+    // per-slot buffer: a fresh file makes the old sample's undo/rate caches meaningless.
     {
         std::lock_guard<std::mutex> lock(sampleEditMutex);
         for (int v = 0; v < MAX_VOICES; v++) {
@@ -417,17 +426,8 @@ int AudioEngine::loadSampleFromCompressed(int id, const char* path) {
         return 0;
     }
 
-    // loadSample/loadSampleStereo free the sample + RATE caches on slot reuse but NOT the sample-editor
-    // undo backup (loadSampleFromWavFile does). Clear it here too so a stale backup from the slot's
-    // previous sample can't be "undone" onto this one.
-    {
-        std::lock_guard<std::mutex> lock(sampleEditMutex);
-        delete[] sampleBackups[id];      sampleBackups[id] = nullptr;
-        delete[] sampleBackupsRight[id]; sampleBackupsRight[id] = nullptr;
-        sampleBackupLengths[id] = 0;
-    }
-
-    // Publish via the existing, tested slot path (voice-stop + buffer free + mutex all handled there).
+    // Publish via the existing, tested slot path (voice-stop + buffer free — incl. the stale undo
+    // backup — + mutex all handled there).
     if (!R.empty() && R.size() == L.size())
         loadSampleStereo(id, L.data(), R.data(), (int)L.size());
     else
@@ -532,8 +532,16 @@ void AudioEngine::stopTrack(int trackId) {
             voices[i].stop();
         }
     }
-    if (trackId >= 0 && trackId < 8) {
-        sfVoices[trackId].hardStop();
+    if (trackId >= 0 && trackId < SF_VOICE_COUNT) {
+        SoundfontVoice& sv = sfVoices[trackId];
+        // Preview lane: first stop starts TSF's release envelope (click-free, musical stop for the
+        // "any button stops the preview" UX); a second stop while releasing hard-cuts so a long-REL
+        // sound can't ignore the user. Song tracks keep the immediate hard stop.
+        if (trackId == PREVIEW_LANE && sv.isActive && !sv.isReleasingOnly) {
+            sv.noteOff();
+        } else {
+            sv.hardStop();
+        }
     }
 }
 
@@ -541,8 +549,8 @@ void AudioEngine::stopAll() {
     for (int i = 0; i < MAX_VOICES; i++) {
         voices[i].stop();
     }
-    // Stop all soundfont notes on all tracks
-    for (int t = 0; t < 8; t++) {
+    // Stop all soundfont notes on all tracks (incl. the preview lane)
+    for (int t = 0; t < SF_VOICE_COUNT; t++) {
         sfVoices[t].hardStop();
     }
     LOGD("stopAll: voices and SF notes cleared, stream stays running");
@@ -607,13 +615,14 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
     // hot loops below. Previously volumeMutex was taken per-sample-per-voice (~350k locks/sec/voice) —
     // pure overhead plus a dropout hazard if the Kotlin thread held the lock during setTrackVolume/
     // setMasterVolume. One block of slightly-stale volume is inaudible.
-    float trackVolSnapshot[8];
+    float trackVolSnapshot[SF_VOICE_COUNT];
     float masterVolSnapshot;
     {
         std::lock_guard<std::mutex> lock(volumeMutex);
         for (int t = 0; t < 8; t++) trackVolSnapshot[t] = trackVolumes[t];
         masterVolSnapshot = masterVolume;
     }
+    trackVolSnapshot[PREVIEW_LANE] = 1.0f;  // preview lane has no mixer fader — neutral volume
 
     // Zero only the [0,numFrames) slice actually used (not the full MAX_BLOCK arrays), and
     // skip the expensive visualizer accumulators when nobody is watching (see CAPTURE_IDLE_MS).
@@ -699,7 +708,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     for (int v = 0; v < MAX_VOICES; v++)
                         if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId)
                             voices[v].reverbSend = upd.value;
-                    if (upd.trackId >= 0 && upd.trackId < 8 && sfVoices[upd.trackId].isActive)
+                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
                         sfVoices[upd.trackId].instrParams.reverbSend = upd.value;
                     break;
                 }
@@ -707,7 +716,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     for (int v = 0; v < MAX_VOICES; v++)
                         if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId)
                             voices[v].delaySend = upd.value;
-                    if (upd.trackId >= 0 && upd.trackId < 8 && sfVoices[upd.trackId].isActive)
+                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
                         sfVoices[upd.trackId].instrParams.delaySend = upd.value;
                     break;
                 }
@@ -737,7 +746,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                         if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == upd.trackId) {
                             applyEqPresetToChain(voices[v].chain, slot); break;
                         }
-                    if (upd.trackId >= 0 && upd.trackId < 8 && sfVoices[upd.trackId].isActive)
+                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive)
                         applyEqPresetToChain(sfVoices[upd.trackId].chain, slot);
                     break;
                 }
@@ -752,7 +761,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                             break;
                         }
                     }
-                    if (upd.trackId >= 0 && upd.trackId < 8 && sfVoices[upd.trackId].isActive) {
+                    if (upd.trackId >= 0 && upd.trackId < SF_VOICE_COUNT && sfVoices[upd.trackId].isActive) {
                         sfVoices[upd.trackId].modSourceValues[(ModSourceId)upd.sourceId] = upd.value;
                     }
                     break;
@@ -766,7 +775,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             if (kill.softKill) {
                 triggerNoteOff(kill.trackId);  // Sampler: trigger ADSR release
                 // SF: noteOff (TSF handles its own release envelope internally)
-                if (kill.trackId >= 0 && kill.trackId < 8) {
+                if (kill.trackId >= 0 && kill.trackId < SF_VOICE_COUNT) {
                     sfVoices[kill.trackId].noteOff();
                 }
                 LOGT("🎵 Note-off: track %d at frame %lld", kill.trackId, (long long)currentFrame);
@@ -778,7 +787,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     }
                 }
                 // SF: soft kill so TSF's internal release envelope can play out.
-                if (kill.trackId >= 0 && kill.trackId < 8) {
+                if (kill.trackId >= 0 && kill.trackId < SF_VOICE_COUNT) {
                     sfVoices[kill.trackId].noteOff();
                 }
             }
@@ -793,7 +802,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             // No per-track clone creation — tsf_load_memory() never runs on the audio thread.
             if (note.isSoundfont) {
                 int t = note.trackId;
-                if (t >= 0 && t < 8 &&
+                if (t >= 0 && t < SF_VOICE_COUNT &&
                     note.sfSlot >= 0 && note.sfSlot < MAX_SOUNDFONTS &&
                     soundfonts[note.sfSlot].handle != nullptr) {
 
@@ -1284,7 +1293,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
     // SF table processing: mirrors sampler loop above. Effects writing to modSourceValues[]
     // are picked up by updateVoiceModulation/applyPitchMod. FX_OFFSET silently skipped.
-    for (int t = 0; t < 8; t++) {
+    for (int t = 0; t < SF_VOICE_COUNT; t++) {
         SoundfontVoice& sv = sfVoices[t];
         if (!sv.isActive || sv.tableId < 0) continue;
 
@@ -1703,7 +1712,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         // memset per use below before each tsf render.
         float masterVol = masterVolSnapshot;
 
-        for (int t = 0; t < 8; t++) {
+        for (int t = 0; t < SF_VOICE_COUNT; t++) {
             SoundfontVoice& sv = sfVoices[t];
             if (!sv.isActive) continue;
 
@@ -1771,7 +1780,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             sv.applyPitchMod((float)sampleRate, numFrames);
         }
 
-        for (int t = 0; t < 8; t++) {
+        for (int t = 0; t < SF_VOICE_COUNT; t++) {
             SoundfontVoice& sv = sfVoices[t];
             // Local sfSlot snapshot — see the volSlot comment above (detach() race).
             int slot = sv.sfSlot;
@@ -1830,8 +1839,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 }
             }
             float trackPeak = fmaxf(trackPeakL, trackPeakR);
-            framePeaksPerTrackL[t] = fmaxf(framePeaksPerTrackL[t], trackPeakL);
-            framePeaksPerTrackR[t] = fmaxf(framePeaksPerTrackR[t], trackPeakR);
+            if (t < 8) {  // mixer meters cover song tracks only, not the preview lane
+                framePeaksPerTrackL[t] = fmaxf(framePeaksPerTrackL[t], trackPeakL);
+                framePeaksPerTrackR[t] = fmaxf(framePeaksPerTrackR[t], trackPeakR);
+            }
 
             // Release tail: when noteOff() was called, keep rendering until TSF goes silent.
             // Suppressed while an ADSR/TRIG VOL release is active (stage 4) — TSF is still
@@ -2152,7 +2163,7 @@ int AudioEngine::getVoiceTableRow(int trackId) {
         }
     }
     // SF voices are indexed directly by trackId
-    if (trackId >= 0 && trackId < 8) {
+    if (trackId >= 0 && trackId < SF_VOICE_COUNT) {
         const SoundfontVoice& sv = sfVoices[trackId];
         if (sv.isActive && sv.tableId >= 0) return sv.tableRow;
     }
@@ -2166,7 +2177,7 @@ int AudioEngine::getVoiceTableId(int trackId) {
         }
     }
     // SF voices are indexed directly by trackId
-    if (trackId >= 0 && trackId < 8) {
+    if (trackId >= 0 && trackId < SF_VOICE_COUNT) {
         const SoundfontVoice& sv = sfVoices[trackId];
         if (sv.isActive) return sv.tableId;
     }
@@ -2427,7 +2438,7 @@ void AudioEngine::setLimiterPreGain(int depth) {
 }
 
 IAudioVoice* AudioEngine::findActiveVoiceForTrack(int trackId) {
-    if (trackId >= 0 && trackId < 8 && sfVoices[trackId].isActive) {
+    if (trackId >= 0 && trackId < SF_VOICE_COUNT && sfVoices[trackId].isActive) {
         return &sfVoices[trackId];
     }
     for (int v = 0; v < MAX_VOICES; v++) {

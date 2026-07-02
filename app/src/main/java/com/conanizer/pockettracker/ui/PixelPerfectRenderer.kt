@@ -136,14 +136,14 @@ fun PixelPerfectTracker(
     currentPhrase: Int,
     projectCursorRow: Int,
     projectCursorColumn: Int,
-    projectStatusMessage: String,
-    projectStatusSuccess: Boolean,
     projectVersion: Int,
     currentInstrument: Int,
     instrumentCursorRow: Int,
     instrumentCursorColumn: Int,
-    instrumentStatusMessage: String,
-    instrumentStatusSuccess: Boolean,
+    // Global status overlay (drawn over the visualizer header): instrument messages take
+    // priority, tracker-level messages are the fallback — computed by MainActivity.
+    statusMessage: String,
+    statusSuccess: Boolean,
     poolCursorColumn: Int = 0,
     instrumentFromPool: Boolean = false,
     fileBrowserState: FileBrowserModule.State? = null,
@@ -375,14 +375,12 @@ fun PixelPerfectTracker(
                         currentPhrase = currentPhrase,
                         projectCursorRow = projectCursorRow,
                         projectCursorColumn = projectCursorColumn,
-                        projectStatusMessage = projectStatusMessage,
-                        projectStatusSuccess = projectStatusSuccess,
                         projectVersion = projectVersion,
                         currentInstrument = currentInstrument,
                         instrumentCursorRow = instrumentCursorRow,
                         instrumentCursorColumn = instrumentCursorColumn,
-                        instrumentStatusMessage = instrumentStatusMessage,
-                        instrumentStatusSuccess = instrumentStatusSuccess,
+                        statusMessage = statusMessage,
+                        statusSuccess = statusSuccess,
                         poolCursorColumn = poolCursorColumn,
                         instrumentFromPool = instrumentFromPool,
                         fileBrowserState = fileBrowserState,
@@ -495,14 +493,13 @@ class TrackerLayout {
         currentPhrase: Int = 0,
         projectCursorRow: Int = 0,
         projectCursorColumn: Int = 1,
-        projectStatusMessage: String = "",
-        projectStatusSuccess: Boolean = true,
         projectVersion: Int = 0,  // Version counter to force redraw on data changes
         currentInstrument: Int = 0,
         instrumentCursorRow: Int = 0,
         instrumentCursorColumn: Int = 1,
-        instrumentStatusMessage: String = "",
-        instrumentStatusSuccess: Boolean = true,
+        // Global status overlay (see drawLayout body): instrument-first, tracker fallback.
+        statusMessage: String = "",
+        statusSuccess: Boolean = true,
         poolCursorColumn: Int = 0,
         instrumentFromPool: Boolean = false,
         fileBrowserState: FileBrowserModule.State? = null,  // File browser state
@@ -675,6 +672,22 @@ class TrackerLayout {
             }
         }
 
+        // Global status message — overlaid on the visualizer header (top-left) so every screen
+        // shows SAVED / LOADED / SF LOADED / ... without stealing an editor row. Auto-dismissed
+        // after 5 s by MainActivity. Full-screen editors (file browser, sample editor) draw over
+        // this area and keep their own inline status lines.
+        if (statusMessage.isNotEmpty()) {
+            drawBitmapText(
+                text = statusMessage.take(34),
+                x = moduleX + 10,
+                y = currentY + 10,
+                scale = scale,
+                color = if (statusSuccess) Color(t.vizWave) else Color(0xFFff0000),
+                spacing = 2,
+                fontScale = 3
+            )
+        }
+
         // Move down for next module
         currentY += oscilloscope.height + SCREEN_SPACER  // 70 + 6 = 76px
 
@@ -737,8 +750,6 @@ class TrackerLayout {
                                     project = project,
                                     cursorRow = projectCursorRow,
                                     cursorColumn = projectCursorColumn,
-                                    statusMessage = projectStatusMessage,
-                                    isSuccess = projectStatusSuccess,
                                     isRendering = isRendering,
                                     renderProgress = renderProgress,
                                     sampleRamBytes = sampleRamBytes,
@@ -811,8 +822,6 @@ class TrackerLayout {
                                     selectionMode = selectionMode,
                                     isCellSelected = isCellSelected,
                                     scrollPosition = songScrollPosition,
-                                    statusMessage = projectStatusMessage,
-                                    statusSuccess = projectStatusSuccess,
                                     appTheme = appTheme
                                 )
                             )
@@ -832,8 +841,6 @@ class TrackerLayout {
                                     instrument = project.instruments[currentInstrument],
                                     cursorRow = instrumentCursorRow,
                                     cursorColumn = instrumentCursorColumn,
-                                    statusMessage = instrumentStatusMessage,
-                                    isSuccess = instrumentStatusSuccess,
                                     soundfontPresetName = soundfontPresetName,
                                     soundfontPresetCount = soundfontPresetCount,
                                     soundfontPresetIndex = soundfontPresetIndex,

@@ -21,9 +21,12 @@
 #include "effects/send-chain.h"
 #include "effects/master-chain.h"
 
-// Per-track soundfont voice state (shares soundfonts[sfSlot].handle via MIDI channels)
+// Per-track soundfont voice state (shares soundfonts[sfSlot].handle via MIDI channels).
+// 9 voices: song tracks 0-7 plus the dedicated preview lane (track 8 == AudioEngine::PREVIEW_LANE
+// == Kotlin PREVIEW_TRACK_ID), so SF instrument previews never touch song tracks.
 // Declared here so audio-engine.cpp and jni-bridge.cpp can reference sfVoices[].
-extern SoundfontVoice sfVoices[8];
+static const int SF_VOICE_COUNT = 9;
+extern SoundfontVoice sfVoices[SF_VOICE_COUNT];
 
 class AudioEngine {
 public:
@@ -518,9 +521,9 @@ private:
     } eqPresets[128];
 
     // Per-track waveform buffers for OCTA visualizer.
-    // 8 song tracks + 1 dedicated preview lane (index PREVIEW_LANE): sampler/sample/note previews
-    // play on PREVIEW_TRACK_ID (outside tracks 0-7), so without their own lane they never appear
-    // on the per-track scopes. SF instrument previews use track 0 and already show on lane 0.
+    // 8 song tracks + 1 dedicated preview lane (index PREVIEW_LANE): all previews — sampler,
+    // sample, note, and SF instrument — play on PREVIEW_TRACK_ID (outside tracks 0-7), so
+    // without their own lane they never appear on the per-track scopes.
     static const int PREVIEW_LANE = 8;
     static const int TRACK_WAVEFORM_COUNT = 9;  // 8 tracks + preview lane
     float trackWaveformBuffer[TRACK_WAVEFORM_COUNT][WAVEFORM_SIZE] = {};

@@ -35,124 +35,6 @@ static void deleteAudioEngine() {
 
 extern "C" {
 
-JNIEXPORT jboolean JNICALL
-Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1create(JNIEnv *env, jobject thiz) {
-    return createAudioEngine() ? JNI_TRUE : JNI_FALSE;
-}
-
-JNIEXPORT void JNICALL
-Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1delete(JNIEnv *env, jobject thiz) {
-    deleteAudioEngine();
-}
-
-JNIEXPORT void JNICALL
-Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1loadSample(
-        JNIEnv *env, jobject thiz, jint id, jfloatArray data) {
-    if (!engine) return;
-
-    jsize len = env->GetArrayLength(data);
-    jfloat* arr = env->GetFloatArrayElements(data, nullptr);
-
-    engine->loadSample(id, arr, len);
-
-    env->ReleaseFloatArrayElements(data, arr, JNI_ABORT);
-}
-
-JNIEXPORT void JNICALL
-Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1triggerNote(
-        JNIEnv *env, jobject thiz, jint sid, jint tid, jfloat f, jfloat bf, jfloat v) {
-    if (engine) {
-        engine->triggerNote(sid, tid, f, bf, v);
-    }
-}
-
-JNIEXPORT void JNICALL
-Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1stopTrack(JNIEnv *env, jobject thiz, jint tid) {
-    if (engine) {
-        engine->stopTrack(tid);
-    }
-}
-
-JNIEXPORT void JNICALL
-Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1stopAll(JNIEnv *env, jobject thiz) {
-    if (engine) {
-        engine->stopAll();
-    }
-}
-
-JNIEXPORT jint JNICALL
-Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1getActiveVoiceCount(JNIEnv *env, jobject thiz) {
-    if (engine) {
-        return engine->getActiveVoiceCount();
-    }
-    return 0;
-}
-
-JNIEXPORT jint JNICALL
-Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1getSampleRate(JNIEnv *env, jobject thiz) {
-    if (engine) {
-        return engine->getSampleRate();
-    }
-    return 48000;
-}
-
-JNIEXPORT void JNICALL
-Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1setInstrumentParams(
-        JNIEnv *env, jobject thiz, jint instrumentId, jint start, jint end,
-        jboolean reverse, jint loopMode, jint loopStart, jint loopEnd,
-        jint drive, jint crush, jint downsample,
-        jint filterType, jint filterCut, jint filterRes) {
-    if (engine) {
-        engine->setInstrumentParams(instrumentId, start, end, reverse, loopMode, loopStart, loopEnd,
-                                    drive, crush, downsample, filterType, filterCut, filterRes);
-    }
-}
-
-JNIEXPORT jlong JNICALL
-Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1getCurrentFrame(JNIEnv *env, jobject thiz) {
-    if (engine) {
-        return (jlong)engine->getCurrentFrame();
-    }
-    return 0;
-}
-
-JNIEXPORT void JNICALL
-Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1scheduleNote(
-        JNIEnv *env, jobject thiz, jlong targetFrame, jint sampleId, jint trackId,
-        jfloat frequency, jfloat baseFrequency, jfloat volume) {
-    if (engine) {
-        engine->scheduleNote(targetFrame, sampleId, trackId, frequency, baseFrequency, volume);
-    }
-}
-
-JNIEXPORT void JNICALL
-Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1clearScheduledNotes(JNIEnv *env, jobject thiz) {
-    if (engine) {
-        engine->clearScheduledNotes();
-    }
-}
-
-JNIEXPORT void JNICALL
-Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1resumeStream(JNIEnv *env, jobject thiz) {
-    if (oboeShell) {
-        oboeShell->resumeStream();
-    }
-}
-
-JNIEXPORT void JNICALL
-Java_com_conanizer_pockettracker_TrackerAudioEngine_native_1getWaveform(JNIEnv *env, jobject thiz, jfloatArray outArray) {
-    if (engine && outArray != nullptr) {
-        jsize length = env->GetArrayLength(outArray);
-        float* buffer = new float[length];
-
-        engine->getWaveform(buffer, length);
-
-        env->SetFloatArrayRegion(outArray, 0, length, buffer);
-
-        delete[] buffer;
-    }
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // JNI METHODS FOR OboeAudioBackend
 // ═══════════════════════════════════════════════════════════════════════════
@@ -864,8 +746,8 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadS
         soundfonts[slot].handle = nullptr;
         soundfonts[slot].instrumentId = -1;
         soundfonts[slot].filePath.clear();
-        // Detach any per-track voices that were using this slot
-        for (int t = 0; t < 8; t++) {
+        // Detach any per-track voices (incl. the preview lane) that were using this slot
+        for (int t = 0; t < SF_VOICE_COUNT; t++) {
             if (sfVoices[t].sfSlot == slot) sfVoices[t].detach();
         }
         LOGD("🎹 Evicted soundfont slot %d to make room for instrumentId %d", slot, (int)instrumentId);
@@ -949,8 +831,8 @@ JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1unloadSoundfont(
         JNIEnv *env, jobject thiz, jint sfSlot) {
     if (sfSlot < 0 || sfSlot >= MAX_SOUNDFONTS) return;
-    // Detach per-track voices using this slot BEFORE closing the master handle
-    for (int t = 0; t < 8; t++) {
+    // Detach per-track voices (incl. the preview lane) using this slot BEFORE closing the master handle
+    for (int t = 0; t < SF_VOICE_COUNT; t++) {
         if (sfVoices[t].sfSlot == (int)sfSlot) sfVoices[t].detach();
     }
     std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
@@ -971,7 +853,7 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1clear
     // samples (≈2× its file size) stay resident across NEW/load. Same per-slot
     // body as native_1unloadSoundfont (detach voices, then close under the slot mutex).
     for (int s = 0; s < MAX_SOUNDFONTS; s++) {
-        for (int t = 0; t < 8; t++) {
+        for (int t = 0; t < SF_VOICE_COUNT; t++) {
             if (sfVoices[t].sfSlot == s) sfVoices[t].detach();
         }
         std::lock_guard<std::mutex> sfLock(soundfonts[s].mutex);

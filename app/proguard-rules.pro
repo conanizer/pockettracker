@@ -25,9 +25,14 @@
     native <methods>;
 }
 
-# Keep crash reporting classes
--keep class com.conanizer.pockettracker.crash.** { *; }
--keep class org.acra.** { *; }
+# Strip debug/verbose/info logging from release builds. Every logger.d / Log.d call site
+# (including its string building) is removed by R8, so the scheduling path and UI layer
+# don't build emoji strings or cross into liblog on the Miyoo. Log.w / Log.e are kept.
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
+    public static int i(...);
+}
 
 # kotlinx.serialization — keep generated serializers for @Serializable model classes
 # (project save/load, instrument presets, themes). kotlinx-serialization-json 1.6.0 ships its own
@@ -57,9 +62,9 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 
-# Google AutoService (a build-time annotation processor pulled in transitively by ACRA) references
-# javax.annotation.processing.* — classes that exist only at compile time, never in the Android
-# runtime. The code is never reached on-device, so silence R8's missing-class errors for them.
+# Google AutoService (a build-time annotation processor) references javax.annotation.processing.* —
+# classes that exist only at compile time, never in the Android runtime. The code is never reached
+# on-device, so silence R8's missing-class errors for them.
 # (These mirror app/build/outputs/mapping/release/missing_rules.txt.)
 -dontwarn javax.annotation.processing.**
 -dontwarn com.google.auto.service.**

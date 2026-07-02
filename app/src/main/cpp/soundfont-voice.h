@@ -10,7 +10,8 @@
 // SOUNDFONTVOICE — per-track state; rendering via shared soundfonts[sfSlot].handle
 // ===================================
 // Design: ONE tsf* instance per SoundfontEntry (per unique SF2 file).
-// Each of the 8 tracks maps to a MIDI channel (0–7) on that shared instance.
+// Each of the 8 tracks maps to a MIDI channel (0–7) on that shared instance; the dedicated
+// preview lane (track 8) uses channel 8, so SF previews never steal a song track's channel.
 // One shared instance avoids a per-track tsf_load_memory() call that would otherwise stall the
 // audio callback for hundreds of ms and use 8× the SF2 file size in RAM.
 //

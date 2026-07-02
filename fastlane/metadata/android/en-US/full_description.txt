@@ -1,0 +1,20 @@
+PocketTracker is a music tracker in the spirit of LSDJ, LGPT and the M8 — built for Android gaming handhelds with physical buttons, with an on-screen control layout for phones.
+
+Features:
+
+* 8-track sequencer with the classic Song → Chain → Phrase structure
+* Sampler instruments: load WAV, MP3, FLAC, OGG, Opus and M4A files
+* SoundFont (SF2) instrument support
+* Sample editor: trim, chop, slice, time-stretch (SOLA), pitch-shift, destructive FX
+* Sample from video: extract audio from screen recordings (MP4/MKV/WebM)
+* 26 step effects: arpeggio, retrigger, pitch slides, vibrato, chance/randomize, tables, grooves and more
+* Per-instrument modulation: AHD/ADSR envelopes and LFOs with 10 destinations
+* Mixer with per-track sends, true dBFS meters, reverb and delay send buses
+* Master bus with OTT-style multiband compression or DUST lo-fi chain, plus limiter
+* WAV export: full mix or per-track stems; resample selections into new instruments
+* Interface color themes, a theme editor and multiple top-bar visualizers
+* Low-latency native audio engine (Oboe); runs well on 1 GB RAM devices
+
+Note: the app asks for "All files access" (MANAGE_EXTERNAL_STORAGE) so its built-in file browser can load samples and projects from anywhere on your storage, including files copied over from a PC.
+
+Requires Android 8.0+ on a 64-bit device (arm64-v8a or x86_64).
