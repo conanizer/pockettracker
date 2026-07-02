@@ -76,6 +76,7 @@ https://github.com/conanizer/pockettracker
 
 | Document | Contents |
 |---|---|
+| [`docs/quick-start-guide.md`](docs/quick-start-guide.md) | Quick start — from install to your first beat |
 | [`docs/manual-en.md`](docs/manual-en.md) | Full user manual |
 | [`docs/input-system.md`](docs/input-system.md) | Complete controls reference |
 | [`docs/features.md`](docs/features.md) | Feature overview |
