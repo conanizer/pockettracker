@@ -13,6 +13,10 @@ android {
     compileSdk {
         version = release(36)
     }
+    // Must match `ndk:` in the fdroiddata recipe (metadata/com.conanizer.pockettracker.yml) —
+    // F-Droid's offline builder provisions exactly this version. Without the pin, AGP silently
+    // resolves its own default NDK, which changes with AGP upgrades.
+    ndkVersion = "27.0.12077973"
 
     // Release signing reads a gitignored keystore.properties from the repo root. When it's
     // absent (fresh clone, CI without secrets) the release build falls back to the debug key,
