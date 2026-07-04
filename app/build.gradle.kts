@@ -30,12 +30,12 @@ android {
         applicationId = "com.conanizer.pockettracker"
         minSdk = 26
         targetSdk = 34
-        // versionCode is hardcoded per release (900 = v0.9.0; next: 910, 1000, …). F-Droid's
+        // versionCode is hardcoded per release (910 = v0.9.1; next: 920, 1000, …). F-Droid's
         // Tags update check and the fastlane changelog filename (changelogs/<versionCode>.txt)
-        // both need a literal value, and 900 outranks any commit-count build ever sideloaded.
+        // both need a literal value, and 900+ outranks any commit-count build ever sideloaded.
         // versionName is bumped by hand per release; tag the matching release in git.
-        versionCode = 900
-        versionName = "0.9.0"
+        versionCode = 910
+        versionName = "0.9.1"
 
         // Landscape touch layout is hidden in release (no themed asset for it yet) but kept
         // in debug builds for testing. Gated in MainActivity / SettingsModule on this flag.
@@ -58,6 +58,14 @@ android {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
         }
+    }
+
+    // Strip AGP's Google "dependency metadata" blob from the APK signing block. F-Droid's
+    // scanner rejects any extra signing block ("Found extra signing block 'Dependency
+    // metadata'"), so its build fails without this. No runtime effect; also trims the APK.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 
     signingConfigs {

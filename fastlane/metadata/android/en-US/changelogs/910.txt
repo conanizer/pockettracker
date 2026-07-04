@@ -1,0 +1,9 @@
+First F-Droid release.
+
+• 8-track sequencer (Song → Chain → Phrase), 26 step effects, tables and grooves
+• Sampler (WAV/MP3/FLAC/OGG/Opus/M4A) and SoundFont (SF2) instruments
+• Sample editor with slicing, SOLA time-stretch, pitch-shift and offline FX
+• Sample-from-video audio extraction
+• Per-instrument modulation (AHD/ADSR/LFO), per-track reverb/delay sends
+• Master bus OTT/DUST + limiter, WAV mix and stems export
+• Themes, theme editor, visualizers; touch layout with device skins
