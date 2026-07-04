@@ -32,12 +32,13 @@ android {
         applicationId = "com.conanizer.pockettracker"
         minSdk = 26
         targetSdk = 34
-        // versionCode is hardcoded per release (900 = v0.9.0; next: 910, 1000, …). F-Droid's
-        // Tags update check and the fastlane changelog filename (changelogs/<versionCode>.txt)
-        // both need a literal value, and 900 outranks any commit-count build ever sideloaded.
+        // versionCode is hardcoded per release (900 = v0.9.0, 910 = v0.9.1 [F-Droid hotfix],
+        // 920 = v0.9.2; next: 930, … 1000 = 1.0.0). F-Droid's Tags update check and the fastlane
+        // changelog filename (changelogs/<versionCode>.txt) both need a literal value, and it
+        // outranks any commit-count build ever sideloaded.
         // versionName is bumped by hand per release; tag the matching release in git.
-        versionCode = 900
-        versionName = "0.9.0"
+        versionCode = 920
+        versionName = "0.9.2"
 
         // Landscape touch layout is hidden in release (no themed asset for it yet) but kept
         // in debug builds for testing. Gated in MainActivity / SettingsModule on this flag.

@@ -1,0 +1,9 @@
+Maintenance release.
+
+• Fixed the app icon so it scales correctly on the launcher
+• Fixed a white outline artifact on the Amiga theme buttons/bezel
+• Launcher name corrected to "PocketTracker"
+• CLEAN INST no longer clears grooves/tables used only from inside a table row
+• Matched track metering between sampler and SoundFont voices
+• EQ spectrum accuracy fix on 48 kHz devices
+• Large internal code cleanup and small fixes
