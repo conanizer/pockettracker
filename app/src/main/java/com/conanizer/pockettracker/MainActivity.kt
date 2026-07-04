@@ -313,7 +313,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     }
 
     val effectProcessor = remember {
-        com.conanizer.pockettracker.core.logic.EffectProcessor(audioBackend, logger)
+        com.conanizer.pockettracker.core.logic.EffectProcessor(logger)
     }
 
     val playbackController = remember {
@@ -1056,6 +1056,24 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         { row, col -> trackerController.inputController.isCellSelected(row, col) }
     }
 
+    // Cache the SoundFont preset name/count/index. The inline versions recomputed on every recomposition
+    // (every cursor move), and getSoundfontCurrentPresetIndex loops all presets over JNI — 200+ calls per
+    // recompose on a GM SF2. Key on the inputs that actually change the result (instrument slot, its SF
+    // path/slot, bank, preset) instead of the per-state-change stateVersion.
+    val sfInst = project.instruments[currentInstrument]
+    val sfPath = sfInst.soundfontPath
+    val sfSlot = if (sfPath != null && sfInst.instrumentType == InstrumentType.SOUNDFONT)
+                     instrumentController.sfSlotMap[sfPath] else null
+    val soundfontPresetName = remember(currentInstrument, sfPath, sfInst.instrumentType, sfInst.sfBank, sfInst.sfPreset, sfSlot) {
+        if (sfSlot != null) audioEngine.backend.getSoundfontPresetName(sfSlot, sfInst.sfBank, sfInst.sfPreset) else "---"
+    }
+    val soundfontPresetCount = remember(currentInstrument, sfPath, sfInst.instrumentType, sfInst.sfBank, sfInst.sfPreset, sfSlot) {
+        instrumentController.getSoundfontPresetCount(sfInst)
+    }
+    val soundfontPresetIndex = remember(currentInstrument, sfPath, sfInst.instrumentType, sfInst.sfBank, sfInst.sfPreset, sfSlot) {
+        instrumentController.getSoundfontCurrentPresetIndex(sfInst)
+    }
+
     val trackerParams = TrackerScreenParams(
         currentScreen = currentScreen,
         project = project,
@@ -1122,25 +1140,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         cursorRemember = cursorRemember,
         notePreviewEnabled = notePreviewEnabled,
         autosaveResumeAuto = autosaveResumeAuto,
-        soundfontPresetName = stateVersion.let {
-            val inst = project.instruments[currentInstrument]
-            val path = inst.soundfontPath
-            if (path != null && inst.instrumentType == InstrumentType.SOUNDFONT) {
-                val slot = instrumentController.sfSlotMap[path]
-                if (slot != null) audioEngine.backend.getSoundfontPresetName(
-                    slot,
-                    inst.sfBank,
-                    inst.sfPreset
-                )
-                else "---"
-            } else "---"
-        },
-        soundfontPresetCount = stateVersion.let {
-            instrumentController.getSoundfontPresetCount(project.instruments[currentInstrument])
-        },
-        soundfontPresetIndex = stateVersion.let {
-            instrumentController.getSoundfontCurrentPresetIndex(project.instruments[currentInstrument])
-        },
+        soundfontPresetName = soundfontPresetName,
+        soundfontPresetCount = soundfontPresetCount,
+        soundfontPresetIndex = soundfontPresetIndex,
         overlayBitmap = overlayBitmap,
         overlayStrength = overlayStrength,
         overlayFiles = overlayFiles,

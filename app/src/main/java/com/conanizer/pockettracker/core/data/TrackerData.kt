@@ -8,6 +8,14 @@ import kotlin.math.pow
 const val TICS_PER_STEP = 12
 
 /**
+ * Frames per phrase step (one 16th note) at [tempo] BPM and [sampleRate] Hz. Single source for the
+ * live scheduler, the render paths, and AudioEngine.calculateTargetFrame so the timing math can't
+ * drift between them: msPerStep = 60000 / tempo / 4, then × sampleRate / 1000.
+ */
+fun framesPerStep(tempo: Int, sampleRate: Int): Long =
+    (60000.0 / tempo / 4.0 * sampleRate / 1000.0).toLong()
+
+/**
  * Format an Int as a 2-digit uppercase hex string (e.g. 255 → "FF"). Masks to the lower 8 bits.
  *
  * Core-layer counterpart to the UI's `EditorHelpers.toHex2()`. The UI keeps its own copy because
@@ -78,9 +86,9 @@ data class Note(
 @Serializable
 data class PhraseStep(
     var note: Note = Note.EMPTY,
-    var instrument: Int = 0x00,  // 00-FF (256 instrument slots)
+    var instrument: Int = 0x00,  // 00-7F (128 instrument slots); older files may hold 00-FF, coerced at use
     var volume: Int = 0x7F,      // 00-7F MIDI velocity (7F = max); sampler uses a squared curve, SF2 → TSF
-    var fx1Type: Int = 0x00,     // Effect type (Milestone 2: NOW EDITABLE!)
+    var fx1Type: Int = 0x00,     // Effect type
     var fx1Value: Int = 0x00,    // Effect value
     var fx2Type: Int = 0x00,
     var fx2Value: Int = 0x00,
@@ -322,7 +330,7 @@ data class Groove(
     /** Get the tick duration for a groove position (wraps around active steps) */
     fun getTicksForStep(grooveStep: Int): Int {
         val len = activeLength()
-        if (len == 0) return 12  // All empty — fall back to standard TICS_PER_STEP
+        if (len == 0) return TICS_PER_STEP  // All empty — fall back to standard step timing
         return steps[grooveStep % len]
     }
 
@@ -403,7 +411,7 @@ data class SFOverrides(
 // Instrument definition
 @Serializable
 data class Instrument(
-    val id: Int,  // 00-FF (256 instrument slots)
+    val id: Int,  // 00-7F (128 instrument slots)
     var name: String = "INST${id.toHex2()}",
     var sampleId: Int = -1,  // Which sample from resources (-1 = empty/no sample)
     var volume: Int = 0xFF,  // 00-FF instrument volume (FF = max)
@@ -468,6 +476,13 @@ data class Instrument(
 ) {
     /** True if this slot is configured as a SoundFont instrument. */
     fun isSoundfont(): Boolean = instrumentType == InstrumentType.SOUNDFONT
+
+    /** Detune as a signed semitone offset: high nibble = semitones, low nibble = 1/16th of a semitone,
+     *  centred at 0x80 (→ 0.0). Single source for the sampler (baked into base frequency) and SF paths. */
+    fun detuneSemitones(): Float = (detune shr 4).toFloat() + (detune and 0x0F) / 16.0f - 8.0f
+
+    /** Detune as a frequency multiplier, 2^(detuneSemitones/12). Default detune 0x80 → 1.0 (unity). */
+    fun detuneMultiplier(): Float = 2.0.pow(detuneSemitones() / 12.0).toFloat()
 
     /** Auto-generated slot name, "INSTxx". */
     fun defaultName(): String = "INST${id.toHex2()}"

@@ -2,7 +2,6 @@ package com.conanizer.pockettracker.core.logic
 
 import com.conanizer.pockettracker.core.logging.ILogger
 import com.conanizer.pockettracker.core.data.PhraseStep
-import com.conanizer.pockettracker.core.audio.IAudioBackend
 
 data class ResolvedStepParams(
     val startPoint: Int = -1,
@@ -13,8 +12,6 @@ data class ResolvedStepParams(
     // KIL xx: extra latency (in ticks) added between the KIL row and the actual voice stop.
     // 00 = stop at the row; 0C = one full step later (TICS_PER_STEP). Resolved alongside killAtFrame.
     val killOffsetTicks: Int = 0,
-    // Axx: high nibble = +semitone1, low nibble = +semitone2
-    val arpeggioValue: Int? = null,
 
     // Cxx: high nibble = mode (0=UP,1=DOWN,2=PINGPONG,3=RANDOM), low nibble = speed in tics
     val arcValue: Int? = null,
@@ -36,13 +33,8 @@ data class ResolvedStepParams(
     // PVX: same format as PVB but 4x depth and 2x speed
     val pvxValue: Int? = null,
     val delayTicks: Int? = null,
-    // CHA: high nibble=probability (0=never, F=always), low nibble=target (0=note, 1-3=FX slot)
-    val chanceValue: Int? = null,
-
-    // RND xy: randomize previous FX column value; range x0 to yF
-    val rndValue: Int? = null,
-    // RNL xy: same as RND but targets the FX column to the left
-    val rnlValue: Int? = null,
+    // NOTE: CHA / RND / RNL carry no resolved field — they're handled directly from the raw step in
+    // PlaybackController.applyChanceAndRandomize (they gate/rewrite the step before resolution).
     val tableOverride: Int? = null,
     val tableHopTarget: Int? = null,
     // 00=disable groove, 01-FF=groove table ID
@@ -68,7 +60,6 @@ data class ResolvedStepParams(
 )
 
 class EffectProcessor(
-    private val audioBackend: IAudioBackend,
     private val logger: ILogger
 ) {
     private val TAG = "EffectProcessor"
@@ -155,7 +146,6 @@ class EffectProcessor(
         var volumeFromVxx = false
         var killAtFrame: Long? = null
         var killOffsetTicks = 0
-        var arpeggioValue: Int? = null
         var arcValue: Int? = null
         var repeatCount: Int? = null
         var repeatVolRamp: Int? = null
@@ -166,9 +156,6 @@ class EffectProcessor(
         var pvbValue: Int? = null
         var pvxValue: Int? = null
         var delayTicks: Int? = null
-        var chanceValue: Int? = null
-        var rndValue: Int? = null
-        var rnlValue: Int? = null
         var tableOverride: Int? = null
         var tableHopTarget: Int? = null
         var grooveId: Int? = null
@@ -203,7 +190,6 @@ class EffectProcessor(
                 }
 
                 FX_ARPEGGIO -> {
-                    arpeggioValue = value
                     val semi1 = (value shr 4) and 0x0F
                     val semi2 = value and 0x0F
                     if (TRACE) logger.d(TAG, "🎵 ARPEGGIO effect: +$semi1, +$semi2 semitones")
@@ -325,7 +311,6 @@ class EffectProcessor(
                 }
 
                 FX_CHA -> {
-                    chanceValue = value
                     val probability = (value shr 4) and 0x0F
                     val target = value and 0x0F
                     val targetName = when (target) {
@@ -337,14 +322,12 @@ class EffectProcessor(
                 }
 
                 FX_RND -> {
-                    rndValue = value
                     val minNibble = (value shr 4) and 0x0F
                     val maxNibble = value and 0x0F
                     if (TRACE) logger.d(TAG, "🎲 RND effect: randomize previous FX value range ${minNibble}0-${maxNibble}F")
                 }
 
                 FX_RNL -> {
-                    rnlValue = value
                     val minNibble = (value shr 4) and 0x0F
                     val maxNibble = value and 0x0F
                     if (TRACE) logger.d(TAG, "🎲 RNL effect: randomize left FX value range ${minNibble}0-${maxNibble}F")
@@ -387,7 +370,6 @@ class EffectProcessor(
             volumeFromVxx = volumeFromVxx,
             killAtFrame = killAtFrame,
             killOffsetTicks = killOffsetTicks,
-            arpeggioValue = arpeggioValue,
             arcValue = arcValue,
             repeatCount = repeatCount,
             repeatVolRamp = repeatVolRamp,
@@ -397,9 +379,6 @@ class EffectProcessor(
             pvbValue = pvbValue,
             pvxValue = pvxValue,
             delayTicks = delayTicks,
-            chanceValue = chanceValue,
-            rndValue = rndValue,
-            rnlValue = rnlValue,
             tableOverride = tableOverride,
             tableHopTarget = tableHopTarget,
             grooveId = grooveId,

@@ -8,6 +8,7 @@ import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.data.Table
 import com.conanizer.pockettracker.core.data.TICS_PER_STEP
+import com.conanizer.pockettracker.core.data.framesPerStep
 import com.conanizer.pockettracker.core.data.VolumeUtils
 import com.conanizer.pockettracker.core.logging.ILogger
 import com.conanizer.pockettracker.core.media.AudioFormats
@@ -367,10 +368,7 @@ class AudioEngine(
         val sampleId = instrument.sampleId
 
         val rootFreq = instrument.root.toFrequency()
-        val detuneSemitones = (instrument.detune shr 4).toFloat()
-        val detuneFraction = (instrument.detune and 0x0F) / 16.0f
-        val totalDetuneSemitones = detuneSemitones + detuneFraction - 8.0f
-        val detuneMultiplier = 2.0.pow(totalDetuneSemitones / 12.0).toFloat()
+        val detuneMultiplier = instrument.detuneMultiplier()
         val targetFreq = rootFreq * detuneMultiplier
 
         val sampleRateRatio = sampleRateRatios[sampleId] ?: 1.0f
@@ -396,7 +394,7 @@ class AudioEngine(
         val tempo = project?.tempo ?: 120
         backend.setTempo(tempo)  // tempo-lock the previewed table to the project tempo
         pushInstrumentModulation(instrument, tempo)
-        if (project != null) pushInstrumentEqAndSends(instrument, project)
+        if (project != null) pushInstrumentEqAndSends(instrument)
 
         backend.scheduleNoteWithTable(
             frame = targetFrame,
@@ -430,10 +428,7 @@ class AudioEngine(
         val sampleId = instrument.sampleId
 
         val rootFreq = instrument.root.toFrequency()
-        val detuneSemitones = (instrument.detune shr 4).toFloat()
-        val detuneFraction = (instrument.detune and 0x0F) / 16.0f
-        val totalDetuneSemitones = detuneSemitones + detuneFraction - 8.0f
-        val detuneMultiplier = 2.0.pow(totalDetuneSemitones / 12.0).toFloat()
+        val detuneMultiplier = instrument.detuneMultiplier()
         val targetFreq = rootFreq * detuneMultiplier
 
         val sampleRateRatio = sampleRateRatios[sampleId] ?: 1.0f
@@ -486,10 +481,7 @@ class AudioEngine(
         }
 
         val sampleId = instrument.sampleId
-        val detuneSemitones = (instrument.detune shr 4).toFloat()
-        val detuneFraction = (instrument.detune and 0x0F) / 16.0f
-        val totalDetuneSemitones = detuneSemitones + detuneFraction - 8.0f
-        val detuneMultiplier = 2.0.pow(totalDetuneSemitones / 12.0).toFloat()
+        val detuneMultiplier = instrument.detuneMultiplier()
         val targetFreq = note.toFrequency() * detuneMultiplier
 
         val sampleRateRatio = sampleRateRatios[sampleId] ?: 1.0f
@@ -507,7 +499,7 @@ class AudioEngine(
 
         val tempo = project?.tempo ?: 120
         pushInstrumentModulation(instrument, tempo)
-        if (project != null) pushInstrumentEqAndSends(instrument, project)
+        if (project != null) pushInstrumentEqAndSends(instrument)
 
         backend.scheduleNoteWithTable(
             frame = targetFrame,
@@ -533,10 +525,7 @@ class AudioEngine(
 
     fun calculateInstrumentBaseFrequency(instrument: Instrument): Float {
         val rootFreq = instrument.root.toFrequency()
-        val detuneSemitones = (instrument.detune shr 4).toFloat()
-        val detuneFraction = (instrument.detune and 0x0F) / 16.0f
-        val totalDetuneSemitones = detuneSemitones + detuneFraction - 8.0f
-        val detuneMultiplier = 2.0.pow(totalDetuneSemitones / 12.0).toFloat()
+        val detuneMultiplier = instrument.detuneMultiplier()
         val sampleRateRatio = sampleRateRatios[instrument.sampleId] ?: 1.0f
         // Detune DIVIDES the base frequency: playback rate = noteFreq / baseFreq, so a sharper detune
         // must lower baseFreq to raise the pitch. Multiplying here inverted it (sharper → lower), which
@@ -664,9 +653,9 @@ class AudioEngine(
             val velocity  = if (midiVelocity >= 0) midiVelocity.coerceIn(1, 127)
                             else (volume * 127).toInt().coerceIn(1, 127)
             val sfNoteVol = if (midiVelocity >= 0) 1.0f else volume
-            // Detune (same encoding as sampler): high nibble = semitones, low nibble = 1/16th, centred at 0x80.
-            // Applied to the SF voice as a fractional pitch-wheel offset (sampler bakes it into baseFreq instead).
-            val sfDetune = (instrument.detune shr 4).toFloat() + (instrument.detune and 0x0F) / 16.0f - 8.0f
+            // Detune (same encoding as sampler): applied to the SF voice as a fractional pitch-wheel
+            // offset (the sampler bakes the same semitone offset into baseFreq instead).
+            val sfDetune = instrument.detuneSemitones()
             // Convert tick-based pitch params to frame-based (same as sampler path)
             val tempo = project.tempo
             val framesPerTic = framesPerTicAt(tempo)
@@ -676,7 +665,7 @@ class AudioEngine(
 
             // Push mod slots, EQ, and send levels to C++ so SF voice picks them up at trigger.
             pushInstrumentModulation(instrument, tempo)
-            pushInstrumentEqAndSends(instrument, project)
+            pushInstrumentEqAndSends(instrument)
             // Apply envelope overrides every trigger so TSF preset has correct ATK/DEC/SUS/REL
             // before the note plays. Without this, KIL → noteOff uses the SF2 file's native
             // (often instant) release instead of the user-configured REL value.
@@ -762,10 +751,7 @@ class AudioEngine(
                 // cancel ROOT out and ROOT would have no effect on pitch. Fix: strip ROOT from baseFreq
                 // so it only carries sampleRateRatio / detune, letting ROOT appear only in the numerator.
                 val sampleRateRatio = sampleRateRatios[sampleId] ?: 1.0f
-                val detuneSemitones = (instrument.detune shr 4).toFloat()
-                val detuneFraction = (instrument.detune and 0x0F) / 16.0f
-                val totalDetuneSemitones = detuneSemitones + detuneFraction - 8.0f
-                val detuneMultiplier = 2.0.pow(totalDetuneSemitones / 12.0).toFloat()
+                val detuneMultiplier = instrument.detuneMultiplier()
                 // Detune DIVIDES (same as calculateInstrumentBaseFrequency): sharper detune → higher pitch.
                 effectiveBaseFreq = C4_HZ * sampleRateRatio / detuneMultiplier
                 // CUT end boundary only when slicingMode=CUT; OFF+SLI or TRU play to sample end
@@ -791,7 +777,7 @@ class AudioEngine(
         // Must be done before scheduleNoteWithTable so the engine has correct params at trigger time.
         val tempo = project.tempo
         pushInstrumentModulation(instrument, tempo)
-        pushInstrumentEqAndSends(instrument, project)
+        pushInstrumentEqAndSends(instrument)
 
         // Convert tick-based pitch effect params to frame-based so C++ needs no tempo knowledge.
         val framesPerTic = framesPerTicAt(tempo)
@@ -961,9 +947,7 @@ class AudioEngine(
     }
 
     fun calculateTargetFrame(startFrame: Long, stepNumber: Int, tempo: Int): Long {
-        val sampleRate = getDeviceSampleRate()
-        val msPerStep = (60000.0 / tempo / 4.0)
-        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+        val framesPerStep = framesPerStep(tempo, getDeviceSampleRate())
         return startFrame + (stepNumber * framesPerStep)
     }
 
@@ -1245,7 +1229,7 @@ class AudioEngine(
         }
     }
 
-    fun pushInstrumentEqAndSends(instrument: Instrument, project: com.conanizer.pockettracker.core.data.Project) {
+    fun pushInstrumentEqAndSends(instrument: Instrument) {
         val sampleId = instrument.sampleId
         backend.setInstrumentEqSlot(sampleId, instrument.eqSlot)
         backend.setInstrumentSendLevels(sampleId, instrument.reverbSend, instrument.delaySend)

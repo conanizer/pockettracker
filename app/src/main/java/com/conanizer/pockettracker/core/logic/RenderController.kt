@@ -407,7 +407,7 @@ class RenderController(
                 // sampler slots, which belong on the sampler path below.)
                 audioEngine.applySoundfontFilterOverrides(instrument)
                 audioEngine.pushInstrumentModulation(instrument, project.tempo)
-                audioEngine.pushInstrumentEqAndSends(instrument, project)
+                audioEngine.pushInstrumentEqAndSends(instrument)
                 continue
             }
 
@@ -431,7 +431,7 @@ class RenderController(
             )
 
             audioEngine.pushInstrumentModulation(instrument, project.tempo)
-            audioEngine.pushInstrumentEqAndSends(instrument, project)
+            audioEngine.pushInstrumentEqAndSends(instrument)
         }
     }
 

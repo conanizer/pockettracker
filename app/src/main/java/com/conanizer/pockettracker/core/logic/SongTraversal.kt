@@ -45,13 +45,14 @@ inline fun Project.forEachStepInSongRange(
 }
 
 /**
- * Instrument IDs (0..255) used by any non-empty step in song rows [startRow]..[endRow]. Muted tracks
- * are skipped, matching the render paths (which don't render muted tracks).
+ * Instrument IDs (0..127) used by any non-empty step in song rows [startRow]..[endRow]. Muted tracks
+ * are skipped, matching the render paths (which don't render muted tracks). Out-of-pool instrument
+ * bytes from older files are ignored (no slot to render).
  */
 fun Project.collectUsedInstruments(startRow: Int, endRow: Int): Set<Int> {
     val used = mutableSetOf<Int>()
     forEachStepInSongRange(startRow, endRow) { step ->
-        if (!step.isEmpty() && step.instrument in 0..255) used.add(step.instrument)
+        if (!step.isEmpty() && step.instrument in instruments.indices) used.add(step.instrument)
     }
     return used
 }

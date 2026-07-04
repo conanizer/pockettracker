@@ -5,7 +5,9 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    id("org.jetbrains.kotlin.plugin.serialization") version "1.9.0"
+    // Pinned to the Kotlin version via the catalog (was a hard-coded "1.9.0" that only resolved because
+    // KGP aligns the compiler plugin) so the serialization plugin can't drift from the Kotlin compiler.
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -60,6 +62,14 @@ android {
         }
     }
 
+    // Strip AGP's Google "dependency metadata" blob from the APK signing block. F-Droid's
+    // scanner rejects any extra signing block ("Found extra signing block 'Dependency
+    // metadata'"), so its build fails without this. No runtime effect; also trims the APK.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
+
     signingConfigs {
         // Only declared when keystore.properties exists; otherwise the release build
         // below stays on the debug key.
@@ -112,8 +122,7 @@ android {
 }
 
 dependencies {
-    //noinspection UseTomlInstead
-    implementation("com.google.oboe:oboe:1.10.0")
+    implementation(libs.oboe)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)
@@ -132,5 +141,5 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
+    implementation(libs.kotlinx.serialization.json)
 }

@@ -551,6 +551,6 @@ private:
     // Lower = faster scrolling (more zoomed in), Higher = slower scrolling (more time visible)
     // Adjust this value to control oscilloscope speed:
     //   1 = 14ms visible (super fast), 10 = 140ms, 20 = 280ms, 50 = 700ms, etc.
-    static const int WAVEFORM_DOWNSAMPLE = 1;  // Capture every 10th sample
+    static const int WAVEFORM_DOWNSAMPLE = 1;  // 1 = capture every sample (no downsampling)
     int waveformDownsampleCounter = 0;
 };

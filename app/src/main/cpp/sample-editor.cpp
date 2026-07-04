@@ -251,10 +251,9 @@ void AudioEngine::backupSample(int id) {
 
 void AudioEngine::undoSample(int id) {
     if (id < 0 || id >= 256 || !sampleBackups[id]) return;
-    for (int v = 0; v < MAX_VOICES; v++) {
-        if (voices[v].instrId == id && voices[v].isActive) voices[v].stop();
-    }
-    std::lock_guard<std::mutex> lock(sampleEditMutex);
+    // Same "stop voices reading this buffer + lock" preamble as the other edits (beginSampleEdit keys
+    // off sampleData == samples[id], the buffer actually swapped below — more precise than instrId).
+    auto editLock = beginSampleEdit(id);
     int len = sampleBackupLengths[id];
     float* newL = new float[len];
     for (int i = 0; i < len; i++) newL[i] = cacheI16ToF32(sampleBackups[id][i]);
@@ -425,15 +424,9 @@ void AudioEngine::downsampleSample(int id, int factor) {
 void AudioEngine::applyRateMode(int id, int factor) {
     if (id < 0 || id >= 256 || !samples[id]) return;
 
-    // Stop any voice currently reading this sample so the callback won't be mid-read
-    // when we swap the buffer pointer below.
-    for (int v = 0; v < MAX_VOICES; v++) {
-        if (voices[v].isActive && voices[v].sampleData == samples[id]) voices[v].stop();
-    }
-
-    // Hold the edit lock so the callback's try_lock fails during the swap, giving the
-    // callback one silent period rather than a use-after-free crash.
-    std::lock_guard<std::mutex> lock(sampleEditMutex);
+    // Stop voices reading this buffer, then hold the edit lock so the callback's try_lock fails
+    // during the swap — one silent period rather than a use-after-free crash.
+    auto editLock = beginSampleEdit(id);
 
     if (factor <= 1) {
         // Restore HIGH: copy original (both channels) back, then discard cache.
@@ -479,11 +472,7 @@ void AudioEngine::applyRateMode(int id, int factor) {
 void AudioEngine::pitchShiftSample(int id, float semitones) {
     if (id < 0 || id >= 256 || !samples[id] || semitones == 0.0f) return;
 
-    for (int v = 0; v < MAX_VOICES; v++) {
-        if (voices[v].isActive && voices[v].sampleData == samples[id]) voices[v].stop();
-    }
-
-    std::lock_guard<std::mutex> lock(sampleEditMutex);
+    auto editLock = beginSampleEdit(id);  // stop voices reading this buffer, then hold the edit lock
 
     // Pitch shift makes this buffer the new "original"; discard any RATE cache (both channels).
     delete[] originalSamples[id];       originalSamples[id] = nullptr;
@@ -517,11 +506,7 @@ void AudioEngine::timeStretchSample(int id, float ratio) {
     if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] <= 0) return;
     if (ratio > 0.999f && ratio < 1.001f) return;
 
-    for (int v = 0; v < MAX_VOICES; v++) {
-        if (voices[v].isActive && voices[v].sampleData == samples[id]) voices[v].stop();
-    }
-
-    std::lock_guard<std::mutex> lock(sampleEditMutex);
+    auto editLock = beginSampleEdit(id);  // stop voices reading this buffer, then hold the edit lock
 
     // Time-stretch makes this buffer the new "original"; discard any RATE cache (both channels).
     delete[] originalSamples[id];       originalSamples[id] = nullptr;
@@ -550,11 +535,7 @@ void AudioEngine::timeStretchSample(int id, float ratio) {
 void AudioEngine::applySampleFx(int id, int fxType, int fxValue, float sampleRate, int limiterPreGain) {
     if (id < 0 || id >= 256 || !samples[id] || sampleLengths[id] <= 0) return;
 
-    for (int v = 0; v < MAX_VOICES; v++) {
-        if (voices[v].isActive && voices[v].sampleData == samples[id]) voices[v].stop();
-    }
-
-    std::lock_guard<std::mutex> lock(sampleEditMutex);
+    auto editLock = beginSampleEdit(id);  // stop voices reading this buffer, then hold the edit lock
 
     int len = sampleLengths[id];
 

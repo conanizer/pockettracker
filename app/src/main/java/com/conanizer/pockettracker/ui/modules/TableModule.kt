@@ -15,6 +15,7 @@ import com.conanizer.pockettracker.core.logic.InputAction
 import com.conanizer.pockettracker.ui.drawBitmapText
 import com.conanizer.pockettracker.ui.getEffectTypeName
 import com.conanizer.pockettracker.ui.rowBgColor
+import com.conanizer.pockettracker.ui.toHex1
 import com.conanizer.pockettracker.ui.toHex2
 
 /**
@@ -160,7 +161,7 @@ class TableModule : TrackerModule {
 
         // COLUMN 0: STEP NUMBER (hex 0-F)
         drawBitmapText(
-            text = index.toString(16).uppercase(),
+            text = index.toHex1(),
             x = stepX,
             y = textY,
             scale = scale,

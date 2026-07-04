@@ -50,18 +50,6 @@ val MAIN_ROW_SCREENS = listOf(
     ScreenType.TABLE
 )
 
-// Get column index for a main screen
-fun getColumnIndex(screen: ScreenType): Int {
-    return when (screen) {
-        ScreenType.SONG -> 0
-        ScreenType.CHAIN -> 1
-        ScreenType.PHRASE -> 2
-        ScreenType.INSTRUMENT -> 3
-        ScreenType.TABLE -> 4
-        else -> -1  // Context screen
-    }
-}
-
 // Get navigation grid based on current screen
 fun getNavigationGrid(currentScreen: ScreenType): NavigationGrid {
     // Initialize 5×5 grid with nulls
@@ -102,9 +90,7 @@ fun getNavigationGrid(currentScreen: ScreenType): NavigationGrid {
         ScreenType.INSTRUMENT, ScreenType.MODS, ScreenType.INST_POOL -> {
             grid[1][3] = ScreenType.MODS
         }
-        else -> {
-            grid[1][currentCol] = ScreenType.PROJECT
-        }
+        else -> { /* PROJECT (set above) is the only row-2 screen for other columns */ }
     }
 
     // Row 4: Mixer shows in current column (and maybe adjacent)

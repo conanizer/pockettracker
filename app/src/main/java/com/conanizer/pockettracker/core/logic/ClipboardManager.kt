@@ -391,10 +391,11 @@ class ClipboardManager(
     ): PasteResult {
         val phrase = project.phrases[phraseId]
         var itemsPasted = 0
+        val minSourceCol = data.items.minOfOrNull { it.column } ?: return PasteResult.Success(0)
 
         for (item in data.items) {
             val targetRow = cursorRow + item.row
-            val targetCol = cursorColumn + (item.column - data.items.minOf { it.column })
+            val targetCol = cursorColumn + (item.column - minSourceCol)
 
             // Skip if out of bounds
             if (targetRow < 0 || targetRow >= 16) continue
@@ -431,10 +432,11 @@ class ClipboardManager(
     ): PasteResult {
         val chain = project.chains[chainId]
         var itemsPasted = 0
+        val minSourceCol = data.items.minOfOrNull { it.column } ?: return PasteResult.Success(0)
 
         for (item in data.items) {
             val targetRow = cursorRow + item.row
-            val targetCol = cursorColumn + (item.column - data.items.minOf { it.column })
+            val targetCol = cursorColumn + (item.column - minSourceCol)
 
             // Skip if out of bounds
             if (targetRow < 0 || targetRow >= 16) continue
@@ -500,10 +502,11 @@ class ClipboardManager(
     ): PasteResult {
         val table = project.tables[tableId.coerceIn(0, project.tables.size - 1)]
         var itemsPasted = 0
+        val minSourceCol = data.items.minOfOrNull { it.column } ?: return PasteResult.Success(0)
 
         for (item in data.items) {
             val targetRow = cursorRow + item.row
-            val targetCol = cursorColumn + (item.column - data.items.minOf { it.column })
+            val targetCol = cursorColumn + (item.column - minSourceCol)
 
             // Skip if out of bounds
             if (targetRow < 0 || targetRow >= 16) continue

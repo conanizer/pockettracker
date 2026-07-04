@@ -5,6 +5,7 @@ import com.conanizer.pockettracker.core.data.PhraseStep
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.data.ScreenType
 import com.conanizer.pockettracker.core.data.TICS_PER_STEP
+import com.conanizer.pockettracker.core.data.framesPerStep
 import com.conanizer.pockettracker.core.data.VolumeUtils
 import com.conanizer.pockettracker.core.audio.AudioEngine
 import com.conanizer.pockettracker.core.data.Chain
@@ -136,12 +137,6 @@ class PlaybackController(
             stateObserver.onStateChanged()
         }
 
-    var playbackCursor = 0
-        private set(value) {
-            field = value
-            stateObserver.onStateChanged()
-        }
-
     private var currentProject: Project? = null
     private var nextFrameToSchedule: Long = 0
     private var nextChainRowToSchedule: Int = 0
@@ -210,8 +205,7 @@ class PlaybackController(
         val elapsedFrames = currentFrame - playbackStartFrame
         val sampleRate = audioEngine.getDeviceSampleRate()
         val tempo = currentProject?.tempo ?: 120
-        val msPerStep = (60000.0 / tempo / 4.0)
-        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+        val framesPerStep = framesPerStep(tempo, sampleRate)
         val framesPerPhrase = framesPerStep * 16
 
         return when (playbackMode) {
@@ -235,6 +229,9 @@ class PlaybackController(
                 PlaybackPosition(phraseStep, chainRow, phraseStep, 0)
             }
             PlaybackMode.SONG -> {
+                // Prune entries definitely in the past (> 1 phrase ago), matching the CHAIN path, so
+                // this scan stays bounded instead of walking up to 256×16 stale entries in a long song.
+                songPositionStartFrames.entries.removeAll { (_, startFrame) -> currentFrame > startFrame + framesPerPhrase }
                 var songRow = 0
                 var chainRow = 0
                 var phraseStep = 0
@@ -321,7 +318,6 @@ class PlaybackController(
     fun stop() {
         isPlaying = false
         playbackMode = PlaybackMode.STOPPED
-        playbackCursor = 0
         // Restore the master EQ to the mixer-configured slot, undoing any transient EQM override
         // (the EQM queue entries are dropped by clearScheduledNotes below, so the bus would otherwise
         // stay stuck on the last EQM preset). Guarded on currentProject: the offline-render path can
@@ -358,8 +354,7 @@ class PlaybackController(
         val project = currentProject ?: return
         val sampleRate = audioEngine.getDeviceSampleRate()
         val tempo = project.tempo
-        val msPerStep = (60000.0 / tempo / 4.0)
-        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+        val framesPerStep = framesPerStep(tempo, sampleRate)
         val framesPerPhrase = framesPerStep * 16
         val currentFrame = audioEngine.getCurrentFrame()
 
@@ -506,7 +501,7 @@ class PlaybackController(
         }
     }
 
-    fun playPhrase(project: Project, phraseId: Int, loop: Boolean = true) {
+    fun playPhrase(project: Project, phraseId: Int) {
         stop()
 
         currentProject = project
@@ -524,8 +519,7 @@ class PlaybackController(
 
         val tempo = project.tempo
         val sampleRate = audioEngine.getDeviceSampleRate()
-        val msPerStep = (60000.0 / tempo / 4.0)
-        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+        val framesPerStep = framesPerStep(tempo, sampleRate)
 
         logger.d(TAG, "▶️ Playing phrase $phraseId (tempo: $tempo BPM)")
 
@@ -648,7 +642,7 @@ class PlaybackController(
         return SchedulePhraseResult(rowsScheduled, hopTriggered = false, trackStopped = false, framesScheduled = frameOffset)
     }
 
-    fun playChain(project: Project, chainId: Int, loop: Boolean = true) {
+    fun playChain(project: Project, chainId: Int) {
         stop()
 
         currentProject = project
@@ -666,8 +660,7 @@ class PlaybackController(
 
         val tempo = project.tempo
         val sampleRate = audioEngine.getDeviceSampleRate()
-        val msPerStep = (60000.0 / tempo / 4.0)
-        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+        val framesPerStep = framesPerStep(tempo, sampleRate)
 
         logger.d(TAG, "▶️ Playing chain $chainId (tempo: $tempo BPM)")
 
@@ -698,7 +691,7 @@ class PlaybackController(
         return if (attempts >= 16) null else row
     }
 
-    fun playSong(project: Project, startRow: Int = 0, loop: Boolean = true) {
+    fun playSong(project: Project, startRow: Int = 0) {
         stop()
 
         currentProject = project
@@ -708,8 +701,7 @@ class PlaybackController(
 
         val tempo = project.tempo
         val sampleRate = audioEngine.getDeviceSampleRate()
-        val msPerStep = (60000.0 / tempo / 4.0)
-        val framesPerStep = (msPerStep * sampleRate / 1000.0).toLong()
+        val framesPerStep = framesPerStep(tempo, sampleRate)
 
         logger.d(TAG, "▶️ Playing song from row $startRow (tempo: $tempo BPM)")
 
@@ -743,7 +735,7 @@ class PlaybackController(
         for (i in trackStates.indices) trackStates[i] = TrackState()
 
         val sampleRate = audioEngine.getDeviceSampleRate()
-        val framesPerStep = (60000.0 / project.tempo / 4.0 * sampleRate / 1000.0).toLong()
+        val framesPerStep = framesPerStep(project.tempo, sampleRate)
 
         var currentFrame = 0L
 

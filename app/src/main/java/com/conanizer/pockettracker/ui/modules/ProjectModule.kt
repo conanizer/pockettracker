@@ -15,6 +15,11 @@ import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.logic.InputAction
 import com.conanizer.pockettracker.ui.darken
 import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.toHex2
+import com.conanizer.pockettracker.ui.FONT_SCALE
+import com.conanizer.pockettracker.ui.CHAR_SPACING
+import com.conanizer.pockettracker.ui.ROW_HEIGHT
+import com.conanizer.pockettracker.ui.TEXT_PADDING
 
 /**
  * PROJECT SCREEN MODULE - FIXED STYLING
@@ -34,13 +39,8 @@ class ProjectModule : TrackerModule {
     override val width = 510
     override val height = 392
 
-    // ===================================
-    // FONT & LAYOUT CONSTANTS
-    // ===================================
-    private val FONT_SCALE = 3      // 5×5 bitmap scaled 3× = 15×15 pixels
-    private val CHAR_SPACING = 2    // 2px between characters
-    private val ROW_HEIGHT = 21     // Each row is 21px tall
-    private val TEXT_PADDING = 3    // 3px padding above text
+    // Font & layout constants are shared from EditorHelpers (FONT_SCALE/CHAR_SPACING/ROW_HEIGHT/
+    // TEXT_PADDING) so they can't drift from the other editor screens.
 
     /**
      * Main draw function
@@ -98,10 +98,7 @@ class ProjectModule : TrackerModule {
         rowY += ROW_HEIGHT
         currentRow++
 
-        val transposeHex = projectState.project.transpose
-            .toString(16)
-            .padStart(2, '0')
-            .uppercase()
+        val transposeHex = projectState.project.transpose.toHex2()
 
         drawParameterRow(
             x = x,

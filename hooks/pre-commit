@@ -1,0 +1,34 @@
+#!/bin/bash
+# Pre-commit hook to ensure code compiles before committing.
+# Tracked in the repo so contributors can install it with:
+#     git config core.hooksPath hooks
+# Git never copies .git/hooks/ on clone, so the hook lives here (tracked) instead.
+
+echo "🔍 Running pre-commit checks..."
+
+# Set JAVA_HOME if not set
+if [ -z "$JAVA_HOME" ]; then
+    export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
+fi
+
+# Navigate to project root
+cd "$(git rev-parse --show-toplevel)"
+
+# Check if Kotlin files were modified
+if git diff --cached --name-only | grep -q "\.kt$"; then
+    echo "📦 Kotlin files changed, checking compilation..."
+
+    # Try to compile
+    ./gradlew compileDebugKotlin --quiet
+
+    if [ $? -ne 0 ]; then
+        echo "❌ Compilation failed! Please fix errors before committing."
+        echo "   Run './gradlew compileDebugKotlin' to see details."
+        exit 1
+    fi
+
+    echo "✅ Compilation successful!"
+fi
+
+echo "✅ Pre-commit checks passed!"
+exit 0

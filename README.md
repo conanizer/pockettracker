@@ -84,6 +84,18 @@ https://github.com/conanizer/pockettracker
 
 ---
 
+## Building from source
+
+A standard Android + NDK project — the native audio engine builds via CMake as part of the normal Gradle build:
+
+1. Clone the repo and open it in a recent **Android Studio**.
+2. Let Gradle sync; it provisions the SDK and the pinned **NDK `27.0.12077973`**.
+3. Run the **app** configuration on a device/emulator, or build an APK with `./gradlew assembleDebug`.
+
+Debug builds need no signing setup — release builds fall back to the debug key when `keystore.properties` is absent.
+
+---
+
 ## Contributing
 
 - Bug reports → GitHub Issues

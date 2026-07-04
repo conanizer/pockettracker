@@ -113,21 +113,6 @@ public:
              (long long)note.targetFrame, note.sampleId, note.trackId, note.frequency);
     }
 
-    // Check if any note should trigger at or before this frame
-    bool hasNoteAt(int64_t currentFrame) {
-        std::lock_guard<std::mutex> lock(mutex);
-        if (queue.empty()) return false;
-        return queue.top().targetFrame <= currentFrame;
-    }
-
-    // Pop the next note (call only if hasNoteAt returns true)
-    ScheduledNote pop() {
-        std::lock_guard<std::mutex> lock(mutex);
-        ScheduledNote note = queue.top();
-        queue.pop();
-        return note;
-    }
-
     // Drain every note with targetFrame <= maxFrame into `out` (ascending frame order, since the
     // heap pops earliest-first) under a SINGLE lock. Lets the audio callback dispatch a whole
     // block's worth of notes without taking this mutex once per frame. `out` is appended to.
@@ -158,12 +143,6 @@ public:
         }
         for (auto& n : keep) queue.push(n);
     }
-
-    // Get queue size (for debugging)
-    size_t size() {
-        std::lock_guard<std::mutex> lock(mutex);
-        return queue.size();
-    }
 };
 
 // Thread-safe kill queue (for Kill effect K00)
@@ -179,21 +158,6 @@ public:
         queue.push(kill);
         // LOGT, not LOGD — see NoteQueue::schedule.
         LOGT("🔪 Scheduled kill: frame=%lld, track=%d", (long long)kill.targetFrame, kill.trackId);
-    }
-
-    // Check if any kill should trigger at or before this frame
-    bool hasKillAt(int64_t currentFrame) {
-        std::lock_guard<std::mutex> lock(mutex);
-        if (queue.empty()) return false;
-        return queue.top().targetFrame <= currentFrame;
-    }
-
-    // Pop the next kill (call only if hasKillAt returns true)
-    ScheduledKill pop() {
-        std::lock_guard<std::mutex> lock(mutex);
-        ScheduledKill kill = queue.top();
-        queue.pop();
-        return kill;
     }
 
     // Drain every kill with targetFrame <= maxFrame into `out` (ascending order). See NoteQueue.
@@ -223,12 +187,6 @@ public:
             if (k.targetFrame < fromFrame) keep.push_back(k);
         }
         for (auto& k : keep) queue.push(k);
-    }
-
-    // Get queue size (for debugging)
-    size_t size() {
-        std::lock_guard<std::mutex> lock(mutex);
-        return queue.size();
     }
 };
 
@@ -272,19 +230,6 @@ public:
     void schedule(const ScheduledParamUpdate& update) {
         std::lock_guard<std::mutex> lock(mutex);
         queue.push(update);
-    }
-
-    bool hasUpdateAt(int64_t currentFrame) {
-        std::lock_guard<std::mutex> lock(mutex);
-        if (queue.empty()) return false;
-        return queue.top().targetFrame <= currentFrame;
-    }
-
-    ScheduledParamUpdate pop() {
-        std::lock_guard<std::mutex> lock(mutex);
-        ScheduledParamUpdate u = queue.top();
-        queue.pop();
-        return u;
     }
 
     // Drain every update with targetFrame <= maxFrame into `out` (ascending order). See NoteQueue.

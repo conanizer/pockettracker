@@ -11,6 +11,7 @@ import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.core.data.Groove
 import com.conanizer.pockettracker.core.logic.InputAction
 import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.toHex1
 import com.conanizer.pockettracker.ui.toHex2
 
 /**
@@ -122,7 +123,7 @@ class GrooveModule : TrackerModule {
                 else      -> Color(t.textEmpty)
             }
             drawBitmapText(
-                text = index.toString(16).uppercase(),
+                text = index.toHex1(),
                 x = stepX,
                 y = rowY,
                 scale = scale,

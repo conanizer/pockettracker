@@ -182,9 +182,6 @@ class InputMapper(
     private var aPressedAlone = false
     private var bPressedAlone = false
 
-    // Track which buttons are currently held (for combinations)
-    private val heldButtons = mutableSetOf<VirtualButton>()
-
     // Track which physical keys are currently pressed (to ignore key repeat)
     // Store native key codes (Int) for proper equality checking
     private val pressedKeys = mutableSetOf<Int>()
@@ -244,7 +241,6 @@ class InputMapper(
         isSelectPressed = false
         aPressedAlone = false
         bPressedAlone = false
-        heldButtons.clear()
         pressedKeys.clear()
     }
 
@@ -406,8 +402,6 @@ class InputMapper(
     private fun handleButtonAction(button: VirtualButton, action: ButtonAction) {
         // Update button state tracking
         if (action == ButtonAction.PRESSED) {
-            heldButtons.add(button)
-
             // Update modifier states
             if (button == VirtualButton.L_SHIFT) isLPressed = true
             if (button == VirtualButton.R_SHIFT) isRPressed = true
@@ -416,8 +410,6 @@ class InputMapper(
             if (button == VirtualButton.SELECT) isSelectPressed = true
 
         } else if (action == ButtonAction.RELEASED) {
-            heldButtons.remove(button)
-
             // Update modifier states
             if (button == VirtualButton.L_SHIFT) isLPressed = false
             if (button == VirtualButton.R_SHIFT) isRPressed = false

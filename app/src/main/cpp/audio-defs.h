@@ -25,7 +25,13 @@
 #  define LOGT(...)
 #endif
 
-const int MAX_VOICES = 8;  // One voice per track (8 tracks); stereo samples use one slot with sampleDataRight
+// One voice per track (8 tracks); stereo samples use one slot with sampleDataRight.
+// NOTE: there are 9 *logical* lanes (tracks 0-7 + the preview lane, PREVIEW_TRACK_ID = 8) but only 8
+// voices. This is intentional: a preview is a transient audition, so when all 8 song tracks are
+// sounding a preview note deliberately steals/preempts a fading voice (see the Step-2/3 voice search
+// in scheduleNoteBatch) rather than the pool being widened to 9. Bump this to 9 only if simultaneous
+// preview-over-full-song becomes a real requirement.
+const int MAX_VOICES = 8;
 const int DECLICK_SAMPLES = 64;  // ~1.45ms anti-click fade at 44100Hz
 
 // ===================================

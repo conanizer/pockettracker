@@ -18,6 +18,7 @@ import com.conanizer.pockettracker.core.logic.InstrumentController
 import com.conanizer.pockettracker.ui.drawBitmapText
 import com.conanizer.pockettracker.ui.getEffectTypeName
 import com.conanizer.pockettracker.ui.rowBgColor
+import com.conanizer.pockettracker.ui.toHex1
 import com.conanizer.pockettracker.ui.toHex2
 
 /**
@@ -114,7 +115,7 @@ class PhraseEditorModule : TrackerModule {
 
         // Quarter-note rows (every 4th) drawn brighter as a beat-accent cue
         drawBitmapText(
-            text = index.toString(16).uppercase(),
+            text = index.toHex1(),
             x = stepX, y = textY, scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 0 -> Color(t.textCursor)

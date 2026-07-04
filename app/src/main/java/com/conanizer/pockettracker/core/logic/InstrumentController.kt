@@ -27,7 +27,7 @@ class InstrumentController(
     // STATE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /** Currently selected instrument (0-255) */
+    /** Currently selected instrument (0-127) */
     var currentInstrument = 0
         set(value) {
             field = value
@@ -69,7 +69,7 @@ class InstrumentController(
 
     /**
      * Navigate to previous instrument (L+LEFT on instrument screen)
-     * Wraps around: 0 → 255
+     * Wraps around: 0 → 127
      *
      * @param onInstrumentChanged Optional callback to sync TrackerController.currentInstrument
      * @return New instrument ID
@@ -84,7 +84,7 @@ class InstrumentController(
 
     /**
      * Navigate to next instrument (L+RIGHT on instrument screen)
-     * Wraps around: 255 → 0
+     * Wraps around: 127 → 0
      *
      * @param onInstrumentChanged Optional callback to sync TrackerController.currentInstrument
      * @return New instrument ID

@@ -14,6 +14,7 @@ import com.conanizer.pockettracker.core.data.MAIN_ROW_SCREENS
 import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.data.ScreenType
 import com.conanizer.pockettracker.core.data.VolumeUtils
+import com.conanizer.pockettracker.core.data.framesPerStep
 import com.conanizer.pockettracker.core.logic.ClipboardManager
 import com.conanizer.pockettracker.core.logic.EffectProcessor
 import com.conanizer.pockettracker.core.logic.FileController
@@ -649,8 +650,8 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                             trackerController.lastEditedInstrument = step.instrument
                             if (notePreviewEnabled && result.lastEditedNote != null) {
                                 val instrument = trackerController.project.instruments[step.instrument.coerceIn(0, 127)]
-                                val sr = audioEngine.getDeviceSampleRate().toLong().coerceAtLeast(44100L)
-                                val stepFrames = (60000.0 / trackerController.project.tempo / 4.0 * sr / 1000.0).toLong()
+                                val sr = audioEngine.getDeviceSampleRate().coerceAtLeast(44100)
+                                val stepFrames = framesPerStep(trackerController.project.tempo, sr)
                                 audioEngine.previewNoteWithTimeout(instrument, step.note, trackerController.project, stepFrames)
                             }
                         }
@@ -1280,6 +1281,103 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     //    One branch per screen, dispatched from handleButtonA by currentScreen. The
     //    global modal-dialog guards stay in handleButtonA; this is the per-screen orchestration only.
 
+    /** Bake the sample editor's pending pitch-shift (pitchSemitones) destructively into the sample and
+     *  rescale the selection/slice markers, then clear the pending shift. No-op when pitchSemitones==0.
+     *  Shared by the three SAMPLE_EDITOR save paths (SAVE, SAVE-AS, in-place). */
+    private fun bakePendingPitch(instId: Int) {
+        val semitones = sampleEditorState.pitchSemitones
+        if (semitones != 0) {
+            val oldLen = sampleEditorState.totalFrames
+            audioEngine.pitchShiftSample(instId, semitones)
+            val newLen = audioEngine.getSampleLength(instId)
+            fun scaleFrame(f: Long) = if (oldLen > 0) (f * newLen.toLong() / oldLen).coerceIn(0L, newLen.toLong()) else 0L
+            audioEngine.updateInstrumentPlaybackParams(trackerController.project.instruments[instId])
+            trackerController.projectVersion++
+            sampleEditorState = sampleEditorState.copy(totalFrames = newLen, waveformData = audioEngine.getSampleWaveform(instId, 620), pitchSemitones = 0, rateMode = 0, selectionStart = scaleFrame(sampleEditorState.selectionStart), selectionEnd = scaleFrame(sampleEditorState.selectionEnd), slicePosition = scaleFrame(sampleEditorState.slicePosition))
+        }
+    }
+
+    /** Channels to write when saving a sample, honouring the editor's source-channel mode (srcMode:
+     *  0=L→mono, 1=R→mono, 2=stereo, else=downmix). Mono sources ignore srcMode. Returns both channel
+     *  buffers plus the WAV channel count (2 only for a true stereo save). Runs on a background thread. */
+    private data class SampleSaveChannels(val left: FloatArray, val right: FloatArray, val outputChannels: Int)
+    private fun resolveSampleSaveChannels(instId: Int, srcMode: Int, hasStereo: Boolean): SampleSaveChannels {
+        val left: FloatArray; val right: FloatArray
+        if (!hasStereo) { val m = audioEngine.getSampleData(instId); left = m; right = m }
+        else when (srcMode) {
+            0 -> { val l = audioEngine.getSampleData(instId); left = l; right = l }
+            1 -> { val r = audioEngine.getSampleDataRight(instId); left = r; right = r }
+            2 -> { left = audioEngine.getSampleData(instId); right = audioEngine.getSampleDataRight(instId) }
+            else -> { val l = audioEngine.getSampleData(instId); val r = audioEngine.getSampleDataRight(instId); val m = FloatArray(l.size) { i -> (l[i] + r[i]) / 2f }; left = m; right = m }
+        }
+        return SampleSaveChannels(left, right, if (hasStereo && srcMode == 2) 2 else 1)
+    }
+
+    /**
+     * Load a picked source file into the current instrument slot — shared by the file browser's
+     * LOAD_SOURCE action and the generic fallback (which were near-verbatim copies). Handles SoundFont
+     * (sf2/sf3), WAV, in-place compressed decode (mp3/flac/ogg/m4a, on a background dispatcher), and
+     * video → audio-extract (opens the SAVE-AS keyboard). When [autoName] is true a still-default-named
+     * slot adopts the file's name (the LOAD_SOURCE behaviour; the fallback passes false).
+     */
+    private fun loadSourceFileIntoInstrument(file: java.io.File, autoName: Boolean) {
+        val ext = file.extension.lowercase()
+        fun applyAutoName() {
+            if (!autoName) return
+            trackerController.project.instruments[trackerController.currentInstrument].run {
+                if (hasDefaultName()) name = file.nameWithoutExtension.take(20)
+            }
+        }
+        if (ext == "sf2" || ext == "sf3") {
+            instrumentController.loadSoundfont(trackerController.project, file.absolutePath)
+            applyAutoName()
+            trackerController.projectVersion++
+            trackerController.currentScreen = previousScreen
+        } else if (ext == "wav") {
+            val result = instrumentController.loadSampleFromFile(trackerController.project, file.absolutePath)
+            if (result is LoadResult.Success) {
+                applyAutoName()
+                trackerController.projectVersion++
+                trackerController.currentScreen = previousScreen
+            } else {
+                fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
+            }
+        } else if (AudioFormats.isCompressed(ext)) {
+            // Compressed audio (mp3/flac/ogg/m4a) → decode in place (no WAV written); instrument keeps its original path.
+            val srcPath = file.absolutePath
+            fileBrowserState = fileBrowserState.copy(statusMessage = "DECODING...", statusSuccess = true)
+            coroutineScope.launch(Dispatchers.Default) {
+                val result = instrumentController.loadSampleFromCompressed(trackerController.project, srcPath, videoExtractor)
+                withContext(Dispatchers.Main) {
+                    if (result is LoadResult.Success) {
+                        applyAutoName()
+                        trackerController.projectVersion++
+                        trackerController.currentScreen = previousScreen
+                    } else {
+                        val why = (result as? LoadResult.Error)?.message ?: "LOAD FAILED"
+                        fileBrowserState = fileBrowserState.copy(statusMessage = why.uppercase().take(40), statusSuccess = false)
+                    }
+                }
+            }
+        } else if (videoExtractor.isSupportedVideo(file.absolutePath)) {
+            val suggestedName = file.nameWithoutExtension + "_audio"
+            qwertyKeyboardState = QwertyKeyboardState(
+                isOpen = true,
+                text = suggestedName,
+                maxLength = 40,
+                textCursor = suggestedName.length,
+                fieldLabel = "SAVE AS:",
+                originalText = suggestedName,
+                insertBefore = insertBefore,
+                clearOnFirstB = true,
+                context = QwertyContext.VIDEO_EXTRACT,
+                contextExtra = file.absolutePath
+            )
+        } else {
+            fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
+        }
+    }
+
     private fun handleConfirmAFileBrowser() {
         when (fileBrowserState.mode) {
             FileBrowserModule.BrowserMode.NORMAL -> {
@@ -1325,61 +1423,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                         trackerController.projectVersion++
                                         trackerController.currentScreen = previousScreen
                                     }
-                                    "LOAD_SOURCE" -> {
-                                        val ext = item.file.extension.lowercase()
-                                        // Default-named slots adopt the loaded file's name; custom names are kept.
-                                        fun autoName() = trackerController.project.instruments[trackerController.currentInstrument].run {
-                                            if (hasDefaultName()) name = item.file.nameWithoutExtension.take(20)
-                                        }
-                                        if (ext == "sf2" || ext == "sf3") {
-                                            instrumentController.loadSoundfont(trackerController.project, item.file.absolutePath)
-                                            autoName()
-                                            trackerController.projectVersion++
-                                            trackerController.currentScreen = previousScreen
-                                        } else if (ext == "wav") {
-                                            val result = instrumentController.loadSampleFromFile(trackerController.project, item.file.absolutePath)
-                                            if (result is LoadResult.Success) {
-                                                autoName()
-                                                trackerController.projectVersion++
-                                                trackerController.currentScreen = previousScreen
-                                            } else {
-                                                fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
-                                            }
-                                        } else if (AudioFormats.isCompressed(ext)) {
-                                            // Compressed audio (mp3/flac/ogg/m4a) → decode in place (no WAV written); instrument keeps its original path.
-                                            val srcPath = item.file.absolutePath
-                                            fileBrowserState = fileBrowserState.copy(statusMessage = "DECODING...", statusSuccess = true)
-                                            coroutineScope.launch(Dispatchers.Default) {
-                                                val result = instrumentController.loadSampleFromCompressed(trackerController.project, srcPath, videoExtractor)
-                                                withContext(Dispatchers.Main) {
-                                                    if (result is LoadResult.Success) {
-                                                        autoName()
-                                                        trackerController.projectVersion++
-                                                        trackerController.currentScreen = previousScreen
-                                                    } else {
-                                                        val why = (result as? LoadResult.Error)?.message ?: "LOAD FAILED"
-                                                        fileBrowserState = fileBrowserState.copy(statusMessage = why.uppercase().take(40), statusSuccess = false)
-                                                    }
-                                                }
-                                            }
-                                        } else if (videoExtractor.isSupportedVideo(item.file.absolutePath)) {
-                                            val suggestedName = item.file.nameWithoutExtension + "_audio"
-                                            qwertyKeyboardState = QwertyKeyboardState(
-                                                isOpen = true,
-                                                text = suggestedName,
-                                                maxLength = 40,
-                                                textCursor = suggestedName.length,
-                                                fieldLabel = "SAVE AS:",
-                                                originalText = suggestedName,
-                                                insertBefore = insertBefore,
-                                                clearOnFirstB = true,
-                                                context = QwertyContext.VIDEO_EXTRACT,
-                                                contextExtra = item.file.absolutePath
-                                            )
-                                        } else {
-                                            fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
-                                        }
-                                    }
+                                    "LOAD_SOURCE" -> loadSourceFileIntoInstrument(item.file, autoName = true)
                                     "LOAD_SAMPLE_EDITOR" -> {
                                         if (item.file.extension.lowercase() == "wav") {
                                             val result = instrumentController.loadSampleFromFile(trackerController.project, item.file.absolutePath)
@@ -1392,50 +1436,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                                             }
                                         }
                                     }
-                                    else -> {
-                                        val ext = item.file.extension.lowercase()
-                                        if (ext == "wav") {
-                                            val result = instrumentController.loadSampleFromFile(trackerController.project, item.file.absolutePath)
-                                            if (result is LoadResult.Success) {
-                                                trackerController.projectVersion++
-                                                trackerController.currentScreen = previousScreen
-                                            } else {
-                                                fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
-                                            }
-                                        } else if (AudioFormats.isCompressed(ext)) {
-                                            // Compressed audio (mp3/flac/ogg/m4a) → decode in place (no WAV written); instrument keeps its original path.
-                                            val srcPath = item.file.absolutePath
-                                            fileBrowserState = fileBrowserState.copy(statusMessage = "DECODING...", statusSuccess = true)
-                                            coroutineScope.launch(Dispatchers.Default) {
-                                                val result = instrumentController.loadSampleFromCompressed(trackerController.project, srcPath, videoExtractor)
-                                                withContext(Dispatchers.Main) {
-                                                    if (result is LoadResult.Success) {
-                                                        trackerController.projectVersion++
-                                                        trackerController.currentScreen = previousScreen
-                                                    } else {
-                                                        val why = (result as? LoadResult.Error)?.message ?: "LOAD FAILED"
-                                                        fileBrowserState = fileBrowserState.copy(statusMessage = why.uppercase().take(40), statusSuccess = false)
-                                                    }
-                                                }
-                                            }
-                                        } else if (videoExtractor.isSupportedVideo(item.file.absolutePath)) {
-                                            val suggestedName = item.file.nameWithoutExtension + "_audio"
-                                            qwertyKeyboardState = QwertyKeyboardState(
-                                                isOpen = true,
-                                                text = suggestedName,
-                                                maxLength = 40,
-                                                textCursor = suggestedName.length,
-                                                fieldLabel = "SAVE AS:",
-                                                originalText = suggestedName,
-                                                insertBefore = insertBefore,
-                                                clearOnFirstB = true,
-                                                context = QwertyContext.VIDEO_EXTRACT,
-                                                contextExtra = item.file.absolutePath
-                                            )
-                                        } else {
-                                            fileBrowserState = fileBrowserState.copy(statusMessage = "LOAD FAILED", statusSuccess = false)
-                                        }
-                                    }
+                                    else -> loadSourceFileIntoInstrument(item.file, autoName = false)
                                 }
                             }
                             ScreenType.SETTINGS -> {
@@ -1817,33 +1818,14 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     val samplesDir = fileController.getSamplesDirectory()
                     File(samplesDir).mkdirs()
                     val targetPath = "$samplesDir/$baseName.wav"
-                    run {
-                        val semitones = sampleEditorState.pitchSemitones
-                        if (semitones != 0) {
-                            val oldLen = sampleEditorState.totalFrames
-                            audioEngine.pitchShiftSample(instId, semitones)
-                            val newLen = audioEngine.getSampleLength(instId)
-                            fun scaleFrame(f: Long) = if (oldLen > 0) (f * newLen.toLong() / oldLen).coerceIn(0L, newLen.toLong()) else 0L
-                            audioEngine.updateInstrumentPlaybackParams(trackerController.project.instruments[instId])
-                            trackerController.projectVersion++
-                            sampleEditorState = sampleEditorState.copy(totalFrames = newLen, waveformData = audioEngine.getSampleWaveform(instId, 620), pitchSemitones = 0, rateMode = 0, selectionStart = scaleFrame(sampleEditorState.selectionStart), selectionEnd = scaleFrame(sampleEditorState.selectionEnd), slicePosition = scaleFrame(sampleEditorState.slicePosition))
-                        }
-                    }
+                    bakePendingPitch(instId)
                     if (!File(targetPath).exists()) {
                         val cuePoints = computeSliceCuePoints(sampleEditorState)
                         val srcMode   = sampleEditorState.sourceMode
                         val hasStereo = sampleEditorState.hasStereoData
                         coroutineScope.launch(Dispatchers.Default) {
                             val origRate = audioEngine.getOriginalSampleRate(instId)
-                            val leftCh: FloatArray; val rightCh: FloatArray
-                            if (!hasStereo) { val m = audioEngine.getSampleData(instId); leftCh = m; rightCh = m }
-                            else when (srcMode) {
-                                0 -> { val l = audioEngine.getSampleData(instId); leftCh = l; rightCh = l }
-                                1 -> { val r = audioEngine.getSampleDataRight(instId); leftCh = r; rightCh = r }
-                                2 -> { leftCh = audioEngine.getSampleData(instId); rightCh = audioEngine.getSampleDataRight(instId) }
-                                else -> { val l = audioEngine.getSampleData(instId); val r = audioEngine.getSampleDataRight(instId); val m = FloatArray(l.size) { i -> (l[i] + r[i]) / 2f }; leftCh = m; rightCh = m }
-                            }
-                            val outputChannels = if (hasStereo && srcMode == 2) 2 else 1
+                            val (leftCh, rightCh, outputChannels) = resolveSampleSaveChannels(instId, srcMode, hasStereo)
                             val success = WavWriter.writeWav(fileSystem = fileSystem, path = targetPath, leftChannel = leftCh, rightChannel = rightCh, sampleRate = origRate, cuePoints = cuePoints, channels = outputChannels)
                             if (success && outputChannels == 1) audioEngine.loadSampleFromFile(instId, targetPath)
                             withContext(Dispatchers.Main) {
@@ -1876,18 +1858,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     }
                 }
                 2 -> {
-                    run {
-                        val semitones = sampleEditorState.pitchSemitones
-                        if (semitones != 0) {
-                            val oldLen = sampleEditorState.totalFrames
-                            audioEngine.pitchShiftSample(instId, semitones)
-                            val newLen = audioEngine.getSampleLength(instId)
-                            fun scaleFrame(f: Long) = if (oldLen > 0) (f * newLen.toLong() / oldLen).coerceIn(0L, newLen.toLong()) else 0L
-                            audioEngine.updateInstrumentPlaybackParams(trackerController.project.instruments[instId])
-                            trackerController.projectVersion++
-                            sampleEditorState = sampleEditorState.copy(totalFrames = newLen, waveformData = audioEngine.getSampleWaveform(instId, 620), pitchSemitones = 0, rateMode = 0, selectionStart = scaleFrame(sampleEditorState.selectionStart), selectionEnd = scaleFrame(sampleEditorState.selectionEnd), slicePosition = scaleFrame(sampleEditorState.slicePosition))
-                        }
-                    }
+                    bakePendingPitch(instId)
                     val filePath = trackerController.project.instruments[instId].sampleFilePath
                     if (filePath != null) {
                         val cuePoints = computeSliceCuePoints(sampleEditorState)
@@ -1895,15 +1866,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                         val hasStereo = sampleEditorState.hasStereoData
                         coroutineScope.launch(Dispatchers.Default) {
                             val origRate = audioEngine.getOriginalSampleRate(instId)
-                            val leftCh: FloatArray; val rightCh: FloatArray
-                            if (!hasStereo) { val m = audioEngine.getSampleData(instId); leftCh = m; rightCh = m }
-                            else when (srcMode) {
-                                0 -> { val l = audioEngine.getSampleData(instId); leftCh = l; rightCh = l }
-                                1 -> { val r = audioEngine.getSampleDataRight(instId); leftCh = r; rightCh = r }
-                                2 -> { leftCh = audioEngine.getSampleData(instId); rightCh = audioEngine.getSampleDataRight(instId) }
-                                else -> { val l = audioEngine.getSampleData(instId); val r = audioEngine.getSampleDataRight(instId); val m = FloatArray(l.size) { i -> (l[i] + r[i]) / 2f }; leftCh = m; rightCh = m }
-                            }
-                            val outputChannels = if (hasStereo && srcMode == 2) 2 else 1
+                            val (leftCh, rightCh, outputChannels) = resolveSampleSaveChannels(instId, srcMode, hasStereo)
                             val success = WavWriter.writeWav(fileSystem = fileSystem, path = filePath, leftChannel = leftCh, rightChannel = rightCh, sampleRate = origRate, cuePoints = cuePoints, channels = outputChannels)
                             if (success && outputChannels == 1) audioEngine.loadSampleFromFile(instId, filePath)
                             withContext(Dispatchers.Main) {
@@ -1959,9 +1922,8 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 trackerController.projectVersion++
                 if (notePreviewEnabled && step.note != Note.EMPTY) {
                     val instrument = trackerController.project.instruments[step.instrument.coerceIn(0, 127)]
-                    val sr = audioEngine.getDeviceSampleRate().toLong().coerceAtLeast(44100L)
-                    val msPerStep = 60000.0 / trackerController.project.tempo / 4.0
-                    val phraseDurationFrames = (msPerStep * sr / 1000.0 * 16).toLong()
+                    val sr = audioEngine.getDeviceSampleRate().coerceAtLeast(44100)
+                    val phraseDurationFrames = framesPerStep(trackerController.project.tempo, sr) * 16
                     audioEngine.previewNoteWithTimeout(instrument, step.note, trackerController.project, phraseDurationFrames)
                 }
             }
@@ -2035,7 +1997,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             return
         }
         when (trackerController.currentScreen) {
-            ScreenType.SETTINGS -> trackerController.currentScreen = previousScreen
+            // NOTE: SETTINGS is handled + returned above (settingsReturnScreen); no branch needed here.
             ScreenType.SAMPLE_EDITOR -> {
                 if (eqEditorState.isOpen) return
                 if (sampleEditorState.showConfirmClose) {
@@ -2204,18 +2166,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     val name = typedText.ifEmpty { "SAMPLE" }
                     val instId = sampleEditorState.instrumentId
                     val samplesDir = qwertyKeyboardState.contextExtra
-                    run {
-                        val semitones = sampleEditorState.pitchSemitones
-                        if (semitones != 0) {
-                            val oldLen = sampleEditorState.totalFrames
-                            audioEngine.pitchShiftSample(instId, semitones)
-                            val newLen = audioEngine.getSampleLength(instId)
-                            fun scaleFrame(f: Long) = if (oldLen > 0) (f * newLen.toLong() / oldLen).coerceIn(0L, newLen.toLong()) else 0L
-                            audioEngine.updateInstrumentPlaybackParams(trackerController.project.instruments[instId])
-                            trackerController.projectVersion++
-                            sampleEditorState = sampleEditorState.copy(totalFrames = newLen, waveformData = audioEngine.getSampleWaveform(instId, 620), pitchSemitones = 0, rateMode = 0, selectionStart = scaleFrame(sampleEditorState.selectionStart), selectionEnd = scaleFrame(sampleEditorState.selectionEnd), slicePosition = scaleFrame(sampleEditorState.slicePosition))
-                        }
-                    }
+                    bakePendingPitch(instId)
                     val cuePoints = computeSliceCuePoints(sampleEditorState)
                     val srcMode   = sampleEditorState.sourceMode
                     val hasStereo = sampleEditorState.hasStereoData
@@ -2224,15 +2175,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                         var path = "$samplesDir/$name.wav"; var counter = 1
                         while (File(path).exists()) { path = "$samplesDir/${name}_${counter.toString().padStart(4,'0')}.wav"; counter++ }
                         val origRate = audioEngine.getOriginalSampleRate(instId)
-                        val leftCh: FloatArray; val rightCh: FloatArray
-                        if (!hasStereo) { val m = audioEngine.getSampleData(instId); leftCh = m; rightCh = m }
-                        else when (srcMode) {
-                            0 -> { val l = audioEngine.getSampleData(instId); leftCh = l; rightCh = l }
-                            1 -> { val r = audioEngine.getSampleDataRight(instId); leftCh = r; rightCh = r }
-                            2 -> { leftCh = audioEngine.getSampleData(instId); rightCh = audioEngine.getSampleDataRight(instId) }
-                            else -> { val l = audioEngine.getSampleData(instId); val r = audioEngine.getSampleDataRight(instId); val m = FloatArray(l.size) { i -> (l[i] + r[i]) / 2f }; leftCh = m; rightCh = m }
-                        }
-                        val outputChannels = if (hasStereo && srcMode == 2) 2 else 1
+                        val (leftCh, rightCh, outputChannels) = resolveSampleSaveChannels(instId, srcMode, hasStereo)
                         val success = WavWriter.writeWav(fileSystem = fileSystem, path = path, leftChannel = leftCh, rightChannel = rightCh, sampleRate = origRate, cuePoints = cuePoints, channels = outputChannels)
                         if (success && outputChannels == 1) audioEngine.loadSampleFromFile(instId, path)
                         withContext(Dispatchers.Main) {
@@ -2396,7 +2339,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     inst.sampleStart = savedStart; inst.sampleEnd = savedEnd
                     audioEngine.updateInstrumentPlaybackParams(inst)
                     // Restore effects bypassed for dry preview
-                    audioEngine.pushInstrumentEqAndSends(inst, trackerController.project)
+                    audioEngine.pushInstrumentEqAndSends(inst)
                     audioEngine.pushInstrumentModulation(inst, trackerController.project.tempo)
                     samplePreviewRestore = null
                 }
@@ -2441,32 +2384,14 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         } else if (fxHelperState.isOpen) {
             fxHelperState = fxHelperState.fxMoveCursorUp()
         } else if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.cursorRow in 3..8) {
-            val step = maxOf(1L, sampleEditorState.totalFrames.toLong() / (256L shl sampleEditorState.zoomLevel))
-            val maxFrame = sampleEditorState.totalFrames.toLong()
-            fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled) audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt(), dir = 1).toLong() else f
-            sampleEditorState = if (sampleEditorState.cursorCol == 0) {
-                val raw = (sampleEditorState.selectionStart + step).coerceAtMost(sampleEditorState.selectionEnd - 1L)
-                sampleEditorState.copy(selectionStart = snapFrame(raw).coerceAtMost(sampleEditorState.selectionEnd - 1L))
-            } else {
-                val raw = (sampleEditorState.selectionEnd + step).coerceAtMost(maxFrame)
-                sampleEditorState.copy(selectionEnd = snapFrame(raw).coerceAtLeast(sampleEditorState.selectionStart + 1L).coerceAtMost(maxFrame))
-            }
+            nudgeSelectionEdge(maxOf(1L, sampleEditorState.totalFrames.toLong() / (256L shl sampleEditorState.zoomLevel)))
         } else if (isOnFxTypeColumn()) {
             val idx = getCurrentFxTypeIndex()
             fxHelperState = fxHelperOpenedAt(idx)
         } else if (trackerController.currentScreen == ScreenType.INSTRUMENT &&
                    trackerController.instrumentCursorRow == 0 &&
                    trackerController.instrumentCursorColumn == 1) {
-            val inst = trackerController.project.instruments[trackerController.currentInstrument]
-            val hasSource = inst.sampleFilePath != null || inst.soundfontPath != null
-            if (hasSource) {
-                showInstrTypeDialog = true
-            } else {
-                instrumentController.currentInstrument = trackerController.currentInstrument
-                val newType = if (inst.instrumentType == InstrumentType.SOUNDFONT) InstrumentType.SAMPLER else InstrumentType.SOUNDFONT
-                instrumentController.setInstrumentType(trackerController.project, newType)
-                trackerController.projectVersion++
-            }
+            toggleInstrumentType()
         } else {
             handleSelectionOrSingleIncrement { ctx -> trackerController.inputController.handleAButton(ctx) }
         }
@@ -2483,31 +2408,14 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         } else if (fxHelperState.isOpen) {
             fxHelperState = fxHelperState.fxMoveCursorDown()
         } else if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.cursorRow in 3..8) {
-            val step = maxOf(1L, sampleEditorState.totalFrames.toLong() / (256L shl sampleEditorState.zoomLevel))
-            fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled) audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt(), dir = -1).toLong() else f
-            sampleEditorState = if (sampleEditorState.cursorCol == 0) {
-                val raw = (sampleEditorState.selectionStart - step).coerceAtLeast(0L)
-                sampleEditorState.copy(selectionStart = snapFrame(raw).coerceAtMost(sampleEditorState.selectionEnd - 1L))
-            } else {
-                val raw = (sampleEditorState.selectionEnd - step).coerceAtLeast(sampleEditorState.selectionStart + 1L)
-                sampleEditorState.copy(selectionEnd = snapFrame(raw).coerceAtLeast(sampleEditorState.selectionStart + 1L))
-            }
+            nudgeSelectionEdge(-maxOf(1L, sampleEditorState.totalFrames.toLong() / (256L shl sampleEditorState.zoomLevel)))
         } else if (isOnFxTypeColumn()) {
             val idx = getCurrentFxTypeIndex()
             fxHelperState = fxHelperOpenedAt(idx)
         } else if (trackerController.currentScreen == ScreenType.INSTRUMENT &&
                    trackerController.instrumentCursorRow == 0 &&
                    trackerController.instrumentCursorColumn == 1) {
-            val inst = trackerController.project.instruments[trackerController.currentInstrument]
-            val hasSource = inst.sampleFilePath != null || inst.soundfontPath != null
-            if (hasSource) {
-                showInstrTypeDialog = true
-            } else {
-                instrumentController.currentInstrument = trackerController.currentInstrument
-                val newType = if (inst.instrumentType == InstrumentType.SOUNDFONT) InstrumentType.SAMPLER else InstrumentType.SOUNDFONT
-                instrumentController.setInstrumentType(trackerController.project, newType)
-                trackerController.projectVersion++
-            }
+            toggleInstrumentType()
         } else {
             handleSelectionOrSingleIncrement { ctx -> trackerController.inputController.handleBButton(ctx) }
         }
@@ -2523,15 +2431,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         } else if (fxHelperState.isOpen) {
             fxHelperState = fxHelperState.fxMoveCursorLeft()
         } else if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.cursorRow in 3..8) {
-            val step = maxOf(1L, sampleEditorState.totalFrames.toLong() / (16L shl sampleEditorState.zoomLevel))
-            fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled) audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt(), dir = -1).toLong() else f
-            sampleEditorState = if (sampleEditorState.cursorCol == 0) {
-                val raw = (sampleEditorState.selectionStart - step).coerceAtLeast(0L)
-                sampleEditorState.copy(selectionStart = snapFrame(raw).coerceAtMost(sampleEditorState.selectionEnd - 1L))
-            } else {
-                val raw = (sampleEditorState.selectionEnd - step).coerceAtLeast(sampleEditorState.selectionStart + 1L)
-                sampleEditorState.copy(selectionEnd = snapFrame(raw).coerceAtLeast(sampleEditorState.selectionStart + 1L))
-            }
+            nudgeSelectionEdge(-maxOf(1L, sampleEditorState.totalFrames.toLong() / (16L shl sampleEditorState.zoomLevel)))
         } else {
             handleSelectionOrSingleIncrement { ctx -> trackerController.inputController.handleALeft(ctx) }
         }
@@ -2547,18 +2447,40 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         } else if (fxHelperState.isOpen) {
             fxHelperState = fxHelperState.fxMoveCursorRight()
         } else if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.cursorRow in 3..8) {
-            val step = maxOf(1L, sampleEditorState.totalFrames.toLong() / (16L shl sampleEditorState.zoomLevel))
-            val maxFrame = sampleEditorState.totalFrames.toLong()
-            fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled) audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt(), dir = 1).toLong() else f
-            sampleEditorState = if (sampleEditorState.cursorCol == 0) {
-                val raw = (sampleEditorState.selectionStart + step).coerceAtMost(sampleEditorState.selectionEnd - 1L)
-                sampleEditorState.copy(selectionStart = snapFrame(raw).coerceAtMost(sampleEditorState.selectionEnd - 1L))
-            } else {
-                val raw = (sampleEditorState.selectionEnd + step).coerceAtMost(maxFrame)
-                sampleEditorState.copy(selectionEnd = snapFrame(raw).coerceAtLeast(sampleEditorState.selectionStart + 1L).coerceAtMost(maxFrame))
-            }
+            nudgeSelectionEdge(maxOf(1L, sampleEditorState.totalFrames.toLong() / (16L shl sampleEditorState.zoomLevel)))
         } else {
             handleSelectionOrSingleIncrement { ctx -> trackerController.inputController.handleARight(ctx) }
+        }
+    }
+
+    /** INSTRUMENT screen NAME row: A toggles SAMPLER↔SOUNDFONT, or opens the confirm dialog first if a
+     *  sample/SF is already loaded (so the user doesn't silently drop a source). Shared by A+Up/Down. */
+    private fun toggleInstrumentType() {
+        val inst = trackerController.project.instruments[trackerController.currentInstrument]
+        val hasSource = inst.sampleFilePath != null || inst.soundfontPath != null
+        if (hasSource) {
+            showInstrTypeDialog = true
+        } else {
+            instrumentController.currentInstrument = trackerController.currentInstrument
+            val newType = if (inst.instrumentType == InstrumentType.SOUNDFONT) InstrumentType.SAMPLER else InstrumentType.SOUNDFONT
+            instrumentController.setInstrumentType(trackerController.project, newType)
+            trackerController.projectVersion++
+        }
+    }
+
+    /** Nudge the active sample-editor selection edge (START=col 0 / END=col 1) by [delta] frames,
+     *  snapping to the nearest zero-crossing in the move direction when snap is on. Shared by A+Up/Down
+     *  (fine, ±totalFrames/256) and A+Left/Right (coarse, ±totalFrames/16). */
+    private fun nudgeSelectionEdge(delta: Long) {
+        val maxFrame = sampleEditorState.totalFrames.toLong()
+        val dir = if (delta >= 0) 1 else -1
+        fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled) audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt(), dir = dir).toLong() else f
+        sampleEditorState = if (sampleEditorState.cursorCol == 0) {
+            val raw = (sampleEditorState.selectionStart + delta).coerceIn(0L, sampleEditorState.selectionEnd - 1L)
+            sampleEditorState.copy(selectionStart = snapFrame(raw).coerceAtMost(sampleEditorState.selectionEnd - 1L))
+        } else {
+            val raw = (sampleEditorState.selectionEnd + delta).coerceIn(sampleEditorState.selectionStart + 1L, maxFrame)
+            sampleEditorState.copy(selectionEnd = snapFrame(raw).coerceIn(sampleEditorState.selectionStart + 1L, maxFrame))
         }
     }
 
@@ -2691,36 +2613,46 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         } else {
             val (newScreen, newCol) = trackerController.navigateLeft(trackerController.currentScreen, trackerController.previousColumn)
             if (newScreen != trackerController.currentScreen) {
-                when (trackerController.currentScreen) {
-                    ScreenType.PHRASE -> {
-                        val context = phraseEditorModule.getCursorContext(
-                            PhraseEditorState(
-                                trackerController.project.phrases[trackerController.currentPhrase],
-                                trackerController.cursorRow,
-                                trackerController.cursorColumn,
-                                playbackRow = 0,
-                                isPlaying = trackerController.isPlaying()
-                            )
-                        )
-                        if (!context.capabilities.isEmpty) trackerController.lastEditedInstrument = trackerController.project.phrases[trackerController.currentPhrase].steps[trackerController.cursorRow].instrument
-                    }
-                    ScreenType.CHAIN -> { val ref = trackerController.project.chains[trackerController.currentChain].phraseRefs[trackerController.cursorRow]; if (ref >= 0) trackerController.lastEditedPhrase = ref }
-                    ScreenType.SONG  -> { val track = trackerController.project.tracks[trackerController.cursorColumn - 1]; if (trackerController.cursorRow < track.chainRefs.size && track.chainRefs[trackerController.cursorRow] >= 0) trackerController.lastEditedChain = track.chainRefs[trackerController.cursorRow] }
-                    else -> {}
-                }
-                when (newScreen) {
-                    ScreenType.PHRASE     -> trackerController.currentPhrase = trackerController.lastEditedPhrase
-                    ScreenType.CHAIN      -> trackerController.currentChain  = trackerController.lastEditedChain
-                    ScreenType.INSTRUMENT -> trackerController.currentInstrument = trackerController.lastEditedInstrument
-                    else -> {}
-                }
-                trackerController.saveCursorForScreen(trackerController.currentScreen)
-                trackerController.restoreCursorForScreen(newScreen, cursorRemember)
-                trackerController.inputController.exitSelectionMode()
+                syncLastEditedOnScreenSwitch(trackerController.currentScreen, newScreen)
             }
             trackerController.currentScreen = newScreen
             trackerController.previousColumn = newCol
         }
+    }
+
+    /**
+     * Shared R+LEFT / R+RIGHT screen-switch bookkeeping: capture the lastEdited ref from the [from]
+     * screen's cursor, apply the matching lastEdited value to the [to] screen's current selection,
+     * then save/restore the per-screen cursor and exit any selection. Extracted from the two verbatim
+     * copies that lived in handleRLeft/handleRRight.
+     */
+    private fun syncLastEditedOnScreenSwitch(from: ScreenType, to: ScreenType) {
+        when (from) {
+            ScreenType.PHRASE -> {
+                val context = phraseEditorModule.getCursorContext(
+                    PhraseEditorState(
+                        trackerController.project.phrases[trackerController.currentPhrase],
+                        trackerController.cursorRow,
+                        trackerController.cursorColumn,
+                        playbackRow = 0,
+                        isPlaying = trackerController.isPlaying()
+                    )
+                )
+                if (!context.capabilities.isEmpty) trackerController.lastEditedInstrument = trackerController.project.phrases[trackerController.currentPhrase].steps[trackerController.cursorRow].instrument
+            }
+            ScreenType.CHAIN -> { val ref = trackerController.project.chains[trackerController.currentChain].phraseRefs[trackerController.cursorRow]; if (ref >= 0) trackerController.lastEditedPhrase = ref }
+            ScreenType.SONG  -> { val track = trackerController.project.tracks[trackerController.cursorColumn - 1]; if (trackerController.cursorRow < track.chainRefs.size && track.chainRefs[trackerController.cursorRow] >= 0) trackerController.lastEditedChain = track.chainRefs[trackerController.cursorRow] }
+            else -> {}
+        }
+        when (to) {
+            ScreenType.PHRASE     -> trackerController.currentPhrase = trackerController.lastEditedPhrase
+            ScreenType.CHAIN      -> trackerController.currentChain  = trackerController.lastEditedChain
+            ScreenType.INSTRUMENT -> trackerController.currentInstrument = trackerController.lastEditedInstrument
+            else -> {}
+        }
+        trackerController.saveCursorForScreen(from)
+        trackerController.restoreCursorForScreen(to, cursorRemember)
+        trackerController.inputController.exitSelectionMode()
     }
 
     fun handleRRight() {
@@ -2730,32 +2662,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         if (eqEditorState.isOpen || trackerController.currentScreen == ScreenType.FILE_BROWSER || trackerController.currentScreen == ScreenType.SAMPLE_EDITOR || trackerController.currentScreen == ScreenType.SETTINGS) return
         val (newScreen, newCol) = trackerController.navigateRight(trackerController.currentScreen, trackerController.previousColumn)
         if (newScreen != trackerController.currentScreen) {
-            when (trackerController.currentScreen) {
-                ScreenType.PHRASE -> {
-                    val context = phraseEditorModule.getCursorContext(
-                        PhraseEditorState(
-                            trackerController.project.phrases[trackerController.currentPhrase],
-                            trackerController.cursorRow,
-                            trackerController.cursorColumn,
-                            playbackRow = 0,
-                            isPlaying = trackerController.isPlaying()
-                        )
-                    )
-                    if (!context.capabilities.isEmpty) trackerController.lastEditedInstrument = trackerController.project.phrases[trackerController.currentPhrase].steps[trackerController.cursorRow].instrument
-                }
-                ScreenType.CHAIN -> { val ref = trackerController.project.chains[trackerController.currentChain].phraseRefs[trackerController.cursorRow]; if (ref >= 0) trackerController.lastEditedPhrase = ref }
-                ScreenType.SONG  -> { val track = trackerController.project.tracks[trackerController.cursorColumn - 1]; if (trackerController.cursorRow < track.chainRefs.size && track.chainRefs[trackerController.cursorRow] >= 0) trackerController.lastEditedChain = track.chainRefs[trackerController.cursorRow] }
-                else -> {}
-            }
-            when (newScreen) {
-                ScreenType.INSTRUMENT -> trackerController.currentInstrument = trackerController.lastEditedInstrument
-                ScreenType.PHRASE     -> trackerController.currentPhrase = trackerController.lastEditedPhrase
-                ScreenType.CHAIN      -> trackerController.currentChain  = trackerController.lastEditedChain
-                else -> {}
-            }
-            trackerController.saveCursorForScreen(trackerController.currentScreen)
-            trackerController.restoreCursorForScreen(newScreen, cursorRemember)
-            trackerController.inputController.exitSelectionMode()
+            syncLastEditedOnScreenSwitch(trackerController.currentScreen, newScreen)
         }
         trackerController.currentScreen = newScreen
         trackerController.previousColumn = newCol

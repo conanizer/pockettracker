@@ -109,32 +109,6 @@ data class CursorContext(
     val defaultValue: Int = NO_DEFAULT      // A+B resets a non-deletable value to this (NO_DEFAULT = none)
 ) {
     /**
-     * Helper: Is the current value empty?
-     *
-     * This checks if the value at the cursor position represents an "empty" state.
-     * Different types have different empty values:
-     * - NOTE: -1 (no note)
-     * - HEX_BYTE (phrase refs): 0xFF or -1 (no reference)
-     * - CHARACTER: ' ' (space)
-     * - etc.
-     *
-     * **Implementation Pattern:**
-     * The module determines if data is empty (e.g., `step.note == Note.EMPTY`)
-     * and passes that to the factory, which sets both:
-     * - `currentValue` to the appropriate display value
-     * - `capabilities.isEmpty` flag to indicate empty state
-     *
-     * This method provides the alternative check: `currentValue == emptyValue`
-     * Both approaches work; `capabilities.isEmpty` is currently preferred for semantic clarity.
-     *
-     * **When to Use:**
-     * - Direct validation: Check if cursor position value is actually empty
-     * - Consistency checks: Verify capabilities.isEmpty matches actual value
-     * - Future refactoring: Replace flag approach with direct isEmpty() calls
-     */
-    fun isEmpty(): Boolean = currentValue == emptyValue
-
-    /**
      * Helper: Can we do anything with this cursor position?
      */
     fun isEditable(): Boolean = valueType != CursorValueType.READ_ONLY &&
@@ -294,8 +268,7 @@ object CursorContextFactory {
     )
 
     /**
-     * Effect type (cycles through: ---, ARP, KIL, OFF, RPT, VOL)
-     * A+UP/DOWN cycles through effect types
+     * Effect type — A+UP/DOWN cycles through all EffectProcessor.EFFECT_TYPES (--- plus the 26 FX codes)
      * A+B clears effect (sets to NONE/---)
      * @param currentType Effect type code (0x00=NONE, 0x0A=ARP, etc.)
      * @param fxSlot Which FX slot (1, 2, or 3) - used to identify which effect to modify

@@ -13,6 +13,7 @@ import com.conanizer.pockettracker.core.data.Chain
 import com.conanizer.pockettracker.core.logic.InputAction
 import com.conanizer.pockettracker.ui.drawBitmapText
 import com.conanizer.pockettracker.ui.rowBgColor
+import com.conanizer.pockettracker.ui.toHex1
 import com.conanizer.pockettracker.ui.toHex2
 
 /**
@@ -88,7 +89,7 @@ class ChainEditorModule : TrackerModule {
         val textY = dataRowY + TEXT_PADDING
 
         drawBitmapText(
-            text = index.toString(16).uppercase(),
+            text = index.toHex1(),
             x = stepX, y = textY, scale = scale,
             color = when {
                 index == state.cursorRow && state.cursorColumn == 0 -> Color(t.textCursor)

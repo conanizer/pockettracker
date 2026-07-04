@@ -195,8 +195,8 @@ class TrackerController(
 
     var currentTable = 0
         set(value) {
-            field = value.coerceIn(0, 255)
-            lastEditedTable = value
+            field = value.coerceIn(0, project.tables.lastIndex)  // pool is 128, not 256
+            lastEditedTable = field
             stateObserver.onStateChanged()
         }
 
@@ -210,7 +210,7 @@ class TrackerController(
 
     var currentGroove = 0
         set(value) {
-            field = value.coerceIn(0, 255)
+            field = value.coerceIn(0, project.grooves.lastIndex)  // pool is 128, not 256
             stateObserver.onStateChanged()
         }
 
@@ -258,8 +258,8 @@ class TrackerController(
 
     var currentInstrument = 0
         set(value) {
-            field = value
-            lastEditedInstrument = value
+            field = value.coerceIn(0, project.instruments.lastIndex)  // clamp at the source (pool is 128)
+            lastEditedInstrument = field
             stateObserver.onStateChanged()
         }
 
@@ -286,50 +286,38 @@ class TrackerController(
 
     fun loadProject(filename: String): FileController.LoadResult {
         val result = fileController.loadProject(filename)
-
-        when (result) {
-            is FileController.LoadResult.Success -> {
-                project = result.project
-                projectVersion++
-                savedProjectVersion = projectVersion
-                fileController.clearAutosave()  // working state now matches a real file
-                statusMessage = "LOADED: $filename"
-                statusSuccess = true
-                resetEditingContext()
-
-                // TODO: Reload project samples if needed in future
-            }
-            is FileController.LoadResult.Error -> {
-                statusMessage = "LOAD FAILED"
-                statusSuccess = false
-            }
-        }
-
+        handleLoadResult(result, filename)
         return result
     }
 
     fun loadProject(fileInfo: FileInfo): FileController.LoadResult {
         val result = fileController.loadProject(fileInfo)
+        handleLoadResult(result, fileInfo.nameWithoutExtension)
+        return result
+    }
 
+    /**
+     * Shared success/error tail for both loadProject overloads. On success the working project becomes
+     * clean (matches a real file), the autosave is cleared, and the editing context resets; on error
+     * only the status line is set. Sample reload after a successful load is driven separately by the UI
+     * (AppInputDispatcher.reloadProjectSamples) once the audio backend is ready.
+     */
+    private fun handleLoadResult(result: FileController.LoadResult, label: String) {
         when (result) {
             is FileController.LoadResult.Success -> {
                 project = result.project
                 projectVersion++
                 savedProjectVersion = projectVersion
                 fileController.clearAutosave()  // working state now matches a real file
-                statusMessage = "LOADED: ${fileInfo.nameWithoutExtension}"
+                statusMessage = "LOADED: $label"
                 statusSuccess = true
                 resetEditingContext()
-
-                // TODO: Reload project samples if needed in future
             }
             is FileController.LoadResult.Error -> {
                 statusMessage = "LOAD FAILED"
                 statusSuccess = false
             }
         }
-
-        return result
     }
 
     fun newProject() {
@@ -411,18 +399,18 @@ class TrackerController(
         return fileController.listProjects()
     }
 
-    fun playPhrase(phraseId: Int, loop: Boolean = true) {
-        playbackController.playPhrase(project, phraseId, loop)
+    fun playPhrase(phraseId: Int) {
+        playbackController.playPhrase(project, phraseId)
         currentPhrase = phraseId
     }
 
-    fun playChain(chainId: Int, loop: Boolean = true) {
-        playbackController.playChain(project, chainId, loop)
+    fun playChain(chainId: Int) {
+        playbackController.playChain(project, chainId)
         currentChain = chainId
     }
 
-    fun playSong(startRow: Int = 0, loop: Boolean = true) {
-        playbackController.playSong(project, startRow, loop)
+    fun playSong(startRow: Int = 0) {
+        playbackController.playSong(project, startRow)
     }
 
     fun stopPlayback() {
@@ -688,14 +676,9 @@ class TrackerController(
         }
     }
 
-    fun getMinEditableRow(screenType: ScreenType): Int {
-        return 0
-    }
-
     fun getDefaultCursorPosition(screenType: ScreenType): Pair<Int, Int> {
-        val defaultRow = getMinEditableRow(screenType)
-        val defaultColumn = getMinEditableColumn(screenType)
-        return Pair(defaultRow, defaultColumn)
+        // Every screen's default cursor row is 0; only the default column varies by screen.
+        return Pair(0, getMinEditableColumn(screenType))
     }
 
     fun resetCursorRememberPositions() {
@@ -806,7 +789,6 @@ class TrackerController(
             }
             ScreenType.MODS -> {
                 val inst = project.instruments[currentInstrument]
-                val activeRowCount = inst.modSlots[modCursorPair * 2 + modCursorSide].rowCount()
                 if (modCursorRow > 0) {
                     modCursorRow--
                 } else if (modCursorPair > 0) {
@@ -1075,6 +1057,9 @@ class TrackerController(
         for (chainId in usedChainIds) {
             for (ref in project.chains[chainId].phraseRefs) { if (ref >= 0) usedPhraseIds.add(ref) }
         }
+        // Only steps WITH a note count their instrument: a note-less step's instrument number never
+        // triggers or configures anything at playback (scheduleStepWithEffects reads it only when
+        // hasNote), so an instrument referenced solely by note-less steps is genuinely unused.
         val usedInstrumentIds = mutableSetOf<Int>()
         for (phraseId in usedPhraseIds) {
             for (step in project.phrases[phraseId].steps) {
@@ -1119,6 +1104,27 @@ class TrackerController(
             val inst = project.instruments.getOrNull(instId) ?: continue
             usedTableIds.add(instId)
             if (inst.tableId >= 0) usedTableIds.add(inst.tableId)
+        }
+
+        // A table's own rows can carry TBL/GRV FX (the editor allows all effects in a table column).
+        // Walk referenced tables transitively so a groove used only from inside a table — or a table
+        // chained from another via a TBL row — isn't wiped out from under a still-referenced table.
+        val tableWorklist = ArrayDeque(usedTableIds)
+        while (tableWorklist.isNotEmpty()) {
+            val table = project.tables.getOrNull(tableWorklist.removeFirst()) ?: continue
+            for (row in table.rows) {
+                for ((fxType, fxValue) in listOf(
+                    row.fx1Type to row.fx1Value, row.fx2Type to row.fx2Value, row.fx3Type to row.fx3Value
+                )) {
+                    when (fxType) {
+                        EffectProcessor.FX_TBL -> {
+                            val ref = fxValue and 0xFF
+                            if (usedTableIds.add(ref)) tableWorklist.addLast(ref)
+                        }
+                        EffectProcessor.FX_GRV -> usedGrooveIds.add(fxValue and 0xFF)
+                    }
+                }
+            }
         }
 
         for (i in project.instruments.indices) {

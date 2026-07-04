@@ -244,13 +244,14 @@ JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getWaveform(JNIEnv *env, jobject thiz, jfloatArray outArray) {
     if (engine && outArray != nullptr) {
         jsize length = env->GetArrayLength(outArray);
-        float* buffer = new float[length];
+        // Reused per-thread scratch instead of a per-frame new[]/delete[] — this getter is polled
+        // every visualizer frame on the (single) UI thread, so the churn was pure waste on the Miyoo.
+        static thread_local std::vector<float> buffer;
+        if ((jsize)buffer.size() < length) buffer.resize(length);
 
-        engine->getWaveform(buffer, length);
+        engine->getWaveform(buffer.data(), length);
 
-        env->SetFloatArrayRegion(outArray, 0, length, buffer);
-
-        delete[] buffer;
+        env->SetFloatArrayRegion(outArray, 0, length, buffer.data());
     }
 }
 
@@ -356,13 +357,14 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getTr
         JNIEnv *env, jobject thiz, jfloatArray outArray, jbooleanArray activeFlags) {
     if (!engine || outArray == nullptr || activeFlags == nullptr) return;
     jsize length = env->GetArrayLength(outArray);
-    float* buf = new float[length];
-    // getTrackWaveforms writes 8 track lanes + 1 preview lane (TRACK_WAVEFORM_COUNT). Size the
-    // local arrays generously; the Kotlin array lengths are authoritative for how much we copy.
+    // Reused per-thread scratch instead of a per-frame new[]/delete[] (5580 floats, polled every
+    // OCTA visualizer frame on the single UI thread). getTrackWaveforms writes 8 track lanes + 1
+    // preview lane (TRACK_WAVEFORM_COUNT); the Kotlin array length is authoritative for the copy size.
+    static thread_local std::vector<float> buf;
+    if ((jsize)buf.size() < length) buf.resize(length);
     bool flags[16] = {};
-    engine->getTrackWaveforms(buf, flags);
-    env->SetFloatArrayRegion(outArray, 0, length, buf);
-    delete[] buf;
+    engine->getTrackWaveforms(buf.data(), flags);
+    env->SetFloatArrayRegion(outArray, 0, length, buf.data());
     jsize flagLen = env->GetArrayLength(activeFlags);
     if (flagLen > 16) flagLen = 16;
     jboolean jflags[16];

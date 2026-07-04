@@ -166,7 +166,7 @@ interface IAudioBackend {
      * @param baseFreq Base frequency of the sample (for pitch calculation)
      * @param vol Volume (0.0 to 1.0)
      * @param pan Stereo pan position (0.0=left, 0.5=center, 1.0=right)
-     * @param startPointOverride Optional start point override (0-65535, overrides instrument start point, -1 = use default)
+     * @param startPointOverride Optional start point override (0-255, overrides instrument start point, -1 = use default)
      */
     fun scheduleNote(
         frame: Long,
@@ -262,8 +262,8 @@ interface IAudioBackend {
     /**
      * Get per-track waveform data for the OCTA visualizer.
      *
-     * @param buffer FloatArray of size 8 * 620 (track0[0..619], track1[0..619], ...)
-     * @param activeTracks BooleanArray[8] — true if track had active voices last block
+     * @param buffer FloatArray of size 9 * 620 — lanes 0-7 = tracks, lane 8 = preview (each [0..619])
+     * @param activeTracks BooleanArray[9] — true if that lane (tracks 0-7 + preview lane 8) had active voices last block
      */
     fun getTrackWaveforms(buffer: FloatArray, activeTracks: BooleanArray)
 

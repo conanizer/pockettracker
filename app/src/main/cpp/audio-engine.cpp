@@ -1823,12 +1823,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             float trackPeakL = 0.0f, trackPeakR = 0.0f;
             if (octaWanted) trackWasActive[t] = true;  // OCTA capture only
             for (int i = 0; i < numFrames; i++) {
-                float sL = sfBuf[i * 2];
-                float sR = sfBuf[i * 2 + 1];
-                trackPeakL = fmaxf(trackPeakL, fabsf(sL));
-                trackPeakR = fmaxf(trackPeakR, fabsf(sR));
-                float outL = sL * masterVol;
-                float outR = sR * masterVol;
+                float outL = sfBuf[i * 2]     * masterVol;
+                float outR = sfBuf[i * 2 + 1] * masterVol;
+                // Meter post-masterVolume to match the sampler path (framePeaksPerTrackL above), so SF
+                // and sampler track meters read the same when master ≠ FF.
+                trackPeakL = fmaxf(trackPeakL, fabsf(outL));
+                trackPeakR = fmaxf(trackPeakR, fabsf(outR));
                 if (stemsMode == 0 || t == stemsMode - 1) {
                     output[i * 2]     += outL;
                     output[i * 2 + 1] += outR;
@@ -2241,7 +2241,7 @@ static const int SPECTRUM_FFT_SIZE = 2048;
 
 // Shared FFT helper — takes FFT_SIZE samples already copied from the circular buffer by the caller
 // (under mutex), applies Hann window + FFT, maps to numBins log-spaced magnitude values [0,1].
-static void computeSpectrumFFT(kiss_fft_scalar* input, int numBins, float* out) {
+static void computeSpectrumFFT(kiss_fft_scalar* input, int numBins, float* out, float sampleRate) {
     for (int i = 0; i < SPECTRUM_FFT_SIZE; i++) {
         float w = 0.5f * (1.0f - cosf(2.0f * M_PI * i / (SPECTRUM_FFT_SIZE - 1)));
         input[i] *= w;
@@ -2255,7 +2255,6 @@ static void computeSpectrumFFT(kiss_fft_scalar* input, int numBins, float* out) 
     kiss_fft_cpx cpx_out[SPECTRUM_FFT_SIZE / 2 + 1];
     kiss_fftr(cfg, input, cpx_out);
 
-    const float sampleRate = 44100.0f;
     const float fMin = 20.0f, fMax = 20000.0f;
     const float logRange = logf(fMax / fMin);
 
@@ -2291,7 +2290,7 @@ void AudioEngine::getSpectrumMagnitudes(int numBins, float* out) {
         std::lock_guard<std::mutex> lock(spectrumMutex);
         readCircularBuffer(spectrumBuffer, spectrumWriteIdx, SPECTRUM_SIZE, input);
     }
-    computeSpectrumFFT(input, numBins, out);
+    computeSpectrumFFT(input, numBins, out, (float)getSampleRate());
 }
 
 void AudioEngine::getSpectrumMagnitudesForSource(int source, int instrId, int numBins, float* out) {
@@ -2308,7 +2307,7 @@ void AudioEngine::getSpectrumMagnitudesForSource(int source, int instrId, int nu
             default: readCircularBuffer(spectrumBuffer,       spectrumWriteIdx,       SPECTRUM_SIZE, input); break;
         }
     }
-    computeSpectrumFFT(input, numBins, out);
+    computeSpectrumFFT(input, numBins, out, (float)getSampleRate());
 }
 
 void AudioEngine::getWaveform(float* outBuffer, int bufferSize) {
