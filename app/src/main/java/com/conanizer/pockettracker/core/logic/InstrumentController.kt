@@ -20,6 +20,9 @@ class InstrumentController(
 ) {
     private val TAG = "InstrumentController"
 
+    // Notify-on-set delegate (see StateObserver.observed).
+    private fun <T> observed(initial: T) = stateObserver.observed(initial)
+
     // SoundFont slot cache: maps soundfont file path → C++ slot index (0-3)
     val sfSlotMap: MutableMap<String, Int> = mutableMapOf()
 
@@ -28,40 +31,20 @@ class InstrumentController(
     // ═══════════════════════════════════════════════════════════════════════════
 
     /** Currently selected instrument (0-127) */
-    var currentInstrument = 0
-        set(value) {
-            field = value
-            stateObserver.onStateChanged()
-        }
+    var currentInstrument by observed(0)
 
     /** Last edited instrument ID (for cursor sync between screens) */
     var lastEditedInstrument = 0
 
     /** Cursor position on instrument screen */
-    var cursorRow = 0
-        set(value) {
-            field = value
-            stateObserver.onStateChanged()
-        }
-    var cursorColumn = 0
-        set(value) {
-            field = value
-            stateObserver.onStateChanged()
-        }
+    var cursorRow by observed(0)
+    var cursorColumn by observed(0)
 
     /** Status message for instrument screen */
-    var statusMessage = ""
-        set(value) {
-            field = value
-            stateObserver.onStateChanged()
-        }
+    var statusMessage by observed("")
 
     /** Status success flag (true = success/green, false = error/red) */
-    var statusSuccess = true
-        set(value) {
-            field = value
-            stateObserver.onStateChanged()
-        }
+    var statusSuccess by observed(true)
 
     // ═══════════════════════════════════════════════════════════════════════════
     // NAVIGATION

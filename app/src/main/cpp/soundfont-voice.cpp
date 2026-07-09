@@ -4,6 +4,8 @@
 #include "vendor/tsf/tsf.h"
 
 #include "soundfont-voice.h"
+#include "mods/modules/pitch-slide-module.h"  // advancePitchSlide (shared with sampler path)
+#include "mods/modules/vibrato-module.h"      // advanceVibratoPhase (shared with sampler path)
 
 // ===================================
 // SOUNDFONT INFRASTRUCTURE (TinySoundFont)
@@ -171,30 +173,19 @@ void SoundfontVoice::applyPitchMod(float sampleRate, int numFrames) {
     // recalculates playbackRate from modDestValues every sample).
     // detuneSemitones counts as active pitch: a static instrument detune has no slide/vibrato/mod,
     // so without this it would be wiped to center here and never reach the pitch wheel below.
-    if (!pitchSliding && !vibratoActive && modDestValues[PARAM_PITCH] == 0.0f && detuneSemitones == 0.0f) {
+    // pitchOffset likewise: a finished slide (advancePitchSlide clears pitchSliding at the
+    // target) must keep applying its held offset — a stopped PBN stays bent, like the sampler.
+    if (!pitchSliding && !vibratoActive && pitchOffset == 0.0f &&
+        modDestValues[PARAM_PITCH] == 0.0f && detuneSemitones == 0.0f) {
         tsf_channel_set_pitchrange(h, _trackId, PITCH_RANGE);
         tsf_channel_set_pitchwheel(h, _trackId, 8192);
         return;
     }
 
-    // Advance pitch slide (PSL / PBN)
-    if (pitchSliding) {
-        float delta      = pitchSlideTarget - pitchOffset;
-        float totalDelta = pitchSlideRate * numFrames;
-        if (fabsf(totalDelta) >= fabsf(delta)) {
-            pitchOffset = pitchSlideTarget;
-            if (fabsf(pitchSlideTarget) < 100.0f) pitchSliding = false;
-        } else {
-            pitchOffset += totalDelta;
-        }
-    }
-
-    // Advance vibrato LFO (PVB / PVX)
-    if (vibratoActive) {
-        float inc = (2.0f * (float)M_PI * vibratoSpeed / sampleRate) * numFrames;
-        vibratoPhase += inc;
-        while (vibratoPhase >= 2.0f * (float)M_PI) vibratoPhase -= 2.0f * (float)M_PI;
-    }
+    // Advance pitch slide (PSL / PBN) + vibrato LFO (PVB / PVX) — the shared per-block
+    // state machines, identical to the sampler path (mods/modules).
+    advancePitchSlide(*this, numFrames);
+    advanceVibratoPhase(*this, numFrames, sampleRate);
 
     // detuneSemitones: static instrument detune (fractional, persists across slides)
     // pitchOffset: PSL/PBN pitch slide state (semitones, advanced above)

@@ -294,12 +294,14 @@ class TableModule : TrackerModule {
     fun getCursorContext(state: TableState): CursorContext {
         return when (state.cursorColumn) {
             0 -> CursorContextFactory.readOnly()  // Step number
-            1 -> CursorContextFactory.hexByte(    // Transpose
-                currentValue = state.table.rows[state.cursorRow].transpose,
-                min = 0,
-                max = 255,
-                canDelete = state.table.rows[state.cursorRow].transpose != 0x00  // Can delete if not already 00
-            )
+            1 -> {  // Transpose — same semitone context as chain transpose (A+LEFT/RIGHT = ±1
+                    // octave); was a plain hexByte with a ±16 large-step, drifting from chain.
+                val transpose = state.table.rows[state.cursorRow].transpose
+                val ctx = CursorContextFactory.transpose(transpose)
+                ctx.copy(capabilities = ctx.capabilities.copy(
+                    canDelete = transpose != 0x00  // deletable back to 00 = no transpose
+                ))
+            }
             2 -> CursorContextFactory.hexByte(    // Volume
                 currentValue = if (state.table.rows[state.cursorRow].volume == -1) 0 else state.table.rows[state.cursorRow].volume,
                 emptyValue = -1,

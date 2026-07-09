@@ -153,7 +153,7 @@ float AudioEngine::getSamplePlaybackPosition(int id) {
     for (int v = 0; v < MAX_VOICES; v++) {
         const Voice& voice = voices[v];
         if (voice.isActive && !voice.isFadingOut && voice.sampleData == samples[id]) {
-            return voice.position / (float)sampleLengths[id];
+            return (float)(voice.position / (double)sampleLengths[id]);
         }
     }
     return -1.0f;
@@ -375,6 +375,31 @@ void AudioEngine::copyRegion(int id, int startFrame, int endFrame) {
         std::memcpy(sampleClipboardRight, samplesRight[id] + startFrame, len * sizeof(float));
     }
     sampleClipboardLength = len;
+}
+
+// Prepare the sample-editor's LEFT/RIGHT/MONO source preview NATIVELY: the Kotlin side used
+// to pull the full left + right PCM into Java arrays (plus a third for the MONO average) —
+// up to 3x the sample size transiently on the capped Java heap, exactly the OOM class the
+// native load paths exist to avoid. Slot→slot copy in native memory instead.
+void AudioEngine::prepareSourcePreview(int dstId, int srcId, int mode) {
+    if (dstId < 0 || dstId >= 256 || srcId < 0 || srcId >= 256 || dstId == srcId) return;
+    // Stops voices reading the dst (scratch) slot and holds the edit mutex — which also
+    // keeps the SOURCE buffers steady for the copy (single global edit mutex).
+    auto editLock = beginSampleEdit(dstId);
+    if (!samples[srcId] || sampleLengths[srcId] <= 0) return;
+    const int len  = sampleLengths[srcId];
+    const float* L = samples[srcId];
+    const float* R = samplesRight[srcId] ? samplesRight[srcId] : L;
+    float* out = new (std::nothrow) float[len];
+    if (!out) return;
+    if (mode == 1) {
+        std::memcpy(out, R, (size_t)len * sizeof(float));
+    } else if (mode == 3) {
+        for (int i = 0; i < len; i++) out[i] = (L[i] + R[i]) * 0.5f;
+    } else {  // 0 = LEFT (also the mono-source fallback: R aliases L then)
+        std::memcpy(out, L, (size_t)len * sizeof(float));
+    }
+    setSampleBuffers(dstId, out, nullptr, len);
 }
 
 void AudioEngine::pasteRegion(int id, int insertAt) {

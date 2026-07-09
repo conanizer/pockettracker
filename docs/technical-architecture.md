@@ -32,6 +32,13 @@ model, business logic, the C++ audio/DSP engine) has no Android dependencies; An
 (Oboe, scoped storage, Compose UI, input device handling) lives behind interfaces. The Android app is
 one set of adapters over that core; a Linux build would add a second set without touching the core.
 
+**The Linux port strategy is decided** (see `docs/internal/linux-port-plan.md`): a **native
+C++/SDL2 rewrite** for handhelds via PortMaster, NOT Compose Multiplatform. What carries over is
+the C++ engine (built from `ENGINE_CORE_SOURCES` in CMakeLists — Oboe/JNI are Android-only,
+gated behind `if(ANDROID)`), the file formats, and — after the songcore migration — the C++
+sequencing core. The Kotlin layers stay Android-only; the ~20 screen modules get re-implemented
+against the C++ UI (see `docs/internal/order-of-work.md` for the zone map and sequencing).
+
 The two halves mirror each other by name:
 
 - **Kotlin:** `IAudioBackend` (interface) ← `OboeAudioBackend` (Android impl). `AudioEngine` (core, portable) calls the interface.

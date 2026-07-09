@@ -110,6 +110,9 @@ public:
     void deleteSampleRegion(int id, int startFrame, int endFrame);
     void copyRegion(int id, int startFrame, int endFrame);
     void pasteRegion(int id, int insertAt);
+    // Sample-editor LEFT/RIGHT/MONO source preview: copy the selected channel (or the L/R
+    // average) of srcId into dstId's slot, entirely in native memory. mode: 0=L, 1=R, 3=avg.
+    void prepareSourcePreview(int dstId, int srcId, int mode);
     int  getClipboardLength();
     void downsampleSample(int id, int factor);
     // Non-destructive rate mode: derives buffer from cached original (factor 1=HIGH,2=NORM,4=LOFI).
@@ -322,6 +325,17 @@ public:
     // state, seeds the RND/DRNK RNG, and applies the LFO trigger mode's initial phase.
     // Shared by the sampler and SF dispatch paths (audio thread only).
     void initVoiceModSlots(IAudioVoice& voice, int sampleId, int64_t currentFrame, float sampleRate);
+
+    // M8-style: a TIC FX in the table's LAST row overrides the instrument's tic rate at
+    // note trigger. Shared by the sampler and SF dispatch paths (audio thread only).
+    int effectiveTicRateFor(int tableId, int fallback);
+
+    // Unified per-voice table tick (tic advance + row FX processing) for sampler AND SF
+    // voices — was two drifted ~90-line copies. Duck-typed template over the identical
+    // table-state fields; the two per-type differences (KIL semantics, OFFSET) resolve at
+    // compile time via the tableKill/tableOffset overloads in audio-engine.cpp, where the
+    // template is defined and (implicitly) instantiated.
+    template <typename V> void processTableTick(V& voice, int numFrames, float sampleRate);
 
     // Smart note-off: trigger ADSR/TRIG release if available, otherwise hard-stop.
     void triggerNoteOff(int trackId);

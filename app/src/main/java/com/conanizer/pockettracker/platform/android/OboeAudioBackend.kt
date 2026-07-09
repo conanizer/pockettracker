@@ -112,6 +112,7 @@ class OboeAudioBackend : IAudioBackend {
     override fun deleteSampleRegion(id: Int, startFrame: Int, endFrame: Int) = native_deleteSampleRegion(id, startFrame, endFrame)
     override fun copyRegion(id: Int, startFrame: Int, endFrame: Int) = native_copyRegion(id, startFrame, endFrame)
     override fun pasteRegion(id: Int, insertAt: Int) = native_pasteRegion(id, insertAt)
+    override fun prepareSourcePreview(dstId: Int, srcId: Int, mode: Int) = native_prepareSourcePreview(dstId, srcId, mode)
     override fun getClipboardLength(): Int = native_getClipboardLength()
     override fun downsampleSample(id: Int, factor: Int) = native_downsampleSample(id, factor)
     override fun applyRateMode(id: Int, factor: Int) = native_applyRateMode(id, factor)
@@ -697,6 +698,7 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_deleteSampleRegion(id: Int, startFrame: Int, endFrame: Int)
     private external fun native_copyRegion(id: Int, startFrame: Int, endFrame: Int)
     private external fun native_pasteRegion(id: Int, insertAt: Int)
+    private external fun native_prepareSourcePreview(dstId: Int, srcId: Int, mode: Int)
     private external fun native_getClipboardLength(): Int
     private external fun native_downsampleSample(id: Int, factor: Int)
     private external fun native_applyRateMode(id: Int, factor: Int)

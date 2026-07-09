@@ -858,16 +858,10 @@ class AudioEngine(
      */
     fun prepareSampleEditorSourcePreview(instId: Int, sourceMode: Int): Int {
         if (!hasStereoData(instId) || sourceMode == 2) return instId
-        val left = getSampleData(instId)
-        val data = when (sourceMode) {
-            0    -> left
-            1    -> getSampleDataRight(instId)
-            else -> {  // MONO (3): average L+R
-                val right = getSampleDataRight(instId)
-                FloatArray(left.size) { i -> (left[i] + right[i]) / 2f }
-            }
-        }
-        backend.loadSample(254, data)
+        // Channel select/average runs natively (slot→slot copy). The old path pulled the full
+        // left + right PCM into Java arrays (up to 3x the sample size transiently on the
+        // capped Java heap) — the OOM class the native load paths exist to avoid.
+        backend.prepareSourcePreview(254, instId, sourceMode)
         sampleRateRatios[instId]?.let { sampleRateRatios[254] = it }
         return 254
     }

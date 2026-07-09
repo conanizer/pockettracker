@@ -2,8 +2,11 @@ cmake_minimum_required(VERSION 3.22.1)
 
 project("pockettracker")
 
-# Find Oboe package (via Prefab)
-find_package(oboe REQUIRED CONFIG)
+# Oboe is the ANDROID audio backend only (via Prefab). A desktop build provides its own
+# shell (SDL/ALSA/JACK) against processLiveBlock() and never sees this.
+if(ANDROID)
+    find_package(oboe REQUIRED CONFIG)
+endif()
 
 # ─── Vendored Opus decode stack (libogg + libopus + opusfile) ──────────────────────────────────
 # Native Opus decoding so .opus / Opus-in-Ogg samples don't depend on the device's MediaCodec, which
@@ -30,15 +33,15 @@ target_include_directories(opusfile
 )
 target_link_libraries(opusfile PUBLIC opus ogg)
 
-# Add our native library
-# The engine is split across focused modules (native-audio.cpp is a thin stub redirect).
-# TSF_IMPLEMENTATION is defined in soundfont-voice.cpp only.
-add_library(pockettracker SHARED
+# ─── Engine sources: portable core vs platform shell ───────────────────────────────────────────
+# ENGINE_CORE_SOURCES is the whole portable engine — no <oboe/*>, <android/*>, or <jni.h>
+# anywhere in it (logging goes through the audio-defs.h shim). A desktop/Linux build reuses
+# this list verbatim and supplies its own shell in place of ANDROID_PLATFORM_SOURCES.
+# TSF_IMPLEMENTATION is defined in soundfont-voice.cpp only; native-audio.cpp is a stub.
+set(ENGINE_CORE_SOURCES
         soundfont-voice.cpp
         sample-editor.cpp
         audio-engine.cpp
-        oboe-audio-engine.cpp
-        jni-bridge.cpp
         transient-detector.cpp
         # Native compressed-audio decoders. dr_mp3/dr_flac impl live inside audio-decoders.cpp;
         # stb_vorbis ships as a .c that must be its own translation unit (compiled as C).
@@ -58,8 +61,23 @@ add_library(pockettracker SHARED
         effects/soundpipe/pareq.c
 )
 
-# Flush-to-zero on ARM: prevents denormal floats from causing 10-100x slowdowns
-# in feedback loops (reverb, delay, EQ). Required when using any effects.
+# Android shell: the Oboe stream glue + the JNI facade.
+set(ANDROID_PLATFORM_SOURCES
+        oboe-audio-engine.cpp
+        jni-bridge.cpp
+)
+
+if(ANDROID)
+    add_library(pockettracker SHARED ${ENGINE_CORE_SOURCES} ${ANDROID_PLATFORM_SOURCES})
+else()
+    # Desktop consumers link the core as a static lib and provide their own shell/main.
+    add_library(pockettracker STATIC ${ENGINE_CORE_SOURCES})
+endif()
+
+# -ffast-math here is a pure codegen optimisation (reassociation, no NaN/Inf special-casing)
+# for the DSP-heavy TUs. It is NOT the denormal protection: that is
+# setFlushToZeroForCurrentThread() in audio-engine.cpp, which sets the FP-environment
+# FTZ/DAZ bits explicitly on every audio thread (a compile-only -ffast-math would not).
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm")
     target_compile_options(pockettracker PRIVATE -ffast-math)
 endif ()
@@ -88,12 +106,17 @@ target_include_directories(pockettracker PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/kissfft
 )
 
-# Link with Oboe and libm (required by tsf for math functions). opusfile pulls in libopus + libogg
+# libm is required by tsf for math functions. opusfile pulls in libopus + libogg
 # (PUBLIC-linked) for native Opus decoding, and propagates the opusfile.h include path.
+# Oboe/android/log are Android-shell dependencies only — the core never touches them.
 target_link_libraries(pockettracker
-        oboe::oboe
         opusfile
-        android
-        log
         m
 )
+if(ANDROID)
+    target_link_libraries(pockettracker
+            oboe::oboe
+            android
+            log
+    )
+endif()

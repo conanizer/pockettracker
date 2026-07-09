@@ -20,6 +20,7 @@ import com.conanizer.pockettracker.ui.FONT_SCALE
 import com.conanizer.pockettracker.ui.ROW_HEIGHT
 import com.conanizer.pockettracker.ui.TEXT_PADDING
 import com.conanizer.pockettracker.ui.drawBitmapText
+import com.conanizer.pockettracker.ui.drawCell
 import com.conanizer.pockettracker.ui.getEffectTypeName
 import com.conanizer.pockettracker.ui.rowBgColor
 import com.conanizer.pockettracker.ui.toHex1
@@ -125,113 +126,25 @@ class PhraseEditorModule : TrackerModule {
             spacing = CHAR_SPACING, fontScale = FONT_SCALE
         )
 
-        drawBitmapText(
-            text = step.note.toString(),
-            x = noteX, y = textY, scale = scale,
-            color = when {
-                index == state.cursorRow && state.cursorColumn == 1 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 1) -> Color(t.vizWave)
-                step.note == Note.EMPTY -> Color(t.textEmpty)
-                else -> Color(t.textValue)
-            },
-            spacing = CHAR_SPACING, fontScale = FONT_SCALE
-        )
+        // All value cells share the drawCell colour priority (cursor > selection > empty >
+        // per-column colour); note-emptiness dims NOTE/VOL/INST, fx-emptiness dims its pair.
+        fun cur(c: Int) = index == state.cursorRow && state.cursorColumn == c
+        fun sel(c: Int) = state.selectionMode && state.isCellSelected(index, c)
+        val noteEmpty = step.note == Note.EMPTY
 
-        drawBitmapText(
-            text = step.volume.toHex2(),
-            x = volX, y = textY, scale = scale,
-            color = when {
-                index == state.cursorRow && state.cursorColumn == 2 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 2) -> Color(t.vizWave)
-                step.note == Note.EMPTY -> Color(t.textEmpty)
-                else -> Color(t.textParam)
-            },
-            spacing = CHAR_SPACING, fontScale = FONT_SCALE
-        )
+        drawCell(step.note.toString(),     noteX, textY, scale, cur(1), sel(1), noteEmpty, t.textValue, t)
+        drawCell(step.volume.toHex2(),     volX,  textY, scale, cur(2), sel(2), noteEmpty, t.textParam, t)
+        drawCell(step.instrument.toHex2(), instX, textY, scale, cur(3), sel(3), noteEmpty, t.textParam, t)
 
-        drawBitmapText(
-            text = step.instrument.toHex2(),
-            x = instX, y = textY, scale = scale,
-            color = when {
-                index == state.cursorRow && state.cursorColumn == 3 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 3) -> Color(t.vizWave)
-                step.note == Note.EMPTY -> Color(t.textEmpty)
-                else -> Color(t.textParam)
-            },
-            spacing = CHAR_SPACING, fontScale = FONT_SCALE
-        )
-
-        drawBitmapText(
-            text = getEffectTypeName(step.fx1Type),
-            x = fx1NameX, y = textY, scale = scale,
-            color = when {
-                index == state.cursorRow && state.cursorColumn == 4 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 4) -> Color(t.vizWave)
-                step.fx1Type == 0x00 -> Color(t.textEmpty)
-                else -> Color(t.textTitle)
-            },
-            spacing = CHAR_SPACING, fontScale = FONT_SCALE
-        )
-
-        drawBitmapText(
-            text = step.fx1Value.toHex2(),
-            x = fx1ValueX, y = textY, scale = scale,
-            color = when {
-                index == state.cursorRow && state.cursorColumn == 5 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 5) -> Color(t.vizWave)
-                step.fx1Type == 0x00 -> Color(t.textEmpty)
-                else -> Color(t.textParam)
-            },
-            spacing = CHAR_SPACING, fontScale = FONT_SCALE
-        )
-
-        drawBitmapText(
-            text = getEffectTypeName(step.fx2Type),
-            x = fx2NameX, y = textY, scale = scale,
-            color = when {
-                index == state.cursorRow && state.cursorColumn == 6 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 6) -> Color(t.vizWave)
-                step.fx2Type == 0x00 -> Color(t.textEmpty)
-                else -> Color(t.textTitle)
-            },
-            spacing = CHAR_SPACING, fontScale = FONT_SCALE
-        )
-
-        drawBitmapText(
-            text = step.fx2Value.toHex2(),
-            x = fx2ValueX, y = textY, scale = scale,
-            color = when {
-                index == state.cursorRow && state.cursorColumn == 7 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 7) -> Color(t.vizWave)
-                step.fx2Type == 0x00 -> Color(t.textEmpty)
-                else -> Color(t.textParam)
-            },
-            spacing = CHAR_SPACING, fontScale = FONT_SCALE
-        )
-
-        drawBitmapText(
-            text = getEffectTypeName(step.fx3Type),
-            x = fx3NameX, y = textY, scale = scale,
-            color = when {
-                index == state.cursorRow && state.cursorColumn == 8 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 8) -> Color(t.vizWave)
-                step.fx3Type == 0x00 -> Color(t.textEmpty)
-                else -> Color(t.textTitle)
-            },
-            spacing = CHAR_SPACING, fontScale = FONT_SCALE
-        )
-
-        drawBitmapText(
-            text = step.fx3Value.toHex2(),
-            x = fx3ValueX, y = textY, scale = scale,
-            color = when {
-                index == state.cursorRow && state.cursorColumn == 9 -> Color(t.textCursor)
-                state.selectionMode && state.isCellSelected(index, 9) -> Color(t.vizWave)
-                step.fx3Type == 0x00 -> Color(t.textEmpty)
-                else -> Color(t.textParam)
-            },
-            spacing = CHAR_SPACING, fontScale = FONT_SCALE
-        )
+        val fx1Empty = step.fx1Type == 0x00
+        drawCell(getEffectTypeName(step.fx1Type), fx1NameX,  textY, scale, cur(4), sel(4), fx1Empty, t.textTitle, t)
+        drawCell(step.fx1Value.toHex2(),          fx1ValueX, textY, scale, cur(5), sel(5), fx1Empty, t.textParam, t)
+        val fx2Empty = step.fx2Type == 0x00
+        drawCell(getEffectTypeName(step.fx2Type), fx2NameX,  textY, scale, cur(6), sel(6), fx2Empty, t.textTitle, t)
+        drawCell(step.fx2Value.toHex2(),          fx2ValueX, textY, scale, cur(7), sel(7), fx2Empty, t.textParam, t)
+        val fx3Empty = step.fx3Type == 0x00
+        drawCell(getEffectTypeName(step.fx3Type), fx3NameX,  textY, scale, cur(8), sel(8), fx3Empty, t.textTitle, t)
+        drawCell(step.fx3Value.toHex2(),          fx3ValueX, textY, scale, cur(9), sel(9), fx3Empty, t.textParam, t)
     }
 
     fun getCursorContext(state: PhraseEditorState): CursorContext {

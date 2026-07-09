@@ -11,7 +11,9 @@ package com.conanizer.pockettracker.core.audio
  * - Linux: ALSAAudioBackend (future - will use ALSA/PulseAudio)
  *
  * Design Philosophy:
- * - Keep interface minimal (only what's needed for playback)
+ * - This is deliberately a WIDE facade (~100 methods mirroring the engine 1:1) rather than a
+ *   minimal one — see "Wide JNI facade" in development-status.md. Adding an engine call means
+ *   touching five files; grouping (e.g. ISampleEditorBackend) is on record as future work.
  * - No Android-specific types (no Context, no Resources)
  * - All methods are synchronous (async handled by implementation)
  * - Thread-safe by contract (implementations must handle thread safety)
@@ -21,8 +23,10 @@ interface IAudioBackend {
      * Initialize the audio stream.
      *
      * This must be called before any other operations.
-     * On Android: Initializes Oboe stream (LowLatency + Exclusive mode)
-     * On Linux: Will initialize ALSA/PulseAudio stream
+     * On Android: opens the stream via a compatibility ladder — OpenSL ES Exclusive →
+     * OpenSL ES Shared → OpenSL ES None/Shared → AAudio (see oboe-audio-engine.cpp; OpenSL
+     * first because AAudio's codec enumeration stalls some target ROMs).
+     * On Linux: will initialize the desktop backend (SDL/ALSA) stream.
      *
      * @return true if successful, false if audio initialization failed
      */
@@ -130,6 +134,9 @@ interface IAudioBackend {
     fun deleteSampleRegion(id: Int, startFrame: Int, endFrame: Int)
     fun copyRegion(id: Int, startFrame: Int, endFrame: Int)
     fun pasteRegion(id: Int, insertAt: Int)
+    // Sample-editor LEFT/RIGHT/MONO source preview: native slot→slot channel copy/average
+    // (mode: 0=L, 1=R, 3=avg) — never round-trips PCM through the Java heap.
+    fun prepareSourcePreview(dstId: Int, srcId: Int, mode: Int)
     fun getClipboardLength(): Int
     fun downsampleSample(id: Int, factor: Int)
     // Non-destructive rate mode: factor 1=HIGH (restore), 2=NORM, 4=LOFI. Derives from cached original.

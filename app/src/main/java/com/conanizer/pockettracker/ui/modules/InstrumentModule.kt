@@ -60,6 +60,10 @@ import java.io.File
  *  12  REV
  *  13  DEL
  *  14  EQ
+ *
+ * KEEP IN SYNC: cursor movement walks core/data/InstrumentRowLayout.kt — any row
+ * added/removed/moved here must be mirrored in that table (one edit), or the cursor
+ * strands on a spacer / skips a live row.
  */
 class InstrumentModule : TrackerModule {
     override val width  = 510

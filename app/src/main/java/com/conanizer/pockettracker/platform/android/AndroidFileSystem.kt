@@ -26,46 +26,25 @@ class AndroidFileSystem(
     private val TAG = "AndroidFileSystem"
 
     /**
-     * Get the PocketTracker projects directory.
-     * Creates it if it doesn't exist.
-     *
-     * Location: Documents/PocketTracker/Projects/
+     * Resolve Documents/PocketTracker/[sub], creating it on first use. One implementation
+     * for all seven app-directory getters (they were identical exists/mkdirs/log blocks).
      */
-    override fun getProjectsDirectory(): String {
+    private fun getOrCreateDocumentsDir(sub: String): String {
         val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        val projectsDir = File(documentsDir, "PocketTracker/Projects")
-
-        if (!projectsDir.exists()) {
-            if (projectsDir.mkdirs()) {
-                Log.d(TAG, "✅ Created projects directory: ${projectsDir.absolutePath}")
+        val dir = File(documentsDir, "PocketTracker/$sub")
+        if (!dir.exists()) {
+            if (dir.mkdirs()) {
+                Log.d(TAG, "Created directory: ${dir.absolutePath}")
             } else {
-                Log.w(TAG, "⚠️ Could not create projects directory — storage permission may be missing")
+                Log.w(TAG, "⚠️ Could not create ${dir.absolutePath} — storage permission may be missing")
             }
         }
-
-        return projectsDir.absolutePath
+        return dir.absolutePath
     }
 
-    /**
-     * Get the samples directory.
-     * Creates it if it doesn't exist.
-     *
-     * Location: Documents/PocketTracker/Samples/
-     */
-    override fun getSamplesDirectory(): String {
-        val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        val samplesDir = File(documentsDir, "PocketTracker/Samples")
+    override fun getProjectsDirectory(): String = getOrCreateDocumentsDir("Projects")
 
-        if (!samplesDir.exists()) {
-            if (samplesDir.mkdirs()) {
-                Log.d(TAG, "✅ Created samples directory: ${samplesDir.absolutePath}")
-            } else {
-                Log.w(TAG, "⚠️ Could not create samples directory — storage permission may be missing")
-            }
-        }
-
-        return samplesDir.absolutePath
-    }
+    override fun getSamplesDirectory(): String = getOrCreateDocumentsDir("Samples")
 
     /**
      * Read entire file as text.
@@ -301,75 +280,15 @@ class AndroidFileSystem(
         return file.parent
     }
 
-    /**
-     * Get the renders directory (for WAV export).
-     * Creates it if it doesn't exist.
-     *
-     * Location: Documents/PocketTracker/Renders/
-     */
-    override fun getRendersDirectory(): String {
-        val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        val rendersDir = File(documentsDir, "PocketTracker/Renders")
+    override fun getRendersDirectory(): String = getOrCreateDocumentsDir("Renders")
 
-        if (!rendersDir.exists()) {
-            if (rendersDir.mkdirs()) {
-                Log.d(TAG, "Created renders directory: ${rendersDir.absolutePath}")
-            } else {
-                Log.w(TAG, "⚠️ Could not create renders directory — storage permission may be missing")
-            }
-        }
+    override fun getResampledDirectory(): String = getOrCreateDocumentsDir("Samples/Resampled")
 
-        return rendersDir.absolutePath
-    }
+    override fun getInstrumentsDirectory(): String = getOrCreateDocumentsDir("Instruments")
 
-    /**
-     * Get the resampled samples directory.
-     * Creates it if it doesn't exist.
-     *
-     * Location: Documents/PocketTracker/Samples/Resampled/
-     */
-    override fun getResampledDirectory(): String {
-        val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        val resampledDir = File(documentsDir, "PocketTracker/Samples/Resampled")
+    override fun getSoundfontsDirectory(): String = getOrCreateDocumentsDir("Soundfonts")
 
-        if (!resampledDir.exists()) {
-            if (resampledDir.mkdirs()) {
-                Log.d(TAG, "Created resampled directory: ${resampledDir.absolutePath}")
-            } else {
-                Log.w(TAG, "⚠️ Could not create resampled directory — storage permission may be missing")
-            }
-        }
-
-        return resampledDir.absolutePath
-    }
-
-    /**
-     * Get the instrument presets directory.
-     * Location: Documents/PocketTracker/Instruments/
-     */
-    override fun getInstrumentsDirectory(): String {
-        val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        val dir = File(documentsDir, "PocketTracker/Instruments")
-        if (!dir.exists() && !dir.mkdirs())
-            Log.w(TAG, "⚠️ Could not create instruments directory — storage permission may be missing")
-        return dir.absolutePath
-    }
-
-    override fun getSoundfontsDirectory(): String {
-        val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        val dir = File(documentsDir, "PocketTracker/Soundfonts")
-        if (!dir.exists() && !dir.mkdirs())
-            Log.w(TAG, "⚠️ Could not create soundfonts directory — storage permission may be missing")
-        return dir.absolutePath
-    }
-
-    override fun getThemesDirectory(): String {
-        val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        val dir = File(documentsDir, "PocketTracker/Themes")
-        if (!dir.exists() && !dir.mkdirs())
-            Log.w(TAG, "⚠️ Could not create themes directory — storage permission may be missing")
-        return dir.absolutePath
-    }
+    override fun getThemesDirectory(): String = getOrCreateDocumentsDir("Themes")
 
     /**
      * Get the template project path.

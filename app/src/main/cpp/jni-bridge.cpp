@@ -376,10 +376,12 @@ JNIEXPORT jfloatArray JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSpectrumMagnitudes(JNIEnv *env, jobject thiz, jint numBins) {
     jfloatArray result = env->NewFloatArray(numBins);
     if (!engine || numBins <= 0) return result;
-    auto* buf = new float[numBins];
-    engine->getSpectrumMagnitudes(numBins, buf);
-    env->SetFloatArrayRegion(result, 0, numBins, buf);
-    delete[] buf;
+    // Reused per-thread scratch (waveform-getter pattern) — this is polled ~20 fps while the
+    // spectrum visualizer / EQ screen is open; per-call new[]/delete[] was pure churn.
+    static thread_local std::vector<float> buf;
+    if ((jint)buf.size() < numBins) buf.resize(numBins);
+    engine->getSpectrumMagnitudes(numBins, buf.data());
+    env->SetFloatArrayRegion(result, 0, numBins, buf.data());
     return result;
 }
 
@@ -387,10 +389,10 @@ JNIEXPORT jfloatArray JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSpectrumMagnitudesForSource(JNIEnv *env, jobject thiz, jint source, jint instrId, jint numBins) {
     jfloatArray result = env->NewFloatArray(numBins);
     if (!engine || numBins <= 0) return result;
-    auto* buf = new float[numBins];
-    engine->getSpectrumMagnitudesForSource(source, instrId, numBins, buf);
-    env->SetFloatArrayRegion(result, 0, numBins, buf);
-    delete[] buf;
+    static thread_local std::vector<float> buf;  // see getSpectrumMagnitudes
+    if ((jint)buf.size() < numBins) buf.resize(numBins);
+    engine->getSpectrumMagnitudesForSource(source, instrId, numBins, buf.data());
+    env->SetFloatArrayRegion(result, 0, numBins, buf.data());
     return result;
 }
 
@@ -1048,6 +1050,12 @@ JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1pasteRegion(
         JNIEnv*, jobject, jint id, jint insertAt) {
     if (engine) engine->pasteRegion((int)id, (int)insertAt);
+}
+
+JNIEXPORT void JNICALL
+Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1prepareSourcePreview(
+        JNIEnv*, jobject, jint dstId, jint srcId, jint mode) {
+    if (engine) engine->prepareSourcePreview((int)dstId, (int)srcId, (int)mode);
 }
 
 JNIEXPORT jint JNICALL

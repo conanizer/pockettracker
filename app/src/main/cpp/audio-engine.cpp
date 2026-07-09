@@ -1,4 +1,4 @@
-﻿// TSF API declarations only — TSF_IMPLEMENTATION lives in soundfont-voice.cpp
+// TSF API declarations only — TSF_IMPLEMENTATION lives in soundfont-voice.cpp
 #include "audio-engine.h"
 #include "kissfft/kiss_fftr.h"
 #include "vendor/tsf/tsf.h"
@@ -11,6 +11,9 @@
 #include <cstdint>
 #include <cstring>
 #include <new>
+#if defined(__SSE2__)
+#include <pmmintrin.h>  // FTZ/DAZ MXCSR macros for setFlushToZeroForCurrentThread
+#endif
 
 // Definition of the per-track soundfont voice array (extern declared in audio-engine.h):
 // song tracks 0-7 + the preview lane (track 8).
@@ -397,6 +400,11 @@ int AudioEngine::loadSampleFromWavFile(int id, const char* path) {
     return sampleRate;
 }
 
+// ACCEPTED 2x MEMORY PEAK: the decoder fills std::vector L/R, then loadSampleStereo
+// allocates the slot buffers and copies — both alive at once, so a multi-minute file
+// transiently needs ~2x its decoded PCM in native heap. The begin/fill/finalize streaming
+// path avoids this (MediaCodec loads use it) and dr_mp3/dr_flac/stb_vorbis all support
+// chunked reads; wire them up only if 1 GB devices actually hit this in practice.
 int AudioEngine::loadSampleFromCompressed(int id, const char* path) {
     if (id < 0 || id >= 256 || !path) return 0;
 
@@ -564,8 +572,10 @@ int AudioEngine::getSampleRate() {
     return deviceSampleRate.load(std::memory_order_relaxed);
 }
 
-// ARM FZ (Flush-to-Zero) bit eliminates denormal CPU stalls. Must be set per-thread
-// because FPCR/FPSCR are thread-local registers.
+// Flush-to-Zero eliminates denormal CPU stalls (10-100x slowdowns in reverb/delay/EQ
+// feedback tails). Must be set per-thread — FPCR/FPSCR/MXCSR are thread-local registers.
+// This helper (not any compile flag) is the engine's denormal protection; every audio
+// entry point (processLiveBlock, renderOffline) calls it first.
 static void setFlushToZeroForCurrentThread() {
     thread_local bool done = false;
     if (done) return;
@@ -580,7 +590,218 @@ static void setFlushToZeroForCurrentThread() {
     asm volatile("vmrs %0, fpscr" : "=r"(fpscr));
     fpscr |= (1U << 24);  // FZ bit
     asm volatile("vmsr fpscr, %0" : : "r"(fpscr));
+#elif defined(__SSE2__)
+    // x86/x86_64 — the emulator ABIs today, desktop Linux later. FTZ (outputs) + DAZ
+    // (inputs) via MXCSR; both Android x86 ABIs and any x86_64 desktop have SSE3+.
+    _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+    _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
 #endif
+}
+
+int AudioEngine::effectiveTicRateFor(int tableId, int fallback) {
+    if (tableId < 0 || tableId >= 256) return fallback;
+    std::lock_guard<std::mutex> lock(tableMutex);
+    if (!tables[tableId].loaded) return fallback;
+    const TableRow& lastRow = tables[tableId].rows[15];
+    if (lastRow.fx1Type == FX_TIC) return lastRow.fx1Value;
+    if (lastRow.fx2Type == FX_TIC) return lastRow.fx2Value;
+    if (lastRow.fx3Type == FX_TIC) return lastRow.fx3Value;
+    return fallback;
+}
+
+// Per-voice-type table FX behaviour, resolved at compile time inside processTableTick:
+//   KIL:    sampler = declicked kill fade; SF = noteOff (TSF plays its own release).
+//   OFFSET: sampler repositions playback; SF voices have no sample position — ignored.
+static inline void tableKill(Voice& v)          { v.startFadeOut(KILL_FADE_SAMPLES); }
+static inline void tableKill(SoundfontVoice& v) { v.noteOff(); }
+static inline void tableOffset(Voice& v, uint8_t fxValue) {
+    if (v.sampleLength > 0) {
+        double normalizedPos = fxValue / 255.0;
+        v.position = normalizedPos * (v.sampleLength - 1);
+    }
+}
+static inline void tableOffset(SoundfontVoice&, uint8_t) {}
+
+// Special TIC modes:
+//   TIC00 (0x00): Trigger mode — table row set by note, doesn't advance automatically
+//   TICFC (0xFC): Octave map — row = triggered note's octave (0-9)
+//   TICFE (0xFE): Note map — row = triggered note's pitch (0-11)
+//   TICFF (0xFF): 200Hz mode — advance ~1 row per 5ms
+template <typename V>
+void AudioEngine::processTableTick(V& voice, int numFrames, float sampleRate) {
+    // ONE tableMutex acquisition per voice per block: read the loaded flag AND copy the
+    // current row speculatively (8-byte POD; tableRow can't change before the tic logic
+    // below decides shouldProcessRow).
+    bool tableLoaded = false;
+    TableRow row;
+    {
+        std::lock_guard<std::mutex> lock(tableMutex);
+        tableLoaded = tables[voice.tableId].loaded;
+        if (tableLoaded) row = tables[voice.tableId].rows[voice.tableRow];
+    }
+    if (!tableLoaded) return;
+
+    bool shouldProcessRow = false;
+    bool shouldAdvance = false;
+
+    if (voice.tableTicRate == 0x00) {
+        // TIC00: Trigger mode - apply row effects ONCE, don't advance automatically
+        shouldProcessRow = (voice.tableRow != voice.lastProcessedRow);
+        shouldAdvance = false;
+    } else if (voice.tableTicRate == 0xFC || voice.tableTicRate == 0xFE) {
+        // TICFC/TICFE: Static mapping modes - row is fixed, process ONCE
+        shouldProcessRow = (voice.tableRow != voice.lastProcessedRow);
+        shouldAdvance = false;
+    } else if (voice.tableTicRate == 0xFF) {
+        // TICFF: 200Hz mode - faster advancement
+        voice.tic200HzAccum += numFrames;
+        float samplesPerTic = sampleRate / 200.0f;
+        if (voice.tic200HzAccum >= samplesPerTic) {
+            voice.tic200HzAccum -= samplesPerTic;
+            shouldProcessRow = true;
+            shouldAdvance = true;
+        }
+    } else {
+        // Standard tic mode (01-FB): advance one row every `tableTicRate` musical tics.
+        // Frame-accurate and tempo-locked (like the TICFF branch above) so table speed tracks
+        // the sequencer, is identical live vs. offline render, and is independent of the audio
+        // buffer size. framesPerTic = sr / (BPM/60 · 4 steps/beat · 12 tics/step).
+        if (voice.lastProcessedRow == -1) {
+            // Fire the first tic AT trigger so row 0's transpose/vol/FX apply immediately.
+            // Otherwise the voice plays one full row-duration with no table effect, which sounds
+            // like the first row lasts twice as long. Mirrors TIC00's note-on processing.
+            voice.tableFrameAccum = 0.0f;
+            shouldProcessRow = true;
+            shouldAdvance = true;
+        } else {
+            int tempo = currentTempo.load(std::memory_order_relaxed);
+            float framesPerRow = sampleRate / (tempo / 60.0f * 4.0f * 12.0f) * (float)voice.tableTicRate;
+            voice.tableFrameAccum += numFrames;
+            if (framesPerRow > 0.0f && voice.tableFrameAccum >= framesPerRow) {
+                voice.tableFrameAccum -= framesPerRow;
+                // A block longer than one row (very fast tables) can't advance >1 row here, so
+                // drop the extra rather than banking it (which would run away). Normal tic rates
+                // have framesPerRow >> block, so the remainder carries and the rate stays exact.
+                if (voice.tableFrameAccum >= framesPerRow) voice.tableFrameAccum = 0.0f;
+                shouldProcessRow = true;
+                shouldAdvance = true;
+            }
+        }
+    }
+
+    if (!shouldProcessRow) return;
+
+    // playbackRate does not include transpose; getModulatedPlaybackRate reads
+    // modDestValues[PARAM_PITCH] which processRoutes accumulates from TABLE_PITCH.
+    int semitones = transposeToSemitones(row.transpose);
+    voice.tableTranspose = (float)semitones;  // kept for debug log
+    voice.modSourceValues[MOD_SRC_TABLE_PITCH] = (float)semitones;
+
+    // Mix loop reads modDestValues[PARAM_VOL] instead of voice.tableVolume.
+    if (row.volume == 0xFF) {
+        voice.tableVolume = 1.0f;  // kept for debug log
+    } else {
+        voice.tableVolume = row.volume / 255.0f;
+    }
+    voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume;
+
+    bool hopExecuted = false;
+    int hopTarget = -1;
+
+    auto processEffect = [&](uint8_t fxType, uint8_t fxValue) {
+        switch (fxType) {
+            case FX_KILL:
+                if (fxValue == 0x00) {
+                    tableKill(voice);
+                    LOGT("📋 Table effect: KILL track %d", voice.getTrackId());
+                }
+                break;
+
+            case FX_HOP:
+                // HOP XY: X=repeat count (0=infinite), Y=target row; FF=stop table
+                if (fxValue == 0xFF) {
+                    voice.tableId = -1;
+                    voice.hopTargetRow = -1;
+                    voice.hopRepeatCount = 0;
+                    LOGT("📋 Table HOP FF: stopped table for track %d", voice.getTrackId());
+                } else {
+                    int repeatCount = (fxValue >> 4) & 0x0F;  // High nibble = X
+                    int targetRow = fxValue & 0x0F;           // Low nibble = Y
+
+                    if (repeatCount == 0) {
+                        // HOP 0Y = Infinite loop to row Y
+                        hopExecuted = true;
+                        hopTarget = targetRow;
+                        LOGT("📋 Table HOP %02X: infinite loop to row %d, track %d", fxValue, targetRow, voice.getTrackId());
+                    } else {
+                        // HOP XY (X>0) = Jump X times, then continue
+                        if (voice.hopTargetRow == -1 || voice.hopTargetRow != targetRow) {
+                            voice.hopRepeatCount = repeatCount;
+                            voice.hopTargetRow = targetRow;
+                            LOGT("📋 Table HOP %02X: initialized counter=%d, target=%d, track %d",
+                                 fxValue, repeatCount, targetRow, voice.getTrackId());
+                        }
+
+                        if (voice.hopRepeatCount > 0) {
+                            voice.hopRepeatCount--;
+                            hopExecuted = true;
+                            hopTarget = targetRow;
+                            LOGT("📋 Table HOP: jump to row %d, %d jumps remaining, track %d",
+                                 targetRow, voice.hopRepeatCount, voice.getTrackId());
+                        } else {
+                            // Counter exhausted, don't jump, reset state and continue normally
+                            voice.hopTargetRow = -1;
+                            LOGT("📋 Table HOP: counter exhausted, continuing past row, track %d", voice.getTrackId());
+                        }
+                    }
+                }
+                break;
+
+            case FX_VOLUME:
+                voice.tableVolume = fxValue / 255.0f;
+                voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume;
+                break;
+
+            case FX_OFFSET:
+                tableOffset(voice, fxValue);
+                break;
+
+            case FX_TIC:
+                if (fxValue >= 0x01 && fxValue <= 0xFB) {
+                    voice.tableTicRate = fxValue;
+                    voice.tableTicCounter = 0;
+                    LOGT("📋 Table effect: TIC %02X - set tick rate to %d", fxValue, fxValue);
+                }
+                break;
+
+            case FX_THO:
+                hopExecuted = true;
+                hopTarget = fxValue & 0x0F;
+                LOGT("📋 Table THO %02X: hop to row %d, track %d", fxValue, hopTarget, voice.getTrackId());
+                break;
+
+            default:
+                break;
+        }
+    };
+
+    processEffect(row.fx1Type, row.fx1Value);
+    processEffect(row.fx2Type, row.fx2Value);
+    processEffect(row.fx3Type, row.fx3Value);
+
+    voice.lastProcessedRow = voice.tableRow;
+
+    if (hopExecuted && hopTarget >= 0) {
+        voice.tableRow = hopTarget % 16;
+        LOGT("📋 Table HOP: track %d jumped to row %d", voice.getTrackId(), voice.tableRow);
+    } else if (shouldAdvance) {
+        voice.tableRow = (voice.tableRow + 1) % 16;
+    }
+
+    if (shouldAdvance && voice.tableRow == 0) {
+        LOGT("📋 Table %d loop: track=%d, transpose=%.0f, vol=%.2f",
+             voice.tableId, voice.getTrackId(), voice.tableTranspose, voice.tableVolume);
+    }
 }
 
 // ALL audio DSP lives here. processLiveBlock (live, via the platform backend's callback) and
@@ -716,8 +937,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                                 // "play backwards" note begins at the sample's end instead of instantly hitting
                                 // actualStart and fading out. Mid-note BCK (restart=false) keeps the live position
                                 // so direction flips are continuous (scratching).
-                                vo.position = rev ? (float)(vo.actualEnd > vo.actualStart ? vo.actualEnd - 1 : vo.actualStart)
-                                                  : (float)vo.actualStart;
+                                vo.position = rev ? (double)(vo.actualEnd > vo.actualStart ? vo.actualEnd - 1 : vo.actualStart)
+                                                  : (double)vo.actualStart;
                             }
                             break;
                         }
@@ -808,23 +1029,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     sv.detuneSemitones = note.detuneSemitones;  // static instrument detune (set after reset)
                     sv.startDelayFrames = frame;  // start rendering at the note's exact intra-block frame
 
-                    // M8-style: honour TIC effect in table's last row (same as sampler path).
-                    int effectiveTicRate = note.tableTicRate;
-                    if (note.tableId >= 0 && note.tableId < 256) {
-                        std::lock_guard<std::mutex> lock(tableMutex);
-                        if (tables[note.tableId].loaded) {
-                            const TableRow& lastRow = tables[note.tableId].rows[15];
-                            auto checkTic = [](uint8_t fxType, uint8_t fxValue) -> int {
-                                return (fxType == FX_TIC) ? fxValue : -1;
-                            };
-                            int t1 = checkTic(lastRow.fx1Type, lastRow.fx1Value);
-                            int t2 = checkTic(lastRow.fx2Type, lastRow.fx2Value);
-                            int t3 = checkTic(lastRow.fx3Type, lastRow.fx3Value);
-                            if      (t1 >= 0) effectiveTicRate = t1;
-                            else if (t2 >= 0) effectiveTicRate = t2;
-                            else if (t3 >= 0) effectiveTicRate = t3;
-                        }
-                    }
+                    // M8-style: a TIC in the table's last row overrides the instrument tic rate.
+                    int effectiveTicRate = effectiveTicRateFor(note.tableId, note.tableTicRate);
                     sv.resetTableState(note.tableId, effectiveTicRate,
                                        note.noteOctave, note.notePitch, note.tableStartRow);
 
@@ -974,30 +1180,8 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     }
                     float rate = note.frequency / note.baseFrequency;
 
-                    int effectiveTicRate = note.tableTicRate;
-                    if (note.tableId >= 0 && note.tableId < 256) {
-                        std::lock_guard<std::mutex> lock(tableMutex);
-                        if (tables[note.tableId].loaded) {
-                            TableRow& lastRow = tables[note.tableId].rows[15];
-                            auto checkTic = [](uint8_t fxType, uint8_t fxValue) -> int {
-                                if (fxType == FX_TIC) return fxValue;
-                                return -1;
-                            };
-                            int tic1 = checkTic(lastRow.fx1Type, lastRow.fx1Value);
-                            int tic2 = checkTic(lastRow.fx2Type, lastRow.fx2Value);
-                            int tic3 = checkTic(lastRow.fx3Type, lastRow.fx3Value);
-                            if (tic1 >= 0) {
-                                effectiveTicRate = tic1;
-                                LOGT("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
-                            } else if (tic2 >= 0) {
-                                effectiveTicRate = tic2;
-                                LOGT("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
-                            } else if (tic3 >= 0) {
-                                effectiveTicRate = tic3;
-                                LOGT("📋 M8-style: Using TIC %02X from table %d last row", effectiveTicRate, note.tableId);
-                            }
-                        }
-                    }
+                    // M8-style: a TIC in the table's last row overrides the instrument tic rate.
+                    int effectiveTicRate = effectiveTicRateFor(note.tableId, note.tableTicRate);
 
                     int startRow;
                     if (note.tableStartRow >= 0) {
@@ -1058,324 +1242,16 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         }
     }
 
-    // Special TIC modes:
-    //   TIC00 (0x00): Trigger mode — table row set by note, doesn't advance automatically
-    //   TICFC (0xFC): Octave map — row = triggered note's octave (0-9)
-    //   TICFE (0xFE): Note map — row = triggered note's pitch (0-11)
-    //   TICFF (0xFF): 200Hz mode — advance ~1 row per 5ms
+    // Table machinery (tic advance + row FX processing) — ONE implementation for both
+    // voice types: processTableTick above (KIL/OFFSET differences resolve via the
+    // tableKill/tableOffset overloads).
     for (int v = 0; v < MAX_VOICES; v++) {
-        Voice& voice = voices[v];
-        if (!voice.isActive || voice.tableId < 0) continue;
-
-        bool tableLoaded = false;
-        {
-            std::lock_guard<std::mutex> lock(tableMutex);
-            tableLoaded = tables[voice.tableId].loaded;
-        }
-        if (!tableLoaded) continue;
-
-        bool shouldProcessRow = false;
-        bool shouldAdvance = false;
-
-        if (voice.tableTicRate == 0x00) {
-            // TIC00: Trigger mode - apply row effects ONCE, don't advance automatically
-            shouldProcessRow = (voice.tableRow != voice.lastProcessedRow);
-            shouldAdvance = false;
-        } else if (voice.tableTicRate == 0xFC || voice.tableTicRate == 0xFE) {
-            // TICFC/TICFE: Static mapping modes - row is fixed, process ONCE
-            shouldProcessRow = (voice.tableRow != voice.lastProcessedRow);
-            shouldAdvance = false;
-        } else if (voice.tableTicRate == 0xFF) {
-            // TICFF: 200Hz mode - faster advancement
-            voice.tic200HzAccum += numFrames;
-            float samplesPerTic = sampleRate / 200.0f;
-            if (voice.tic200HzAccum >= samplesPerTic) {
-                voice.tic200HzAccum -= samplesPerTic;
-                shouldProcessRow = true;
-                shouldAdvance = true;
-            }
-        } else {
-            // Standard tic mode (01-FB): advance one row every `tableTicRate` musical tics.
-            // Frame-accurate and tempo-locked (like the TICFF branch above) so table speed tracks
-            // the sequencer, is identical live vs. offline render, and is independent of the audio
-            // buffer size. framesPerTic = sr / (BPM/60 · 4 steps/beat · 12 tics/step).
-            if (voice.lastProcessedRow == -1) {
-                // Fire the first tic AT trigger so row 0's transpose/vol/FX apply immediately.
-                // Otherwise the voice plays one full row-duration with no table effect, which sounds
-                // like the first row lasts twice as long. Mirrors TIC00's note-on processing.
-                voice.tableFrameAccum = 0.0f;
-                shouldProcessRow = true;
-                shouldAdvance = true;
-            } else {
-                int tempo = currentTempo.load(std::memory_order_relaxed);
-                float framesPerRow = sampleRate / (tempo / 60.0f * 4.0f * 12.0f) * (float)voice.tableTicRate;
-                voice.tableFrameAccum += numFrames;
-                if (framesPerRow > 0.0f && voice.tableFrameAccum >= framesPerRow) {
-                    voice.tableFrameAccum -= framesPerRow;
-                    // A block longer than one row (very fast tables) can't advance >1 row here, so
-                    // drop the extra rather than banking it (which would run away). Normal tic rates
-                    // have framesPerRow >> block, so the remainder carries and the rate stays exact.
-                    if (voice.tableFrameAccum >= framesPerRow) voice.tableFrameAccum = 0.0f;
-                    shouldProcessRow = true;
-                    shouldAdvance = true;
-                }
-            }
-        }
-
-        if (shouldProcessRow) {
-            TableRow row;
-            {
-                std::lock_guard<std::mutex> lock(tableMutex);
-                row = tables[voice.tableId].rows[voice.tableRow];
-            }
-
-            // playbackRate does not include transpose; getModulatedPlaybackRate reads
-            // modDestValues[PARAM_PITCH] which processRoutes accumulates from TABLE_PITCH.
-            int semitones = transposeToSemitones(row.transpose);
-            voice.tableTranspose = (float)semitones;  // kept for debug log
-            voice.modSourceValues[MOD_SRC_TABLE_PITCH] = (float)semitones;
-
-            // Mix loop reads modDestValues[PARAM_VOL] instead of voice.tableVolume.
-            if (row.volume == 0xFF) {
-                voice.tableVolume = 1.0f;  // kept for debug log
-            } else {
-                voice.tableVolume = row.volume / 255.0f;
-            }
-            voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume;
-
-            bool hopExecuted = false;
-            int hopTarget = -1;
-
-            auto processEffect = [&](uint8_t fxType, uint8_t fxValue) {
-                switch (fxType) {
-                    case FX_KILL:
-                        if (fxValue == 0x00) {
-                            voice.startFadeOut(KILL_FADE_SAMPLES);  // soft deliberate cut
-                            LOGT("📋 Table effect: KILL voice %d", v);
-                        }
-                        break;
-
-                    case FX_HOP:
-                        // HOP XY: X=repeat count (0=infinite), Y=target row; FF=stop table
-                        if (fxValue == 0xFF) {
-                            voice.tableId = -1;
-                            voice.hopTargetRow = -1;
-                            voice.hopRepeatCount = 0;
-                            LOGT("📋 Table HOP FF: stopped table for voice %d", v);
-                        } else {
-                            int repeatCount = (fxValue >> 4) & 0x0F;  // High nibble = X
-                            int targetRow = fxValue & 0x0F;           // Low nibble = Y
-
-                            if (repeatCount == 0) {
-                                // HOP 0Y = Infinite loop to row Y
-                                hopExecuted = true;
-                                hopTarget = targetRow;
-                                LOGT("📋 Table HOP %02X: infinite loop to row %d, voice %d", fxValue, targetRow, v);
-                            } else {
-                                // HOP XY (X>0) = Jump X times, then continue
-                                if (voice.hopTargetRow == -1 || voice.hopTargetRow != targetRow) {
-                                    voice.hopRepeatCount = repeatCount;
-                                    voice.hopTargetRow = targetRow;
-                                    LOGT("📋 Table HOP %02X: initialized counter=%d, target=%d, voice %d",
-                                         fxValue, repeatCount, targetRow, v);
-                                }
-
-                                if (voice.hopRepeatCount > 0) {
-                                    voice.hopRepeatCount--;
-                                    hopExecuted = true;
-                                    hopTarget = targetRow;
-                                    LOGT("📋 Table HOP: jump to row %d, %d jumps remaining, voice %d",
-                                         targetRow, voice.hopRepeatCount, v);
-                                } else {
-                                    // Counter exhausted, don't jump, reset state and continue normally
-                                    voice.hopTargetRow = -1;
-                                    LOGT("📋 Table HOP: counter exhausted, continuing past row, voice %d", v);
-                                }
-                            }
-                        }
-                        break;
-
-                    case FX_VOLUME:
-                        voice.tableVolume = fxValue / 255.0f;
-                        voice.modSourceValues[MOD_SRC_TABLE_VOL] = voice.tableVolume;
-                        break;
-
-                    case FX_OFFSET:
-                        if (voice.sampleLength > 0) {
-                            float normalizedPos = fxValue / 255.0f;
-                            voice.position = normalizedPos * (voice.sampleLength - 1);
-                        }
-                        break;
-
-                    case FX_TIC:
-                        if (fxValue >= 0x01 && fxValue <= 0xFB) {
-                            voice.tableTicRate = fxValue;
-                            voice.tableTicCounter = 0;
-                            LOGT("📋 Table effect: TIC %02X - set tick rate to %d", fxValue, fxValue);
-                        }
-                        break;
-
-                    case FX_THO:
-                        hopExecuted = true;
-                        hopTarget = fxValue & 0x0F;
-                        LOGT("📋 Table THO %02X: hop to row %d, voice %d", fxValue, hopTarget, v);
-                        break;
-
-                    default:
-                        break;
-                }
-            };
-
-            processEffect(row.fx1Type, row.fx1Value);
-            processEffect(row.fx2Type, row.fx2Value);
-            processEffect(row.fx3Type, row.fx3Value);
-
-            voice.lastProcessedRow = voice.tableRow;
-
-            if (hopExecuted && hopTarget >= 0) {
-                voice.tableRow = hopTarget % 16;
-                LOGT("📋 Table HOP: voice %d jumped to row %d", v, voice.tableRow);
-            } else if (shouldAdvance) {
-                voice.tableRow = (voice.tableRow + 1) % 16;
-            }
-
-            if (shouldAdvance && voice.tableRow == 0) {
-                LOGT("📋 Table %d loop: voice=%d, transpose=%.0f, vol=%.2f",
-                     voice.tableId, v, voice.tableTranspose, voice.tableVolume);
-            }
-        }
+        if (voices[v].isActive && voices[v].tableId >= 0)
+            processTableTick(voices[v], numFrames, sampleRate);
     }
-
-    // SF table processing: mirrors sampler loop above. Effects writing to modSourceValues[]
-    // are picked up by updateVoiceModulation/applyPitchMod. FX_OFFSET silently skipped.
     for (int t = 0; t < SF_VOICE_COUNT; t++) {
-        SoundfontVoice& sv = sfVoices[t];
-        if (!sv.isActive || sv.tableId < 0) continue;
-
-        bool tableLoaded = false;
-        {
-            std::lock_guard<std::mutex> lock(tableMutex);
-            tableLoaded = tables[sv.tableId].loaded;
-        }
-        if (!tableLoaded) continue;
-
-        bool shouldProcessRow = false;
-        bool shouldAdvance    = false;
-
-        if (sv.tableTicRate == 0x00) {
-            shouldProcessRow = (sv.tableRow != sv.lastProcessedRow);
-            shouldAdvance    = false;
-        } else if (sv.tableTicRate == 0xFC || sv.tableTicRate == 0xFE) {
-            shouldProcessRow = (sv.tableRow != sv.lastProcessedRow);
-            shouldAdvance    = false;
-        } else if (sv.tableTicRate == 0xFF) {
-            sv.tic200HzAccum += numFrames;
-            float samplesPerTic = sampleRate / 200.0f;
-            if (sv.tic200HzAccum >= samplesPerTic) {
-                sv.tic200HzAccum -= samplesPerTic;
-                shouldProcessRow = true;
-                shouldAdvance    = true;
-            }
-        } else {
-            // Standard tic mode (01-FB): frame-accurate, tempo-locked advance (see sampler path).
-            if (sv.lastProcessedRow == -1) {
-                // Fire the first tic at trigger so row 0 applies immediately (see sampler path).
-                sv.tableFrameAccum = 0.0f;
-                shouldProcessRow   = true;
-                shouldAdvance      = true;
-            } else {
-                int tempo = currentTempo.load(std::memory_order_relaxed);
-                float framesPerRow = sampleRate / (tempo / 60.0f * 4.0f * 12.0f) * (float)sv.tableTicRate;
-                sv.tableFrameAccum += numFrames;
-                if (framesPerRow > 0.0f && sv.tableFrameAccum >= framesPerRow) {
-                    sv.tableFrameAccum -= framesPerRow;
-                    if (sv.tableFrameAccum >= framesPerRow) sv.tableFrameAccum = 0.0f;
-                    shouldProcessRow   = true;
-                    shouldAdvance      = true;
-                }
-            }
-        }
-
-        if (shouldProcessRow) {
-            TableRow row;
-            {
-                std::lock_guard<std::mutex> lock(tableMutex);
-                row = tables[sv.tableId].rows[sv.tableRow];
-            }
-
-            int semitones = transposeToSemitones(row.transpose);
-            sv.tableTranspose = (float)semitones;
-            sv.modSourceValues[MOD_SRC_TABLE_PITCH] = (float)semitones;
-
-            if (row.volume == 0xFF) {
-                sv.tableVolume = 1.0f;
-            } else {
-                sv.tableVolume = row.volume / 255.0f;
-            }
-            sv.modSourceValues[MOD_SRC_TABLE_VOL] = sv.tableVolume;
-
-            bool hopExecuted = false;
-            int  hopTarget   = -1;
-
-            auto processEffect = [&](uint8_t fxType, uint8_t fxValue) {
-                switch (fxType) {
-                    case FX_KILL:
-                        if (fxValue == 0x00) sv.noteOff();
-                        break;
-                    case FX_HOP:
-                        if (fxValue == 0xFF) {
-                            sv.tableId      = -1;
-                            sv.hopTargetRow = -1;
-                            sv.hopRepeatCount = 0;
-                        } else {
-                            int repeatCount = (fxValue >> 4) & 0x0F;
-                            int targetRow   =  fxValue       & 0x0F;
-                            if (repeatCount == 0) {
-                                hopExecuted = true; hopTarget = targetRow;
-                            } else {
-                                if (sv.hopTargetRow == -1 || sv.hopTargetRow != targetRow) {
-                                    sv.hopRepeatCount = repeatCount;
-                                    sv.hopTargetRow   = targetRow;
-                                }
-                                if (sv.hopRepeatCount > 0) {
-                                    sv.hopRepeatCount--;
-                                    hopExecuted = true; hopTarget = targetRow;
-                                } else {
-                                    sv.hopTargetRow = -1;
-                                }
-                            }
-                        }
-                        break;
-                    case FX_VOLUME:
-                        sv.tableVolume = fxValue / 255.0f;
-                        sv.modSourceValues[MOD_SRC_TABLE_VOL] = sv.tableVolume;
-                        break;
-                    case FX_TIC:
-                        if (fxValue >= 0x01 && fxValue <= 0xFB) {
-                            sv.tableTicRate    = fxValue;
-                            sv.tableTicCounter = 0;
-                        }
-                        break;
-                    case FX_THO:
-                        hopExecuted = true; hopTarget = fxValue & 0x0F;
-                        break;
-                    default:
-                        break;  // FX_OFFSET, FX_RETRIGGER, FX_ARP not applicable to SF
-                }
-            };
-
-            processEffect(row.fx1Type, row.fx1Value);
-            processEffect(row.fx2Type, row.fx2Value);
-            processEffect(row.fx3Type, row.fx3Value);
-
-            sv.lastProcessedRow = sv.tableRow;
-
-            if (hopExecuted && hopTarget >= 0) {
-                sv.tableRow = hopTarget % 16;
-            } else if (shouldAdvance) {
-                sv.tableRow = (sv.tableRow + 1) % 16;
-            }
-        }
+        if (sfVoices[t].isActive && sfVoices[t].tableId >= 0)
+            processTableTick(sfVoices[t], numFrames, sampleRate);
     }
 
     for (int v = 0; v < MAX_VOICES; v++) {
@@ -1474,7 +1350,9 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
 
         for (int i = startFrame; i < numFrames; i++) {
             int idx = (int)voice.position;
-            float frac = voice.position - (float)idx;
+            // frac computed in double THEN narrowed: (float)idx is inexact past 2^24, which
+            // would corrupt frac for exactly the long samples double position exists for.
+            float frac = (float)(voice.position - (double)idx);
 
             // Bounds check - need idx+1 for interpolation
             if (idx < 0 || idx >= voice.sampleLength - 1) {
@@ -1482,7 +1360,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     voice.isActive = false;  // negative position: safety hard-stop
                 } else {
                     // At or past last interpolation point: fade out so SVF resonance decays
-                    voice.position = (float)(voice.sampleLength - 2);
+                    voice.position = (double)(voice.sampleLength - 2);
                     voice.startFadeOut();  // no-op if already fading
                 }
                 break;
@@ -1512,10 +1390,13 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             float masterVol = masterVolSnapshot;
             float antiClick = voice.antiClickFade();
 
-            float sampleL, sampleR;
-
+            // Sample fetch + per-voice chain is the ONLY mono/stereo difference; a mono
+            // sample simply feeds the same value to both lanes (procL == procR). The shared
+            // tail below replaces two ~40-line copies (stereo semantics; the mono path's
+            // multiplies regroup by one ulp at most).
+            float procL, procR;
             if (voice.sampleDataRight) {
-                // ── STEREO SAMPLE PATH ────────────────────────────────────────────
+                // ── STEREO FETCH ─────────────────────────────────────────────────
                 float s1L, s2L, s1R, s2R;
                 if (effDownsample > 0) {
                     int factor = 1 << effDownsample;
@@ -1526,80 +1407,55 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     s1L = voice.sampleData[idx];       s2L = voice.sampleData[idx + 1];
                     s1R = voice.sampleDataRight[idx];  s2R = voice.sampleDataRight[idx + 1];
                 }
-                float procL = s1L + (s2L - s1L) * frac;
-                float procR = s1R + (s2R - s1R) * frac;
+                procL = s1L + (s2L - s1L) * frac;
+                procR = s1R + (s2R - s1R) * frac;
                 voice.chain.filter.setInterpolatedCoeffs(t);
                 voice.chain.processStereo(procL, procR);
-
-                float scalar = finalVol * volRoute;
-                procL *= scalar;
-                procR *= scalar;
-
-                if ((stemsMode == 0 || stemsMode >= 9) && voice.reverbSend > 0.0f) {
-                    revSendBufL[i] += procL * panL * voice.reverbSend;
-                    revSendBufR[i] += procR * panR * voice.reverbSend;
-                }
-                if ((stemsMode == 0 || stemsMode >= 9) && voice.delaySend > 0.0f) {
-                    dlySendBufL[i] += procL * panL * voice.delaySend;
-                    dlySendBufR[i] += procR * panR * voice.delaySend;
-                }
-
-                float globalMul = trackVol * masterVol * antiClick;
-                procL *= globalMul;
-                procR *= globalMul;
-
-                if (voice.isFadingOut) {
-                    float fo = (float)voice.fadeOutRemaining / (float)voice.fadeOutTotal;
-                    procL *= fo;
-                    procR *= fo;
-                    if (--voice.fadeOutRemaining <= 0) {
-                        voice.isFadingOut = false;
-                        voice.isActive = false;
-                    }
-                }
-
-                sampleL = procL * panL;
-                sampleR = procR * panR;
             } else {
-                // ── MONO SAMPLE PATH ──────────────────────────────────────────────
+                // ── MONO FETCH ───────────────────────────────────────────────────
                 float sample1 = voice.sampleData[idx];
                 float sample2 = voice.sampleData[idx + 1];
-
                 if (effDownsample > 0) {
                     int downsampleFactor = 1 << effDownsample;
                     int quantizedIdx = (idx / downsampleFactor) * downsampleFactor;
                     sample1 = voice.sampleData[quantizedIdx];
                     sample2 = voice.sampleData[quantizedIdx];
                 }
-
                 float processedSample = sample1 + (sample2 - sample1) * frac;
                 voice.chain.filter.setInterpolatedCoeffs(t);
-                processedSample = voice.chain.processMono(processedSample);
-
-                float sample = processedSample * finalVol * volRoute;
-
-                if ((stemsMode == 0 || stemsMode >= 9) && voice.reverbSend > 0.0f) {
-                    revSendBufL[i] += sample * panL * voice.reverbSend;
-                    revSendBufR[i] += sample * panR * voice.reverbSend;
-                }
-                if ((stemsMode == 0 || stemsMode >= 9) && voice.delaySend > 0.0f) {
-                    dlySendBufL[i] += sample * panL * voice.delaySend;
-                    dlySendBufR[i] += sample * panR * voice.delaySend;
-                }
-
-                sample = sample * trackVol * masterVol * antiClick;
-
-                if (voice.isFadingOut) {
-                    sample *= (float)voice.fadeOutRemaining / (float)voice.fadeOutTotal;
-                    if (--voice.fadeOutRemaining <= 0) {
-                        voice.isFadingOut = false;
-                        voice.isActive = false;
-                    }
-                }
-
-                sampleL = sample * panL;
-                sampleR = sample * panR;
+                procL = procR = voice.chain.processMono(processedSample);
             }
+
+            // ── SHARED TAIL: sends → global gain → fade-out → pan ────────────────
+            float scalar = finalVol * volRoute;
+            procL *= scalar;
+            procR *= scalar;
+
+            if ((stemsMode == 0 || stemsMode >= 9) && voice.reverbSend > 0.0f) {
+                revSendBufL[i] += procL * panL * voice.reverbSend;
+                revSendBufR[i] += procR * panR * voice.reverbSend;
+            }
+            if ((stemsMode == 0 || stemsMode >= 9) && voice.delaySend > 0.0f) {
+                dlySendBufL[i] += procL * panL * voice.delaySend;
+                dlySendBufR[i] += procR * panR * voice.delaySend;
+            }
+
+            float globalMul = trackVol * masterVol * antiClick;
+            procL *= globalMul;
+            procR *= globalMul;
+
+            if (voice.isFadingOut) {
+                float fo = (float)voice.fadeOutRemaining / (float)voice.fadeOutTotal;
+                procL *= fo;
+                procR *= fo;
+                if (--voice.fadeOutRemaining <= 0) {
+                    voice.isFadingOut = false;
+                    voice.isActive = false;
+                }
+            }
+
+            float sampleL = procL * panL;
+            float sampleR = procR * panR;
 
             if (stemsMode == 0 || voice.trackId == stemsMode - 1) {
                 output[i * channelCount] += sampleL;
@@ -1631,22 +1487,22 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     voice.position -= modulatedRate;
                     if (voice.position <= voice.actualLoopStart) {
                         voice.loopingBack = false;
-                        voice.position = (float)voice.actualLoopStart;
+                        voice.position = (double)voice.actualLoopStart;
                     }
                 } else {
                     voice.position += modulatedRate;
                     if (voice.position >= voice.actualLoopEnd) {
                         voice.loopingBack = true;
-                        voice.position = (float)voice.actualLoopEnd;
+                        voice.position = (double)voice.actualLoopEnd;
                     }
                 }
             } else if (voice.reverse && !voice.loopReleasing) {
                 voice.position -= modulatedRate;
                 if (voice.position <= voice.actualStart) {
                     if (voice.loopMode == 1) {
-                        voice.position = (float)voice.actualLoopStart;
+                        voice.position = (double)voice.actualLoopStart;
                     } else {
-                        voice.position = (float)voice.actualStart;
+                        voice.position = (double)voice.actualStart;
                         voice.startFadeOut();
                         break;
                     }
@@ -1654,12 +1510,12 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             } else {
                 voice.position += modulatedRate;
                 bool activeForwardLoop = (voice.loopMode == 1 && !voice.loopReleasing);
-                float fwdBoundary = activeForwardLoop ? (float)voice.actualLoopEnd : (float)voice.actualEnd;
+                double fwdBoundary = activeForwardLoop ? (double)voice.actualLoopEnd : (double)voice.actualEnd;
                 if (voice.position >= fwdBoundary) {
                     if (activeForwardLoop) {
-                        voice.position = (float)voice.actualLoopStart;
+                        voice.position = (double)voice.actualLoopStart;
                     } else {
-                        voice.position = (float)(voice.actualEnd - 1);
+                        voice.position = (double)(voice.actualEnd - 1);
                         voice.startFadeOut();
                         break;
                     }
@@ -2508,30 +2364,9 @@ void AudioEngine::initVoiceModSlots(IAudioVoice& voice, int sampleId, int64_t cu
 }
 
 void AudioEngine::triggerNoteOff(int trackId) {
+    // The release-vs-fade decision lives in Voice::noteOff — one implementation.
     for (int v = 0; v < MAX_VOICES; v++) {
-        if (!voices[v].isActive || voices[v].trackId != trackId) continue;
-        bool hasRelease = false;
-        for (int m = 0; m < 4; m++) {
-            VoiceModSlot& mod = voices[v].voiceMods[m];
-            if (mod.dest == 1 && (mod.type == 2 || mod.type == 5)) {
-                if (mod.stage >= 1 && mod.stage <= 3 && mod.releaseSamples > 0) {
-                    mod.stage = 4;
-                    mod.stageCounter = 0;
-                    hasRelease = true;
-                } else if (mod.stage == 4) {
-                    hasRelease = true;
-                }
-            }
-        }
-        if (hasRelease) {
-            // Looping voice: leave the loop so the [loopEnd, end] tail plays out under the release env.
-            if (voices[v].loopMode != 0) voices[v].loopReleasing = true;
-        } else {
-            // No release envelope: fade out over KILL_FADE_SAMPLES instead of a hard stop, so KIL
-            // (and any soft note-off on a release-less voice) is click-free. startFadeOut keeps the
-            // slot reserved and the main mix loop frees it when the fade finishes.
-            voices[v].startFadeOut(KILL_FADE_SAMPLES);
-        }
+        if (voices[v].isActive && voices[v].trackId == trackId) voices[v].noteOff();
     }
 }
 

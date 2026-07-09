@@ -100,6 +100,31 @@ fun getTrackIndex(cursorColumn: Int): Int {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// GRID CELL  (shared by the row editors: phrase, chain, song, table)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * One value cell in an editor grid row, with the standard colour priority:
+ * cursor > selection > empty > [valueColor]. Collapses the per-cell `when` blocks
+ * that every editor used to inline.
+ *
+ * @param valueColor the cell's "normal" colour (varies per column: values, params, FX names).
+ */
+fun DrawScope.drawCell(
+    text: String, x: Int, textY: Int, scale: Int,
+    isCursor: Boolean, isSelected: Boolean, isEmpty: Boolean,
+    valueColor: Long, t: AppTheme
+) {
+    val color = when {
+        isCursor   -> Color(t.textCursor)
+        isSelected -> Color(t.vizWave)
+        isEmpty    -> Color(t.textEmpty)
+        else       -> Color(valueColor)
+    }
+    drawBitmapText(text, x, textY, scale, color, CHAR_SPACING, FONT_SCALE)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // EQ CELL  (shared by instrument, instrument pool, mixer, effects, sample editor)
 // ═══════════════════════════════════════════════════════════════════════════
 

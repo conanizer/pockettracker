@@ -123,105 +123,13 @@ const val SCREEN_SPACER = 6      // Space between modules
 const val SIDE_SPACER = 10       // Space on sides
 
 @Composable
-fun PixelPerfectTracker(
-    currentScreen: ScreenType,
-    project: Project,
-    audioEngine: AudioEngine,
-    playbackController: PlaybackController,
-    cursorRow: Int,
-    cursorColumn: Int,
-    isPlaying: Boolean,
-    previousColumn: Int,
-    currentChain: Int,
-    currentPhrase: Int,
-    projectCursorRow: Int,
-    projectCursorColumn: Int,
-    projectVersion: Int,
-    currentInstrument: Int,
-    instrumentCursorRow: Int,
-    instrumentCursorColumn: Int,
-    // Global status overlay (drawn over the visualizer header): instrument messages take
-    // priority, tracker-level messages are the fallback — computed by MainActivity.
-    statusMessage: String,
-    statusSuccess: Boolean,
-    poolCursorColumn: Int = 0,
-    instrumentFromPool: Boolean = false,
-    fileBrowserState: FileBrowserModule.State? = null,
-    sampleEditorState: SampleEditorState? = null,
-    // Copy/paste state
-    selectionInfo: String = "",        // e.g., "SEL:CELL", "SEL:ROW", "SEL:ALL"
-    clipboardInfo: String = "",        // e.g., "PHR:3x4", "CHN:1x8"
-    selectionMode: Boolean = false,    // Whether selection mode is active
-    isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },  // Check if cell is selected
-    // Mixer state
-    mixerCursorColumn: Int = 0,        // 0-7 = tracks, 8 = master
-    mixerMasterRow: Int = 0,           // 0 = volume row, 1 = OTT row
-    trackPeaks: FloatArray = FloatArray(8),
-    masterPeaks: FloatArray = FloatArray(2),
-    sendPeaks: FloatArray = FloatArray(4),
-    // Table state
-    currentTable: Int = 0,
-    tableCursorRow: Int = 0,
-    tableCursorColumn: Int = 1,
-    // Groove state
-    currentGroove: Int = 0,
-    grooveCursorRow: Int = 0,
-    // Modulation state
-    modCursorRow: Int = 0,
-    modCursorPair: Int = 0,
-    modCursorSide: Int = 0,
-    // Effects screen cursor
-    effectsCursorRow: Int = 0,
-    // Render state (WAV export)
-    isRendering: Boolean = false,
-    renderProgress: Float = 0f,
-    // Sample-RAM readout (PROJECT screen)
-    sampleRamBytes: Long = 0L,
-    // Clean dialog state
-    showCleanDialog: Boolean = false,
-    cleanDialogTarget: String = "",  // "SEQ" or "INST"
-    cleanDialogCursor: Int = 0,      // 0 = YES, 1 = NO
-    // Simple confirm dialogs
-    showNewProjectDialog: Boolean = false,
-    showInstrTypeDialog: Boolean = false,
-    showRecoveryDialog: Boolean = false,
-    // Song scroll position
-    songScrollPosition: Int = 0,
-    // Scaling mode (for project screen display)
-    scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER,
-    buttonSoundEnabled: Boolean = false,
-    buttonSoundVolume: Int = 255,
-    buttonVibroEnabled: Boolean = false,
-    vibroPower: Int = 255,
-    // QWERTY keyboard overlay state
-    qwertyKeyboardState: QwertyKeyboardState = QwertyKeyboardState(),
-    // FX helper overlay state
-    fxHelperState: FxHelperState = FxHelperState(),
-    // EQ editor overlay state
-    eqEditorState: EqEditorState = EqEditorState(),
-    eqSpectrumData: FloatArray? = null,
-    // Theme editor overlay state
-    themeEditorState: ThemeEditorState = ThemeEditorState(),
-    // Settings screen cursor
-    settingsCursorRow: Int = 0,
-    settingsCursorColumn: Int = 1,
-    // Cursor remember setting (for settings screen display)
-    cursorRemember: Boolean = false,
-    // Note preview setting (for settings screen display)
-    notePreviewEnabled: Boolean = true,
-    // Autosave resume mode (for settings screen display)
-    autosaveResumeAuto: Boolean = false,
-    // SoundFont preset navigation state
-    soundfontPresetName: String = "",
-    soundfontPresetCount: Int = 0,
-    soundfontPresetIndex: Int = 0,
-    // Overlay settings (for settings screen display)
-    overlayFiles: List<String> = emptyList(),
-    overlayName: String = "OFF",
-    overlayStrength: Int = 128,
-    // Selected device skin (for the LAYOUT row's theme column)
-    portraitSkinId: String = "amiga"
-) {
+fun PixelPerfectTracker(params: TrackerScreenParams) {
+    // The whole screen-state bundle travels as ONE object. It used to be exploded into ~60
+    // loose parameters here, in the TrackerScreen wrapper, and again into drawLayout — three
+    // parallel lists that had to stay in sync (REVIEW-6 6.7.1). with(params) keeps the body
+    // reading the fields unqualified; only locally-derived values (playback rows, ticker,
+    // theme/layout CompositionLocals) remain loose.
+    with(params) {
     // Playback state
     var playbackRow by remember { mutableStateOf(0) }
     var playbackChainRow by remember { mutableStateOf(0) }
@@ -375,90 +283,21 @@ fun PixelPerfectTracker(
         translate(offsetX, offsetY) {
             with(layout) {
                 drawLayout(
-                        scale = scale,
-                        oscilloscopeTicker = oscilloscopeTicker,
-                        currentScreen = currentScreen,
-                        project = project,
-                        cursorRow = cursorRow,
-                        cursorColumn = cursorColumn,
-                        isPlaying = isPlaying,
-                        playbackRow = playbackRow,
-                        playbackChainRow = playbackChainRow,
-                        playbackSongRow = playbackSongRow,
-                        tablePlaybackRow = tablePlaybackRow,
-                        audioEngine = audioEngine,
-                        previousColumn = previousColumn,
-                        currentChain = currentChain,
-                        currentPhrase = currentPhrase,
-                        projectCursorRow = projectCursorRow,
-                        projectCursorColumn = projectCursorColumn,
-                        projectVersion = projectVersion,
-                        currentInstrument = currentInstrument,
-                        instrumentCursorRow = instrumentCursorRow,
-                        instrumentCursorColumn = instrumentCursorColumn,
-                        statusMessage = statusMessage,
-                        statusSuccess = statusSuccess,
-                        poolCursorColumn = poolCursorColumn,
-                        instrumentFromPool = instrumentFromPool,
-                        fileBrowserState = fileBrowserState,
-                        sampleEditorState = sampleEditorState,
-                        selectionInfo = selectionInfo,
-                        clipboardInfo = clipboardInfo,
-                        selectionMode = selectionMode,
-                        isCellSelected = isCellSelected,
-                        mixerCursorColumn = mixerCursorColumn,
-                        mixerMasterRow = mixerMasterRow,
-                        trackPeaks = trackPeaks,
-                        masterPeaks = masterPeaks,
-                        sendPeaks = sendPeaks,
-                        currentTable = currentTable,
-                        tableCursorRow = tableCursorRow,
-                        tableCursorColumn = tableCursorColumn,
-                        currentGroove = currentGroove,
-                        grooveCursorRow = grooveCursorRow,
-                        modCursorRow = modCursorRow,
-                        modCursorPair = modCursorPair,
-                        modCursorSide = modCursorSide,
-                        effectsCursorRow = effectsCursorRow,
-                        isRendering = isRendering,
-                        renderProgress = renderProgress,
-                        sampleRamBytes = sampleRamBytes,
-                        showCleanDialog = showCleanDialog,
-                        cleanDialogTarget = cleanDialogTarget,
-                        cleanDialogCursor = cleanDialogCursor,
-                        showNewProjectDialog = showNewProjectDialog,
-                        showInstrTypeDialog = showInstrTypeDialog,
-                        showRecoveryDialog = showRecoveryDialog,
-                        layoutMode = layoutMode,
-                        songScrollPosition = songScrollPosition,
-                        scalingMode = scalingMode,
-                        buttonSoundEnabled = buttonSoundEnabled,
-                        buttonSoundVolume = buttonSoundVolume,
-                        buttonVibroEnabled = buttonVibroEnabled,
-                        vibroPower = vibroPower,
-                        qwertyKeyboardState = qwertyKeyboardState,
-                        fxHelperState = fxHelperState,
-                        eqEditorState = eqEditorState,
-                        eqSpectrumData = eqSpectrumData,
-                        settingsCursorRow = settingsCursorRow,
-                        settingsCursorColumn = settingsCursorColumn,
-                        cursorRemember = cursorRemember,
-                        notePreviewEnabled = notePreviewEnabled,
-                        autosaveResumeAuto = autosaveResumeAuto,
-                        trackNotes = trackNotes,
-                        soundfontPresetName  = soundfontPresetName,
-                        soundfontPresetCount = soundfontPresetCount,
-                        soundfontPresetIndex = soundfontPresetIndex,
-                        appTheme             = appTheme,
-                        themeEditorState     = themeEditorState,
-                        overlayFiles         = overlayFiles,
-                        overlayName          = overlayName,
-                        overlayStrength      = overlayStrength,
-                        portraitSkinId       = portraitSkinId
-                    )
-                }
+                    scale = scale,
+                    oscilloscopeTicker = oscilloscopeTicker,
+                    params = params,
+                    playbackRow = playbackRow,
+                    playbackChainRow = playbackChainRow,
+                    playbackSongRow = playbackSongRow,
+                    tablePlaybackRow = tablePlaybackRow,
+                    trackNotes = trackNotes,
+                    appTheme = appTheme,
+                    layoutMode = layoutMode
+                )
             }
         }
+    }
+    }  // with(params)
 }
 
 /**
@@ -496,110 +335,18 @@ class TrackerLayout {
     fun DrawScope.drawLayout(
         scale: Int,
         oscilloscopeTicker: Long = 0L,  // Read in draw scope → Canvas redraws at 60fps for oscilloscope
-        currentScreen: ScreenType,
-        project: Project,
-        cursorRow: Int,
-        cursorColumn: Int,
-        isPlaying: Boolean,
+        // The whole screen-state bundle (MainActivity builds it once) — see PixelPerfectTracker.
+        params: TrackerScreenParams,
+        // Locally-derived values, not part of the bundle:
         playbackRow: Int,
         playbackChainRow: Int,
         playbackSongRow: Int,
         tablePlaybackRow: Int? = null,  // resolved in the 60 Hz poll loop — no JNI in the draw pass
-        audioEngine: AudioEngine,
-        previousColumn: Int,
-        currentChain: Int,
-        currentPhrase: Int = 0,
-        projectCursorRow: Int = 0,
-        projectCursorColumn: Int = 1,
-        projectVersion: Int = 0,  // Version counter to force redraw on data changes
-        currentInstrument: Int = 0,
-        instrumentCursorRow: Int = 0,
-        instrumentCursorColumn: Int = 1,
-        // Global status overlay (see drawLayout body): instrument-first, tracker fallback.
-        statusMessage: String = "",
-        statusSuccess: Boolean = true,
-        poolCursorColumn: Int = 0,
-        instrumentFromPool: Boolean = false,
-        fileBrowserState: FileBrowserModule.State? = null,  // File browser state
-        sampleEditorState: SampleEditorState? = null,
-        // Copy/paste state
-        selectionInfo: String = "",
-        clipboardInfo: String = "",
-        selectionMode: Boolean = false,
-        isCellSelected: (Int, Int) -> Boolean = { _, _ -> false },
-        // Mixer state
-        mixerCursorColumn: Int = 0,
-        mixerMasterRow: Int = 0,
-        trackPeaks: FloatArray = FloatArray(8),
-        masterPeaks: FloatArray = FloatArray(2),
-        sendPeaks: FloatArray = FloatArray(4),
-        // Table state
-        currentTable: Int = 0,
-        tableCursorRow: Int = 0,
-        tableCursorColumn: Int = 1,
-        // Groove state
-        currentGroove: Int = 0,
-        grooveCursorRow: Int = 0,
-        // Modulation state
-        modCursorRow: Int = 0,
-        modCursorPair: Int = 0,
-        modCursorSide: Int = 0,
-        // Effects screen cursor
-        effectsCursorRow: Int = 0,
-        // Render state (WAV export)
-        isRendering: Boolean = false,
-        renderProgress: Float = 0f,
-        // Sample-RAM readout (PROJECT screen)
-        sampleRamBytes: Long = 0L,
-        // Clean dialog state
-        showCleanDialog: Boolean = false,
-        cleanDialogTarget: String = "",  // "SEQ" or "INST"
-        cleanDialogCursor: Int = 0,      // 0 = YES, 1 = NO
-        // Simple confirm dialogs (A=YES, B=NO)
-        showNewProjectDialog: Boolean = false,
-        showInstrTypeDialog: Boolean = false,
-        showRecoveryDialog: Boolean = false,
-        // Layout mode (from CompositionLocal, for display in project screen)
-        layoutMode: DeviceAdapter.LayoutMode = DeviceAdapter.LayoutMode.FULL,
-        // Song scroll position (viewport start row for 256-row song)
-        songScrollPosition: Int = 0,
-        // Scaling mode (for project screen display)
-        scalingMode: DeviceAdapter.ScalingMode = DeviceAdapter.ScalingMode.INTEGER,
-        buttonSoundEnabled: Boolean = false,
-        buttonSoundVolume: Int = 255,
-        buttonVibroEnabled: Boolean = false,
-        vibroPower: Int = 255,
-        // QWERTY keyboard overlay state
-        qwertyKeyboardState: QwertyKeyboardState = QwertyKeyboardState(),
-        // FX helper overlay state
-        fxHelperState: FxHelperState = FxHelperState(),
-        // EQ editor overlay state
-        eqEditorState: EqEditorState = EqEditorState(),
-        eqSpectrumData: FloatArray? = null,
-        // Settings screen cursor
-        settingsCursorRow: Int = 0,
-        settingsCursorColumn: Int = 1,
-        // Cursor remember setting (passed through to SettingsState for display)
-        cursorRemember: Boolean = false,
-        // Note preview setting (passed through to SettingsState for display)
-        notePreviewEnabled: Boolean = true,
-        // Autosave resume mode (passed through to SettingsState for display)
-        autosaveResumeAuto: Boolean = false,
-        // Track note monitor
-        trackNotes: List<Note> = List(8) { Note.EMPTY },
-        // SoundFont preset navigation state
-        soundfontPresetName: String = "",
-        soundfontPresetCount: Int = 0,
-        soundfontPresetIndex: Int = 0,
-        appTheme: AppTheme = AppTheme.CLASSIC,
-        themeEditorState: ThemeEditorState = ThemeEditorState(),
-        // Overlay settings (for settings screen display)
-        overlayFiles: List<String> = emptyList(),
-        overlayName: String = "OFF",
-        overlayStrength: Int = 128,
-        // Selected device skin (for the LAYOUT row's theme column)
-        portraitSkinId: String = "amiga"
+        trackNotes: List<Note> = List(8) { Note.EMPTY },  // note monitor (60 Hz poll)
+        appTheme: AppTheme = AppTheme.CLASSIC,                              // LocalAppTheme
+        layoutMode: DeviceAdapter.LayoutMode = DeviceAdapter.LayoutMode.FULL  // LocalLayoutMode
     ) {
+        with(params) {
         val t = appTheme
         // ===================================
         // DRAW BACKGROUND
@@ -1138,6 +885,7 @@ class TrackerLayout {
         // ===================================
         // Left column: Oscilloscope + Phrase Editor (or placeholder)
         // Right corner: Navigation Map
+        }  // with(params)
     }
 
     private fun DrawScope.drawCleanDialog(scale: Int, target: String, @Suppress("UNUSED_PARAMETER") cursor: Int, t: AppTheme) {

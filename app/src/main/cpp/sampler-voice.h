@@ -12,7 +12,10 @@ struct Voice : public IAudioVoice {
     float* sampleData;
     float* sampleDataRight;  // Right channel for stereo samples (null = mono)
     int sampleLength;
-    float position;
+    // double, not float: float spacing reaches 1.0 at 2^24 frames (~6 min 20 s @ 44.1 kHz),
+    // where interpolation collapses to nearest-neighbour and position steps go irregular.
+    // Long WAVs / extracted video audio hit this; double costs the same on arm64 FPUs.
+    double position;
     int trackId;
     int instrId = -1;        // Instrument index (= sampleId); used for per-instrument spectrum capture
     float playbackRate;
@@ -270,9 +273,9 @@ struct Voice : public IAudioVoice {
         // Set initial position based on direction
         // For reverse: start at actualEnd - 1 (not actualEnd) because we need to read idx+1 for interpolation
         if (reverse) {
-            position = (float)(actualEnd > actualStart ? actualEnd - 1 : actualStart);
+            position = (double)(actualEnd > actualStart ? actualEnd - 1 : actualStart);
         } else {
-            position = (float)actualStart;
+            position = (double)actualStart;
         }
 
         fadeInRemaining = DECLICK_SAMPLES;  // Anti-click fade-in on every new note
@@ -315,14 +318,21 @@ struct Voice : public IAudioVoice {
     void hardStop() override { stop(); }
 
     void noteOff() override {
-        // Transitions ADSR/TRIG modulators to release stage (same as triggerNoteOff path).
-        // For voices with no release envelope this falls back to the declicked fade.
+        // THE release decision for sampler voices — AudioEngine::triggerNoteOff delegates
+        // here (they used to be two drifted copies). Promote live ADSR/TRIG VOL mods
+        // (attack/decay/sustain, with a nonzero release configured) to the release stage;
+        // an already-releasing mod also counts. No release envelope → declicked kill fade.
         bool hasRelease = false;
         for (int m = 0; m < 4; m++) {
             VoiceModSlot& vmod = voiceMods[m];
-            if ((vmod.type == 2 || vmod.type == 5) && vmod.stage == 3) {
-                vmod.stage = 4;  // ADSR/TRIG → release
-                hasRelease = true;
+            if (vmod.dest == 1 && (vmod.type == 2 || vmod.type == 5)) {
+                if (vmod.stage >= 1 && vmod.stage <= 3 && vmod.releaseSamples > 0) {
+                    vmod.stage = 4;  // ADSR/TRIG → release
+                    vmod.stageCounter = 0;
+                    hasRelease = true;
+                } else if (vmod.stage == 4) {
+                    hasRelease = true;
+                }
             }
         }
         if (hasRelease) {
@@ -346,10 +356,10 @@ struct Voice : public IAudioVoice {
         if (!isActive || !sampleData) return;
         if (startPoint >= 0 && startPoint <= 255 && sampleLength > 0) {
             // int64 — same overflow as trigger() for long samples
-            position = (float)(((int64_t)startPoint * sampleLength) / 255);
-            position = fmaxf((float)actualStart, fminf(position, (float)(actualEnd - 1)));
+            position = (double)(((int64_t)startPoint * sampleLength) / 255);
+            position = std::max((double)actualStart, std::min(position, (double)(actualEnd - 1)));
         } else {
-            position = (float)actualStart;
+            position = (double)actualStart;
         }
         fadeInRemaining = DECLICK_SAMPLES;
     }
@@ -401,9 +411,11 @@ struct Voice : public IAudioVoice {
             fadeInRemaining--;
         }
         if (loopMode == 0) {
-            float remaining = reverse
-                ? (position - (float)actualStart)
-                : ((float)actualEnd - position);
+            // Difference computed in double (position is double), then narrowed — the
+            // remaining distance is small wherever this matters, so float is exact enough.
+            float remaining = (float)(reverse
+                ? (position - (double)actualStart)
+                : ((double)actualEnd - position));
             if (remaining >= 0.0f && remaining < (float)DECLICK_SAMPLES)
                 fade *= remaining / (float)DECLICK_SAMPLES;
         }
