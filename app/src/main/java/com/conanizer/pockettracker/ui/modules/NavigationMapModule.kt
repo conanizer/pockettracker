@@ -7,13 +7,14 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.conanizer.pockettracker.ui.theme.AppTheme
 import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.core.data.ScreenType
+import com.conanizer.pockettracker.ui.CHAR_SPACING
+import com.conanizer.pockettracker.ui.FONT_SCALE
 import com.conanizer.pockettracker.ui.drawBitmapText
 
 /**
- * SIMPLIFIED NAVIGATION MAP MODULE
+ * NAVIGATION MAP MODULE
  *
- * Instead of big when() blocks, we use a LOOKUP TABLE
- * This is a "data-driven" approach - the grid structure is DATA, not CODE
+ * Data-driven: the 5×5 grid structure is a lookup table (COLUMN_LAYOUTS), not when() blocks.
  */
 class NavigationMapModule : TrackerModule {
     override val width = 115
@@ -24,11 +25,9 @@ class NavigationMapModule : TrackerModule {
     // ===================================
     private val CELL_WIDTH = 23
     private val CELL_HEIGHT = 21
-    private val FONT_SCALE = 3
-    private val CHAR_SPACING = 2
 
     // ===================================
-    // THE MAGIC: 5x5 GRID TEMPLATE
+    // 5x5 GRID TEMPLATE
     // This defines what's in each column
     // null = empty cell (dark)
     // ===================================
@@ -84,7 +83,6 @@ class NavigationMapModule : TrackerModule {
 
         // ===================================
         // STEP 3: Build the grid
-        // This is the SIMPLE part now!
         // ===================================
         val grid = buildGrid(currentCol)
 
@@ -126,9 +124,8 @@ class NavigationMapModule : TrackerModule {
     }
 
     /**
-     * Build the 5x5 grid showing what's visible
-     *
-     * SIMPLE VERSION: Just copy the current column from our template!
+     * Build the 5x5 grid showing what's visible: the always-on main row plus the
+     * current column's layout from COLUMN_LAYOUTS.
      *
      * @param currentCol Which column (0-4) we're in
      * @return 5x5 grid with nulls for empty cells
@@ -165,7 +162,6 @@ class NavigationMapModule : TrackerModule {
 
     /**
      * Draw a single cell in the navigation map
-     * (This part stays the same as your original)
      */
     private fun DrawScope.drawNavigationCell(
         cellX: Int,
@@ -222,7 +218,6 @@ class NavigationMapModule : TrackerModule {
 
     /**
      * Get short label for each screen type
-     * (Same as before)
      */
     private fun getScreenLabel(screen: ScreenType): String {
         return when (screen) {
@@ -247,7 +242,6 @@ class NavigationMapModule : TrackerModule {
 
 /**
  * State for navigation map
- * (No changes needed here)
  */
 data class NavigationMapState(
     val currentScreen: ScreenType,

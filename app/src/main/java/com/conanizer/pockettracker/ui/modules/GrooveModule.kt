@@ -10,6 +10,10 @@ import com.conanizer.pockettracker.input.CursorContextFactory
 import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.core.data.Groove
 import com.conanizer.pockettracker.core.logic.InputAction
+import com.conanizer.pockettracker.ui.CHAR_SPACING
+import com.conanizer.pockettracker.ui.FONT_SCALE
+import com.conanizer.pockettracker.ui.ROW_HEIGHT
+import com.conanizer.pockettracker.ui.TEXT_PADDING
 import com.conanizer.pockettracker.ui.drawBitmapText
 import com.conanizer.pockettracker.ui.toHex1
 import com.conanizer.pockettracker.ui.toHex2
@@ -44,10 +48,6 @@ class GrooveModule : TrackerModule {
     override val width = 510
     override val height = 392
 
-    private val FONT_SCALE = 3
-    private val CHAR_SPACING = 2
-    private val ROW_HEIGHT = 21
-    private val TEXT_PADDING = 3
 
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val grooveState = state as? GrooveState ?: return
@@ -117,11 +117,7 @@ class GrooveModule : TrackerModule {
             }
 
             // Step number (read-only)
-            val stepColor = when {
-                isCursor  -> Color(t.textCursor)
-                isPastEnd -> Color(t.textEmpty)
-                else      -> Color(t.textEmpty)
-            }
+            val stepColor = if (isCursor) Color(t.textCursor) else Color(t.textEmpty)
             drawBitmapText(
                 text = index.toHex1(),
                 x = stepX,

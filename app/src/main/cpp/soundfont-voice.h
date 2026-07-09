@@ -61,6 +61,11 @@ struct SoundfontVoice : public IAudioVoice {
     // Release tail: true after noteOff() — keeps rendering while TSF decays to silence.
     bool  isReleasingOnly  = false;
 
+    // Intra-block onset offset (same contract as Voice::startDelayFrames): the SF render
+    // pass starts this channel's tsf render at this offset within the trigger block so a
+    // mid-block targetFrame doesn't sound at the block start, then zeroes it.
+    int   startDelayFrames = 0;
+
     // ── IAudioVoice ─────────────────────────────────────────────────────────
     bool active()     const override { return isActive; }
     int  getTrackId() const override { return _trackId; }
@@ -83,12 +88,6 @@ struct SoundfontVoice : public IAudioVoice {
 
     // ── Pitch effect interface ───────────────────────────────────────────────
     // All pitch setters only write state fields — no TSF calls, safe from JNI thread.
-    void setPitchSlideRaw(float targetSemitones, float totalFrames) override {
-        float delta = targetSemitones - pitchOffset;
-        pitchSlideTarget = targetSemitones;
-        pitchSlideRate   = delta / totalFrames;
-        pitchSliding     = true;
-    }
     void setPitchBendRaw(float ratePerFrame) override {
         if (fabsf(ratePerFrame) < 0.000001f) {
             pitchSliding   = false;
@@ -103,15 +102,6 @@ struct SoundfontVoice : public IAudioVoice {
         if (depth < 0.01f) { vibratoActive = false; vibratoDepth = 0.0f; }
         else { vibratoSpeed = speed; vibratoDepth = depth; vibratoActive = true; }
     }
-    void clearPitchMod() override {
-        pitchOffset    = 0.0f;
-        pitchSliding   = false;
-        pitchSlideRate = 0.0f;
-        vibratoActive  = false;
-        vibratoDepth   = 0.0f;
-        needsPitchReset = true;  // audio thread resets pitch wheel on next block
-    }
-    void setInitialPitchOffset(float semitones) override { pitchOffset = semitones; }
     // ── end IAudioVoice ─────────────────────────────────────────────────────
 
     // render() is intentionally unused for SF voices.
@@ -182,6 +172,7 @@ struct SoundfontVoice : public IAudioVoice {
         trackVolume    = 1.0f;
         isReleasingOnly = false;
         tableId        = -1;
+        startDelayFrames = 0;
     }
 };
 

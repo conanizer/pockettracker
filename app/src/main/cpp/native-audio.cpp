@@ -1,7 +1,6 @@
 // native-audio.cpp — STUB
 //
 // The engine is organised into focused modules:
-//   effects/primitives/filter.h — Biquad coefficient math (kept as reference; SVF used by effects/)
 //   audio-defs.h      — Log macros, constants (MAX_VOICES, DECLICK_SAMPLES, FX_*)
 //   note-queue.h      — SoundfontEntry, NoteQueue/KillQueue, InstrumentParams, Table
 //   mods/mod-system.h — ParamId, ParamBus, IAudioVoice

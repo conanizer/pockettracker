@@ -1094,10 +1094,6 @@ class AudioEngine(
      *  undoing any transient EQM override). -1 = bypass. */
     fun setMasterEqSlot(slot: Int) = backend.setMasterEqSlot(slot)
 
-    fun setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int) {
-        backend.setPitchSlide(trackId, targetSemitones, durationTicks, tempo)
-    }
-
     // Uses the sample-accurate queue so mid-note PBN/PVB/PVX fire at the correct step frame and
     // the voices[] write happens on the audio thread.
     fun schedulePitchBend(targetFrame: Long, trackId: Int, semitonesPerTick: Float, tempo: Int) {
@@ -1106,14 +1102,6 @@ class AudioEngine(
 
     fun scheduleVibrato(targetFrame: Long, trackId: Int, speed: Float, depth: Float) {
         backend.scheduleVibrato(targetFrame, trackId, speed, depth)
-    }
-
-    fun clearPitchMod(trackId: Int) {
-        backend.clearPitchMod(trackId)
-    }
-
-    fun setInitialPitchOffset(trackId: Int, semitones: Float) {
-        backend.setInitialPitchOffset(trackId, semitones)
     }
 
     // KILL effect: triggers ADSR release (sustain → release) so looped samples fade rather than cut hard.
@@ -1182,7 +1170,8 @@ class AudioEngine(
                     val lfoHz    = (slot.lfoFreq + 1) * 20.0f / 256.0f
                     val oscShape = slot.oscShape
                     backend.setInstrumentModulation(sampleId, slotIndex, 3, dest, amount,
-                        0, 0, 0, 0.5f, lfoHz, oscShape)
+                        0, 0, 0, 0.5f, lfoHz, oscShape,
+                        lfoTrigMode = slot.lfoTrigMode)
                     anyActive = true
                 }
                 ModType.DRUM -> {

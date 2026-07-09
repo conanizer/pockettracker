@@ -1,8 +1,8 @@
 #pragma once
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
 #include <algorithm>
+#include "rng.h"
 #include "mods/mod-system.h"
 #include "effects/instrument-chain.h"
 
@@ -82,9 +82,17 @@ struct Voice : public IAudioVoice {
     float reverbSend = 0.0f;
     float delaySend  = 0.0f;
 
-    // Voice-steal fade-out: instead of a hard cut, fade over DECLICK_SAMPLES frames
-    int fadeOutRemaining;  // Counts down from DECLICK_SAMPLES to 0 during fade-out
-    bool isFadingOut;      // true while the voice-steal fade-out is active
+    // Fade-out instead of a hard cut. Two lengths: DECLICK_SAMPLES for voice steals (tail is
+    // masked by the new note), KILL_FADE_SAMPLES for deliberate kills (see audio-defs.h).
+    int fadeOutRemaining;  // Counts down from fadeOutTotal to 0 during fade-out
+    int fadeOutTotal;      // Length of the current fade in samples (multiplier denominator)
+    bool isFadingOut;      // true while the fade-out is active
+
+    // Intra-block onset offset: a note whose targetFrame lands mid-block is triggered by the
+    // dispatch loop before mixing, so without this the mix loop would start it at the block
+    // start — up to one audio burst early. The mix loop skips this many frames on the trigger
+    // block, then zeroes it. Always < the trigger block's numFrames when set.
+    int startDelayFrames;
 
     Voice() : isActive(false), fadeInRemaining(0), sampleData(nullptr), sampleDataRight(nullptr), sampleLength(0),
               position(0), trackId(-1), playbackRate(1.0f), basePlaybackRate(1.0f), volume(1.0f),
@@ -99,7 +107,7 @@ struct Voice : public IAudioVoice {
               hopRepeatCount(0), hopTargetRow(-1),
               pitchOffset(0.0f), pitchSlideTarget(0.0f), pitchSlideRate(0.0f), pitchSliding(false),
               vibratoPhase(0.0f), vibratoSpeed(0.0f), vibratoDepth(0.0f), vibratoActive(false),
-              fadeOutRemaining(0), isFadingOut(false) {}
+              fadeOutRemaining(0), fadeOutTotal(1), isFadingOut(false), startDelayFrames(0) {}
               // params (ParamBus) is default-constructed: base={1,0.5,0,128,0}, mod={0}
 
     void trigger(float* sample, float* sampleRight, int length, int track, float rate, float instrVol, float phraseVol, float pan,
@@ -214,7 +222,10 @@ struct Voice : public IAudioVoice {
         noteVelocity  = instrVol;
         int midiNote  = (octave + 1) * 12 + pitch;
         noteKeytrack  = (float)(midiNote - 60) / 12.0f;
-        noteRandom    = (float)(rand() & 0xFFFF) / 65535.0f;
+        // trigger() runs in the audio callback — xorshift, not rand() (glibc rand() takes a
+        // process-global lock; see rng.h). thread_local: audio + offline-render threads.
+        static thread_local uint32_t noteRngState = 0x6E624EB7u;
+        noteRandom    = xorshift32Unit(noteRngState);
 
         // Clear all source values; then write static ones.
         // Dynamic slots (ENV/LFO) will be written each block by updateVoiceModulation.
@@ -267,6 +278,7 @@ struct Voice : public IAudioVoice {
         fadeInRemaining = DECLICK_SAMPLES;  // Anti-click fade-in on every new note
         isFadingOut = false;               // Clear any stale fade state from previous use
         fadeOutRemaining = 0;
+        startDelayFrames = 0;              // Dispatch loop sets the real offset after trigger()
         isActive = true;
     }
 
@@ -274,6 +286,7 @@ struct Voice : public IAudioVoice {
         isActive = false;
         isFadingOut = false;
         fadeOutRemaining = 0;
+        startDelayFrames = 0;
     }
 
     // Begin a smooth fade-out instead of a hard stop (used by voice stealing).
@@ -282,12 +295,16 @@ struct Voice : public IAudioVoice {
     // trackId is preserved (NOT cleared) so that Step-1 in the voice allocator
     // can recycle this fading slot directly when the same track fires again,
     // preventing voice-count explosion during simultaneous multi-track triggers.
-    void startFadeOut() {
+    void startFadeOut(int fadeSamples = DECLICK_SAMPLES) {
         if (isFadingOut) return;  // Already fading — don't restart
-        // isActive stays true: slot stays reserved for the duration of the fade
+        // isActive stays true: slot stays reserved for the duration of the fade.
+        // The counters are written BEFORE isFadingOut: stopTrack() calls this from the JNI
+        // thread, and the mix loop must never observe isFadingOut=true with a stale zero
+        // counter (that would end the voice with the hard cut the fade exists to prevent).
+        fadeOutTotal = (fadeSamples > 0) ? fadeSamples : 1;
+        fadeOutRemaining = fadeOutTotal;
         isFadingOut = true;
-        fadeOutRemaining = DECLICK_SAMPLES;
-        // trackId intentionally NOT cleared — see allocator Step 1
+        // trackId intentionally NOT cleared — the allocator recycles same-track fading slots
     }
 
     // ── IAudioVoice implementation ──────────────────────────────────────────
@@ -299,7 +316,7 @@ struct Voice : public IAudioVoice {
 
     void noteOff() override {
         // Transitions ADSR/TRIG modulators to release stage (same as triggerNoteOff path).
-        // For voices with no release envelope this is equivalent to hardStop().
+        // For voices with no release envelope this falls back to the declicked fade.
         bool hasRelease = false;
         for (int m = 0; m < 4; m++) {
             VoiceModSlot& vmod = voiceMods[m];
@@ -312,7 +329,7 @@ struct Voice : public IAudioVoice {
             // Looping voice: abandon the loop so playback runs out into the [loopEnd, end] tail.
             if (loopMode != 0) loopReleasing = true;
         } else {
-            stop();
+            startFadeOut(KILL_FADE_SAMPLES);  // deliberate note-off, not a steal
         }
     }
 
@@ -353,12 +370,6 @@ struct Voice : public IAudioVoice {
     float render(float* /*buf*/, int /*numFrames*/) override { return 0.0f; }
 
     // ── Pitch effect interface (IAudioVoice) ────────────────────────────────
-    void setPitchSlideRaw(float targetSemitones, float totalFrames) override {
-        float delta = targetSemitones - pitchOffset;
-        pitchSlideTarget = targetSemitones;
-        pitchSlideRate   = delta / totalFrames;
-        pitchSliding     = true;
-    }
     void setPitchBendRaw(float ratePerFrame) override {
         if (fabsf(ratePerFrame) < 0.000001f) {
             pitchSliding   = false;
@@ -379,15 +390,6 @@ struct Voice : public IAudioVoice {
             vibratoActive = true;
         }
     }
-    void clearPitchMod() override {
-        pitchOffset    = 0.0f;
-        pitchSliding   = false;
-        pitchSlideRate = 0.0f;
-        vibratoActive  = false;
-        vibratoDepth   = 0.0f;
-    }
-    void setInitialPitchOffset(float semitones) override { pitchOffset = semitones; }
-
     // ── end IAudioVoice ─────────────────────────────────────────────────────
 
     // Returns a [0..1] fade multiplier and advances fadeInRemaining.

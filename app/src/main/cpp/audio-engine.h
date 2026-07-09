@@ -11,7 +11,6 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
-#include <functional>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -37,10 +36,6 @@ public:
     // stream opens, then read by getSampleRate() and the scheduler-thread pitch/tic math — so the core
     // never has to reach into a platform stream object for it.
     void setDeviceSampleRate(int sr) { deviceSampleRate.store(sr, std::memory_order_relaxed); }
-
-    // Install a hook the core calls to wake a paused output stream (used by triggerNote). The platform
-    // shell sets this to its resumeStream(); on a backend that never pauses it can stay null (no-op).
-    void setResumeHook(std::function<void()> hook) { resumeHook = std::move(hook); }
 
     void loadSample(int id, const float* data, int length);
     void loadSampleStereo(int id, const float* left, const float* right, int length);
@@ -70,8 +65,6 @@ public:
 
     void setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt, int loopEn,
                              int drv, int crsh, int dwn, int fType, int fCut, int fRes);
-
-    void triggerNote(int sampleId, int trackId, float freq, float baseFreq, float vol, float pan = 0.5f);
 
     void stopTrack(int trackId);
     void stopAll();
@@ -311,9 +304,6 @@ public:
     // Returns the active voice for a given track, checking SF voices first.
     IAudioVoice* findActiveVoiceForTrack(int trackId);
 
-    // Set pitch slide for a voice (PSL effect).
-    void setPitchSlide(int trackId, float targetSemitones, float durationTicks, int tempo);
-
     // Schedule a continuous pitch bend (PBN on an empty step) at targetFrame — applied on the
     // audio thread via paramUpdateQueue (no off-thread voices[] write). ~0 stops the bend.
     void schedulePitchBend(int64_t targetFrame, int trackId, float semitonesPerStep, int tempo);
@@ -321,18 +311,17 @@ public:
     // Schedule vibrato (PVB/PVX on an empty step) at targetFrame. depth=0 stops vibrato.
     void scheduleVibrato(int64_t targetFrame, int trackId, float speed, float depth);
 
-    // Clear all pitch modulation for a voice (PSL/PBN/PVB/PVX reset).
-    void clearPitchMod(int trackId);
-
-    // Set initial pitch offset (PSL setup: call before setPitchSlide).
-    void setInitialPitchOffset(int trackId, float semitones);
-
     // Set per-instrument modulation slot (called from Kotlin before scheduling each note)
     void setInstrumentModulation(int sampleId, int slotIndex,
                                  int type, int dest, float amount,
                                  int attackSamples, int holdSamples, int decaySamples,
                                  float sustainLevel, float lfoHz, int oscShape,
-                                 int releaseSamples = 0);
+                                 int releaseSamples = 0, int lfoTrigMode = 1);
+
+    // Copy an instrument's mod-slot config onto a voice at note trigger: resets all per-note
+    // state, seeds the RND/DRNK RNG, and applies the LFO trigger mode's initial phase.
+    // Shared by the sampler and SF dispatch paths (audio thread only).
+    void initVoiceModSlots(IAudioVoice& voice, int sampleId, int64_t currentFrame, float sampleRate);
 
     // Smart note-off: trigger ADSR/TRIG release if available, otherwise hard-stop.
     void triggerNoteOff(int trackId);
@@ -382,9 +371,6 @@ private:
     // 44100 so getSampleRate()/pitch math stay correct if read before the stream opens — matches every
     // other 44100 fallback in the engine. Atomic: written by the shell thread, read by the scheduler.
     std::atomic<int> deviceSampleRate{44100};
-    // Wakes a paused output stream from triggerNote (set by the platform shell; null = no-op backend).
-    std::function<void()> resumeHook;
-    void requestResume() { if (resumeHook) resumeHook(); }
 
     Voice voices[MAX_VOICES];
     float* samples[256];
@@ -463,6 +449,13 @@ private:
     // getCurrentFrame() JNI — atomic (relaxed) makes that formally race-free at zero cost on arm64
     // and keeps the planned Linux port correct on unknown hardware.
     std::atomic<int64_t> globalFrameCounter{0};  // Total frames processed since start
+
+    // Session entropy mixed into per-note RNG seeds (RND/DRNK LFO). Reseeded from the wall
+    // clock at construction and at every resetFrameCounter() (= offline-render start): seeds
+    // derived from the frame counter alone made repeated renders of the same song
+    // bit-identical, because the counter resets to 0 for each render. Plain (non-atomic) is
+    // fine — a torn read would just be different entropy.
+    uint32_t noteSeedEntropy = 0x9E3779B9u;
     std::atomic<bool> isOfflineRendering{false};  // True during WAV export → processLiveBlock outputs silence
     std::atomic<int> currentTempo{120};  // Song BPM; read by the table-advance to derive framesPerTic
     int stemsMode = 0;  // 0=normal, 1-8=track stem, 9=reverb, 10=delay

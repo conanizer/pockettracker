@@ -107,8 +107,8 @@ public:
     void schedule(const ScheduledNote& note) {
         std::lock_guard<std::mutex> lock(mutex);
         queue.push(note);
-        // LOGT, not LOGD: the audio callback takes this mutex every frame, so an always-on
-        // logging syscall while holding it is a priority-inversion / dropout hazard.
+        // LOGT, not LOGD: the audio callback takes this mutex once per block (drainUntil), so
+        // an always-on logging syscall while holding it is a priority-inversion / dropout hazard.
         LOGT("📅 Scheduled note: frame=%lld, sample=%d, track=%d, freq=%.2f",
              (long long)note.targetFrame, note.sampleId, note.trackId, note.frequency);
     }
@@ -302,7 +302,7 @@ struct InstrumentParams {
 // Per-slot modulation configuration set from Kotlin.
 // Copied to VoiceModSlot when a note triggers on that instrument.
 struct InstrumentModSlot {
-    int type;          // 0=NONE, 1=AHD, 2=ADSR, 3=LFO
+    int type;          // 0=NONE, 1=AHD, 2=ADSR, 3=LFO, 4=DRUM, 5=TRIG, 6=SCALAR
     int dest;          // 0=NONE, 1=VOL, 2=PAN, 3=PITCH, 4=FINE_PITCH, 5=CUT, 6=RES, 7=STA, 8=MOD_AMT, 9=MOD_RATE, 10=MOD_BOTH
     float amount;      // Modulation depth 0.0-1.0 (normalised from 00-FF)
     int attackSamples; // Attack duration in audio samples
@@ -311,11 +311,13 @@ struct InstrumentModSlot {
     float sustainLevel; // ADSR: sustain level 0.0-1.0
     float lfoHz;        // LFO: frequency in Hz
     int oscShape;       // LFO: 0=TRI,1=SIN,2=RMP+,3=RMP-,4=EXP+,5=EXP-,6=SQU+,7=SQU-,8=RND,9=DRNK
+    int lfoTrigMode;    // LFO: 0=FREE, 1=RETG, 2=HOLD, 3=ONCE
     int releaseSamples; // ADSR/TRIG: release duration in audio samples (0 = instant)
 
     InstrumentModSlot() : type(0), dest(0), amount(0.5f),
                           attackSamples(0), holdSamples(0), decaySamples(0),
-                          sustainLevel(0.5f), lfoHz(4.0f), oscShape(0), releaseSamples(0) {}
+                          sustainLevel(0.5f), lfoHz(4.0f), oscShape(0), lfoTrigMode(1),
+                          releaseSamples(0) {}
 };
 
 // Tables are mini-sequencers that run alongside playing voices.

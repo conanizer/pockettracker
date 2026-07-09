@@ -9,7 +9,6 @@ espressoCore = "3.7.0"
 lifecycleRuntimeKtx = "2.10.0"
 activityCompose = "1.12.0"
 composeBom = "2025.11.01"
-uiText = "1.9.5"
 kotlinxSerializationJson = "1.6.0"
 oboe = "1.10.0"
 
@@ -29,7 +28,8 @@ androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "u
 androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
-androidx-compose-ui-text = { group = "androidx.compose.ui", name = "ui-text", version.ref = "uiText" }
+# No explicit version: governed by the Compose BOM like its ui-* siblings, so it can't skew.
+androidx-compose-ui-text = { group = "androidx.compose.ui", name = "ui-text" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 oboe = { group = "com.google.oboe", name = "oboe", version.ref = "oboe" }
 

@@ -357,6 +357,10 @@ void AudioEngine::deleteSampleRegion(int id, int startFrame, int endFrame) {
 
 void AudioEngine::copyRegion(int id, int startFrame, int endFrame) {
     if (id < 0 || id >= 256 || !samples[id]) return;
+    // Read-only on the sample, but must still hold the edit mutex so no destructive op swaps
+    // the buffers out from under the memcpy. Deliberately NOT beginSampleEdit(): that would
+    // also stop voices playing this sample, and COPY must not cut an audible preview.
+    std::unique_lock<std::mutex> editLock(sampleEditMutex);
     startFrame = std::max(0, startFrame);
     endFrame   = std::min(sampleLengths[id], endFrame);
     if (startFrame >= endFrame) return;

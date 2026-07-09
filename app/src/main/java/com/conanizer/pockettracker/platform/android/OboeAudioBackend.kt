@@ -6,12 +6,12 @@ import android.util.Log
 /**
  * Android implementation of IAudioBackend using Oboe library.
  *
- * This class wraps the native C++ audio engine (native-audio.cpp) via JNI.
- * All actual audio processing happens in C++ for maximum performance and low latency.
+ * This class is a thin JNI shim over the portable C++ engine (audio-engine.cpp) and its
+ * Oboe glue (oboe-audio-engine.cpp). All actual audio processing happens in C++.
  *
  * Architecture:
- * - Kotlin (this class) → JNI → C++ Oboe audio engine
- * - C++ handles: Sample-accurate queue, 8-voice polyphony, filters, effects
+ * - Kotlin (this class) → JNI (jni-bridge.cpp) → C++ engine core + Oboe backend
+ * - C++ handles: Sample-accurate queues, 8-voice polyphony, filters, effects
  * - Kotlin handles: High-level API, sample loading, scheduling
  *
  * Thread Safety:
@@ -19,8 +19,9 @@ import android.util.Log
  * - Safe to call from UI thread or background threads
  *
  * Performance:
- * - LowLatency + Exclusive mode for minimal latency (<50ms on most devices)
- * - Sample-accurate timing (<0.02ms jitter)
+ * - Stream-open ladder: OpenSL ES Exclusive → Shared → None/Shared → AAudio (see
+ *   oboe-audio-engine.cpp); ~<50ms latency on tested hardware
+ * - Note onsets are sample-accurate; kills/param updates apply at block granularity
  * - 44.1kHz or 48kHz (automatically detected)
  */
 class OboeAudioBackend : IAudioBackend {
@@ -52,14 +53,15 @@ class OboeAudioBackend : IAudioBackend {
         return success
     }
 
+    // Per-sample-import and per-preview logging removed from the methods below: a project
+    // reload calls them up to 256 times, and preview stop/start fires on every browser move.
+
     override fun loadSample(id: Int, samples: FloatArray) {
         native_loadSample(id, samples)
-        Log.d(TAG, "📦 Loaded sample $id (${samples.size} samples)")
     }
 
     override fun loadSampleStereo(id: Int, left: FloatArray, right: FloatArray) {
         native_loadSampleStereo(id, left, right)
-        Log.d(TAG, "📦 Loaded stereo sample $id (${left.size} frames)")
     }
 
     override fun beginSampleLoad(id: Int, channels: Int, estimatedFrames: Int): Boolean =
@@ -72,17 +74,10 @@ class OboeAudioBackend : IAudioBackend {
 
     override fun cancelSampleLoad(id: Int) = native_cancelSampleLoad(id)
 
-    override fun loadSampleFromWav(id: Int, path: String): Int {
-        val rate = native_loadSampleFromWav(id, path)
-        Log.d(TAG, "📦 Loaded WAV sample $id from $path (rate=$rate)")
-        return rate
-    }
+    override fun loadSampleFromWav(id: Int, path: String): Int = native_loadSampleFromWav(id, path)
 
-    override fun loadSampleFromCompressed(id: Int, path: String): Int {
-        val rate = native_loadSampleFromCompressed(id, path)
-        Log.d(TAG, "📦 Decoded compressed sample $id from $path (rate=$rate)")
-        return rate
-    }
+    override fun loadSampleFromCompressed(id: Int, path: String): Int =
+        native_loadSampleFromCompressed(id, path)
 
     override fun hasStereoData(id: Int): Boolean = native_hasStereoData(id)
 
@@ -152,7 +147,6 @@ class OboeAudioBackend : IAudioBackend {
 
     override fun clearScheduledNotesFrom(fromFrame: Long) {
         native_clearScheduledNotesFrom(fromFrame)
-        Log.d(TAG, "🗑️ Cleared scheduled notes")
     }
 
     override fun resumeStream() {
@@ -166,12 +160,10 @@ class OboeAudioBackend : IAudioBackend {
 
     override fun killTrack(trackId: Int) {
         native_killTrack(trackId)
-        Log.d(TAG, "🔪 Killed track $trackId")
     }
 
     override fun scheduleKill(frame: Long, trackId: Int) {
         native_scheduleKill(frame, trackId)
-        Log.d(TAG, "⏱️ Scheduled kill: track $trackId at frame $frame")
     }
 
     override fun getSampleRate(): Int {
@@ -420,37 +412,15 @@ class OboeAudioBackend : IAudioBackend {
         native_scheduleMasterEqSlotAt(targetFrame, slot)
     }
 
-    override fun setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int) {
-        native_setPitchSlide(trackId, targetSemitones, durationTicks, tempo)
-        Log.d(TAG, "🎵 Pitch slide: track=$trackId, target=$targetSemitones, duration=$durationTicks ticks")
-    }
+    // No logging on the scheduling-path methods below: PBN/PVB/PVX fire per step during
+    // playback, and the C++/PlaybackController sides gate this class of logging behind TRACE.
 
     override fun schedulePitchBend(targetFrame: Long, trackId: Int, semitonesPerTick: Float, tempo: Int) {
         native_schedulePitchBend(targetFrame, trackId, semitonesPerTick, tempo)
-        if (semitonesPerTick == 0f) {
-            Log.d(TAG, "🎵 Pitch bend stopped: track=$trackId")
-        } else {
-            Log.d(TAG, "🎵 Pitch bend: track=$trackId, rate=$semitonesPerTick semitones/tick")
-        }
     }
 
     override fun scheduleVibrato(targetFrame: Long, trackId: Int, speed: Float, depth: Float) {
         native_scheduleVibrato(targetFrame, trackId, speed, depth)
-        if (depth < 0.01f) {
-            Log.d(TAG, "🎵 Vibrato stopped: track=$trackId")
-        } else {
-            Log.d(TAG, "🎵 Vibrato: track=$trackId, speed=${speed}Hz, depth=$depth semitones")
-        }
-    }
-
-    override fun clearPitchMod(trackId: Int) {
-        native_clearPitchMod(trackId)
-        Log.d(TAG, "🎵 Pitch mod cleared: track=$trackId")
-    }
-
-    override fun setInitialPitchOffset(trackId: Int, semitones: Float) {
-        native_setInitialPitchOffset(trackId, semitones)
-        Log.d(TAG, "🎵 Pitch offset set: track=$trackId, offset=$semitones semitones")
     }
 
     override fun setInstrumentModulation(
@@ -465,10 +435,12 @@ class OboeAudioBackend : IAudioBackend {
         sustainLevel: Float,
         lfoHz: Float,
         oscShape: Int,
-        releaseSamples: Int
+        releaseSamples: Int,
+        lfoTrigMode: Int
     ) {
         native_setInstrumentModulation(sampleId, slotIndex, type, dest, amount,
-            attackSamples, holdSamples, decaySamples, sustainLevel, lfoHz, oscShape, releaseSamples)
+            attackSamples, holdSamples, decaySamples, sustainLevel, lfoHz, oscShape, releaseSamples,
+            lfoTrigMode)
     }
 
     override fun clearInstrumentModulation(sampleId: Int) {
@@ -666,16 +638,14 @@ class OboeAudioBackend : IAudioBackend {
     private external fun native_scheduleVoiceEqSlot(targetFrame: Long, trackId: Int, slot: Int)
     private external fun native_scheduleMasterEqSlotAt(targetFrame: Long, slot: Int)
 
-    private external fun native_setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int)
     private external fun native_schedulePitchBend(targetFrame: Long, trackId: Int, semitonesPerTick: Float, tempo: Int)
     private external fun native_scheduleVibrato(targetFrame: Long, trackId: Int, speed: Float, depth: Float)
-    private external fun native_clearPitchMod(trackId: Int)
-    private external fun native_setInitialPitchOffset(trackId: Int, semitones: Float)
 
     private external fun native_setInstrumentModulation(
         sampleId: Int, slotIndex: Int, type: Int, dest: Int, amount: Float,
         attackSamples: Int, holdSamples: Int, decaySamples: Int,
-        sustainLevel: Float, lfoHz: Float, oscShape: Int, releaseSamples: Int
+        sustainLevel: Float, lfoHz: Float, oscShape: Int, releaseSamples: Int,
+        lfoTrigMode: Int
     )
     private external fun native_clearInstrumentModulation(sampleId: Int)
     private external fun native_triggerNoteOff(trackId: Int)

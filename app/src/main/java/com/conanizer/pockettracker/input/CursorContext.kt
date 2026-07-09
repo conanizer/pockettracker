@@ -424,6 +424,21 @@ object CursorContextFactory {
     )
 
     /**
+     * Cycle over N options by index (0..count-1), wrapping with A+DPAD.
+     * For rows whose options are computed lists (skins, layout modes, overlay files, enums).
+     */
+    fun enumCycle(currentIndex: Int, optionCount: Int) = CursorContext(
+        valueType = CursorValueType.HEX_BYTE,
+        capabilities = CursorCapabilities(canIncrement = true, canDecrement = true),
+        currentValue = currentIndex.coerceAtLeast(0),
+        minValue = 0,
+        maxValue = (optionCount - 1).coerceAtLeast(0),
+        smallStep = 1,
+        largeStep = 1,
+        emptyValue = -1
+    )
+
+    /**
      * Binary toggle (off/on)
      * Value: 0 = off, 1 = on
      * Changed with A+DPAD (cycles between states)

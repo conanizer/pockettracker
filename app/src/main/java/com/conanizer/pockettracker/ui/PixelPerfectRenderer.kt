@@ -227,6 +227,7 @@ fun PixelPerfectTracker(
     var playbackChainRow by remember { mutableStateOf(0) }
     var playbackPhraseStep by remember { mutableStateOf(0) }
     var playbackSongRow by remember { mutableStateOf(0) }
+    var tablePlaybackRow by remember { mutableStateOf<Int?>(null) }
     var trackNotes by remember { mutableStateOf(List(8) { Note.EMPTY }) }
 
     // Oscilloscope refresh ticker. Reading this inside the Canvas draw lambda forces a redraw;
@@ -237,6 +238,7 @@ fun PixelPerfectTracker(
     val appTheme = LocalAppTheme.current
     val currentIsPlaying by rememberUpdatedState(isPlaying)
     val currentVizType by rememberUpdatedState(appTheme.visualizerType)
+    val currentTableViewed by rememberUpdatedState(currentTable)
 
     // Oscilloscope / visualizer refresh loop (independent of playback position).
     // A single Canvas can only redraw all-or-nothing, so unconditionally bumping the ticker here
@@ -310,6 +312,19 @@ fun PixelPerfectTracker(
                 // Derive notes from actual playback position (not schedule-ahead trackStates)
                 trackNotes = playbackController.getCurrentPlayingNotes()
 
+                // TABLE screen: resolve the playing table row HERE (60 Hz) rather than inside
+                // the draw pass — keeps up to 16 JNI calls per redraw frame out of drawLayout.
+                tablePlaybackRow = if (currentScreen == ScreenType.TABLE) {
+                    var row: Int? = null
+                    for (trackId in 0 until 8) {
+                        if (audioEngine.getVoiceTableId(trackId) == currentTableViewed) {
+                            val r = audioEngine.getVoiceTableRow(trackId)
+                            if (r >= 0) { row = r; break }
+                        }
+                    }
+                    row
+                } else null
+
                 // Update UI at 60 Hz
                 delay(16L)
             }
@@ -318,6 +333,7 @@ fun PixelPerfectTracker(
             // (can't do this after the while loop because LaunchedEffect cancels the old
             // coroutine when its keys change, so code after the loop never executes)
             trackNotes = List(8) { Note.EMPTY }
+            tablePlaybackRow = null
         }
     }
 
@@ -369,6 +385,7 @@ fun PixelPerfectTracker(
                         playbackRow = playbackRow,
                         playbackChainRow = playbackChainRow,
                         playbackSongRow = playbackSongRow,
+                        tablePlaybackRow = tablePlaybackRow,
                         audioEngine = audioEngine,
                         previousColumn = previousColumn,
                         currentChain = currentChain,
@@ -487,6 +504,7 @@ class TrackerLayout {
         playbackRow: Int,
         playbackChainRow: Int,
         playbackSongRow: Int,
+        tablePlaybackRow: Int? = null,  // resolved in the 60 Hz poll loop — no JNI in the draw pass
         audioEngine: AudioEngine,
         previousColumn: Int,
         currentChain: Int,
@@ -874,18 +892,6 @@ class TrackerLayout {
                     // ===================================
                     ScreenType.TABLE -> {
                         with(tableModule) {
-                            // Find which track is playing with this table (if any)
-                            var tablePlaybackRow: Int? = null
-                            for (trackId in 0 until 8) {
-                                if (audioEngine.getVoiceTableId(trackId) == currentTable) {
-                                    val row = audioEngine.getVoiceTableRow(trackId)
-                                    if (row >= 0) {
-                                        tablePlaybackRow = row
-                                        break
-                                    }
-                                }
-                            }
-
                             draw(
                                 x = moduleX,
                                 y = currentY,

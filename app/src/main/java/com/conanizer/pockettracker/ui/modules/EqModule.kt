@@ -184,19 +184,28 @@ class EqModule : TrackerModule {
             drawPath(curvePath, Color(t.textParam), style = Stroke(width = scale.toFloat()))
         }
 
-        // EQ band response curve (yellow, always on top of spectrum)
+        // EQ band response curve (yellow, always on top of spectrum).
+        // Cached per (slot, band params): the animating spectrum redraws this screen ~20×/s,
+        // but the curve only changes on a band edit — without the cache the 3-band transfer
+        // function runs per pixel per redraw (~300k transcendental ops/s on the UI thread).
         val preset = s.project.eqPresets.getOrNull(s.slotIndex)
         if (preset != null) {
+            val hash = bandsContentHash(preset.bands)
+            if (curveCacheSlot != s.slotIndex || curveCacheParamsHash != hash) {
+                for (xi in 0 until width) {
+                    val normX = xi.toFloat() / (width - 1)
+                    val freq  = 20f * (1000f).pow(normX)
+                    curveCacheDb[xi] = computeCombinedGainDb(preset.bands, freq)
+                }
+                curveCacheSlot = s.slotIndex
+                curveCacheParamsHash = hash
+            }
             val path = Path()
-            var started = false
             for (xi in 0 until width) {
-                val normX = xi.toFloat() / (width - 1)
-                val freq  = 20f * (1000f).pow(normX)
-                val db   = computeCombinedGainDb(preset.bands, freq)
-                val py   = vy + dbToPixel(db)
-                val px   = vx + xi
-                if (!started) { path.moveTo((px * scale).toFloat(), (py * scale).toFloat()); started = true }
-                else          { path.lineTo((px * scale).toFloat(), (py * scale).toFloat()) }
+                val py = vy + dbToPixel(curveCacheDb[xi])
+                val px = vx + xi
+                if (xi == 0) path.moveTo((px * scale).toFloat(), (py * scale).toFloat())
+                else         path.lineTo((px * scale).toFloat(), (py * scale).toFloat())
             }
             drawPath(path, Color(t.textCursor), style = Stroke(width = (scale * 2).toFloat()))
         }
@@ -317,6 +326,24 @@ class EqModule : TrackerModule {
     // ── EQ curve math ─────────────────────────────────────────────────────────
 
     /** Sum gain in dB from all active bands at the given frequency. */
+    // Response-curve cache (see the draw site): one dB value per pixel column, rebuilt only
+    // when the viewed slot or any band parameter changes. EqBand fields are mutable, so the
+    // key is a content hash of the 12 band values — not the (in-place-mutated) instances.
+    private var curveCacheSlot = -1
+    private var curveCacheParamsHash = 0L
+    private val curveCacheDb = FloatArray(width)
+
+    private fun bandsContentHash(bands: Array<EqBand>): Long {
+        var h = 1L
+        for (b in bands) {
+            h = h * 31 + b.type
+            h = h * 31 + b.freq
+            h = h * 31 + b.gain
+            h = h * 31 + b.q
+        }
+        return h
+    }
+
     private fun computeCombinedGainDb(bands: Array<EqBand>, freq: Float, sampleRate: Float = 44100f): Float {
         var totalDb = 0f
         for (band in bands) {

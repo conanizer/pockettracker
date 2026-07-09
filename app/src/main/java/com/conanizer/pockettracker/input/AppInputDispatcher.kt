@@ -262,6 +262,16 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         else -> state.transientMarkers.filter { it > 0 && it < state.totalFrames }.toIntArray()
     }
 
+    // NEW project: the native engine keeps mixer/master-FX/EQ-bank state across project swaps,
+    // so a fresh project must push its defaults down — otherwise the previous project's
+    // volumes/OTT/sends keep sounding until each control is touched (loads get the same sync
+    // via reloadProjectSamples). Shared by both NEW entry points (dialog confirm + clean NEW).
+    fun startNewProject() {
+        trackerController.newProject()
+        audioEngine.clearLoadedTables()
+        syncVolumesToAudioBackend()
+    }
+
     fun syncVolumesToAudioBackend() {
         val project = trackerController.project
         for (i in 0 until 8) {
@@ -1185,8 +1195,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         }
         if (showNewProjectDialog) {
             showNewProjectDialog = false
-            trackerController.newProject()
-            audioEngine.clearLoadedTables()
+            startNewProject()
             return
         }
         if (showRecoveryDialog) {
@@ -1509,8 +1518,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     if (trackerController.isProjectDirty) {
                         showNewProjectDialog = true
                     } else {
-                        trackerController.newProject()
-                        audioEngine.clearLoadedTables()
+                        startNewProject()
                     }
                 }
             }
@@ -2299,6 +2307,19 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 }
             }
             ScreenType.SAMPLE_EDITOR -> {
+                // START toggles: while the editor preview is audible, START stops it instead of
+                // retriggering — long/looped samples were otherwise unstoppable inside the editor
+                // (the any-button-stops-preview UX deliberately exempts this screen).
+                // playbackPosition is the editor's own ~30fps "is playing" poll of the slot that
+                // actually sounds (254 for stereo LEFT/RIGHT/MONO source modes). It also tracks
+                // song voices on the same sample, so the toggle only engages while the transport
+                // is stopped — during song playback START keeps its retrigger behaviour.
+                if (sampleEditorState.playbackPosition >= 0f && !trackerController.isPlaying()) {
+                    audioEngine.stopPreview()
+                    sampleEditorState = sampleEditorState.copy(playbackPosition = -1f)
+                    return
+                }
+
                 // Rapid double-START guard: finish the previous preview's deferred restore NOW,
                 // otherwise savedStart/savedEnd below capture the preview selection and the
                 // instrument's real START/END are lost.
@@ -2516,43 +2537,35 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         }
     }
 
-    fun handleBLeft() {
+    // B+LEFT / B+RIGHT: cycle the current item with wrap (EQ editor: clamped slot step).
+    // One implementation for both directions so the per-screen cases can't diverge.
+    private fun cycleCurrentItem(delta: Int) {
         if (themeEditorState.isOpen) return
         if (eqEditorState.isOpen) {
-            val newSlot = (eqEditorState.slotIndex - 1).coerceIn(0, 127)
+            val newSlot = (eqEditorState.slotIndex + delta).coerceIn(0, 127)
             eqEditorState = eqEditorState.copy(slotIndex = newSlot)
             applyCallerEqSlotChange(newSlot)
-        } else {
-            when (trackerController.currentScreen) {
-                ScreenType.CHAIN -> { trackerController.currentChain = if (trackerController.currentChain > 0) trackerController.currentChain - 1 else 255; trackerController.lastEditedChain = trackerController.currentChain }
-                ScreenType.PHRASE -> { trackerController.currentPhrase = if (trackerController.currentPhrase > 0) trackerController.currentPhrase - 1 else 255; trackerController.lastEditedPhrase = trackerController.currentPhrase }
-                ScreenType.INSTRUMENT -> { val n = if (trackerController.currentInstrument > 0) trackerController.currentInstrument - 1 else 127; trackerController.currentInstrument = n; trackerController.lastEditedInstrument = n; instrumentController.currentInstrument = n }
-                ScreenType.MODS -> { val n = if (trackerController.currentInstrument > 0) trackerController.currentInstrument - 1 else 127; trackerController.currentInstrument = n; trackerController.lastEditedInstrument = n; instrumentController.currentInstrument = n }
-                ScreenType.TABLE  -> { val n = if (trackerController.currentTable > 0) trackerController.currentTable - 1 else 127; trackerController.currentTable = n; trackerController.lastEditedTable = n }
-                ScreenType.GROOVE -> { trackerController.currentGroove = if (trackerController.currentGroove > 0) trackerController.currentGroove - 1 else 127 }
-                else -> { }
+            return
+        }
+        fun wrap(value: Int, max: Int) = (value + delta).mod(max + 1)
+        when (trackerController.currentScreen) {
+            ScreenType.CHAIN  -> { trackerController.currentChain = wrap(trackerController.currentChain, 255); trackerController.lastEditedChain = trackerController.currentChain }
+            ScreenType.PHRASE -> { trackerController.currentPhrase = wrap(trackerController.currentPhrase, 255); trackerController.lastEditedPhrase = trackerController.currentPhrase }
+            ScreenType.INSTRUMENT, ScreenType.MODS -> {
+                val n = wrap(trackerController.currentInstrument, 127)
+                trackerController.currentInstrument = n
+                trackerController.lastEditedInstrument = n
+                instrumentController.currentInstrument = n
             }
+            ScreenType.TABLE  -> { val n = wrap(trackerController.currentTable, 127); trackerController.currentTable = n; trackerController.lastEditedTable = n }
+            ScreenType.GROOVE -> { trackerController.currentGroove = wrap(trackerController.currentGroove, 127) }
+            else -> { }
         }
     }
 
-    fun handleBRight() {
-        if (themeEditorState.isOpen) return
-        if (eqEditorState.isOpen) {
-            val newSlot = (eqEditorState.slotIndex + 1).coerceIn(0, 127)
-            eqEditorState = eqEditorState.copy(slotIndex = newSlot)
-            applyCallerEqSlotChange(newSlot)
-        } else {
-            when (trackerController.currentScreen) {
-                ScreenType.CHAIN -> { trackerController.currentChain = if (trackerController.currentChain < 255) trackerController.currentChain + 1 else 0; trackerController.lastEditedChain = trackerController.currentChain }
-                ScreenType.PHRASE -> { trackerController.currentPhrase = if (trackerController.currentPhrase < 255) trackerController.currentPhrase + 1 else 0; trackerController.lastEditedPhrase = trackerController.currentPhrase }
-                ScreenType.INSTRUMENT -> { val n = if (trackerController.currentInstrument < 127) trackerController.currentInstrument + 1 else 0; trackerController.currentInstrument = n; trackerController.lastEditedInstrument = n; instrumentController.currentInstrument = n }
-                ScreenType.MODS -> { val n = if (trackerController.currentInstrument < 127) trackerController.currentInstrument + 1 else 0; trackerController.currentInstrument = n; trackerController.lastEditedInstrument = n; instrumentController.currentInstrument = n }
-                ScreenType.TABLE  -> { val n = if (trackerController.currentTable < 127) trackerController.currentTable + 1 else 0; trackerController.currentTable = n; trackerController.lastEditedTable = n }
-                ScreenType.GROOVE -> { trackerController.currentGroove = if (trackerController.currentGroove < 127) trackerController.currentGroove + 1 else 0 }
-                else -> { }
-            }
-        }
-    }
+    fun handleBLeft()  = cycleCurrentItem(-1)
+
+    fun handleBRight() = cycleCurrentItem(+1)
     fun handleBUp()    { when (trackerController.currentScreen) {
         ScreenType.SONG      -> trackerController.moveSongBigUp()
         ScreenType.INST_POOL -> trackerController.poolBigUp()

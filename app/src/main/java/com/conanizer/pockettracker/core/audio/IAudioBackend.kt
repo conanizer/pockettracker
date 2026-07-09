@@ -222,9 +222,10 @@ interface IAudioBackend {
     /**
      * Stop a specific track's voice immediately.
      *
-     * Used for Kill effect (K00) - stops the voice on the specified track.
+     * Preview-stop only: cuts the previous preview when a new one starts or the user stops it.
+     * The K00 kill effect does NOT use this — it goes through scheduleNoteOff (declicked).
      *
-     * @param trackId Which track to kill (0-7)
+     * @param trackId Which track to stop (typically PREVIEW_TRACK_ID)
      */
     fun killTrack(trackId: Int)
 
@@ -557,19 +558,6 @@ interface IAudioBackend {
     fun scheduleMasterEqSlotAt(targetFrame: Long, slot: Int)
 
     /**
-     * Set pitch slide for a voice (PSL effect).
-     *
-     * Slides the pitch from current offset to target over the specified duration.
-     * Used for portamento effects between notes.
-     *
-     * @param trackId Which track to apply pitch slide (0-7)
-     * @param targetSemitones Target pitch offset in semitones (can be negative)
-     * @param durationTicks Duration of slide in ticks (1 tick = 1/12 of a step at default groove)
-     * @param tempo Current tempo in BPM (needed for timing calculations)
-     */
-    fun setPitchSlide(trackId: Int, targetSemitones: Float, durationTicks: Float, tempo: Int)
-
-    /**
      * Schedule a continuous pitch bend (PBN on an empty step) at the exact frame. Applied to the
      * active voice on the audio thread. Use semitonesPerTick = 0 to stop bending.
      *
@@ -592,28 +580,6 @@ interface IAudioBackend {
     fun scheduleVibrato(targetFrame: Long, trackId: Int, speed: Float, depth: Float)
 
     /**
-     * Clear all pitch modulation for a voice.
-     *
-     * Resets pitch offset to 0, stops any pitch slide, and disables vibrato.
-     * Called automatically when a new note is triggered on the same track.
-     *
-     * @param trackId Which track to clear pitch modulation (0-7)
-     */
-    fun clearPitchMod(trackId: Int)
-
-    /**
-     * Set initial pitch offset for a voice (used by PSL portamento effect).
-     *
-     * This sets the starting pitch offset before calling setPitchSlide.
-     * Used for portamento: set offset to (previousNote - currentNote) semitones,
-     * then call setPitchSlide with target=0 to slide to the current note.
-     *
-     * @param trackId Which track to set pitch offset (0-7)
-     * @param semitones Pitch offset in semitones (can be negative)
-     */
-    fun setInitialPitchOffset(trackId: Int, semitones: Float)
-
-    /**
      * Set a modulation slot for an instrument.
      *
      * Call this before scheduling a note. The engine copies these params to the voice
@@ -622,15 +588,17 @@ interface IAudioBackend {
      *
      * @param sampleId     Instrument's sample slot (0-255)
      * @param slotIndex    Mod slot (0-3)
-     * @param type         0=NONE, 1=AHD, 2=ADSR, 3=LFO
-     * @param dest         0=NONE, 1=VOL, 3=PITCH
+     * @param type         0=NONE, 1=AHD, 2=ADSR, 3=LFO, 4=DRUM, 5=TRIG, 6=SCALAR
+     * @param dest         0=NONE, 1=VOL, 2=PAN, 3=PITCH, 4=FINE_PITCH, 5=CUT, 6=RES, 7=STA,
+     *                     8=MOD_AMT, 9=MOD_RATE, 10=MOD_BOTH
      * @param amount       Modulation depth 0.0-1.0
      * @param attackSamples  Attack duration in audio samples
      * @param holdSamples    Hold duration in audio samples (AHD hold; unused in ADSR)
      * @param decaySamples   Decay duration in audio samples
      * @param sustainLevel   ADSR sustain level 0.0-1.0
      * @param lfoHz          LFO frequency in Hz
-     * @param oscShape       LFO shape: 0=TRI,1=SIN,2=RMP+,3=RMP-,6=SQU+,7=SQU-
+     * @param oscShape       LFO shape: 0=TRI,1=SIN,2=RMP+,3=RMP-,4=EXP+,5=EXP-,6=SQU+,7=SQU-,8=RND,9=DRNK
+     * @param lfoTrigMode    LFO trigger mode: 0=FREE, 1=RETG, 2=HOLD, 3=ONCE
      */
     fun setInstrumentModulation(
         sampleId: Int,
@@ -644,7 +612,8 @@ interface IAudioBackend {
         sustainLevel: Float = 0.5f,
         lfoHz: Float = 4.0f,
         oscShape: Int = 0,
-        releaseSamples: Int = 0  // ADSR/TRIG: release duration; 0 = instant on note-off
+        releaseSamples: Int = 0,  // ADSR/TRIG: release duration; 0 = instant on note-off
+        lfoTrigMode: Int = 1      // LFO only; 1 = RETG (retrigger phase at note-on)
     )
 
     /**

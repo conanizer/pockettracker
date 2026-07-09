@@ -1,5 +1,6 @@
 #pragma once
 #include <cstring>
+#include <cstdint>
 #include "note-queue.h"
 
 // ===================================
@@ -113,7 +114,10 @@ struct VoiceModSlot {
     float sustainLevel;  // ADSR: sustain level 0.0-1.0
     float lfoHz;         // LFO: frequency in Hz
     float lfoPhase;      // LFO: current phase (0 to 2π)
-    int oscShape;        // LFO: oscillator shape (0=TRI, 1=SIN, ...)
+    int oscShape;        // LFO: oscillator shape (0=TRI, 1=SIN, ...; 8=RND, 9=DRNK are stateful)
+    int lfoTrigMode;     // LFO: 0=FREE (clock-aligned phase), 1=RETG, 2=HOLD, 3=ONCE
+    float lfoRandValue;  // LFO RND/DRNK: current sample-&-hold / drunk-walk level
+    uint32_t lfoRngState;// LFO RND/DRNK: per-slot xorshift32 state (seeded at trigger, never 0)
     int releaseSamples;  // ADSR/TRIG: release duration in audio samples
 
     // Mod-to-mod: computed each audio callback by updateVoiceModulation
@@ -126,7 +130,8 @@ struct VoiceModSlot {
     VoiceModSlot() : type(0), dest(0), amount(0.5f), effectiveAmt(0.5f), effectiveRateMult(1.0f),
                      stage(0), envValue(0.0f), prevEnvValue(0.0f), stageCounter(0),
                      attackSamples(0), holdSamples(0), decaySamples(0), releaseSamples(0),
-                     sustainLevel(0.5f), lfoHz(4.0f), lfoPhase(0.0f), oscShape(0) {}
+                     sustainLevel(0.5f), lfoHz(4.0f), lfoPhase(0.0f), oscShape(0),
+                     lfoTrigMode(1), lfoRandValue(0.0f), lfoRngState(1u) {}
 };
 
 // ModRoute — a single weighted connection from one source to one destination.
@@ -210,17 +215,12 @@ public:
     // Change the pitch to midiNote (Arpeggio effect).
     virtual void setMidiNote(int midiNote) = 0;
 
-    // Pitch effects (PSL/PBN/PVB/PVX) — rate/total-frames already converted from ticks by Kotlin.
-    // setPitchSlideRaw: slide from current offset to targetSemitones over totalFrames audio frames.
-    virtual void setPitchSlideRaw(float targetSemitones, float totalFrames) = 0;
+    // Pitch effects (PBN/PVB/PVX mid-note) — applied on the audio thread via paramUpdateQueue.
+    // PSL travels on the scheduled note itself (pslInitialOffset/pslDuration), not through here.
     // setPitchBendRaw: continuous bend at ratePerFrame semitones/frame; 0 = stop.
     virtual void setPitchBendRaw(float ratePerFrame) = 0;
     // setVibratoRaw: LFO vibrato at speed Hz, depth semitones; depth=0 = stop.
     virtual void setVibratoRaw(float speed, float depth) = 0;
-    // clearPitchMod: reset all pitch mod state (offset, slide, vibrato).
-    virtual void clearPitchMod() = 0;
-    // setInitialPitchOffset: set pitchOffset without starting a slide (PSL setup).
-    virtual void setInitialPitchOffset(float semitones) = 0;
 
     // Render up to numFrames of stereo audio into buf (interleaved L/R).
     // Returns the peak level of this block (used for per-track metering).

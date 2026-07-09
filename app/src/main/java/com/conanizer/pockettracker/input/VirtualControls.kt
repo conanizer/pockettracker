@@ -47,6 +47,28 @@ import kotlin.math.floor
 val LocalButtonEventCallback =
     staticCompositionLocalOf<((button: VirtualButton, isPress: Boolean) -> Unit)?> { null }
 
+// Shared press gesture for all virtual buttons: PRESSED on touch-down, RELEASED on touch-up.
+// Each button gets its own pointer scope, so multi-touch hold combos (L+A, A+DPAD, ...) work
+// exactly like physical buttons. Used by both VirtualBtn and VirtualBtnThemed.
+private fun Modifier.virtualButtonPress(
+    button: VirtualButton,
+    inputMapper: InputMapper,
+    buttonEvent: ((VirtualButton, Boolean) -> Unit)?,
+    setPressed: (Boolean) -> Unit
+): Modifier = pointerInput(button) {
+    detectTapGestures(
+        onPress = {
+            setPressed(true)
+            buttonEvent?.invoke(button, true)
+            inputMapper.onVirtualButton(button, ButtonAction.PRESSED)
+            tryAwaitRelease()
+            setPressed(false)
+            buttonEvent?.invoke(button, false)
+            inputMapper.onVirtualButton(button, ButtonAction.RELEASED)
+        }
+    )
+}
+
 private val BTN_NORMAL  = Color(0xFF3D5A80)
 private val BTN_PRESSED = Color(0xFF98C1D9)
 
@@ -72,19 +94,7 @@ private fun VirtualBtn(
                 color = if (pressed) BTN_PRESSED else BTN_NORMAL,
                 shape = RoundedCornerShape(4.dp)
             )
-            .pointerInput(button) {
-                detectTapGestures(
-                    onPress = {
-                        pressed = true
-                        buttonEvent?.invoke(button, true)
-                        inputMapper.onVirtualButton(button, ButtonAction.PRESSED)
-                        tryAwaitRelease()
-                        pressed = false
-                        buttonEvent?.invoke(button, false)
-                        inputMapper.onVirtualButton(button, ButtonAction.RELEASED)
-                    }
-                )
-            }
+            .virtualButtonPress(button, inputMapper, buttonEvent) { pressed = it }
     ) {
         Text(
             text = label,
@@ -354,19 +364,7 @@ private fun VirtualBtnThemed(
                         RoundedCornerShape(4.dp)
                     )
             )
-            .pointerInput(button) {
-                detectTapGestures(
-                    onPress = {
-                        pressed = true
-                        buttonEvent?.invoke(button, true)
-                        inputMapper.onVirtualButton(button, ButtonAction.PRESSED)
-                        tryAwaitRelease()
-                        pressed = false
-                        buttonEvent?.invoke(button, false)
-                        inputMapper.onVirtualButton(button, ButtonAction.RELEASED)
-                    }
-                )
-            }
+            .virtualButtonPress(button, inputMapper, buttonEvent) { pressed = it }
     ) {
         Text(
             text = label,

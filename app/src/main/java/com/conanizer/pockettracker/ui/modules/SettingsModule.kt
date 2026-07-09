@@ -7,14 +7,16 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.conanizer.pockettracker.BuildConfig
 import com.conanizer.pockettracker.ui.theme.AppTheme
 import com.conanizer.pockettracker.ui.theme.DeviceSkin
-import com.conanizer.pockettracker.input.CursorCapabilities
 import com.conanizer.pockettracker.input.CursorContext
 import com.conanizer.pockettracker.input.CursorContextFactory
-import com.conanizer.pockettracker.input.CursorValueType
 import com.conanizer.pockettracker.platform.android.DeviceAdapter
 import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.ui.theme.VisualizerType
 import com.conanizer.pockettracker.core.logic.InputAction
+import com.conanizer.pockettracker.ui.CHAR_SPACING
+import com.conanizer.pockettracker.ui.FONT_SCALE
+import com.conanizer.pockettracker.ui.ROW_HEIGHT
+import com.conanizer.pockettracker.ui.TEXT_PADDING
 import com.conanizer.pockettracker.ui.drawBitmapText
 import com.conanizer.pockettracker.ui.toHex2
 
@@ -51,10 +53,6 @@ class SettingsModule : TrackerModule {
     override val width = 510
     override val height = 392
 
-    private val FONT_SCALE = 3
-    private val CHAR_SPACING = 2
-    private val ROW_HEIGHT = 21
-    private val TEXT_PADDING = 3
 
     // Column positions
     private val NAME_X_OFFSET  = 10
@@ -299,128 +297,41 @@ class SettingsModule : TrackerModule {
         return when (state.cursorRow) {
             0  -> when (state.cursorColumn) {
                 2 -> if (state.availableSkins.isEmpty()) CursorContextFactory.readOnly()
-                     else CursorContext(
-                        valueType = CursorValueType.HEX_BYTE,   // THEME — A+dpad cycles available skins
-                        capabilities = CursorCapabilities(
-                            canIncrement = true, canDecrement = true,
-                            canIncrementFast = false, canDecrementFast = false
-                        ),
-                        currentValue = state.availableSkins
-                            .indexOfFirst { it.id == state.currentSkinId }.coerceAtLeast(0),
-                        minValue = 0, maxValue = (state.availableSkins.size - 1).coerceAtLeast(0),
-                        smallStep = 1, largeStep = 1, emptyValue = -1
+                     else CursorContextFactory.enumCycle(   // THEME — A+dpad cycles available skins
+                        state.availableSkins.indexOfFirst { it.id == state.currentSkinId },
+                        state.availableSkins.size
                      )
-                else -> CursorContext(
-                    valueType = CursorValueType.HEX_BYTE,   // LAYOUT — A+dpad cycles selectable modes
-                    capabilities = CursorCapabilities(
-                        canIncrement = true, canDecrement = true,
-                        canIncrementFast = false, canDecrementFast = false
-                    ),
-                    currentValue = layoutModeList(state.hasPhysicalButtons)
-                        .indexOf(state.layoutMode).coerceAtLeast(0),
-                    minValue = 0,
-                    maxValue = (layoutModeList(state.hasPhysicalButtons).size - 1).coerceAtLeast(0),
-                    smallStep = 1, largeStep = 1, emptyValue = -1
+                else -> CursorContextFactory.enumCycle(     // LAYOUT — A+dpad cycles selectable modes
+                    layoutModeList(state.hasPhysicalButtons).indexOf(state.layoutMode),
+                    layoutModeList(state.hasPhysicalButtons).size
                 )
             }
-            1  -> CursorContext(
-                valueType = CursorValueType.HEX_BYTE,   // SCALING — A+dpad toggles INT / BILINEAR
-                capabilities = CursorCapabilities(
-                    canIncrement = true, canDecrement = true,
-                    canIncrementFast = false, canDecrementFast = false
-                ),
-                currentValue = if (state.scalingMode == DeviceAdapter.ScalingMode.BILINEAR) 1 else 0,
-                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
-            )
-            2  -> when (state.cursorColumn) {
+            1  -> CursorContextFactory.toggleBinary(state.scalingMode == DeviceAdapter.ScalingMode.BILINEAR)  // SCALING
+            2  -> when (state.cursorColumn) {   // OVERLAY
                 1 -> {
                     val options = listOf("OFF") + state.overlayFiles
-                    CursorContext(
-                        valueType = CursorValueType.HEX_BYTE,
-                        capabilities = CursorCapabilities(
-                            canIncrement = true, canDecrement = true,
-                            canIncrementFast = false, canDecrementFast = false
-                        ),
-                        currentValue = options.indexOf(state.overlayName).coerceAtLeast(0),
-                        minValue = 0, maxValue = (options.size - 1).coerceAtLeast(0),
-                        smallStep = 1, largeStep = 1, emptyValue = -1
-                    )
+                    CursorContextFactory.enumCycle(options.indexOf(state.overlayName), options.size)
                 }
                 else -> CursorContextFactory.hexByte(currentValue = state.overlayStrength, min = 0, max = 255)
             }
             3  -> when (state.cursorColumn) {   // BTN SOUND
-                1 -> CursorContext(
-                    valueType = CursorValueType.HEX_BYTE,
-                    capabilities = CursorCapabilities(
-                        canIncrement = true, canDecrement = true,
-                        canIncrementFast = false, canDecrementFast = false
-                    ),
-                    currentValue = if (state.buttonSoundEnabled) 1 else 0,
-                    minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
-                )
+                1 -> CursorContextFactory.toggleBinary(state.buttonSoundEnabled)
                 else -> CursorContextFactory.hexByte(currentValue = state.buttonSoundVolume, min = 0, max = 255)
             }
             4  -> when (state.cursorColumn) {   // BTN VIBRO
-                1 -> CursorContext(
-                    valueType = CursorValueType.HEX_BYTE,
-                    capabilities = CursorCapabilities(
-                        canIncrement = true, canDecrement = true,
-                        canIncrementFast = false, canDecrementFast = false
-                    ),
-                    currentValue = if (state.buttonVibroEnabled) 1 else 0,
-                    minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
-                )
+                1 -> CursorContextFactory.toggleBinary(state.buttonVibroEnabled)
                 else -> CursorContextFactory.hexByte(currentValue = state.vibroPower, min = 0, max = 255)
             }
-            5  -> CursorContext(
-                valueType = CursorValueType.HEX_BYTE,   // KB INSERT
-                capabilities = CursorCapabilities(
-                    canIncrement = true, canDecrement = true,
-                    canIncrementFast = false, canDecrementFast = false
-                ),
-                currentValue = if (state.insertBefore) 1 else 0,
-                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
-            )
-            6  -> CursorContext(
-                valueType = CursorValueType.HEX_BYTE,   // CURSOR
-                capabilities = CursorCapabilities(
-                    canIncrement = true, canDecrement = true,
-                    canIncrementFast = false, canDecrementFast = false
-                ),
-                currentValue = if (state.cursorRemember) 1 else 0,
-                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
-            )
-            7  -> CursorContext(
-                valueType = CursorValueType.HEX_BYTE,   // NOTE PREV
-                capabilities = CursorCapabilities(
-                    canIncrement = true, canDecrement = true,
-                    canIncrementFast = false, canDecrementFast = false
-                ),
-                currentValue = if (state.notePreviewEnabled) 1 else 0,
-                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
-            )
-            8  -> CursorContext(
-                valueType = CursorValueType.HEX_BYTE,   // VISUALIZER
-                capabilities = CursorCapabilities(
-                    canIncrement = true, canDecrement = true,
-                    canIncrementFast = false, canDecrementFast = false
-                ),
-                currentValue = VisualizerType.values().indexOf(state.visualizerType)
-                    .coerceAtLeast(0),
-                minValue = 0, maxValue = VisualizerType.values().size - 1,
-                smallStep = 1, largeStep = 1, emptyValue = -1
+            5  -> CursorContextFactory.toggleBinary(state.insertBefore)        // KB INSERT
+            6  -> CursorContextFactory.toggleBinary(state.cursorRemember)      // CURSOR
+            7  -> CursorContextFactory.toggleBinary(state.notePreviewEnabled)  // NOTE PREV
+            8  -> CursorContextFactory.enumCycle(                              // VISUALIZER
+                VisualizerType.values().indexOf(state.visualizerType),
+                VisualizerType.values().size
             )
             9  -> CursorContextFactory.readOnly()   // THEME: A opens editor
             10 -> CursorContextFactory.readOnly()   // TEMPLATE: A triggers save/clear
-            11 -> CursorContext(
-                valueType = CursorValueType.HEX_BYTE,   // RESUME
-                capabilities = CursorCapabilities(
-                    canIncrement = true, canDecrement = true,
-                    canIncrementFast = false, canDecrementFast = false
-                ),
-                currentValue = if (state.autosaveResumeAuto) 1 else 0,
-                minValue = 0, maxValue = 1, smallStep = 1, largeStep = 1, emptyValue = -1
-            )
+            11 -> CursorContextFactory.toggleBinary(state.autosaveResumeAuto)  // RESUME
             else -> CursorContextFactory.none()
         }
     }

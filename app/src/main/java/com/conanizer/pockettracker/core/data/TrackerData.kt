@@ -258,9 +258,9 @@ enum class ModType(val displayName: String) {
     AHD("AHD"),
     ADSR("ADSR"),
     LFO("LFO"),
-    DRUM("DRUM"),     // future
-    TRIG("TRIG"),     // future
-    TRACKING("TRK"),  // future
+    DRUM("DRUM"),     // AHD semantics (engine type 4)
+    TRIG("TRIG"),     // ADSR semantics (engine type 5)
+    TRACKING("TRK"),  // future — no engine implementation; hidden from the TYPE cycle
     SCALAR("SCL")     // constant value — amount field is the output (0x00–0xFF)
 }
 

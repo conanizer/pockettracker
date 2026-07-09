@@ -74,7 +74,7 @@ class ProjectModule : TrackerModule {
         rowY += ROW_HEIGHT + 14
 
         // ===================================
-        // STEP 4: Draw parameter rows
+        // Parameter rows
         // ===================================
 
         // Row index for cursor matching

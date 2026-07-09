@@ -157,9 +157,12 @@ struct OttModule {
     void process(float* buf, int numFrames, int channelCount) {
         // Auto-reset: if signal arrives after SILENCE_RESET_FRAMES of silence,
         // reset DSP and start warmup to hide the LR4 zero-state filter transient.
+        // Scan BOTH channels: an L-only check counts a hard-right-panned passage as
+        // silence, and the next left-channel signal would trigger a reset+warmup dip.
         bool hasSignal = false;
         for (int i = 0; i < numFrames && !hasSignal; i++) {
-            if (fabsf(buf[i * channelCount]) > 1e-4f) hasSignal = true;
+            if (fabsf(buf[i * channelCount])     > 1e-4f ||
+                fabsf(buf[i * channelCount + 1]) > 1e-4f) hasSignal = true;
         }
         if (!hasSignal) {
             if (silenceCounter < SILENCE_RESET_FRAMES) silenceCounter += numFrames;

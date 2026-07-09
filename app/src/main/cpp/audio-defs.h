@@ -32,7 +32,12 @@
 // in scheduleNoteBatch) rather than the pool being widened to 9. Bump this to 9 only if simultaneous
 // preview-over-full-song becomes a real requirement.
 const int MAX_VOICES = 8;
-const int DECLICK_SAMPLES = 64;  // ~1.45ms anti-click fade at 44100Hz
+const int DECLICK_SAMPLES = 64;  // ~1.45ms anti-click fade at 44100Hz (note start, voice steal)
+// Deliberate kills (K00 / table KIL / preview stop) fade longer: 1.45 ms from a high-amplitude
+// point still lands as a small tick, ~5.8 ms is soft yet perceptually instant. Steals stay at
+// DECLICK_SAMPLES — their tail is masked by the new note, and short fades keep slots turning
+// over at phrase-boundary trigger bursts.
+const int KILL_FADE_SAMPLES = 256;
 
 // ===================================
 // EFFECT TYPE CONSTANTS (must match EffectProcessor.kt)

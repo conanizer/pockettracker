@@ -24,23 +24,6 @@ enum class ScreenType(val label: String, val shortLabel: String) {
     SAMPLE_EDITOR("SAMPLE EDITOR", "SE") // Full-screen waveform editor (opened from INSTRUMENT)
 }
 
-// Navigation grid: 5 columns × 5 rows
-// Returns which screen appears at [row, col] for current screen
-data class NavigationGrid(
-    val grid: Array<Array<ScreenType?>>  // [row][col]
-) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-        other as NavigationGrid
-        return grid.contentDeepEquals(other.grid)
-    }
-
-    override fun hashCode(): Int {
-        return grid.contentDeepHashCode()
-    }
-}
-
 // Main row screens (always visible at row 3)
 val MAIN_ROW_SCREENS = listOf(
     ScreenType.SONG,
@@ -49,55 +32,3 @@ val MAIN_ROW_SCREENS = listOf(
     ScreenType.INSTRUMENT,
     ScreenType.TABLE
 )
-
-// Get navigation grid based on current screen
-fun getNavigationGrid(currentScreen: ScreenType): NavigationGrid {
-    // Initialize 5×5 grid with nulls
-    val grid = Array(5) { Array<ScreenType?>(5) { null } }
-
-    // Row 3 (middle): Always show S C P I T
-    grid[2] = arrayOf(
-        ScreenType.SONG,
-        ScreenType.CHAIN,
-        ScreenType.PHRASE,
-        ScreenType.INSTRUMENT,
-        ScreenType.TABLE
-    )
-
-    // Get current column (which main screen we're on or related to)
-    val currentCol = when (currentScreen) {
-        ScreenType.SONG -> 0
-        ScreenType.CHAIN -> 1
-        ScreenType.PHRASE, ScreenType.GROOVE, ScreenType.SCALE -> 2
-        ScreenType.INSTRUMENT, ScreenType.MODS, ScreenType.INST_POOL -> 3
-        ScreenType.TABLE -> 4
-        else -> 2  // Default to middle
-    }
-
-    // Row 1 (top): Show only when on that specific screen
-    when (currentScreen) {
-        ScreenType.PHRASE -> grid[0][2] = ScreenType.SCALE
-        ScreenType.INSTRUMENT -> grid[0][3] = ScreenType.INST_POOL
-        else -> { /* No top screens for other main screens */ }
-    }
-
-    // Row 2: Show screens above current column
-    grid[1][currentCol] = ScreenType.PROJECT  // Project always on row 2
-    when (currentScreen) {
-        ScreenType.PHRASE, ScreenType.GROOVE, ScreenType.SCALE -> {
-            grid[1][2] = ScreenType.GROOVE
-        }
-        ScreenType.INSTRUMENT, ScreenType.MODS, ScreenType.INST_POOL -> {
-            grid[1][3] = ScreenType.MODS
-        }
-        else -> { /* PROJECT (set above) is the only row-2 screen for other columns */ }
-    }
-
-    // Row 4: Mixer shows in current column (and maybe adjacent)
-    grid[3][currentCol] = ScreenType.MIXER
-
-    // Row 5: Effects shows in current column (and maybe adjacent)
-    grid[4][currentCol] = ScreenType.EFFECTS
-
-    return NavigationGrid(grid)
-}

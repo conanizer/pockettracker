@@ -11,6 +11,11 @@ import android.view.WindowManager
 class DeviceAdapter(private val context: Context) {
 
     companion object {
+        // Verbose per-scale layout tracing (fires on every layout change) — same TRACE-gate
+        // convention as the scheduler/backend layers. Errors/oddities still use Log.d directly.
+        private const val TRACE = false
+        private const val TAG = "DeviceAdapter"
+
         const val SCREEN_WIDTH = 640
         const val SCREEN_HEIGHT = 480
         const val BUTTON_PATTERN_WIDTH = 3.4f
@@ -48,6 +53,8 @@ class DeviceAdapter(private val context: Context) {
         val deviceHeight: Int = 0
     )
 
+    private fun logt(msg: String) { if (TRACE) Log.d(TAG, msg) }
+
     /**
      * Returns (width, height) for the current window/screen in the current orientation.
      * Uses the modern WindowMetrics API on API 30+ to avoid the deprecated
@@ -84,7 +91,7 @@ class DeviceAdapter(private val context: Context) {
             val hasJoystick = (sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
 
             if (hasGamepad || hasJoystick) {
-                Log.d("DeviceAdapter", "Found gaming device: ${device.name}")
+                logt("Found gaming device: ${device.name}")
                 return true
             }
 
@@ -96,7 +103,7 @@ class DeviceAdapter(private val context: Context) {
                 if (lowerName.contains("xbox") ||
                     lowerName.contains("controller") ||
                     lowerName.contains("gamepad")) {
-                    Log.d("DeviceAdapter", "Treating as gamepad (keyboard-like): ${device.name}")
+                    logt("Treating as gamepad (keyboard-like): ${device.name}")
                     return true
                 }
             }
@@ -109,50 +116,20 @@ class DeviceAdapter(private val context: Context) {
         return orientation == Configuration.ORIENTATION_LANDSCAPE
     }
 
+    /** Auto-detect: FULL when physical game buttons exist, else touch layout by orientation. */
     fun calculateLayout(): LayoutConfig {
-        val hasButtons = hasPhysicalGameButtons()
-
-        val (deviceWidth, deviceHeight) = getDeviceDimensions()
-
-        Log.d("DeviceAdapter", "Device PHYSICAL screen: ${deviceWidth}×${deviceHeight}")
-
-        val needsVirtual = !hasButtons
-        val isLandscape = if (needsVirtual) isLandscapeOrientation() else true
-
-        if (!needsVirtual) {
-            val scaleByWidth = deviceWidth / SCREEN_WIDTH
-            val scaleByHeight = deviceHeight / SCREEN_HEIGHT
-            val scale = minOf(scaleByWidth, scaleByHeight)
-            val finalScale = maxOf(1, scale)
-
-            Log.d("DeviceAdapter", "Mode: FULL SCREEN")
-            Log.d("DeviceAdapter", "Scale factors: width=${scaleByWidth}, height=${scaleByHeight}")
-
-            return LayoutConfig(
-                needsVirtualButtons = false,
-                isLandscape = true,
-                screenScale = finalScale,
-                scaledScreenWidth = SCREEN_WIDTH * finalScale,
-                scaledScreenHeight = SCREEN_HEIGHT * finalScale,
-                virtualButtonsHeight = 0,
-                virtualButtonsWidth = 0,
-                deviceWidth = deviceWidth,
-                deviceHeight = deviceHeight
-            )
+        val mode = when {
+            hasPhysicalGameButtons() -> LayoutMode.FULL
+            isLandscapeOrientation() -> LayoutMode.TOUCH_LANDSCAPE
+            else                     -> LayoutMode.TOUCH_PORTRAIT
         }
-
-        // Rest of the function remains the same...
-
-        if (isLandscape) {
-            return calculateLandscapeLayout(deviceWidth, deviceHeight)
-        } else {
-            return calculatePortraitLayout(deviceWidth, deviceHeight)
-        }
+        return calculateLayout(mode)
     }
 
     /** Calculate layout for a forced mode (used when user overrides auto-detection). */
     fun calculateLayout(mode: LayoutMode): LayoutConfig {
         val (deviceWidth, deviceHeight) = getDeviceDimensions()
+        logt("Device PHYSICAL screen: ${deviceWidth}×${deviceHeight}, mode=$mode")
 
         return when (mode) {
             LayoutMode.FULL -> {
@@ -176,18 +153,18 @@ class DeviceAdapter(private val context: Context) {
     }
 
     private fun calculateLandscapeLayout(deviceWidth: Int, deviceHeight: Int): LayoutConfig {
-        Log.d("DeviceAdapter", "=== LANDSCAPE CALCULATION ===")
+        logt("=== LANDSCAPE CALCULATION ===")
 
         for (scale in 4 downTo 1) {
             val scaledScreenWidth = SCREEN_WIDTH * scale
             val scaledScreenHeight = SCREEN_HEIGHT * scale
 
-            Log.d("DeviceAdapter", "")
-            Log.d("DeviceAdapter", "Testing scale ${scale}x:")
-            Log.d("DeviceAdapter", "  Scaled screen: ${scaledScreenWidth}×${scaledScreenHeight}")
+            logt("")
+            logt("Testing scale ${scale}x:")
+            logt("  Scaled screen: ${scaledScreenWidth}×${scaledScreenHeight}")
 
             if (scaledScreenHeight > deviceHeight || scaledScreenWidth > deviceWidth) {
-                Log.d("DeviceAdapter", "  ✗ Screen too tall/wide")
+                logt("  ✗ Screen too tall/wide")
                 continue
             }
 
@@ -196,19 +173,19 @@ class DeviceAdapter(private val context: Context) {
             val availableButtonWidth = (deviceWidth - scaledScreenWidth) / 2
 
             if (availableButtonWidth < MIN_BUTTON_PANEL_PX) {
-                Log.d("DeviceAdapter", "  ✗ Button panel too narrow (${availableButtonWidth}px < ${MIN_BUTTON_PANEL_PX}px)")
+                logt("  ✗ Button panel too narrow (${availableButtonWidth}px < ${MIN_BUTTON_PANEL_PX}px)")
                 continue
             }
             val availableButtonHeight = deviceHeight  // FULL device height
 
-            Log.d("DeviceAdapter", "  Remaining width: ${deviceWidth - scaledScreenWidth}px")
-            Log.d("DeviceAdapter", "  Button panel: ${availableButtonWidth}px each")
+            logt("  Remaining width: ${deviceWidth - scaledScreenWidth}px")
+            logt("  Button panel: ${availableButtonWidth}px each")
 
             val boxRatio = availableButtonWidth.toFloat() / availableButtonHeight.toFloat()
             val patternRatio = BUTTON_PATTERN_WIDTH / BUTTON_PATTERN_HEIGHT
 
-            Log.d("DeviceAdapter", "  Box ratio: ${"%.3f".format(boxRatio)}")
-            Log.d("DeviceAdapter", "  Pattern ratio: ${"%.3f".format(patternRatio)}")
+            logt("  Box ratio: ${"%.3f".format(boxRatio)}")
+            logt("  Pattern ratio: ${"%.3f".format(patternRatio)}")
 
             val requiredHeight: Int
 
@@ -216,17 +193,17 @@ class DeviceAdapter(private val context: Context) {
                 // Width limits
                 val X = availableButtonWidth / BUTTON_PATTERN_WIDTH
                 requiredHeight = (X * BUTTON_PATTERN_HEIGHT).toInt()
-                Log.d("DeviceAdapter", "  WIDTH limits → X = ${"%.2f".format(X)}px")
+                logt("  WIDTH limits → X = ${"%.2f".format(X)}px")
             } else {
                 // Height limits
                 requiredHeight = availableButtonHeight
-                Log.d("DeviceAdapter", "  HEIGHT limits")
+                logt("  HEIGHT limits")
             }
 
-            Log.d("DeviceAdapter", "  Need ${requiredHeight}px height (have ${availableButtonHeight}px)")
+            logt("  Need ${requiredHeight}px height (have ${availableButtonHeight}px)")
 
             if (requiredHeight <= availableButtonHeight) {
-                Log.d("DeviceAdapter", "  ✓ FITS! Using ${scale}x")
+                logt("  ✓ FITS! Using ${scale}x")
 
                 return LayoutConfig(
                     needsVirtualButtons = true,
@@ -260,17 +237,17 @@ class DeviceAdapter(private val context: Context) {
     }
 
     private fun calculatePortraitLayout(deviceWidth: Int, deviceHeight: Int): LayoutConfig {
-        Log.d("DeviceAdapter", "=== PORTRAIT CALCULATION ===")
+        logt("=== PORTRAIT CALCULATION ===")
 
         for (scale in 4 downTo 1) {
             val scaledScreenWidth = SCREEN_WIDTH * scale
             val scaledScreenHeight = SCREEN_HEIGHT * scale
 
-            Log.d("DeviceAdapter", "")
-            Log.d("DeviceAdapter", "Testing scale ${scale}x:")
+            logt("")
+            logt("Testing scale ${scale}x:")
 
             if (scaledScreenWidth > deviceWidth) {
-                Log.d("DeviceAdapter", "  ✗ Screen too wide")
+                logt("  ✗ Screen too wide")
                 continue
             }
 
@@ -279,13 +256,13 @@ class DeviceAdapter(private val context: Context) {
             val availableButtonHeight = deviceHeight - PORTRAIT_SPACER_HEIGHT - scaledScreenHeight
             val availableButtonWidth = deviceWidth  // Full width
 
-            Log.d("DeviceAdapter", "  Available for buttons: ${availableButtonWidth}×${availableButtonHeight}")
+            logt("  Available for buttons: ${availableButtonWidth}×${availableButtonHeight}")
 
             val boxRatio = availableButtonWidth.toFloat() / availableButtonHeight.toFloat()
             val patternRatio = PORTRAIT_PATTERN_WIDTH / PORTRAIT_PATTERN_HEIGHT
 
-            Log.d("DeviceAdapter", "  Box ratio: ${"%.3f".format(boxRatio)}")
-            Log.d("DeviceAdapter", "  Pattern ratio: ${"%.3f".format(patternRatio)}")
+            logt("  Box ratio: ${"%.3f".format(boxRatio)}")
+            logt("  Pattern ratio: ${"%.3f".format(patternRatio)}")
 
             val requiredHeight: Int
 
@@ -293,16 +270,16 @@ class DeviceAdapter(private val context: Context) {
                 // Width limits
                 val X = availableButtonWidth / PORTRAIT_PATTERN_WIDTH
                 requiredHeight = (X * PORTRAIT_PATTERN_HEIGHT).toInt()
-                Log.d("DeviceAdapter", "  WIDTH limits → X = ${"%.2f".format(X)}px")
-                Log.d("DeviceAdapter", "  Required height: ${requiredHeight}px")
+                logt("  WIDTH limits → X = ${"%.2f".format(X)}px")
+                logt("  Required height: ${requiredHeight}px")
             } else {
                 // Height limits
                 requiredHeight = availableButtonHeight
-                Log.d("DeviceAdapter", "  HEIGHT limits")
+                logt("  HEIGHT limits")
             }
 
             if (requiredHeight <= availableButtonHeight) {
-                Log.d("DeviceAdapter", "  ✓ FITS! Using ${scale}x")
+                logt("  ✓ FITS! Using ${scale}x")
 
                 return LayoutConfig(
                     needsVirtualButtons = true,
@@ -340,14 +317,14 @@ class DeviceAdapter(private val context: Context) {
      * Screen sits above the button area, centered horizontally.
      */
     private fun calculatePortrait2Layout(deviceWidth: Int, deviceHeight: Int): LayoutConfig {
-        Log.d("DeviceAdapter", "=== PORTRAIT2 CALCULATION ===")
+        logt("=== PORTRAIT2 CALCULATION ===")
 
         for (scale in 4 downTo 1) {
             val scaledScreenWidth = SCREEN_WIDTH * scale
             val scaledScreenHeight = SCREEN_HEIGHT * scale
 
             if (scaledScreenWidth > deviceWidth) {
-                Log.d("DeviceAdapter", "  ✗ Scale ${scale}x: screen too wide")
+                logt("  ✗ Scale ${scale}x: screen too wide")
                 continue
             }
 
@@ -356,7 +333,7 @@ class DeviceAdapter(private val context: Context) {
             // Height: 5.2X (0.8X spacer above + 4 cells + 3×0.1X row spacers + 0.1X bottom)
             val remainingHeight = deviceHeight - scaledScreenHeight
             if (remainingHeight <= 0) {
-                Log.d("DeviceAdapter", "  ✗ Scale ${scale}x: no space for buttons")
+                logt("  ✗ Scale ${scale}x: no space for buttons")
                 continue
             }
 
@@ -369,7 +346,7 @@ class DeviceAdapter(private val context: Context) {
             val buttonAreaHeight = (X * 5.2f).toInt()  // 0.8X spacer + 4 button rows + 3×0.1X row spacers + 0.1X bottom
             val buttonAreaWidth  = (X * 4.5f).toInt()  // 2×0.1X outer + 4 button cols + 3×0.1X col spacers
 
-            Log.d("DeviceAdapter", "  ✓ Scale ${scale}x: X=$X, btnArea=${buttonAreaWidth}×${buttonAreaHeight}")
+            logt("  ✓ Scale ${scale}x: X=$X, btnArea=${buttonAreaWidth}×${buttonAreaHeight}")
 
             return LayoutConfig(
                 needsVirtualButtons = true,

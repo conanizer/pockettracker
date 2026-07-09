@@ -122,7 +122,10 @@ A sample-accurate queue system in C++.
 - Oboe-based real-time output at 44.1 kHz (OpenSL ES preferred, AAudio fallback). The stream-open
   ladder tries OpenSL ES Exclusive → Shared → None/Shared → AAudio Exclusive.
 - Audio init runs off the main thread (`Dispatchers.IO`) so startup never freezes the UI.
-- Sample-accurate note scheduling driven by a global frame counter (<0.02 ms jitter); ~<50 ms latency on tested hardware.
+- Sample-accurate note scheduling driven by a global frame counter: note onsets start at their
+  exact target frame (mid-block triggers render from an intra-block offset). Kills and param
+  updates are applied at block granularity — up to one audio burst early. ~<50 ms latency on
+  tested hardware.
 - 8-voice polyphony with per-track voice stealing.
 - Linear interpolation for pitch-shifting (no aliasing).
 - Per-voice DSP chain: Downsample (pre-interpolation) → Interpolate → Crush → Drive → Filter → Volume.

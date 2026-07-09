@@ -73,11 +73,11 @@ data class ButtonHandlers(
     val onRLeft: () -> Unit,        // R+LEFT: Navigate screen left
     val onRRight: () -> Unit,       // R+RIGHT: Navigate screen right
 
-    // L+direction combinations (reserved for future use)
-    val onLLeft: () -> Unit,        // L+LEFT: Reserved
-    val onLRight: () -> Unit,       // L+RIGHT: Reserved
-    val onLUp: () -> Unit,          // L+UP: Reserved
-    val onLDown: () -> Unit,        // L+DOWN: Reserved
+    // L+direction combinations
+    val onLLeft: () -> Unit,        // L+LEFT: Browser parent dir / prev item
+    val onLRight: () -> Unit,       // L+RIGHT: Next item
+    val onLUp: () -> Unit,          // L+UP: Browser sort mode up
+    val onLDown: () -> Unit,        // L+DOWN: Browser sort mode down
 
     // L+button combinations for copy/paste
     val onLA: () -> Unit,           // L+A: Cut (in selection) / Paste (outside selection)
@@ -551,21 +551,11 @@ class InputMapper(
         if (isLPressed && isRPressed) {
             // Check for more specific L+R+button combos first
             when (button) {
-                VirtualButton.SELECT -> {
-                    logger?.d(TAG, "L+R+SELECT (quit to project)")
-                    // TODO: Add handler for L+R+SELECT
-                    return
-                }
-                VirtualButton.A -> {
-                    logger?.d(TAG, "L+R+A (save snapshot)")
-                    // TODO: Add handler for L+R+A
-                    return
-                }
-                VirtualButton.B -> {
-                    logger?.d(TAG, "L+R+B (load snapshot)")
-                    // TODO: Add handler for L+R+B
-                    return
-                }
+                // L+R+SELECT / L+R+A / L+R+B: reserved combos — intentionally consumed (no-op)
+                // so they never fall through to the single-button handlers mid-chord.
+                VirtualButton.SELECT -> return
+                VirtualButton.A -> return
+                VirtualButton.B -> return
                 // L+R alone (when second button of the pair is pressed)
                 VirtualButton.L_SHIFT, VirtualButton.R_SHIFT -> {
                     logger?.d(TAG, "L+R (exit selection mode)")
@@ -618,11 +608,8 @@ class InputMapper(
                     buttonHandlers.onLRight()
                     return
                 }
-                VirtualButton.START -> {
-                    logger?.d(TAG, "L+START (play all from beginning)")
-                    // TODO: Add handler for L+START
-                    return
-                }
+                // L+START: reserved — intentionally consumed so START doesn't toggle playback mid-chord.
+                VirtualButton.START -> return
                 else -> {
                     logger?.d(TAG, "L held but button=$button not a combo target")
                 }
@@ -675,21 +662,11 @@ class InputMapper(
                     buttonHandlers.onRRight()
                     return
                 }
-                VirtualButton.A -> {
-                    logger?.d(TAG, "R+A (clone)")
-                    // TODO: Add handler for R+A (clone)
-                    return
-                }
-                VirtualButton.B -> {
-                    logger?.d(TAG, "R+B (reset to default)")
-                    // TODO: Add handler for R+B
-                    return
-                }
-                VirtualButton.START -> {
-                    logger?.d(TAG, "R+START (play from cursor)")
-                    // TODO: Add handler for R+START
-                    return
-                }
+                // R+A / R+B / R+START: reserved combos — intentionally consumed (no-op) so the
+                // single-button actions can't fire while R is held for screen navigation.
+                VirtualButton.A -> return
+                VirtualButton.B -> return
+                VirtualButton.START -> return
                 else -> { }
             }
         }

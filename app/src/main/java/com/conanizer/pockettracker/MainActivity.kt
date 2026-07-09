@@ -759,15 +759,19 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         wasPhraseScreen = isPhrase
     }
 
-    LaunchedEffect(fileBrowserState.currentDirectory, fileBrowserState.sortMode) {
-        val items = fileBrowserModule.buildItemList(
-            fileBrowserState.currentDirectory,
-            fileBrowserState.fileExtension,
-            fileBrowserState.fileExtensions
-        )
-        fileBrowserState = fileBrowserState.copy(
-            items = fileBrowserModule.sortItems(items, fileBrowserState.sortMode)
-        )
+    LaunchedEffect(fileBrowserState.currentDirectory, fileBrowserState.sortMode,
+                   fileBrowserState.listRefreshTick) {
+        // Directory listing on IO: the stat-heavy walk of a folder with hundreds of samples
+        // janks the main thread on slow flash. This effect is the single list builder —
+        // navigateToFolder only switches the directory (empty items until this fills them).
+        val dir  = fileBrowserState.currentDirectory
+        val ext  = fileBrowserState.fileExtension
+        val exts = fileBrowserState.fileExtensions
+        val sort = fileBrowserState.sortMode
+        val sorted = withContext(Dispatchers.IO) {
+            fileBrowserModule.sortItems(fileBrowserModule.buildItemList(dir, ext, exts), sort)
+        }
+        fileBrowserState = fileBrowserState.copy(items = sorted)
     }
 
     LaunchedEffect(trackerController.currentScreen, sampleEditorState.instrumentId) {

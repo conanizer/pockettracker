@@ -9,6 +9,10 @@ import com.conanizer.pockettracker.input.CursorContext
 import com.conanizer.pockettracker.input.CursorContextFactory
 import com.conanizer.pockettracker.ui.TrackerModule
 import com.conanizer.pockettracker.core.storage.FileSortMode
+import com.conanizer.pockettracker.ui.CHAR_SPACING
+import com.conanizer.pockettracker.ui.FONT_SCALE
+import com.conanizer.pockettracker.ui.ROW_HEIGHT
+import com.conanizer.pockettracker.ui.TEXT_PADDING
 import com.conanizer.pockettracker.ui.drawBitmapText
 import java.io.File
 import java.text.SimpleDateFormat
@@ -65,10 +69,6 @@ class FileBrowserModule : TrackerModule {
     override val height = HEIGHT
 
     // Font constants
-    private val FONT_SCALE = 3
-    private val CHAR_SPACING = 2
-    private val ROW_HEIGHT = 21
-    private val TEXT_PADDING = 3
 
     // Date formatter
     private val dateFormat = SimpleDateFormat("dd-MM-yy", Locale.US)
@@ -90,8 +90,15 @@ class FileBrowserModule : TrackerModule {
             override val displayName = "[${file.name}]"
         }
 
-        /** File entry */
-        data class FileItem(override val file: File, val extension: String) : BrowserItem() {
+        /** File entry. sizeText/dateText are captured at build time: the draw pass runs at
+         *  up to 60 fps while a preview rings, and per-row stat() + SimpleDateFormat there
+         *  meant ~2.3k syscalls/s plus string churn. */
+        data class FileItem(
+            override val file: File,
+            val extension: String,
+            val sizeText: String = "",
+            val dateText: String = ""
+        ) : BrowserItem() {
             override val displayName = file.nameWithoutExtension
         }
     }
@@ -123,6 +130,9 @@ class FileBrowserModule : TrackerModule {
         val permissionError: Boolean = false,
         val fileExtension: String? = null,          // Single-extension filter (legacy)
         val fileExtensions: List<String>? = null,   // Multi-extension filter (null = all files)
+        // Bumped by navigateToFolder so the listing effect refires even when the target
+        // directory is unchanged (browser reopen, rename/create/paste refresh).
+        val listRefreshTick: Int = 0,
         val appTheme: AppTheme = AppTheme.Companion.CLASSIC,
         val selectionMode: Boolean = false,
         val selectionAnchor: Int = -1,
@@ -196,7 +206,14 @@ class FileBrowserModule : TrackerModule {
             .filter { effectiveExtensions == null || it.extension.lowercase() in effectiveExtensions }
             .sortedBy { it.name.lowercase() }
 
-        matchedFiles.forEach { items.add(BrowserItem.FileItem(it, it.extension)) }
+        matchedFiles.forEach {
+            items.add(BrowserItem.FileItem(
+                file = it,
+                extension = it.extension,
+                sizeText = formatFileSize(it.length()),
+                dateText = dateFormat.format(Date(it.lastModified()))
+            ))
+        }
 
         return items
     }
@@ -233,14 +250,18 @@ class FileBrowserModule : TrackerModule {
     }
 
     /**
-     * Navigate into a folder
+     * Navigate into a folder (also used as a same-directory refresh after rename/create/paste).
+     * Only switches the directory and bumps listRefreshTick — the actual listing is built off
+     * the main thread by MainActivity's LaunchedEffect on (currentDirectory, listRefreshTick).
+     * Previously this ALSO built the list synchronously, so every navigation walked the
+     * directory twice, one of those on the main thread.
      */
     fun navigateToFolder(state: State, folder: File): State {
         val canRead = folder.canRead()
-        val newItems = if (canRead) buildItemList(folder, state.fileExtension, state.fileExtensions) else emptyList()
         return state.copy(
             currentDirectory = folder,
-            items = sortItems(newItems, state.sortMode),
+            items = emptyList(),
+            listRefreshTick = state.listRefreshTick + 1,
             cursor = 0,
             scroll = 0,
             statusMessage = "",
@@ -466,12 +487,11 @@ class FileBrowserModule : TrackerModule {
                 fontScale = FONT_SCALE
             )
 
-            // Draw file size/date for files (not folders or parent)
+            // Draw file size/date for files (not folders or parent) — precomputed at build
+            // time (see FileItem), so the draw pass does no stat() or date formatting.
             if (item is BrowserItem.FileItem) {
-                // File size
-                val sizeText = formatFileSize(item.file.length())
                 drawBitmapText(
-                    text = sizeText,
+                    text = item.sizeText,
                     x = x + 370,
                     y = rowY + TEXT_PADDING,
                     scale = scale,
@@ -479,11 +499,8 @@ class FileBrowserModule : TrackerModule {
                     spacing = CHAR_SPACING,
                     fontScale = FONT_SCALE
                 )
-
-                // Date
-                val dateText = dateFormat.format(Date(item.file.lastModified()))
                 drawBitmapText(
-                    text = dateText,
+                    text = item.dateText,
                     x = x + 480,
                     y = rowY + TEXT_PADDING,
                     scale = scale,
@@ -552,17 +569,3 @@ class FileBrowserModule : TrackerModule {
     private fun clipName(name: String, maxChars: Int): String =
         if (name.length > maxChars) name.take(maxChars - 2) + ".." else name
 }
-
-/**
- * Legacy FileBrowserState for backward compatibility
- * Use FileBrowserModule.State for new code
- */
-@Deprecated("Use FileBrowserModule.State instead")
-data class FileBrowserState(
-    val files: List<File>,
-    val cursorPosition: Int = 0,
-    val scrollPosition: Int = 0,
-    val directoryPath: String = "",
-    val sortMode: FileSortMode = FileSortMode.DATE_DESC,
-    val deleteConfirmMode: Boolean = false
-)

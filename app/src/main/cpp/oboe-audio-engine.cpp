@@ -8,9 +8,6 @@ OboeAudioEngine::OboeAudioEngine(AudioEngine* core) : core(core) {}
 
 OboeAudioEngine::~OboeAudioEngine() {
     closeStream();
-    // Drop the core's reference back to us before we're gone, so a stray triggerNote → requestResume()
-    // during teardown can't call into a destroyed shell.
-    if (core) core->setResumeHook(nullptr);
 }
 
 bool OboeAudioEngine::openStream() {
@@ -69,11 +66,9 @@ bool OboeAudioEngine::openStream() {
          oboe::convertToText(stream->getPerformanceMode()),
          oboe::convertToText(stream->getSharingMode()));
 
-    // Hand the negotiated device rate to the core (it caches it for getSampleRate()/pitch math), and
-    // give it a hook to wake the stream from triggerNote.
+    // Hand the negotiated device rate to the core (it caches it for getSampleRate()/pitch math).
     if (core) {
         core->setDeviceSampleRate(stream->getSampleRate());
-        core->setResumeHook([this]() { resumeStream(); });
     }
 
     result = stream->requestStart();

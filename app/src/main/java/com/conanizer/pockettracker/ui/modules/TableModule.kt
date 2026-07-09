@@ -12,6 +12,10 @@ import com.conanizer.pockettracker.core.data.Table
 import com.conanizer.pockettracker.core.data.TableRow
 import com.conanizer.pockettracker.core.logic.EffectProcessor
 import com.conanizer.pockettracker.core.logic.InputAction
+import com.conanizer.pockettracker.ui.CHAR_SPACING
+import com.conanizer.pockettracker.ui.FONT_SCALE
+import com.conanizer.pockettracker.ui.ROW_HEIGHT
+import com.conanizer.pockettracker.ui.TEXT_PADDING
 import com.conanizer.pockettracker.ui.drawBitmapText
 import com.conanizer.pockettracker.ui.getEffectTypeName
 import com.conanizer.pockettracker.ui.rowBgColor
@@ -32,10 +36,6 @@ class TableModule : TrackerModule {
     override val height = 392
 
     // Font constants
-    private val FONT_SCALE = 3      // 5×5 bitmap scaled 3× = 15×15
-    private val CHAR_SPACING = 2    // 2px between characters
-    private val ROW_HEIGHT = 21     // Each row is 21px tall
-    private val TEXT_PADDING = 3    // 3px padding above/below text
 
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val tableState = state as? TableState ?: return

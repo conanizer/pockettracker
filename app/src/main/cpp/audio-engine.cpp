@@ -30,6 +30,7 @@ AudioEngine::AudioEngine() {
         originalSampleLengths[i] = 0;
     }
     globalFrameCounter.store(0, std::memory_order_relaxed);
+    noteSeedEntropy = ((uint32_t)nowMs() * 2654435761u) | 1u;  // vary RND/DRNK per app session
 
     // Pre-size the per-block drain buffers so the audio thread never reallocates them at
     // runtime. A single ~23 ms block only ever holds a handful of events (a few tracks × retrigs).
@@ -502,34 +503,12 @@ void AudioEngine::clearAllSamples() {
 
 // Sample editor operations live in sample-editor.cpp.
 
-void AudioEngine::triggerNote(int sampleId, int trackId, float freq, float baseFreq, float vol, float pan) {
-    if (sampleId < 0 || sampleId >= 256 || !samples[sampleId]) return;
-
-    requestResume();
-
-    for (int i = 0; i < MAX_VOICES; i++) {
-        if (voices[i].trackId == trackId) {
-            voices[i].stop();
-        }
-    }
-
-    for (int i = 0; i < MAX_VOICES; i++) {
-        if (!voices[i].isActive) {
-            float rate = freq / baseFreq;
-            float sampleRate = (float)getSampleRate();
-            voices[i].trigger(samples[sampleId], samplesRight[sampleId], sampleLengths[sampleId], trackId, rate, vol, 1.0f, pan,
-                              instrumentParams[sampleId], sampleRate);
-            voices[i].instrId = sampleId;
-            LOGD("Note: track=%d, sampleId=%d, rate=%.3f, pan=%.2f", trackId, sampleId, rate, pan);
-            return;
-        }
-    }
-}
-
 void AudioEngine::stopTrack(int trackId) {
+    // Fade instead of hard stop: this is the preview-stop path (new preview supersedes the old
+    // one / user stops it), and a mid-waveform stop() clicks on sustained material.
     for (int i = 0; i < MAX_VOICES; i++) {
         if (voices[i].trackId == trackId && voices[i].isActive) {
-            voices[i].stop();
+            voices[i].startFadeOut(KILL_FADE_SAMPLES);
         }
     }
     if (trackId >= 0 && trackId < SF_VOICE_COUNT) {
@@ -579,9 +558,9 @@ void AudioEngine::getTrackActiveNotes(int* out, int trackCount) {
 
 int AudioEngine::getSampleRate() {
     // Cached from the platform backend at stream-open (setDeviceSampleRate). Defaults to 44100 until
-    // then — matching every other fallback in the engine (triggerNote, setPitchSlide/Bend,
-    // updateVoiceModulation, the Kotlin layer); 48000 here once made rate/pitch math ~8.8% off if
-    // Kotlin cached this before the stream opened.
+    // then — matching every other fallback in the engine (schedulePitchBend, updateVoiceModulation,
+    // the Kotlin layer); 48000 here once made rate/pitch math ~8.8% off if Kotlin cached this
+    // before the stream opened.
     return deviceSampleRate.load(std::memory_order_relaxed);
 }
 
@@ -608,6 +587,11 @@ static void setFlushToZeroForCurrentThread() {
 // renderOffline (WAV export) are thin wrappers.
 // Rule: NEVER add audio processing logic directly to processLiveBlock or renderOffline.
 void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCount, float sampleRate) {
+    // The engine mixes STEREO ONLY: the SF render pass and the send/master chains index
+    // [i*2] directly (only the sampler loop honours channelCount). Backends must open
+    // stereo streams (the Oboe builder requests it; renderOffline is fixed at 2). Guard —
+    // one silent block — rather than write past a mono buffer if a future backend drifts.
+    if (channelCount != 2) return;
     for (int t = 0; t < 8; t++) { framePeaksPerTrackL[t] = 0.0f; framePeaksPerTrackR[t] = 0.0f; }
     frameSendPeakRevL = frameSendPeakRevR = frameSendPeakDelL = frameSendPeakDelR = 0.0f;
 
@@ -782,7 +766,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             } else {
                 for (int v = 0; v < MAX_VOICES; v++) {
                     if (voices[v].trackId == kill.trackId && voices[v].isActive) {
-                        voices[v].stop();
+                        voices[v].startFadeOut(KILL_FADE_SAMPLES);  // soft deliberate cut, not a steal
                         LOGT("🔪 Killed track %d at frame %lld", kill.trackId, (long long)currentFrame);
                     }
                 }
@@ -822,6 +806,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     sv.isReleasingOnly = false;
                     sv.resetPitchState();
                     sv.detuneSemitones = note.detuneSemitones;  // static instrument detune (set after reset)
+                    sv.startDelayFrames = frame;  // start rendering at the note's exact intra-block frame
 
                     // M8-style: honour TIC effect in table's last row (same as sampler path).
                     int effectiveTicRate = note.tableTicRate;
@@ -846,26 +831,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     // Only valid when sampleId >= 0 (phrase playback); previews pass -1.
                     if (note.sampleId >= 0 && note.sampleId < 256) {
                         sv.instrParams = instrumentParams[note.sampleId];
-                        for (int m = 0; m < 4; m++) {
-                            const InstrumentModSlot& src = instrumentModSlots[note.sampleId][m];
-                            VoiceModSlot& dst = sv.voiceMods[m];
-                            dst.type = src.type;
-                            dst.dest = src.dest;
-                            dst.amount = src.amount;
-                            dst.attackSamples = src.attackSamples;
-                            dst.holdSamples = src.holdSamples;
-                            dst.decaySamples = src.decaySamples;
-                            dst.sustainLevel = src.sustainLevel;
-                            dst.lfoHz = src.lfoHz;
-                            dst.oscShape = src.oscShape;
-                            dst.lfoPhase = 0.0f;
-                            dst.releaseSamples = src.releaseSamples;
-                            dst.effectiveAmt = src.amount;
-                            dst.effectiveRateMult = 1.0f;
-                            dst.prevEnvValue = 0.0f;
-                            if (src.type != 0) { dst.stage = 1; dst.envValue = 0.0f; dst.stageCounter = 0; }
-                            else               { dst.stage = 0; dst.envValue = 0.0f; dst.stageCounter = 0; }
-                        }
+                        initVoiceModSlots(sv, note.sampleId, currentFrame, sampleRate);
                     } else {
                         sv.instrParams = InstrumentParams{};
                         for (int m = 0; m < 4; m++) sv.voiceMods[m] = VoiceModSlot{};
@@ -939,46 +905,52 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             }
 
             // ---------------------------------------------------------------
-            // VOICE ALLOCATION — 3-step priority
+            // VOICE ALLOCATION — mono per track + 4-step slot choice
             //
             // Problem: "steal old + allocate new" temporarily consumes two
             // slots per track.  When N tracks all trigger at the same frame
             // (phrase boundaries) this exhausts the 8-slot pool even with
             // only 5 active tracks.
             //
-            // Step 1 — recycle fading same-track voice (0 extra slots used).
-            //           trackId is preserved through startFadeOut() so we can
-            //           find and reuse the slot immediately.
-            // Step 2 — normal steal: fade old same-track voice, find free slot.
-            // Step 3 — last resort: preempt any fading voice (other track).
+            // Step 1 — fade any playing same-track voice (mono per track).
+            // Step 2 — prefer a FREE slot, so the faded voice's declick tail
+            //           actually plays out. (Recycling the fading same-track
+            //           slot here instead cut its tail mid-fade — an audible
+            //           pop on rapid same-sample retriggers/previews.)
+            // Step 3 — no free slot: recycle a same-track fading voice
+            //           directly (0 extra slots used; trackId is preserved
+            //           through startFadeOut() precisely for this).
+            // Step 4 — last resort: preempt any fading voice (other track).
             //           Produces at most a ~1ms click but prevents silence.
             // ---------------------------------------------------------------
 
-            // Step 1: same-track fading voice → recycle directly
+            // Step 1: mono per track — fade whatever is still playing on this track
+            for (int v = 0; v < MAX_VOICES; v++) {
+                if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut) {
+                    voices[v].startFadeOut();
+                }
+            }
+
+            // Step 2: free slot
             int targetSlot = -1;
             for (int v = 0; v < MAX_VOICES; v++) {
-                if (voices[v].trackId == note.trackId && voices[v].isFadingOut) {
+                if (!voices[v].isActive) {
                     targetSlot = v;
                     break;
                 }
             }
 
-            // Step 2: steal non-fading same-track voice, then find free slot
+            // Step 3: pool full — recycle a same-track fading voice (cuts its tail)
             if (targetSlot == -1) {
                 for (int v = 0; v < MAX_VOICES; v++) {
-                    if (voices[v].trackId == note.trackId && voices[v].isActive && !voices[v].isFadingOut) {
-                        voices[v].startFadeOut();
-                    }
-                }
-                for (int v = 0; v < MAX_VOICES; v++) {
-                    if (!voices[v].isActive) {
+                    if (voices[v].trackId == note.trackId && voices[v].isFadingOut) {
                         targetSlot = v;
                         break;
                     }
                 }
             }
 
-            // Step 3: preempt any fading voice (last resort)
+            // Step 4: preempt any fading voice (last resort)
             if (targetSlot == -1) {
                 for (int v = 0; v < MAX_VOICES; v++) {
                     if (voices[v].isFadingOut) {
@@ -992,6 +964,14 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             if (targetSlot != -1) {
                 int v = targetSlot;
                 if (note.sampleId >= 0 && note.sampleId < 256 && samples[note.sampleId]) {
+                    // Per-track mono across voice types: a sampler note replaces an SF note
+                    // still sounding on this track. noteOff (not hardStop) so the SF release
+                    // plays out musically — findActiveVoiceForTrack skips releasing SF voices,
+                    // so mid-note params already target the new sampler voice meanwhile.
+                    if (note.trackId >= 0 && note.trackId < SF_VOICE_COUNT &&
+                        sfVoices[note.trackId].isActive && !sfVoices[note.trackId].isReleasingOnly) {
+                        sfVoices[note.trackId].noteOff();
+                    }
                     float rate = note.frequency / note.baseFrequency;
 
                     int effectiveTicRate = note.tableTicRate;
@@ -1033,6 +1013,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                                       sampleRate, note.startPointOverride, note.endPointOverride,
                                       note.tableId, effectiveTicRate, note.noteOctave, note.notePitch, startRow);
                     voices[v].instrId = note.sampleId;
+                    voices[v].startDelayFrames = frame;  // start mixing at the note's exact intra-block frame
 
                     // pslDuration is already in audio frames (converted by AudioEngine.kt).
                     if (fabsf(note.pslInitialOffset) > 0.001f && note.pslDuration > 0.0f) {
@@ -1059,33 +1040,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                              note.vibratoSpeed, note.vibratoDepth);
                     }
 
-                    for (int m = 0; m < 4; m++) {
-                        const InstrumentModSlot& src = instrumentModSlots[note.sampleId][m];
-                        VoiceModSlot& dst = voices[v].voiceMods[m];
-                        dst.type = src.type;
-                        dst.dest = src.dest;
-                        dst.amount = src.amount;
-                        dst.attackSamples = src.attackSamples;
-                        dst.holdSamples = src.holdSamples;
-                        dst.decaySamples = src.decaySamples;
-                        dst.sustainLevel = src.sustainLevel;
-                        dst.lfoHz = src.lfoHz;
-                        dst.oscShape = src.oscShape;
-                        dst.lfoPhase = 0.0f;
-                        dst.releaseSamples = src.releaseSamples;
-                        dst.effectiveAmt = src.amount;
-                        dst.effectiveRateMult = 1.0f;
-                        dst.prevEnvValue = 0.0f;
-                        if (src.type != 0) {
-                            dst.stage = 1;
-                            dst.envValue = 0.0f;
-                            dst.stageCounter = 0;
-                        } else {
-                            dst.stage = 0;
-                            dst.envValue = 0.0f;
-                            dst.stageCounter = 0;
-                        }
-                    }
+                    initVoiceModSlots(voices[v], note.sampleId, currentFrame, sampleRate);
 
                     LOGT("🎵 Triggered note at frame %lld: sample=%d, track=%d, rate=%.3f, vol=%.4f, pan=%.2f, startOverride=%d, table=%d, tic=%d, oct=%d, pitch=%d, startRow=%d",
                          (long long)currentFrame, note.sampleId, note.trackId, rate, note.volume, note.pan, note.startPointOverride,
@@ -1195,7 +1150,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 switch (fxType) {
                     case FX_KILL:
                         if (fxValue == 0x00) {
-                            voice.isActive = false;
+                            voice.startFadeOut(KILL_FADE_SAMPLES);  // soft deliberate cut
                             LOGT("📋 Table effect: KILL voice %d", v);
                         }
                         break;
@@ -1509,7 +1464,15 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             voice.actualLoopEnd   = std::max(voice.actualLoopStart + 1, std::min((int)((float)voice.loopEndNorm * sl / 255.0f), voice.actualEnd));
         }
 
-        for (int i = 0; i < numFrames; i++) {
+        // Honour the intra-block trigger offset: a note dispatched at blockStart+f must not
+        // sound before frame f (kills/params stay block-quantized — onsets are the audible case).
+        int startFrame = 0;
+        if (voice.startDelayFrames > 0) {
+            startFrame = std::min(voice.startDelayFrames, numFrames);
+            voice.startDelayFrames = 0;
+        }
+
+        for (int i = startFrame; i < numFrames; i++) {
             int idx = (int)voice.position;
             float frac = voice.position - (float)idx;
 
@@ -1586,7 +1549,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 procR *= globalMul;
 
                 if (voice.isFadingOut) {
-                    float fo = (float)voice.fadeOutRemaining / (float)DECLICK_SAMPLES;
+                    float fo = (float)voice.fadeOutRemaining / (float)voice.fadeOutTotal;
                     procL *= fo;
                     procR *= fo;
                     if (--voice.fadeOutRemaining <= 0) {
@@ -1627,7 +1590,7 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 sample = sample * trackVol * masterVol * antiClick;
 
                 if (voice.isFadingOut) {
-                    sample *= (float)voice.fadeOutRemaining / (float)DECLICK_SAMPLES;
+                    sample *= (float)voice.fadeOutRemaining / (float)voice.fadeOutTotal;
                     if (--voice.fadeOutRemaining <= 0) {
                         voice.isFadingOut = false;
                         voice.isActive = false;
@@ -1787,14 +1750,21 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
             if (!sv.isActive || slot < 0 || slot >= MAX_SOUNDFONTS) continue;
 
             memset(sfBuf, 0, sizeof(float) * numFrames * 2);
+            // Honour the intra-block trigger offset (see the sampler mix loop): render into the
+            // buffer tail so the note starts at its exact frame; the head stays silent (memset).
+            int sfStart = 0;
+            if (sv.startDelayFrames > 0) {
+                sfStart = std::min(sv.startDelayFrames, numFrames);
+                sv.startDelayFrames = 0;
+            }
             bool rendered = false;
             {
                 // Handle must be read INSIDE the lock: capturing it before would let
                 // loadSoundfont's eviction tsf_close it between the read and the render.
                 std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
                 tsf* h = soundfonts[slot].handle;
-                if (h) {
-                    tsf_render_float_channel(h, t, sfBuf, numFrames, 0 /* overwrite */);
+                if (h && numFrames - sfStart > 0) {
+                    tsf_render_float_channel(h, t, sfBuf + sfStart * 2, numFrames - sfStart, 0 /* overwrite */);
                     rendered = true;
                 }
             }
@@ -2437,25 +2407,21 @@ void AudioEngine::setLimiterPreGain(int depth) {
 }
 
 IAudioVoice* AudioEngine::findActiveVoiceForTrack(int trackId) {
-    if (trackId >= 0 && trackId < SF_VOICE_COUNT && sfVoices[trackId].isActive) {
+    // Returns the track's CURRENT note, for mid-note param updates (PBN/PVB/PAN). A releasing
+    // SF voice or a fading (stolen) sampler voice is the previous note's tail, never the
+    // target: without the isReleasingOnly skip, one SF note left the track's SF voice
+    // permanently preferred here (nothing note-offs a naturally-decayed SF note, so it stays
+    // isActive) and PBN/PVB on every later sampler note went nowhere.
+    if (trackId >= 0 && trackId < SF_VOICE_COUNT &&
+        sfVoices[trackId].isActive && !sfVoices[trackId].isReleasingOnly) {
         return &sfVoices[trackId];
     }
     for (int v = 0; v < MAX_VOICES; v++) {
-        if (voices[v].isActive && voices[v].trackId == trackId) {
+        if (voices[v].isActive && !voices[v].isFadingOut && voices[v].trackId == trackId) {
             return &voices[v];
         }
     }
     return nullptr;
-}
-
-void AudioEngine::setPitchSlide(int trackId, float targetSemitones, float durationTicks, int tempo) {
-    IAudioVoice* v = findActiveVoiceForTrack(trackId);
-    if (!v) return;
-    float sr = (float)getSampleRate();
-    float framesPerTic = sr / (tempo / 60.0f * 4.0f * 12.0f);
-    float totalFrames = fmaxf(1.0f, framesPerTic * durationTicks);
-    v->setPitchSlideRaw(targetSemitones, totalFrames);
-    LOGD("🎵 Pitch slide: track=%d, to=%.2f over %.0f frames", trackId, targetSemitones, totalFrames);
 }
 
 void AudioEngine::schedulePitchBend(int64_t targetFrame, int trackId, float semitonesPerStep, int tempo) {
@@ -2475,25 +2441,11 @@ void AudioEngine::scheduleVibrato(int64_t targetFrame, int trackId, float speed,
     paramUpdateQueue.schedule({ targetFrame, trackId, 0, speed, PARAM_UPDATE_VIBRATO, depth });
 }
 
-void AudioEngine::clearPitchMod(int trackId) {
-    IAudioVoice* v = findActiveVoiceForTrack(trackId);
-    if (!v) return;
-    v->clearPitchMod();
-    LOGD("🎵 Pitch mod cleared: track=%d", trackId);
-}
-
-void AudioEngine::setInitialPitchOffset(int trackId, float semitones) {
-    IAudioVoice* v = findActiveVoiceForTrack(trackId);
-    if (!v) return;
-    v->setInitialPitchOffset(semitones);
-    LOGD("🎵 Pitch offset set: track=%d, offset=%.2f semitones", trackId, semitones);
-}
-
 void AudioEngine::setInstrumentModulation(int sampleId, int slotIndex,
                                           int type, int dest, float amount,
                                           int attackSamples, int holdSamples, int decaySamples,
                                           float sustainLevel, float lfoHz, int oscShape,
-                                          int releaseSamples) {
+                                          int releaseSamples, int lfoTrigMode) {
     if (sampleId < 0 || sampleId >= 256 || slotIndex < 0 || slotIndex >= 4) return;
     InstrumentModSlot& slot = instrumentModSlots[sampleId][slotIndex];
     slot.type = type;
@@ -2505,7 +2457,54 @@ void AudioEngine::setInstrumentModulation(int sampleId, int slotIndex,
     slot.sustainLevel = sustainLevel;
     slot.lfoHz = lfoHz;
     slot.oscShape = oscShape;
+    slot.lfoTrigMode = lfoTrigMode;
     slot.releaseSamples = releaseSamples;
+}
+
+void AudioEngine::initVoiceModSlots(IAudioVoice& voice, int sampleId, int64_t currentFrame, float sampleRate) {
+    for (int m = 0; m < 4; m++) {
+        const InstrumentModSlot& src = instrumentModSlots[sampleId][m];
+        VoiceModSlot& dst = voice.voiceMods[m];
+        dst.type = src.type;
+        dst.dest = src.dest;
+        dst.amount = src.amount;
+        dst.attackSamples = src.attackSamples;
+        dst.holdSamples = src.holdSamples;
+        dst.decaySamples = src.decaySamples;
+        dst.sustainLevel = src.sustainLevel;
+        dst.lfoHz = src.lfoHz;
+        dst.oscShape = src.oscShape;
+        dst.lfoTrigMode = src.lfoTrigMode;
+        dst.releaseSamples = src.releaseSamples;
+        dst.effectiveAmt = src.amount;
+        dst.effectiveRateMult = 1.0f;
+        dst.prevEnvValue = 0.0f;
+        dst.stage = (src.type != 0) ? 1 : 0;
+        dst.envValue = 0.0f;
+        dst.stageCounter = 0;
+
+        // Per-slot RNG for the stateful RND/DRNK LFO shapes: RND holds a random level from
+        // note-on, DRNK walks from it. Seed varies per note (frame), per slot, and per
+        // session/render (noteSeedEntropy — frame-only seeds made renders bit-identical).
+        dst.lfoRngState  = (((uint32_t)(uint64_t)currentFrame) * 747796405u
+                            ^ (uint32_t)(m + 1) * 2891336453u
+                            ^ noteSeedEntropy) | 1u;
+        dst.lfoRandValue = (src.type == 3 && src.oscShape >= 8)
+                           ? xorshift32Bipolar(dst.lfoRngState) : 0.0f;
+
+        // LFO trigger mode: RETG/ONCE restart the cycle at note-on; FREE and HOLD align the
+        // phase to the global frame clock (a stateless free-running LFO). HOLD additionally
+        // freezes the clock-aligned value for the note's lifetime (tickLFO never advances it).
+        dst.lfoPhase = 0.0f;
+        if (src.type == 3 && (src.lfoTrigMode == 0 || src.lfoTrigMode == 2)) {
+            double cycles = (double)currentFrame * (double)src.lfoHz / (double)sampleRate;
+            dst.lfoPhase = (float)(fmod(cycles, 1.0) * 2.0 * M_PI);
+            if (src.lfoTrigMode == 2) {
+                dst.envValue = (src.oscShape >= 8) ? dst.lfoRandValue
+                                                   : lfoShape(dst.lfoPhase, src.oscShape);
+            }
+        }
+    }
 }
 
 void AudioEngine::triggerNoteOff(int trackId) {
@@ -2528,10 +2527,10 @@ void AudioEngine::triggerNoteOff(int trackId) {
             // Looping voice: leave the loop so the [loopEnd, end] tail plays out under the release env.
             if (voices[v].loopMode != 0) voices[v].loopReleasing = true;
         } else {
-            // No release envelope: fade out over DECLICK_SAMPLES instead of a hard stop, so KIL (and any
-            // soft note-off on a release-less voice) is click-free. startFadeOut keeps the slot reserved
-            // and the main mix loop frees it when the fade finishes — same path voice-stealing uses.
-            voices[v].startFadeOut();
+            // No release envelope: fade out over KILL_FADE_SAMPLES instead of a hard stop, so KIL
+            // (and any soft note-off on a release-less voice) is click-free. startFadeOut keeps the
+            // slot reserved and the main mix loop frees it when the fade finishes.
+            voices[v].startFadeOut(KILL_FADE_SAMPLES);
         }
     }
 }
@@ -2574,6 +2573,8 @@ void AudioEngine::renderOffline(int numFrames, float* output, int sampleRate) {
 
 void AudioEngine::resetFrameCounter() {
     globalFrameCounter.store(0, std::memory_order_relaxed);
+    // Fresh randomness per render — see noteSeedEntropy in the header.
+    noteSeedEntropy = ((uint32_t)nowMs() * 2654435761u) | 1u;
 }
 
 int64_t AudioEngine::getFrameCounter() {

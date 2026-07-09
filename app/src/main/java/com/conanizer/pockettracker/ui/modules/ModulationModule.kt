@@ -15,6 +15,10 @@ import com.conanizer.pockettracker.core.data.ModDest
 import com.conanizer.pockettracker.core.data.ModSlot
 import com.conanizer.pockettracker.core.data.ModType
 import com.conanizer.pockettracker.core.logic.InputAction
+import com.conanizer.pockettracker.ui.CHAR_SPACING
+import com.conanizer.pockettracker.ui.FONT_SCALE
+import com.conanizer.pockettracker.ui.ROW_HEIGHT
+import com.conanizer.pockettracker.ui.TEXT_PADDING
 import com.conanizer.pockettracker.ui.drawBitmapText
 import com.conanizer.pockettracker.ui.toHex2
 
@@ -25,7 +29,7 @@ import com.conanizer.pockettracker.ui.toHex2
  * - Pair 0: MOD1 (left) + MOD2 (right)
  * - Pair 1: MOD3 (left) + MOD4 (right)
  *
- * Each slot supports: NONE, AHD, ADSR, LFO (+ future: DRUM, TRIG, TRACKING)
+ * Each slot supports: NONE, AHD, ADSR, LFO, DRUM, TRIG (+ future: TRACKING, hidden until real)
  * Targets: VOL, PAN, PITCH, FINE, CUT, RES, STA, MOD A/R/B
  *
  * Size: 620×392 pixels
@@ -52,10 +56,6 @@ class ModulationModule : TrackerModule {
     override val width = 620
     override val height = 392
 
-    private val FONT_SCALE = 3
-    private val CHAR_SPACING = 2
-    private val ROW_HEIGHT = 21
-    private val TEXT_PADDING = 3
 
     // X positions relative to module x
     private val nameX1 = 10     // Left slot: label column
@@ -67,8 +67,10 @@ class ModulationModule : TrackerModule {
         val OSC_SHAPES  = listOf("TRI", "SIN", "RMP+", "RMP-", "EXP+", "EXP-", "SQU+", "SQU-", "RND", "DRK")
         val TRIG_MODES  = listOf("FREE", "RETG", "HOLD", "ONCE")
 
-        // SCALAR is internal-only (used for instrVol/phraseVol routes); not user-selectable.
-        val USER_MOD_TYPES = ModType.values().filter { it != ModType.SCALAR }
+        // SCALAR is internal-only (used for instrVol/phraseVol routes); TRACKING has no
+        // engine implementation yet (the push path clears the slot) — both hidden from the
+        // TYPE cycle until real. Legacy slots saved as TRACKING still display as "TRK".
+        val USER_MOD_TYPES = ModType.values().filter { it != ModType.SCALAR && it != ModType.TRACKING }
 
         fun rowLabels(type: ModType): List<String> = when (type) {
             ModType.NONE     -> listOf("TYPE")

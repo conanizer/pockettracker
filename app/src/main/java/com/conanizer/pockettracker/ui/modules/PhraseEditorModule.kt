@@ -15,6 +15,10 @@ import com.conanizer.pockettracker.core.data.PhraseStep
 import com.conanizer.pockettracker.core.logic.EffectProcessor
 import com.conanizer.pockettracker.core.logic.InputAction
 import com.conanizer.pockettracker.core.logic.InstrumentController
+import com.conanizer.pockettracker.ui.CHAR_SPACING
+import com.conanizer.pockettracker.ui.FONT_SCALE
+import com.conanizer.pockettracker.ui.ROW_HEIGHT
+import com.conanizer.pockettracker.ui.TEXT_PADDING
 import com.conanizer.pockettracker.ui.drawBitmapText
 import com.conanizer.pockettracker.ui.getEffectTypeName
 import com.conanizer.pockettracker.ui.rowBgColor
@@ -32,10 +36,6 @@ class PhraseEditorModule : TrackerModule {
     override val width  = 510
     override val height = 392
 
-    private val FONT_SCALE   = 3
-    private val CHAR_SPACING = 2
-    private val ROW_HEIGHT   = 21
-    private val TEXT_PADDING = 3
 
     override fun DrawScope.draw(x: Int, y: Int, scale: Int, state: Any?) {
         val phraseState = state as? PhraseEditorState ?: return
