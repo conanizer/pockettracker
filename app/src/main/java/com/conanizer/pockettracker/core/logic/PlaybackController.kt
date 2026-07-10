@@ -333,13 +333,13 @@ class PlaybackController(
         songPositionStartFrames.clear()
         nextSongChainRowToSchedule = 0
         schedulingCheckpoints.clear()
-        trackStates.forEach {
-            it.clearRepeat()
-            it.clearAllArpeggioState()
-            it.clearHopState()
-            it.grooveId = 0
-            it.grooveStep = 0
-        }
+        // Full per-track reset, not just repeat/arp/hop/groove: lastNote (PSL slide source + the
+        // note persistent RPT/ARP retrigs), lastPan/lastVolume/lastStartPoint (retrig inheritance),
+        // lastColFx* (RND recall) and the pitch-mod flags used to survive stop→play, so a session's
+        // first notes could depend on the previous session — and live playback could differ from a
+        // render, which always schedules from fresh state. Playback must be a pure function of the
+        // project. (getTrackNotes() is the only post-stop reader and has no callers.)
+        for (i in trackStates.indices) trackStates[i] = TrackState()
         logger.d(TAG, "⏹️ Playback stopped")
     }
 
@@ -566,14 +566,14 @@ class PlaybackController(
             val step = phrase.steps[stepIndex]
 
             // Pre-scan GRV before computing step duration so the new groove takes effect
-            // immediately on the triggering step, not deferred to the next phrase.
-            // scheduleStepWithEffects also processes GRV (idempotent — same result).
+            // immediately on the triggering step, not deferred to the next phrase. No break: with
+            // GRV in several slots the LAST one wins, matching resolveStepParams' 1..3 overwrite
+            // order (scheduleStepWithEffects then re-applies the same value — idempotent).
             for (fxSlot in 1..3) {
                 val (fxType, fxValue) = step.fx(fxSlot)
                 if (fxType == EffectProcessor.FX_GRV) {
                     trackState.grooveId = fxValue
                     localGrooveStep = 0  // New groove always starts at slot 0
-                    break
                 }
             }
 
@@ -1181,6 +1181,11 @@ class PlaybackController(
             }
         }
 
+        // Frame of the note this step actually scheduled (LAT-shifted), or -1 if none (empty step,
+        // or CHA gated the trigger). The RPT/ARP grids skip the grid hit landing exactly here so a
+        // LAT'd note doesn't double-trigger with its own retrig; a CHA-gated note's grid hits all
+        // fire (the gate blocks the note, not its retrig train).
+        val scheduledNoteFrame = if (noteScheduled) effectiveTargetFrame else -1L
 
         // Handle KILL effect - schedule kill at the specified frame.
         // KIL xx adds xx ticks of latency before the stop fires (00 = at the row, 0C = one step later);
@@ -1432,9 +1437,11 @@ class PlaybackController(
                 while (true) {
                     val triggerFrame = trackState.repeatStartFrame + (k * gridStep) / gridDenom
                     if (triggerFrame >= stepEndFrame) break
-                    // Skip the grid hit coinciding with a played note's own trigger (already scheduled
-                    // at tic 0); empty/persistent steps fire on every hit inside the step.
-                    if (triggerFrame >= targetFrame && !(hasNote && triggerFrame == targetFrame)) {
+                    // Skip the grid hit coinciding with the note this step actually scheduled
+                    // (LAT-shifted; -1 when nothing triggered, so every hit fires). Comparing against
+                    // targetFrame instead used to double-trigger LAT'd notes and swallow the first
+                    // retrig of CHA-gated ones.
+                    if (triggerFrame >= targetFrame && triggerFrame != scheduledNoteFrame) {
                         trackState.repeatRetrigCount++
                         val retrigVolume = (trackState.repeatBaseVolume + trackState.repeatRetrigCount * rampDelta)
                             .coerceIn(0.0f, 1.0f)
@@ -1536,7 +1543,8 @@ class PlaybackController(
                 // (volume × phraseVol), so the arp note matches the main note's loudness.
                 instrVol = velocityGain,
                 phraseVol = instrVolWithVxx,
-                finalPan = notePan
+                finalPan = notePan,
+                scheduledNoteFrame = scheduledNoteFrame
             )
         }
 
@@ -1566,7 +1574,8 @@ class PlaybackController(
         transposeSemitones: Int,
         instrVol: Float,
         phraseVol: Float,
-        finalPan: Float
+        finalPan: Float,
+        scheduledNoteFrame: Long
     ) {
         val semi1 = (trackState.arpeggioValue shr 4) and 0x0F
         val semi2 = trackState.arpeggioValue and 0x0F
@@ -1604,30 +1613,24 @@ class PlaybackController(
         // Calculate step boundaries
         val stepEndFrame = targetFrame + stepDuration
 
-        // For step where ARP starts (with note), the first note was already scheduled
-        // We need to find subsequent notes within this step
-        val isNewArp = hasNote && trackState.arpeggioStartFrame == targetFrame
-
         // Calculate trigger points using absolute frames (works across steps!)
         val framesSinceStart = targetFrame - trackState.arpeggioStartFrame
         var notesScheduled = 0
 
         if (framesSinceStart >= 0) {
-            // Find the first trigger index at or after targetFrame
-            // triggerIndex = how many arp notes have played since start
-            val firstTriggerIndex = if (isNewArp) {
-                1L  // Skip index 0, it was the original note
-            } else {
-                // Find first trigger at or after targetFrame
-                ((framesSinceStart + framesPerArpNote - 1) / framesPerArpNote)
-            }
+            // First grid index at or after targetFrame (ceil). Index 0 of a fresh arp lands on the
+            // step's own note frame and is skipped by the scheduledNoteFrame check below — the same
+            // rule as the RPT grid, so LAT'd and CHA-gated steps keep their slot-0 arp hit.
+            val firstTriggerIndex = (framesSinceStart + framesPerArpNote - 1) / framesPerArpNote
 
             var triggerIndex = firstTriggerIndex
             var triggerFrame = trackState.arpeggioStartFrame + (triggerIndex * framesPerArpNote)
 
-            // Schedule all notes that fall within this step's frame range
+            // Schedule all notes that fall within this step's frame range. A grid slot landing
+            // exactly on the note this step scheduled (LAT-shifted) is skipped — the main trigger
+            // already plays that frame.
             while (triggerFrame < stepEndFrame) {
-                if (triggerFrame >= targetFrame) {
+                if (triggerFrame >= targetFrame && triggerFrame != scheduledNoteFrame) {
                     // Calculate which note in the pattern this is
                     val patternPosition = (triggerIndex % patternLength).toInt()
                     val arpMidi = getArpeggioNote(baseMidi, semi1, semi2, trackState.arpeggioMode, patternPosition)

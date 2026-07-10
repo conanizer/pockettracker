@@ -725,17 +725,17 @@ A groove is a list of up to 16 tick values. The track cycles through the list: s
 03   --    ← 3 × 8 = 24 ticks = same total as 2 × 12
 ```
 
-Default: groove `00`, row 0 = `0C` (even timing, no swing).
+Default: all grooves start empty. An empty groove plays even timing (12 ticks per step, no swing).
 
 ### Assigning grooves
 
 Each track uses groove `00` by default. Use the **GRV XX** phrase effect to switch a track to groove `XX`.
 
 > [!TIP]
-> To reset a track back to even timing after a groove section, place `GRV 00` in an FX column. Groove `00` defaults to `0C` per step, which is perfectly even.
+> To reset a track back to even timing after a groove section, place `GRV 00` in an FX column. Groove `00` is empty by default, which plays perfectly even — but it is a real, editable groove: if you put tick values into groove `00`, every track that hasn't been assigned another groove will swing with it.
 
 > [!WARNING]
-> For the grooved track to stay in sync, each complete cycle of your groove list should **average 12 ticks per entry**. A 2-entry swing sums to 24 (14+10 ✓). A 4-entry groove should sum to 48. If the average is not 12, the track will drift against un-grooved tracks over time.
+> For the grooved track to stay in sync, each complete cycle of your groove list should **average 12 ticks per entry**. A 2-entry swing sums to 24 (14+10 ✓). A 4-entry groove should sum to 48. If the average is not 12, the track drifts against un-grooved tracks within each phrase; in SONG mode all tracks re-align at every chain row, so an off-average groove produces a gap (or a cut) at the end of each phrase rather than unbounded drift.
 
 ### Controls
 
@@ -1170,9 +1170,9 @@ Switches the current track to use groove `XX` from this step onward.
 
 ### HOP `XY` — Hop / Jump
 
-- In a **phrase**: jumps to phrase step `Y`, limited to `X` times before falling through.
-- In a **table**: jumps to table row `Y`.
-- `HOP FF`: **stops the track** for the rest of the song (no jump).
+- In a **phrase**: ends the phrase at this step; the **next** phrase starts at row `Y` (`X` is ignored).
+- In a **table**: jumps to table row `Y`, `X` times before falling through (`X` = 0: forever).
+- `HOP FF`: **stops the track** — in SONG mode until the next song row; in PHRASE/CHAIN playback the track stays silent until you stop.
 
 `HOP 00` at the end of a section = infinite loop of that section.
 
@@ -1834,7 +1834,7 @@ Open with **A** (or SELECT) on an EQ cell.
 | CHA | Chance | `XY` | X=probability (0=never F=always), Y=target (0=note 1=FX1 2=FX2 3=FX3) |
 | LAT | Latency | `XX` ticks | Delays row trigger |
 | GRV | Groove | `XX` | Assigns groove to this track |
-| HOP | Hop/Jump | `XY` | Jumps to step Y, X times max |
+| HOP | Hop/Jump | `XY` | Phrase: next phrase starts at row Y (FF=stop track). Table: jump to row Y, X times (0=forever) |
 | KIL | Kill | `XX` ticks | Stop after XX ticks (00=now, 0C=next step) |
 | OFF | Offset | `XX` | Sample start position jump |
 | PIT | Pitch Offset | `XX` signed | 00–7F up, 80–FF down |
