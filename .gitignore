@@ -132,8 +132,12 @@ nul
 /CLAUDE.md
 /.claudeignore
 
-# Internal / planning docs (kept locally, not for contributors)
-docs/internal/
+# Internal / planning docs (kept locally, not for contributors).
+# Exception: event-schema.md is the ratified normative spec for the songcore event bus /
+# conformance trace / JNI seam — it must live in-repo so schema changes land in the same
+# commit as code + regenerated goldens (its §9 rule).
+docs/internal/*
+!docs/internal/event-schema.md
 
 # APK artifacts — release APKs go to GitHub Releases, not the repo
 apk/
