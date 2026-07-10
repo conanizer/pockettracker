@@ -26,6 +26,7 @@ import com.conanizer.pockettracker.core.logic.TrackerController
 import com.conanizer.pockettracker.core.media.AudioFormats
 import com.conanizer.pockettracker.core.storage.FileSortMode
 import com.conanizer.pockettracker.core.storage.WavWriter
+import com.conanizer.pockettracker.core.trace.EventTrace
 import com.conanizer.pockettracker.ui.getTrackIndex
 import com.conanizer.pockettracker.platform.android.AndroidFileSystem
 import com.conanizer.pockettracker.platform.android.AndroidVideoAudioExtractor
@@ -183,6 +184,25 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     private val videoExtractor get() = ctrl.videoExtractor
     private val fileSystem get() = ctrl.fileSystem
     private val coroutineScope get() = ctrl.coroutineScope
+
+    // ── Songcore conformance trace (debug SETTINGS row 12) ───────────────────
+    // Writes the schema-v1 event trace to Renders/event.trace for the device↔host cross-check
+    // (see /testdata/README.md). Session-only: never persisted, always off at app start.
+    private var eventTraceWriter: java.io.Writer? = null
+
+    private fun setEventTraceEnabled(enabled: Boolean) {
+        if (enabled == EventTrace.active) return
+        if (enabled) {
+            val traceFile = File(fileSystem.getRendersDirectory(), "event.trace")
+            val sha = EventTrace.projectSha1(fileController.serializeProject(trackerController.project))
+            eventTraceWriter = traceFile.bufferedWriter(Charsets.UTF_8)
+            EventTrace.begin(eventTraceWriter!!, sha)
+        } else {
+            EventTrace.end()
+            eventTraceWriter?.close()
+            eventTraceWriter = null
+        }
+    }
 
     // ── Module shortcuts ─────────────────────────────────────────────────────
     private val chainEditorModule get() = ctrl.chainEditorModule
@@ -724,6 +744,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     cursorRemember = cursorRemember,
                     notePreviewEnabled = notePreviewEnabled,
                     autosaveResumeAuto = autosaveResumeAuto,
+                    traceEnabled = EventTrace.active,
                     visualizerType = appTheme.visualizerType,
                     currentThemeName = appTheme.name
                 )
@@ -744,6 +765,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     result.cursorRemember?.let      { cursorRemember      = it }
                     result.notePreviewEnabled?.let  { notePreviewEnabled  = it }
                     result.autosaveResumeAuto?.let  { autosaveResumeAuto  = it }
+                    result.traceEnabled?.let        { setEventTraceEnabled(it) }
                     result.visualizerType?.let      { appTheme = appTheme.copy(visualizerType = it) }
                     trackerController.projectVersion++
                 }

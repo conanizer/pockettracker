@@ -10,7 +10,9 @@ import com.conanizer.pockettracker.core.data.VolumeUtils
 import com.conanizer.pockettracker.core.audio.AudioEngine
 import com.conanizer.pockettracker.core.data.Chain
 import com.conanizer.pockettracker.core.data.Phrase
+import com.conanizer.pockettracker.core.data.toHex2
 import com.conanizer.pockettracker.core.logging.ILogger
+import com.conanizer.pockettracker.core.trace.EventTrace
 
 // Per-track state for persistent effects (REPEAT, ARPEGGIO, HOP, pitch, groove).
 // Effects persist until cancelled — e.g. REPEAT until new note, KILL, or same FX column override.
@@ -316,6 +318,7 @@ class PlaybackController(
     }
 
     fun stop() {
+        EventTrace.tStop()  // conformance tap — closes an open trace session (no-op otherwise)
         isPlaying = false
         playbackMode = PlaybackMode.STOPPED
         // Restore the master EQ to the mixer-configured slot, undoing any transient EQM override
@@ -523,6 +526,7 @@ class PlaybackController(
 
         logger.d(TAG, "▶️ Playing phrase $phraseId (tempo: $tempo BPM)")
 
+        EventTrace.tPlay("PHRASE", "id=${phraseId.toHex2()}", playbackStartFrame, tempo, sampleRate)
         nextFrameToSchedule = playbackStartFrame
         val result = schedulePhrase(phrase, playbackStartFrame, 0, project.getTransposeSemitones(), project, framesPerStep)
         nextFrameToSchedule += result.framesScheduled
@@ -664,6 +668,7 @@ class PlaybackController(
 
         logger.d(TAG, "▶️ Playing chain $chainId (tempo: $tempo BPM)")
 
+        EventTrace.tPlay("CHAIN", "id=${chainId.toHex2()}", playbackStartFrame, tempo, sampleRate)
         nextFrameToSchedule = playbackStartFrame
         nextChainRowToSchedule = 0
         chainRowStartFrames.clear()
@@ -705,6 +710,7 @@ class PlaybackController(
 
         logger.d(TAG, "▶️ Playing song from row $startRow (tempo: $tempo BPM)")
 
+        EventTrace.tPlay("SONG", "row=${startRow.toHex2()}", playbackStartFrame, tempo, sampleRate)
         nextFrameToSchedule = playbackStartFrame
         nextSongRowToSchedule = startRow
         nextSongChainRowToSchedule = 0
@@ -736,6 +742,10 @@ class PlaybackController(
 
         val sampleRate = audioEngine.getDeviceSampleRate()
         val framesPerStep = framesPerStep(project.tempo, sampleRate)
+
+        // Conformance tap: render sessions carry their own PLAY..STOP marks (there is no stop()
+        // on this path). Frame base 0 — render frames are already session-relative.
+        EventTrace.tPlay("RENDER", "rows=${startRow.toHex2()}-${endRow.toHex2()}", 0L, project.tempo, sampleRate)
 
         var currentFrame = 0L
 
@@ -789,6 +799,7 @@ class PlaybackController(
             }
         }
 
+        EventTrace.tStop()
         return currentFrame
     }
 
@@ -803,7 +814,7 @@ class PlaybackController(
      * Extracted from scheduleStepWithEffects so that method stays focused on scheduling.
      *
      * CHA xy: probability gate — x=probability (0=never, F=always), y=target (0=note, 1-3=FX slot).
-     * RND xy: recall the previously-active FX in the same column with a randomized value [x0..yF].
+     * RND xy: recall the previously-active FX in the same column with a randomized value [x0.yF].
      * RNL xy: randomize the column to the LEFT (FX2→FX1, FX3→FX2); on FX1, randomize note+instrument.
      */
     private fun applyChanceAndRandomize(step: PhraseStep, trackState: TrackState): Pair<PhraseStep, Boolean> {

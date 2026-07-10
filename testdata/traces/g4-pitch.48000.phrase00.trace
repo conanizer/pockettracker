@@ -1,0 +1,69 @@
+# schema=1 sr=48000 tempo=128 mode=live project=50cee852219b8ef1e453d4c5d1dca86b80a666b0
+T PLAY PHRASE id=00
+0 0 01 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+11250 0 01 90 note=79 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0xC0E00000 pslDur=0x41400000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+22500 0 01 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x40000000 vibSpd=0x00000000 vibDep=0x00000000
+33750 0 -1 01 rate=0xBF800000 tempo=128
+39375 0 -1 01 rate=0x00000000 tempo=128
+45000 0 01 90 note=76 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x404CCCCE vibDep=0x3F000000
+56250 0 -1 02 speed=0x406EEEF0 depth=0x3EC00000
+56250 0 -1 02 speed=0x40CCCCCE depth=0x3F800000
+67500 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=64 slice=-1 transpose=12 pit=3 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+73125 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=-1 slice=-1 transpose=12 pit=-8 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+78750 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=-1 slice=2 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+90000 0 01 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+101250 0 01 90 note=79 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0xC0E00000 pslDur=0x41400000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+112500 0 01 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x40000000 vibSpd=0x00000000 vibDep=0x00000000
+123750 0 -1 01 rate=0xBF800000 tempo=128
+129375 0 -1 01 rate=0x00000000 tempo=128
+135000 0 01 90 note=76 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x404CCCCE vibDep=0x3F000000
+146250 0 -1 02 speed=0x406EEEF0 depth=0x3EC00000
+146250 0 -1 02 speed=0x40CCCCCE depth=0x3F800000
+157500 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=64 slice=-1 transpose=12 pit=3 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+163125 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=-1 slice=-1 transpose=12 pit=-8 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+168750 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=-1 slice=2 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+180000 0 01 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+191250 0 01 90 note=79 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0xC0E00000 pslDur=0x41400000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+202500 0 01 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x40000000 vibSpd=0x00000000 vibDep=0x00000000
+213750 0 -1 01 rate=0xBF800000 tempo=128
+219375 0 -1 01 rate=0x00000000 tempo=128
+225000 0 01 90 note=76 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x404CCCCE vibDep=0x3F000000
+236250 0 -1 02 speed=0x406EEEF0 depth=0x3EC00000
+236250 0 -1 02 speed=0x40CCCCCE depth=0x3F800000
+247500 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=64 slice=-1 transpose=12 pit=3 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+253125 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=-1 slice=-1 transpose=12 pit=-8 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+258750 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=-1 slice=2 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+270000 0 01 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+281250 0 01 90 note=79 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0xC0E00000 pslDur=0x41400000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+292500 0 01 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x40000000 vibSpd=0x00000000 vibDep=0x00000000
+303750 0 -1 01 rate=0xBF800000 tempo=128
+309375 0 -1 01 rate=0x00000000 tempo=128
+315000 0 01 90 note=76 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x404CCCCE vibDep=0x3F000000
+326250 0 -1 02 speed=0x406EEEF0 depth=0x3EC00000
+326250 0 -1 02 speed=0x40CCCCCE depth=0x3F800000
+337500 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=64 slice=-1 transpose=12 pit=3 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+343125 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=-1 slice=-1 transpose=12 pit=-8 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+348750 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=-1 slice=2 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+360000 0 01 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+371250 0 01 90 note=79 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0xC0E00000 pslDur=0x41400000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+382500 0 01 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x40000000 vibSpd=0x00000000 vibDep=0x00000000
+393750 0 -1 01 rate=0xBF800000 tempo=128
+399375 0 -1 01 rate=0x00000000 tempo=128
+405000 0 01 90 note=76 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x404CCCCE vibDep=0x3F000000
+416250 0 -1 02 speed=0x406EEEF0 depth=0x3EC00000
+416250 0 -1 02 speed=0x40CCCCCE depth=0x3F800000
+427500 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=64 slice=-1 transpose=12 pit=3 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+433125 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=-1 slice=-1 transpose=12 pit=-8 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+438750 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=-1 slice=2 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+450000 0 01 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+461250 0 01 90 note=79 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0xC0E00000 pslDur=0x41400000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+472500 0 01 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x40000000 vibSpd=0x00000000 vibDep=0x00000000
+483750 0 -1 01 rate=0xBF800000 tempo=128
+489375 0 -1 01 rate=0x00000000 tempo=128
+495000 0 01 90 note=76 vel=127 velGain=0x3F800000 volGain=0x3F40C0C1 pan=0x3E808081 start=-1 slice=-1 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x404CCCCE vibDep=0x3F000000
+506250 0 -1 02 speed=0x406EEEF0 depth=0x3EC00000
+506250 0 -1 02 speed=0x40CCCCCE depth=0x3F800000
+517500 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=64 slice=-1 transpose=12 pit=3 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+523125 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=-1 slice=-1 transpose=12 pit=-8 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+528750 0 00 90 note=72 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=-1 slice=2 transpose=12 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+T STOP

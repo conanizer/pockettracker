@@ -40,6 +40,8 @@ import com.conanizer.pockettracker.ui.toHex2
  *   9  — THEME     (opens editor)
  *   10 — TEMPLATE  (SAVE / CLEAR)
  *   11 — RESUME    (ASK=show RECOVER WORK? prompt / AUTO=silently restore autosave)
+ *   12 — TRACE     (debug-only: songcore conformance event trace → Renders/event.trace;
+ *                   enable AFTER loading the project so the header sha matches)
  */
 class SettingsModule : TrackerModule {
 
@@ -194,6 +196,15 @@ class SettingsModule : TrackerModule {
             "RESUME", if (s.autosaveResumeAuto) "AUTO" else "ASK",
             s.cursorRow == row && s.cursorColumn == 0,
             s.cursorRow == row && s.cursorColumn == 1)
+        rowY += ROW_HEIGHT; row++
+
+        // ── ROW 12: TRACE (debug-only — songcore conformance event trace) ──
+        if (BuildConfig.DEBUG) {
+            drawParameterRow(x, rowY, scale, nameColumnX, val1ColumnX, t,
+                "TRACE", if (s.traceEnabled) "ON" else "OFF",
+                s.cursorRow == row && s.cursorColumn == 0,
+                s.cursorRow == row && s.cursorColumn == 1)
+        }
     }
 
     private fun DrawScope.drawDualParamRow(
@@ -332,6 +343,7 @@ class SettingsModule : TrackerModule {
             9  -> CursorContextFactory.readOnly()   // THEME: A opens editor
             10 -> CursorContextFactory.readOnly()   // TEMPLATE: A triggers save/clear
             11 -> CursorContextFactory.toggleBinary(state.autosaveResumeAuto)  // RESUME
+            12 -> CursorContextFactory.toggleBinary(state.traceEnabled)        // TRACE (debug)
             else -> CursorContextFactory.none()
         }
     }
@@ -402,6 +414,9 @@ class SettingsModule : TrackerModule {
             11 -> if (action is InputAction.SET_VALUE) {   // RESUME
                 return InputResult(modified = true, autosaveResumeAuto = action.value > 0)
             }
+            12 -> if (action is InputAction.SET_VALUE) {   // TRACE (debug)
+                return InputResult(modified = true, traceEnabled = action.value > 0)
+            }
         }
         return InputResult(modified = action !is InputAction.NONE)
     }
@@ -421,7 +436,8 @@ class SettingsModule : TrackerModule {
         val cursorRemember: Boolean? = null,
         val notePreviewEnabled: Boolean? = null,
         val autosaveResumeAuto: Boolean? = null,
-        val visualizerType: VisualizerType? = null
+        val visualizerType: VisualizerType? = null,
+        val traceEnabled: Boolean? = null
     )
 }
 
@@ -448,6 +464,7 @@ data class SettingsState(
     val cursorRemember: Boolean = false,
     val notePreviewEnabled: Boolean = true,
     val autosaveResumeAuto: Boolean = false,
+    val traceEnabled: Boolean = false,
     val visualizerType: VisualizerType = VisualizerType.SCOPE,
     val currentThemeName: String = "CLASSIC",
     val appTheme: AppTheme = AppTheme.Companion.CLASSIC

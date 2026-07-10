@@ -14,6 +14,7 @@ import com.conanizer.pockettracker.core.logging.ILogger
 import com.conanizer.pockettracker.core.media.AudioFormats
 import com.conanizer.pockettracker.core.media.IVideoAudioExtractor
 import com.conanizer.pockettracker.core.resources.IResourceLoader
+import com.conanizer.pockettracker.core.trace.EventTrace
 import java.io.File
 import kotlin.math.pow
 
@@ -575,6 +576,8 @@ class AudioEngine(
     }
 
     fun killTrack(trackId: Int) {
+        // Conformance tap (event-schema NoteOff CUT). getCurrentFrame only when tracing.
+        if (EventTrace.active) EventTrace.noteOff(backend.getCurrentFrame(), trackId, EventTrace.NOTE_OFF_CUT)
         backend.killTrack(trackId)
     }
 
@@ -586,6 +589,7 @@ class AudioEngine(
     }
 
     fun scheduleKill(frame: Long, trackId: Int) {
+        EventTrace.noteOff(frame, trackId, EventTrace.NOTE_OFF_CUT)
         backend.scheduleKill(frame, trackId)
     }
 
@@ -622,6 +626,20 @@ class AudioEngine(
         isRootAudition: Boolean = false
     ) {
         if (note == Note.EMPTY) return
+        // Conformance tap (event-schema NoteOn) — at seam ENTRY, before instrument/sample validity
+        // checks: invalid-instrument and empty-slot NoteOns ARE events, consumers drop them. The
+        // fields are these seam args verbatim; everything below this line (SF velocity derivation,
+        // slice window, baseFreq) is consumer-side derivation and never rides the trace.
+        EventTrace.noteOn(
+            frame = targetFrame, track = trackId, instrument = instrumentId,
+            notePitch = note.pitch, noteOctave = note.octave,
+            velocity = midiVelocity, velGain = volume, volGain = phraseVol, pan = pan,
+            start = startPointOverride, slice = sliIndex,
+            transpose = transposeSemitones, pit = pitSemitones, arp = arpSemitoneOffset,
+            tableId = tableIdOverride, tableRow = tableStartRow,
+            pslOff = pslInitialOffset, pslDur = pslDuration, pbnRate = pbnRate,
+            vibSpd = vibratoSpeed, vibDep = vibratoDepth
+        )
         if (trackId in 0..7) phraseTrackMask = phraseTrackMask or (1 shl trackId)
 
         val instrument = if (instrumentId in project.instruments.indices) {
@@ -1062,27 +1080,41 @@ class AudioEngine(
 
     // Uses the sample-accurate queue so the THO hop fires at the correct step frame.
     fun scheduleVoiceTableRow(targetFrame: Long, trackId: Int, row: Int) {
+        EventTrace.extTableRow(targetFrame, trackId, row)
         backend.scheduleVoiceTableRow(targetFrame, trackId, row)
     }
 
     // Uses sample-accurate queue so the Vxx change fires at the correct step boundary.
     fun scheduleTrackPhraseVol(targetFrame: Long, trackId: Int, phraseVol: Float) {
+        EventTrace.cc(targetFrame, trackId, EventTrace.CC_VOLUME, phraseVol)
         backend.scheduleTrackPhraseVol(targetFrame, trackId, phraseVol)
     }
 
     // ── Live per-note / mixer FX — sample-accurate, applied on the audio thread ──
-    fun scheduleVoicePan(targetFrame: Long, trackId: Int, pan: Float) =
+    fun scheduleVoicePan(targetFrame: Long, trackId: Int, pan: Float) {
+        EventTrace.cc(targetFrame, trackId, EventTrace.CC_PAN, pan)
         backend.scheduleVoicePan(targetFrame, trackId, pan)
-    fun scheduleVoiceReverbSend(targetFrame: Long, trackId: Int, send: Float) =
+    }
+    fun scheduleVoiceReverbSend(targetFrame: Long, trackId: Int, send: Float) {
+        EventTrace.cc(targetFrame, trackId, EventTrace.CC_REVERB_SEND, send)
         backend.scheduleVoiceReverbSend(targetFrame, trackId, send)
-    fun scheduleVoiceDelaySend(targetFrame: Long, trackId: Int, send: Float) =
+    }
+    fun scheduleVoiceDelaySend(targetFrame: Long, trackId: Int, send: Float) {
+        EventTrace.cc(targetFrame, trackId, EventTrace.CC_DELAY_SEND, send)
         backend.scheduleVoiceDelaySend(targetFrame, trackId, send)
-    fun scheduleVoiceReverse(targetFrame: Long, trackId: Int, reverse: Boolean, restart: Boolean) =
+    }
+    fun scheduleVoiceReverse(targetFrame: Long, trackId: Int, reverse: Boolean, restart: Boolean) {
+        EventTrace.extReverse(targetFrame, trackId, reverse, restart)
         backend.scheduleVoiceReverse(targetFrame, trackId, reverse, restart)
-    fun scheduleVoiceEqSlot(targetFrame: Long, trackId: Int, slot: Int) =
+    }
+    fun scheduleVoiceEqSlot(targetFrame: Long, trackId: Int, slot: Int) {
+        EventTrace.extEqSlot(targetFrame, trackId, slot)
         backend.scheduleVoiceEqSlot(targetFrame, trackId, slot)
-    fun scheduleMasterEqSlotAt(targetFrame: Long, slot: Int) =
+    }
+    fun scheduleMasterEqSlotAt(targetFrame: Long, slot: Int) {
+        EventTrace.extMasterEq(targetFrame, slot)
         backend.scheduleMasterEqSlotAt(targetFrame, slot)
+    }
 
     /** Apply a master EQ preset immediately (used to restore the mixer's master EQ when playback stops,
      *  undoing any transient EQM override). -1 = bypass. */
@@ -1091,10 +1123,12 @@ class AudioEngine(
     // Uses the sample-accurate queue so mid-note PBN/PVB/PVX fire at the correct step frame and
     // the voices[] write happens on the audio thread.
     fun schedulePitchBend(targetFrame: Long, trackId: Int, semitonesPerTick: Float, tempo: Int) {
+        EventTrace.extPitchRate(targetFrame, trackId, semitonesPerTick, tempo)
         backend.schedulePitchBend(targetFrame, trackId, semitonesPerTick, tempo)
     }
 
     fun scheduleVibrato(targetFrame: Long, trackId: Int, speed: Float, depth: Float) {
+        EventTrace.extVibrato(targetFrame, trackId, speed, depth)
         backend.scheduleVibrato(targetFrame, trackId, speed, depth)
     }
 
@@ -1104,6 +1138,7 @@ class AudioEngine(
     }
 
     fun scheduleNoteOff(frame: Long, trackId: Int) {
+        EventTrace.noteOff(frame, trackId, EventTrace.NOTE_OFF_RELEASE)
         backend.scheduleNoteOff(frame, trackId)
     }
 

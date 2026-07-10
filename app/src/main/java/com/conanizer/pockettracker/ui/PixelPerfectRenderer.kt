@@ -724,6 +724,7 @@ class TrackerLayout {
                                     cursorRemember = cursorRemember,
                                     notePreviewEnabled = notePreviewEnabled,
                                     autosaveResumeAuto = autosaveResumeAuto,
+                                    traceEnabled = com.conanizer.pockettracker.core.trace.EventTrace.active,
                                     visualizerType = t.visualizerType,
                                     currentThemeName = t.name,
                                     appTheme = appTheme

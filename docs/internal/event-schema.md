@@ -2,6 +2,9 @@
 
 **Status:** RATIFIED 2026-07-10 (drafted same day; one amendment — the phrase V column is
 termed **velocity** in all docs, see the §3.1 terminology note). Songcore Phase 1 is open.
+**Tap-writing freezes applied 2026-07-10 (Phase 1 session 1)** — §3.1/§6 amended in place,
+§9 carries the freeze record; `cpp/songcore/event.h` is the schema-in-code companion and the
+goldens live in `/testdata`.
 This is the Step-2 one-pager from `order-of-work.md`. It serves three masters at once:
 `midi-implementation-plan.md` §3 (the bus events), `linux-port-plan.md` §4.3 (the
 `(frame, track, event, params)` conformance trace), and the songcore↔UI JNI vocabulary
@@ -68,18 +71,18 @@ Fields marked EXT are dropped by the EXTERNAL serializer; ᵇ = binary32 raw bit
 
 | Field | Form | Source | MIDI out |
 |---|---|---|---|
-| `note` | u8 0–127 | octave×12+pitch | data1 (after transpose/pit fold, clamped) |
+| `note` | u8 | **the MIDI number, (octave+1)×12+pitch** (frozen 2026-07-10 — the draft's octave×12+pitch went negative for transpose-coerced sub-C0 notes; MIDI form stays ≥0; top-octave authored notes may exceed 127 (B-9=131), consumers clamp, trace records verbatim) | data1 (after transpose/pit/arp fold, clamped) |
 | `velocity` | i8 −1 · 0–127 | the phrase **V column** (`PhraseStep.volume`, 00–7F); −1 = retrig legacy "derive from gain" (IB-19) | data2, clamp ≥1 |
 | `velGain` | f32ᵇ | velocity curve (squared) — seam arg `volume` | EXT |
-| `volGain` | f32ᵇ | instrument vol × Vxx — seam arg `phraseVol` | EXT |
+| `volGain` | f32ᵇ | instrument vol, **or the Vxx byte /255 when Vxx overrides it** (Vxx replaces, does not multiply) — seam arg `phraseVol` | EXT |
 | `pan` | f32ᵇ 0=L ½=C 1=R | PAN-with-note is baked here, not a CC (IB-12) | EXT v1 |
-| `startOffset` / `endOffset` | i32, −1 default | OFF / CUT-slice window | EXT |
-| `sliceIndex` | i32, −1 | SLI | EXT |
-| `transpose` / `pit` | i32 semitones | chain transpose + ARP offset / PIT | folded into data1 |
-| `tableId` · `tableTicRate` · `tableStartRow` | i32 · i32 · i32 −1 | TBL / TIC / THO-with-note | EXT |
-| `pslOffset` · `pslDuration` | f32ᵇ st · f32ᵇ ticks | PSL | EXT (phase-D option: CC 5/65) |
-| `pbnRate` | f32ᵇ st/tick | PBN-with-note | EXT |
-| `vibSpeed` · `vibDepth` | f32ᵇ Hz · f32ᵇ st | PVB/PVX-with-note | EXT |
+| `start` | i32, −1 default | the authored OFF byte verbatim. ~~endOffset~~ **removed at tap-writing**: the CUT-slice window is derived below the seam from instrument+note+slice data → instrument-static rule | EXT |
+| `slice` | i32, −1 | SLI | EXT |
+| `transpose` · `pit` · `arp` | i32 st ×3 | **three separate fields** (frozen): chain+song transpose / PIT / arpeggio offset — slice derivation needs chain transpose alone, folding would lose information | folded into data1 |
+| `tableId` · `tableRow` | i32 −1 · i32 −1 | TBL-override(+retrig continuity) / THO-with-note. ~~tableTicRate~~ **removed at tap-writing**: always `instrument.tableTicRate` at the seam → instrument-static rule | EXT |
+| `pslOff` · `pslDur` | f32ᵇ st · f32ᵇ ticks | PSL | EXT (phase-D option: CC 5/65) |
+| `pbnRate` | f32ᵇ | PBN-with-note: the raw FX byte /16, sign = direction (the seam's per-tick vs per-step naming discrepancy is historical; the value is seam-verbatim) | EXT |
+| `vibSpd` · `vibDep` | f32ᵇ Hz (tempo-scaled at emit) · f32ᵇ st | PVB/PVX-with-note | EXT |
 
 - **Cross-wiring ledger note:** at today's seam, `velGain` rides the arg *named* `volume`
   (→ `MOD_SRC_INSTR_VOL`) and `volGain` rides `phraseVol` (→ `MOD_SRC_PHRASE_VOL`) — the
@@ -137,19 +140,33 @@ Fields marked EXT are dropped by the EXTERNAL serializer; ᵇ = binary32 raw bit
 
 - **Tap points:** Kotlin = one wrapper around each `AudioEngine.schedule*` call (the one
   allowed zone-C change); C++ = the router itself (bus records serialize directly).
-- **Text form**, one record per line, fields in schema order, floats as `0x…`:
+- **Text form**, one record per line, fields in schema order, floats as `0x…`. Frozen
+  2026-07-10 (normative comment block: `cpp/songcore/event.h`; Kotlin twin:
+  `core/trace/EventTrace.kt`). Real generated lines:
 
   ```
-  # schema=1 sr=44100 tempo=120 mode=render project=<sha1> date=2026-07-10
-  T PLAY SONG row=00
-  1058400 2 0A 90 note=48 vel=100 velGain=0x3F4C4A3D volGain=0x3F800000 pan=0x3F000000 …
-  1058401 2 -1 B0 param=91 value=0x3F19999A
-  1063691 2 -1 80 mode=0
+  # schema=1 sr=44100 tempo=128 mode=render project=b9ec73148e3380c551dcebf1c2d0eaa20e281f14
+  T PLAY RENDER rows=00-00
+  20668 0 01 90 note=67 vel=32 velGain=0x3D820610 volGain=0x3F40C0C1 pan=0x3E008081 start=-1 slice=-1 transpose=0 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+  51670 0 -1 B0 param=7 value=0x3F008081
+  41336 0 -1 80 mode=0
   T STOP
   ```
 
+  Freezes: **every payload field always renders** (fixed line shape — adding a field is a
+  schema bump anyway); ints decimal, floats `0x`+8 uppercase hex digits, bools 0/1, instrument
+  hex2 or `-1`; `\n` endings; **no date/wall-clock anywhere** (the draft's `date=` header field
+  is dropped — byte-determinism wins, git history carries dates). `T PLAY` grammar:
+  `SONG row=xx` · `CHAIN id=xx` · `PHRASE id=xx` · `RENDER rows=xx-yy` (hex2).
+  **Frames are session-relative**: the base latches at `T PLAY` (render = 0 naturally; live
+  subtracts the transport-start frame) — traces are playback-position independent, which is
+  what makes device↔host and Kotlin↔C++ traces comparable at all. Events outside a PLAY..STOP
+  session are dropped (stray previews / stop-cleanup kills can't trail a `T STOP`).
+
 - **Meta records** (`#` header, `T` transport) carry session context; they are compared
-  too (same project + transport = same header).
+  too (same project + transport = same header). `project=` is the SHA-1 of the canonical
+  serialized project JSON (`FileController.serializeProject` bytes; `EventTrace.projectSha1`)
+  — on the C++ side this doubles as a serializer-equality check (§4.4 schema lock).
 - **Comparison:** byte equality after the §4 canonical sort. Goldens live in
   `/testdata`, one trace per (project, mode): render mode skips muted tracks, live mode
   schedules them (IB-10) — both modes are goldened per project.
@@ -183,7 +200,23 @@ implementation decision.
 
 `SCHEMA_VERSION = 1` lives in `songcore/event.h` and in every trace header. Any change to
 tags, payload fields, ordering, or float derivations = version bump + regenerated goldens
-+ this doc updated, all in one PR (the port plan §6 CI rule). Open items that Phase 1's
-tap-writing freezes into event.h + a doc update, without redesign: exact per-field units
-for `startOffset`/`endOffset` (today's seam values verbatim), the packed JNI field order,
-and the final trace rendering of each field.
++ this doc updated, all in one PR (the port plan §6 CI rule).
+
+**Freeze record — tap-writing, 2026-07-10 (songcore Phase 1, session 1).** The §9 open items
+are closed; `cpp/songcore/event.h` is now the normative schema-in-code (compile-guarded by
+`songcore/schema-check.cpp`), `core/trace/EventTrace.kt` is the Kotlin tap, and the goldens
+live in `/testdata` (see its README; regenerated + guarded by `GoldenTraceTest`):
+
+- **Tap point:** the public `AudioEngine.schedule*` seam, at ENTRY — after the empty-note
+  guard, before instrument/sample validity checks. Invalid-instrument and empty-slot NoteOns
+  ARE events; consumers drop them. Everything below the seam (SF velocity derivation, slice
+  window, baseFreq, transcendentals) is consumer-side and never rides the trace.
+- **Field units:** seam args verbatim (§3.1 as amended above): `note` = MIDI number;
+  `start` = authored OFF byte; `endOffset` and `tableTicRate` dropped (instrument-static);
+  `transpose`/`pit`/`arp` separate; `pslDur` ticks; `pbnRate` = FX byte /16; `vibSpd` Hz
+  tempo-scaled. Float audit passed: every traced f32 derives from pure +−×÷ on authored
+  bytes — no transcendental reaches the trace, so §5 bit-stability holds by construction.
+- **Trace rendering:** §6 as amended (fixed line shape, session-relative frames, no dates).
+- **Packed JNI order (rule):** int32 sequence `frameHi, frameLo, track, instrument, type`,
+  then payload fields in event.h struct order; floats as raw bits, bools 0/1. Arrays land
+  with `injectEvent` (S5) under this rule.

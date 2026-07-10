@@ -1,0 +1,4 @@
+# Golden conformance artifacts are byte-exact: no EOL conversion, ever.
+# (GoldenTraceTest compares committed bytes against regenerated ones; a CRLF checkout would
+# fail every comparison on Windows.)
+* -text

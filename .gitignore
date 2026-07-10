@@ -142,6 +142,10 @@ docs/internal/*
 # APK artifacts — release APKs go to GitHub Releases, not the repo
 apk/
 
+# Device-recorded conformance traces — scratch input for the GoldenTraceTest cross-check,
+# never committed (the committed truth is /testdata/traces)
+/testdata/device/
+
 # Keep build helper scripts (don't ignore)
 !build.sh
 !test.sh

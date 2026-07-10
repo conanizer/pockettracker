@@ -1,0 +1,18 @@
+# schema=1 sr=48000 tempo=128 mode=render project=eac0333d940714fd4df205d00a2a15b177e74c89
+T PLAY RENDER rows=00-00
+0 0 00 90 note=60 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=-1 slice=-1 transpose=0 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+1 0 -1 B0 param=91 value=0x3F008081
+1 0 -1 B0 param=93 value=0x3E808081
+11250 0 -1 B0 param=91 value=0x3D808081
+16875 0 -1 B0 param=93 value=0x3F800000
+22500 0 00 90 note=64 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=-1 slice=-1 transpose=0 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+22501 0 -1 04 reverse=1 restart=1
+33750 0 -1 04 reverse=0 restart=0
+45000 0 00 90 note=67 vel=127 velGain=0x3F800000 volGain=0x3F800000 pan=0x3F008081 start=-1 slice=-1 transpose=0 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+45001 0 -1 05 slot=5
+56250 255 -1 06 slot=5
+61875 0 -1 B0 param=10 value=0x3F40C0C1
+67500 0 02 90 note=72 vel=72 velGain=0x3EA48FAE volGain=0x3F60E0E1 pan=0x3F008081 start=-1 slice=-1 transpose=0 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
+67500 0 -1 80 mode=0
+78750 0 -1 B0 param=7 value=0x3E088889
+T STOP

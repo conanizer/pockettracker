@@ -39,6 +39,7 @@ target_link_libraries(opusfile PUBLIC opus ogg)
 # this list verbatim and supplies its own shell in place of ANDROID_PLATFORM_SOURCES.
 # TSF_IMPLEMENTATION is defined in soundfont-voice.cpp only; native-audio.cpp is a stub.
 set(ENGINE_CORE_SOURCES
+        songcore/schema-check.cpp
         soundfont-voice.cpp
         sample-editor.cpp
         audio-engine.cpp
