@@ -62,10 +62,12 @@ set(ENGINE_CORE_SOURCES
         effects/soundpipe/pareq.c
 )
 
-# Android shell: the Oboe stream glue + the JNI facade.
+# Android shell: the Oboe stream glue + the JNI facade (+ songcore's JNI shell — the Linux port
+# swaps exactly these files and keeps everything above).
 set(ANDROID_PLATFORM_SOURCES
         oboe-audio-engine.cpp
         jni-bridge.cpp
+        songcore-jni.cpp
 )
 
 if(ANDROID)
@@ -91,6 +93,18 @@ set_source_files_properties(
         audio-decoders.cpp
         vendor/stb_vorbis/stb_vorbis.c
         PROPERTIES COMPILE_OPTIONS "-fno-fast-math"
+)
+
+# songcore's translation unit is REQUIRED to be IEEE-exact — this is not an optimisation choice.
+# The sequencer's float params (velGain, volGain, pan, PSL/PBN/vibrato rates) are compared against the
+# Kotlin sequencer as raw binary32 BITS (event-schema §5/§6), so any reassociation, and above all fma
+# contraction of `a + b*c` — which aarch64 clang performs BY DEFAULT, -ffast-math or not — changes the
+# rounding and the conformance trace stops matching. Hence both flags, and hence songcore lives in its
+# own TU: pulling its headers into any other source would put that source's math under -ffast-math and
+# silently break the guarantee.
+set_source_files_properties(
+        songcore-jni.cpp
+        PROPERTIES COMPILE_OPTIONS "-fno-fast-math;-ffp-contract=off"
 )
 
 # 7.3: explicit optimization level. The NDK leaves Debug at -O0, which makes the real-time audio

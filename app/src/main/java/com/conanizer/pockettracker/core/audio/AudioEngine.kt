@@ -524,6 +524,13 @@ class AudioEngine(
         backend.scheduleKill(targetFrame + durationFrames, PREVIEW_TRACK_ID)
     }
 
+    /**
+     * deviceRate / fileRate for an instrument's loaded sample — 1.0 when nothing is loaded (the same
+     * fallback the note path uses). Kotlin-side state: only the file loaders know a sample's original
+     * rate, so songcore's C++ consumer is handed this rather than deriving it.
+     */
+    fun sampleRateRatioFor(instrumentId: Int): Float = sampleRateRatios[instrumentId] ?: 1.0f
+
     fun calculateInstrumentBaseFrequency(instrument: Instrument): Float {
         val rootFreq = instrument.root.toFrequency()
         val detuneMultiplier = instrument.detuneMultiplier()

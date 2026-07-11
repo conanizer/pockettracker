@@ -29,6 +29,7 @@
 #include "../../native/songcore/router.h"
 #include "../../native/songcore/trace_writer.h"
 #include "../../native/songcore/scheduler.h"
+#include "../../native/songcore/sha1.h"
 
 #include <algorithm>
 #include <cctype>
@@ -72,41 +73,9 @@ static bool read_file(const std::string& path, std::string& out) {
     return true;
 }
 
-// ─── SHA-1 (project= header id; matches EventTrace.projectSha1 over the .ptp bytes) ───────────────
-static std::string sha1_hex(const std::string& msg) {
-    uint32_t h0 = 0x67452301, h1 = 0xEFCDAB89, h2 = 0x98BADCFE, h3 = 0x10325476, h4 = 0xC3D2E1F0;
-    std::string data = msg;
-    uint64_t ml = static_cast<uint64_t>(data.size()) * 8;
-    data += static_cast<char>(0x80);
-    while (data.size() % 64 != 56) data += static_cast<char>(0x00);
-    for (int i = 7; i >= 0; --i) data += static_cast<char>((ml >> (i * 8)) & 0xFF);
-
-    auto rol = [](uint32_t v, int n) { return (v << n) | (v >> (32 - n)); };
-    for (size_t chunk = 0; chunk < data.size(); chunk += 64) {
-        uint32_t w[80];
-        for (int i = 0; i < 16; ++i) {
-            w[i] = (static_cast<uint8_t>(data[chunk + i * 4]) << 24) |
-                   (static_cast<uint8_t>(data[chunk + i * 4 + 1]) << 16) |
-                   (static_cast<uint8_t>(data[chunk + i * 4 + 2]) << 8) |
-                   (static_cast<uint8_t>(data[chunk + i * 4 + 3]));
-        }
-        for (int i = 16; i < 80; ++i) w[i] = rol(w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16], 1);
-        uint32_t a = h0, b = h1, c = h2, d = h3, e = h4;
-        for (int i = 0; i < 80; ++i) {
-            uint32_t f, k;
-            if (i < 20)      { f = (b & c) | ((~b) & d);        k = 0x5A827999; }
-            else if (i < 40) { f = b ^ c ^ d;                   k = 0x6ED9EBA1; }
-            else if (i < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8F1BBCDC; }
-            else             { f = b ^ c ^ d;                   k = 0xCA62C1D6; }
-            uint32_t tmp = rol(a, 5) + f + e + k + w[i];
-            e = d; d = c; c = rol(b, 30); b = a; a = tmp;
-        }
-        h0 += a; h1 += b; h2 += c; h3 += d; h4 += e;
-    }
-    char buf[41];
-    std::snprintf(buf, sizeof buf, "%08x%08x%08x%08x%08x", h0, h1, h2, h3, h4);
-    return buf;
-}
+// ─── SHA-1 ───────────────────────────────────────────────────────────────────────────────────────
+// songcore/sha1.h holds the one implementation, shared with the app: the trace header must carry the
+// same project= id whether the trace was written on the device or here.
 
 // ─── canonical sort (event-schema §4 / TraceCompare.canonicalize) ────────────────────────────────
 static int rank_of_type(const std::string& tt) {

@@ -1,6 +1,6 @@
 {
     "version": 1,
-    "name": "G3RETRIG",
+    "name": "g3-retrig",
     "tempo": 120,
     "eqPresets": [
         {

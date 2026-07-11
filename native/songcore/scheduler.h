@@ -16,21 +16,26 @@
 // literals, so the raw-bits trace fields reproduce (S3 already proved the shared arithmetic bitwise;
 // tools/ptplay proves the whole spine).
 //
-// Deliberately NOT ported (no effect on the trace, event-schema §5 / SC-4):
-//   * getPlaybackPosition() + its chainRowStartFrames / songPositionStartFrames maps — UI cursor
-//     feedback, never goldened;
-//   * the scheduling-checkpoint ring + notifyDataChanged() rollback — only a live-edit reaction, and
-//     the conformance harness never edits mid-playback (the stream stays a pure function of the
-//     project + transport, FIX-1);
-//   * eqmActive / master-EQ restore on stop() — setMasterEqSlot carries no tap (not a bus event).
+// S4 shipped the event-emitting spine alone. S5 adds the three pieces a LIVE app needs that carry no
+// bus event and therefore no golden (event-schema §5 / SC-4) — they are pure SIDE-RECORDS kept
+// alongside the walk, and the proof that they stay side-records is that tools/ptplay must remain
+// byte-green on all 32 traces with them in:
+//   * getPlaybackPosition() + its chainRowStartFrames / songPositionStartFrames maps — the UI cursor;
+//   * the scheduling-checkpoint ring + notify_data_changed() rollback — the live-edit reaction
+//     (SC-2: only the POSITION rolls back, never TrackState — the state smear is today's behavior);
+//   * eqm_active() — setMasterEqSlot is not a bus event, so the master-EQ restore on stop() is the
+//     host's job; the flag tells it whether an EQM ran (PlaybackController.eqmActive).
 // Random FX (CHA/RND/RNL/ARP-RANDOM) are excluded from the goldens (SC-1); applyChanceAndRandomize
 // is ported structurally but its random draws are never exercised here (separate statistical tests).
 
 #include <algorithm>
 #include <cstdint>
+#include <deque>
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
+#include <vector>
 #include "model.h"
 #include "timing.h"
 #include "effects.h"
@@ -75,6 +80,16 @@ inline bool step_empty(const PhraseStep& s) { return s.note == Note::EMPTY(); }
 inline bool chain_is_empty(const Chain& c, int index) { return c.phraseRefs[index] == -1; }
 
 enum class PlaybackMode { STOPPED, PHRASE, CHAIN, SONG };
+
+// ─── UI cursor feedback (SC-4 — never goldened) ──────────────────────────────────────────────────
+// PlaybackController.PlaybackPosition field-for-field. `row` doubles as the phrase step in every
+// mode (that is how Kotlin fills it), so the UI reads one struct wherever the cursor lives.
+struct PlaybackPosition {
+    int row = 0;
+    int chainRow = 0;
+    int phraseStep = 0;
+    int songRow = 0;
+};
 
 // ─── Per-track persistent effect state (TrackState) ─────────────────────────────────────────────
 struct TrackState {
@@ -131,13 +146,112 @@ class Sequencer {
     Sequencer(MidiRouter& router, const Project& project, int sample_rate)
         : router_(router), project_(&project), sampleRate_(sample_rate) {}
 
-    // Synthetic transport clock — the driver advances it and polls updatePlaybackBuffer(), exactly
-    // as TraceHarness drives the fake backend's frameClock (getCurrentFrame reads it verbatim).
+    // The transport clock — the driver advances it and polls updatePlaybackBuffer(). In the app the
+    // driver is the host, which copies the engine's frame counter in (that IS what the Kotlin
+    // scheduler polled); in the harness it is TraceHarness's synthetic clock. getCurrentFrame() reads
+    // it verbatim either way.
     void set_clock(int64_t f) { currentFrame_ = f; }
     int64_t clock() const { return currentFrame_; }
 
+    // Re-read per verb by the host, mirroring PlaybackController, which asks the backend for the
+    // device rate on every poll rather than caching it (a headphone swap can change it mid-session).
+    void set_sample_rate(int sr) { if (sr > 0) sampleRate_ = sr; }
+    int  sample_rate() const { return sampleRate_; }
+
+    // The frame the current session latched at T PLAY — the trace's session base.
+    int64_t playback_start_frame() const { return playbackStartFrame_; }
+
     static constexpr int64_t LOOKAHEAD_MS = 50;
     static constexpr int BUFFER_PHRASES = 2;
+
+    bool is_playing() const { return isPlaying_; }
+    PlaybackMode playback_mode() const { return playbackMode_; }
+
+    // ── UI cursor + live-edit reaction (S5 side-records — no bus events, SC-4) ──
+
+    // PlaybackController.getPlaybackPosition, verbatim (incl. the tempo fallback: currentProject_ is
+    // null on the render path, but so is isPlaying_, so this reads the live tempo in practice).
+    PlaybackPosition getPlaybackPosition() {
+        PlaybackPosition pos;
+        if (!isPlaying_) return pos;
+
+        int64_t currentFrame = getCurrentFrame();
+        int64_t elapsedFrames = currentFrame - playbackStartFrame_;
+        int tempo = currentProject_ ? currentProject_->tempo : 120;
+        int64_t framesPerStep = frames_per_step(tempo, sampleRate_);
+        if (framesPerStep <= 0) return pos;   // unreachable for any legal tempo; a 60 Hz UI poll must not divide by zero
+        int64_t framesPerPhrase = framesPerStep * 16;
+
+        switch (playbackMode_) {
+            case PlaybackMode::PHRASE: {
+                pos.row = clampi(static_cast<int>((elapsedFrames % framesPerPhrase) / framesPerStep), 0, 15);
+                return pos;
+            }
+            case PlaybackMode::CHAIN: {
+                prune_past(chainRowStartFrames_, currentFrame, framesPerPhrase);
+                for (const auto& e : chainRowStartFrames_) {
+                    int64_t into = currentFrame - e.second;
+                    if (into >= 0 && into < framesPerPhrase) {
+                        pos.chainRow = e.first;
+                        pos.phraseStep = clampi(static_cast<int>(into / framesPerStep), 0, 15);
+                        break;
+                    }
+                }
+                pos.row = pos.phraseStep;
+                return pos;
+            }
+            case PlaybackMode::SONG: {
+                prune_past(songPositionStartFrames_, currentFrame, framesPerPhrase);
+                for (const auto& e : songPositionStartFrames_) {
+                    int64_t into = currentFrame - e.second;
+                    if (into >= 0 && into < framesPerPhrase) {
+                        pos.songRow = e.first.first;
+                        pos.chainRow = e.first.second;
+                        pos.phraseStep = clampi(static_cast<int>(into / framesPerStep), 0, 15);
+                        break;
+                    }
+                }
+                pos.row = pos.phraseStep;
+                return pos;
+            }
+            default: return pos;
+        }
+    }
+
+    // PlaybackController.notifyDataChanged: roll the lookahead back to the earliest UNPLAYED phrase
+    // boundary so an edit is heard on the next phrase loop instead of 2–3 phrases later. Returns the
+    // frame the host must clearScheduledNotesFrom(), or −1 when there is nothing to roll back (the
+    // Sequencer holds no engine handle — that call is the host's, exactly as it is Kotlin's).
+    int64_t notify_data_changed(int64_t currentFrame) {
+        if (!isPlaying_) return -1;
+
+        const Checkpoint* hit = nullptr;
+        for (const Checkpoint& c : checkpoints_) {
+            if (c.frame > currentFrame) { hit = &c; break; }
+        }
+        if (!hit) return -1;
+        Checkpoint cp = *hit;   // by value: the pops below invalidate the pointer
+
+        nextFrameToSchedule_ = cp.frame;
+        switch (playbackMode_) {
+            case PlaybackMode::CHAIN:
+                nextChainRowToSchedule_ = cp.chainRow;
+                break;
+            case PlaybackMode::SONG:
+                nextSongRowToSchedule_ = cp.songRow;
+                nextSongChainRowToSchedule_ = cp.songChainRow;
+                break;
+            default: break;   // PHRASE: resetting nextFrameToSchedule_ is enough
+        }
+        while (!checkpoints_.empty() && checkpoints_.back().frame >= cp.frame) checkpoints_.pop_back();
+        return cp.frame;
+    }
+
+    // True once an EQM has overridden the master EQ this session. The host reads it BEFORE stop()
+    // (which clears it) and restores project.masterEqSlot — mirroring PlaybackController.stop(),
+    // including its guard: no restore when currentProject_ is null (the render path owns its own).
+    bool eqm_active() const { return eqmActive_; }
+    bool has_live_project() const { return currentProject_ != nullptr; }
 
     // ── transport starts ──
 
@@ -173,6 +287,7 @@ class Sequencer {
         router_.t_play("CHAIN", "id=" + hex2(chainId), playbackStartFrame_, tempo, sampleRate_);
         nextFrameToSchedule_ = playbackStartFrame_;
         nextChainRowToSchedule_ = 0;
+        chainRowStartFrames_.clear();
         int firstRow = findNextNonEmptyChainRow(0, chain);
         if (firstRow >= 0) {
             int phraseId = chain.phraseRefs[firstRow];
@@ -180,6 +295,7 @@ class Sequencer {
             SchedulePhraseResult r = schedulePhrase(project_->phrases[phraseId], playbackStartFrame_, 0,
                                                     transposeSemitones + project_transpose_semitones(*project_),
                                                     framesPerStep, 0);
+            chainRowStartFrames_.emplace_back(firstRow, playbackStartFrame_);
             nextFrameToSchedule_ += r.framesScheduled;
             nextChainRowToSchedule_ = firstRow + 1;
         }
@@ -196,12 +312,17 @@ class Sequencer {
         nextFrameToSchedule_ = playbackStartFrame_;
         nextSongRowToSchedule_ = startRow;
         nextSongChainRowToSchedule_ = 0;
+        songPositionStartFrames_.clear();
     }
 
     void stop() {
         router_.t_stop();
         isPlaying_ = false;
         playbackMode_ = PlaybackMode::STOPPED;
+        chainRowStartFrames_.clear();
+        songPositionStartFrames_.clear();
+        checkpoints_.clear();
+        eqmActive_ = false;   // the host reads eqm_active() BEFORE calling stop() to restore the master EQ
         nextSongChainRowToSchedule_ = 0;
         // Full per-track reset: playback is a pure function of the project (see PlaybackController.stop).
         for (int i = 0; i < 8; ++i) trackStates_[i] = TrackState();
@@ -225,6 +346,7 @@ class Sequencer {
             case PlaybackMode::PHRASE: {
                 const Phrase& phrase = project.phrases[currentPhraseId_];
                 TrackState& trackState = trackStates_[0];
+                save_checkpoint(Checkpoint{nextFrameToSchedule_});
                 int hopStartRow = trackState.consumeHopTarget();
                 int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
                 SchedulePhraseResult r = schedulePhrase(phrase, nextFrameToSchedule_, 0,
@@ -246,10 +368,12 @@ class Sequencer {
                     int phraseId = chain.phraseRefs[nextRow];
                     int transposeSemitones = chain_transpose_semitones(chain, nextRow)
                                              + project_transpose_semitones(project);
+                    save_checkpoint(Checkpoint{nextFrameToSchedule_, nextRow});
                     int hopStartRow = trackState.consumeHopTarget();
                     int effectiveStartRow = hopStartRow >= 0 ? hopStartRow : 0;
                     SchedulePhraseResult r = schedulePhrase(project.phrases[phraseId], nextFrameToSchedule_, 0,
                                                             transposeSemitones, framesPerStep, effectiveStartRow);
+                    chainRowStartFrames_.emplace_back(nextRow, nextFrameToSchedule_);
                     nextFrameToSchedule_ += r.framesScheduled;
                     nextChainRowToSchedule_ = (nextRow + 1) % 16;
                 } else {
@@ -282,6 +406,8 @@ class Sequencer {
                     for (int i = 0; i < 8; ++i) trackStates_[i].trackStopped = false;
                     if (nextSongRowToSchedule_ >= songLength) nextSongRowToSchedule_ = 0;
                 } else if (nextSongChainRowToSchedule_ < maxChainLength) {
+                    save_checkpoint(Checkpoint{nextFrameToSchedule_, 0,
+                                               nextSongRowToSchedule_, nextSongChainRowToSchedule_});
                     bool scheduledAny = false;
                     int64_t maxFramesScheduled = 0;
                     for (int trackId = 0; trackId < 8; ++trackId) {
@@ -300,6 +426,8 @@ class Sequencer {
                                     SchedulePhraseResult r = schedulePhrase(project.phrases[phraseId], nextFrameToSchedule_,
                                                                             trackId, transposeSemitones, framesPerStep,
                                                                             effectiveStartRow);
+                                    put_song_position(nextSongRowToSchedule_, nextSongChainRowToSchedule_,
+                                                      nextFrameToSchedule_);
                                     scheduledAny = true;
                                     if (r.framesScheduled > maxFramesScheduled) maxFramesScheduled = r.framesScheduled;
                                 }
@@ -395,7 +523,43 @@ class Sequencer {
         bool hopTriggered = false;
     };
 
+    // Snapshot taken just BEFORE scheduling a phrase, so notify_data_changed() can roll the buffer
+    // back to the earliest future phrase boundary without disturbing the phrase now playing.
+    struct Checkpoint {
+        int64_t frame = 0;
+        int chainRow = 0;
+        int songRow = 0;
+        int songChainRow = 0;
+    };
+
     int64_t getCurrentFrame() const { return currentFrame_; }
+
+    void save_checkpoint(const Checkpoint& cp) {
+        checkpoints_.push_back(cp);
+        if (checkpoints_.size() > 4) checkpoints_.pop_front();   // ring of 4, oldest = earliest unplayed
+    }
+
+    // Kotlin's `mutableMapOf` is a LinkedHashMap: iteration follows INSERTION order, and re-assigning
+    // an existing key keeps its original slot. getPlaybackPosition() takes the FIRST in-window entry,
+    // so that order is load-bearing — a std::map (key-sorted) would surface a different row. Hence a
+    // vector with find-then-update, not a map.
+    void put_song_position(int songRow, int chainRow, int64_t frame) {
+        for (auto& e : songPositionStartFrames_) {
+            if (e.first.first == songRow && e.first.second == chainRow) { e.second = frame; return; }
+        }
+        songPositionStartFrames_.emplace_back(std::make_pair(songRow, chainRow), frame);
+    }
+
+    // Drop entries that are definitely in the past (> 1 phrase ago) — Kotlin prunes both containers
+    // on every position read so the scan stays bounded in a long song.
+    template <typename C>
+    static void prune_past(C& c, int64_t currentFrame, int64_t framesPerPhrase) {
+        c.erase(std::remove_if(c.begin(), c.end(),
+                               [&](const typename C::value_type& e) {
+                                   return currentFrame > e.second + framesPerPhrase;
+                               }),
+                c.end());
+    }
 
     int findNextNonEmptyChainRow(int startRow, const Chain& chain) {
         int row = startRow;
@@ -702,8 +866,12 @@ class Sequencer {
                 router_.ext_reverse(voiceFxFrame, trackId, *params.bckValue == 0, triggeredNote);
             if (params.eqnSlot.has_value())
                 router_.ext_eq_slot(voiceFxFrame, trackId, *params.eqnSlot);
-            if (params.eqmSlot.has_value())
+            if (params.eqmSlot.has_value()) {
+                // Master/mixer EQ — global, persists until the next EQM; the host restores the mixer
+                // value on stop() (PlaybackController.eqmActive).
                 router_.ext_master_eq(effectiveTargetFrame, *params.eqmSlot);
+                eqmActive_ = true;
+            }
         }
 
         // STEP 2.4: pitch/vol FX on steps WITHOUT notes (mid-note changes)
@@ -985,6 +1153,13 @@ class Sequencer {
     int64_t playbackStartFrame_ = 0;
     PlaybackMode playbackMode_ = PlaybackMode::STOPPED;
     bool isPlaying_ = false;
+
+    // ── side-records: UI cursor + live-edit rollback + the EQM restore flag (S5, SC-4/SC-2) ──
+    std::deque<Checkpoint> checkpoints_;                                   // ring of 4
+    std::deque<std::pair<int, int64_t>> chainRowStartFrames_;              // (chainRow, startFrame)
+    std::vector<std::pair<std::pair<int, int>, int64_t>>
+        songPositionStartFrames_;                                          // ((songRow, chainRow) → startFrame), insertion-ordered
+    bool eqmActive_ = false;
 
     // Per-retrigger additive volume delta for RPT (Rxy), indexed by ramp nibble. Same constants as
     // PlaybackController.REPEAT_RAMP_DELTAS (single source of the ramp curve).

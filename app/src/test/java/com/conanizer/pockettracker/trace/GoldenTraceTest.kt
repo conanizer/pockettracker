@@ -98,6 +98,30 @@ class GoldenTraceTest {
         }
     }
 
+    /**
+     * A golden's stored `name` must equal its `.ptp` filename, or the device cross-check can never
+     * pass. Loading a project through the file browser renames it to the file's basename
+     * (`AppInputDispatcher`: `result.project.name = item.file.nameWithoutExtension.take(20)`), so a
+     * golden named "G1BASICS" in a file called `g1-basics.ptp` comes back from a device load with
+     * different bytes — and the trace header's `project=` sha, taken over the whole serialized
+     * project, then matches no golden.
+     *
+     * That failure cost a full debugging session in S5: the device's events were byte-perfect against
+     * every golden, and the run was still rejected — on identity, before a single event was compared.
+     * Nothing reads `name`, so no amount of staring at the audio path could find it.
+     */
+    @Test
+    fun goldenNameMatchesFilename() {
+        for (spec in GoldenProjects.all) {
+            assertEquals(
+                "golden '${spec.name}' stores project.name='${spec.build().name}' but its file is " +
+                    "'${spec.name}.ptp' — the file-browser load renames the project to the filename, so " +
+                    "this golden can never round-trip on device (see the doc on GoldenProjects.Spec)",
+                spec.name, spec.build().name
+            )
+        }
+    }
+
     @Test
     fun tracesAreDeterministic() {
         val first = generateAll()
@@ -216,8 +240,12 @@ class GoldenTraceTest {
         val sr = fields["sr"] ?: return "$where: header has no sr"
         val mode = fields["mode"] ?: return "$where: header has no mode"
         val name = shaToName[fields["project"]]
-            ?: return "$where: project ${fields["project"]} matches no golden — was it edited or " +
-                      "re-saved on device? Re-copy the pristine .ptp from /testdata and reload it"
+            ?: return "$where: project ${fields["project"]} matches no golden — the project that was " +
+                      "traced is not byte-identical to any golden .ptp, so its events can't be " +
+                      "attributed. To see WHAT differs rather than guess: a debug build dumps the exact " +
+                      "bytes this sha is taken over to Renders/event.trace.ptp when TRACE turns ON — " +
+                      "diff that against the .ptp you loaded. (Most likely: the on-device copy was " +
+                      "edited or re-saved; re-copy the pristine .ptp from /testdata and reload it.)"
         val tPlay = session.getOrNull(1)?.takeIf { it.startsWith("T PLAY ") }
             ?: return "$where: missing T PLAY line"
 

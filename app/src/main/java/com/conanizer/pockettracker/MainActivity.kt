@@ -50,6 +50,7 @@ import com.conanizer.pockettracker.core.audio.AudioEngine
 import com.conanizer.pockettracker.core.data.InstrumentType
 import com.conanizer.pockettracker.core.data.ScreenType
 import com.conanizer.pockettracker.core.logic.RenderController
+import com.conanizer.pockettracker.platform.android.AndroidSongcore
 import com.conanizer.pockettracker.platform.android.OboeAudioBackend
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -298,9 +299,14 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // (current native heap − baseline) ≈ the PCM of the samples/soundfonts the user has loaded.
     // −1 = not captured yet.
     var nativeHeapBaseline by remember { mutableStateOf(-1L) }
+    // The C++ sequencer (songcore). Constructed here, created below — its native runtime reads the
+    // audio engine's frame counter as its transport clock, so it cannot exist before the engine does.
+    val songcore = remember { AndroidSongcore() }
+
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             audioEngine.create()
+            songcore.create()   // after the engine: songcore binds to it for the clock and the queues
         }
         // Engine DSP is now allocated and no user samples are loaded yet (the template/recovery sample
         // loads are keyed on audioReady, set on the next line) → this is the clean "zero samples" baseline.
@@ -317,7 +323,13 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     }
 
     val playbackController = remember {
-        PlaybackController(audioEngine, effectProcessor, logger, stateObserver)
+        // songcore + the serializer that feeds it: the C++ sequencer parses the very bytes
+        // FileController writes to a .ptp, so there is one project format and no second encoder.
+        PlaybackController(
+            audioEngine, effectProcessor, logger, stateObserver,
+            songcore = songcore,
+            serializeProject = { p -> fileController.serializeProject(p) },
+        )
     }
     LaunchedEffect(playbackController, instrumentController) {
         playbackController.instrumentController = instrumentController
@@ -519,6 +531,11 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val _autosaveResumeAuto = remember { mutableStateOf(prefs.getBoolean("autosave_resume_auto", false)) }
     var autosaveResumeAuto  by _autosaveResumeAuto
 
+    // SETTINGS → ENGINE (debug-only row): which sequencer walks the song. Persisted per device so a
+    // songcore soak survives app restarts. Defaults to the Kotlin path until the C++ one has soaked.
+    val _engineCpp = remember { mutableStateOf(BuildConfig.DEBUG && prefs.getBoolean("engine_cpp", false)) }
+    var engineCpp  by _engineCpp
+
     // Overlay: list files from assets/overlays/, load + process selected bitmap
     val overlayFiles: List<String> = remember {
         try { context.assets.list("overlays")
@@ -595,6 +612,19 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     }
     LaunchedEffect(autosaveResumeAuto) {
         prefs.edit().putBoolean("autosave_resume_auto", autosaveResumeAuto).apply()
+    }
+    // Persist the engine choice AND apply it (the setter stops playback on a real change). One effect
+    // for both so the running controller and the stored pref can never disagree.
+    //
+    // Gated on audioReady: songcore's native runtime is created right after the audio engine, and on
+    // some devices opening the stream takes tens of seconds. Handing playback to a songcore that does
+    // not exist yet would play silence; staying on the Kotlin path until it does costs nothing, since
+    // nothing can play before the engine exists either way.
+    LaunchedEffect(engineCpp, audioReady) {
+        prefs.edit().putBoolean("engine_cpp", engineCpp).apply()
+        if (!audioReady) return@LaunchedEffect
+        playbackController.engine =
+            if (engineCpp) PlaybackController.Engine.CPP else PlaybackController.Engine.KT
     }
     LaunchedEffect(overlayName) {
         prefs.edit().putString("overlay_name", overlayName).apply()
@@ -944,7 +974,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
             _overlayName, _overlayStrength, overlayFiles,
             trackPeakBuffer, masterPeakBuffer, sendPeakBuffer, _appTheme, _themeEditorState,
             _showNewProjectDialog, _showInstrTypeDialog, _showRecoveryDialog,
-            _autosaveResumeAuto
+            _autosaveResumeAuto, _engineCpp
         )
     }
     val dispatcher = remember { AppInputDispatcher(appCtrl, appState) }
@@ -1144,6 +1174,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
         cursorRemember = cursorRemember,
         notePreviewEnabled = notePreviewEnabled,
         autosaveResumeAuto = autosaveResumeAuto,
+        engineCpp = engineCpp,
         soundfontPresetName = soundfontPresetName,
         soundfontPresetCount = soundfontPresetCount,
         soundfontPresetIndex = soundfontPresetIndex,

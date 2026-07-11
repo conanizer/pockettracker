@@ -1,4 +1,4 @@
-# schema=1 sr=44100 tempo=140 mode=live project=e0a21d4497fed95a8b90e317bee8a8ec56f01469
+# schema=1 sr=44100 tempo=140 mode=live project=9d6c3ce1e2c2b306e3aedf8c52e59722c95a484b
 T PLAY SONG row=00
 0 0 00 90 note=60 vel=112 velGain=0x3F471949 volGain=0x3F800000 pan=0x3F008081 start=-1 slice=-1 transpose=0 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000
 9450 0 00 90 note=60 vel=110 velGain=0x3F400D35 volGain=0x3F800000 pan=0x3F008081 start=-1 slice=-1 transpose=0 pit=0 arp=0 tableId=-1 tableRow=-1 pslOff=0x00000000 pslDur=0x00000000 pbnRate=0x00000000 vibSpd=0x00000000 vibDep=0x00000000

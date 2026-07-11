@@ -67,17 +67,37 @@ struct IMidiConsumer {
 };
 
 // ─── The router ─────────────────────────────────────────────────────────────────────────────────
+// Fans one record out to every attached consumer (MIDI plan §3: "sources → router → consumers"). In
+// the app that is the engine consumer plus, when tracing, the trace writer — they see the identical
+// record in the identical order, which is what makes a device trace a faithful witness of the audio
+// that was actually scheduled. Consumers are plain pointers owned by the host; attach/detach happens
+// on the transport thread, never during a dispatch.
 struct MidiRouter {
-    IMidiConsumer* consumer = nullptr;
+    static constexpr int MAX_CONSUMERS = 4;
 
-    explicit MidiRouter(IMidiConsumer* c = nullptr) : consumer(c) {}
+    explicit MidiRouter(IMidiConsumer* c = nullptr) { add_consumer(c); }
+
+    void add_consumer(IMidiConsumer* c) {
+        if (!c || count_ >= MAX_CONSUMERS) return;
+        for (int i = 0; i < count_; ++i) if (consumers_[i] == c) return;   // idempotent
+        consumers_[count_++] = c;
+    }
+    void remove_consumer(IMidiConsumer* c) {
+        for (int i = 0; i < count_; ++i) {
+            if (consumers_[i] != c) continue;
+            for (int j = i; j + 1 < count_; ++j) consumers_[j] = consumers_[j + 1];
+            --count_;
+            return;
+        }
+    }
+    void clear_consumers() { count_ = 0; }
 
     // ── transport ──
     void t_play(const std::string& kind, const std::string& detail,
                 int64_t start_frame, int tempo, int sample_rate) {
-        if (consumer) consumer->on_play(kind, detail, start_frame, tempo, sample_rate);
+        for (int i = 0; i < count_; ++i) consumers_[i]->on_play(kind, detail, start_frame, tempo, sample_rate);
     }
-    void t_stop() { if (consumer) consumer->on_stop(); }
+    void t_stop() { for (int i = 0; i < count_; ++i) consumers_[i]->on_stop(); }
 
     // ── events (build the record, forward to the consumer) ──
 
@@ -171,7 +191,10 @@ struct MidiRouter {
         ev.type = type;
         return ev;
     }
-    void emit(const Event& ev) { if (consumer) consumer->consume(ev); }
+    void emit(const Event& ev) { for (int i = 0; i < count_; ++i) consumers_[i]->consume(ev); }
+
+    IMidiConsumer* consumers_[MAX_CONSUMERS] = {nullptr, nullptr, nullptr, nullptr};
+    int count_ = 0;
 };
 
 }  // namespace songcore

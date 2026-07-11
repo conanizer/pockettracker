@@ -657,7 +657,7 @@ class TrackerController(
             }
             ScreenType.SETTINGS -> {
                 var prev = if (settingsCursorRow > 0) settingsCursorRow - 1 else 12
-                if (!BuildConfig.DEBUG && prev == 12) prev = 11 // TRACE hidden in release
+                if (!BuildConfig.DEBUG && prev == 12) prev = 11 // TRACE/ENG hidden in release
                 if (!BuildConfig.DEBUG && prev == 2) prev = 1   // OVERLAY hidden in release
                 settingsCursorRow = prev
                 settingsCursorColumn = 1
@@ -729,7 +729,7 @@ class TrackerController(
             ScreenType.SETTINGS -> {
                 var next = if (settingsCursorRow < 12) settingsCursorRow + 1 else 0
                 if (!BuildConfig.DEBUG && next == 2) next = 3   // OVERLAY hidden in release
-                if (!BuildConfig.DEBUG && next == 12) next = 0  // TRACE hidden in release
+                if (!BuildConfig.DEBUG && next == 12) next = 0  // TRACE/ENG hidden in release
                 settingsCursorRow = next
                 settingsCursorColumn = 1
             }
@@ -847,9 +847,9 @@ class TrackerController(
                 projectCursorColumn = getProjectCursorRightColumn(projectCursorRow, projectCursorColumn)
             }
             ScreenType.SETTINGS -> {
-                // rows 2 (OVERLAY), 3 (BTN SOUND), 4 (BTN VIBRO), 10 (TEMPLATE) have a second column,
-                // and row 0 (LAYOUT) gains a theme column when the current layout is skinned.
-                val hasSecondCol = settingsCursorRow in setOf(2, 3, 4, 10) ||
+                // rows 2 (OVERLAY), 3 (BTN SOUND), 4 (BTN VIBRO), 10 (TEMPLATE), 12 (TRACE + ENG)
+                // have a second column, and row 0 (LAYOUT) gains a theme column when the layout is skinned.
+                val hasSecondCol = settingsCursorRow in setOf(2, 3, 4, 10, 12) ||
                         (settingsCursorRow == 0 && settingsLayoutHasThemes)
                 settingsCursorColumn = if (hasSecondCol && settingsCursorColumn < 2) 2 else settingsCursorColumn
             }

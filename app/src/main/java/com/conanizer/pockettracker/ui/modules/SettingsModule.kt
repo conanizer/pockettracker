@@ -40,8 +40,11 @@ import com.conanizer.pockettracker.ui.toHex2
  *   9  — THEME     (opens editor)
  *   10 — TEMPLATE  (SAVE / CLEAR)
  *   11 — RESUME    (ASK=show RECOVER WORK? prompt / AUTO=silently restore autosave)
- *   12 — TRACE     (debug-only: songcore conformance event trace → Renders/event.trace;
- *                   enable AFTER loading the project so the header sha matches)
+ *   12 — TRACE     (debug-only, two columns — the panel has no room for a 14th row)
+ *                   col1 TRACE: songcore conformance event trace → Renders/event.trace
+ *                               (enable AFTER loading the project so the header sha matches)
+ *                   col2 ENG:   which sequencer walks the song — KT = the Kotlin PlaybackController,
+ *                               C++ = songcore. Switching stops playback. KT by default until the soak.
  */
 class SettingsModule : TrackerModule {
 
@@ -198,12 +201,15 @@ class SettingsModule : TrackerModule {
             s.cursorRow == row && s.cursorColumn == 1)
         rowY += ROW_HEIGHT; row++
 
-        // ── ROW 12: TRACE (debug-only — songcore conformance event trace) ──
+        // ── ROW 12: TRACE + ENGINE (debug-only — the songcore conformance trace and A/B switch) ──
+        // Both live on ONE row, as a dual-column pair: the rows above consume 395px of the module's
+        // 392px, so a 14th row would draw below the panel and be invisible. The second column is
+        // free here and costs no vertical space (same pattern as OVERLAY/STR and BTN SOUND/VOL).
         if (BuildConfig.DEBUG) {
-            drawParameterRow(x, rowY, scale, nameColumnX, val1ColumnX, t,
+            drawDualParamRow(x, rowY, scale, nameColumnX, val1ColumnX, subLabelX, val2ColumnX, t,
                 "TRACE", if (s.traceEnabled) "ON" else "OFF",
-                s.cursorRow == row && s.cursorColumn == 0,
-                s.cursorRow == row && s.cursorColumn == 1)
+                "ENG", if (s.engineCpp) "C++" else "KT",
+                s.cursorRow == row, s.cursorColumn)
         }
     }
 
@@ -343,7 +349,10 @@ class SettingsModule : TrackerModule {
             9  -> CursorContextFactory.readOnly()   // THEME: A opens editor
             10 -> CursorContextFactory.readOnly()   // TEMPLATE: A triggers save/clear
             11 -> CursorContextFactory.toggleBinary(state.autosaveResumeAuto)  // RESUME
-            12 -> CursorContextFactory.toggleBinary(state.traceEnabled)        // TRACE (debug)
+            12 -> when (state.cursorColumn) {   // TRACE (debug) | ENG (debug)
+                1 -> CursorContextFactory.toggleBinary(state.traceEnabled)
+                else -> CursorContextFactory.toggleBinary(state.engineCpp)
+            }
             else -> CursorContextFactory.none()
         }
     }
@@ -414,8 +423,13 @@ class SettingsModule : TrackerModule {
             11 -> if (action is InputAction.SET_VALUE) {   // RESUME
                 return InputResult(modified = true, autosaveResumeAuto = action.value > 0)
             }
-            12 -> if (action is InputAction.SET_VALUE) {   // TRACE (debug)
-                return InputResult(modified = true, traceEnabled = action.value > 0)
+            12 -> when (state.cursorColumn) {
+                1 -> if (action is InputAction.SET_VALUE) {   // TRACE (debug)
+                    return InputResult(modified = true, traceEnabled = action.value > 0)
+                }
+                2 -> if (action is InputAction.SET_VALUE) {   // ENG (debug)
+                    return InputResult(modified = true, engineCpp = action.value > 0)
+                }
             }
         }
         return InputResult(modified = action !is InputAction.NONE)
@@ -437,7 +451,8 @@ class SettingsModule : TrackerModule {
         val notePreviewEnabled: Boolean? = null,
         val autosaveResumeAuto: Boolean? = null,
         val visualizerType: VisualizerType? = null,
-        val traceEnabled: Boolean? = null
+        val traceEnabled: Boolean? = null,
+        val engineCpp: Boolean? = null
     )
 }
 
@@ -465,6 +480,7 @@ data class SettingsState(
     val notePreviewEnabled: Boolean = true,
     val autosaveResumeAuto: Boolean = false,
     val traceEnabled: Boolean = false,
+    val engineCpp: Boolean = false,
     val visualizerType: VisualizerType = VisualizerType.SCOPE,
     val currentThemeName: String = "CLASSIC",
     val appTheme: AppTheme = AppTheme.Companion.CLASSIC

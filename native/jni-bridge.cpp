@@ -21,17 +21,26 @@ static bool createAudioEngine() {
     if (engine) return false;
     engine = new AudioEngine();
     oboeShell = new OboeAudioEngine(engine);
+    // The core (and songcore's consumer, which must not know Oboe exists) asks for the stream through
+    // this hook — the C++ equivalent of the Kotlin path's backend.resumeStream() before every note.
+    engine->onResumeRequested = [] { if (oboeShell) oboeShell->resumeStream(); };
     return oboeShell->openStream();
 }
 
 // Tear down in the safe order: the shell's destructor stops/closes the stream (so no callback can run)
 // and detaches the core's resume hook BEFORE the core it points at is freed. delete on null is a no-op.
 static void deleteAudioEngine() {
+    if (engine) engine->onResumeRequested = nullptr;   // detach before the shell it captures is freed
     delete oboeShell;
     oboeShell = nullptr;
     delete engine;
     engine = nullptr;
 }
+
+// The one handle out of this file: songcore-jni.cpp (its own TU — it must not inherit -ffast-math,
+// see CMakeLists) needs the engine for the transport clock and the scheduling queues. Null until the
+// audio engine is created, so every caller checks.
+AudioEngine* pt_engine() { return engine; }
 
 extern "C" {
 

@@ -394,7 +394,7 @@ class TrackerLayout {
                     activeTrackMask = when {
                         isOctaFull -> 0xFF
                         isOcta -> {
-                            val base = audioEngine.phraseTrackMask and 0xFF
+                            val base = playbackController.phraseTrackMask and 0xFF
                             if (!isPlaying && audioEngine.previewLaneActive) base or (1 shl 8) else base
                         }
                         else -> 0
@@ -724,7 +724,8 @@ class TrackerLayout {
                                     cursorRemember = cursorRemember,
                                     notePreviewEnabled = notePreviewEnabled,
                                     autosaveResumeAuto = autosaveResumeAuto,
-                                    traceEnabled = com.conanizer.pockettracker.core.trace.EventTrace.active,
+                                    traceEnabled = playbackController.traceActive,
+                                    engineCpp = engineCpp,
                                     visualizerType = t.visualizerType,
                                     currentThemeName = t.name,
                                     appTheme = appTheme

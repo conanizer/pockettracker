@@ -25,6 +25,16 @@ object GoldenProjects {
         val horizonPhrases: Int  // drive the fake clock this many phrase-lengths, then stop()
     )
 
+    /**
+     * [name] is BOTH the `.ptp` filename and the project's stored `name` field, and they must stay
+     * equal. Loading a project through the file browser renames it to the file's basename
+     * (`AppInputDispatcher`: `result.project.name = item.file.nameWithoutExtension.take(20)`), so a
+     * golden whose stored name differs from its filename comes back from a device load as *different
+     * bytes* — and the trace header's `project=` sha, taken over the whole serialized project, then
+     * matches no golden and the device cross-check refuses to compare anything. The events are
+     * unaffected (nothing reads `name`), which makes it a maddening failure: byte-perfect events,
+     * rejected on identity. `goldenNameMatchesFilename` below enforces the invariant.
+     */
     data class Spec(
         val name: String,
         val renderRows: IntRange,
@@ -79,7 +89,7 @@ object GoldenProjects {
     // Live SONG schedules the muted track 1, render skips it (IB-10) — the two goldens differ
     // by exactly those events, on purpose.
     private fun g1Basics(): Project {
-        val p = Project(version = 1, name = "G1BASICS", tempo = 128)
+        val p = Project(version = 1, name = "g1-basics", tempo = 128)
         p.standardInstruments()
         p.phrases[0].apply {
             step(0, "C-4", inst = 0, vel = 0x7F)
@@ -109,7 +119,7 @@ object GoldenProjects {
     // ── g2: grooves (swing, 0-tic swallow IB-3, groove-00-is-real IB-13, GRV last-wins FIX-2,
     //        cross-phrase carry IB-4), LAT, LAT+KIL, odd tempo 137 (floor arithmetic) ──
     private fun g2Timing(): Project {
-        val p = Project(version = 1, name = "G2TIMING", tempo = 137)
+        val p = Project(version = 1, name = "g2-timing", tempo = 137)
         p.standardInstruments()
         p.grooves[1].steps.fill(-1); p.grooves[1].steps[0] = 8; p.grooves[1].steps[1] = 4
         p.grooves[2].steps.fill(-1)
@@ -141,7 +151,7 @@ object GoldenProjects {
     // ── g3: RPT grids (phase-continuous, ramps, persistence, R00 cancel, LAT+RPT FIX-3 skip),
     //        ARP (UP/DOWN/PINGPONG via ARC, persistence), SF retrig velocity=-1 (IB-19) ──
     private fun g3Retrig(): Project {
-        val p = Project(version = 1, name = "G3RETRIG", tempo = 120)
+        val p = Project(version = 1, name = "g3-retrig", tempo = 120)
         p.standardInstruments()
         p.phrases[0].apply {
             step(0, "C-4", inst = 0, fx1 = FX.FX_REPEAT to 0x03)   // R03: every 3 ticks, persistent
@@ -167,7 +177,7 @@ object GoldenProjects {
     // ── g4: PSL (incl. no-previous-note FIX-1 case), PBN with-note + empty-step + stop,
     //        PVB/PVX incl. same-step last-wins (IB-21), PIT ±, OFF, SLI, transposes ──
     private fun g4Pitch(): Project {
-        val p = Project(version = 1, name = "G4PITCH", tempo = 128)
+        val p = Project(version = 1, name = "g4-pitch", tempo = 128)
         p.standardInstruments()
         p.transpose = 0x0C  // project transpose +12 — rides the NoteOn transpose field
         p.instruments[0].apply { slicingMode = 1; sliceMarkers = listOf(1000L, 9000L, 20000L) }
@@ -192,7 +202,7 @@ object GoldenProjects {
     // ── g5: SONG row-lock + padding (IB-5), HOP row-jump + HOP FF (IB-6), empty song row (IB-7),
     //        gapped chain rows, THO with/without note, TBL override, TIC-in-phrase no-op (IB-15) ──
     private fun g5Structure(): Project {
-        val p = Project(version = 1, name = "G5STRUCT", tempo = 140)
+        val p = Project(version = 1, name = "g5-structure", tempo = 140)
         p.standardInstruments()
         p.tables[3].rows[0].transpose = 0x0C
         p.phrases[0].apply {   // long phrase, notes to the end
@@ -228,7 +238,7 @@ object GoldenProjects {
     // ── g6: the param-queue FX on note steps (frame+1 rule, IB-12) and empty steps; BCK restart
     //        semantics; EQN/EQM; KIL 00 + note on one row (same-frame drain-order case) ──
     private fun g6Params(): Project {
-        val p = Project(version = 1, name = "G6PARAMS", tempo = 128)
+        val p = Project(version = 1, name = "g6-params", tempo = 128)
         p.standardInstruments()
         p.instruments[0].apply { reverbSend = 0x30; delaySend = 0x20; eqSlot = 2 }
         p.eqPresets[5].bands[0].apply { type = 3; freq = 0x90; gain = 180; q = 0x70 }

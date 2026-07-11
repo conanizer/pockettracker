@@ -1,6 +1,6 @@
 {
     "version": 1,
-    "name": "G6PARAMS",
+    "name": "g6-params",
     "eqPresets": [
         {
             "id": 0,

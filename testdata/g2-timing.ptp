@@ -1,6 +1,6 @@
 {
     "version": 1,
-    "name": "G2TIMING",
+    "name": "g2-timing",
     "tempo": 137,
     "eqPresets": [
         {

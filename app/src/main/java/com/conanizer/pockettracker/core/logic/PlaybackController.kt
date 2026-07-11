@@ -8,6 +8,7 @@ import com.conanizer.pockettracker.core.data.TICS_PER_STEP
 import com.conanizer.pockettracker.core.data.framesPerStep
 import com.conanizer.pockettracker.core.data.VolumeUtils
 import com.conanizer.pockettracker.core.audio.AudioEngine
+import com.conanizer.pockettracker.core.audio.ISongcore
 import com.conanizer.pockettracker.core.data.Chain
 import com.conanizer.pockettracker.core.data.Phrase
 import com.conanizer.pockettracker.core.data.toHex2
@@ -117,6 +118,12 @@ class PlaybackController(
     private var currentPhraseId: Int = 0,
     private var currentChainId: Int = 0,
     var instrumentController: InstrumentController? = null,
+    // ── songcore (Phase 1 S5) ────────────────────────────────────────────────────────────────────
+    // The C++ sequencer, and the serializer that hands it the project. Both null where there is no
+    // native engine (the JVM golden harness) — then [engine] can only ever be KT and every songcore
+    // branch below is dead. This class is zone C (frozen); the switch around it IS the migration.
+    private val songcore: ISongcore? = null,
+    private val serializeProject: ((Project) -> String)? = null,
 ) {
     private val TAG = "PlaybackController"
 
@@ -126,6 +133,74 @@ class PlaybackController(
         // current value even if instrumentController is set after PlaybackController is created.
         audioEngine.sfSlotProvider = { path -> instrumentController?.sfSlotMap?.get(path) }
     }
+
+    /** Which sequencer walks the song: the Kotlin one (default) or the C++ songcore. SETTINGS → ENGINE. */
+    enum class Engine { KT, CPP }
+
+    /**
+     * Switching engines stops playback first — the two sequencers keep separate transport state, so a
+     * mid-flight handover would leave whichever one was playing with notes queued past the switch.
+     */
+    var engine: Engine = Engine.KT
+        set(value) {
+            if (field == value) return
+            stop()
+            field = value
+            logger.d(TAG, "🔀 ENGINE → $value")
+        }
+
+    private val useSongcore: Boolean get() = engine == Engine.CPP && songcore != null && serializeProject != null
+
+    /**
+     * Hand songcore the current project state. Called on every transport start, on the render path, and
+     * on every edit-while-playing — i.e. exactly when its copy could be stale, which is why no dirty
+     * flag is needed. Whole-project push (~440 KB for a full pool); the §7 per-item diff verbs are the
+     * documented next step if this ever hitches on device.
+     */
+    fun songcorePushProject(project: Project) {
+        val sc = songcore ?: return
+        val serialize = serializeProject ?: return
+        if (!sc.pushProject(serialize(project).toByteArray(Charsets.UTF_8))) {
+            logger.e(TAG, "❌ songcore rejected the project blob — staying on the previous one")
+            return
+        }
+
+        // The two facts songcore can't derive for itself, because it never opens a file: the sample's
+        // rate ratio (the Kotlin loaders compute it) and the SF2 slot the path resolved to (the loader
+        // de-duplicates identical SF2s onto one slot). Pushed here so they always match the project
+        // that was just sent. Sample loading is synchronous and finishes before playback can start.
+        val sfSlotMap = instrumentController?.sfSlotMap
+        val count = project.instruments.size
+        sc.pushRouting(
+            FloatArray(count) { i -> audioEngine.sampleRateRatioFor(i) },
+            IntArray(count) { i ->
+                val path = project.instruments[i].soundfontPath
+                if (path == null) -1 else (sfSlotMap?.get(path) ?: -1)
+            }
+        )
+    }
+
+    /**
+     * Route the conformance trace to whichever engine is playing. Both write the same schema-v1 bytes
+     * to the same path, so the device cross-check procedure never has to know which one produced it.
+     * The project must be pushed first — the header's `project=` sha is taken over the pushed blob.
+     */
+    fun songcoreSetTrace(enabled: Boolean, path: String) {
+        songcore?.setTrace(enabled, path)
+        songcoreTraceActive = enabled
+    }
+
+    private var songcoreTraceActive = false
+
+    /** True while a conformance trace is being written, by either engine (the SETTINGS row reads this). */
+    val traceActive: Boolean get() = if (useSongcore) songcoreTraceActive else EventTrace.active
+
+    /**
+     * Which tracks have had a note scheduled this session (the OCTA visualizer lights one scope lane
+     * per bit). In C++ mode the notes never pass through Kotlin's AudioEngine, so the mask comes from
+     * the bus consumer that did see them.
+     */
+    val phraseTrackMask: Int get() = if (useSongcore) songcore!!.getTrackMask() else audioEngine.phraseTrackMask
 
     var isPlaying = false
         private set(value) {
@@ -202,6 +277,11 @@ class PlaybackController(
 
     fun getPlaybackPosition(): PlaybackPosition {
         if (!isPlaying) return PlaybackPosition(0, 0, 0, 0)
+
+        if (useSongcore) {
+            val p = songcore!!.getPlayheads()   // int[4] = row, chainRow, phraseStep, songRow
+            return PlaybackPosition(p[0], p[1], p[2], p[3])
+        }
 
         val currentFrame = audioEngine.getCurrentFrame()
         val elapsedFrames = currentFrame - playbackStartFrame
@@ -289,6 +369,15 @@ class PlaybackController(
 
     fun notifyDataChanged() {
         if (!isPlaying) return
+
+        if (useSongcore) {
+            // Re-push first: songcore holds a COPY of the project, so the rollback must reschedule
+            // from the edited data, not the data it was handed at play time.
+            currentProject?.let { songcorePushProject(it) }
+            songcore!!.notifyDataChanged()
+            return
+        }
+
         val currentFrame = audioEngine.getCurrentFrame()
 
         // Find the earliest unplayed buffered phrase boundary; clear only from there
@@ -319,6 +408,9 @@ class PlaybackController(
 
     fun stop() {
         EventTrace.tStop()  // conformance tap — closes an open trace session (no-op otherwise)
+        // songcore resets its own transport, per-track state and master EQ; the engine-side cleanup
+        // below (queues, voices) is shared and runs for both engines.
+        if (useSongcore) songcore!!.stop()
         isPlaying = false
         playbackMode = PlaybackMode.STOPPED
         // Restore the master EQ to the mixer-configured slot, undoing any transient EQM override
@@ -352,6 +444,19 @@ class PlaybackController(
     }
 
     fun updatePlaybackBuffer() {
+        if (useSongcore) {
+            songcore!!.poll()
+            // songcore can stop itself (a CHAIN running out of rows), so mirror its transport rather
+            // than assuming. Only on a real edge — `isPlaying`'s setter notifies the UI on every write,
+            // and this runs at 60 Hz.
+            val playing = songcore.isPlaying()
+            if (playing != isPlaying) {
+                isPlaying = playing
+                if (!playing) playbackMode = PlaybackMode.STOPPED
+            }
+            return
+        }
+
         if (!isPlaying || currentProject == null) return
 
         val project = currentProject ?: return
@@ -509,6 +614,21 @@ class PlaybackController(
 
         currentProject = project
         currentPhraseId = phraseId
+
+        if (useSongcore) {
+            songcorePushProject(project)
+            // songcore latches its own start frame off the engine clock; take that value rather than
+            // re-reading a clock that has already advanced, so both sides agree on the session base.
+            playbackStartFrame = songcore!!.playPhrase(phraseId)
+            if (phraseId !in 0..255) {
+                logger.e(TAG, "Invalid phraseId: $phraseId")
+                return   // songcore bails identically — stay stopped
+            }
+            playbackMode = PlaybackMode.PHRASE
+            isPlaying = true
+            return
+        }
+
         playbackStartFrame = audioEngine.getCurrentFrame()
 
         if (phraseId !in 0..255) {
@@ -651,6 +771,19 @@ class PlaybackController(
 
         currentProject = project
         currentChainId = chainId
+
+        if (useSongcore) {
+            songcorePushProject(project)
+            playbackStartFrame = songcore!!.playChain(chainId)
+            if (chainId !in 0..255) {
+                logger.e(TAG, "Invalid chainId: $chainId")
+                return
+            }
+            playbackMode = PlaybackMode.CHAIN
+            isPlaying = true
+            return
+        }
+
         playbackStartFrame = audioEngine.getCurrentFrame()
 
         if (chainId !in 0..255) {
@@ -700,6 +833,15 @@ class PlaybackController(
         stop()
 
         currentProject = project
+
+        if (useSongcore) {
+            songcorePushProject(project)
+            playbackStartFrame = songcore!!.playSong(startRow)
+            playbackMode = PlaybackMode.SONG
+            isPlaying = true
+            return
+        }
+
         playbackStartFrame = audioEngine.getCurrentFrame()
         playbackMode = PlaybackMode.SONG
         isPlaying = true
@@ -720,15 +862,27 @@ class PlaybackController(
     }
 
     // Uses the same schedulePhrase logic as live playback — groove, HOP, pitch, etc. all identical.
-    fun scheduleSongForRender(project: Project, startRow: Int, endRow: Int): Long =
-        scheduleSongRowRange(project, startRow, endRow)
+    fun scheduleSongForRender(project: Project, startRow: Int, endRow: Int): Long {
+        if (useSongcore) return songcoreScheduleRange(project, startRow, endRow, null)
+        return scheduleSongRowRange(project, startRow, endRow)
+    }
 
     fun scheduleSelectionForRender(
         project: Project,
         startRow: Int,
         endRow: Int,
         selectedTrackIds: Set<Int>
-    ): Long = scheduleSongRowRange(project, startRow, endRow, trackFilter = selectedTrackIds)
+    ): Long {
+        if (useSongcore) return songcoreScheduleRange(project, startRow, endRow, selectedTrackIds.toIntArray())
+        return scheduleSongRowRange(project, startRow, endRow, trackFilter = selectedTrackIds)
+    }
+
+    // The render path through songcore: one call fills the engine queue for rows start..end at frames
+    // 0..N, exactly as the Kotlin scheduleSongRowRange does (same walk, same RENDER trace session).
+    private fun songcoreScheduleRange(project: Project, startRow: Int, endRow: Int, trackFilter: IntArray?): Long {
+        songcorePushProject(project)
+        return songcore!!.scheduleSongRange(startRow, endRow, trackFilter)
+    }
 
     // Shared render-path scheduler. trackFilter = null schedules all tracks; non-null restricts to
     // the given set. Muted tracks are always skipped. Does not update live-playback cursor state.

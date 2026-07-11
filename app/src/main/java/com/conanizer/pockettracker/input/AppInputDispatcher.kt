@@ -20,6 +20,7 @@ import com.conanizer.pockettracker.core.logic.EffectProcessor
 import com.conanizer.pockettracker.core.logic.FileController
 import com.conanizer.pockettracker.core.logic.InputAction
 import com.conanizer.pockettracker.core.logic.InstrumentController
+import com.conanizer.pockettracker.core.logic.PlaybackController
 import com.conanizer.pockettracker.core.logic.LoadResult
 import com.conanizer.pockettracker.core.logic.RenderController
 import com.conanizer.pockettracker.core.logic.TrackerController
@@ -167,7 +168,9 @@ class AppStateRefs(
     val showNewProjectDialog: MutableState<Boolean>,
     val showInstrTypeDialog: MutableState<Boolean>,
     val showRecoveryDialog: MutableState<Boolean>,
-    val autosaveResumeAuto: MutableState<Boolean>
+    val autosaveResumeAuto: MutableState<Boolean>,
+    /** SETTINGS → ENGINE (debug): true = songcore (C++) walks the song, false = the Kotlin sequencer. */
+    val engineCpp: MutableState<Boolean>
 )
 
 class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
@@ -191,7 +194,32 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     private var eventTraceWriter: java.io.Writer? = null
 
     private fun setEventTraceEnabled(enabled: Boolean) {
-        if (enabled == EventTrace.active) return
+        val playback = trackerController.playbackController
+        if (enabled == playback.traceActive) return
+
+        // Dump the EXACT bytes the trace header's project= sha is taken over, beside the trace. When a
+        // device trace "matches no golden", the trace alone can only guess why (edited? re-saved? wrong
+        // project?) — this file answers it in one diff against the .ptp that was loaded. Same bytes in
+        // both engines, so it diagnoses either. Debug-only, like the TRACE row itself.
+        if (enabled) {
+            val json = fileController.serializeProject(trackerController.project)
+            fileSystem.writeFile(File(fileSystem.getRendersDirectory(), "event.trace.ptp").absolutePath, json)
+        }
+
+        // ENGINE=C++: songcore's own writer emits the same schema-v1 bytes to the same file, so the
+        // device cross-check compares either engine against the same goldens with no change of
+        // procedure. The project is pushed first — the header's project= is the sha of the pushed blob.
+        if (playback.engine == PlaybackController.Engine.CPP) {
+            if (enabled) {
+                val traceFile = File(fileSystem.getRendersDirectory(), "event.trace")
+                playback.songcorePushProject(trackerController.project)
+                playback.songcoreSetTrace(true, traceFile.absolutePath)
+            } else {
+                playback.songcoreSetTrace(false, "")
+            }
+            return
+        }
+
         if (enabled) {
             val traceFile = File(fileSystem.getRendersDirectory(), "event.trace")
             val sha = EventTrace.projectSha1(fileController.serializeProject(trackerController.project))
@@ -202,6 +230,21 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             eventTraceWriter?.close()
             eventTraceWriter = null
         }
+    }
+
+    /**
+     * Flip the sequencer (SETTINGS → ENGINE). The trace belongs to whichever engine was writing it, so
+     * it is closed BEFORE the flag flips — otherwise the old engine's file handle would leak and the
+     * new engine's session would be appended to a trace carrying the wrong header.
+     *
+     * Only the flag moves here. MainActivity owns applying it to [PlaybackController] (and persisting
+     * it), because that has to wait for songcore's native runtime to exist — handing playback to a
+     * songcore that has not been created yet would play silence.
+     */
+    private fun switchEngine(cpp: Boolean) {
+        if (cpp == engineCpp) return
+        setEventTraceEnabled(false)
+        engineCpp = cpp
     }
 
     // ── Module shortcuts ─────────────────────────────────────────────────────
@@ -259,6 +302,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     private var showInstrTypeDialog by refs.showInstrTypeDialog
     private var showRecoveryDialog by refs.showRecoveryDialog
     private var autosaveResumeAuto by refs.autosaveResumeAuto
+    private var engineCpp by refs.engineCpp
 
     // Dedicated return target for SETTINGS — set when entering, never overwritten by FILE_BROWSER navigation
     private var settingsReturnScreen: ScreenType = ScreenType.PROJECT
@@ -744,7 +788,8 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     cursorRemember = cursorRemember,
                     notePreviewEnabled = notePreviewEnabled,
                     autosaveResumeAuto = autosaveResumeAuto,
-                    traceEnabled = EventTrace.active,
+                    traceEnabled = trackerController.playbackController.traceActive,
+                    engineCpp = engineCpp,
                     visualizerType = appTheme.visualizerType,
                     currentThemeName = appTheme.name
                 )
@@ -766,6 +811,7 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     result.notePreviewEnabled?.let  { notePreviewEnabled  = it }
                     result.autosaveResumeAuto?.let  { autosaveResumeAuto  = it }
                     result.traceEnabled?.let        { setEventTraceEnabled(it) }
+                    result.engineCpp?.let           { switchEngine(it) }
                     result.visualizerType?.let      { appTheme = appTheme.copy(visualizerType = it) }
                     trackerController.projectVersion++
                 }

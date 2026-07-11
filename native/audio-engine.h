@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -68,6 +69,13 @@ public:
 
     void stopTrack(int trackId);
     void stopAll();
+
+    // Platform hook: the audio shell installs a callback that restarts the output stream if the
+    // platform paused it (Oboe today; ALSA/SDL on Linux). The Kotlin path called
+    // backend.resumeStream() before every scheduled note; songcore's consumer calls requestResume()
+    // for the same reason, without knowing what a stream is. Unset = no-op.
+    std::function<void()> onResumeRequested;
+    void requestResume() { if (onResumeRequested) onResumeRequested(); }
 
     int getActiveVoiceCount();
 

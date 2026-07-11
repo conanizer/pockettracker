@@ -120,6 +120,9 @@ data class TrackerScreenParams(
     val cursorRemember: Boolean = false,
     val notePreviewEnabled: Boolean = true,
     val autosaveResumeAuto: Boolean = false,
+    /** SETTINGS → ENGINE (debug): the REQUESTED sequencer. The row and the toggle must read the same
+     *  value, or toggling from an applied-but-different state would no-op. */
+    val engineCpp: Boolean = false,
     val soundfontPresetName: String = "",
     val soundfontPresetCount: Int = 0,
     val soundfontPresetIndex: Int = 0,
