@@ -58,7 +58,9 @@ android {
 
     externalNativeBuild {
         cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
+            // Shared C++ core lives at repo-root /native (moved from app/src/main/cpp,
+            // Linux-port plan §4.2/§6). file() is relative to this module dir (app/).
+            path = file("../native/CMakeLists.txt")
             version = "3.22.1"
         }
     }
