@@ -16,17 +16,19 @@ to run under `ctest` in CI once the `pt-core` / linux-x86_64 build lands.
 cover populated phrases/notes/FX, chain transposes, tracks with `chainRefs`/`mute`, 128 instruments
 (incl. a SOUNDFONT slot), tables, grooves, and EQ presets.
 
-## Build & run (Windows, on-box MSVC)
+## Build & run
 
-There is no CMake target yet (arrives with the CI lane). Compile the single TU directly — its
-`#include`s are relative, so compile it in place:
+The four conformance tools are one CMake project (`tools/CMakeLists.txt`), wired to ctest. CI runs
+exactly this on every push, on gcc/x86-64, MSVC/x86-64 and clang/arm64:
 
 ```
-call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-cl /std:c++17 /EHsc /O2 /nologo tools\ptroundtrip\main.cpp /Fe:ptroundtrip.exe
-ptroundtrip.exe testdata
+cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
+cmake --build tools/build --config Release
+ctest --test-dir tools/build --output-on-failure -C Release
 ```
 
-`clang++` / `g++` work equally (`-std=c++17 tools/ptroundtrip/main.cpp -o ptroundtrip`).
+This tool alone is the **`s2-project-io`** test — `ctest --test-dir tools/build -R s2-project-io
+--output-on-failure` — or invoke the built binary directly with the goldens directory as `argv[1]`
+(`ptroundtrip testdata`).
 
 Exit code `0` = all green, `1` = any mismatch. Expected output ends in `ALL GREEN`.

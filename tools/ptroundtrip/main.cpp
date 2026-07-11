@@ -9,10 +9,11 @@
 // (no Kotlin-authored golden .pti exists yet; Instrument emission itself is byte-proven through the
 // .ptp round-trip, since a Project embeds 128 instruments).
 //
-// Build (Windows, on-box MSVC):
-//   cl /std:c++17 /EHsc /O2 /nologo tools/ptroundtrip/main.cpp /Fe:ptroundtrip.exe
-// Run:
-//   ptroundtrip.exe testdata
+// Build + run via the tools/ CMake project — this is the `s2-project-io` ctest, run by CI on every
+// push (see tools/CMakeLists.txt and tools/ptroundtrip/README.md):
+//   cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
+//   cmake --build tools/build --config Release
+//   ctest --test-dir tools/build -R s2-project-io --output-on-failure -C Release
 //
 // Exit code 0 = all green, 1 = any mismatch.  Linux-port plan §4.4 (schema round-trip in CI).
 

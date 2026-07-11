@@ -36,19 +36,21 @@ The goldens must exist first — run the JVM test (writes them if missing):
 gradlew.bat :app:testDebugUnitTest --tests "com.conanizer.pockettracker.trace.GoldenTraceTest"
 ```
 
-## Build & run (Windows, on-box MSVC)
+## Build & run
 
-No CMake target yet (arrives with the CI lane, S6). Compile the single TU directly — its `#include`s
-are relative, so compile it in place:
+The four conformance tools are one CMake project (`tools/CMakeLists.txt`), wired to ctest. CI runs
+exactly this on every push, on gcc/x86-64, MSVC/x86-64 and clang/arm64:
 
 ```
-call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-cl /std:c++17 /EHsc /O2 /nologo tools\ptplay\main.cpp /Fe:ptplay.exe
-ptplay.exe testdata
+cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
+cmake --build tools/build --config Release
+ctest --test-dir tools/build --output-on-failure -C Release
 ```
 
-`clang++` / `g++` work equally (`-std=c++17 tools/ptplay/main.cpp -o ptplay`).
+This tool alone is the **`s4-golden-traces`** test — `ctest --test-dir tools/build -R s4-golden-traces
+--output-on-failure` — or invoke the built binary directly with the goldens directory as `argv[1]`
+(`ptplay testdata`).
 
 Exit code `0` = all green, `1` = any mismatch. Expected output ends in `ALL GREEN` (32 traces:
 6 projects × 2 sample rates × render + their live modes). A mismatch reports the first divergent
-canonical line, golden vs C++.
+canonical line, golden vs C++ — a single-ULP float drift is enough to trip it, which is the point.

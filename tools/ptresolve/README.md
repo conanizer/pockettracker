@@ -28,17 +28,19 @@ The golden must exist first — run the JVM test (writes it if missing):
 gradlew.bat :app:testDebugUnitTest --tests "com.conanizer.pockettracker.trace.S3UnitGoldenTest"
 ```
 
-## Build & run (Windows, on-box MSVC)
+## Build & run
 
-No CMake target yet (arrives with the CI lane, S6). Compile the single TU directly — its
-`#include`s are relative, so compile it in place:
+The four conformance tools are one CMake project (`tools/CMakeLists.txt`), wired to ctest. CI runs
+exactly this on every push, on gcc/x86-64, MSVC/x86-64 and clang/arm64:
 
 ```
-call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-cl /std:c++17 /EHsc /O2 /nologo tools\ptresolve\main.cpp /Fe:ptresolve.exe
-ptresolve.exe testdata
+cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
+cmake --build tools/build --config Release
+ctest --test-dir tools/build --output-on-failure -C Release
 ```
 
-`clang++` / `g++` work equally (`-std=c++17 tools/ptresolve/main.cpp -o ptresolve`).
+This tool alone is the **`s3-pure-units`** test — `ctest --test-dir tools/build -R s3-pure-units
+--output-on-failure` — or invoke the built binary directly with the goldens directory as `argv[1]`
+(`ptresolve testdata`).
 
 Exit code `0` = all green, `1` = any mismatch. Expected output ends in `ALL GREEN`.

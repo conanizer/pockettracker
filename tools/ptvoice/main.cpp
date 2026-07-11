@@ -15,11 +15,12 @@
 // Because plan_note_on is a template over the engine, this checks the WHOLE note path — the derived
 // values, which calls happen, in what order, and when a note is dropped instead — not just the math.
 //
-// Build (Windows, on-box MSVC):
-//   call "...\VC\Auxiliary\Build\vcvars64.bat"
-//   cl /std:c++17 /EHsc /O2 /nologo tools\ptvoice\main.cpp /Fe:ptvoice.exe
-//   ptvoice.exe testdata/units/s5-consumer.txt
-// clang++ / g++ work equally (-std=c++17). Exit 0 = all green, 1 = any mismatch.
+// Build + run via the tools/ CMake project — this is the `s5-consumer` ctest, run by CI on every
+// push (see tools/CMakeLists.txt and tools/ptvoice/README.md):
+//   cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
+//   cmake --build tools/build --config Release
+//   ctest --test-dir tools/build -R s5-consumer --output-on-failure -C Release
+// Exit 0 = all green, 1 = any mismatch.
 
 #include "../../native/songcore/model.h"
 #include "../../native/songcore/event.h"

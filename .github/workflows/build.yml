@@ -56,3 +56,32 @@ jobs:
           name: pockettracker-debug
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 7
+
+  # The C++ half of the songcore conformance suite. The `build` job above already runs the JVM
+  # goldens (./gradlew test), which proves the KOTLIN sequencer still matches them — this proves
+  # the C++ one does, by byte-comparing tools/pt{roundtrip,resolve,play,voice} against the same
+  # committed goldens in /testdata. No Android SDK, no Gradle, no engine: the tools are header-only
+  # consumers of native/songcore, so this is a ~1-minute gate that runs beside the APK build.
+  songcore:
+    name: songcore conformance
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the conformance tools
+        run: |
+          cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build tools/build --config Release
+
+      # The three runners are the test, not redundancy. songcore's floats are compared as raw
+      # binary32 BITS (event-schema §5), and the only reason that holds across languages and
+      # machines is -ffp-contract=off / -fno-fast-math. gcc/x86-64, MSVC/x86-64 and clang/arm64
+      # agreeing here is what makes that guarantee real — and arm64 is the architecture the app
+      # actually ships on, so a divergence surfaces in CI instead of in the Linux port.
+      - name: Byte-compare the C++ port against the Kotlin goldens
+        run: ctest --test-dir tools/build --output-on-failure -C Release

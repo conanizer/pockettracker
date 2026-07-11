@@ -17,12 +17,12 @@
 // (GoldenTraceTest writes the file as serializeProject(project), and hashes those same bytes) —
 // so a header mismatch would also flag a serializer drift (S2 already proved the round-trip).
 //
-// Build (Windows, on-box MSVC):
-//   call "...\VC\Auxiliary\Build\vcvars64.bat"
-//   cl /std:c++17 /EHsc /O2 /nologo tools\ptplay\main.cpp /Fe:ptplay.exe
-//   ptplay.exe testdata
-// clang++ / g++ work equally (-std=c++17). Exit 0 = all green, 1 = any mismatch.
-// Linux-port plan §4.3 (S4 — the spine).
+// Build + run via the tools/ CMake project — this is the `s4-golden-traces` ctest, run by CI on
+// every push (see tools/CMakeLists.txt and tools/ptplay/README.md):
+//   cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
+//   cmake --build tools/build --config Release
+//   ctest --test-dir tools/build -R s4-golden-traces --output-on-failure -C Release
+// Exit 0 = all green, 1 = any mismatch. Linux-port plan §4.3 (S4 — the spine).
 
 #include "../../native/songcore/model.h"
 #include "../../native/songcore/project_io.h"

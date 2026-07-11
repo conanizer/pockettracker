@@ -47,14 +47,20 @@ closed input domains removes the transcendental from the runtime entirely, which
 
 ## Build & run
 
+The four conformance tools are one CMake project (`tools/CMakeLists.txt`), wired to ctest. CI runs
+exactly this on every push, on gcc/x86-64, MSVC/x86-64 and clang/arm64:
+
 ```
-call "...\VC\Auxiliary\Build\vcvars64.bat"
-cl /std:c++17 /EHsc /O2 /nologo tools\ptvoice\main.cpp /Fe:ptvoice.exe
-ptvoice.exe testdata\units\s5-consumer.txt
+cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
+cmake --build tools/build --config Release
+ctest --test-dir tools/build --output-on-failure -C Release
 ```
 
-`clang++` / `g++` work equally (`-std=c++17`). Exit 0 = all green, 1 = any mismatch; a failure prints
-the Kotlin line and the C++ line side by side.
+This tool alone is the **`s5-consumer`** test — `ctest --test-dir tools/build -R s5-consumer
+--output-on-failure` — or invoke the built binary directly with the golden file as `argv[1]`
+(`ptvoice testdata/units/s5-consumer.txt`).
+
+Exit 0 = all green, 1 = any mismatch; a failure prints the Kotlin line and the C++ line side by side.
 
 Regenerate the golden after an intentional Kotlin change: delete `testdata/units/s5-consumer.txt`,
 run `gradlew :app:testDebugUnitTest`, re-run ptvoice.

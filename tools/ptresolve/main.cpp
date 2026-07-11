@@ -11,10 +11,11 @@
 // the offending line. This is where the framesPerStep double-rounding and the binary32 `volume`
 // divide are proven bit-identical across the language boundary.
 //
-// Build (Windows, on-box MSVC):
-//   cl /std:c++17 /EHsc /O2 /nologo tools/ptresolve/main.cpp /Fe:ptresolve.exe
-// Run:
-//   ptresolve.exe testdata
+// Build + run via the tools/ CMake project — this is the `s3-pure-units` ctest, run by CI on every
+// push (see tools/CMakeLists.txt and tools/ptresolve/README.md):
+//   cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
+//   cmake --build tools/build --config Release
+//   ctest --test-dir tools/build -R s3-pure-units --output-on-failure -C Release
 //
 // Exit code 0 = all green, 1 = any mismatch.  Linux-port plan §4.3 (S3 pure-piece port).
 
