@@ -1,17 +1,20 @@
 cmake_minimum_required(VERSION 3.22.1)
 
-project("pockettracker-tools" LANGUAGES CXX)
+# C as well as C++: ptrender links the engine (add_subdirectory(../native) below), and the vendored
+# decoder stack under it — stb_vorbis, kissfft, pareq, libopus, libogg — is C.
+project("pockettracker-tools" LANGUAGES C CXX)
 
 # ─── The songcore conformance harness — host-only, never part of the Android build ─────────────
 #
-# One tool per layer of the songcore port (linux-port-plan.md §4.3), each byte-comparing C++
-# output against a golden recorded from the REAL Kotlin implementation. The JVM tests under
+# One tool per layer of the songcore port (linux-port-plan.md §4.3), each comparing C++ output
+# against a golden recorded from the REAL Kotlin implementation. The JVM tests under
 # app/src/test/.../trace/ WRITE /testdata; these READ it back:
 #
-#   ptroundtrip   S2   .ptp/.pti I/O            the six golden projects re-serialize byte-for-byte
-#   ptresolve     S3   timing / FX / traversal  286 unit cases       (units/s3-units.txt)
-#   ptplay        S4   the scheduler spine      all 32 event traces  (traces/)
+#   ptroundtrip   S2   .ptp/.pti I/O            the seven golden projects re-serialize byte-for-byte
+#   ptresolve     S3   timing / FX / traversal  288 unit cases       (units/s3-units.txt)
+#   ptplay        S4   the scheduler spine      all 36 event traces  (traces/)
 #   ptvoice       S5   the below-seam consumer  77 engine-call cases (units/s5-consumer.txt)
+#   ptrender      S6b  the render, end to end   real audio, through the real engine
 #
 # Why this project exists: `./gradlew test` already runs the JVM goldens, which proves the KOTLIN
 # sequencer still matches them. Nothing proved the C++ one did — the tools were built by hand, on
@@ -25,12 +28,12 @@ project("pockettracker-tools" LANGUAGES CXX)
 # Pass the build type explicitly, as above: the usual "default to Release if CMAKE_BUILD_TYPE is
 # empty" guard is not portable, because MSVC's platform module pre-seeds it to Debug (via
 # CMAKE_BUILD_TYPE_INIT) while GCC/Clang leave it unset — so the guard silently never fires on
-# Windows. Debug is only ever a speed difference here, never a correctness one: the goldens match
-# bit-for-bit under both -Od and -O2, which is what /fp:precise below is there to guarantee.
+# Windows. For the four header-only tools Debug is a speed difference and never a correctness one:
+# the goldens match bit-for-bit under both -Od and -O2, which is what pt_ieee_exact() guarantees.
 #
-# The tools are header-only consumers of native/songcore (relative #includes, no link deps), so
-# there is nothing to configure and no engine to build. ptrender — real audio, through the real
-# engine — is the one that will need native/'s desktop static lib, and lands with S6b.
+# Four of the five tools are header-only consumers of native/songcore (relative #includes, no link
+# deps) and build in about a second. ptrender is the exception: it renders real audio through the
+# real engine, so it builds native/ — the engine plus opus/ogg/opusfile — and dominates the time.
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -44,11 +47,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # so without this the Linux CI runner could go red on a tree that is green on the Windows dev box.
 # This is the same guarantee native/CMakeLists.txt gives songcore-jni.cpp; it has to be restated
 # here because these translation units are built by a different project entirely.
-if(MSVC)
-    add_compile_options(/fp:precise)   # MSVC contracts only under /fp:fast — pin it regardless
-else()
-    add_compile_options(-fno-fast-math -ffp-contract=off)
-endif()
+#
+# PER-TARGET, not add_compile_options(). A directory-scope flag would be inherited by everything
+# under add_subdirectory(../native) — the engine and the whole vendored decoder stack — and quietly
+# countermand the engine's own -ffast-math policy. The tools' own TUs need it (they #include the
+# songcore headers, and aarch64 clang contracts a+b*c into an fma by DEFAULT, -ffast-math or not);
+# the engine must be left to decide for itself.
+function(pt_ieee_exact target)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /fp:precise)   # MSVC contracts only under /fp:fast — pin it regardless
+    else()
+        target_compile_options(${target} PRIVATE -fno-fast-math -ffp-contract=off)
+    endif()
+endfunction()
 
 # ─── Targets + tests ───────────────────────────────────────────────────────────────────────────
 
@@ -58,7 +69,21 @@ set(PT_TESTDATA "${CMAKE_CURRENT_SOURCE_DIR}/../testdata")
 
 foreach(tool ptroundtrip ptresolve ptplay ptvoice)
     add_executable(${tool} ${tool}/main.cpp)
+    pt_ieee_exact(${tool})
 endforeach()
+
+# The engine, as a host static lib. native/CMakeLists.txt's non-ANDROID branch: the same portable
+# core the APK ships, minus the Oboe/JNI shell. This is the first thing in the repo to build it as
+# part of another project — and the reason the CI matrix now compiles the engine on gcc and clang
+# too, not just the NDK's clang.
+add_subdirectory(../native native)
+
+add_executable(ptrender ptrender/main.cpp)
+pt_ieee_exact(ptrender)
+target_link_libraries(ptrender PRIVATE pockettracker)
+
+# ptrender writes WAVs, and the fingerprint goldens live beside the projects they describe.
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/render-out")
 
 # Each tool takes its goldens as argv[1] and exits non-zero on the first byte that differs. The
 # paths are absolute, so ctest does not care which directory it is run from.
@@ -66,3 +91,4 @@ add_test(NAME s2-project-io    COMMAND ptroundtrip "${PT_TESTDATA}")
 add_test(NAME s3-pure-units    COMMAND ptresolve   "${PT_TESTDATA}")
 add_test(NAME s4-golden-traces COMMAND ptplay      "${PT_TESTDATA}")
 add_test(NAME s5-consumer      COMMAND ptvoice     "${PT_TESTDATA}/units/s5-consumer.txt")
+add_test(NAME s6-render        COMMAND ptrender    "${PT_TESTDATA}" "${CMAKE_CURRENT_BINARY_DIR}/render-out")

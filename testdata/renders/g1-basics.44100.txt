@@ -1,0 +1,19 @@
+# ptrender audio fingerprint — schema 1 — g1-basics
+#
+# NOT a byte golden, and it cannot be one: the DSP uses transcendentals and is built with
+# -ffast-math on arm, so gcc/x86-64, MSVC/x86-64 and clang/arm64 disagree on the last bit of
+# a reverb tail. These are energy measurements in dBFS, compared with a 1.00 dB tolerance —
+# far above the numerical noise between toolchains, far below any regression worth catching.
+#
+# songFrames is EXACT: it comes from the sequencer, whose arithmetic is IEEE-pinned.
+# totalFrames = songFrames + the decay tail, which may shift by a chunk or two.
+#
+# Regenerate deliberately: delete this file and re-run ptrender.
+sr 44100
+songFrames 165344
+totalFrames 165344
+peak -7.49
+rms -28.57
+sec 0 -25.81
+sec 1 -26.84
+sec 2 -41.60

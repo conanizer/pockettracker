@@ -2,3 +2,8 @@
 # (GoldenTraceTest compares committed bytes against regenerated ones; a CRLF checkout would
 # fail every comparison on Windows.)
 * -text
+
+# The golden media the projects play (see golden/make-golden-media.cpp). `binary` is -text -diff:
+# no EOL conversion, and no attempt to render a WAV or a SoundFont as a text diff.
+golden/*.wav binary
+golden/*.sf2 binary

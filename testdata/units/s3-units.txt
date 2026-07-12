@@ -313,3 +313,5 @@ USEDINST project=g5-structure start=0 end=2 => inst=0,1
 USEDINST project=g5-structure start=0 end=0 => inst=0,1
 USEDINST project=g6-params start=0 end=0 => inst=0,2
 USEDINST project=g6-params start=0 end=0 => inst=0,2
+USEDINST project=g7-audio start=0 end=0 => inst=0,1,2
+USEDINST project=g7-audio start=0 end=0 => inst=0,1,2

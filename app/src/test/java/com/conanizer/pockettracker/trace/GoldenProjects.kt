@@ -1,6 +1,8 @@
 package com.conanizer.pockettracker.trace
 
 import com.conanizer.pockettracker.core.data.InstrumentType
+import com.conanizer.pockettracker.core.data.ModDest
+import com.conanizer.pockettracker.core.data.ModType
 import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.data.Phrase
 import com.conanizer.pockettracker.core.data.Project
@@ -49,6 +51,7 @@ object GoldenProjects {
         Spec("g4-pitch", 0..0, listOf(LiveMode("PHRASE", 0, 4)), ::g4Pitch),
         Spec("g5-structure", 0..2, listOf(LiveMode("SONG", 0, 12)), ::g5Structure),
         Spec("g6-params", 0..0, listOf(LiveMode("PHRASE", 0, 4)), ::g6Params),
+        Spec("g7-audio", 0..0, listOf(LiveMode("SONG", 0, 4)), ::g7Audio),
     )
 
     // ── Builder helpers ──────────────────────────────────────────────────────────────────────
@@ -256,6 +259,91 @@ object GoldenProjects {
         }
         p.chainRow(0, 0, 0)
         p.tracks[0].chainRefs.add(0)
+        return p
+    }
+
+    // ── g7: the AUDIO golden — the only one that is judged on its SOUND ──────────────────────
+    //
+    // g1..g6 are judged on their EVENTS, so they never needed to make a noise (their sample paths
+    // point at files that did not exist). tools/ptrender renders THIS one through the real engine,
+    // so it is built around the DSP instead of the sequencer: both send buses (reverb and delay —
+    // the two whose state used to leak from one render into the next), the master bus (OTT, limiter,
+    // master EQ), a per-instrument EQ, a drive, a resonant filter under an LFO, a SoundFont voice,
+    // and a stereo sample at HALF the render rate so the resampler runs. testdata/golden/ holds the
+    // media (see make-golden-media.cpp — every source decays to silence, and nothing loops).
+    //
+    // The last step of the pad phrase carries a note ON PURPOSE: it is still ringing — sample,
+    // reverb tail and delay repeats — when the song's last step ends. A render that stops at the
+    // scheduler's span (as every render did before S6b) cuts that note dead at full amplitude, so
+    // this project makes the truncation bug visible rather than theoretical.
+    //
+    // TWO HARD CONSTRAINTS, both because ptrender asserts that two renders of this project are
+    // BYTE-IDENTICAL. Anything with a wall-clock seed in it breaks that:
+    //   • no CHA / RND / RNL / random ARP — SC-1, and the C++ scheduler's rng_* are still stubs;
+    //   • no oscShape 8 or 9 (RND / DRNK). Those LFO shapes draw from the engine's noteSeedEntropy,
+    //     which is deliberately re-seeded from the clock at every render start, so a project using
+    //     them renders differently every time BY DESIGN.
+    // The master FX is OTT (masterBusFx = 0), not DUST, for the same reason: DUST's random-walk
+    // drift is not something ptrender can make a determinism claim about.
+    private fun g7Audio(): Project {
+        val p = Project(version = 1, name = "g7-audio", tempo = 120)
+        p.standardInstruments()
+
+        // The two send buses. Wet and feedback are pushed high enough that the tail is unmistakable
+        // — but not so high that it takes the render anywhere near render.h's 30-second tail cap.
+        p.reverbFeedback = 0x70; p.reverbDamp = 0x60; p.reverbWet = 0xA0
+        p.delayTime = 0x30; p.delayFeedback = 0x60; p.delayWet = 0x90; p.delayReverbSend = 0x40
+
+        // The master bus, and the master EQ the render must restore afterwards.
+        p.masterBusFx = 0; p.ottDepth = 0x50; p.limiterPreGain = 0x20
+        p.eqPresets[3].bands[0].apply { type = 1; freq = 0x30; gain = 150; q = 0x80 }  // low shelf +3dB
+        p.eqPresets[3].bands[1].apply { type = 3; freq = 0xB0; gain = 100; q = 0x60 }  // bell −2dB
+        p.masterEqSlot = 3
+        p.eqPresets[6].bands[0].apply { type = 4; freq = 0xC0; gain = 145; q = 0x80 }  // the pad's own EQ
+
+        p.instruments[0].apply {                       // kick: dry-ish, driven, with an amp envelope
+            reverbSend = 0x20; drive = 0x40
+            modSlots[0].apply {
+                type = ModType.AHD; dest = ModDest.VOLUME; amount = 0xFF
+                attack = 0x00; hold = 0x08; decay = 0x40
+            }
+        }
+        p.instruments[1].apply {                       // pad: soaked in both buses — the tail's source
+            reverbSend = 0x90; delaySend = 0x70; eqSlot = 6
+            filterType = "lp"; filterCut = 0xA0; filterRes = 0x40
+            modSlots[0].apply {                        // a slow filter sweep — the modulation engine
+                type = ModType.LFO; dest = ModDest.FILTER_CUTOFF; amount = 0x60
+                oscShape = 1; lfoTrigMode = 1; lfoFreq = 0x30   // SIN, RETRIG — never 8/9 (RND/DRNK)
+            }
+        }
+        p.instruments[2].apply { reverbSend = 0x60; delaySend = 0x40 }   // the SoundFont voice
+
+        p.phrases[0].apply {                           // kick
+            step(0, "C-4", inst = 0, vel = 0x7F)
+            step(4, "C-4", inst = 0, vel = 0x60)
+            step(6, "C-4", inst = 0, vel = 0x40)
+            step(8, "C-4", inst = 0, vel = 0x7F)
+            step(12, "C-4", inst = 0, vel = 0x50)
+            step(14, "C-4", inst = 0, vel = 0x35, fx1 = FX.FX_RSEND to 0xA0)  // a live send move
+        }
+        p.phrases[1].apply {                           // pad — stereo, resampled from 22050
+            step(0, "C-3", inst = 1, vel = 0x70)
+            step(8, "G-3", inst = 1, vel = 0x60, fx1 = FX.FX_PAN to 0x30)
+            step(15, "E-3", inst = 1, vel = 0x7F)      // still ringing when the song ends → the tail
+        }
+        p.phrases[2].apply {                           // SoundFont
+            step(2, "C-4", inst = 2, vel = 0x60)
+            step(6, "E-4", inst = 2, vel = 0x50)
+            step(10, "G-4", inst = 2, vel = 0x55)
+            step(13, "C-5", inst = 2, vel = 0x45)
+        }
+        // Two chain rows each, so the song is 32 steps = 4.0 s at 120 BPM before the tail.
+        p.chainRow(0, 0, 0); p.chainRow(0, 1, 0)
+        p.chainRow(1, 0, 1); p.chainRow(1, 1, 1)
+        p.chainRow(2, 0, 2); p.chainRow(2, 1, 2)
+        p.tracks[0].chainRefs.add(0)
+        p.tracks[1].chainRefs.add(1)
+        p.tracks[2].chainRefs.add(2)
         return p
     }
 }

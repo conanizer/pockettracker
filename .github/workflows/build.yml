@@ -59,9 +59,15 @@ jobs:
 
   # The C++ half of the songcore conformance suite. The `build` job above already runs the JVM
   # goldens (./gradlew test), which proves the KOTLIN sequencer still matches them — this proves
-  # the C++ one does, by byte-comparing tools/pt{roundtrip,resolve,play,voice} against the same
-  # committed goldens in /testdata. No Android SDK, no Gradle, no engine: the tools are header-only
-  # consumers of native/songcore, so this is a ~1-minute gate that runs beside the APK build.
+  # the C++ one does, by comparing tools/pt{roundtrip,resolve,play,voice,render} against the same
+  # committed goldens in /testdata. No Android SDK and no Gradle.
+  #
+  # Since S6b it also BUILDS THE ENGINE. Four of the five tools are header-only consumers of
+  # native/songcore, but ptrender renders real audio through the real thing, so this job compiles
+  # native/ — the engine plus the vendored opus/ogg/opusfile stack, which dominates the time. That
+  # is a feature, not a cost: the engine had only ever been compiled by the NDK's clang (for the
+  # APK) and by MSVC (on the dev box). gcc and host clang building it here is the first standing
+  # proof that the Linux port's foundation actually compiles off Android.
   songcore:
     name: songcore conformance
     runs-on: ${{ matrix.os }}
@@ -73,7 +79,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build the conformance tools
+      - name: Build the engine + the conformance tools
         run: |
           cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
           cmake --build tools/build --config Release
@@ -83,5 +89,20 @@ jobs:
       # machines is -ffp-contract=off / -fno-fast-math. gcc/x86-64, MSVC/x86-64 and clang/arm64
       # agreeing here is what makes that guarantee real — and arm64 is the architecture the app
       # actually ships on, so a divergence surfaces in CI instead of in the Linux port.
-      - name: Byte-compare the C++ port against the Kotlin goldens
+      #
+      # ptrender (s6-render) is the one test that is NOT a byte-compare across these runners, and
+      # cannot be: its DSP uses transcendentals and is built with -ffast-math on arm. It asserts
+      # determinism (the same binary, twice), health, and an energy fingerprint with a 1 dB
+      # tolerance. tools/ptrender/README.md explains why that is the strongest honest claim.
+      - name: Compare the C++ port against the Kotlin goldens
         run: ctest --test-dir tools/build --output-on-failure -C Release
+
+      # The rendered WAVs, so a fingerprint failure on a runner you cannot reach can be listened to.
+      - name: Upload the rendered audio
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptrender-${{ matrix.os }}
+          path: tools/build/render-out/*.wav
+          retention-days: 7
+          if-no-files-found: ignore

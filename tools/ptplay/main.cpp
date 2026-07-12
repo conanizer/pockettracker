@@ -55,6 +55,7 @@ static const std::vector<Spec> SPECS = {
     {"g4-pitch",    0, 0, {{"PHRASE", 0, 4}}},
     {"g5-structure",0, 2, {{"SONG", 0, 12}}},
     {"g6-params",   0, 0, {{"PHRASE", 0, 4}}},
+    {"g7-audio",    0, 0, {{"SONG", 0, 4}}},
 };
 
 static const int SAMPLE_RATES[] = {44100, 48000};
