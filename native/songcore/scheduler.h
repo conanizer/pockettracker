@@ -547,14 +547,29 @@ class Sequencer {
         if (checkpoints_.size() > 4) checkpoints_.pop_front();   // ring of 4, oldest = earliest unplayed
     }
 
-    // Kotlin's `mutableMapOf` is a LinkedHashMap: iteration follows INSERTION order, and re-assigning
-    // an existing key keeps its original slot. getPlaybackPosition() takes the FIRST in-window entry,
-    // so that order is load-bearing — a std::map (key-sorted) would surface a different row. Hence a
-    // vector with find-then-update, not a map.
+    // APPEND, never overwrite — a DELIBERATE divergence from the Kotlin original, which is buggy here.
+    //
+    // Kotlin keeps this in a `mutableMapOf`, so re-scheduling a position it already holds REPLACES that
+    // key's start frame. That breaks the moment a song laps itself inside the lookahead: the scheduler
+    // runs BUFFER_PHRASES (2) phrases ahead, so a song shorter than that comes back round to a
+    // (songRow, chainRow) it has already queued and rewrites its start frame to the NEXT time that row
+    // will play — clobbering the frame of the row that is sounding RIGHT NOW. getPlaybackPosition()
+    // then finds every `into` negative, matches no window, and returns its zero-initialised struct: the
+    // playhead sits frozen at 0/0/0 for the entire song.
+    //
+    // It survived this long because it is invisible on real music, which is many phrases long, so the
+    // key being rewritten is always far in the future. The SDL shell surfaced it immediately by playing
+    // a one-row golden (g7-audio: 1 song row over a 2-row chain — exactly the lookahead depth, so the
+    // clobber lands on every poll). Playheads carry no bus event and therefore no golden (SC-4), which
+    // is precisely why nothing caught it: ptplay compares events, and this is a side-record.
+    //
+    // Appending is what the CHAIN-mode sibling has always done — chainRowStartFrames_ is an emplace_back
+    // list with no de-duplication — so SONG stops being the odd one out. Duplicates cannot pile up:
+    // prune_past() drops everything more than a phrase old on every read and the lookahead is bounded,
+    // so the list stays a handful of entries. Insertion order is still load-bearing — getPlaybackPosition
+    // takes the FIRST in-window entry, which is now the OLDEST, i.e. the row actually sounding, instead
+    // of a future one that had overwritten it.
     void put_song_position(int songRow, int chainRow, int64_t frame) {
-        for (auto& e : songPositionStartFrames_) {
-            if (e.first.first == songRow && e.first.second == chainRow) { e.second = frame; return; }
-        }
         songPositionStartFrames_.emplace_back(std::make_pair(songRow, chainRow), frame);
     }
 
