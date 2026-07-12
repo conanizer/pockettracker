@@ -148,7 +148,14 @@ JNIEXPORT jlong JNICALL SONGCORE_FN(renderToWav)(JNIEnv* env, jobject, jstring p
         jclass cls = env->GetObjectClass(progress);
         onProgress = env->GetMethodID(cls, "onProgress", "(F)V");
         env->DeleteLocalRef(cls);
-        if (onProgress) {
+        if (!onProgress) {
+            // GetMethodID does not merely return null on failure — it RAISES NoSuchMethodError and
+            // leaves it PENDING, so returning with it set throws it at the caller and kills a render
+            // that is otherwise fine. The name is an ABI (app/proguard-rules.pro keeps it from R8);
+            // this is what happens if that keep rule is ever lost again. Same rule as below: a broken
+            // progress bar must not be able to take the app down.
+            env->ExceptionClear();
+        } else {
             // If the listener ever throws, the exception stays PENDING on this thread — and calling
             // any further JNI function with one pending is undefined (in practice: an abort with
             // "JNI called with pending exception"). The render loop calls back once per chunk, so a

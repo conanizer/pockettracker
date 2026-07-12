@@ -3,6 +3,29 @@
     native <methods>;
 }
 
+# The one place C++ calls back INTO Kotlin, and the only by-name JNI lookup in the codebase:
+# songcore's render loop reports progress through this interface, resolving the method with
+#     GetMethodID(cls, "onProgress", "(F)V")     (native/songcore-jni.cpp)
+# so the NAME is part of the ABI and R8 must not touch it.
+#
+# The default proguard-android-optimize.txt rule
+#     -keepclasseswithmembernames,includedescriptorclasses class * { native <methods>; }
+# is a trap here: `includedescriptorclasses` keeps the *class names* appearing in a native
+# method's signature — AndroidSongcore, native_renderToWav and this interface all kept theirs —
+# but it does NOT keep those classes' MEMBERS. So `onProgress` was renamed on the SAM lambda
+# RenderController.progressSlice builds, and every render in a release build died with
+#     NoSuchMethodError: no non-static method "Lh1/o1;.onProgress(F)V"
+# Debug builds don't run R8, which is why only a release APK ever showed it.
+#
+# Keeping the interface method pins the name for every implementation of it (R8 names virtual
+# methods per override group); the second rule states that for the implementors outright.
+-keep interface com.conanizer.pockettracker.core.audio.ISongcore$RenderProgress {
+    void onProgress(float);
+}
+-keepclassmembers class * implements com.conanizer.pockettracker.core.audio.ISongcore$RenderProgress {
+    void onProgress(float);
+}
+
 # Strip debug/verbose/info logging from release builds. Every logger.d / Log.d call site
 # (including its string building) is removed by R8, so the scheduling path and UI layer
 # don't build emoji strings or cross into liblog on the Miyoo. Log.w / Log.e are kept.
