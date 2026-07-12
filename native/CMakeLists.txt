@@ -25,8 +25,21 @@ set(OPUS_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
 set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
 set(OPUS_INSTALL_PKG_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
 set(OPUS_INSTALL_CMAKE_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
+
+# CMake 4 REMOVED compatibility with cmake_minimum_required(VERSION < 3.5) — it is a hard configure
+# error, not a warning — and the vendored codecs ask for less than that: libogg declares 2.8.12 and
+# libopus 3.1. CMAKE_POLICY_VERSION_MINIMUM raises the floor for exactly those projects that ask for
+# less, and touches nothing of ours (we declare 3.22.1), so it is scoped to the two lines below and
+# unset immediately after. CMake < 3.31 has never heard of the variable and ignores it.
+#
+# Why this hid for so long: the Android build uses the NDK's bundled CMake 3.22.1, which has no such
+# restriction, and neither does ubuntu-latest. It surfaced the moment tools/ started building the
+# engine — the windows-latest and macos-latest runners both ship CMake 4 today, and both went red.
+# Patching vendor/ would work equally well and be silently undone by the next vendor update.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 add_subdirectory(vendor/ogg)
 add_subdirectory(vendor/opus)
+unset(CMAKE_POLICY_VERSION_MINIMUM)
 add_library(opusfile STATIC
         vendor/opusfile/src/opusfile.c
         vendor/opusfile/src/info.c
