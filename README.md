@@ -10,7 +10,7 @@ PocketTracker is a music tracker for Android-based devices — a retro gaming ha
 
 > **Note:** This project was developed with AI assistance. If that bothers you, this project isn't for you.
 
-**Status:** 0.9.2 — public beta
+**Status:** 0.9.3 — public beta
 
 **License:** [GPL-3.0](LICENSE)
 

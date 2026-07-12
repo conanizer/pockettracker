@@ -1,0 +1,9 @@
+The sequencer is rewritten in C++ — same sound, shared with the coming Linux port.
+
+• WAV exports keep their reverb/delay/release tails instead of cutting off
+• Renders are repeatable: same project, same file
+• Sample-accurate note timing
+• LFO completed: EXP+/EXP- shapes, RND, DRNK, and the TRIG modes
+• Stops, kills and fast retriggers no longer click
+• Playback state no longer leaks between play sessions
+• Fixed duplicate GRV, LAT'd retriggers, and long samples past 6 min
