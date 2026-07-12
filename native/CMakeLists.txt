@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.22.1)
 
 project("pockettracker")
 
+# The engine is C++17 (std::clamp, std::optional, structured bindings). Nothing declared that until
+# now: the Android build simply inherited C++17 from the NDK clang's default, so a host compiler with
+# an older default (MSVC → C++14) failed on <algorithm>'s std::clamp. State it, and require it.
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # Oboe is the ANDROID audio backend only (via Prefab). A desktop build provides its own
 # shell (SDL/ALSA/JACK) against processLiveBlock() and never sees this.
 if(ANDROID)
@@ -77,57 +83,84 @@ else()
     add_library(pockettracker STATIC ${ENGINE_CORE_SOURCES})
 endif()
 
-# -ffast-math here is a pure codegen optimisation (reassociation, no NaN/Inf special-casing)
-# for the DSP-heavy TUs. It is NOT the denormal protection: that is
-# setFlushToZeroForCurrentThread() in audio-engine.cpp, which sets the FP-environment
-# FTZ/DAZ bits explicitly on every audio thread (a compile-only -ffast-math would not).
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm")
-    target_compile_options(pockettracker PRIVATE -ffast-math)
-endif ()
+# ─── Compiler flags ────────────────────────────────────────────────────────────────────────────
+# Every flag below is GCC/Clang spelling, and the engine is now built by MSVC too (the host static
+# lib that tools/ptrender links — see the desktop branch above). cl.exe does not error on an unknown
+# `-f…`, it warns D9002 and IGNORES it, so an unguarded list would look fine and quietly do nothing.
+# Hence the explicit MSVC arm on each one.
+if(MSVC)
+    # M_PI is not in MSVC's <cmath> without this — the engine uses it in the LFOs, the SOLA window
+    # and the FFT. (GCC/Clang expose it by default.) PUBLIC because sampler-voice.h uses M_PI in a
+    # header, so every desktop consumer that includes the engine needs the define too.
+    target_compile_definitions(pockettracker PUBLIC _USE_MATH_DEFINES)
+    # MSVC's default is already /fp:precise (no contraction, no reassociation) — state it anyway, so
+    # a future /fp:fast in a parent scope cannot silently change the DSP's rounding.
+    target_compile_options(pockettracker PRIVATE /fp:precise)
+else()
+    # -ffast-math here is a pure codegen optimisation (reassociation, no NaN/Inf special-casing)
+    # for the DSP-heavy TUs. It is NOT the denormal protection: that is
+    # setFlushToZeroForCurrentThread() in audio-engine.cpp, which sets the FP-environment
+    # FTZ/DAZ bits explicitly on every audio thread (a compile-only -ffast-math would not).
+    #
+    # ⚠️ The arch test, not an ANDROID test, on purpose — the Linux handhelds are arm and want the
+    # same speed. But it now also fires on an arm64 *host* (a macOS CI runner), so the DSP there is
+    # NOT bit-comparable with the x86-64 runners. Harmless for the trace goldens (songcore's own TU is
+    # IEEE-pinned below, and the engine never touches them) and harmless for ptrender's determinism
+    # check (same binary, twice) — but it is exactly why an audio golden cannot be a byte-exact
+    # cross-toolchain compare. See the S6b notes in docs/internal/order-of-work.md.
+    if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm")
+        target_compile_options(pockettracker PRIVATE -ffast-math)
+    endif ()
 
-# The compressed-audio decoders are float-heavy (stb_vorbis's IMDCT especially). -ffast-math implies
-# -ffinite-math-only, which can corrupt Vorbis decode/setup — so build the decoder TUs WITHOUT it
-# (dr_mp3/dr_flac don't need it either; the perf delta on a one-shot file decode is negligible). The
-# per-source flag is appended after the target's -ffast-math, so -fno-fast-math wins for these files.
-set_source_files_properties(
-        audio-decoders.cpp
-        vendor/stb_vorbis/stb_vorbis.c
-        PROPERTIES COMPILE_OPTIONS "-fno-fast-math"
-)
+    # The compressed-audio decoders are float-heavy (stb_vorbis's IMDCT especially). -ffast-math implies
+    # -ffinite-math-only, which can corrupt Vorbis decode/setup — so build the decoder TUs WITHOUT it
+    # (dr_mp3/dr_flac don't need it either; the perf delta on a one-shot file decode is negligible). The
+    # per-source flag is appended after the target's -ffast-math, so -fno-fast-math wins for these files.
+    set_source_files_properties(
+            audio-decoders.cpp
+            vendor/stb_vorbis/stb_vorbis.c
+            PROPERTIES COMPILE_OPTIONS "-fno-fast-math"
+    )
 
-# songcore's translation unit is REQUIRED to be IEEE-exact — this is not an optimisation choice.
-# The sequencer's float params (velGain, volGain, pan, PSL/PBN/vibrato rates) are compared against the
-# Kotlin sequencer as raw binary32 BITS (event-schema §5/§6), so any reassociation, and above all fma
-# contraction of `a + b*c` — which aarch64 clang performs BY DEFAULT, -ffast-math or not — changes the
-# rounding and the conformance trace stops matching. Hence both flags, and hence songcore lives in its
-# own TU: pulling its headers into any other source would put that source's math under -ffast-math and
-# silently break the guarantee.
-set_source_files_properties(
-        songcore-jni.cpp
-        PROPERTIES COMPILE_OPTIONS "-fno-fast-math;-ffp-contract=off"
-)
+    # songcore's translation unit is REQUIRED to be IEEE-exact — this is not an optimisation choice.
+    # The sequencer's float params (velGain, volGain, pan, PSL/PBN/vibrato rates) are compared against the
+    # Kotlin sequencer as raw binary32 BITS (event-schema §5/§6), so any reassociation, and above all fma
+    # contraction of `a + b*c` — which aarch64 clang performs BY DEFAULT, -ffast-math or not — changes the
+    # rounding and the conformance trace stops matching. Hence both flags, and hence songcore lives in its
+    # own TU: pulling its headers into any other source would put that source's math under -ffast-math and
+    # silently break the guarantee. (songcore-jni.cpp is Android-only, so this needs no MSVC arm; the host
+    # tools restate the same guarantee for their own TUs in tools/CMakeLists.txt.)
+    set_source_files_properties(
+            songcore-jni.cpp
+            PROPERTIES COMPILE_OPTIONS "-fno-fast-math;-ffp-contract=off"
+    )
 
-# 7.3: explicit optimization level. The NDK leaves Debug at -O0, which makes the real-time audio
-# engine too slow to test reliably on the Miyoo (the variant we test most). Force -O2 in Debug so
-# debug builds run the engine at near-release speed; Release keeps -O3. (We debug via logcat, not
-# native breakpoints, so the loss of -O0 debuggability is a non-issue here.)
-target_compile_options(pockettracker PRIVATE $<IF:$<CONFIG:Debug>,-O2,-O3>)
+    # 7.3: explicit optimization level. The NDK leaves Debug at -O0, which makes the real-time audio
+    # engine too slow to test reliably on the Miyoo (the variant we test most). Force -O2 in Debug so
+    # debug builds run the engine at near-release speed; Release keeps -O3. (We debug via logcat, not
+    # native breakpoints, so the loss of -O0 debuggability is a non-issue here.) MSVC keeps CMake's
+    # own /Od-Debug, /O2-Release defaults: no real-time constraint applies to a host tool.
+    target_compile_options(pockettracker PRIVATE $<IF:$<CONFIG:Debug>,-O2,-O3>)
+endif()
 
 # Include paths: root (for audio-defs.h, sampler-voice.h, etc.),
-#   effects/soundpipe (so pareq.c finds soundpipe.h), kissfft (for kiss_fft.h)
-target_include_directories(pockettracker PRIVATE
+#   effects/soundpipe (so pareq.c finds soundpipe.h), kissfft (for kiss_fft.h).
+# PUBLIC, not PRIVATE: a desktop consumer (tools/ptrender, the future SDL shell) links this target and
+# must inherit the same include roots — otherwise it would have to restate them and could drift.
+target_include_directories(pockettracker PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/effects/soundpipe
         ${CMAKE_CURRENT_SOURCE_DIR}/kissfft
 )
 
-# libm is required by tsf for math functions. opusfile pulls in libopus + libogg
-# (PUBLIC-linked) for native Opus decoding, and propagates the opusfile.h include path.
-# Oboe/android/log are Android-shell dependencies only — the core never touches them.
-target_link_libraries(pockettracker
-        opusfile
-        m
-)
+# opusfile pulls in libopus + libogg (PUBLIC-linked) for native Opus decoding, and propagates the
+# opusfile.h include path. Oboe/android/log are Android-shell dependencies only — the core never
+# touches them. libm is required by tsf for math functions on Unix-likes; on Windows the CRT already
+# carries it and there is no `m.lib` to find, so asking for it fails the link.
+target_link_libraries(pockettracker opusfile)
+if(NOT WIN32)
+    target_link_libraries(pockettracker m)
+endif()
 if(ANDROID)
     target_link_libraries(pockettracker
             oboe::oboe

@@ -14,6 +14,7 @@
 #include <jni.h>
 
 #include <algorithm>
+#include <functional>
 #include <memory>
 #include <set>
 #include <string>
@@ -118,6 +119,64 @@ JNIEXPORT jlong JNICALL SONGCORE_FN(scheduleSongRange)(JNIEnv* env, jobject, jin
     if (n > 0) env->GetIntArrayRegion(trackFilter, 0, n, ids.data());
     std::set<int> filter(ids.begin(), ids.end());
     return static_cast<jlong>(g_host->schedule_song_range(startRow, endRow, &filter));
+}
+
+// ── ↓ the render itself (songcore/render.h) ──────────────────────────────────────────────────────
+// RenderController keeps the *policy* — song bounds, filenames, the stem folder, which rows and
+// tracks — and hands the three verbs below the *mechanism*: ready the engine, render, restore. That
+// split is what lets Android schedule with either sequencer while the audio-affecting code around it
+// (the engine reset, the project push, the chunk loop, the decay tail, the WAV writer) is shared C++.
+JNIEXPORT void JNICALL SONGCORE_FN(prepareRender)(JNIEnv*, jobject, jint startRow, jint endRow) {
+    if (g_host) g_host->prepare_render(startRow, endRow);
+}
+
+// Progress crosses back to Kotlin through a small listener object (ISongcore.RenderProgress). The
+// method id is resolved once per render, not per chunk. A null listener renders with no callback.
+JNIEXPORT jlong JNICALL SONGCORE_FN(renderToWav)(JNIEnv* env, jobject, jstring path, jlong songFrames,
+                                                 jint stemsMode, jboolean applyMasterBus,
+                                                 jobject progress) {
+    if (!g_host || !path) return 0;
+
+    const char* pathChars = env->GetStringUTFChars(path, nullptr);
+    if (!pathChars) return 0;
+    const std::string outPath(pathChars);
+    env->ReleaseStringUTFChars(path, pathChars);
+
+    std::function<void(float)> cb = nullptr;
+    jmethodID onProgress = nullptr;
+    if (progress) {
+        jclass cls = env->GetObjectClass(progress);
+        onProgress = env->GetMethodID(cls, "onProgress", "(F)V");
+        env->DeleteLocalRef(cls);
+        if (onProgress) {
+            // If the listener ever throws, the exception stays PENDING on this thread — and calling
+            // any further JNI function with one pending is undefined (in practice: an abort with
+            // "JNI called with pending exception"). The render loop calls back once per chunk, so a
+            // single throw would take the whole app down mid-render. Clear it and stop reporting: a
+            // broken progress bar must not be able to kill a render that is otherwise fine.
+            auto failed = std::make_shared<bool>(false);
+            cb = [env, progress, onProgress, failed](float fraction) {
+                if (*failed) return;
+                env->CallVoidMethod(progress, onProgress, static_cast<jfloat>(fraction));
+                if (env->ExceptionCheck()) {
+                    env->ExceptionDescribe();
+                    env->ExceptionClear();
+                    *failed = true;
+                }
+            };
+        }
+    }
+
+    const songcore::RenderStats stats = g_host->render_to_wav(
+        outPath, static_cast<int64_t>(songFrames), stemsMode, applyMasterBus == JNI_TRUE, cb);
+
+    // Frames actually written — the song span PLUS the decay tail, so the caller's reported duration
+    // matches the file it can now play. 0 = the render failed.
+    return static_cast<jlong>(stats.ok ? stats.totalFrames : 0);
+}
+
+JNIEXPORT void JNICALL SONGCORE_FN(finishRender)(JNIEnv*, jobject) {
+    if (g_host) g_host->finish_render();
 }
 
 // ── ↑ live-edit reaction ─────────────────────────────────────────────────────────────────────────

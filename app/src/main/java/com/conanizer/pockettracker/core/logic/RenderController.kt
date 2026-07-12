@@ -1,29 +1,34 @@
 package com.conanizer.pockettracker.core.logic
 
 import com.conanizer.pockettracker.core.audio.AudioEngine
+import com.conanizer.pockettracker.core.audio.ISongcore
 import com.conanizer.pockettracker.core.data.Project
 import com.conanizer.pockettracker.core.logging.ILogger
 import com.conanizer.pockettracker.core.storage.IFileSystem
-import com.conanizer.pockettracker.core.storage.WavStreamWriter
 
 /**
- * RENDER CONTROLLER
+ * RENDER CONTROLLER — the *policy* half of an offline render.
  *
- * Renders the song to a WAV file by delegating scheduling entirely to
- * [PlaybackController.scheduleSongForRender].  This guarantees that groove,
- * DEL, arpeggio, HOP, pitch effects and every other effect behaves identically
- * to live playback — there is no separate scheduling code path here.
+ * Since songcore S6b this class decides only what a render IS: which rows, which tracks, where the
+ * file goes, what the user sees. Everything that touches audio — readying the engine, pushing the
+ * project into it, the chunked render loop, the decay tail, the WAV writer — lives in C++
+ * (`native/songcore/render.h` + `engine_setup.h`) behind [ISongcore]'s three render verbs. The Linux
+ * shell calls that same code; nothing about how a render *sounds* is written twice.
  *
- * Rendering process:
- *   1. Find song bounds (first / last used row)
- *   2. Set up instrument params (sample points, filter, modulation)
- *   3. scheduleSongForRender → fills the C++ note queue at frames 0..N
- *   4. renderToWavFile → renders in ~5 s chunks, streaming each chunk to a
- *      16-bit stereo WAV via WavStreamWriter (flat memory use, real progress)
+ * Scheduling stays outside those verbs on purpose: [PlaybackController] may fill the note queue with
+ * either sequencer (SETTINGS → ENG), and rendering the same project on both must produce byte-identical
+ * WAVs. That check only means something while the sequencer is the *only* thing that differs.
+ *
+ *   1. Find the song bounds (first / last used row)
+ *   2. songcore.prepareRender  — silence the live stream, reset the engine + effect chains, push the project
+ *   3. PlaybackController      — schedule the notes at frames 0..N (Kotlin or C++ sequencer)
+ *   4. songcore.renderToWav    — render the span + its decay tail, streaming to a 16-bit stereo WAV
+ *   5. songcore.finishRender   — restore the engine for live playback (always, even on failure)
  */
 class RenderController(
     private val audioEngine: AudioEngine,
     private val playbackController: PlaybackController,
+    private val songcore: ISongcore,
     private val fileSystem: IFileSystem,
     private val logger: ILogger
 ) {
@@ -31,46 +36,6 @@ class RenderController(
 
     companion object {
         private const val TAG = "RenderController"
-
-        // Frames per renderFrames() JNI call: ~5 s of stereo float ≈ 1.7 MB per chunk.
-        // Rendering the whole song in ONE call held ~4 full-song copies in RAM at peak
-        // (C++ vector + jfloatArray + channel splits + WAV ByteBuffer) — an OOM kill on
-        // 1 GB devices for songs of a few minutes. Chunking keeps peak memory flat and
-        // makes real render progress reporting possible.
-        private const val RENDER_CHUNK_FRAMES = 220_500
-    }
-
-    /**
-     * Render [totalFrames] from the already-scheduled C++ note queue into a 16-bit stereo WAV
-     * at [path], in RENDER_CHUNK_FRAMES slices. Reports progress over [progressFrom]..[progressTo].
-     * The engine keeps its state (frame counter, scheduled notes) across chunks, so chunked
-     * output is bit-identical to a single renderFrames(totalFrames) call.
-     */
-    private fun renderToWavFile(
-        totalFrames: Long,
-        sampleRate: Int,
-        path: String,
-        progressCallback: ProgressCallback?,
-        progressFrom: Float,
-        progressTo: Float,
-        progressLabel: String
-    ): Boolean {
-        val writer = WavStreamWriter(path, sampleRate)
-        try {
-            var rendered = 0L
-            while (rendered < totalFrames) {
-                val chunk = minOf(RENDER_CHUNK_FRAMES.toLong(), totalFrames - rendered).toInt()
-                val audio = audioBackend.renderFrames(chunk, sampleRate)
-                writer.appendInterleaved(audio, chunk)
-                rendered += chunk
-                val p = progressFrom + (progressTo - progressFrom) * (rendered.toFloat() / totalFrames)
-                progressCallback?.onProgress(p, progressLabel)
-            }
-            return writer.finish()
-        } catch (e: Exception) {
-            writer.abort()
-            throw e
-        }
     }
 
     sealed class RenderResult {
@@ -82,66 +47,80 @@ class RenderController(
         fun onProgress(progress: Float, message: String)
     }
 
+    /** Map songcore's 0..1 render progress onto a slice of this render's overall progress bar. */
+    private fun progressSlice(
+        callback: ProgressCallback?,
+        from: Float,
+        to: Float,
+        label: String
+    ): ISongcore.RenderProgress? =
+        callback?.let { cb -> ISongcore.RenderProgress { f -> cb.onProgress(from + (to - from) * f, label) } }
+
+    /**
+     * Hand songcore the project, then ready the engine for a render of [startRow]..[endRow].
+     *
+     * The push is unconditional — songcore holds a *copy* of the project and `prepareRender` pushes
+     * that copy's instruments, mixer and FX into the engine, so it must be current whichever sequencer
+     * is about to schedule. (In C++ mode `scheduleSongForRender` pushes again; a second parse of the
+     * blob costs nothing next to a render.)
+     */
+    private fun prepare(project: Project, startRow: Int, endRow: Int) {
+        playbackController.songcorePushProject(project)
+        songcore.prepareRender(startRow, endRow)
+    }
+
+    /**
+     * `finishRender()` stops voices, clears the note queue and restores the master EQ — so it must run
+     * only when a render actually readied the engine. Each render below tracks that with a `prepared`
+     * flag: a path that bails first (empty song, no active tracks) has touched nothing, and tearing the
+     * engine down anyway would kill whatever was playing at the time for a render that never started.
+     */
+
     fun renderSongToWav(
         project: Project,
         progressCallback: ProgressCallback? = null
     ): RenderResult {
-        // Silence the live stream so it cannot consume note queue entries during export
-        audioBackend.setOfflineRendering(true)
+        var prepared = false
         try {
             progressCallback?.onProgress(0f, "Analyzing song...")
 
             val (startRow, endRow) = findSongBounds(project)
             if (startRow < 0) return RenderResult.Error("Song is empty")
 
-            // Prepare audio engine for offline rendering
-            audioBackend.stopAll()
-            audioBackend.clearScheduledNotes()
-            audioBackend.resetFrameCounter()
-
-            // Push all instrument params (sample points, filter, modulation)
-            setupInstrumentParams(project, startRow, endRow)
+            prepare(project, startRow, endRow)
+            prepared = true
 
             progressCallback?.onProgress(0.1f, "Scheduling notes...")
 
-            // Schedule the entire song using PlaybackController's scheduling.
-            // Groove, DEL, arpeggio, HOP, pitch effects all work automatically.
-            val totalFrames = playbackController.scheduleSongForRender(project, startRow, endRow)
+            // Groove, DEL, arpeggio, HOP and the pitch effects all come for free: this is the same
+            // scheduling code live playback runs, not a second copy of it.
+            val songFrames = playbackController.scheduleSongForRender(project, startRow, endRow)
+            if (songFrames <= 0L) return RenderResult.Error("Song produced no audio")
 
-            if (totalFrames <= 0L) return RenderResult.Error("Song produced no audio")
-
-            logger.d(TAG, "🎬 Scheduled $totalFrames frames (${totalFrames / audioBackend.getSampleRate()}s)")
+            logger.d(TAG, "🎬 Scheduled $songFrames frames (${songFrames / audioBackend.getSampleRate()}s)")
 
             progressCallback?.onProgress(0.3f, "Rendering audio...")
 
-            // Reset active bus effect for clean offline render.
-            applyMasterBusForRender(project)
-
             val sampleRate = audioBackend.getSampleRate()
-            val outputDir = fileSystem.getRendersDirectory()
-            val filename  = generateFilename(project.name, outputDir)
+            val outputDir  = fileSystem.getRendersDirectory()
+            val filename   = generateFilename(project.name, outputDir)
 
-            val success = renderToWavFile(
-                totalFrames, sampleRate, filename,
-                progressCallback, 0.3f, 0.98f, "Rendering audio..."
+            // The file is longer than songFrames: the render now runs on past the last step until the
+            // reverb tail, delay repeats and note releases have died away.
+            val framesWritten = songcore.renderToWav(
+                filename, songFrames,
+                progress = progressSlice(progressCallback, 0.3f, 0.98f, "Rendering audio...")
             )
+            if (framesWritten <= 0L) return RenderResult.Error("Failed to write WAV file")
 
-            return if (success) {
-                val durationMs = (totalFrames * 1000L) / sampleRate
-                progressCallback?.onProgress(1f, "Done!")
-                RenderResult.Success(filename, durationMs)
-            } else {
-                RenderResult.Error("Failed to write WAV file")
-            }
+            progressCallback?.onProgress(1f, "Done!")
+            return RenderResult.Success(filename, (framesWritten * 1000L) / sampleRate)
 
         } catch (e: Exception) {
             logger.e(TAG, "❌ Render failed: ${e.message}")
             return RenderResult.Error(e.message ?: "Unknown error")
         } finally {
-            audioBackend.stopAll()
-            audioBackend.clearScheduledNotes()
-            restoreMasterEq(project)
-            audioBackend.setOfflineRendering(false)  // Always re-enable live playback
+            if (prepared) songcore.finishRender()
         }
     }
 
@@ -163,57 +142,42 @@ class RenderController(
         progressCallback: ProgressCallback? = null,
         customBaseName: String? = null
     ): RenderResult {
-        audioBackend.setOfflineRendering(true)
+        var prepared = false
         try {
             progressCallback?.onProgress(0f, "Preparing selection...")
 
-            audioBackend.stopAll()
-            audioBackend.clearScheduledNotes()
-            audioBackend.resetFrameCounter()
-
-            setupInstrumentParams(project, startRow, endRow)
+            prepare(project, startRow, endRow)
+            prepared = true
 
             progressCallback?.onProgress(0.1f, "Scheduling notes...")
 
-            val totalFrames = playbackController.scheduleSelectionForRender(
+            val songFrames = playbackController.scheduleSelectionForRender(
                 project, startRow, endRow, selectedTrackIds
             )
+            if (songFrames <= 0L) return RenderResult.Error("Selection produced no audio")
 
-            if (totalFrames <= 0L) return RenderResult.Error("Selection produced no audio")
-
-            logger.d(TAG, "🎬 Selection render: $totalFrames frames, tracks=$selectedTrackIds")
+            logger.d(TAG, "🎬 Selection render: $songFrames frames, tracks=$selectedTrackIds")
 
             progressCallback?.onProgress(0.3f, "Rendering audio...")
 
-            // Honor the project's master bus (OTT *or* DUST) — was hardcoded to OTT, so a DUST project's
-            // resample didn't match playback.
-            applyMasterBusForRender(project)
-
             val sampleRate = audioBackend.getSampleRate()
-            val outputDir = fileSystem.getResampledDirectory()
-            val filename  = generateResampledFilename(outputDir, customBaseName)
+            val outputDir  = fileSystem.getResampledDirectory()
+            val filename   = generateResampledFilename(outputDir, customBaseName)
 
-            val success = renderToWavFile(
-                totalFrames, sampleRate, filename,
-                progressCallback, 0.3f, 0.98f, "Rendering audio..."
+            val framesWritten = songcore.renderToWav(
+                filename, songFrames,
+                progress = progressSlice(progressCallback, 0.3f, 0.98f, "Rendering audio...")
             )
+            if (framesWritten <= 0L) return RenderResult.Error("Failed to write WAV file")
 
-            return if (success) {
-                val durationMs = (totalFrames * 1000L) / sampleRate
-                progressCallback?.onProgress(1f, "Done!")
-                RenderResult.Success(filename, durationMs)
-            } else {
-                RenderResult.Error("Failed to write WAV file")
-            }
+            progressCallback?.onProgress(1f, "Done!")
+            return RenderResult.Success(filename, (framesWritten * 1000L) / sampleRate)
 
         } catch (e: Exception) {
             logger.e(TAG, "❌ Selection render failed: ${e.message}")
             return RenderResult.Error(e.message ?: "Unknown error")
         } finally {
-            audioBackend.stopAll()
-            audioBackend.clearScheduledNotes()
-            restoreMasterEq(project)
-            audioBackend.setOfflineRendering(false)
+            if (prepared) songcore.finishRender()
         }
     }
 
@@ -225,25 +189,24 @@ class RenderController(
      *
      * Track stems: dry signal only (no OTT/DUST/masterEQ, limiter applied).
      * Send stems: all tracks feed their sends; OTT/DUST/masterEQ bypassed, limiter applied.
+     *
+     * Every pass re-prepares the engine, so a stem can no longer begin inside the previous stem's
+     * reverb tail — and each one runs on past its last step until its own tail has decayed.
      */
     fun renderStemsToWav(
         project: Project,
         progressCallback: ProgressCallback? = null
     ): RenderResult {
-        audioBackend.setOfflineRendering(true)
+        var prepared = false
         try {
             progressCallback?.onProgress(0f, "Analyzing song...")
 
             val (startRow, endRow) = findSongBounds(project)
             if (startRow < 0) return RenderResult.Error("Song is empty")
 
-            audioBackend.stopAll()
-            audioBackend.clearScheduledNotes()
-
-            setupInstrumentParams(project, startRow, endRow)
-            audioBackend.setLimiterPreGain(project.limiterPreGain)
-
-            val sampleRate = audioBackend.getSampleRate()
+            // Silences the live stream before anything else, as the single-file renders do.
+            prepare(project, startRow, endRow)
+            prepared = true
 
             // Active = non-muted and has at least one chain reference in the song
             val activeTracks = (0..7).filter { trackId ->
@@ -255,7 +218,7 @@ class RenderController(
             if (activeTracks.isEmpty()) return RenderResult.Error("No active tracks")
 
             // Collect instruments used in the song range to check send routing
-            val usedInstrIds = project.collectUsedInstruments(startRow, endRow)
+            val usedInstrIds  = project.collectUsedInstruments(startRow, endRow)
             val hasReverbSend = usedInstrIds.any { (project.instruments.getOrNull(it)?.reverbSend ?: 0) > 0 }
             val hasDelaySend  = usedInstrIds.any { (project.instruments.getOrNull(it)?.delaySend  ?: 0) > 0 }
 
@@ -270,68 +233,47 @@ class RenderController(
                 fileSystem.createFolder(rendersDir, safeProjectName) ?: "$rendersDir/$safeProjectName"
             }
 
-            val sendPasses = (if (hasReverbSend) 1 else 0) + (if (hasDelaySend) 1 else 0)
+            val sendPasses  = (if (hasReverbSend) 1 else 0) + (if (hasDelaySend) 1 else 0)
             val totalPasses = activeTracks.size + sendPasses
-            var passIndex = 0
+            var passIndex   = 0
+
+            // One stem pass. stemsMode: 1-8 = track N, 9 = reverb return, 10 = delay return.
+            // Stems bypass the master bus (OTT/DUST/master EQ) by design, so they don't apply it.
+            //
+            // prepareRender per pass, not once: it is what wipes the effect chains, and without it
+            // each stem would begin inside the *previous* stem's reverb tail. (The project itself was
+            // pushed above and hasn't changed, so it isn't re-pushed here.)
+            fun renderStem(stemsMode: Int, path: String, label: String) {
+                progressCallback?.onProgress(passIndex.toFloat() / totalPasses, label)
+
+                songcore.prepareRender(startRow, endRow)
+                val songFrames = playbackController.scheduleSongForRender(project, startRow, endRow)
+                if (songFrames > 0L) {
+                    songcore.renderToWav(
+                        path, songFrames, stemsMode = stemsMode, applyMasterBus = false,
+                        progress = progressSlice(
+                            progressCallback,
+                            passIndex.toFloat() / totalPasses,
+                            (passIndex + 1).toFloat() / totalPasses,
+                            label
+                        )
+                    )
+                }
+                passIndex++
+            }
 
             for ((stemIdx, trackId) in activeTracks.withIndex()) {
-                val label = "Rendering track ${stemIdx + 1}/${activeTracks.size}..."
-                progressCallback?.onProgress(passIndex.toFloat() / totalPasses, label)
-
-                audioBackend.stopAll()
-                audioBackend.clearScheduledNotes()
-                audioBackend.resetFrameCounter()
-
-                val totalFrames = playbackController.scheduleSongForRender(project, startRow, endRow)
-                if (totalFrames > 0L) {
-                    audioBackend.setStemsMode(trackId + 1)
-                    renderToWavFile(
-                        totalFrames, sampleRate, "$stemDir/${safeProjectName}_${stemIdx + 1}.wav",
-                        progressCallback,
-                        passIndex.toFloat() / totalPasses, (passIndex + 1).toFloat() / totalPasses, label
-                    )
-                    audioBackend.setStemsMode(0)
-                }
-                passIndex++
+                renderStem(
+                    stemsMode = trackId + 1,
+                    path      = "$stemDir/${safeProjectName}_${stemIdx + 1}.wav",
+                    label     = "Rendering track ${stemIdx + 1}/${activeTracks.size}..."
+                )
             }
-
-            // Reverb stem (only if instruments use reverb send)
             if (hasReverbSend) {
-                val label = "Rendering reverb stem..."
-                progressCallback?.onProgress(passIndex.toFloat() / totalPasses, label)
-                audioBackend.stopAll()
-                audioBackend.clearScheduledNotes()
-                audioBackend.resetFrameCounter()
-                val reverbFrames = playbackController.scheduleSongForRender(project, startRow, endRow)
-                if (reverbFrames > 0L) {
-                    audioBackend.setStemsMode(9)
-                    renderToWavFile(
-                        reverbFrames, sampleRate, "$stemDir/${safeProjectName}_reverb.wav",
-                        progressCallback,
-                        passIndex.toFloat() / totalPasses, (passIndex + 1).toFloat() / totalPasses, label
-                    )
-                    audioBackend.setStemsMode(0)
-                }
-                passIndex++
+                renderStem(9,  "$stemDir/${safeProjectName}_reverb.wav", "Rendering reverb stem...")
             }
-
-            // Delay stem (only if instruments use delay send)
             if (hasDelaySend) {
-                val label = "Rendering delay stem..."
-                progressCallback?.onProgress(passIndex.toFloat() / totalPasses, label)
-                audioBackend.stopAll()
-                audioBackend.clearScheduledNotes()
-                audioBackend.resetFrameCounter()
-                val delayFrames = playbackController.scheduleSongForRender(project, startRow, endRow)
-                if (delayFrames > 0L) {
-                    audioBackend.setStemsMode(10)
-                    renderToWavFile(
-                        delayFrames, sampleRate, "$stemDir/${safeProjectName}_delay.wav",
-                        progressCallback,
-                        passIndex.toFloat() / totalPasses, (passIndex + 1).toFloat() / totalPasses, label
-                    )
-                    audioBackend.setStemsMode(0)
-                }
+                renderStem(10, "$stemDir/${safeProjectName}_delay.wav",  "Rendering delay stem...")
             }
 
             progressCallback?.onProgress(1f, "Done!")
@@ -341,40 +283,11 @@ class RenderController(
             logger.e(TAG, "❌ Stems render failed: ${e.message}")
             return RenderResult.Error(e.message ?: "Unknown error")
         } finally {
-            audioBackend.setStemsMode(0)
-            audioBackend.stopAll()
-            audioBackend.clearScheduledNotes()
-            restoreMasterEq(project)
-            audioBackend.setOfflineRendering(false)
+            if (prepared) songcore.finishRender()
         }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Push the project's master-bus effect (OTT or DUST) + limiter for a clean offline render
-     * (the no-warmup-fade *ForRender variants). Both the full-song and selection renders need this so
-     * the export matches playback (both OTT and DUST master buses are honoured). Stems bypass the
-     * master bus (setStemsMode), so they don't use it.
-     */
-    private fun applyMasterBusForRender(project: Project) {
-        audioBackend.setMasterFx(project.masterBusFx)
-        if (project.masterBusFx == 0)
-            audioBackend.setOttDepthForRender(project.ottDepth)
-        else
-            audioBackend.setDustDepthForRender(project.dustDepth)
-        audioBackend.setLimiterPreGain(project.limiterPreGain)
-        // Start from the configured master EQ so an EQM effect in the song animates from the right
-        // baseline (and a prior render's EQM override can't bleed into this one). restoreMasterEq()
-        // in each finally returns the live bus to this slot after export.
-        audioBackend.setMasterEqSlot(project.masterEqSlot)
-    }
-
-    /** Return the master bus EQ to the project's configured slot after a render (an EQM effect in the
-     *  song mutates the global master EQ; without this the live bus would stay on the last EQM preset). */
-    private fun restoreMasterEq(project: Project) {
-        audioBackend.setMasterEqSlot(project.masterEqSlot)
-    }
 
     private fun findSongBounds(project: Project): Pair<Int, Int> {
         var first = -1
@@ -389,50 +302,6 @@ class RenderController(
             }
         }
         return Pair(first, last)
-    }
-
-    /**
-     * Push sample-playback params and modulation slots for every instrument used
-     * in the song range.  Must be called before [scheduleSongForRender].
-     */
-    private fun setupInstrumentParams(project: Project, startRow: Int, endRow: Int) {
-        val usedInstruments = project.collectUsedInstruments(startRow, endRow)
-
-        for (instId in usedInstruments) {
-            val instrument = project.instruments.getOrNull(instId) ?: continue
-            if (instrument.isSoundfont()) {
-                // SF instrument: ensure instrumentParams[instId] has safe defaults so stale
-                // WAV params from a previous render or project load don't bleed into SF output.
-                // (isSoundfont(), not sampleFilePath == null — the latter is also true for empty
-                // sampler slots, which belong on the sampler path below.)
-                audioEngine.applySoundfontFilterOverrides(instrument)
-                audioEngine.pushInstrumentModulation(instrument, project.tempo)
-                audioEngine.pushInstrumentEqAndSends(instrument)
-                continue
-            }
-
-            val loopModeInt = when (instrument.loopMode) { "fwd" -> 1; "png" -> 2; else -> 0 }
-            val filterTypeInt = when (instrument.filterType) { "lp" -> 1; "hp" -> 2; "bp" -> 3; else -> 0 }
-
-            audioBackend.setInstrumentParams(
-                instrumentId = instrument.sampleId,
-                startPoint   = instrument.sampleStart,
-                endPoint      = instrument.sampleEnd,
-                reverse       = instrument.reverse,
-                loopMode      = loopModeInt,
-                loopStart     = instrument.loopStart,
-                loopEnd       = instrument.loopEnd,
-                drive         = instrument.drive,
-                crush         = instrument.crush,
-                downsample    = instrument.downsample,
-                filterType    = filterTypeInt,
-                filterCut     = instrument.filterCut,
-                filterRes     = instrument.filterRes
-            )
-
-            audioEngine.pushInstrumentModulation(instrument, project.tempo)
-            audioEngine.pushInstrumentEqAndSends(instrument)
-        }
     }
 
     private fun generateFilename(projectName: String, outputDir: String): String {

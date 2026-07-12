@@ -13,6 +13,7 @@
 #include <cstring>
 #include <functional>
 #include <mutex>
+#include <string>
 #include <utility>
 #include <vector>
 #include <algorithm>
@@ -63,6 +64,29 @@ public:
     void clearAllSamples();
     // Free all buffers for a single slot (used when a slot is repurposed, e.g. sampler → SoundFont).
     void clearSample(int id);
+
+    // ===================================
+    // SOUNDFONT BANK — SF2 files → the shared tsf handles the SF voices render through
+    // ===================================
+    // Loading a SoundFont is engine work, not platform work: it opens a file, parses it, and owns the
+    // handle every SF voice reads. It lived in jni-bridge.cpp until S6b, which put it out of reach of
+    // any non-Android build — tools/ptrender could not render an SF2 project, and the SDL shell would
+    // have had to reimplement the slot cache. The JNI functions are now thin forwards to these.
+    //
+    // MAX_SOUNDFONTS slots, shared by file: an already-loaded path de-duplicates onto its existing slot
+    // (instruments sharing a handle play on distinct MIDI channels and apply their ADSR override
+    // per-note, so their state stays isolated), and one more distinct SF2 than there are slots evicts
+    // the least-recently-used one.
+    int  loadSoundfont(int instrumentId, const char* path);   // → slot index, or -1 on failure
+    void unloadSoundfont(int slot);
+    void clearAllSoundfonts();
+
+    // Preset metadata for the UI. Each takes the slot mutex before touching the handle: a concurrent
+    // load can evict and tsf_close a slot at any moment, and TSF's getters dereference without a null
+    // check. Empty slot → "---" / false / 0.
+    std::string getSoundfontPresetName(int slot, int bank, int preset);
+    bool getSoundfontPresetAt(int slot, int index, int* bank, int* presetNumber);
+    int  getSoundfontPresetCount(int slot);
 
     void setInstrumentParams(int instrumentId, int start, int end, bool rev, int loop, int loopSt, int loopEn,
                              int drv, int crsh, int dwn, int fType, int fCut, int fRes);
@@ -368,6 +392,18 @@ public:
     // Reset frame counter (for starting a new render)
     void resetFrameCounter();
 
+    // Clear every effect chain's INTERNAL STATE: the reverb's delay lines and its random-lineseg LCG,
+    // the delay buffers, and the OTT/DUST/limiter envelopes. stopAll() stops voices but leaves all of
+    // this running, so before S6b a render began inside the previous render's reverb tail — and since
+    // ReverbSc's LCG kept walking, the same song rendered differently every time. A render must be a
+    // function of the project, not of playback history.
+    //
+    // ⚠️ This is NOT a state-only reset: the module reset()s also re-apply their factory DEFAULTS
+    // (reverb feedback 0x60, delay 500 ms, master EQ bypassed). The caller MUST re-push the project's
+    // FX afterwards or it silently renders with default reverb/delay — songcore::prepare_render does
+    // exactly that, via engine_setup.h. Live playback never calls this.
+    void resetEffectState();
+
     // Get current frame counter
     int64_t getFrameCounter();
 
@@ -434,6 +470,10 @@ private:
     std::unique_lock<std::mutex> beginSampleEdit(int id);
     // Apply a global EQ preset (0-127, <0 = bypass) to a live voice's inline EQ (EQN effect).
     void applyEqPresetToChain(InstrumentChain& chain, int slot);
+    // Release one SoundFont slot. Order matters — detach the per-track voices FIRST (so the render
+    // pass stops touching the slot), then close the handle under the slot mutex. The only place a
+    // slot is ever freed: LRU eviction, unloadSoundfont and clearAllSoundfonts all route through it.
+    void freeSoundfontSlot(int slot);
     InstrumentParams instrumentParams[256];
     InstrumentModSlot instrumentModSlots[256][4]; // [sampleId][slotIndex]
     // Per-instrument SF2 ADSR envelope override: stored keyed by instrument id

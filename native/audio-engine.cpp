@@ -11,7 +11,10 @@
 #include <cstdint>
 #include <cstring>
 #include <new>
-#if defined(__SSE2__)
+// MSVC defines neither __SSE2__ nor __x86_64__ — it signals x86/x64 with _M_X64 / _M_IX86 — so the
+// host build would silently lose denormal protection without these arms. SSE2 is baseline on x64.
+#if defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86) && _M_IX86_FP >= 2)
+#define PT_HAS_SSE_DENORMAL_CTRL 1
 #include <pmmintrin.h>  // FTZ/DAZ MXCSR macros for setFlushToZeroForCurrentThread
 #endif
 
@@ -590,9 +593,10 @@ static void setFlushToZeroForCurrentThread() {
     asm volatile("vmrs %0, fpscr" : "=r"(fpscr));
     fpscr |= (1U << 24);  // FZ bit
     asm volatile("vmsr fpscr, %0" : : "r"(fpscr));
-#elif defined(__SSE2__)
-    // x86/x86_64 — the emulator ABIs today, desktop Linux later. FTZ (outputs) + DAZ
-    // (inputs) via MXCSR; both Android x86 ABIs and any x86_64 desktop have SSE3+.
+#elif defined(PT_HAS_SSE_DENORMAL_CTRL)
+    // x86/x86_64 — the emulator ABIs today, desktop Linux/Windows hosts now (ptrender), desktop
+    // Linux later. FTZ (outputs) + DAZ (inputs) via MXCSR; both Android x86 ABIs and any x86_64
+    // desktop have SSE3+.
     _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
     _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
 #endif
@@ -1861,28 +1865,27 @@ void AudioEngine::scheduleNote(int64_t targetFrame, int sampleId, int trackId,
                                float pslInitialOffset, float pslDuration,
                                float pbnRate, float vibratoSpeed, float vibratoDepth,
                                int tableStartRow) {
-    ScheduledNote note = {
-            .targetFrame = targetFrame,
-            .sampleId = sampleId,
-            .trackId = trackId,
-            .frequency = frequency,
-            .baseFrequency = baseFrequency,
-            .volume = volume,
-            .phraseVolume = phraseVolume,
-            .pan = pan,
-            .startPointOverride = startPointOverride,
-            .endPointOverride = endPointOverride,
-            .tableId = tableId,
-            .tableTicRate = tableTicRate,
-            .noteOctave = noteOctave,
-            .notePitch = notePitch,
-            .pslInitialOffset = pslInitialOffset,
-            .pslDuration = pslDuration,
-            .pbnRate = pbnRate,
-            .vibratoSpeed = vibratoSpeed,
-            .vibratoDepth = vibratoDepth,
-            .tableStartRow = tableStartRow
-    };
+    ScheduledNote note{};
+    note.targetFrame        = targetFrame;
+    note.sampleId           = sampleId;
+    note.trackId            = trackId;
+    note.frequency          = frequency;
+    note.baseFrequency      = baseFrequency;
+    note.volume             = volume;
+    note.phraseVolume       = phraseVolume;
+    note.pan                = pan;
+    note.startPointOverride = startPointOverride;
+    note.endPointOverride   = endPointOverride;
+    note.tableId            = tableId;
+    note.tableTicRate       = tableTicRate;
+    note.noteOctave         = noteOctave;
+    note.notePitch          = notePitch;
+    note.pslInitialOffset   = pslInitialOffset;
+    note.pslDuration        = pslDuration;
+    note.pbnRate            = pbnRate;
+    note.vibratoSpeed       = vibratoSpeed;
+    note.vibratoDepth       = vibratoDepth;
+    note.tableStartRow      = tableStartRow;
     noteQueue.schedule(note);
 }
 
@@ -1931,20 +1934,128 @@ void AudioEngine::setSoundfontEnvelopeOverride(int instrumentId, int atk, int de
     o.atk = atk; o.dec = dec; o.sus = sus; o.rel = rel;
 }
 
+// ===================================
+// SOUNDFONT BANK
+// ===================================
+// Moved here from jni-bridge.cpp in S6b. Nothing about parsing an SF2 and caching its handle is
+// platform-specific, and leaving it behind the JNI wall meant no host build could load one — which
+// blocked tools/ptrender and would have forced the SDL shell to write a second slot cache. See the
+// header for the de-dup / LRU contract.
+
+void AudioEngine::freeSoundfontSlot(int slot) {
+    if (slot < 0 || slot >= MAX_SOUNDFONTS) return;
+    for (int t = 0; t < SF_VOICE_COUNT; t++) {
+        if (sfVoices[t].sfSlot == slot) sfVoices[t].detach();
+    }
+    std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
+    if (soundfonts[slot].handle) {
+        tsf_close(soundfonts[slot].handle);
+        soundfonts[slot].handle = nullptr;
+    }
+    soundfonts[slot].instrumentId = -1;
+    soundfonts[slot].filePath.clear();
+}
+
+int AudioEngine::loadSoundfont(int instrumentId, const char* path) {
+    if (!path) return -1;
+
+    // De-dup: this exact file already loaded reuses its slot instead of a second copy. Multiple
+    // instruments share one handle — they play on distinct MIDI channels (= tracks) and apply their
+    // ADSR override per-note in triggerNote, so per-instrument state stays isolated. Frees stay
+    // reference-guarded (setInstrumentType / clearAllSoundfonts).
+    for (int i = 0; i < MAX_SOUNDFONTS; i++) {
+        if (soundfonts[i].handle != nullptr && soundfonts[i].filePath == path) {
+            soundfonts[i].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);
+            LOGD("🎹 Reusing soundfont slot %d (de-dup): %s", i, path);
+            return i;
+        }
+    }
+
+    // Find a free slot; if none, evict the genuinely least-recently-used one (smallest use tick), not
+    // the smallest instrumentId — that could evict the SoundFont playing right now.
+    int slot = -1;
+    for (int i = 0; i < MAX_SOUNDFONTS; i++) {
+        if (soundfonts[i].handle == nullptr) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == -1) {
+        uint64_t oldest = UINT64_MAX;
+        slot = 0;
+        for (int i = 0; i < MAX_SOUNDFONTS; i++) {
+            uint64_t lu = soundfonts[i].lastUsed.load(std::memory_order_relaxed);
+            if (lu < oldest) { oldest = lu; slot = i; }
+        }
+        freeSoundfontSlot(slot);
+        LOGD("🎹 Evicted soundfont slot %d to make room for instrumentId %d", slot, instrumentId);
+    }
+
+    // Parse the SF2 into a single master TSF handle. All tracks share it via MIDI channels — no
+    // per-track clones, which would cost 8× the file size in RAM and stall the audio callback.
+    std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
+    soundfonts[slot].handle = tsf_load_filename(path);
+    if (!soundfonts[slot].handle) {
+        LOGE("❌ Failed to parse soundfont: %s", path);
+        return -1;
+    }
+    tsf_set_output(soundfonts[slot].handle, TSF_STEREO_INTERLEAVED, getSampleRate(), 0.0f);
+    soundfonts[slot].instrumentId = instrumentId;
+    soundfonts[slot].filePath = path;
+    soundfonts[slot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // freshly loaded = newest
+    LOGD("🎹 Loaded soundfont slot %d: %s (instrumentId=%d)", slot, path, instrumentId);
+    return slot;
+}
+
+void AudioEngine::unloadSoundfont(int slot) {
+    if (slot < 0 || slot >= MAX_SOUNDFONTS) return;
+    freeSoundfontSlot(slot);
+    LOGD("🎹 Unloaded soundfont slot %d", slot);
+}
+
+void AudioEngine::clearAllSoundfonts() {
+    // Free EVERY slot — called when the project changes (NEW / load). The cache otherwise only
+    // reclaims a slot on LRU eviction (one more distinct SF2 than there are slots), so a loaded SF2's
+    // float samples (≈2× its file size) would stay resident across NEW/load.
+    for (int s = 0; s < MAX_SOUNDFONTS; s++) freeSoundfontSlot(s);
+    LOGD("🎹 Cleared all soundfont slots");
+}
+
+std::string AudioEngine::getSoundfontPresetName(int slot, int bank, int preset) {
+    if (slot < 0 || slot >= MAX_SOUNDFONTS) return "---";
+    std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
+    tsf* h = soundfonts[slot].handle;
+    if (!h) return "---";
+    const char* name = tsf_bank_get_presetname(h, bank, preset);
+    return name ? std::string(name) : std::string("---");
+}
+
+bool AudioEngine::getSoundfontPresetAt(int slot, int index, int* bank, int* presetNumber) {
+    if (slot < 0 || slot >= MAX_SOUNDFONTS) return false;
+    std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
+    tsf* h = soundfonts[slot].handle;
+    return h && tsf_get_preset_at(h, index, bank, presetNumber);
+}
+
+int AudioEngine::getSoundfontPresetCount(int slot) {
+    if (slot < 0 || slot >= MAX_SOUNDFONTS) return 0;
+    std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
+    tsf* h = soundfonts[slot].handle;
+    return h ? tsf_get_presetcount(h) : 0;
+}
+
 void AudioEngine::scheduleKill(int64_t targetFrame, int trackId) {
-    ScheduledKill kill = {
-            .targetFrame = targetFrame,
-            .trackId = trackId
-    };
+    ScheduledKill kill{};
+    kill.targetFrame = targetFrame;
+    kill.trackId     = trackId;
     killQueue.schedule(kill);
 }
 
 void AudioEngine::scheduleNoteOff(int64_t targetFrame, int trackId) {
-    ScheduledKill kill = {
-            .targetFrame = targetFrame,
-            .trackId = trackId,
-            .softKill = true
-    };
+    ScheduledKill kill{};
+    kill.targetFrame = targetFrame;
+    kill.trackId     = trackId;
+    kill.softKill    = true;
     killQueue.schedule(kill);
 }
 
@@ -2410,6 +2521,15 @@ void AudioEngine::resetFrameCounter() {
     globalFrameCounter.store(0, std::memory_order_relaxed);
     // Fresh randomness per render — see noteSeedEntropy in the header.
     noteSeedEntropy = ((uint32_t)nowMs() * 2654435761u) | 1u;
+}
+
+void AudioEngine::resetEffectState() {
+    const float sr = (float)getSampleRate();
+    reverbSend.reset(sr);   // zeroes the delay lines AND reseeds ReverbSc's random-lineseg LCG
+    delaySend.reset(sr);    // zeroes both delay lines
+    masterChain.reset(sr);  // OTT bands, DUST, limiter envelope, master EQ
+    // Everything above is now at FACTORY DEFAULTS, not at the project's values — the caller re-pushes.
+    LOGD("🎬 Effect chains reset to clean state (caller must re-push the project's FX)");
 }
 
 int64_t AudioEngine::getFrameCounter() {

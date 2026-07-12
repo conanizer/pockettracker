@@ -340,7 +340,9 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     }
 
     val renderController = remember {
-        RenderController(audioEngine, playbackController, fileSystem, logger)
+        // songcore owns the render itself now (engine prep, the chunk loop, the decay tail, the WAV
+        // writer — native/songcore/render.h); RenderController only decides what to render and where.
+        RenderController(audioEngine, playbackController, songcore, fileSystem, logger)
     }
 
     val _isRendering = remember { mutableStateOf(false) }

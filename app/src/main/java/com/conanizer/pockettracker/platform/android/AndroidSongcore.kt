@@ -46,6 +46,18 @@ class AndroidSongcore : ISongcore {
     override fun scheduleSongRange(startRow: Int, endRow: Int, trackFilter: IntArray?): Long =
         native_scheduleSongRange(startRow, endRow, trackFilter)
 
+    override fun prepareRender(startRow: Int, endRow: Int) = native_prepareRender(startRow, endRow)
+
+    override fun renderToWav(
+        path: String,
+        songFrames: Long,
+        stemsMode: Int,
+        applyMasterBus: Boolean,
+        progress: ISongcore.RenderProgress?
+    ): Long = native_renderToWav(path, songFrames, stemsMode, applyMasterBus, progress)
+
+    override fun finishRender() = native_finishRender()
+
     override fun notifyDataChanged() = native_notifyDataChanged()
 
     override fun getPlayheads(): IntArray = native_getPlayheads()
@@ -70,6 +82,20 @@ class AndroidSongcore : ISongcore {
     private external fun native_isPlaying(): Boolean
     private external fun native_getTrackMask(): Int
     private external fun native_scheduleSongRange(startRow: Int, endRow: Int, trackFilter: IntArray?): Long
+
+    private external fun native_prepareRender(startRow: Int, endRow: Int)
+
+    /** [progress] is called back synchronously on THIS thread, once per rendered chunk. */
+    private external fun native_renderToWav(
+        path: String,
+        songFrames: Long,
+        stemsMode: Int,
+        applyMasterBus: Boolean,
+        progress: ISongcore.RenderProgress?
+    ): Long
+
+    private external fun native_finishRender()
+
     private external fun native_notifyDataChanged()
     private external fun native_getPlayheads(): IntArray
     private external fun native_setTrace(enabled: Boolean, path: String)

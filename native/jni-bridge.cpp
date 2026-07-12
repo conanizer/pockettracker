@@ -1,12 +1,13 @@
 // jni-bridge.cpp — JNI EXPORT functions
-// All JNI entry points from Kotlin/Java into the AudioEngine.
-// TSF_IMPLEMENTATION lives in soundfont-voice.cpp; tsf* is opaque here (no struct member access).
+// All JNI entry points from Kotlin/Java into the AudioEngine. Marshalling only: every function here
+// converts arguments and forwards. Nothing that decides how the app sounds — or that a non-Android
+// build would also need — belongs in this file; that is what made the SoundFont bank a portability
+// bug until S6b moved it into the engine.
 #include <jni.h>
 #include <climits>
 #include <vector>
 #include "audio-engine.h"
 #include "oboe-audio-engine.h"  // Android (Oboe) backend that owns the stream + drives the core
-#include "vendor/tsf/tsf.h"  // API declarations only (tsf_close, tsf_load_filename, etc.)
 
 // JNI requires env and thiz in every function signature, but most thin wrappers don't use them.
 #pragma clang diagnostic push
@@ -694,91 +695,24 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setTe
 // ===================================
 // SOUNDFONT JNI FUNCTIONS
 // ===================================
-
-// Free one SoundFont slot. Order matters: detach the per-track voices first (so the render
-// pass stops touching the slot), THEN close the handle under the slot mutex and clear its
-// metadata. Shared by LRU eviction, unloadSoundfont, and clearAllSoundfonts — keep it the
-// only place that frees a slot.
-static void freeSoundfontSlot(int slot) {
-    for (int t = 0; t < SF_VOICE_COUNT; t++) {
-        if (sfVoices[t].sfSlot == slot) sfVoices[t].detach();
-    }
-    std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
-    if (soundfonts[slot].handle) {
-        tsf_close(soundfonts[slot].handle);
-        soundfonts[slot].handle = nullptr;
-    }
-    soundfonts[slot].instrumentId = -1;
-    soundfonts[slot].filePath.clear();
-}
+// Marshalling only. The bank itself — slot de-dup, LRU eviction, tsf_load/close, the preset getters
+// and their locking — is AudioEngine's (audio-engine.cpp, "SOUNDFONT BANK"), because none of it is
+// platform-specific and a host build needs it too (tools/ptrender, the SDL shell).
 
 JNIEXPORT jint JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1loadSoundfont(
         JNIEnv *env, jobject thiz, jint instrumentId, jstring path) {
+    if (!engine) return -1;
     const char* pathStr = env->GetStringUTFChars(path, nullptr);
     if (!pathStr) return -1;
-
-    // De-dup: if this exact file is already loaded, reuse its slot instead of loading a 2nd copy
-    // Multiple instruments share one handle — they play on distinct MIDI channels
-    // (= tracks) and apply their ADSR override per-note in triggerNote, so per-instrument state stays
-    // isolated. Frees stay reference-guarded (setInstrumentType / clearAllSoundfonts).
-    for (int i = 0; i < MAX_SOUNDFONTS; i++) {
-        if (soundfonts[i].handle != nullptr && soundfonts[i].filePath == pathStr) {
-            soundfonts[i].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);
-            LOGD("🎹 Reusing soundfont slot %d (de-dup): %s", i, pathStr);
-            env->ReleaseStringUTFChars(path, pathStr);
-            return i;
-        }
-    }
-
-    // Find a free slot; if none, evict the least-recently-used one.
-    int slot = -1;
-    for (int i = 0; i < MAX_SOUNDFONTS; i++) {
-        if (soundfonts[i].handle == nullptr) {
-            slot = i;
-            break;
-        }
-    }
-    if (slot == -1) {
-        // Evict the genuinely least-recently-used slot (smallest use tick), not the one with the
-        // smallest instrumentId, which could evict the SoundFont playing right now.
-        uint64_t oldest = UINT64_MAX;
-        slot = 0;
-        for (int i = 0; i < MAX_SOUNDFONTS; i++) {
-            uint64_t lu = soundfonts[i].lastUsed.load(std::memory_order_relaxed);
-            if (lu < oldest) { oldest = lu; slot = i; }
-        }
-        freeSoundfontSlot(slot);
-        LOGD("🎹 Evicted soundfont slot %d to make room for instrumentId %d", slot, (int)instrumentId);
-    }
-
-    // Load and parse the SF2 file into a single master TSF handle.
-    // All 8 tracks share this handle via MIDI channels — no per-track clones needed.
-    {
-        std::lock_guard<std::mutex> sfLock(soundfonts[slot].mutex);
-        soundfonts[slot].handle = tsf_load_filename(pathStr);
-        if (!soundfonts[slot].handle) {
-            LOGE("❌ Failed to parse soundfont: %s", pathStr);
-            env->ReleaseStringUTFChars(path, pathStr);
-            return -1;
-        }
-        int sampleRate = engine ? engine->getSampleRate() : 44100;
-        tsf_set_output(soundfonts[slot].handle, TSF_STEREO_INTERLEAVED, sampleRate, 0.0f);
-        soundfonts[slot].instrumentId = (int)instrumentId;
-        soundfonts[slot].filePath = pathStr;
-        soundfonts[slot].lastUsed.store(nextSfUseTick(), std::memory_order_relaxed);  // freshly loaded = newest
-        LOGD("🎹 Loaded soundfont slot %d: %s (instrumentId=%d)", slot, pathStr, (int)instrumentId);
-    }
-
+    const jint slot = (jint)engine->loadSoundfont((int)instrumentId, pathStr);
     env->ReleaseStringUTFChars(path, pathStr);
-    LOGD("🎹 Loaded soundfont slot %d for instrumentId %d", slot, (int)instrumentId);
     return slot;
 }
 
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1setSoundfontPreset(
         JNIEnv *env, jobject thiz, jint sfSlot, jint bank, jint preset) {
-    if (sfSlot < 0 || sfSlot >= MAX_SOUNDFONTS || !soundfonts[sfSlot].handle) return;
     // Preset is set per-note via tsf_channel_set_presetnumber; this is a no-op stored in Kotlin.
     LOGD("🎹 setSoundfontPreset slot=%d bank=%d preset=%d (applied per-note)", (int)sfSlot, (int)bank, (int)preset);
 }
@@ -829,82 +763,54 @@ Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1sched
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1unloadSoundfont(
         JNIEnv *env, jobject thiz, jint sfSlot) {
-    if (sfSlot < 0 || sfSlot >= MAX_SOUNDFONTS) return;
-    freeSoundfontSlot((int)sfSlot);
-    LOGD("🎹 Unloaded soundfont slot %d", (int)sfSlot);
+    if (engine) engine->unloadSoundfont((int)sfSlot);
 }
 
 JNIEXPORT void JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1clearAllSoundfonts(
         JNIEnv *env, jobject thiz) {
-    // Free EVERY soundfont slot — called when the project changes (NEW / load). The 4-slot cache
-    // otherwise only reclaims a slot on LRU eviction (a 5th distinct SF2), so a loaded SF2's float
-    // samples (≈2× its file size) stay resident across NEW/load.
-    for (int s = 0; s < MAX_SOUNDFONTS; s++) freeSoundfontSlot(s);
-    LOGD("🎹 Cleared all soundfont slots");
+    if (engine) engine->clearAllSoundfonts();
 }
-
-// All four preset getters read the handle INSIDE the slot mutex: a concurrent loadSoundfont
-// eviction or unloadSoundfont can tsf_close + null it at any moment, and TSF's getters
-// dereference without a null check. Same discipline as the audio side (soundfont-voice.cpp).
 
 JNIEXPORT jstring JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSoundfontPresetName(
         JNIEnv *env, jobject thiz, jint sfSlot, jint bank, jint preset) {
-    if (sfSlot < 0 || sfSlot >= MAX_SOUNDFONTS) return env->NewStringUTF("---");
-    std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
-    tsf* h = soundfonts[sfSlot].handle;
-    if (!h) return env->NewStringUTF("---");
-    const char* name = tsf_bank_get_presetname(h, (int)bank, (int)preset);
-    return env->NewStringUTF(name ? name : "---");
+    if (!engine) return env->NewStringUTF("---");
+    return env->NewStringUTF(engine->getSoundfontPresetName((int)sfSlot, (int)bank, (int)preset).c_str());
+}
+
+// [bank, preset_number] of one preset, or [-1, -1] if the slot is empty / the index is out of range.
+static jintArray sfPresetPair(JNIEnv* env, int sfSlot, int index) {
+    jintArray result = env->NewIntArray(2);
+    jint values[2] = {-1, -1};
+    int bank, presetNum;
+    if (engine && engine->getSoundfontPresetAt(sfSlot, index, &bank, &presetNum)) {
+        values[0] = (jint)bank;
+        values[1] = (jint)presetNum;
+    }
+    env->SetIntArrayRegion(result, 0, 2, values);
+    return result;
 }
 
 // Returns [bank, preset_number] of the first preset in the SF2, or [-1, -1] if none loaded.
 JNIEXPORT jintArray JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSoundfontFirstBankPreset(
         JNIEnv *env, jobject thiz, jint sfSlot) {
-    jintArray result = env->NewIntArray(2);
-    jint values[2] = {-1, -1};
-    if (sfSlot >= 0 && sfSlot < MAX_SOUNDFONTS) {
-        std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
-        tsf* h = soundfonts[sfSlot].handle;
-        int bank, preset_num;
-        if (h && tsf_get_preset_at(h, 0, &bank, &preset_num)) {
-            values[0] = (jint)bank;
-            values[1] = (jint)preset_num;
-        }
-    }
-    env->SetIntArrayRegion(result, 0, 2, values);
-    return result;
+    return sfPresetPair(env, (int)sfSlot, 0);
 }
 
 // Returns the total number of presets in the SF2 file, or 0 if not loaded.
 JNIEXPORT jint JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSoundfontPresetCount(
         JNIEnv *env, jobject thiz, jint sfSlot) {
-    if (sfSlot < 0 || sfSlot >= MAX_SOUNDFONTS) return 0;
-    std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
-    tsf* h = soundfonts[sfSlot].handle;
-    return h ? (jint)tsf_get_presetcount(h) : 0;
+    return engine ? (jint)engine->getSoundfontPresetCount((int)sfSlot) : 0;
 }
 
 // Returns [bank, preset_number] of the preset at the given index in the SF2, or [-1, -1] on error.
 JNIEXPORT jintArray JNICALL
 Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1getSoundfontPresetAt(
         JNIEnv *env, jobject thiz, jint sfSlot, jint index) {
-    jintArray result = env->NewIntArray(2);
-    jint values[2] = {-1, -1};
-    if (sfSlot >= 0 && sfSlot < MAX_SOUNDFONTS) {
-        std::lock_guard<std::mutex> sfLock(soundfonts[sfSlot].mutex);
-        tsf* h = soundfonts[sfSlot].handle;
-        int bank, preset_num;
-        if (h && tsf_get_preset_at(h, (int)index, &bank, &preset_num)) {
-            values[0] = (jint)bank;
-            values[1] = (jint)preset_num;
-        }
-    }
-    env->SetIntArrayRegion(result, 0, 2, values);
-    return result;
+    return sfPresetPair(env, (int)sfSlot, (int)index);
 }
 
 // ============================================================

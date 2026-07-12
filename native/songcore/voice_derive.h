@@ -262,6 +262,38 @@ inline ModPushes derive_mod_pushes(const Instrument& ins, int tempo, int sampleR
     return out;
 }
 
+// The two pushes that must reach the engine BEFORE a voice triggers: the modulation slots and the
+// EQ/send routing (AudioEngine.pushInstrumentModulation + pushInstrumentEqAndSends). A template over
+// the engine, like plan_note_on, so tools/ptvoice golden-checks the calls it makes.
+//
+// Both the note path (below) and the project→engine setup (engine_setup.h) push these — Kotlin does
+// too, from scheduleNote and from RenderController.setupInstrumentParams — so they share one
+// implementation here rather than two that could drift.
+template <typename Engine>
+void push_instrument_mod_eq_sends(Engine& engine, const Instrument& ins, int tempo, int sampleRate) {
+    const ModPushes m = derive_mod_pushes(ins, tempo, sampleRate);
+    for (const ModPush& p : m.slots) {
+        engine.setInstrumentModulation(p.sampleId, p.slotIndex, p.type, p.dest, p.amount,
+                                       p.attackSamples, p.holdSamples, p.decaySamples,
+                                       p.sustainLevel, p.lfoHz, p.oscShape,
+                                       p.releaseSamples, p.lfoTrigMode);
+    }
+    if (!m.anyActive) engine.clearInstrumentModulation(ins.sampleId);
+    engine.setInstrumentEqSlot(ins.sampleId, ins.eqSlot);
+    engine.setInstrumentSendLevels(ins.sampleId, ins.reverbSend, ins.delaySend);
+}
+
+// AudioEngine.updateInstrumentPlaybackParams — the sample-playback window, loop, drive/crush/
+// downsample and filter. (Kotlin's applySoundfontFilterOverrides is this same call under another
+// name, which is why the SF and sampler setup paths push identical params.)
+template <typename Engine>
+void push_instrument_playback_params(Engine& engine, const Instrument& ins) {
+    engine.setInstrumentParams(ins.sampleId, ins.sampleStart, ins.sampleEnd, ins.reverse,
+                               loop_mode_code(ins.loopMode), ins.loopStart, ins.loopEnd,
+                               ins.drive, ins.crush, ins.downsample,
+                               filter_type_code(ins.filterType), ins.filterCut, ins.filterRes);
+}
+
 // ─── AudioEngine.scheduleNote — the sampler path ─────────────────────────────────────────────────
 // `sampleLength` is engine_->getSampleLength(sampleId) (slice windows need it); `sampleRateRatio` is
 // deviceRate/fileRate for that sample. Both are pushed/read by the caller, keeping this pure.
@@ -434,18 +466,7 @@ void plan_note_on(Engine& engine, const Event& ev, const Project& project, const
     engine.setTempo(tempo);
 
     // Modulation / EQ / sends must reach the engine BEFORE the note triggers.
-    auto push_instrument_state = [&]() {
-        const ModPushes m = derive_mod_pushes(ins, tempo, sampleRate);
-        for (const ModPush& p : m.slots) {
-            engine.setInstrumentModulation(p.sampleId, p.slotIndex, p.type, p.dest, p.amount,
-                                           p.attackSamples, p.holdSamples, p.decaySamples,
-                                           p.sustainLevel, p.lfoHz, p.oscShape,
-                                           p.releaseSamples, p.lfoTrigMode);
-        }
-        if (!m.anyActive) engine.clearInstrumentModulation(ins.sampleId);
-        engine.setInstrumentEqSlot(ins.sampleId, ins.eqSlot);
-        engine.setInstrumentSendLevels(ins.sampleId, ins.reverbSend, ins.delaySend);
-    };
+    auto push_instrument_state = [&]() { push_instrument_mod_eq_sends(engine, ins, tempo, sampleRate); };
 
     // Lazy table push, exactly like Kotlin's `loadedTables` — but built from songcore's own project
     // copy, so no table data has to cross the JNI boundary.
@@ -484,10 +505,7 @@ void plan_note_on(Engine& engine, const Event& ev, const Project& project, const
         // sharing one de-duplicated SF2 handle must stay isolated.
         const SFOverrides& ov = ins.sfOverrides;
         engine.setSoundfontEnvelopeOverride(ins.id, ov.ampAttack, ov.ampDecay, ov.ampSustain, ov.ampRelease);
-        engine.setInstrumentParams(ins.sampleId, ins.sampleStart, ins.sampleEnd, ins.reverse,
-                                   loop_mode_code(ins.loopMode), ins.loopStart, ins.loopEnd,
-                                   ins.drive, ins.crush, ins.downsample,
-                                   filter_type_code(ins.filterType), ins.filterCut, ins.filterRes);
+        push_instrument_playback_params(engine, ins);
 
         ensure_table_loaded(a.tableId);
         engine.requestResume();

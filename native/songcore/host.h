@@ -18,9 +18,12 @@
 // calls it makes (scheduleNote…, clearScheduledNotesFrom) are the same ones the Kotlin sequencer made
 // from that same thread — they land in the engine's lock-free queues, which is the existing contract.
 //
-// What is NOT here: sample/soundfont/table loading and instrument param pushes stay on the app's
-// existing path (they are file-system and UI-driven, not sequencing). songcore reads the project it
-// was handed and emits events; the consumer (S5.2) turns those into engine calls.
+// S6b closed the last gap: project→engine setup (engine_setup.h) and the offline render (render.h)
+// are C++ too, so this class can now take a project from JSON all the way to a WAV with no app code
+// at all — which is what tools/ptrender does, and what the SDL shell will do. The one thing still
+// outside it is Android's *media* loading (samples/SF2 from disk): the Kotlin loader also drives
+// MediaCodec for m4a and reads WAV cue points, so it stays for now and pushes its results down via
+// push_routing(). load_media() is the C++ equivalent, used by every non-Android caller.
 
 #include <algorithm>
 #include <cstdint>
@@ -28,10 +31,14 @@
 #include <set>
 #include <string>
 
+#include <functional>
+
 #include "../audio-engine.h"
 #include "engine_consumer.h"
+#include "engine_setup.h"
 #include "model.h"
 #include "project_io.h"
+#include "render.h"
 #include "router.h"
 #include "scheduler.h"
 #include "sha1.h"
@@ -135,6 +142,64 @@ class SongcoreHost {
         int64_t frames = seq_.scheduleSongRowRange(startRow, endRow, trackFilter);
         flush_trace();
         return frames;
+    }
+
+    // ── ↓ the render itself (render.h) ───────────────────────────────────────────────────────────
+    // Three verbs rather than one, because the caller may schedule with a DIFFERENT sequencer:
+    // Android's RenderController must still be able to put the KOTLIN one between prepare and render
+    // — that is exactly what the ENG=KT vs ENG=C++ byte-identical WAV check compares, and it stays
+    // meaningful only while the sequencer is the sole difference between the two runs.
+    // A caller with no other sequencer (tools/ptrender, the SDL shell) uses render_song_range_to_wav.
+    void prepare_render(int startRow, int endRow) {
+        if (!engine_) return;
+        songcore::prepare_render(*engine_, project_, startRow, endRow);
+        consumer_.clear_track_mask();   // Kotlin clears phraseTrackMask in clearScheduledNotes()
+        sync_clock();                   // the frame counter is back at 0 — re-read it
+    }
+
+    RenderStats render_to_wav(const std::string& path, int64_t songFrames,
+                              int stemsMode, bool applyMasterBus,
+                              const std::function<void(float)>& progress = nullptr) {
+        if (!engine_) return RenderStats();
+        RenderOptions opts;
+        opts.stemsMode      = stemsMode;
+        opts.applyMasterBus = applyMasterBus;
+        return songcore::render_to_wav(*engine_, project_, songFrames, path, opts, progress);
+    }
+
+    void finish_render() {
+        if (!engine_) return;
+        songcore::finish_render(*engine_, project_);
+        consumer_.clear_track_mask();
+    }
+
+    // prepare → schedule → render → finish, with songcore's own sequencer in the middle.
+    RenderStats render_song_range_to_wav(int startRow, int endRow, const std::string& path,
+                                         const RenderOptions& opts = RenderOptions(),
+                                         const std::function<void(float)>& progress = nullptr) {
+        if (!engine_) return RenderStats();
+        prepare_render(startRow, endRow);
+        const int64_t songFrames = schedule_song_range(startRow, endRow, nullptr);
+        RenderStats stats = render_to_wav(path, songFrames, opts.stemsMode, opts.applyMasterBus, progress);
+        finish_render();
+        return stats;
+    }
+
+    // The whole song, bounds and all — what a host renderer actually wants to call.
+    RenderStats render_song_to_wav(const std::string& path,
+                                   const RenderOptions& opts = RenderOptions(),
+                                   const std::function<void(float)>& progress = nullptr) {
+        const SongBounds b = find_song_bounds(project_);
+        if (b.empty()) return RenderStats();
+        return render_song_range_to_wav(b.startRow, b.endRow, path, opts, progress);
+    }
+
+    // Load the project's samples and SoundFonts into the engine, and learn the Routing from them
+    // (engine_setup.h). Android does this in Kotlin — its loader also drives MediaCodec for m4a and
+    // reads WAV cue points — and pushes the result in via push_routing() instead.
+    MediaLoadResult load_media(const std::string& baseDir) {
+        if (!engine_) return MediaLoadResult();
+        return load_project_media(*engine_, project_, baseDir, routing_);
     }
 
     // ── ↑ live-edit reaction ─────────────────────────────────────────────────────────────────────

@@ -61,6 +61,45 @@ interface ISongcore {
      */
     fun scheduleSongRange(startRow: Int, endRow: Int, trackFilter: IntArray?): Long
 
+    // ── the render (native/songcore/render.h) ────────────────────────────────────────────────────
+    // Three verbs, not one, because the scheduling step between them may be the KOTLIN sequencer:
+    // that is precisely what the ENG=KT vs ENG=C++ byte-identical WAV check compares, and it only
+    // stays meaningful while everything *around* the sequencer is the same code.
+
+    /** Fraction is 0..1 across the song; the decay tail reports 1.0 (its length isn't known ahead). */
+    fun interface RenderProgress {
+        fun onProgress(fraction: Float)
+    }
+
+    /**
+     * Ready the engine for an offline render of rows [startRow]..[endRow]: silence the live stream,
+     * stop voices, clear the queue, reset the frame counter, **wipe the effect chains' state**, and
+     * re-push the whole project. The wipe + re-push is what makes a render a pure function of the
+     * project instead of inheriting the previous render's reverb tail and delay buffer.
+     * Push the project first — songcore renders the copy it holds.
+     */
+    fun prepareRender(startRow: Int, endRow: Int)
+
+    /**
+     * Render [songFrames] (what the scheduler returned) plus the decay tail into a 16-bit stereo WAV
+     * at [path], in chunks. The tail is the fix for renders being cut dead at the last step boundary:
+     * it keeps going until the output falls below −90 dBFS, capped at 30 s.
+     *
+     * @param stemsMode 0 = full mix, 1-8 = track stem, 9 = reverb return, 10 = delay return.
+     * @param applyMasterBus false for stems — they bypass OTT/DUST/master-EQ by design.
+     * @return frames actually written (song + tail), or 0 if the render failed.
+     */
+    fun renderToWav(
+        path: String,
+        songFrames: Long,
+        stemsMode: Int = 0,
+        applyMasterBus: Boolean = true,
+        progress: RenderProgress? = null
+    ): Long
+
+    /** Put the engine back for live playback: stems off, voices stopped, master EQ restored, stream live. */
+    fun finishRender()
+
     /**
      * An edit landed mid-playback: roll the lookahead back to the earliest unplayed phrase boundary and
      * drop the notes queued past it, so the edit is heard on the next phrase loop. Push the project first.
