@@ -56,6 +56,8 @@ endif()
 add_executable(pockettracker-sdl
         main.cpp
         sdl-audio-engine.cpp
+        sdl-input.cpp
+        sdl-video.cpp
 )
 
 # ─── IEEE-exactness: a CORRECTNESS requirement, not an optimisation choice ─────────────────────
@@ -78,7 +80,11 @@ else()
     target_compile_options(pockettracker-sdl PRIVATE -fno-fast-math -ffp-contract=off)
 endif()
 
-target_link_libraries(pockettracker-sdl PRIVATE pockettracker)
+# pt-ui is the portable UI — the screen modules, the software canvas, the 5×5 font, the cursor-context
+# system (native/ui/). It links `pockettracker` itself, so this one line brings the engine, songcore
+# and the UI in together. It contains no SDL and no POSIX: the seam is exactly at this line, which is
+# what lets tools/ptshot draw a screen with no window at all.
+target_link_libraries(pockettracker-sdl PRIVATE pt-ui)
 
 # SDL2 exports different target names depending on how it arrived (system config package vs
 # FetchContent, shared vs static), and an older find module exports plain variables instead.

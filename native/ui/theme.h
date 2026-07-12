@@ -1,0 +1,112 @@
+#pragma once
+
+// ─── The theme ───────────────────────────────────────────────────────────────────────────────────
+//
+// A 1:1 port of ui/theme/AppTheme.kt — the same field names, the same four built-in palettes, the
+// same ARGB values. Kotlin stores each colour as a `Long` because the class is kotlinx-serializable
+// straight into a `.ptt` theme file; here it is a uint32_t, which is what the canvas blends anyway.
+//
+// The field names are load-bearing. `.ptt` files on a user's SD card are JSON keyed by exactly these
+// names, and a project (and its themes) must move between an Android device and a handheld without
+// conversion — so a rename here is a file-format break, not a refactor. The .ptt reader lands with
+// the SETTINGS screen; until then these four built-ins are the whole palette set.
+
+#include <cstdint>
+#include <string>
+
+namespace pt::ui {
+
+using Argb = uint32_t;  // 0xAARRGGBB, straight from the Kotlin literals
+
+enum class VisualizerType { SCOPE, FLAT, OCTA, OCTA_FULL, SPECTRUM, SPECTRUM_PEAKS };
+
+struct Theme {
+    std::string name = "CLASSIC";
+
+    // ── Row backgrounds ──────────────────────────────────────────────────────────────────────────
+    Argb background   = 0xFF0A0A0A;  // module fill + default row
+    Argb rowEvery4th  = 0xFF151515;  // beat-accent rows (every 4th)
+    Argb rowCursor    = 0xFF333333;  // cursor row highlight
+    Argb rowPlayback  = 0xFF004400;  // current playback row
+    Argb rowSelection = 0xFF1A3A1A;  // selection region
+
+    // ── Text roles ───────────────────────────────────────────────────────────────────────────────
+    Argb textTitle  = 0xFF00FFFF;  // screen headers (cyan)
+    Argb textParam  = 0xFF808080;  // inactive param label
+    Argb textValue  = 0xFFFFFFFF;  // inactive param value
+    Argb textCursor = 0xFFFFFF00;  // cursor-highlighted cell (yellow)
+    Argb textEmpty  = 0xFF666666;  // empty / placeholder
+
+    // ── Visualizer (oscilloscope bar) ────────────────────────────────────────────────────────────
+    Argb vizBackground = 0xFF0A0A0A;
+    Argb vizCenterLine = 0xFF333333;
+    Argb vizWave       = 0xFF00FF00;  // waveform line / bar fill
+
+    // ── Mixer dBFS meters ────────────────────────────────────────────────────────────────────────
+    Argb meterBackground = 0xFF1A1A1A;
+    Argb meterLow        = 0xFF00CC00;
+    Argb meterMid        = 0xFFCCCC00;
+    Argb meterHigh       = 0xFFCC0000;
+    Argb meterBorder     = 0xFF444444;
+
+    // ── Visualizer mode ──────────────────────────────────────────────────────────────────────────
+    VisualizerType visualizerType = VisualizerType::SCOPE;
+};
+
+inline Theme theme_classic() { return Theme{}; }
+
+inline Theme theme_amber() {
+    Theme t;
+    t.name          = "AMBER";
+    t.rowPlayback   = 0xFF332200;
+    t.rowSelection  = 0xFF3A2A00;
+    t.textTitle     = 0xFFFFCC00;
+    t.textParam     = 0xFF806040;
+    t.textValue     = 0xFFEECC88;
+    t.textCursor    = 0xFFFFFF00;
+    t.textEmpty     = 0xFF664422;
+    t.vizCenterLine = 0xFF442200;
+    t.vizWave       = 0xFFFF8800;
+    t.meterLow      = 0xFFCC8800;
+    t.meterMid      = 0xFFCC4400;
+    t.meterHigh     = 0xFFCC0000;
+    return t;
+}
+
+inline Theme theme_blue() {
+    Theme t;
+    t.name          = "BLUE";
+    t.rowPlayback   = 0xFF001144;
+    t.rowSelection  = 0xFF002266;
+    t.textTitle     = 0xFF88CEFF;
+    t.textParam     = 0xFF4488AA;
+    t.textValue     = 0xFFAADDFF;
+    t.textCursor    = 0xFF00FFFF;
+    t.textEmpty     = 0xFF224466;
+    t.vizCenterLine = 0xFF112244;
+    t.vizWave       = 0xFF0088FF;
+    t.meterLow      = 0xFF0088CC;
+    t.meterMid      = 0xFF0044CC;
+    t.meterHigh     = 0xFF8800CC;
+    return t;
+}
+
+inline Theme theme_mono() {
+    Theme t;
+    t.name          = "MONO";
+    t.rowPlayback   = 0xFF222222;
+    t.rowSelection  = 0xFF333333;
+    t.textTitle     = 0xFFFFFFFF;
+    t.textParam     = 0xFF888888;
+    t.textValue     = 0xFF8F8F8F;
+    t.textCursor    = 0xFFFFFFFF;
+    t.textEmpty     = 0xFF444444;
+    t.vizCenterLine = 0xFF222222;
+    t.vizWave       = 0xFFCCCCCC;
+    t.meterLow      = 0xFFCCCCCC;
+    t.meterMid      = 0xFF888888;
+    t.meterHigh     = 0xFF444444;
+    return t;
+}
+
+}  // namespace pt::ui

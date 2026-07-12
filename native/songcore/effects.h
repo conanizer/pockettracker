@@ -76,6 +76,32 @@ inline int effect_value_max(int effect_type) {
             effect_type == FX_EQN || effect_type == FX_EQM) ? 127 : 255;
 }
 
+// The cycle order of the FX-type column, and the reading order of the FX helper grid — mirrors
+// EffectProcessor.EFFECT_TYPES exactly, including the trailing send/EQ group that the helper draws
+// as a centred last row. This is a UI-facing list (an FX column stores an INDEX into it, and A+UP
+// steps that index), but it lives here beside the codes and the names because those three must never
+// drift: an entry added to the effects without an entry here is an effect no one can type.
+inline constexpr int EFFECT_TYPES[] = {
+    FX_NONE, FX_ARC, FX_CHA, FX_LAT, FX_GRV, FX_HOP, FX_TIC, FX_ARPEGGIO, FX_KILL, FX_OFFSET,
+    FX_RND, FX_RNL, FX_REPEAT, FX_TBL, FX_THO, FX_VOLUME,
+    FX_PSL, FX_PBN, FX_PVB, FX_PVX, FX_PIT, FX_SLI,
+    // Last grid row (centred): the four send/EQ FX
+    FX_PAN, FX_BCK, FX_RSEND, FX_DSEND, FX_EQN, FX_EQM,
+};
+inline constexpr int EFFECT_TYPE_COUNT = static_cast<int>(sizeof(EFFECT_TYPES) / sizeof(int));
+
+/** Index of `code` in EFFECT_TYPES, or 0 (FX_NONE) if it is not a known effect — `indexOf(...) ?: 0`. */
+inline int effect_type_index(int code) {
+    for (int i = 0; i < EFFECT_TYPE_COUNT; ++i)
+        if (EFFECT_TYPES[i] == code) return i;
+    return 0;
+}
+
+/** EFFECT_TYPES[i], or FX_NONE when out of range — Kotlin's `getOrElse(i) { FX_NONE }`. */
+inline int effect_type_at(int index) {
+    return (index >= 0 && index < EFFECT_TYPE_COUNT) ? EFFECT_TYPES[index] : FX_NONE;
+}
+
 // ─── Resolved bundle (ResolvedStepParams) ─────────────────────────────────────────────────────────
 // std::optional mirrors Kotlin's nullable `Int?` / `Long?` ("effect not present on this step"); the
 // non-optional fields carry the same defaults as the Kotlin data class.

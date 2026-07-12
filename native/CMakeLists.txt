@@ -181,3 +181,38 @@ if(ANDROID)
             log
     )
 endif()
+
+# ─── pt-ui: the portable UI (Linux-port plan Phase 3) ──────────────────────────────────────────
+#
+# The screen modules, the software canvas, the 5×5 font, the theme and the cursor-context system —
+# the C++ port of the Kotlin `ui/**` + `input/**` layer. It draws into a 640×480 ARGB framebuffer and
+# knows nothing about SDL, POSIX, a window or an audio device: the SHELL owns those and scales the
+# finished frame (ui/canvas.h). That is what makes `tools/ptshot` able to render a screen headlessly,
+# and it is the §12.8 obligation — "write the SDL UI as portable C++ with no Linux-isms, so that
+# 'Android on SDL' is a shell swap, not a rewrite".
+#
+# ⚠️ NOT in the Android build. Android draws these screens in Compose today, and will keep doing so
+# until the convergence decision point (linux-port-plan §12.8, taken after the port ships). Gating it
+# out means the port cannot grow the APK by a byte or break it in any way while it is being written —
+# and when convergence comes, this `if` is what changes, not where the code lives.
+if(NOT ANDROID)
+    add_library(pt-ui STATIC
+            ui/canvas.cpp
+            ui/layout.cpp
+            ui/modules/phrase_editor.cpp
+    )
+
+    # PUBLIC: pt-ui's headers include songcore's (model.h, effects.h), so anything linking pt-ui
+    # inherits the engine's include roots too — the same reasoning as pockettracker's own PUBLIC roots.
+    target_link_libraries(pt-ui PUBLIC pockettracker)
+
+    # IEEE-exactness, for the same reason songcore-jni.cpp carries it: this target includes songcore
+    # headers, and the rule stated above is that any TU which does must not have its math reassociated
+    # or fma-contracted. The UI does no float math worth the name today — but the rule is what keeps
+    # that true after someone adds a meter, and it costs nothing to state now.
+    if(MSVC)
+        target_compile_options(pt-ui PRIVATE /fp:precise)
+    else()
+        target_compile_options(pt-ui PRIVATE -fno-fast-math -ffp-contract=off)
+    endif()
+endif()

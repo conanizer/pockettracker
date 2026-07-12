@@ -17,6 +17,7 @@ project("pockettracker-tools" LANGUAGES C CXX)
 #   ptrender      S6b  the render, end to end   real audio, through the real engine
 #   ptrandom      S7   the random FX            12 distributions     (units/s7-random.txt)
 #   ptnondet      S7   which projects may be byte-compared at all   (+ a standalone .ptp diagnostic)
+#   ptshot   Phase3 S1 the UI, as pixels        a screen → a PNG, headless (no golden yet — see below)
 #
 # ptrandom is the odd one out, and deliberately so: CHA/RND/RNL/ARP-RANDOM draw from a clock-seeded
 # RNG, so the Kotlin sequencer has no repeatable event stream to record and there is no byte-exact
@@ -89,6 +90,16 @@ add_subdirectory(../native native)
 add_executable(ptrender ptrender/main.cpp)
 pt_ieee_exact(ptrender)
 target_link_libraries(ptrender PRIVATE pockettracker)
+
+# ptshot — a screen, rendered to a PNG with no window (Phase 3). It links pt-ui, the portable UI, and
+# that link is itself the point: pt-ui knows nothing about SDL or a display, so a screen can be drawn
+# in CI on a headless runner. It has no ctest yet and that is deliberate — the golden for a pixel diff
+# is an Android screenshot, which is a device capture, not something CI can produce. Building it here
+# still earns its keep: it compiles the UI on all three toolchains, so the port cannot rot on gcc or
+# clang/arm64 while it is being written on MSVC.
+add_executable(ptshot ptshot/main.cpp)
+pt_ieee_exact(ptshot)
+target_link_libraries(ptshot PRIVATE pt-ui)
 
 # ptrender writes WAVs, and the fingerprint goldens live beside the projects they describe.
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/render-out")

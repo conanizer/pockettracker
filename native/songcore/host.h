@@ -202,6 +202,26 @@ class SongcoreHost {
         return load_project_media(*engine_, project_, baseDir, routing_);
     }
 
+    // ── ↕ live editing — the SDL shell's UI *is* the editing model ────────────────────────────────
+    //
+    // On Android the Kotlin UI owns a SECOND copy of the project (Compose needs an observable object
+    // graph to recompose against) and pushes it down as a whole JSON blob whenever it changes. There
+    // is no Kotlin on Linux: the C++ UI edits THIS project, in place.
+    //
+    // That is not a shortcut — it is what push_project's own contract already describes. The project
+    // never changes address, and the Sequencer reads "the one live Project object, seeing edits as
+    // they land", which is exactly how the Kotlin sequencer sees Kotlin's edits. Editing here simply
+    // removes the serialize → parse round trip from the path, so a cursor keystroke on a handheld does
+    // not re-encode ~440 KB of JSON to move one byte.
+    //
+    // Two obligations come with the reference, both of them the same ones the Android path has:
+    //   • after an edit WHILE PLAYING → notify_data_changed(), or the change is not heard until the
+    //     lookahead happens to pass it;
+    //   • after editing a TABLE → invalidate_tables(), because the consumer caches which tables it has
+    //     already pushed to the engine (push_project does this for you; an in-place edit cannot).
+    Project& edit_project() { return project_; }
+    void     invalidate_tables() { consumer_.invalidate_tables(); }
+
     // ── ↑ live-edit reaction ─────────────────────────────────────────────────────────────────────
     // Roll the lookahead back to the earliest unplayed phrase boundary and drop the notes already
     // queued past it, so an edit is heard on the next phrase loop. The Sequencer computes the

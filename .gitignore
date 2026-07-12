@@ -132,12 +132,16 @@ nul
 /CLAUDE.md
 /.claudeignore
 
-# Internal / planning docs (kept locally, not for contributors). No exceptions: event-schema.md was
-# briefly tracked as the songcore spec, but it is internal design material and doesn't belong in a
-# public repo. Its §9 rule (a schema change lands with the code + regenerated goldens in one commit)
-# still holds — the schema is enforced in-repo by songcore/event.h, the conformance goldens in
-# /testdata, and the tools that compare against them.
-docs/internal/*
+# Internal / planning docs (kept locally, not for contributors). The WHOLE directory, no exceptions:
+# event-schema.md was briefly tracked as the songcore spec, but it is internal design material and
+# doesn't belong in a public repo. Its §9 rule (a schema change lands with the code + regenerated
+# goldens in one commit) still holds — the schema is enforced in-repo by songcore/event.h, the
+# conformance goldens in /testdata, and the tools that compare against them.
+#
+# The trailing slash matters, and so does the leading one: `/docs/internal/` ignores the DIRECTORY, so
+# git never descends into it and no later negation pattern can accidentally re-include a file from it.
+# The old `docs/internal/*` only ignored the entries, one by one.
+/docs/internal/
 
 # APK artifacts — release APKs go to GitHub Releases, not the repo
 apk/

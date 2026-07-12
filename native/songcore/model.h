@@ -133,6 +133,28 @@ struct Note {
     static Note C4()    { return Note{ 0, 4}; }  // Note.fromString("C-4")
 };
 
+// ─── Note ↔ MIDI ↔ display (TrackerData.Note's own methods) ───────────────────────────────────────
+// Note's arithmetic, not the scheduler's: it lived in scheduler.h until the UI needed it, and the UI
+// has no business including the sequencer to name a note.
+inline int note_to_midi(const Note& n) {
+    if (n.pitch == -1) return -1;
+    return (n.octave + 1) * 12 + n.pitch;  // C-4 = 60 (standard MIDI)
+}
+inline Note note_from_midi(int midi) {
+    if (midi < 0 || midi > 127) return Note::EMPTY();
+    return Note{midi % 12, midi / 12 - 1};
+}
+
+// Note.NOTES — the chromatic names, two chars each so every note renders in a fixed 3-char cell.
+inline const char* const NOTE_NAMES[12] = {"C-", "C#", "D-", "D#", "E-", "F-",
+                                           "F#", "G-", "G#", "A-", "A#", "B-"};
+
+/** Note.toString(): "C-4", or "---" when empty. The 3-char cell every editor grid draws. */
+inline std::string note_name(const Note& n) {
+    if (n.pitch < 0 || n.pitch > 11) return "---";
+    return std::string(NOTE_NAMES[n.pitch]) + std::to_string(n.octave);
+}
+
 struct PhraseStep {
     Note note = Note::EMPTY();
     int  instrument = 0x00;

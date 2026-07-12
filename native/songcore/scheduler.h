@@ -46,15 +46,8 @@
 
 namespace songcore {
 
-// ─── Note ↔ MIDI (TrackerData.Note) ─────────────────────────────────────────────────────────────
-inline int note_to_midi(const Note& n) {
-    if (n.pitch == -1) return -1;
-    return (n.octave + 1) * 12 + n.pitch;  // C-4 = 60 (standard MIDI)
-}
-inline Note note_from_midi(int midi) {
-    if (midi < 0 || midi > 127) return Note::EMPTY();
-    return Note{midi % 12, midi / 12 - 1};
-}
+// note_to_midi / note_from_midi moved to model.h — they are Note's own arithmetic (TrackerData.Note),
+// not scheduling, and the UI needs them without pulling the whole sequencer in.
 
 // ─── small helpers ───────────────────────────────────────────────────────────────────────────────
 inline int   clampi(int v, int lo, int hi)       { return v < lo ? lo : (v > hi ? hi : v); }
