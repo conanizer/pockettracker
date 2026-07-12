@@ -70,8 +70,11 @@ static void report_diff(const std::string& a, const std::string& b) {
 int main(int argc, char** argv) {
     std::string testdata = (argc > 1) ? argv[1] : "testdata";
 
+    // Every golden project. g7-audio carries the EQ presets, mod slots and filter settings no other
+    // project serializes; g8-random carries the CHA/RND/RNL effect codes, which no other one does.
     const std::vector<std::string> golden = {
         "g1-basics", "g2-timing", "g3-retrig", "g4-pitch", "g5-structure", "g6-params",
+        "g7-audio", "g8-random",
     };
 
     int failures = 0;

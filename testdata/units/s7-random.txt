@@ -1,0 +1,35 @@
+# songcore S7 — the random-FX distribution golden.  MEASURED FROM THE REAL KOTLIN SEQUENCER
+# (PlaybackController + kotlin.random.Random) over 300 renders of g8-random.ptp at 44100 Hz.
+# Written by S7RandomGoldenTest; read back by it AND by tools/ptrandom, which holds C++ songcore
+# to the same lines.
+#
+# This is the one golden that is not a byte-for-byte recording of an event stream, because the FX
+# it covers — CHA, RND, RNL, ARP mode RANDOM — draw from a clock-seeded RNG. Kotlin does not repeat
+# itself either, so there is no stream to record. What is invariant, and what is compared, is:
+#
+#   n=        the number of draws one render makes. Deterministic: the random FX decide WHICH value
+#             comes out, never HOW MANY are drawn. Compared exactly — it proves both engines ran the
+#             same code paths the same number of times.
+#   support=  the set of values a draw can produce, `a..b` for runs. Compared exactly. This is where
+#             the bugs live: an off-by-one, a closed interval where Kotlin's is half-open, or a stub
+#             pinned to the low end of the range (which is what songcore shipped until S7 — every
+#             other check stayed green throughout). Not flaky: at these sample sizes the chance of a
+#             reachable value going unseen is about e^-200.
+#   expect=   the law the draws follow. Checked STATISTICALLY by each engine against its own
+#             histogram (chi-square / Bernoulli, 6-sigma margins), never across engines — two random
+#             samples never agree exactly, and demanding that they do is how a test becomes flaky.
+#             The values here are not asserted from theory: the Kotlin measurement validates them.
+#
+# Regenerate deliberately: delete this file, rerun S7RandomGoldenTest, commit the diff with the change.
+OBS rnd-pit n=16800 support=48..127 expect=uniform
+OBS rnl-note n=19200 support=55..65 expect=uniform
+OBS rnl-inst n=19200 support=1..7 expect=uniform
+OBS rnl-left-pit n=19200 support=32..79 expect=uniform
+OBS arp-random n=57000 support=0,3,7 expect=uniform
+OBS cha-gate-p0 n=2400 support=0 expect=p(1)=0/15
+OBS cha-gate-p4 n=2400 support=0,1 expect=p(1)=4/15
+OBS cha-gate-p8 n=4800 support=0,1 expect=p(1)=8/15
+OBS cha-gate-p12 n=2400 support=0,1 expect=p(1)=12/15
+OBS cha-gate-p15 n=2400 support=1 expect=p(1)=15/15
+OBS cha-gate-none n=2400 support=1 expect=p(1)=15/15
+OBS cha-clear-p8 n=19200 support=0,5 expect=p(5)=8/15

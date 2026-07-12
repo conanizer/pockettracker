@@ -134,14 +134,18 @@ class PlaybackController(
         audioEngine.sfSlotProvider = { path -> instrumentController?.sfSlotMap?.get(path) }
     }
 
-    /** Which sequencer walks the song: the Kotlin one (default) or the C++ songcore. SETTINGS → ENGINE. */
+    /** Which sequencer walks the song: the C++ songcore (default since S7) or the Kotlin one, which is
+     *  now only reachable from the debug-only SETTINGS → ENGINE row and is deleted after the soak. */
     enum class Engine { KT, CPP }
 
     /**
      * Switching engines stops playback first — the two sequencers keep separate transport state, so a
      * mid-flight handover would leave whichever one was playing with notes queued past the switch.
+     *
+     * CPP is safe as the pre-wiring default: useSongcore below also demands that songcore actually
+     * exists, so before the native runtime is built this still resolves to the Kotlin path.
      */
-    var engine: Engine = Engine.KT
+    var engine: Engine = Engine.CPP
         set(value) {
             if (field == value) return
             stop()

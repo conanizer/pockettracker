@@ -533,9 +533,20 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     val _autosaveResumeAuto = remember { mutableStateOf(prefs.getBoolean("autosave_resume_auto", false)) }
     var autosaveResumeAuto  by _autosaveResumeAuto
 
-    // SETTINGS → ENGINE (debug-only row): which sequencer walks the song. Persisted per device so a
-    // songcore soak survives app restarts. Defaults to the Kotlin path until the C++ one has soaked.
-    val _engineCpp = remember { mutableStateOf(BuildConfig.DEBUG && prefs.getBoolean("engine_cpp", false)) }
+    // SETTINGS → ENGINE (debug-only row): which sequencer walks the song.
+    //
+    // S7 flipped the default to C++ songcore in BOTH builds. A release that cannot reach the C++ path
+    // cannot soak it, and the soak is the whole point of shipping it before the Kotlin sequencer is
+    // deleted — so release PINS C++: no toggle (the row is debug-gated), and therefore nothing to
+    // persist. Debug keeps the pref so an A/B session survives an app restart.
+    //
+    // The old `engine_cpp` key is deliberately NOT read. Its value was `BuildConfig.DEBUG && …`, so
+    // every release build wrote `false` into it on every single launch — an upgrading user carries a
+    // stored `false` that was never their choice. Honouring it would leave them silently on the Kotlin
+    // path, and the soak would never happen for anyone who already had the app installed.
+    val _engineCpp = remember {
+        mutableStateOf(if (BuildConfig.DEBUG) prefs.getBoolean("engine_cpp_v2", true) else true)
+    }
     var engineCpp  by _engineCpp
 
     // Overlay: list files from assets/overlays/, load + process selected bitmap
@@ -623,7 +634,7 @@ fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: De
     // not exist yet would play silence; staying on the Kotlin path until it does costs nothing, since
     // nothing can play before the engine exists either way.
     LaunchedEffect(engineCpp, audioReady) {
-        prefs.edit().putBoolean("engine_cpp", engineCpp).apply()
+        if (BuildConfig.DEBUG) prefs.edit().putBoolean("engine_cpp_v2", engineCpp).apply()
         if (!audioReady) return@LaunchedEffect
         playbackController.engine =
             if (engineCpp) PlaybackController.Engine.CPP else PlaybackController.Engine.KT

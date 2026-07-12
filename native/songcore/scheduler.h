@@ -25,8 +25,10 @@
 //     (SC-2: only the POSITION rolls back, never TrackState — the state smear is today's behavior);
 //   * eqm_active() — setMasterEqSlot is not a bus event, so the master-EQ restore on stop() is the
 //     host's job; the flag tells it whether an EQM ran (PlaybackController.eqmActive).
-// Random FX (CHA/RND/RNL/ARP-RANDOM) are excluded from the goldens (SC-1); applyChanceAndRandomize
-// is ported structurally but its random draws are never exercised here (separate statistical tests).
+// Random FX (CHA/RND/RNL/ARP-RANDOM) are excluded from the goldens (SC-1) — a stream seeded from the
+// wall clock has no byte-comparable golden, on either engine. They are therefore the one part of the
+// spine measured statistically instead: rng.h holds the generator and the reasoning, and
+// tools/ptrandom checks its distributions against the real Kotlin sequencer's (S7).
 
 #include <algorithm>
 #include <cstdint>
@@ -39,6 +41,7 @@
 #include "model.h"
 #include "timing.h"
 #include "effects.h"
+#include "rng.h"
 #include "router.h"
 
 namespace songcore {
@@ -156,6 +159,11 @@ class Sequencer {
     // Re-read per verb by the host, mirroring PlaybackController, which asks the backend for the
     // device rate on every poll rather than caching it (a headphone swap can change it mid-session).
     void set_sample_rate(int sr) { if (sr > 0) sampleRate_ = sr; }
+
+    // Pin the random FX (CHA/RND/RNL/ARP-RANDOM) to a known stream. For tools/ptrandom, which must be
+    // able to fail reproducibly; the app never calls it, and a fresh Sequencer seeds itself from the
+    // platform exactly as kotlin.random.Random.Default does (rng.h).
+    void seed_rng(uint64_t s) { rng_.seed(s); }
     int  sample_rate() const { return sampleRate_; }
 
     // The frame the current session latched at T PLAY — the trace's session base.
@@ -637,9 +645,10 @@ class Sequencer {
         return SchedulePhraseResult{rowsScheduled, false, false, frameOffset};
     }
 
-    // CHA gate + RND/RNL randomize, evaluated before effect resolution. Random-free on the goldens
-    // (SC-1): with no CHA/RND/RNL slot present this returns (step, skipNote=false) unchanged. The
-    // random draws below are ported for structure but never run in conformance (see file header).
+    // CHA gate + RND/RNL randomize, evaluated before effect resolution. The byte-exact goldens are
+    // random-free (SC-1): with no CHA/RND/RNL slot present this returns (step, skipNote=false)
+    // unchanged, which is why they can be compared at all. The draws themselves are measured instead
+    // by tools/ptrandom, against the same draws taken from the real Kotlin sequencer (S7).
     PhraseStep applyChanceAndRandomize(const PhraseStep& step, TrackState& trackState, bool& skipNote) {
         bool hasNote = !step_empty(step);
         skipNote = false;
@@ -650,7 +659,7 @@ class Sequencer {
             if (fxType == FX_CHA) {
                 int probability = (fxValue >> 4) & 0x0F;
                 int target = fxValue & 0x0F;
-                int roll = rng_int(15);  // 0-14 (SC-1: not exercised by goldens)
+                int roll = rng_int(15);  // 0-14, so probability F always passes and 0 never does
                 bool passed = roll < probability;
                 if (!passed) {
                     if (target == 0) skipNote = true;
@@ -1118,7 +1127,11 @@ class Sequencer {
             case 0: switch (position % 3) { case 0: return note0; case 1: return note1; default: return note2; }
             case 1: switch (position % 3) { case 0: return note2; case 1: return note1; default: return note0; }
             case 2: switch (position % 4) { case 0: return note0; case 1: return note1; case 2: return note2; default: return note1; }
-            case 3: return note0;  // RANDOM excluded from goldens (SC-1); deterministic placeholder
+            // RANDOM. Kotlin is `listOf(note0, note1, note2).random()` — a uniform draw over the three
+            // SLOTS, not over the distinct pitches, so a chord whose semitones collide (A00, A33) stays
+            // weighted by slot. Drawing an index reproduces that; picking from a de-duplicated set would
+            // not, and no golden would ever show the difference.
+            case 3: { int notes[3] = {note0, note1, note2}; return notes[rng_int(3)]; }
             default: switch (position % 3) { case 0: return note0; case 1: return note1; default: return note2; }
         }
     }
@@ -1130,11 +1143,14 @@ class Sequencer {
         router_.note_on(a);
     }
 
-    // Random draws for CHA/RND/RNL — never exercised on the goldens (SC-1). Deterministic stub so the
-    // structural port compiles; the real generator lands with the separate random-FX statistical test.
-    int rng_int(int bound) { (void)bound; return 0; }
-    int rng_range(int lo, int hi) { (void)hi; return lo; }
+    // The random draws for CHA / RND / RNL / ARP-RANDOM. Thin names kept so the port reads against
+    // PlaybackController.kt line for line: `rng_int(15)` is its `Random.nextInt(15)`, `rng_range(a, b)`
+    // its `Random.nextInt(a, b)` — half-open at the top, negative `lo` allowed. See rng.h for why this
+    // is the one piece of songcore proven statistically rather than by a golden.
+    int rng_int(int bound) { return rng_.next_int(bound); }
+    int rng_range(int lo, int hi) { return rng_.next_int(lo, hi); }
 
+    Rng rng_;
     MidiRouter& router_;
     const Project* project_ = nullptr;
     // Mirrors PlaybackController.currentProject: set only by the live transport starts, left null on

@@ -10,11 +10,19 @@ project("pockettracker-tools" LANGUAGES C CXX)
 # against a golden recorded from the REAL Kotlin implementation. The JVM tests under
 # app/src/test/.../trace/ WRITE /testdata; these READ it back:
 #
-#   ptroundtrip   S2   .ptp/.pti I/O            the seven golden projects re-serialize byte-for-byte
+#   ptroundtrip   S2   .ptp/.pti I/O            the eight golden projects re-serialize byte-for-byte
 #   ptresolve     S3   timing / FX / traversal  288 unit cases       (units/s3-units.txt)
 #   ptplay        S4   the scheduler spine      all 36 event traces  (traces/)
 #   ptvoice       S5   the below-seam consumer  77 engine-call cases (units/s5-consumer.txt)
 #   ptrender      S6b  the render, end to end   real audio, through the real engine
+#   ptrandom      S7   the random FX            12 distributions     (units/s7-random.txt)
+#   ptnondet      S7   which projects may be byte-compared at all   (+ a standalone .ptp diagnostic)
+#
+# ptrandom is the odd one out, and deliberately so: CHA/RND/RNL/ARP-RANDOM draw from a clock-seeded
+# RNG, so the Kotlin sequencer has no repeatable event stream to record and there is no byte-exact
+# golden to be had. It compares the SUPPORT and the DRAW COUNT exactly (which is where every bug in a
+# bounded random draw actually lives) and the SHAPE statistically. That gap is exactly how songcore
+# shipped a stub RNG through four green sessions.
 #
 # Why this project exists: `./gradlew test` already runs the JVM goldens, which proves the KOTLIN
 # sequencer still matches them. Nothing proved the C++ one did — the tools were built by hand, on
@@ -67,7 +75,7 @@ enable_testing()
 
 set(PT_TESTDATA "${CMAKE_CURRENT_SOURCE_DIR}/../testdata")
 
-foreach(tool ptroundtrip ptresolve ptplay ptvoice)
+foreach(tool ptroundtrip ptresolve ptplay ptvoice ptrandom ptnondet)
     add_executable(${tool} ${tool}/main.cpp)
     pt_ieee_exact(${tool})
 endforeach()
@@ -92,3 +100,8 @@ add_test(NAME s3-pure-units    COMMAND ptresolve   "${PT_TESTDATA}")
 add_test(NAME s4-golden-traces COMMAND ptplay      "${PT_TESTDATA}")
 add_test(NAME s5-consumer      COMMAND ptvoice     "${PT_TESTDATA}/units/s5-consumer.txt")
 add_test(NAME s6-render        COMMAND ptrender    "${PT_TESTDATA}" "${CMAKE_CURRENT_BINARY_DIR}/render-out")
+add_test(NAME s7-random        COMMAND ptrandom    "${PT_TESTDATA}")
+# Guards a dependency that is otherwise invisible: ptrender asserts two renders of g7-audio are
+# BYTE-IDENTICAL, which only holds while g7 contains nothing clock-seeded. Put a CHA in it and s6-render
+# fails as "the two renders differ" — true, useless, and hours from the cause. This fails first, by name.
+add_test(NAME s7-determinism   COMMAND ptnondet    "${PT_TESTDATA}")

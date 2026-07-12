@@ -54,6 +54,16 @@ object GoldenProjects {
         Spec("g7-audio", 0..0, listOf(LiveMode("SONG", 0, 4)), ::g7Audio),
     )
 
+    /**
+     * g8 is deliberately NOT in [all] — it is the only golden project that is *random*, so it can
+     * never own a byte-exact trace, and generating one for it would produce a file that fails on its
+     * own second run. It is driven instead by S7RandomGoldenTest / tools/ptrandom, which run it a few
+     * hundred times and compare DISTRIBUTIONS. Its `.ptp` is still written to /testdata (both engines
+     * must load the same bytes), and ptroundtrip still round-trips it — the FX codes CHA/RND/RNL had
+     * never appeared in a serialized golden before.
+     */
+    val random: Spec = Spec("g8-random", 0..0, emptyList(), ::g8Random)
+
     // ── Builder helpers ──────────────────────────────────────────────────────────────────────
 
     private fun Phrase.step(
@@ -344,6 +354,93 @@ object GoldenProjects {
         p.tracks[0].chainRefs.add(0)
         p.tracks[1].chainRefs.add(1)
         p.tracks[2].chainRefs.add(2)
+        return p
+    }
+
+    // ── g8: the RANDOM golden — the only one judged on its DISTRIBUTION ────────────────────────
+    //
+    // The four random FX (CHA, RND, RNL, ARP mode RANDOM) are the one corner of the sequencer no
+    // golden can reach: kotlin.random.Random is seeded from the platform, so the KOTLIN engine does
+    // not repeat itself either. SC-1 kept them out of g1..g7 for exactly that reason — which left
+    // songcore free to ship a stub (rng_int() → 0) that always took the LOWEST value, for four
+    // sessions, with every check green. This project is what finally aims something at them.
+    //
+    // Built so that every random draw arrives in the schema-v1 trace as an EXACT INTEGER, which is
+    // what lets the JVM measure Kotlin and the C++ tool measure songcore with the same arithmetic:
+    //
+    //   • PIT is the carrier. resolveStepParams maps its byte to a signed semitone bijectively
+    //     (`value < 0x80 ? value : value - 256` — no clamp, no rounding) and it rides the NoteOn's
+    //     `pit=` field, so a randomized FX byte lands in the trace as a plain integer. No float to
+    //     invert, unlike PAN or Vxx.
+    //   • ONE FX per track, so no two random draws can interact (a CHA that clears an FX column
+    //     would change what a RND in that column later recalls).
+    //   • Every band is chosen to stay clear of every clamp. RNL's note offset is ±5 around C-4 and
+    //     its instrument offset ±3 around 4: let either saturate at 0 or 127 and probability would
+    //     pile up on the boundary value, making the "uniform" claim in the golden simply false.
+    //   • ARP uses A37 (+3/+7) — three DISTINCT chord tones. Kotlin's `listOf(n0,n1,n2).random()`
+    //     draws a SLOT, so a chord with colliding semitones would be uniform over slots but not over
+    //     pitches, and the trace only shows pitches. Distinct semitones make the two the same claim.
+    //
+    // Chains are eight rows of the same phrase, so one render walks each phrase eight times: the
+    // draws-per-render is a constant, which is what makes the golden's `n=` counts byte-comparable.
+    private fun g8Random(): Project {
+        val p = Project(version = 1, name = "g8-random", tempo = 120)
+        p.standardInstruments()
+
+        // Track 0 — RND: recall the column's previous FX with a random value in [x0, yF].
+        // Row 0 establishes the column (RND/RNL/CHA are never themselves recorded as the "previous"
+        // FX, so without it every RND here would find prevType == 0 and quietly do nothing).
+        p.phrases[0].apply {
+            step(0, "C-4", inst = 0, fx1 = FX.FX_PIT to 0x10)              // seed the column: PIT
+            for (r in 2..14 step 2) step(r, "C-4", inst = 0, fx1 = FX.FX_RND to 0x37)
+        }                                                                   // → pit uniform over 48..127
+
+        // Track 1 — RNL on FX1: randomize the NOTE and the INSTRUMENT, not an FX value.
+        p.phrases[1].apply {
+            for (r in 0..14 step 2) step(r, "C-4", inst = 4, fx1 = FX.FX_RNL to 0x53)
+        }                                                                   // → note 55..65, inst 1..7
+
+        // Track 2 — CHA target 0: the gate on the note itself. The two ends are DETERMINISTIC and
+        // assert exactly: probability 0 never fires, probability F always does (the roll is
+        // nextInt(15) → 0..14, so 15 can never lose). Row 12 carries no CHA at all — the control that
+        // proves an absent NoteOn means "gated", not "the harness lost the step".
+        p.phrases[2].apply {
+            step(0,  "C-4", inst = 0, fx1 = FX.FX_CHA to 0x00)             // p=0  → never
+            step(2,  "C-4", inst = 0, fx1 = FX.FX_CHA to 0x40)             // p=4  → 4/15
+            step(4,  "C-4", inst = 0, fx1 = FX.FX_CHA to 0x80)             // p=8  → 8/15
+            step(6,  "C-4", inst = 0, fx1 = FX.FX_CHA to 0x80)             // p=8  again (more trials)
+            step(8,  "C-4", inst = 0, fx1 = FX.FX_CHA to 0xC0)             // p=12 → 12/15
+            step(10, "C-4", inst = 0, fx1 = FX.FX_CHA to 0xF0)             // p=15 → always
+            step(12, "C-4", inst = 0)                                       // control: no CHA
+        }
+
+        // Track 3 — CHA target 2: the OTHER arm of the gate. A losing roll clears FX2 instead of the
+        // note, so the note always fires and its `pit=` reads 5 when the gate passed and 0 when it did
+        // not — the same Bernoulli, observed through an FX column rather than a missing event.
+        p.phrases[3].apply {
+            for (r in 0..14 step 2) step(r, "C-4", inst = 0,
+                fx1 = FX.FX_CHA to 0x82, fx2 = FX.FX_PIT to 0x05)
+        }
+
+        // Track 4 — ARP mode RANDOM. ARC configures on its own row (a note on the same row as the ARP
+        // is fine, but ARC-then-ARP is how g3 does it and keeps the two effects unambiguous). The
+        // arpeggio is persistent, and rows 2..15 stay EMPTY on purpose: any note would clearArpeggio()
+        // and the draws would stop after one step.
+        p.phrases[4].apply {
+            step(0, null, fx1 = FX.FX_ARC to 0x38)                          // mode 3 = RANDOM, speed 8
+            step(1, "C-4", inst = 0, fx2 = FX.FX_ARPEGGIO to 0x37)          // +3 / +7 → arp ∈ {0,3,7}
+        }
+
+        // Track 5 — RNL on FX2: randomize the column to the LEFT, i.e. FX1's VALUE, keeping FX1's type.
+        p.phrases[5].apply {
+            for (r in 0..14 step 2) step(r, "C-4", inst = 0,
+                fx1 = FX.FX_PIT to 0x00, fx2 = FX.FX_RNL to 0x24)
+        }                                                                   // → pit uniform over 32..79
+
+        for (t in 0..5) {
+            for (row in 0..7) p.chainRow(t, row, t)   // eight walks of the phrase per render
+            p.tracks[t].chainRefs.add(t)
+        }
         return p
     }
 }
