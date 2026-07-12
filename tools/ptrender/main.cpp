@@ -15,17 +15,22 @@
 //
 // Every other golden in this repo is compared BIT-FOR-BIT, and the trace goldens can be, because
 // songcore's own translation units are pinned to IEEE arithmetic (-fno-fast-math -ffp-contract=off).
-// Audio cannot be, and that is MEASURED rather than assumed. Render g7-audio on MSVC/x86-64 and on
-// gcc/x86-64 — same architecture, and -ffast-math is off for both (it only turns on for arm):
+// Audio cannot be, and that is MEASURED on all three CI runners rather than assumed. Diff each runner's
+// g7-audio.wav against the MSVC/x86-64 one, sample by sample:
 //
-//     g1-basics   BYTE-IDENTICAL           (dry: sampler + SoundFont, no send buses)
-//     g7-audio    9.7% of samples differ   max 5 LSB of 32767 (≈ −76 dBFS), first at t = 1.627 s
+//     vs MSVC/x86-64            differing   max delta                  first divergence
+//     gcc/x86-64 (no fast-math)      9.7%    5 LSB of 32767 (−76 dBFS)   t = 1.627 s
+//     clang/arm64 (-ffast-math)     17.0%   16 LSB of 32767 (−66 dBFS)   t = 0.002 s
 //
-// The dry path IS bit-reproducible across toolchains. Put a FEEDBACK chain in the signal — reverb,
-// delay — and the last bits of sin/exp/pow, which are a libm implementation detail, recirculate and the
-// renders separate. Inaudibly, but permanently. So a byte-exact audio golden would be red on gcc today,
-// and the checks below are instead the ones that are both toolchain-proof AND actually catch the two
-// bugs S6b fixed:
+// Two mechanisms, and the timings give them away. On gcc/x86-64 the DRY path is bit-reproducible —
+// g1-basics (sampler + SoundFont, no send buses) comes out BYTE-IDENTICAL — and g7 only drifts at
+// 1.627 s, once the reverb and delay have built up: sin/exp/pow's last bits are a libm implementation
+// detail, and a FEEDBACK chain recirculates them. On clang/arm64 divergence starts at sample 140, before
+// any tail exists, because -ffast-math reassociates the dry path too.
+//
+// Both are inaudible, and every energy measurement still lands inside 1 dB. But a byte-exact audio golden
+// would be RED ON TWO OF THE THREE RUNNERS today. So the checks below are instead the ones that are both
+// toolchain-proof AND actually catch the two bugs S6b fixed:
 //
 //   (i)  DETERMINISM — the same project, rendered twice through the same engine, must produce a
 //        BYTE-IDENTICAL file. This is a same-binary comparison, so it is exact, and it is the

@@ -30,20 +30,26 @@ why the CI matrix now compiles `native/` on **gcc** and **clang** — not just t
 Every other golden here is compared bit-for-bit, and the trace goldens *can* be: songcore's own
 translation units are pinned to IEEE arithmetic (`-fno-fast-math -ffp-contract=off`, event-schema §5).
 
-Audio cannot be, and this is **measured, not assumed**. Render `g7-audio` on MSVC/x86-64 and on
-gcc/x86-64 — the same architecture, neither built with `-ffast-math`, which only turns on for arm:
+Audio cannot be, and this is **measured on all three CI runners, not assumed**. Take the same
+`g7-audio.wav` rendered by each and diff it against the MSVC/x86-64 one, sample by sample:
 
-```
-g1-basics   BYTE-IDENTICAL          (dry: sampler + SoundFont, no send buses)
-g7-audio    9.7% of samples differ  max delta 5 LSB of 32767 (≈ −76 dBFS), mean 1.05 LSB
-                                    first divergence at t = 1.627 s
-```
+| vs MSVC/x86-64 | samples differing | max delta | first divergence |
+|---|---|---|---|
+| **gcc/x86-64** (no `-ffast-math`) | 9.7% | **5 LSB** of 32767 (≈ −76 dBFS) | t = 1.627 s |
+| **clang/arm64** (`-ffast-math`) | 17.0% | **16 LSB** of 32767 (≈ −66 dBFS) | t = 0.002 s |
 
-The dry path is bit-reproducible across toolchains. The moment a **feedback** chain is in the signal —
-reverb, delay — the last bits of `sin`/`exp`/`pow` are a libm implementation detail, they recirculate,
-and the two renders separate. Inaudibly (5 LSB), but permanently. Add `-ffast-math` on the arm64 runner
-and the gap only widens. A byte-exact audio golden would be red on gcc **today**, and demanding that it
-not be would buy nothing.
+Two different mechanisms, and the timings give them away:
+
+- On **gcc/x86-64**, `g1-basics` comes out **byte-identical** — the dry path (sampler + SoundFont) *is*
+  bit-reproducible across toolchains. `g7-audio` only starts to drift at **1.627 s**, once the reverb and
+  delay have had time to build up: the last bits of `sin`/`exp`/`pow` are a libm implementation detail,
+  and a **feedback** chain recirculates them.
+- On **clang/arm64**, divergence starts at **sample 140** — 2 ms in, before any tail exists. `-ffast-math`
+  reassociates the dry path too, so nothing is bit-identical from the first note onward.
+
+Both are inaudible (16 LSB is −66 dBFS), and every energy measurement still lands inside 1 dB. But a
+byte-exact audio golden would be **red on two of the three runners, today**, and demanding that it not be
+would buy nothing.
 
 So the checks are the ones that are both toolchain-proof *and* actually catch the bugs:
 
