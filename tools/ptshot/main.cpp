@@ -17,9 +17,13 @@
 // gives today is the human loop — render, look, fix — which is what the grind actually needs. When a
 // screen's pixels are settled, its PNG becomes the golden and a byte-compare test lands beside it.
 //
-//   ptshot <project.ptp> <out.png> [--screen=PHRASE] [--phrase=0] [--cursor=ROW,COL]
-//                                  [--theme=CLASSIC|AMBER|BLUE|MONO] [--playing=ROW] [--scale=N]
+//   ptshot <project.ptp> <out.png> [--screen=PHRASE] [--phrase=N] [--chain=N] [--table=N]
+//                                  [--groove=N] [--instrument=N] [--scroll=N] [--cursor=ROW,COL]
+//                                  [--theme=CLASSIC|AMBER|BLUE|MONO] [--viz=SCOPE|OCTA|SPECTRUM|…]
+//                                  [--playing=ROW] [--source-column=N] [--from-pool] [--demo]
+//                                  [--scale=N]
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -30,7 +34,9 @@
 
 #include "songcore/project_io.h"
 #include "ui/app_state.h"
+#include "ui/cursor_move.h"
 #include "ui/layout.h"
+#include "ui/modules/oscilloscope.h"
 
 using namespace pt::ui;
 
@@ -174,6 +180,66 @@ bool theme_from_name(const std::string& n, Theme& out) {
     return false;
 }
 
+bool viz_from_name(const std::string& n, VisualizerType& out) {
+    if (n == "SCOPE")          { out = VisualizerType::SCOPE;          return true; }
+    if (n == "FLAT")           { out = VisualizerType::FLAT;           return true; }
+    if (n == "OCTA")           { out = VisualizerType::OCTA;           return true; }
+    if (n == "OCTA_FULL")      { out = VisualizerType::OCTA_FULL;      return true; }
+    if (n == "SPECTRUM")       { out = VisualizerType::SPECTRUM;       return true; }
+    if (n == "SPECTRUM_PEAKS") { out = VisualizerType::SPECTRUM_PEAKS; return true; }
+    return false;
+}
+
+// ─── --demo: a synthetic feed for the furniture ──────────────────────────────────────────────────
+//
+// The oscilloscope and the note monitor are the two pieces of S2 furniture whose GEOMETRY only exists
+// when there is data in them: forty spectrum bars at amplitude zero draw nothing at all, and eight
+// OCTA lanes with no audio are one empty panel. ptshot has no engine and never will (that is what
+// makes it proof the UI is portable), so `--demo` fills those buffers with a deterministic formula
+// instead — the same reasoning that made S6b synthesize its golden media rather than sample it.
+//
+// It is a FIXTURE, not a golden: nothing here is compared against anything. Its whole job is to make
+// the bars, lanes and note rows visible so a human can check they are where Android puts them.
+struct DemoFeed {
+    float waveform[WAVEFORM_SIZE]{};
+    float trackWaveforms[TRACK_WAVEFORM_COUNT * WAVEFORM_SIZE]{};
+    float spectrum[OscilloscopeModule::NUM_BARS]{};
+
+    void fill(AppState& state) {
+        for (int i = 0; i < WAVEFORM_SIZE; ++i) {
+            const float phase = static_cast<float>(i) / WAVEFORM_SIZE;
+            waveform[i]       = 0.25f * std::sin(phase * 6.2831853f * 3.0f);
+        }
+        // A different frequency and amplitude per lane, so a mislabelled or misplaced lane is obvious
+        // rather than plausible.
+        for (int lane = 0; lane < TRACK_WAVEFORM_COUNT; ++lane) {
+            for (int i = 0; i < WAVEFORM_SIZE; ++i) {
+                const float phase = static_cast<float>(i) / WAVEFORM_SIZE;
+                trackWaveforms[lane * WAVEFORM_SIZE + i] =
+                    (0.30f - 0.02f * lane) * std::sin(phase * 6.2831853f * (lane + 1));
+            }
+        }
+        // A tilted comb: every bar a different height, so the 14px width and 1px gap are countable.
+        for (int i = 0; i < OscilloscopeModule::NUM_BARS; ++i) {
+            const float t = static_cast<float>(i) / (OscilloscopeModule::NUM_BARS - 1);
+            spectrum[i]   = (1.0f - 0.7f * t) * (0.55f + 0.45f * std::sin(t * 18.0f));
+        }
+
+        state.waveform          = waveform;
+        state.trackWaveforms    = trackWaveforms;
+        state.spectrum          = spectrum;
+        state.trackMask         = 0xFF;
+        state.previewLaneActive = true;
+
+        // A note on every track, an octave apart, and one track left silent — so "--" is on screen
+        // beside real notes rather than only ever alone.
+        for (int i = 0; i < 8; ++i) {
+            state.trackNotes[i] = (i == 5) ? songcore::Note::EMPTY()
+                                           : songcore::Note{(i * 2) % 12, 3 + (i % 4)};
+        }
+    }
+};
+
 /** "--key=value" → value, or nullptr. */
 const char* opt(int argc, char** argv, const char* key) {
     const size_t klen = std::strlen(key);
@@ -183,14 +249,28 @@ const char* opt(int argc, char** argv, const char* key) {
     return nullptr;
 }
 
+/** A bare "--flag", no value. */
+bool flag(int argc, char** argv, const char* key) {
+    for (int i = 1; i < argc; ++i)
+        if (std::strcmp(argv[i], key) == 0) return true;
+    return false;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::fprintf(stderr,
-                     "usage: ptshot <project.ptp> <out.png> [--screen=PHRASE] [--phrase=N]\n"
-                     "              [--cursor=ROW,COL] [--theme=CLASSIC|AMBER|BLUE|MONO]\n"
-                     "              [--playing=ROW] [--scale=N]\n");
+                     "usage: ptshot <project.ptp> <out.png> [--screen=PHRASE]\n"
+                     "              [--phrase=N] [--chain=N] [--table=N] [--groove=N]\n"
+                     "              [--instrument=N] [--scroll=N] [--cursor=ROW,COL]\n"
+                     "              [--theme=CLASSIC|AMBER|BLUE|MONO]\n"
+                     "              [--viz=SCOPE|FLAT|OCTA|OCTA_FULL|SPECTRUM|SPECTRUM_PEAKS]\n"
+                     "              [--playing=ROW] [--source-column=N] [--from-pool]\n"
+                     "              [--demo] [--scale=N]\n"
+                     "\n"
+                     "  --demo   synthesise the visualizer + note monitor, which are otherwise empty\n"
+                     "           (ptshot has no engine). A fixture for eyeballing geometry, not data.\n");
         return 2;
     }
     const std::string projectPath = argv[1];
@@ -228,21 +308,87 @@ int main(int argc, char** argv) {
             return 2;
         }
     }
-    if (const char* v = opt(argc, argv, "--phrase")) state.currentPhrase = std::atoi(v);
+    if (const char* v = opt(argc, argv, "--viz")) {
+        if (!viz_from_name(v, state.theme.visualizerType)) {
+            std::fprintf(stderr, "unknown visualizer: %s\n", v);
+            return 2;
+        }
+    }
+
+    // Every slot index is clamped to its pool: the layout indexes those pools directly (as it must —
+    // the running app can only ever hold a valid slot), so a typo on the command line would otherwise
+    // be an out-of-bounds read rather than an error message.
+    const auto clamp = [](int v, int hi) { return v < 0 ? 0 : (v > hi ? hi : v); };
+
+    using namespace songcore;
+    if (const char* v = opt(argc, argv, "--phrase"))
+        state.currentPhrase = clamp(std::atoi(v), POOL_PHRASES - 1);
+    if (const char* v = opt(argc, argv, "--chain"))
+        state.currentChain = clamp(std::atoi(v), POOL_CHAINS - 1);
+    if (const char* v = opt(argc, argv, "--table"))
+        state.currentTable = clamp(std::atoi(v), POOL_TABLES - 1);
+    if (const char* v = opt(argc, argv, "--groove"))
+        state.currentGroove = clamp(std::atoi(v), POOL_GROOVES - 1);
+    if (const char* v = opt(argc, argv, "--instrument"))
+        state.currentInstrument = clamp(std::atoi(v), POOL_INSTRUMENTS - 1);
+    if (const char* v = opt(argc, argv, "--scroll"))
+        state.songScrollPosition = clamp(std::atoi(v), 240);  // 256 rows − a 16-row window
+    if (const char* v = opt(argc, argv, "--source-column"))
+        state.previousColumn = clamp(std::atoi(v), 4);
+
+    state.instrumentFromPool = flag(argc, argv, "--from-pool");
+
+    // One --cursor, routed to whichever cursor the screen on show actually reads — TABLE and GROOVE
+    // carry their own, exactly as TrackerController does. Clamped to the same bounds the D-pad obeys
+    // (ui/cursor_move.h), so the tool cannot put the cursor somewhere the app never could.
     if (const char* v = opt(argc, argv, "--cursor")) {
         int row = 0, col = 1;
         if (std::sscanf(v, "%d,%d", &row, &col) == 2) {
-            state.cursorRow    = row;
-            state.cursorColumn = col;
+            const int maxRow = (state.currentScreen == ScreenType::SONG) ? 255 : 15;
+            row = clamp(row, maxRow);
+
+            switch (state.currentScreen) {
+                case ScreenType::TABLE:
+                    state.tableCursorRow    = row;
+                    state.tableCursorColumn = col < 1 ? 1 : (col > 8 ? 8 : col);
+                    break;
+                case ScreenType::GROOVE:
+                    state.grooveCursorRow = row;
+                    break;
+                default: {
+                    const int lo = min_cursor_column(state.currentScreen);
+                    const int hi = max_cursor_column(state.currentScreen);
+                    state.cursorRow    = row;
+                    state.cursorColumn = col < lo ? lo : (col > hi ? hi : col);
+                    break;
+                }
+            }
         }
     }
+
+    // SONG's 16-row window must contain its cursor — the same invariant the D-pad maintains. An
+    // explicit --scroll wins only if it is consistent with the cursor.
+    if (state.currentScreen == ScreenType::SONG) scroll_song_to_row(state, state.cursorRow);
+
+    // One --playing, likewise: each screen watches a different playhead.
     if (const char* v = opt(argc, argv, "--playing")) {
-        state.isPlaying   = true;
-        state.playbackRow = std::atoi(v);
+        const int row   = std::atoi(v);
+        state.isPlaying = true;
+        switch (state.currentScreen) {
+            case ScreenType::SONG:   state.playbackSongRow  = row; break;
+            case ScreenType::CHAIN:  state.playbackChainRow = row; break;
+            case ScreenType::TABLE:  state.tablePlaybackRow = row; break;
+            case ScreenType::GROOVE: break;  // the groove editor draws no playhead
+            default:                 state.playbackRow      = row; break;
+        }
     }
+
+    DemoFeed demo;
+    if (flag(argc, argv, "--demo")) demo.fill(state);
+
     const int scale = opt(argc, argv, "--scale") ? std::atoi(opt(argc, argv, "--scale")) : 1;
 
-    Canvas       canvas;
+    Canvas        canvas;
     TrackerLayout layout;
     layout.draw(canvas, state);
 

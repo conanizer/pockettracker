@@ -26,11 +26,10 @@
 //
 // ─── WHAT IS STILL A STUB ────────────────────────────────────────────────────────────────────────
 //
-// One screen is real (PHRASE). The rest draw the "COMING SOON" placeholder that the Android app itself
-// used while its screens were being written, and they land session by session: the grid editors and
-// the oscilloscope/navigation furniture next, then the full input dispatcher, then the instrument,
-// mixer, file and settings screens. Navigation between them is not wired yet either — R+DPAD moves
-// between screens on Android, and that lives in AppInputDispatcher.
+// Five screens are real (SONG, CHAIN, PHRASE, TABLE, GROOVE) and R+DPAD moves between all of them.
+// The rest draw the "COMING SOON" placeholder that the Android app itself used while its screens were
+// being written, and they land session by session: the full input dispatcher (selection, clipboard,
+// note preview, the FX helper) next, then the instrument, mixer, file and settings screens.
 
 // <cmath> before <SDL.h> — see the note in sdl-audio-engine.h (M_PI, _USE_MATH_DEFINES, C4005).
 #include <cmath>
@@ -43,8 +42,15 @@
 #include "ui/app_state.h"
 #include "ui/canvas.h"
 #include "ui/cursor.h"
+#include "ui/cursor_move.h"
+#include "ui/engine_feed.h"
 #include "ui/layout.h"
+#include "ui/navigation.h"
+#include "ui/modules/chain_editor.h"
+#include "ui/modules/groove_editor.h"
 #include "ui/modules/phrase_editor.h"
+#include "ui/modules/song_editor.h"
+#include "ui/modules/table_editor.h"
 
 #include "sdl-audio-engine.h"
 #include "sdl-input.h"
@@ -77,39 +83,144 @@ std::string dir_of(const std::string& path) {
     return (slash == std::string::npos) ? std::string(".") : path.substr(0, slash);
 }
 
-constexpr int PHRASE_ROWS    = 16;
-constexpr int PHRASE_COLUMNS = 10;  // 0 = step number (read-only), 1..9 = note/vel/inst/FX
+/** Every grid editor the shell can currently show. One instance each, exactly as TrackerLayout holds. */
+struct Editors {
+    ui::SongEditorModule   song;
+    ui::ChainEditorModule  chain;
+    ui::PhraseEditorModule phrase;
+    ui::TableModule        table;
+    ui::GrooveModule       groove;
+};
+
+/**
+ * "What is under the cursor, and what can be done to it" — for whichever screen is up.
+ *
+ * The ONE place the shell asks which screen it is on. Everything downstream (the five button handlers,
+ * the value stepping, the wrap-vs-clamp rules) is written against the CursorContext this returns and
+ * never learns the answer. That is the whole point of the cursor-context system, and it is why adding
+ * a screen below is four lines rather than a new branch in every handler.
+ */
+ui::CursorContext cursor_context_for(const ui::AppState& s, const Project& p, const Editors& ed) {
+    switch (s.currentScreen) {
+        case ui::ScreenType::SONG: {
+            ui::SongEditorState ss{p};
+            ss.cursorRow   = s.cursorRow;
+            ss.cursorTrack = s.cursorColumn;  // on SONG the column IS the track
+            return ed.song.cursor_context(ss);
+        }
+        case ui::ScreenType::CHAIN: {
+            ui::ChainEditorState cs{p.chains[static_cast<size_t>(s.currentChain)]};
+            cs.cursorRow    = s.cursorRow;
+            cs.cursorColumn = s.cursorColumn;
+            return ed.chain.cursor_context(cs);
+        }
+        case ui::ScreenType::PHRASE: {
+            ui::PhraseEditorState ps{p.phrases[static_cast<size_t>(s.currentPhrase)]};
+            ps.cursorRow    = s.cursorRow;
+            ps.cursorColumn = s.cursorColumn;
+            return ed.phrase.cursor_context(ps);
+        }
+        case ui::ScreenType::TABLE: {
+            ui::TableState ts{p.tables[static_cast<size_t>(s.currentTable)]};
+            ts.cursorRow    = s.tableCursorRow;
+            ts.cursorColumn = s.tableCursorColumn;
+            return ed.table.cursor_context(ts);
+        }
+        case ui::ScreenType::GROOVE: {
+            ui::GrooveState gs{p.grooves[static_cast<size_t>(s.currentGroove)]};
+            gs.cursorRow    = s.grooveCursorRow;
+            gs.cursorColumn = 1;
+            return ed.groove.cursor_context(gs);
+        }
+        default:
+            return ui::cc::none();  // a placeholder screen has nothing to edit
+    }
+}
+
+/** Apply an action to the live document. Returns true if anything changed. */
+bool apply_edit(const ui::AppState& s, SongcoreHost& host, const Editors& ed,
+                const ui::InputAction& action) {
+    Project& p = host.edit_project();  // the SAME Project the Sequencer is reading
+
+    switch (s.currentScreen) {
+        case ui::ScreenType::SONG:
+            return ed.song.handle_input(p, s.cursorRow, s.cursorColumn, action).modified;
+
+        case ui::ScreenType::CHAIN:
+            return ed.chain
+                .handle_input(p.chains[static_cast<size_t>(s.currentChain)], s.cursorRow,
+                              s.cursorColumn, action)
+                .modified;
+
+        case ui::ScreenType::PHRASE:
+            return ed.phrase
+                .handle_input(p.phrases[static_cast<size_t>(s.currentPhrase)], s.cursorRow,
+                              s.cursorColumn, action)
+                .modified;
+
+        case ui::ScreenType::TABLE: {
+            const bool modified =
+                ed.table
+                    .handle_input(p.tables[static_cast<size_t>(s.currentTable)], s.tableCursorRow,
+                                  s.tableCursorColumn, action)
+                    .modified;
+            // ⚠️ The consumer caches which tables it has already pushed to the engine. An in-place
+            // edit is invisible to that cache — push_project invalidates it, an edit cannot.
+            if (modified) host.invalidate_tables();
+            return modified;
+        }
+
+        case ui::ScreenType::GROOVE:
+            return ed.groove
+                .handle_input(p.grooves[static_cast<size_t>(s.currentGroove)], s.grooveCursorRow,
+                              /*cursor_column=*/1, action)
+                .modified;
+
+        default:
+            return false;
+    }
+}
 
 /**
  * The editing half of the input loop.
  *
  * A deliberately SMALL stand-in for `AppInputDispatcher` (~3200 lines of Kotlin), covering exactly the
- * vertical slice this session set out to prove: move the cursor, edit the cell under it, hear the
- * result. What matters is that it is written THROUGH the real architecture rather than around it —
- * `cursor_context()` answers what the cursor is on, and the generic `on_a` / `on_b` / `on_a_left` /
- * `on_a_right` / `on_a_b` handlers turn a button into an `InputAction` without ever asking which
- * screen is up. The dispatcher session replaces this function and keeps everything underneath it.
+ * slice these two sessions set out to prove: reach every screen, move the cursor, edit the cell under
+ * it, hear the result. What matters is that it is written THROUGH the real architecture rather than
+ * around it — `cursor_context()` answers what the cursor is on, and the generic `on_a` / `on_b` /
+ * `on_a_left` / `on_a_right` / `on_a_b` handlers turn a button into an `InputAction` without ever
+ * asking which screen is up. The dispatcher session replaces this function and keeps everything under
+ * it.
  *
- * Not here yet, and each belongs to a later session: every screen but PHRASE (so no R+DPAD screen
- * navigation), the selection/clipboard combos (L+B, L+A), the item-cycling B+DPAD, the A,A
- * double-tap, the note preview an edit should play, and the FX-helper overlay that intercepts A+UP
- * when the cursor is on an FX-type column.
+ * Not here yet, and each belongs to that session: the selection/clipboard combos (L+B, L+A), the
+ * item-cycling B+DPAD (which is how you change WHICH phrase/chain/table you are looking at), the A,A
+ * double-tap, the note preview an edit should play, and the FX-helper overlay that intercepts A+UP on
+ * an FX-type column.
  */
-void handle_button(const ButtonEvent& e, ui::AppState& state, SongcoreHost& host,
-                   const ui::PhraseEditorModule& phraseEditor, const SdlInput& input) {
+void handle_button(const ButtonEvent& e, ui::AppState& state, SongcoreHost& host, const Editors& ed,
+                   const SdlInput& input) {
     if (e.action != ButtonAction::PRESSED) return;
-    if (state.currentScreen != ui::ScreenType::PHRASE) return;  // the only module so far
 
-    // The live project — the same object the Sequencer is reading.
-    Phrase& phrase = host.edit_project().phrases[static_cast<size_t>(state.currentPhrase)];
+    const bool aHeld = input.is_held(Button::A);
+    const bool bHeld = input.is_held(Button::B);
+    const bool rHeld = input.is_held(Button::R_SHIFT);
 
-    ui::PhraseEditorState ps{phrase};
-    ps.cursorRow    = state.cursorRow;
-    ps.cursorColumn = state.cursorColumn;
+    // ── R + DPAD: move between screens ───────────────────────────────────────────────────────────
+    // Checked FIRST: R is a screen-navigation modifier, and while it is down a DPAD press must not
+    // also move the cursor underneath.
+    if (rHeld) {
+        const ui::NavState ns = ui::nav_state_of(state);
+        switch (e.button) {
+            case Button::DPAD_UP:    ui::go_to_screen(state, ui::navigate_up(ns));    break;
+            case Button::DPAD_DOWN:  ui::go_to_screen(state, ui::navigate_down(ns));  break;
+            case Button::DPAD_LEFT:  ui::go_to_screen(state, ui::navigate_left(ns));  break;
+            case Button::DPAD_RIGHT: ui::go_to_screen(state, ui::navigate_right(ns)); break;
+            default: break;
+        }
+        return;
+    }
 
-    const ui::CursorContext ctx   = phraseEditor.cursor_context(ps);
-    const bool              aHeld = input.is_held(Button::A);
-    const bool              bHeld = input.is_held(Button::B);
+    const ui::CursorContext ctx = cursor_context_for(state, host.edit_project(), ed);
 
     ui::InputAction action = ui::InputAction::none();
 
@@ -131,21 +242,24 @@ void handle_button(const ButtonEvent& e, ui::AppState& state, SongcoreHost& host
     } else {
         // ── DPAD alone: move the cursor ──────────────────────────────────────────────────────────
         switch (e.button) {
-            case Button::DPAD_UP:
-                state.cursorRow = (state.cursorRow + PHRASE_ROWS - 1) % PHRASE_ROWS;
-                break;
-            case Button::DPAD_DOWN:
-                state.cursorRow = (state.cursorRow + 1) % PHRASE_ROWS;
-                break;
-            case Button::DPAD_LEFT:
-                state.cursorColumn = (state.cursorColumn + PHRASE_COLUMNS - 1) % PHRASE_COLUMNS;
-                break;
-            case Button::DPAD_RIGHT:
-                state.cursorColumn = (state.cursorColumn + 1) % PHRASE_COLUMNS;
-                break;
+            case Button::DPAD_UP:    ui::move_cursor_up(state);    break;
+            case Button::DPAD_DOWN:  ui::move_cursor_down(state);  break;
+            case Button::DPAD_LEFT:  ui::move_cursor_left(state);  break;
+            case Button::DPAD_RIGHT: ui::move_cursor_right(state); break;
             case Button::START:
-                if (host.is_playing()) host.stop();
-                else host.play_song(0);
+                // Kotlin's togglePlayback(): what START plays depends on the screen you are ON — the
+                // phrase you are editing, the chain you are editing, or the whole song from row 0
+                // (`playSong(project)` takes the startRow=0 default; it does NOT start at the cursor).
+                // Every other screen falls back to the phrase, so START always makes a sound.
+                if (host.is_playing()) {
+                    host.stop();
+                } else {
+                    switch (state.currentScreen) {
+                        case ui::ScreenType::SONG:  host.play_song(0); break;
+                        case ui::ScreenType::CHAIN: host.play_chain(state.currentChain); break;
+                        default:                    host.play_phrase(state.currentPhrase); break;
+                    }
+                }
                 break;
             default:
                 break;
@@ -154,13 +268,10 @@ void handle_button(const ButtonEvent& e, ui::AppState& state, SongcoreHost& host
 
     if (action.type == ui::ActionType::NONE) return;
 
-    const ui::PhraseInputResult r =
-        phraseEditor.handle_input(phrase, state.cursorRow, state.cursorColumn, action);
-
     // An edit made WHILE PLAYING has to reach the lookahead that has already been scheduled past it —
     // otherwise it is not heard until the buffer happens to roll over it. Kotlin calls exactly this,
     // from exactly here.
-    if (r.modified && host.is_playing()) host.notify_data_changed();
+    if (apply_edit(state, host, ed, action) && host.is_playing()) host.notify_data_changed();
 }
 
 }  // namespace
@@ -228,12 +339,14 @@ int main(int argc, char** argv) {
     state.project       = &host.edit_project();
     state.currentScreen = ui::ScreenType::PHRASE;
 
-    ui::Canvas         canvas;
-    ui::TrackerLayout  layout;
-    ui::PhraseEditorModule phraseEditor;
+    ui::Canvas        canvas;
+    ui::TrackerLayout layout;
+    ui::EngineFeed    feed;
+    Editors           editors;
 
     std::printf("\nWASD/arrows move   K/Enter = A   J/Esc = B   SPACE = START (play/stop)   F10 quit\n");
-    std::printf("A+UP/DOWN edit the cell   A+LEFT/RIGHT edit fast   A+B clear\n\n");
+    std::printf("A+UP/DOWN edit the cell   A+LEFT/RIGHT edit fast   A+B clear\n");
+    std::printf("I(R)+DPAD moves between screens: SONG CHAIN PHRASE TABLE GROOVE\n\n");
 
     bool   running    = true;
     Uint64 lastStatus = 0;
@@ -260,7 +373,7 @@ int main(int argc, char** argv) {
 
         ButtonEvent be;
         while (input.poll(be)) {
-            handle_button(be, state, host, phraseEditor, input);
+            handle_button(be, state, host, editors, input);
         }
 
         // The lookahead pump — the same call, on the same 60 Hz cadence, that PixelPerfectRenderer's
@@ -272,6 +385,12 @@ int main(int argc, char** argv) {
         state.playbackRow      = pos.phraseStep;
         state.playbackChainRow = pos.chainRow;
         state.playbackSongRow  = pos.songRow;
+        state.trackMask        = host.track_mask();
+
+        // Everything the UI reads back OUT of the engine: the scope's samples, the eight monitored
+        // notes, the table's playing row. AFTER the transport fields above — the waveform decay is a
+        // function of isPlaying, and the table row is only resolved on the TABLE screen.
+        feed.poll(*engine, state);
 
         layout.draw(canvas, state);
         video.present(canvas);
@@ -284,11 +403,12 @@ int main(int argc, char** argv) {
         // broken link. A window on screen does not answer that question when there is no screen.
         if (now - lastStatus >= 1000) {
             lastStatus = now;
-            std::printf("%s  frame %-10lld  song %3d  chain %2d  step %2d   voices %2d   cursor %X,%d\n",
-                        host.is_playing() ? "play" : "stop",
-                        static_cast<long long>(engine->getCurrentFrame()), pos.songRow, pos.chainRow,
-                        pos.phraseStep, engine->getActiveVoiceCount(), state.cursorRow,
-                        state.cursorColumn);
+            std::printf(
+                "%s  frame %-10lld  song %3d  chain %2d  step %2d   voices %2d   %-10s cursor %X,%d\n",
+                host.is_playing() ? "play" : "stop",
+                static_cast<long long>(engine->getCurrentFrame()), pos.songRow, pos.chainRow,
+                pos.phraseStep, engine->getActiveVoiceCount(), ui::screen_label(state.currentScreen),
+                state.cursorRow, state.cursorColumn);
             std::fflush(stdout);  // block-buffered to a pipe otherwise, and then it says nothing
         }
     }

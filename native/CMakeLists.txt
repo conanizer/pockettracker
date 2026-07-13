@@ -199,7 +199,13 @@ if(NOT ANDROID)
     add_library(pt-ui STATIC
             ui/canvas.cpp
             ui/layout.cpp
+            ui/modules/chain_editor.cpp
+            ui/modules/groove_editor.cpp
+            ui/modules/navigation_map.cpp
+            ui/modules/oscilloscope.cpp
             ui/modules/phrase_editor.cpp
+            ui/modules/song_editor.cpp
+            ui/modules/table_editor.cpp
     )
 
     # PUBLIC: pt-ui's headers include songcore's (model.h, effects.h), so anything linking pt-ui

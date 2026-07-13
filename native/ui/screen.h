@@ -53,6 +53,13 @@ inline const char* screen_label(ScreenType s) {
     return "";
 }
 
+/**
+ * The navigation map's cell label — NavigationMapModule.getScreenLabel().
+ *
+ * Deliberately NOT unique: SCALE and SONG are both "S", and PROJECT / PHRASE / INST_POOL are all "P".
+ * The cell's COLUMN disambiguates it (the map only ever draws a screen in its own column), so the
+ * label is a mnemonic, not an identifier — and it must stay one char wide to fit the 23px cell.
+ */
 inline const char* screen_short_label(ScreenType s) {
     switch (s) {
         case ScreenType::SONG:          return "S";
@@ -62,9 +69,9 @@ inline const char* screen_short_label(ScreenType s) {
         case ScreenType::TABLE:         return "T";
         case ScreenType::PROJECT:       return "P";
         case ScreenType::GROOVE:        return "G";
-        case ScreenType::SCALE:         return "SC";
+        case ScreenType::SCALE:         return "S";
         case ScreenType::MODS:          return "M";
-        case ScreenType::INST_POOL:     return "IP";
+        case ScreenType::INST_POOL:     return "P";
         case ScreenType::MIXER:         return "V";
         case ScreenType::EFFECTS:       return "X";
         case ScreenType::FILE_BROWSER:  return "FB";

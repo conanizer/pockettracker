@@ -17,7 +17,7 @@ project("pockettracker-tools" LANGUAGES C CXX)
 #   ptrender      S6b  the render, end to end   real audio, through the real engine
 #   ptrandom      S7   the random FX            12 distributions     (units/s7-random.txt)
 #   ptnondet      S7   which projects may be byte-compared at all   (+ a standalone .ptp diagnostic)
-#   ptshot   Phase3 S1 the UI, as pixels        a screen → a PNG, headless (no golden yet — see below)
+#   ptshot   Phase3 S1 the UI, as pixels        any screen → a PNG, headless (no golden yet — see below)
 #
 # ptrandom is the odd one out, and deliberately so: CHA/RND/RNL/ARP-RANDOM draw from a clock-seeded
 # RNG, so the Kotlin sequencer has no repeatable event stream to record and there is no byte-exact
