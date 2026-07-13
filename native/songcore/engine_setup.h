@@ -409,6 +409,224 @@ void clear_instrument(Engine* engine, Project& project, int id, Routing& routing
     routing.sfSlot[id] = -1;
 }
 
+// ─── the preview slots (AudioEngine.clearPreviewSlots) ──────────────────────────────────────────
+//
+// Two sample slots above the 128-instrument pool are scratch, and neither belongs to a project:
+//   255 — the FILE BROWSER's audition. The file under the cursor, decoded so it can be heard BEFORE
+//         it is committed to a slot, which is the entire reason to browse samples rather than guess.
+//   254 — the SAMPLE EDITOR's source preview (S6b).
+// A real load frees them, because the audition is stale the moment the file it auditioned is loaded.
+
+inline constexpr int PREVIEW_SAMPLE_SLOT = 255;
+inline constexpr int SOURCE_PREVIEW_SLOT = 254;
+
+template <typename Engine>
+void clear_preview_slots(Engine& engine) {
+    engine.clearSample(SOURCE_PREVIEW_SLOT);
+    engine.clearSample(PREVIEW_SAMPLE_SLOT);
+}
+
+/**
+ * Audition the file at `path` — the browser's START. It decodes into slot 255 and plays it at C-4 on
+ * the preview lane, so it steals nothing from a song playing underneath.
+ *
+ * ⚠️ This is the ONE note in the port that does NOT go through `plan_note_on`, and the exception is
+ * principled rather than convenient: `plan_note_on` derives a note from an INSTRUMENT, and a file
+ * being auditioned in a browser has no instrument behind it — no root, no detune, no filter, no mod
+ * slots, not even a pool slot. There is nothing to derive from. What it plays is the file, flat, at
+ * C-4, with the sample-rate ratio applied so a 22 kHz file is not auditioned an octave low.
+ *
+ * Returns the file's sample rate (> 0) on success, 0 if it could not be decoded.
+ */
+template <typename Engine>
+int preview_sample_file(Engine& engine, const std::string& path) {
+    constexpr float C4_HZ = 261.63f;
+
+    engine.scheduleKill(engine.getCurrentFrame(), Engine::PREVIEW_LANE);   // the previous audition
+
+    const int fileRate = load_sample_file(engine, PREVIEW_SAMPLE_SLOT, path);
+    if (fileRate <= 0) return 0;
+
+    engine.requestResume();
+    const float deviceRate = static_cast<float>(engine.getSampleRate());
+    const float baseFreq   = C4_HZ * (deviceRate / static_cast<float>(fileRate));
+
+    engine.scheduleNote(engine.getCurrentFrame() + 100, PREVIEW_SAMPLE_SLOT, Engine::PREVIEW_LANE,
+                        /*frequency=*/C4_HZ, /*baseFrequency=*/baseFreq, /*volume=*/1.0f,
+                        /*phraseVolume=*/1.0f, /*pan=*/0.5f);
+    return fileRate;
+}
+
+// ─── loading a SOURCE into one instrument (Phase 3 S6a — the file browser's whole point) ─────────
+//
+// `load_project_media` above loads every instrument's source at once, which is what a project LOAD
+// does. These two are the single-slot verbs the file browser needs: the user picked one file, and it
+// goes into one slot. Same engine calls, same Routing writes, same "sampleFilePath is the empty
+// signal" convention — differing only in that they also update the DOCUMENT, because a project load
+// has already read the paths from the file whereas a browser pick is what CREATES them.
+
+/**
+ * Load a sample (wav / mp3 / flac / ogg / opus) into instrument `id`. True on success.
+ *
+ * ⚠️ The instrument keeps the ORIGINAL path even for a compressed source — no WAV is written, and the
+ * decode is repeated on the next project load. That is Kotlin's contract (`loadSampleFromCompressed`:
+ * "the instrument keeps its original path"), and `load_project_media` is the code that honours it.
+ *
+ * ⚠️ WAV cue points → `sliceMarkers` is NOT read here, exactly as `load_project_media` does not read
+ * it: the engine's WAV decoder does not parse the `cue ` chunk. An instrument whose markers came from
+ * the file therefore loads without them on this platform (markers stored in the .ptp are unaffected).
+ * Kotlin reads them via WavWriter.readCuePoints. This lands with the Phase 1.5 media unification, and
+ * until it does, a sliced WAV loaded on Linux plays whole. Stated, not silently dropped.
+ */
+template <typename Engine>
+bool load_instrument_sample(Engine* engine, Project& project, int id, const std::string& path,
+                            Routing& routing) {
+    if (id < 0 || id >= static_cast<int>(project.instruments.size())) return false;
+
+    // No engine → no decode, and therefore nothing true to write into the document. Unlike
+    // set_instrument_type (which edits the document and merely also frees engine resources), a LOAD
+    // *is* the engine call: claiming a path we never opened would leave a slot that points at audio
+    // the engine does not have.
+    if (!engine) return false;
+
+    const int fileRate = load_sample_file(*engine, id, path);
+    if (fileRate <= 0) return false;
+
+    Instrument& ins   = project.instruments[static_cast<size_t>(id)];
+    ins.sampleFilePath = path;
+    ins.sampleId       = id;
+    ins.sliceMarkers.clear();   // a fresh source has no markers until a sample-editor CHOP writes some
+
+    const float deviceRate = static_cast<float>(engine->getSampleRate());
+    routing.sampleRateRatio[id] = deviceRate / static_cast<float>(fileRate);
+
+    // The audition the browser was playing while the user scrolled is now stale — a real load has
+    // committed. Kotlin drops it here too (`audioEngine.clearPreviewSlots()`).
+    clear_preview_slots(*engine);
+    return true;
+}
+
+/**
+ * Load an SF2/SF3 into instrument `id`, make the slot a SOUNDFONT, and select the first preset that
+ * actually EXISTS in the file — a bank/preset pair the .sf2 does not contain plays silence, and 0/0 is
+ * not present in every soundfont.
+ */
+template <typename Engine>
+bool load_instrument_soundfont(Engine* engine, Project& project, int id, const std::string& path,
+                               Routing& routing) {
+    if (id < 0 || id >= static_cast<int>(project.instruments.size())) return false;
+    if (!engine) return false;
+
+    const int slot = engine->loadSoundfont(id, path.c_str());
+    if (slot < 0) return false;
+
+    Instrument& ins    = project.instruments[static_cast<size_t>(id)];
+    ins.soundfontPath  = path;
+    ins.instrumentType = InstrumentType::SOUNDFONT;
+    ins.sampleFilePath.reset();   // the slot's old sampler source is gone with the type change
+    routing.sfSlot[id] = slot;
+
+    // The FIRST preset in the file's list — `getSoundfontFirstBankPreset` on Android, which is
+    // `getSoundfontPresetAt(slot, 0)` here. Not 0/0: plenty of SF2s do not contain bank 0 preset 0, and
+    // a bank/preset pair the file lacks plays silence.
+    int bank = -1, preset = -1;
+    if (engine->getSoundfontPresetAt(slot, 0, &bank, &preset) && bank >= 0) {
+        ins.sfBank   = bank;
+        ins.sfPreset = preset;
+    }
+
+    clear_preview_slots(*engine);
+    return true;
+}
+
+/**
+ * Apply a loaded .pti to instrument `id` — every parameter, the embedded table if there is one, and
+ * the source file the preset names.
+ *
+ * `id` is preserved (a preset saved from slot 3 loads into whichever slot you are standing on), and so
+ * is the TABLE it lands in: the embedded rows always go into the DESTINATION instrument's own table,
+ * because instrument index == table index is the app's rule (INST01 owns TABLE01) and honouring the
+ * preset's stored tableId would have it stomp a table belonging to a different instrument.
+ *
+ * Returns false only if the SOURCE could not be loaded — the parameters are applied either way, which
+ * is Kotlin's behaviour and the useful one: a preset whose sample has been moved should still give you
+ * back its filter, its envelope and its mod slots.
+ */
+template <typename Engine>
+bool apply_instrument_preset(Engine* engine, Project& project, int id, const InstrumentPreset& preset,
+                             Routing& routing) {
+    if (id < 0 || id >= static_cast<int>(project.instruments.size())) return false;
+
+    Instrument&       dst = project.instruments[static_cast<size_t>(id)];
+    const Instrument& src = preset.instrument;
+
+    const int keepId = dst.id;
+    dst = src;
+    dst.id       = keepId;
+    dst.sampleId = keepId;
+    dst.sampleFilePath.reset();
+    dst.soundfontPath.reset();
+
+    if (preset.tableRows.has_value() && id < POOL_TABLES) {
+        Table& table = project.tables[static_cast<size_t>(id)];
+        const std::vector<TableRow>& rows = *preset.tableRows;
+        for (size_t i = 0; i < rows.size() && i < table.rows.size(); ++i) table.rows[i] = rows[i];
+        dst.tableId = id;
+    }
+
+    if (src.instrumentType == InstrumentType::SOUNDFONT) {
+        if (!src.soundfontPath.has_value()) return true;   // params-only preset
+        if (!load_instrument_soundfont(engine, project, id, *src.soundfontPath, routing)) return false;
+
+        // load_instrument_soundfont selected the SF2's FIRST preset. The one the .pti saved wins —
+        // but only if this file still has it: a preset validated against a different .sf2 (or an .sf2
+        // that has been edited since) would play silence, and falling back to the first is Kotlin's
+        // behaviour and the recoverable one.
+        Instrument& ins = project.instruments[static_cast<size_t>(id)];
+        if (engine && routing.sfSlot[id] >= 0 &&
+            engine->getSoundfontPresetName(routing.sfSlot[id], src.sfBank, src.sfPreset) != "---") {
+            ins.sfBank   = src.sfBank;
+            ins.sfPreset = src.sfPreset;
+            // No engine call: the bank and preset ride with every scheduled note (derive_soundfont_note),
+            // so writing them on the instrument IS the whole of it. Kotlin's `setSoundfontPreset` here
+            // reaches an engine function whose body is a log line — see set_soundfont_preset_by_index.
+        }
+        return true;
+    }
+
+    if (!src.sampleFilePath.has_value()) return true;      // params-only preset
+    if (!load_instrument_sample(engine, project, id, *src.sampleFilePath, routing)) return false;
+
+    // load_instrument_sample cleared the markers (a fresh source has none); the preset's win.
+    project.instruments[static_cast<size_t>(id)].sliceMarkers = src.sliceMarkers;
+    return true;
+}
+
+/**
+ * Build the .pti for instrument `id`. The table travels WITH the preset — but only if it has content,
+ * because embedding 16 empty rows in every preset is bloat that says nothing.
+ */
+inline InstrumentPreset make_instrument_preset(const Project& project, int id) {
+    InstrumentPreset ip;
+    if (id < 0 || id >= static_cast<int>(project.instruments.size())) return ip;
+
+    ip.instrument = project.instruments[static_cast<size_t>(id)];
+
+    const Instrument& ins = ip.instrument;
+    const int tableId = (ins.tableId >= 0 && ins.tableId < static_cast<int>(project.tables.size()))
+                            ? ins.tableId
+                            : ins.id;
+    if (tableId < 0 || tableId >= static_cast<int>(project.tables.size())) return ip;
+
+    const std::vector<TableRow>& rows = project.tables[static_cast<size_t>(tableId)].rows;
+    bool hasContent = false;
+    for (const TableRow& r : rows)
+        if (r.transpose != 0 || r.volume != -1 || r.fx1Type != 0) { hasContent = true; break; }
+    if (hasContent) ip.tableRows = rows;
+
+    return ip;
+}
+
 }  // namespace songcore
 
 #endif  // POCKETTRACKER_SONGCORE_ENGINE_SETUP_H

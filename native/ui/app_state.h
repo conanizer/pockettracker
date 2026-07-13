@@ -19,6 +19,8 @@
 #include "songcore/model.h"
 #include "theme.h"
 #include "ui/fx_helper.h"
+#include "ui/modules/file_browser.h"
+#include "ui/modules/qwerty_keyboard.h"
 #include "ui/selection.h"
 
 #include <string>
@@ -184,6 +186,39 @@ struct AppState {
     // A+UP/DOWN on an FX-TYPE column opens it; releasing A commits the highlighted effect
     // (ui/fx_helper.h). While it is open it OWNS the D-pad — the cursor underneath must not move.
     FxHelperState fxHelper{};
+
+    // ── The file browser, and why it was opened (S6a) ────────────────────────────────────────────
+    FileBrowserState fileBrowser{};
+
+    /**
+     * What the A button will DO with the file the user picks. The browser itself has no idea — it
+     * lists, it sorts, it hands back a path.
+     *
+     * ⚠️ Android answers this question with TWO fields and no type at all: `previousScreen` (a
+     * ScreenType) plus `instrumentFileBrowserAction`, a **String** compared against the literals
+     * `"LOAD_PRESET"`, `"LOAD_SOURCE"`, `"LOAD_SAMPLE_EDITOR"` and `"LOAD_THEME"` — with a silent
+     * `else` arm for every typo. An enum is the same information with the failure mode removed.
+     */
+    enum class BrowserPurpose {
+        LOAD_SOURCE,  // a sample (or an .sf2 — the instrument's TYPE decides which, at open time)
+        LOAD_PRESET   // a .pti into the current instrument slot
+    };
+    BrowserPurpose browserPurpose = BrowserPurpose::LOAD_SOURCE;
+
+    /** The screen the browser (or a full-screen overlay) will return to when it closes. */
+    ScreenType previousScreen = ScreenType::INSTRUMENT;
+
+    // ── The QWERTY keyboard ─────────────────────────────────────────────────────────────────────
+    // The app's first true modal: while it is open it owns every button, and `isOpen` is checked
+    // before any other arm in every handler that can reach it.
+    QwertyKeyboardState qwerty{};
+
+    /**
+     * SETTINGS "INSERT MODE" — where a typed character lands relative to the text cursor, and hence
+     * which way B deletes. The keyboard reads it when it OPENS (as Kotlin does), so flipping the
+     * setting mid-word cannot change what the buttons mean under the user's thumb.
+     */
+    bool insertBefore = true;
 
     // ── "Last edited" — the memory that makes A,A and the insert defaults useful ─────────────────
     //

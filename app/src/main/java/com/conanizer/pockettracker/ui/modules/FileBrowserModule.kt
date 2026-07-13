@@ -255,6 +255,13 @@ class FileBrowserModule : TrackerModule {
      * the main thread by MainActivity's LaunchedEffect on (currentDirectory, listRefreshTick).
      * Previously this ALSO built the list synchronously, so every navigation walked the
      * directory twice, one of those on the main thread.
+     *
+     * ⚠️ The SELECTION is cleared, and it did not used to be. A multi-select (L+B) left live across a
+     * folder change kept `selectionAnchor` pointing at an index in the directory you just LEFT, while
+     * `cursor` reset to 0 — so `selectedRange` (anchor..cursor, clamped to the first selectable row)
+     * highlighted a band of rows in the NEW listing that the user had never picked. B there copied
+     * them, and an L+A paste then duplicated them. Found while porting this module to C++ (Linux
+     * Phase 3 S6a); the C++ browser clears it in the same place.
      */
     fun navigateToFolder(state: State, folder: File): State {
         val canRead = folder.canRead()
@@ -266,7 +273,9 @@ class FileBrowserModule : TrackerModule {
             scroll = 0,
             statusMessage = "",
             statusSuccess = canRead,
-            permissionError = !canRead
+            permissionError = !canRead,
+            selectionMode = false,
+            selectionAnchor = -1
         )
     }
 

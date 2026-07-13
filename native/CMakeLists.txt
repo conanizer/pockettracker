@@ -201,8 +201,10 @@ if(NOT ANDROID)
             ui/clipboard.cpp
             ui/input_dispatcher.cpp
             ui/layout.cpp
+            ui/std_filesystem.cpp
             ui/modules/chain_editor.cpp
             ui/modules/effects_editor.cpp
+            ui/modules/file_browser.cpp
             ui/modules/fx_helper_overlay.cpp
             ui/modules/groove_editor.cpp
             ui/modules/instrument_editor.cpp
@@ -212,9 +214,23 @@ if(NOT ANDROID)
             ui/modules/navigation_map.cpp
             ui/modules/oscilloscope.cpp
             ui/modules/phrase_editor.cpp
+            ui/modules/qwerty_keyboard.cpp
             ui/modules/song_editor.cpp
             ui/modules/table_editor.cpp
     )
+
+    # ⚠️ std::filesystem needs a separate link library on gcc 8 and older — `stdc++fs`. It was folded
+    # into libstdc++ proper in gcc 9. The CI runners are far newer (gcc 13, clang 18, MSVC), but a
+    # PortMaster cross-toolchain can easily be gcc 8, and the failure mode is a wall of undefined
+    # references at LINK time on a box the port author does not have.
+    #
+    # A compiler-version test, NOT a check_cxx_source_compiles probe: the probe does not inherit
+    # CMAKE_CXX_STANDARD, so it compiles as C++14 on MSVC, fails to find <filesystem>, and concludes
+    # that MSVC needs `stdc++fs` — a library that does not exist there. (Measured, not guessed: that is
+    # exactly what the first version of this block did.)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
+        target_link_libraries(pt-ui PUBLIC stdc++fs)
+    endif()
 
     # PUBLIC: pt-ui's headers include songcore's (model.h, effects.h), so anything linking pt-ui
     # inherits the engine's include roots too — the same reasoning as pockettracker's own PUBLIC roots.

@@ -28,6 +28,7 @@
 #include "ui/helpers.h"
 #include "ui/modules/chain_editor.h"
 #include "ui/modules/effects_editor.h"
+#include "ui/modules/file_browser.h"
 #include "ui/modules/groove_editor.h"
 #include "ui/modules/instrument_editor.h"
 #include "ui/modules/instrument_pool.h"
@@ -36,6 +37,7 @@
 #include "ui/modules/navigation_map.h"
 #include "ui/modules/oscilloscope.h"
 #include "ui/modules/phrase_editor.h"
+#include "ui/modules/qwerty_keyboard.h"
 #include "ui/modules/song_editor.h"
 #include "ui/modules/table_editor.h"
 
@@ -86,6 +88,8 @@ private:
     MixerModule           mixer_;        // stateful (peak-hold) — see draw()
     EffectModule          effects_;
     NavigationMapModule   navigationMap_;
+    FileBrowserModule     fileBrowser_;   // full-screen: draw() returns before the furniture
+    QwertyKeyboardOverlay qwerty_;        // modal: drawn LAST, over everything, including the browser
 };
 
 }  // namespace pt::ui

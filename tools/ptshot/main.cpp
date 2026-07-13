@@ -36,7 +36,20 @@
 #include "ui/app_state.h"
 #include "ui/cursor_move.h"
 #include "ui/layout.h"
+#include "ui/modules/file_browser.h"
 #include "ui/modules/oscilloscope.h"
+#include "ui/std_filesystem.h"
+
+/** "wav,mp3,flac" → {"wav","mp3","flac"} — for --browser-ext. */
+static std::vector<std::string> split_csv(const std::string& s) {
+    std::vector<std::string> out;
+    std::stringstream        ss(s);
+    std::string              item;
+    while (std::getline(ss, item, ',')) {
+        if (!item.empty()) out.push_back(item);
+    }
+    return out;
+}
 
 using namespace pt::ui;
 
@@ -289,6 +302,10 @@ int main(int argc, char** argv) {
                      "              [--viz=SCOPE|FLAT|OCTA|OCTA_FULL|SPECTRUM|SPECTRUM_PEAKS]\n"
                      "              [--playing=ROW] [--source-column=N] [--from-pool]\n"
                      "              [--fx-helper=N] [--selection=r1,c1,r2,c2]\n"
+                     "              [--browser=DIR] [--browser-ext=wav,mp3] [--browser-cursor=N]\n"
+                     "              [--browser-mode=delete] [--browser-select=N] [--browser-clip=N]\n"
+                     "              [--qwerty=TEXT] [--qwerty-label=L] [--qwerty-key=ROW,COL]\n"
+                     "              [--qwerty-layout=0|1] [--qwerty-cursor=N]\n"
                      "              [--mod-cursor=PAIR,SIDE,ROW] [--sf-presets=COUNT,INDEX]\n"
                      "              [--demo] [--scale=N]\n"
                      "\n"
@@ -488,6 +505,59 @@ int main(int argc, char** argv) {
             state.selection.scope  = SelectionScope::CELL;
             state.selection.start  = CursorPosition{r1, c1};
             state.selection.end    = CursorPosition{r2, c2};
+        }
+    }
+
+    // ── --browser=DIR: the FILE BROWSER, over a real directory (S6a) ────────────────────────────
+    //
+    // The one screen ptshot points at the DISK, and it has to: the browser's whole content is a
+    // listing, and a synthetic one (the `--demo` approach the mixer and the visualizer take) would be
+    // drawing a picture of a fixture rather than of the module. Point it at `testdata/golden` and it
+    // draws the three files S6b synthesised; point it at a folder of your own samples and it draws
+    // those. `--browser-mode=delete` arms the confirm; `--browser-select=N` paints a live multi-select.
+    StdFileSystem browserFs(".");
+    if (const char* v = opt(argc, argv, "--browser")) {
+        state.currentScreen                = ScreenType::FILE_BROWSER;
+        state.fileBrowser.fileExtensions   = {};   // no filter: show everything that is there
+        if (const char* e = opt(argc, argv, "--browser-ext")) {
+            state.fileBrowser.fileExtensions = split_csv(e);
+        }
+        navigate_to_folder(state.fileBrowser, browserFs, v);
+
+        if (const char* c = opt(argc, argv, "--browser-cursor")) {
+            state.fileBrowser.cursor = std::atoi(c);
+        }
+        if (const char* m = opt(argc, argv, "--browser-mode")) {
+            if (std::string(m) == "delete") state.fileBrowser.mode = BrowserMode::DELETE;
+        }
+        if (const char* n = opt(argc, argv, "--browser-select")) {
+            state.fileBrowser.selectionMode   = true;
+            state.fileBrowser.selectionAnchor = std::atoi(n);
+        }
+        if (const char* cb = opt(argc, argv, "--browser-clip")) {
+            // A fake clipboard, purely so the "L+A=PASTE  CPY 3 FILES" top bar can be eyeballed.
+            const int n = std::atoi(cb);
+            for (int i = 0; i < n; ++i) state.fileBrowser.fileClipboard.push_back("x.wav");
+        }
+    }
+
+    // ── --qwerty=TEXT: the KEYBOARD overlay, on top of whatever screen is showing ────────────────
+    // Modal, drawn last, so it composes with every other flag — including --browser.
+    if (const char* v = opt(argc, argv, "--qwerty")) {
+        state.qwerty.isOpen     = true;
+        state.qwerty.text       = v;
+        state.qwerty.textCursor = static_cast<int>(state.qwerty.text.size());
+        state.qwerty.fieldLabel = opt(argc, argv, "--qwerty-label")
+                                      ? opt(argc, argv, "--qwerty-label")
+                                      : "SAMPLE NAME:";
+        if (const char* k = opt(argc, argv, "--qwerty-key")) {
+            std::sscanf(k, "%d,%d", &state.qwerty.keyCursorRow, &state.qwerty.keyCursorCol);
+        }
+        if (const char* l = opt(argc, argv, "--qwerty-layout")) {
+            state.qwerty.layout = std::atoi(l);
+        }
+        if (const char* c = opt(argc, argv, "--qwerty-cursor")) {
+            state.qwerty.textCursor = std::atoi(c);
         }
     }
 

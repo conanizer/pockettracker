@@ -37,7 +37,10 @@
 #include "../../native/ui/clipboard.h"
 #include "../../native/ui/cursor.h"
 #include "../../native/ui/fx_helper.h"
+#include "../../native/ui/modules/file_browser.h"
+#include "../../native/ui/modules/qwerty_keyboard.h"
 #include "../../native/ui/selection.h"
+#include "../../native/ui/std_filesystem.h"
 #include "../../native/ui/modules/chain_editor.h"
 #include "../../native/ui/modules/effects_editor.h"
 #include "../../native/ui/modules/groove_editor.h"
@@ -879,6 +882,148 @@ static std::string recompute_fxh(const std::vector<std::string>& toks, std::stri
            " idx=" + std::to_string(s.cursor_index()) + " code=" + hex2(s.selected_effect_code());
 }
 
+// ─── SORT — the file browser's listing order (S6a) ───────────────────────────────────────────────
+//
+// The browser is a NAVIGATOR: no cursor context, no handle_input, nothing an EDIT line could measure.
+// What it has is `sort_items`, and that is where every bug in a file listing actually lives.
+//
+// The fixture is SYNTHETIC — name, size and mtime as data, never a real directory — so both sides sort
+// the identical input with no disk between them. It mirrors P3InputGoldenTest.sortFixture() exactly;
+// the two must be edited together, and the golden's own header says which two files tie.
+
+static std::vector<BrowserItem> sort_fixture() {
+    struct Entry {
+        std::string name;
+        bool        dir;
+        int64_t     size;
+        int64_t     mtime;
+    };
+
+    // ⚠️ **THIRTY-SIX files, and the number is load-bearing.** The first version of this fixture had
+    // four, and swapping `std::stable_sort` for `std::sort` in sort_items STILL PASSED — measured, not
+    // assumed. Every standard sort falls back to insertion sort below a small-range threshold (32 on
+    // MSVC's `_ISORT_MAX`, 16 on libstdc++'s `_S_threshold`), and insertion sort is stable, so a small
+    // fixture cannot tell the two apart: green on the dev box, and free to go red on another toolchain
+    // for a reason nobody would guess. Past the threshold introsort partitions and ties scramble.
+    //
+    // So 34 of them share ONE mtime — which is not a contrivance but the common case (every file a
+    // `git clone` writes; every WAV a CHOP produces) — and must come out of a DATE sort in pure NAME
+    // order. Mirrors P3InputGoldenTest.sortFixture(); the two are edited together.
+    std::vector<Entry> entries = {
+        {"Zed", true, 0, 500},
+        {"alpha", true, 0, 900},
+        {"aaa.wav", false, 5000, 100},   // oldest, biggest
+        {"zzz.wav", false, 1, 9000},     // newest, smallest
+    };
+    for (int k = 0; k < 34; ++k) {
+        const int i = (k * 13) % 34;     // a jumbled but deterministic permutation
+        char      name[16];
+        std::snprintf(name, sizeof(name), "s%02d.wav", i);
+        entries.push_back({name, false, 100 + (i % 3) * 1000, 1000});
+    }
+
+    // build_item_list's own pre-sort: each group by lowercased name. Reproduced here rather than
+    // called, because build_item_list takes a FileSystem and this fixture has no directory behind it.
+    std::vector<BrowserItem> folders, files;
+    for (const Entry& e : entries) {
+        BrowserItem it;
+        it.path         = "/fixture/" + e.name;
+        it.sortName     = to_lower(e.name);
+        it.size         = e.size;
+        it.lastModified = e.mtime;
+        if (e.dir) {
+            it.kind        = BrowserItem::Kind::FOLDER;
+            it.displayName = "[" + e.name + "]";
+            folders.push_back(std::move(it));
+        } else {
+            it.kind        = BrowserItem::Kind::FILE;
+            it.extension   = path_extension(e.name);
+            it.displayName = path_stem(e.name);
+            files.push_back(std::move(it));
+        }
+    }
+    auto by_name = [](const BrowserItem& a, const BrowserItem& b) { return a.sortName < b.sortName; };
+    std::stable_sort(folders.begin(), folders.end(), by_name);
+    std::stable_sort(files.begin(), files.end(), by_name);
+
+    BrowserItem parent;
+    parent.kind        = BrowserItem::Kind::PARENT;
+    parent.displayName = "..";
+
+    std::vector<BrowserItem> out{parent};
+    out.insert(out.end(), folders.begin(), folders.end());
+    out.insert(out.end(), files.begin(), files.end());
+    return out;
+}
+
+static std::string recompute_sort(const std::vector<std::string>& toks, std::string& err) {
+    const std::string mode = field(toks, "mode");
+
+    FileSortMode m{};
+    if (mode == "DATE_DESC")      m = FileSortMode::DATE_DESC;
+    else if (mode == "DATE_ASC")  m = FileSortMode::DATE_ASC;
+    else if (mode == "NAME_ASC")  m = FileSortMode::NAME_ASC;
+    else if (mode == "NAME_DESC") m = FileSortMode::NAME_DESC;
+    else if (mode == "SIZE_ASC")  m = FileSortMode::SIZE_ASC;
+    else if (mode == "SIZE_DESC") m = FileSortMode::SIZE_DESC;
+    else {
+        err = "unknown sort mode " + mode;
+        return "";
+    }
+
+    std::vector<BrowserItem> items = sort_fixture();
+    sort_items(items, m);
+
+    std::string out;
+    for (const BrowserItem& it : items) {
+        if (!out.empty()) out += ",";
+        out += it.displayName;
+    }
+    return out;
+}
+
+// ─── KBD — the QWERTY keyboard's state machine (S6a) ─────────────────────────────────────────────
+
+static std::string recompute_kbd(const std::vector<std::string>& toks, std::string& err) {
+    QwertyKeyboardState s{};
+    s.isOpen        = true;
+    s.maxLength     = 8;   // small, so the golden's "past maxLength" script is reachable
+    s.insertBefore  = from_dec(field(toks, "ib")) != 0;
+    s.clearOnFirstB = from_dec(field(toks, "cb")) != 0;
+
+    const std::string init = field(toks, "init");
+    s.text       = (init == "-") ? "" : init;
+    s.textCursor = static_cast<int>(s.text.size());
+
+    const std::string g = field(toks, "g");
+    if (g != "-") {
+        for (const std::string& gesture : split(g, ',')) {
+            if (gesture == "U")      move_key_cursor_up(s);
+            else if (gesture == "D") move_key_cursor_down(s);
+            else if (gesture == "L") move_key_cursor_left(s);
+            else if (gesture == "R") move_key_cursor_right(s);
+            else if (gesture == "A") insert_current_key(s);
+            else if (gesture == "B") delete_char(s);
+            else if (gesture == "<") move_text_cursor_left(s);
+            else if (gesture == ">") move_text_cursor_right(s);
+            // ⚠️ The layout switch CLAMPS the column, because the two layouts' rows can differ in
+            // length. Kotlin's R+UP/R+DOWN handlers call `.withClampedCol()` for the same reason.
+            else if (gesture == "0") { s.layout = 0; clamp_col(s); }
+            else if (gesture == "1") { s.layout = 1; clamp_col(s); }
+            else {
+                err = "unknown gesture " + gesture;
+                return "";
+            }
+        }
+    }
+
+    return "text=" + (s.text.empty() ? std::string("-") : s.text) +
+           " tc=" + std::to_string(s.textCursor) + " kr=" + std::to_string(s.keyCursorRow) +
+           " kc=" + std::to_string(s.keyCursorCol) + " lay=" + std::to_string(s.layout) +
+           " key=" + std::string(1, s.current_key()) +
+           " cb=" + std::to_string(s.clearOnFirstB ? 1 : 0);
+}
+
 // ─── main ────────────────────────────────────────────────────────────────────────────────────────
 
 int main(int argc, char** argv) {
@@ -932,6 +1077,8 @@ int main(int argc, char** argv) {
         if (kind == "EDIT")      rhsCpp = recompute_edit(toks, err);
         else if (kind == "SEL")  rhsCpp = recompute_sel(toks, err);
         else if (kind == "FXH")  rhsCpp = recompute_fxh(toks, err);
+        else if (kind == "SORT") rhsCpp = recompute_sort(toks, err);
+        else if (kind == "KBD")  rhsCpp = recompute_kbd(toks, err);
         else if (kind == "CLIP") {
             const ClipOut o = recompute_clip(toks, err);
             rhsCpp          = o.rhs;

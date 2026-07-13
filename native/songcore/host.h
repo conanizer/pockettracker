@@ -280,6 +280,98 @@ class SongcoreHost {
                                                 routing_, index);
     }
 
+    // ── ↕ the FILE verbs (Phase 3 S6a — what the browser's A button reaches) ─────────────────────
+    //
+    // Until now the host could only be handed a project blob by its caller. These five are what let the
+    // app OPEN and SAVE things itself, and they are the reason `set_instrument_type` / `clear_instrument`
+    // (S4) finally have company: those two could empty a slot, and nothing could fill one.
+    //
+    // All of them take a path and none of them take a FileSystem: songcore reads and writes files
+    // directly (project_io.h has always parsed a blob; the engine has always opened a .wav), and the
+    // `ui::FileSystem` abstraction exists for the BROWSER — for listing, sorting, renaming — which is a
+    // UI concern. Two layers, each doing its own job.
+
+    /** Replace the project from a .ptp on disk: parse → push → load its media → push its params. */
+    bool load_project_file(const std::string& path, const std::string& baseDir) {
+        std::ifstream f(path, std::ios::binary);
+        if (!f) return false;
+        std::string blob((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        if (!push_project(blob)) return false;
+
+        // ⚠️ The three calls that must follow a push, in this order, or the project you loaded is not
+        // the project you hear. load_media opens the files and learns the Routing; push_params pushes
+        // everything the ENGINE holds that no note carries. Phase 3 S4 is the session that found out
+        // what happens when the second one is missing (84.4% of the render's bytes differed).
+        load_media(baseDir);
+        push_params();
+        return true;
+    }
+
+    /** Serialize the live project to a .ptp. The bytes are kotlinx-exact (project_io.h, S2). */
+    bool save_project_file(const std::string& path) const {
+        const std::string blob = serialize_project(project_);
+        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        if (!f) return false;
+        f.write(blob.data(), static_cast<std::streamsize>(blob.size()));
+        return f.good();
+    }
+
+    /** A sample (wav/mp3/flac/ogg/opus) → instrument `id`. The browser's A on a sampler slot. */
+    bool load_sample(int id, const std::string& path) {
+        if (!load_instrument_sample(engine_, project_, id, path, routing_)) return false;
+        push_instrument(id);   // the fresh source needs its slot's filter/window/loop pushed at it
+        return true;
+    }
+
+    /** An .sf2/.sf3 → instrument `id`, which becomes a SOUNDFONT slot. The browser's A on one. */
+    bool load_soundfont(int id, const std::string& path) {
+        if (!load_instrument_soundfont(engine_, project_, id, path, routing_)) return false;
+        push_instrument(id);
+        return true;
+    }
+
+    /** Write instrument `id` (and its table, if it has content) as a .pti. */
+    bool save_instrument_preset(int id, const std::string& path) const {
+        const InstrumentPreset ip = make_instrument_preset(project_, id);
+        const std::string blob = serialize_instrument_preset(ip);
+        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        if (!f) return false;
+        f.write(blob.data(), static_cast<std::streamsize>(blob.size()));
+        return f.good();
+    }
+
+    /**
+     * Read a .pti into instrument `id`. False if the file will not parse, OR if its source file is
+     * gone — but the PARAMETERS land either way in the second case, which is deliberate (a preset
+     * whose sample has moved should still give you back its filter and its mod slots).
+     */
+    bool load_instrument_preset(int id, const std::string& path) {
+        std::ifstream f(path, std::ios::binary);
+        if (!f) return false;
+        std::string blob((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+
+        json j = json::parse(blob, /*cb=*/nullptr, /*allow_exceptions=*/false);
+        if (j.is_discarded() || !j.is_object()) return false;
+
+        const InstrumentPreset ip = parse_instrument_preset(j);
+        const bool sourceOk = apply_instrument_preset(engine_, project_, id, ip, routing_);
+        invalidate_tables();   // the preset may have brought a table with it
+        push_instrument(id);
+        return sourceOk;
+    }
+
+    /** Audition the file under the browser's cursor (slot 255, the preview lane). START, on a file. */
+    bool preview_file(const std::string& path) {
+        if (!engine_) return false;
+        return preview_sample_file(*engine_, path) > 0;
+    }
+
+    /** Drop the browser's audition — what leaving the browser does. */
+    void clear_previews() {
+        if (!engine_) return;
+        clear_preview_slots(*engine_);
+    }
+
     // ── ↕ live editing — the SDL shell's UI *is* the editing model ────────────────────────────────
     //
     // On Android the Kotlin UI owns a SECOND copy of the project (Compose needs an observable object

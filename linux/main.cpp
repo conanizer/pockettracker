@@ -50,6 +50,7 @@
 #include "ui/engine_feed.h"
 #include "ui/input_dispatcher.h"
 #include "ui/layout.h"
+#include "ui/std_filesystem.h"
 
 #include "sdl-audio-engine.h"
 #include "sdl-input.h"
@@ -82,9 +83,25 @@ std::string dir_of(const std::string& path) {
     return (slash == std::string::npos) ? std::string(".") : path.substr(0, slash);
 }
 
-/** The mapper's own memory. Today just the A,A double-tap window — Kotlin's `InputMapper.lastAPress`. */
+/**
+ * The mapper's own memory — everything the combo matrix must remember BETWEEN events, and nothing
+ * else. Kotlin keeps the same two fields on `InputMapper` itself.
+ */
 struct MapperState {
+    /** The A,A double-tap window. */
     Uint64 lastAPress = 0;
+
+    /**
+     * ⚠️ The DEFERRED-A latch (`InputMapper.aPressedAlone`). Set when A goes down on a cell whose A
+     * OPENS something — and whose A+DPAD/A+B means something ELSE. The open is then held until A is
+     * RELEASED, and CANCELLED outright if any A-combo fires in between.
+     *
+     * Without it, holding A on the INSTRUMENT NAME cell and pressing B to reset it would open the
+     * keyboard first and land the combo on top of it. The dispatcher decides which cells qualify
+     * (`defer_a_to_release()`); the mapper owns the latch, because it is the mapper that sees the
+     * press, the combo and the release as one gesture.
+     */
+    bool aPressedAlone = false;
 };
 
 /**
@@ -111,9 +128,17 @@ void handle_button(const ButtonEvent& e, ui::InputDispatcher& d, MapperState& ms
 
     // ── RELEASE ──────────────────────────────────────────────────────────────────────────────────
     if (e.action != ButtonAction::PRESSED) {
-        // The FX helper commits on the RELEASE of A — which is what lets you hold A, read your way
-        // through the effect grid, and let go on the one you want.
-        if (e.button == Button::A) d.on_a_released();
+        if (e.button == Button::A) {
+            // The DEFERRED single-A: it went down on a sub-screen-opening cell and no A-combo
+            // intervened, so the open fires NOW, on the release, rather than on the press.
+            if (ms.aPressedAlone) {
+                ms.aPressedAlone = false;
+                d.on_button_a();
+            }
+            // The FX helper commits on the RELEASE of A — which is what lets you hold A, read your way
+            // through the effect grid, and let go on the one you want.
+            d.on_a_released();
+        }
         return;
     }
 
@@ -124,11 +149,29 @@ void handle_button(const ButtonEvent& e, ui::InputDispatcher& d, MapperState& ms
     // ── A + … : the tracker's core editing gesture ───────────────────────────────────────────────
     if (m.a && !m.l && !m.r) {
         switch (e.button) {
-            case Button::B:          d.on_a_b();     return;   // A+B — delete / reset to default
-            case Button::DPAD_UP:    d.on_a_up();    return;   // +1  (or open the FX helper)
-            case Button::DPAD_DOWN:  d.on_a_down();  return;   // −1
-            case Button::DPAD_RIGHT: d.on_a_right(); return;   // +16 / +1 octave
-            case Button::DPAD_LEFT:  d.on_a_left();  return;   // −16 / −1 octave
+            // ⚠️ Every arm CANCELS the deferred A first: the gesture turned out to be a combo, so the
+            // open it was holding must not fire when A comes back up.
+            case Button::B:          ms.aPressedAlone = false; d.on_a_b();     return;   // delete / reset
+            case Button::DPAD_UP:    ms.aPressedAlone = false; d.on_a_up();    return;   // +1 (or the FX helper)
+            case Button::DPAD_DOWN:  ms.aPressedAlone = false; d.on_a_down();  return;   // −1
+            case Button::DPAD_RIGHT: ms.aPressedAlone = false; d.on_a_right(); return;   // +16 / +1 octave
+            case Button::DPAD_LEFT:  ms.aPressedAlone = false; d.on_a_left();  return;   // −16 / −1 octave
+            default: break;
+        }
+    }
+
+    // ── SELECT + … : the file browser's file-management chords ───────────────────────────────────
+    //
+    // ⚠️ `(!m.r || e.button == R_SHIFT)`, not `!m.r`, and this is `ButtonHandlers.kt:621` to the
+    // character. **The mods snapshot INCLUDES the button being pressed** (that is what makes the L+R
+    // arm below work at all, and why the plain-SELECT arm has to be checked ahead of the no-modifier
+    // guard). So on the SELECT+R chord, R's own press has already set `m.r` — a flat `!m.r` would
+    // reject the very gesture it is trying to match. R may be held here only when R IS the button.
+    if (m.select && !m.l && (!m.r || e.button == Button::R_SHIFT)) {
+        switch (e.button) {
+            case Button::A:       d.on_select_a(); return;   // rename     (opens the keyboard)
+            case Button::B:       d.on_select_b(); return;   // delete     (arms the confirm)
+            case Button::R_SHIFT: d.on_select_r(); return;   // new folder (opens the keyboard)
             default: break;
         }
     }
@@ -194,6 +237,16 @@ void handle_button(const ButtonEvent& e, ui::InputDispatcher& d, MapperState& ms
     // here rather than in the dispatcher — and it is passed in rather than kept in a function-local
     // static, because a mapper that hides its own state cannot be driven by a test.
     if (e.button == Button::A && !m.l && !m.r) {
+        // ⚠️ The DEFER, first: on a cell whose A opens a sub-screen, hold the action until A comes back
+        // up, so an A+DPAD or A+B on the same cell is not pre-empted by an immediate open. A deferred
+        // cell is never a double-tap cell — there is nothing there to insert — so the A,A path below is
+        // skipped for it, and `lastAPress` is cleared so the NEXT A press cannot read as the second
+        // half of a double-tap that never happened.
+        if (d.defer_a_to_release()) {
+            ms.aPressedAlone = true;
+            ms.lastAPress    = 0;
+            return;
+        }
         if (now - ms.lastAPress < 300) {
             ms.lastAPress = 0;   // …so a triple-tap does not read as two double-taps
             d.on_a_a();          // insert the next UNUSED chain/phrase
@@ -230,7 +283,12 @@ int main(int argc, char** argv) {
     SDL_SetMainReady();
 
     if (argc < 2) {
-        std::fprintf(stderr, "usage: pockettracker-sdl <project.ptp> [media-base-dir]\n");
+        std::fprintf(stderr,
+                     "usage: pockettracker-sdl <project.ptp> [media-base-dir] [app-root]\n"
+                     "  media-base-dir  where the project's relative sample paths resolve against\n"
+                     "                  (default: the project file's own directory)\n"
+                     "  app-root        where Projects/ Samples/ Soundfonts/ Instruments/ live\n"
+                     "                  (default: $POCKETTRACKER_HOME, else XDG, else ~/.local/share)\n");
         return 2;
     }
     const std::string projectPath = argv[1];
@@ -285,6 +343,33 @@ int main(int argc, char** argv) {
     // that compares audio renders — through the path that was already right).
     host.push_params();
 
+    // ── The file system (S6a) ────────────────────────────────────────────────────────────────────
+    //
+    // The seven app directories — Projects, Samples, Soundfonts, Instruments, Renders, Themes — live
+    // under ONE root, and the root is the only per-platform fact about files. Android hard-codes
+    // `Documents/PocketTracker` because that is the one place scoped storage lets it write and the user
+    // browse; a handheld has no Documents directory, so it is chosen here (`$POCKETTRACKER_HOME`, then
+    // XDG, then `$HOME/.local/share` — see default_app_root), and a PortMaster launch script sets the
+    // env var to point at the SD card's ports folder.
+    //
+    // The SUB-directory names are identical to Android's on purpose: a user who copies their
+    // `PocketTracker/` folder off a phone onto an SD card must find their projects where the app looks.
+    const std::string appRoot = (argc > 3) ? argv[3] : ui::default_app_root();
+    ui::StdFileSystem filesystem(appRoot);
+
+    // ⚠️ Create them NOW, at boot, rather than lazily on the first browse. `ensure_dir` runs inside each
+    // getter, so the folders would otherwise not exist until the user opened the browser once — and on a
+    // handheld that is exactly backwards. The first thing anyone does with a new port is plug the SD
+    // card into a PC and copy their samples in, and they cannot do that if the app has not yet said
+    // where. (Android gets this for free: it calls the getters all through start-up.)
+    filesystem.projects_directory();
+    filesystem.samples_directory();
+    filesystem.renders_directory();
+    filesystem.instruments_directory();
+    filesystem.soundfonts_directory();
+    filesystem.themes_directory();
+    std::printf("files:   %s\n", appRoot.c_str());
+
     SdlVideo video;
     if (!video.open("PocketTracker", ui::DESIGN_W, ui::DESIGN_H)) {
         SDL_Quit();
@@ -305,7 +390,7 @@ int main(int argc, char** argv) {
 
     // The whole input layer, in one object. It edits `host.edit_project()` — the SAME Project the
     // Sequencer is reading — so an edit is live the instant it is made.
-    ui::InputDispatcher dispatch(state, host);
+    ui::InputDispatcher dispatch(state, host, filesystem);
     MapperState         mapper;
 
     std::printf("\nWASD/arrows move   K/Enter = A   J/Esc = B   U/I = L/R   LShift = SELECT   SPACE = START   F10 quit\n");
@@ -319,7 +404,14 @@ int main(int argc, char** argv) {
     std::printf("R+DPAD moves between screens: SONG CHAIN PHRASE INSTRUMENT TABLE MODS INST.POOL\n");
     std::printf("                             GROOVE MIXER EFFECTS\n");
     std::printf("START auditions the instrument on INSTRUMENT/POOL/MODS/TABLE - any button silences it\n");
-    std::printf("SELECT on the EFFECTS TIME row toggles delay sync (free ms <-> note divisions)\n\n");
+    std::printf("SELECT on the EFFECTS TIME row toggles delay sync (free ms <-> note divisions)\n");
+    std::printf("\nFILE BROWSER (A on INSTRUMENT's LOAD, or on the pool's NAME of an empty slot):\n");
+    std::printf("  A opens a folder or LOADS the file   B goes back   START auditions the file\n");
+    std::printf("  R+LEFT = up a directory   R+UP/DOWN = sort (name/date/size)   DPAD L/R = page\n");
+    std::printf("  SELECT+A rename   SELECT+B delete   SELECT+R new folder\n");
+    std::printf("  L+B select (again within 500ms = all)   B copies   L+A cut/paste   L+R cancel\n");
+    std::printf("KEYBOARD: DPAD picks a key   A types   B deletes   R+UP/DOWN = ABC/123 layout\n");
+    std::printf("          R+LEFT/RIGHT moves the text cursor   SELECT aborts   START applies\n\n");
 
     bool   running    = true;
     Uint64 lastStatus = 0;

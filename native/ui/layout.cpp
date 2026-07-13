@@ -14,6 +14,22 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
 
     if (!s.project) return;  // no document: the background is the honest thing to draw
 
+    // ── The FILE BROWSER is FULL-SCREEN, and returns before any of the furniture ─────────────────
+    //
+    // It covers the whole 640×480: no oscilloscope strip, no right bar, no navigation map. That is not
+    // a shortcut — it is what `FileBrowserModule.HEIGHT = 480` means, and it is why the browser is a
+    // POPUP in ScreenType's own comment rather than a cell in the 5×5 grid. Nineteen file rows and two
+    // status bars need the whole panel; a 115px nav map beside them would cost four characters of every
+    // filename.
+    //
+    // The QWERTY keyboard still draws on top (it can be open OVER the browser — SELECT+A renames a
+    // file), so the early return is *before* the furniture and *after* nothing.
+    if (s.currentScreen == ScreenType::FILE_BROWSER) {
+        fileBrowser_.draw(c, 0, 0, s.fileBrowser, t);
+        if (s.qwerty.isOpen) qwerty_.draw(c, s.qwerty, t);
+        return;
+    }
+
     const songcore::Project& p       = *s.project;
     const int                moduleX = SIDE_SPACER;
 
@@ -182,16 +198,17 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
     }
 
     // ── The right bar ────────────────────────────────────────────────────────────────────────────
-    // Hidden on the screens that take the whole 640×480 for themselves.
-    if (s.currentScreen != ScreenType::FILE_BROWSER && s.currentScreen != ScreenType::SETTINGS &&
-        s.currentScreen != ScreenType::SAMPLE_EDITOR) {
+    // Hidden on the screens that take the whole 640×480 for themselves. (FILE_BROWSER returned long
+    // before this line; SETTINGS and SAMPLE_EDITOR still route through the placeholder.)
+    if (s.currentScreen != ScreenType::SETTINGS && s.currentScreen != ScreenType::SAMPLE_EDITOR) {
         draw_right_bar(c, s);
     }
 
     // ── The overlays ─────────────────────────────────────────────────────────────────────────────
     // LAST, over everything, including the right bar — an overlay is modal, and its backdrop dims the
-    // whole frame. (The EQ editor, the theme editor and the qwerty keyboard join it here as they land.)
+    // whole frame. (The EQ editor and the theme editor join them here as they land.)
     draw_fx_helper(c, s.fxHelper, t);
+    if (s.qwerty.isOpen) qwerty_.draw(c, s.qwerty, t);
 }
 
 void TrackerLayout::draw_right_bar(Canvas& c, const AppState& s) const {

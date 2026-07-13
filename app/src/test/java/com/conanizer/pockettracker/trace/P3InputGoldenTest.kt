@@ -19,6 +19,7 @@ import com.conanizer.pockettracker.core.logic.EffectProcessor
 import com.conanizer.pockettracker.core.logic.InputAction
 import com.conanizer.pockettracker.core.logic.InputController
 import com.conanizer.pockettracker.core.logic.InstrumentController
+import com.conanizer.pockettracker.core.storage.FileSortMode
 import com.conanizer.pockettracker.input.CursorContext
 import com.conanizer.pockettracker.input.NO_DEFAULT
 import com.conanizer.pockettracker.ui.modules.ChainEditorModule
@@ -42,12 +43,23 @@ import com.conanizer.pockettracker.ui.modules.SongEditorState
 import com.conanizer.pockettracker.ui.modules.TableModule
 import com.conanizer.pockettracker.ui.modules.TableState
 import com.conanizer.pockettracker.ui.overlays.FxHelperState
+import com.conanizer.pockettracker.ui.overlays.QwertyKeyboardState
+import com.conanizer.pockettracker.ui.overlays.currentKey
+import com.conanizer.pockettracker.ui.overlays.deleteChar
 import com.conanizer.pockettracker.ui.overlays.fxHelperOpenedAt
 import com.conanizer.pockettracker.ui.overlays.fxMoveCursorDown
 import com.conanizer.pockettracker.ui.overlays.fxMoveCursorLeft
 import com.conanizer.pockettracker.ui.overlays.fxMoveCursorRight
 import com.conanizer.pockettracker.ui.overlays.fxMoveCursorUp
+import com.conanizer.pockettracker.ui.overlays.insertCurrentKey
+import com.conanizer.pockettracker.ui.overlays.moveCursorDown
+import com.conanizer.pockettracker.ui.overlays.moveCursorLeft
+import com.conanizer.pockettracker.ui.overlays.moveCursorRight
+import com.conanizer.pockettracker.ui.overlays.moveCursorUp
+import com.conanizer.pockettracker.ui.overlays.moveTextCursorLeft
+import com.conanizer.pockettracker.ui.overlays.moveTextCursorRight
 import com.conanizer.pockettracker.ui.overlays.selectedEffectCode
+import com.conanizer.pockettracker.ui.overlays.withClampedCol
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.io.File
@@ -1073,6 +1085,187 @@ class P3InputGoldenTest {
         }
     }
 
+    // ── SORT — the file browser's listing order (Phase 3 S6a) ───────────────────────────────────
+
+    /**
+     * The browser is the one screen with NO cursor context and NO handleInput — it is a navigator, not
+     * an editor, so the EDIT lines above have nothing to say about it. What it DOES have is a pure
+     * function with all of its logic in it: `sortItems`, over a list `buildItemList` has already put in
+     * name order.
+     *
+     * That pairing is the whole test, and it is subtler than it looks. `sortedBy` is a STABLE sort, so
+     * two files with the same key keep the order they arrived in — which is the NAME order, every time,
+     * because the Android browser re-lists from `buildItemList` on every sort change
+     * (`LaunchedEffect(currentDirectory, sortMode, listRefreshTick)` → `sortItems(buildItemList(…))`).
+     * Ties are not exotic: every file a `git clone` writes shares an mtime, and so does every WAV a
+     * sample-editor CHOP produces.
+     *
+     * ⚠️ The C++ port must therefore use `std::stable_sort` AND rebuild before sorting. `std::sort`
+     * would order ties arbitrarily — differently on libstdc++, libc++ and MSVC — and re-sorting the
+     * on-screen list in place would tie-break on whichever mode the user happened to arrive from. Both
+     * bugs are INVISIBLE without a tie in the fixture, which is why two of the six files below share an
+     * mtime and two more share a size.
+     *
+     * The fixture is synthetic (name, size, mtime as data — no real directory), so the JVM and C++
+     * sides sort the identical input without either of them touching a disk.
+     */
+    private data class SortEntry(val name: String, val dir: Boolean, val size: Long, val mtime: Long)
+
+    /**
+     * ⚠️ **THIRTY-SIX files, and the number is the whole point.**
+     *
+     * The first version of this fixture had four, and a `std::sort` passed it — measured, not assumed.
+     * Every standard `sort` falls back to INSERTION SORT below a small-range threshold (32 on MSVC's
+     * `_ISORT_MAX`, 16 on libstdc++'s `_S_threshold`), and insertion sort happens to be stable. So a
+     * small fixture cannot tell `sort` from `stable_sort` — it would go green on the dev box and could
+     * go red on a different toolchain, for a reason nobody would ever guess.
+     *
+     * Past the threshold, introsort partitions and the tie order becomes arbitrary. Thirty-four files
+     * therefore share ONE mtime, which is not a contrivance — it is the common case (every file a `git
+     * clone` writes, every WAV a CHOP produces) — and they must come out of a DATE sort in pure NAME
+     * order. The three size buckets do the same job for the SIZE modes.
+     */
+    private fun sortFixture(): List<SortEntry> = buildList {
+        add(SortEntry("Zed", dir = true, size = 0L, mtime = 500L))
+        add(SortEntry("alpha", dir = true, size = 0L, mtime = 900L))   // lowercase sorts FIRST — the
+                                                                       // name sort is case-insensitive
+
+        // The two that break the tie at either end, so a DATE sort is not simply a name sort.
+        add(SortEntry("aaa.wav", dir = false, size = 5000L, mtime = 100L))   // oldest, biggest
+        add(SortEntry("zzz.wav", dir = false, size = 1L, mtime = 9000L))     // newest, smallest
+
+        // …and 34 that ALL share one mtime, in three size buckets. Added in an order that is neither
+        // the name order nor the reverse of it, so a sort that merely preserved the input would fail too.
+        val order = (0 until 34).map { (it * 13) % 34 }   // a permutation, deterministic and jumbled
+        for (i in order) {
+            add(SortEntry(
+                name = "s%02d.wav".format(i),
+                dir = false,
+                size = 100L + (i % 3) * 1000L,   // three big size ties
+                mtime = 1000L                    // ⚠️ ONE mtime for all 34
+            ))
+        }
+    }
+
+    /** The C++ twin of BrowserItem, built from the fixture the way `buildItemList` builds it. */
+    private fun sweepSort(out: MutableList<String>) {
+        out += ""
+        out += "# SORT — the file browser's listing order. The browser has no cursor context and no"
+        out += "# handleInput (it navigates, it does not edit), so this is what there is to measure:"
+        out += "# sortItems over a list buildItemList has already put in NAME order."
+        out += "#"
+        out += "# ⚠️ 34 of the 36 files share ONE mtime, and the SIZE of the fixture is load-bearing."
+        out += "# sortedBy is STABLE, so a tie must fall back on the name order the build left behind."
+        out += "# A four-file fixture could NOT prove that: every std::sort falls back to insertion sort"
+        out += "# below a threshold (32 on MSVC, 16 on libstdc++) and insertion sort is stable, so it"
+        out += "# passed. Past the threshold introsort partitions and ties scramble. Measured, not"
+        out += "# assumed — the first version of this fixture had four files and a std::sort went green."
+        out += "#"
+        out += "# '..' is always first; folders always precede files; the sort orders each GROUP."
+
+        // buildItemList's own pre-sort: folders by name, then files by name, both case-insensitive.
+        val entries = sortFixture()
+        val folders0 = entries.filter { it.dir }.sortedBy { it.name.lowercase() }
+        val files0 = entries.filter { !it.dir }.sortedBy { it.name.lowercase() }
+
+        for (mode in FileSortMode.values()) {
+            // The exact comparators FileBrowserModule.sortItems uses, applied to the pre-sorted groups.
+            fun sort(v: List<SortEntry>): List<SortEntry> = when (mode) {
+                FileSortMode.NAME_ASC -> v.sortedBy { it.name.lowercase() }
+                FileSortMode.NAME_DESC -> v.sortedByDescending { it.name.lowercase() }
+                FileSortMode.DATE_ASC -> v.sortedBy { it.mtime }
+                FileSortMode.DATE_DESC -> v.sortedByDescending { it.mtime }
+                FileSortMode.SIZE_ASC -> v.sortedBy { it.size }
+                FileSortMode.SIZE_DESC -> v.sortedByDescending { it.size }
+            }
+            val order = (listOf("..") + sort(folders0).map { "[${it.name}]" } +
+                sort(files0).map { it.name.substringBeforeLast('.') }).joinToString(",")
+            out += "SORT mode=${mode.name} => $order"
+        }
+    }
+
+    // ── KBD — the QWERTY keyboard (Phase 3 S6a) ─────────────────────────────────────────────────
+
+    /**
+     * The keyboard is a pure state machine over (text, textCursor, keyRow, keyCol, layout), and every
+     * one of its verbs is an extension function on the state — so a script of gestures drives it with
+     * no Compose, no engine and no screen. Exactly what a golden wants.
+     *
+     * The two flags are what make it worth 700 lines of cases rather than 20. `insertBefore` (a
+     * SETTINGS row) flips the meaning of BOTH A and B at once — insert-at-cursor + backspace, or
+     * insert-after + forward-delete — and `clearOnFirstB` makes the first B wipe the field instead of
+     * deleting a character, which is what a "SAVE AS" that suggests a name needs.
+     */
+    private fun sweepQwerty(out: MutableList<String>) {
+        out += ""
+        out += "# KBD — the QWERTY keyboard's state machine. Gestures in, (text, textCursor, keyRow,"
+        out += "# keyCol, layout) out. U/D/L/R move the KEY cursor; A types; B deletes; </> move the"
+        out += "# TEXT cursor; 0/1 switch layout."
+        out += "#"
+        out += "# ⚠️ insertBefore flips A *and* B together (insert-at + backspace, or insert-after +"
+        out += "# forward-delete); clearOnFirstB makes the FIRST B wipe the field. Both are set at OPEN."
+
+        val scripts = listOf(
+            "",
+            "A", "A,A", "A,A,A",
+            "D,A", "D,D,A", "D,D,D,A",          // walk down the rows, typing one from each
+            "D,D,D,D,A",                        // …onto the ACTION row, where A types NOTHING
+            "R,A", "R,R,A", "L,A",              // the key cursor wraps within its row
+            "U,A",                              // UP from row 0 wraps to the ACTION row
+            "U,U,A",                            // …and once more lands on the space bar
+            "D,D,D,A",                          // the space bar itself types a space
+            "B", "B,B", "B,B,B,B,B,B,B,B",      // delete past the start
+            "A,B", "A,A,B",
+            "<,A", "<,<,A", "<,<,<,<,<,A",      // type into the MIDDLE of the text
+            ">,A", "<,>,A",
+            "<,B", "<,<,B",                     // delete from the middle
+            "1,A", "1,D,A", "1,D,D,A",          // the 123 layout
+            "1,R,R,A,0,A",                      // …type in one layout, switch back, type in the other
+            "1,R,R,R,R,R,R,R,R,R,0,A",          // ⚠️ col 9 in one layout must CLAMP in the other
+            "A,A,A,A,A,A,A,A,A,A,A,A",          // past maxLength
+        )
+
+        for (insertBefore in listOf(true, false)) {
+            for (clearOnFirstB in listOf(false, true)) {
+                for (initial in listOf("", "AB", "KICK")) {
+                    for (script in scripts) {
+                        var s = QwertyKeyboardState(
+                            isOpen = true,
+                            text = initial,
+                            maxLength = 8,               // small, so "past maxLength" is reachable
+                            textCursor = initial.length,
+                            insertBefore = insertBefore,
+                            clearOnFirstB = clearOnFirstB
+                        )
+                        if (script.isNotEmpty()) {
+                            for (g in script.split(",")) {
+                                s = when (g) {
+                                    "U" -> s.moveCursorUp()
+                                    "D" -> s.moveCursorDown()
+                                    "L" -> s.moveCursorLeft()
+                                    "R" -> s.moveCursorRight()
+                                    "A" -> s.insertCurrentKey()
+                                    "B" -> s.deleteChar()
+                                    "<" -> s.moveTextCursorLeft()
+                                    ">" -> s.moveTextCursorRight()
+                                    "0" -> s.copy(layout = 0).withClampedCol()
+                                    "1" -> s.copy(layout = 1).withClampedCol()
+                                    else -> error("unknown gesture $g")
+                                }
+                            }
+                        }
+                        val ib = if (insertBefore) 1 else 0
+                        val cb = if (clearOnFirstB) 1 else 0
+                        out += "KBD ib=$ib cb=$cb init=${initial.ifEmpty { "-" }} " +
+                            "g=${script.ifEmpty { "-" }} => text=${s.text.ifEmpty { "-" }} " +
+                            "tc=${s.textCursor} kr=${s.keyCursorRow} kc=${s.keyCursorCol} " +
+                            "lay=${s.layout} key=${s.currentKey()} cb=${if (s.clearOnFirstB) 1 else 0}"
+                    }
+                }
+            }
+        }
+    }
+
     // ════════════════════════════════════════════════════════════════════════════════════════════
 
     @Test
@@ -1100,6 +1293,8 @@ class P3InputGoldenTest {
         sweepSelection(out)
         sweepClipboard(out)
         sweepFxHelper(out)
+        sweepSort(out)
+        sweepQwerty(out)
 
         val text = out.joinToString("\n") + "\n"
 

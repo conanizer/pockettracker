@@ -9,21 +9,32 @@
 // ever asking which screen is up (ui/cursor.h). What lands here is what those five could not do —
 // selection, the clipboard, item cycling, cloning, the FX helper, the note preview.
 //
-// ── SCOPE: the ten screens that exist ────────────────────────────────────────────────────────────
+// ── SCOPE: the eleven screens that exist ─────────────────────────────────────────────────────────
 //
-// SONG, CHAIN, PHRASE, TABLE, GROOVE, INSTRUMENT, INST.POOL, MODS (S4), and — since S5 — MIXER and
-// EFFECTS. The Kotlin dispatcher is ~3200 lines, and what is still missing here serves screens the
-// port has not reached: the file browser, the sample editor, PROJECT, SETTINGS, the EQ editor, the
-// qwerty keyboard. Porting their input against modules that do not exist would be writing code no one
-// can run and no tool can measure; each lands WITH its screen, in the session that draws it. The
-// structure is built to receive them: a new screen is a new arm in `generic_input()` and
+// SONG, CHAIN, PHRASE, TABLE, GROOVE, INSTRUMENT, INST.POOL, MODS (S4), MIXER, EFFECTS (S5), and —
+// since S6a — the FILE BROWSER, with the QWERTY KEYBOARD overlay behind it. The Kotlin dispatcher is
+// ~3200 lines, and what is still missing here serves screens the port has not reached: the sample
+// editor, PROJECT, SETTINGS, the EQ editor. Each lands WITH its screen, in the session that draws it.
+// The structure is built to receive them: a new screen is a new arm in `generic_input()` and
 // `apply_edit()`, not a new branch in every handler.
 //
-// ⚠️ Some cells open a SUB-SCREEN that does not exist yet — INSTRUMENT's LOAD and SAVE (the file
-// browser) and its EDIT (the sample editor), and every EQ cell (the EQ overlay: INSTRUMENT's, the
-// pool's, MIXER's master EQ, EFFECTS' two input EQs). On Android a plain A opens that overlay; here it
-// is a no-op, and A+DPAD still dials the slot NUMBER, which is the part of the cell that is a plain
-// value. That is the whole of the gap, and it closes when the overlay lands.
+// ⚠️ Some cells still open a SUB-SCREEN that does not exist — INSTRUMENT's EDIT (the sample editor,
+// S6b) and every EQ cell (the EQ overlay: INSTRUMENT's, the pool's, MIXER's master EQ, EFFECTS' two
+// input EQs). On Android a plain A opens that overlay; here it is a no-op, and A+DPAD still dials the
+// slot NUMBER, which is the part of the cell that is a plain value.
+//
+// ── ⚠️ THE MODAL RULE, which arrives with S6a ────────────────────────────────────────────────────
+//
+// The QWERTY keyboard is the app's first true modal, and the FILE BROWSER is the first full-screen
+// popup. Both OWN THE BUTTONS while they are up, and every handler below therefore opens with the same
+// two questions in the same order — keyboard first, then browser — before it does anything else. That
+// order is the specification: the keyboard can be open ON TOP of the browser (SELECT+A to rename a
+// file), and a D-pad press there must move the KEY cursor, not the file cursor.
+//
+// Kotlin enforces this the same way (an `if (qwertyKeyboardState.isOpen) { … ; return }` at the top of
+// each handler) and its own comment states the rule the hard way: "every new show*Dialog-style modal
+// state MUST be added to this predicate". A modal that one handler forgets is a button that does the
+// wrong thing exactly once — and that is a bug nobody reports, because it looks like a mis-press.
 //
 // ── THE SHELL IS THE InputMapper ─────────────────────────────────────────────────────────────────
 //
@@ -42,22 +53,36 @@
 #include "ui/app_state.h"
 #include "ui/clipboard.h"
 #include "ui/cursor.h"
+#include "ui/filesystem.h"
 #include "ui/modules/chain_editor.h"
 #include "ui/modules/effects_editor.h"
+#include "ui/modules/file_browser.h"
 #include "ui/modules/groove_editor.h"
 #include "ui/modules/instrument_editor.h"
 #include "ui/modules/instrument_pool.h"
 #include "ui/modules/mixer.h"
 #include "ui/modules/modulation.h"
 #include "ui/modules/phrase_editor.h"
+#include "ui/modules/qwerty_keyboard.h"
 #include "ui/modules/song_editor.h"
 #include "ui/modules/table_editor.h"
+
+#include <string>
+#include <vector>
 
 namespace pt::ui {
 
 class InputDispatcher {
   public:
-    InputDispatcher(AppState& state, songcore::SongcoreHost& host) : s_(state), host_(host) {}
+    /**
+     * `fs` is a REFERENCE, and there is no null-FileSystem path — unlike the engine, which
+     * `SongcoreHost` null-checks everywhere so the whole editing layer can be driven with no audio
+     * device. A file browser with no filesystem is not a degraded browser, it is an empty box; a tool
+     * that wants one without touching the user's disk points it at a temp directory instead, which is
+     * what `tools/ptdispatch` does.
+     */
+    InputDispatcher(AppState& state, songcore::SongcoreHost& host, FileSystem& fs)
+        : s_(state), host_(host), fs_(fs) {}
 
     /** The frame's clock reading. Feeds the L+B multi-tap window and nothing else. */
     void set_now(long long now_ms) { now_ms_ = now_ms; }
@@ -109,6 +134,16 @@ class InputDispatcher {
     /** L+B+A: deep-clone the chain/phrase under the cursor into free slots. */
     void on_l_b_a();
 
+    // ── SELECT + … : the file browser's verbs (S6a) ──────────────────────────────────────────────
+    // Three chords that exist only on the browser, and each opens something: the keyboard (twice) or
+    // a confirm. They are its whole file-management vocabulary — Android has no others.
+    /** SELECT+A: rename the file/folder under the cursor (opens the keyboard). */
+    void on_select_a();
+    /** SELECT+B: delete it — arms the "A=YES B=NO" confirm, never deletes on the press itself. */
+    void on_select_b();
+    /** SELECT+R: create a folder here (opens the keyboard). */
+    void on_select_r();
+
     // ── The plain buttons ────────────────────────────────────────────────────────────────────────
     /** B inside a selection COPIES it and exits — the tracker's copy gesture. */
     void on_button_b();
@@ -124,13 +159,34 @@ class InputDispatcher {
      */
     void on_stop_preview();
 
+    /**
+     * ⚠️ **Asked by the MAPPER on every plain A press**: is the cursor on a cell whose A OPENS
+     * something, and whose A+DPAD/A+B means something ELSE? If so the mapper holds the press until A is
+     * RELEASED, and cancels it outright if any A-combo fires in between.
+     *
+     * Without it, holding A on such a cell to reset it with A+B would open the sub-screen first and the
+     * combo would land on top of it. Kotlin's `InputMapper` asks the same question (`deferAToRelease()`
+     * → `openSubScreenAtCursor(peek = true)`) and keeps the same `aPressedAlone` latch.
+     */
+    bool defer_a_to_release() const;
+
     /** The clipboard, for the top-strip readout ("PHR:2x3"). */
     const Clipboard& clipboard() const { return clip_; }
 
+    // ── Opening the sub-screens (the shell needs these too, for its start-up state) ──────────────
+
+    /**
+     * Show the browser, filtered, in `directory`, and remember what A will do with the pick.
+     * `previousScreen` is captured here — it is where B returns to.
+     */
+    void open_file_browser(AppState::BrowserPurpose purpose, const std::string& directory,
+                           const std::vector<std::string>& extensions);
+
   private:
-    AppState&              s_;
+    AppState&               s_;
     songcore::SongcoreHost& host_;
-    long long              now_ms_ = 0;
+    FileSystem&             fs_;
+    long long               now_ms_ = 0;
 
     Clipboard clip_{};
 
@@ -225,6 +281,44 @@ class InputDispatcher {
 
     // ── A,A / L+B+A helpers ─────────────────────────────────────────────────────────────────────
     void cycle_current_item(int delta);
+
+    // ── The modal guards (see the ⚠️ THE MODAL RULE note at the top of this file) ────────────────
+    bool qwerty_open() const { return s_.qwerty.isOpen; }
+    bool on_browser() const { return s_.currentScreen == ScreenType::FILE_BROWSER; }
+
+    // ── The FILE BROWSER ────────────────────────────────────────────────────────────────────────
+    /** Leave the browser for the screen it was opened from, dropping the audition on the way out. */
+    void close_file_browser();
+    /** Re-list the current directory in place — after a rename, a create, a delete or a paste. */
+    void refresh_browser();
+    /** R+UP / R+DOWN: step through the six sort modes, rebuilding the listing under the cursor. */
+    void browser_cycle_sort(int delta);
+    /** Move the cursor, keeping the 19-row window around it. `page` = the D-pad's LEFT/RIGHT jump. */
+    void browser_move_cursor(int delta, bool page);
+    /** A: open a folder, go up, or LOAD the file — which depends on `browserPurpose`. */
+    void browser_confirm();
+    /** The paths inside the live selection, minus the ".." entry, which is not a file. */
+    std::vector<std::string> browser_selected_paths() const;
+    /** Copy or move the clipboard into the directory on screen, de-duplicating names. */
+    void browser_paste();
+
+    // ── The QWERTY keyboard ─────────────────────────────────────────────────────────────────────
+    void open_qwerty(QwertyContext context, const std::string& initial_text,
+                     const std::string& field_label, const std::string& context_extra,
+                     int max_length = 20, bool clear_on_first_b = false);
+    /** APPLY — what START, and A on the APPLY button, do. Acts on the context it was opened with. */
+    void qwerty_apply();
+    /** ABORT — SELECT, and A on the ABORT button. Discards the text. */
+    void qwerty_cancel() { s_.qwerty = QwertyKeyboardState{}; }
+
+    // ── INSTRUMENT's three buttons, which S4 drew and could not press ────────────────────────────
+    /**
+     * A on one of the four cells that open something: the preset LOAD/SAVE on row 0, and the source
+     * LOAD on the SOURCE row. Returns true if it handled the press.
+     *
+     * (EDIT — the fourth — is the sample editor, and still opens nothing. S6b.)
+     */
+    bool instrument_open_at_cursor();
 };
 
 }  // namespace pt::ui

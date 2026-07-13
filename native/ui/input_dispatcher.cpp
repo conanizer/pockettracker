@@ -4,10 +4,12 @@
 #include "songcore/traversal.h"
 #include "ui/cursor_move.h"
 #include "ui/navigation.h"
+#include "ui/std_filesystem.h"   // path_name / path_stem / path_extension / to_lower
 
 #include <algorithm>
 #include <map>
 #include <set>
+#include <string>
 #include <vector>
 
 namespace pt::ui {
@@ -411,11 +413,35 @@ void InputDispatcher::dpad_nav(const char* direction) {
 }
 
 // ─── D-pad alone ─────────────────────────────────────────────────────────────────────────────────
+//
+// ⚠️ THE MODAL RULE (input_dispatcher.h): keyboard first, then browser, then the screen. The order is
+// the specification — the keyboard opens ON TOP of the browser (SELECT+A renames a file), and a D-pad
+// press there must move the KEY cursor, not the file cursor.
 
-void InputDispatcher::on_dpad_up()    { dpad_nav("UP"); }
-void InputDispatcher::on_dpad_down()  { dpad_nav("DOWN"); }
-void InputDispatcher::on_dpad_left()  { dpad_nav("LEFT"); }
-void InputDispatcher::on_dpad_right() { dpad_nav("RIGHT"); }
+void InputDispatcher::on_dpad_up() {
+    if (qwerty_open()) { move_key_cursor_up(s_.qwerty); return; }
+    if (on_browser())  { browser_move_cursor(-1, /*page=*/false); return; }
+    dpad_nav("UP");
+}
+
+void InputDispatcher::on_dpad_down() {
+    if (qwerty_open()) { move_key_cursor_down(s_.qwerty); return; }
+    if (on_browser())  { browser_move_cursor(+1, /*page=*/false); return; }
+    dpad_nav("DOWN");
+}
+
+void InputDispatcher::on_dpad_left() {
+    if (qwerty_open()) { move_key_cursor_left(s_.qwerty); return; }
+    // LEFT/RIGHT PAGE the browser by a screenful — the one list in the app long enough to need it.
+    if (on_browser())  { browser_move_cursor(-BROWSER_VISIBLE_ROWS, /*page=*/true); return; }
+    dpad_nav("LEFT");
+}
+
+void InputDispatcher::on_dpad_right() {
+    if (qwerty_open()) { move_key_cursor_right(s_.qwerty); return; }
+    if (on_browser())  { browser_move_cursor(+BROWSER_VISIBLE_ROWS, /*page=*/true); return; }
+    dpad_nav("RIGHT");
+}
 
 // ─── The FX-type column, and the helper it opens ──────────────────────────────────────────────────
 
@@ -532,7 +558,12 @@ bool InputDispatcher::on_instrument_type_cell() const {
            s_.instrumentCursorColumn == 1;
 }
 
+// A+DPAD has no meaning in either modal — the keyboard's D-pad moves its key cursor (a bare press,
+// handled above) and the browser's moves its file cursor. Swallowed, not passed through: an A held
+// down over a browser must not reach the editor screen underneath it.
+
 void InputDispatcher::on_a_up() {
+    if (qwerty_open() || on_browser()) return;
     if (s_.fxHelper.isOpen) { fx_move_up(s_.fxHelper); return; }
     if (on_fx_type_column()) { s_.fxHelper = fx_helper_opened_at(current_fx_type_index()); return; }
     if (on_instrument_type_cell()) { toggle_instrument_type(); return; }
@@ -540,6 +571,7 @@ void InputDispatcher::on_a_up() {
 }
 
 void InputDispatcher::on_a_down() {
+    if (qwerty_open() || on_browser()) return;
     if (s_.fxHelper.isOpen) { fx_move_down(s_.fxHelper); return; }
     if (on_fx_type_column()) { s_.fxHelper = fx_helper_opened_at(current_fx_type_index()); return; }
     if (on_instrument_type_cell()) { toggle_instrument_type(); return; }
@@ -547,11 +579,13 @@ void InputDispatcher::on_a_down() {
 }
 
 void InputDispatcher::on_a_left() {
+    if (qwerty_open() || on_browser()) return;
     if (s_.fxHelper.isOpen) { fx_move_left(s_.fxHelper); return; }
     selection_or_single(pt::ui::on_a_left);
 }
 
 void InputDispatcher::on_a_right() {
+    if (qwerty_open() || on_browser()) return;
     if (s_.fxHelper.isOpen) { fx_move_right(s_.fxHelper); return; }
     selection_or_single(pt::ui::on_a_right);
 }
@@ -567,6 +601,8 @@ void InputDispatcher::on_a_released() {
 // ─── A+B: delete / reset ─────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_a_b() {
+    if (qwerty_open() || on_browser()) return;
+
     if (s_.selection.active) {
         const SelectionBounds b = s_.selection.bounds();
         Project&              p = host_.edit_project();
@@ -612,6 +648,8 @@ void InputDispatcher::on_a_b() {
 // ─── A,A: insert the next UNUSED item ────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_a_a() {
+    if (qwerty_open() || on_browser()) return;
+
     // A double-tap is only a double-tap if the cursor has not moved between the presses. Anything
     // else is two separate A presses, and each of those already did something (they inserted the
     // LAST-EDITED item — see on_button_a).
@@ -691,10 +729,12 @@ void InputDispatcher::cycle_current_item(int delta) {
     }
 }
 
-void InputDispatcher::on_b_left()  { cycle_current_item(-1); }
-void InputDispatcher::on_b_right() { cycle_current_item(+1); }
+void InputDispatcher::on_b_left()  { if (qwerty_open() || on_browser()) return; cycle_current_item(-1); }
+void InputDispatcher::on_b_right() { if (qwerty_open() || on_browser()) return; cycle_current_item(+1); }
 
 void InputDispatcher::on_b_up() {
+    if (qwerty_open() || on_browser()) return;
+
     // The pool pages by 16 like the song does — but it CLAMPS at the ends where a single D-pad step
     // wraps 00↔7F. Paging past the end of a 128-slot list should stop at the end, not lap it.
     if (s_.currentScreen == ScreenType::INST_POOL) {
@@ -708,6 +748,8 @@ void InputDispatcher::on_b_up() {
 }
 
 void InputDispatcher::on_b_down() {
+    if (qwerty_open() || on_browser()) return;
+
     if (s_.currentScreen == ScreenType::INST_POOL) {
         const int last = static_cast<int>(s_.project->instruments.size()) - 1;
         s_.currentInstrument    = std::min(last, s_.currentInstrument + 16);
@@ -719,24 +761,63 @@ void InputDispatcher::on_b_down() {
     scroll_song_to_row(s_, s_.cursorRow);
 }
 
-// ─── R + D-pad: move between screens ─────────────────────────────────────────────────────────────
+// ─── R + D-pad: move between screens — except where it does not ──────────────────────────────────
+//
+// ⚠️ On the two modals R+DPAD is NOT navigation, and this is the one place the modal rule pays for
+// itself twice over. In the KEYBOARD, R+UP/DOWN switches layout (letters ↔ numbers) and R+LEFT/RIGHT
+// moves the TEXT cursor — four bindings that have nowhere else to live on an eight-button device. In
+// the BROWSER, R+UP/DOWN cycles the SORT MODE and R+LEFT goes UP A DIRECTORY, which is what its own
+// bottom bar advertises ("R+<=UP R+^v=SORT").
+//
+// Neither may fall through to `navigate_*`: a browser is a popup, not a cell in the 5×5 screen grid,
+// and R+RIGHT out of one would land the user on a screen with the browser's cursor state still live.
 
 void InputDispatcher::on_r_up() {
+    if (qwerty_open()) { s_.qwerty.layout = 0; clamp_col(s_.qwerty); return; }
+    if (on_browser()) { browser_cycle_sort(+1); return; }
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_up(ns));
     s_.selection.exit();   // a selection belongs to the screen it was made on
 }
+
 void InputDispatcher::on_r_down() {
+    if (qwerty_open()) { s_.qwerty.layout = 1; clamp_col(s_.qwerty); return; }
+    if (on_browser()) { browser_cycle_sort(-1); return; }
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_down(ns));
     s_.selection.exit();
 }
+
+void InputDispatcher::browser_cycle_sort(int delta) {
+    FileBrowserState& b = s_.fileBrowser;
+
+    // Step through the six modes BY INDEX, which is why the enum's declaration order is behaviour
+    // rather than documentation (ui/filesystem.h).
+    const int next = (static_cast<int>(b.sortMode) + delta + FILE_SORT_MODE_COUNT) % FILE_SORT_MODE_COUNT;
+    b.sortMode = static_cast<FileSortMode>(next);
+
+    // ⚠️ REBUILD, not `sort_items` on what is already there — see rebuild_items. Sorting the on-screen
+    // list in place would make the tie-break depend on the sort mode you happened to arrive from.
+    rebuild_items(b, fs_);
+
+    // The cursor stays where it is (Android's does — `handleRUp` copies only `sortMode`), so the row
+    // under it now holds a different file. That is the point: you are re-ordering the list you are
+    // looking at, not jumping somewhere.
+    b.statusMessage = file_sort_label(b.sortMode);
+    b.statusSuccess = true;
+}
+
 void InputDispatcher::on_r_left() {
+    if (qwerty_open()) { move_text_cursor_left(s_.qwerty); return; }
+    if (on_browser())  { navigate_to_parent(s_.fileBrowser, fs_); return; }
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_left(ns));
     s_.selection.exit();
 }
+
 void InputDispatcher::on_r_right() {
+    if (qwerty_open()) { move_text_cursor_right(s_.qwerty); return; }
+    if (on_browser())  return;   // no "down a directory" — that is what A on a folder is for
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_right(ns));
     s_.selection.exit();
@@ -745,6 +826,35 @@ void InputDispatcher::on_r_right() {
 // ─── L: selection and the clipboard ──────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_l_b() {
+    if (qwerty_open()) return;
+
+    // ⚠️ The browser's selection is a DIFFERENT machine from the grid editors'. Theirs is the multi-tap
+    // CELL→ROW→SCREEN widener (ui/selection.h); the browser's is a plain anchor..cursor RANGE over a
+    // list, and its second tap inside the window means SELECT ALL rather than "widen the scope". They
+    // share a button and a 500 ms window and nothing else, which is why they are two pieces of code.
+    if (on_browser()) {
+        FileBrowserState& b = s_.fileBrowser;
+        if (b.mode != BrowserMode::NORMAL) return;
+
+        if (!b.selectionMode) {
+            b.selectionMode   = true;
+            b.selectionAnchor = b.cursor;
+            b.lastSelectTapMs = now_ms_;
+        } else if (now_ms_ - b.lastSelectTapMs <= 500) {
+            // Tap again inside the window: select everything, skipping the ".." row.
+            const int first = b.first_selectable();
+            const int last  = std::max(static_cast<int>(b.items.size()) - 1, first);
+            b.selectionAnchor = first;
+            b.cursor          = last;
+            b.scroll          = std::max(0, last - BROWSER_VISIBLE_ROWS + 1);
+            b.lastSelectTapMs = 0;   // …so a third tap re-anchors rather than re-selecting all
+        } else {
+            b.selectionAnchor = b.cursor;   // the window lapsed — start a fresh range here
+            b.lastSelectTapMs = now_ms_;
+        }
+        return;
+    }
+
     switch (s_.currentScreen) {
         case ScreenType::PHRASE:
         case ScreenType::CHAIN:
@@ -759,6 +869,31 @@ void InputDispatcher::on_l_b() {
 }
 
 void InputDispatcher::on_l_a() {
+    if (qwerty_open()) return;
+
+    // On the browser L+A is the FILE clipboard's cut/paste — the same "inside a selection it cuts,
+    // outside one it pastes" shape as the grid editors below, over files instead of cells.
+    if (on_browser()) {
+        FileBrowserState& b = s_.fileBrowser;
+        if (b.mode != BrowserMode::NORMAL) return;
+
+        if (b.selectionMode) {
+            std::vector<std::string> files = browser_selected_paths();
+            if (files.empty()) return;
+            const size_t n = files.size();
+
+            b.fileClipboard      = std::move(files);
+            b.fileClipboardIsCut = true;
+            b.selectionMode      = false;
+            b.selectionAnchor    = -1;
+            b.statusMessage = "CUT " + std::to_string(n) + (n == 1 ? " FILE" : " FILES");
+            b.statusSuccess = true;
+        } else if (!b.fileClipboard.empty()) {
+            browser_paste();
+        }
+        return;
+    }
+
     // Inside a selection L+A CUTS; outside one it PASTES. One button, two verbs, and which one you
     // get is a function of the selection — Kotlin's `handleSelectA()`, inlined because the C++
     // selection has no InputAction to return.
@@ -805,11 +940,21 @@ void InputDispatcher::on_l_a() {
     if (r.kind == PasteResult::Kind::SUCCESS && r.itemsPasted > 0) mark_modified();
 }
 
-void InputDispatcher::on_l_r() { s_.selection.exit(); }
+void InputDispatcher::on_l_r() {
+    if (qwerty_open()) return;
+    if (on_browser()) {
+        s_.fileBrowser.selectionMode   = false;
+        s_.fileBrowser.selectionAnchor = -1;
+        return;
+    }
+    s_.selection.exit();
+}
 
 // ─── L+B+A: clone ────────────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_l_b_a() {
+    if (qwerty_open() || on_browser()) return;
+
     Project& p = host_.edit_project();
 
     if (s_.currentScreen == ScreenType::SONG) {
@@ -919,6 +1064,26 @@ void InputDispatcher::on_l_b_a() {
 // ─── The plain buttons ───────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_button_a() {
+    // A on the KEYBOARD types the key under the cursor — unless the cursor is on the action row, where
+    // the two buttons ARE the answer: ABORT (col 0) and APPLY (col 1).
+    if (qwerty_open()) {
+        if (s_.qwerty.is_on_action_row()) {
+            if (s_.qwerty.keyCursorCol == 0) qwerty_cancel();
+            else                             qwerty_apply();
+        } else {
+            insert_current_key(s_.qwerty);
+        }
+        return;
+    }
+
+    // A on the BROWSER opens a folder, goes up, or loads the file — see browser_confirm.
+    if (on_browser()) { browser_confirm(); return; }
+
+    // A on a cell that OPENS something (INSTRUMENT's NAME / LOAD / SAVE, the pool's empty NAME). This
+    // runs before the insert logic below, exactly as Kotlin's `openSubScreenAtCursor(peek = false)`
+    // does, because those cells have nothing to insert.
+    if (instrument_open_at_cursor()) return;
+
     // A on an EMPTY cell inserts the item you last edited. That is what makes A,A meaningful: press
     // A once to lay down the last chain again, press it twice to get a fresh one.
     Project& p = host_.edit_project();
@@ -987,6 +1152,34 @@ void InputDispatcher::on_button_a() {
 }
 
 void InputDispatcher::on_button_b() {
+    if (qwerty_open()) { delete_char(s_.qwerty); return; }
+
+    if (on_browser()) {
+        FileBrowserState& fb = s_.fileBrowser;
+
+        // B is the NO of "A=YES B=NO" — it disarms the delete rather than leaving the browser, which is
+        // what makes SELECT+B safe to press by accident.
+        if (fb.mode != BrowserMode::NORMAL) { fb.mode = BrowserMode::NORMAL; return; }
+
+        // Inside a file selection, B COPIES it — the same gesture as B over a grid selection below.
+        if (fb.selectionMode) {
+            std::vector<std::string> files = browser_selected_paths();
+            if (!files.empty()) {
+                const size_t n = files.size();
+                fb.fileClipboard      = std::move(files);
+                fb.fileClipboardIsCut = false;
+                fb.statusMessage = "CPY " + std::to_string(n) + (n == 1 ? " FILE" : " FILES");
+                fb.statusSuccess = true;
+            }
+            fb.selectionMode   = false;
+            fb.selectionAnchor = -1;
+            return;
+        }
+
+        close_file_browser();
+        return;
+    }
+
     // B inside a selection COPIES it and exits — the tracker's copy gesture. Outside one, B on these
     // five screens does nothing (they are the main row; there is nowhere to go back to).
     if (!s_.selection.active) return;
@@ -1018,6 +1211,14 @@ void InputDispatcher::on_button_b() {
 }
 
 void InputDispatcher::on_select() {
+    // SELECT is the keyboard's ABORT — the chord alias for the button on its action row.
+    if (qwerty_open()) { qwerty_cancel(); return; }
+
+    // On the browser SELECT does nothing ALONE; it is a modifier there (SELECT+A/B/R), and its press
+    // is what arms those three. Kotlin's `handleSelect()` has an empty FILE_BROWSER arm for the same
+    // reason.
+    if (on_browser()) return;
+
     // SELECT does NOT clear the cell under the cursor on the editor screens — deleting a value is
     // A+B. It is left free for CONTEXT ACTIONS, exactly as Kotlin leaves it, and S5 lands the first
     // one the port can honour.
@@ -1042,16 +1243,47 @@ void InputDispatcher::on_select() {
 }
 
 void InputDispatcher::on_stop_preview() {
+    if (qwerty_open()) return;
+
     // Only the screens that can START an audition can stop one — `stopActivePreview()`. On PHRASE it
     // is gated on the setting, because with previews off there is nothing to silence. The three
     // instrument screens always can: their START *is* an audition, and it rings out until stopped, so
     // "press any button to silence it" is the only way to end it.
-    const bool previewScreen = (s_.currentScreen == ScreenType::TABLE) || on_instrument_screen() ||
+    //
+    // ⚠️ The BROWSER is on this list too, and it has to be: its START auditions the file under the
+    // cursor and the sample rings out (no timed kill). Moving the cursor to the next file must silence
+    // the last one, or scrolling a folder of kicks stacks them on top of each other.
+    const bool previewScreen = (s_.currentScreen == ScreenType::TABLE) || on_browser() ||
+                               on_instrument_screen() ||
                                (s_.currentScreen == ScreenType::PHRASE && s_.notePreviewEnabled);
     if (previewScreen) host_.stop_preview();
 }
 
 void InputDispatcher::on_start() {
+    // START is the keyboard's APPLY — the chord alias for the button on its action row.
+    if (qwerty_open()) { qwerty_apply(); return; }
+
+    // ⚠️ START on the BROWSER is not the transport either: it AUDITIONS the file under the cursor, on
+    // the preview lane, decoded straight into slot 255. This is what a sample browser is FOR — hearing
+    // a file before committing a slot to it — and it is the one note in the port that does not go
+    // through `plan_note_on`, because a file being auditioned has no instrument to derive from
+    // (songcore::preview_sample_file).
+    if (on_browser()) {
+        const BrowserItem* item = s_.fileBrowser.current();
+        if (!item || item->kind != BrowserItem::Kind::FILE) return;
+
+        const std::string ext = to_lower(item->extension);
+        const bool audible = std::find(sample_extensions().begin(), sample_extensions().end(), ext) !=
+                             sample_extensions().end();
+        if (!audible) return;   // a .pti or an .sf2 has no waveform to play
+
+        if (!host_.preview_file(item->path)) {
+            s_.fileBrowser.statusMessage = "PREVIEW FAILED";
+            s_.fileBrowser.statusSuccess = false;
+        }
+        return;
+    }
+
     // ⚠️ **START IS NOT ALWAYS THE TRANSPORT.** On the four screens that edit a SOUND rather than an
     // arrangement — INSTRUMENT, INST.POOL, MODS and TABLE — it AUDITIONS the instrument at its own
     // root, on the preview lane, and the note rings until the next plain button press silences it. That
@@ -1098,6 +1330,400 @@ void InputDispatcher::on_start() {
         // PHRASE, GROOVE, SCALE… — Kotlin's `togglePlayback()` else-arm.
         default: host_.play_phrase(s_.currentPhrase); break;
     }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// THE FILE BROWSER AND THE QWERTY KEYBOARD (Phase 3 S6a)
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+// ─── Opening and closing the browser ─────────────────────────────────────────────────────────────
+
+void InputDispatcher::open_file_browser(AppState::BrowserPurpose purpose, const std::string& directory,
+                                        const std::vector<std::string>& extensions) {
+    s_.previousScreen = s_.currentScreen;
+    s_.browserPurpose = purpose;
+
+    s_.fileBrowser.fileExtensions = extensions;
+    s_.fileBrowser.mode           = BrowserMode::NORMAL;
+    navigate_to_folder(s_.fileBrowser, fs_, directory);
+
+    s_.currentScreen = ScreenType::FILE_BROWSER;
+}
+
+void InputDispatcher::close_file_browser() {
+    // The audition the user was scrolling through is over. Kotlin frees slot 255 here for the same
+    // reason: a preview left resident is a megabyte of PCM nothing will ever play again.
+    host_.clear_previews();
+    s_.fileBrowser.selectionMode   = false;
+    s_.fileBrowser.selectionAnchor = -1;
+    s_.currentScreen = s_.previousScreen;
+}
+
+void InputDispatcher::refresh_browser() {
+    // Re-list in place and KEEP THE CURSOR where it was — a refresh is not a navigation. Deleting the
+    // twentieth file in a folder should leave you on the twentieth row, not throw you back to the
+    // first. It has to be CLAMPED, though: the list may have got shorter, and a cursor past the end of
+    // it is the "cursor vanishes" bug S2 found on the screen changes (nothing draws highlighted).
+    FileBrowserState& b = s_.fileBrowser;
+    rebuild_items(b, fs_);
+
+    const int last = static_cast<int>(b.items.size()) - 1;
+    b.cursor = std::min(std::max(b.cursor, 0), std::max(last, 0));
+
+    if (b.cursor < b.scroll) b.scroll = b.cursor;
+    if (b.cursor >= b.scroll + BROWSER_VISIBLE_ROWS) b.scroll = b.cursor - BROWSER_VISIBLE_ROWS + 1;
+    b.scroll = std::max(0, std::min(b.scroll, std::max(0, last - BROWSER_VISIBLE_ROWS + 1)));
+}
+
+// ─── The browser's cursor ────────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::browser_move_cursor(int delta, bool page) {
+    FileBrowserState& b     = s_.fileBrowser;
+    const int         total = static_cast<int>(b.items.size());
+    if (total == 0) return;
+
+    // ⚠️ UP/DOWN WRAP; the LEFT/RIGHT page jump CLAMPS. That asymmetry is Kotlin's and it is the right
+    // one: wrapping a single step off the end of a list is a convenience, but a PAGE that wrapped would
+    // fling you from the top of a 400-file directory to the bottom on one tap.
+    if (page) {
+        b.cursor = std::min(std::max(b.cursor + delta, 0), total - 1);
+    } else {
+        b.cursor = (b.cursor + delta + total) % total;
+    }
+
+    // Keep the 19-row window around the cursor.
+    if (b.cursor < b.scroll) {
+        b.scroll = b.cursor;
+    } else if (b.cursor >= b.scroll + BROWSER_VISIBLE_ROWS) {
+        b.scroll = b.cursor - BROWSER_VISIBLE_ROWS + 1;
+    }
+}
+
+// ─── A: open a folder, or LOAD the file ──────────────────────────────────────────────────────────
+
+void InputDispatcher::browser_confirm() {
+    FileBrowserState& b = s_.fileBrowser;
+
+    // DELETE mode: A is the YES of "A=YES B=NO". This is the ONLY place the browser removes anything,
+    // and it is two presses away from any accident — SELECT+B to arm, A to confirm.
+    if (b.mode == BrowserMode::DELETE) {
+        const BrowserItem* item = b.current();
+        b.mode = BrowserMode::NORMAL;
+        if (!item || item->is_parent()) return;
+
+        const std::string name = item->displayName;
+        if (fs_.delete_path(item->path)) {
+            refresh_browser();
+            b.statusMessage = "DELETED: " + name;
+            b.statusSuccess = true;
+        } else {
+            b.statusMessage = "DELETE FAILED";
+            b.statusSuccess = false;
+        }
+        return;
+    }
+
+    const BrowserItem* item = b.current();
+    if (!item) return;
+
+    if (item->is_parent()) { navigate_to_parent(b, fs_); return; }
+    if (item->kind == BrowserItem::Kind::FOLDER) { navigate_to_folder(b, fs_, item->path); return; }
+
+    // ── It is a FILE, and what happens now is the whole reason the browser was opened ────────────
+    const int         id   = s_.currentInstrument;
+    const std::string ext  = to_lower(item->extension);
+    const std::string path = item->path;
+    const std::string stem = item->displayName;
+
+    bool ok = false;
+    switch (s_.browserPurpose) {
+        case AppState::BrowserPurpose::LOAD_PRESET:
+            ok = host_.load_instrument_preset(id, path);
+            break;
+
+        case AppState::BrowserPurpose::LOAD_SOURCE:
+            // The extension decides, not the slot's current type: picking an .sf2 from a sampler slot
+            // TURNS it into a SoundFont slot (load_instrument_soundfont sets the type), which is what
+            // the user asked for by picking one. The browser's filter usually makes this moot — but the
+            // user can navigate anywhere, and a folder full of both is not exotic.
+            if (ext == "sf2" || ext == "sf3") {
+                ok = host_.load_soundfont(id, path);
+            } else {
+                ok = host_.load_sample(id, path);
+            }
+            break;
+    }
+
+    if (!ok) {
+        b.statusMessage = "LOAD FAILED";
+        b.statusSuccess = false;
+        return;
+    }
+
+    // A still-unnamed slot adopts the file's name. Only a DEFAULT-named one ("INST07"): a slot the user
+    // has named is theirs, and silently renaming it on a source swap would lose that.
+    if (s_.browserPurpose == AppState::BrowserPurpose::LOAD_SOURCE) {
+        Instrument& ins = host_.edit_project().instruments[static_cast<size_t>(id)];
+        if (songcore::instrument_has_default_name(ins)) ins.name = stem.substr(0, 20);
+    }
+
+    mark_modified();
+    close_file_browser();
+}
+
+// ─── The multi-select and the file clipboard ─────────────────────────────────────────────────────
+
+std::vector<std::string> InputDispatcher::browser_selected_paths() const {
+    const FileBrowserState& b = s_.fileBrowser;
+    std::vector<std::string> out;
+    if (!b.selectionMode || b.selectionAnchor < 0) return out;
+
+    const int lo = std::max(std::min(b.selectionAnchor, b.cursor), b.first_selectable());
+    const int hi = std::max(b.selectionAnchor, b.cursor);
+    for (int i = lo; i <= hi; ++i) {
+        const BrowserItem* item = b.item_at(i);
+        if (item && !item->is_parent()) out.push_back(item->path);
+    }
+    return out;
+}
+
+void InputDispatcher::browser_paste() {
+    FileBrowserState& b = s_.fileBrowser;
+    if (b.fileClipboard.empty()) return;
+
+    const std::string& dest = b.currentDirectory;
+    int done = 0, failed = 0;
+
+    for (const std::string& src : b.fileClipboard) {
+        if (!fs_.file_exists(src)) { ++failed; continue; }
+
+        const std::string name = path_name(src);
+        std::string       target = dest + "/" + name;
+        if (target == src) { ++done; continue; }   // pasted back into the folder it was copied from
+
+        // De-duplicate: "kick.wav" → "kick_2.wav" → "kick_3.wav". Never overwrite — a paste that
+        // silently replaced a file of the same name would be a data-loss bug wearing a convenience hat.
+        if (fs_.file_exists(target)) {
+            const std::string ext  = path_extension(name);
+            const std::string base = path_stem(name);
+            for (int n = 2;; ++n) {
+                target = dest + "/" + base + "_" + std::to_string(n) + (ext.empty() ? "" : "." + ext);
+                if (!fs_.file_exists(target)) break;
+            }
+        }
+
+        const bool ok = b.fileClipboardIsCut ? fs_.move_file(src, target) : fs_.copy_file(src, target);
+        if (ok) ++done; else ++failed;
+    }
+
+    const bool  cut  = b.fileClipboardIsCut;
+    const char* verb = cut ? "MOVED" : "COPIED";
+
+    // A CUT clipboard is spent once pasted — the sources are gone. A COPY one survives, so the same
+    // files can be pasted into several folders.
+    if (cut) b.fileClipboard.clear();
+
+    refresh_browser();
+    b.statusMessage = failed == 0
+                          ? std::string(verb) + " " + std::to_string(done) +
+                                (done == 1 ? " FILE" : " FILES")
+                          : std::string(verb) + " " + std::to_string(done) + ", FAILED " +
+                                std::to_string(failed);
+    b.statusSuccess = (failed == 0);
+}
+
+// ─── SELECT + A / B / R — the browser's file-management chords ───────────────────────────────────
+
+void InputDispatcher::on_select_a() {
+    if (qwerty_open() || !on_browser()) return;
+    if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
+
+    const BrowserItem* item = s_.fileBrowser.current();
+    if (!item || item->is_parent()) return;   // ".." is not a file and cannot be renamed
+
+    const bool  dir   = (item->kind == BrowserItem::Kind::FOLDER);
+    const std::string ext = to_lower(item->extension);
+    const char* label = dir              ? "FOLDER NAME:"
+                        : (ext == "wav") ? "SAMPLE NAME:"
+                        : (ext == "ptp") ? "PROJECT NAME:"
+                                         : "FILE NAME:";
+
+    // A FOLDER's displayName is "[name]" — the brackets are decoration, and typing them back into the
+    // rename box would make them part of the name.
+    const std::string base = dir ? path_name(item->path) : item->displayName;
+    open_qwerty(QwertyContext::FILE_RENAME, base, label, item->path);
+}
+
+void InputDispatcher::on_select_b() {
+    if (qwerty_open() || !on_browser()) return;
+    if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
+
+    const BrowserItem* item = s_.fileBrowser.current();
+    if (!item || item->is_parent()) return;
+
+    // ARM the confirm; never delete on this press. The top bar becomes "DELETE <name>? A=YES B=NO".
+    s_.fileBrowser.mode          = BrowserMode::DELETE;
+    s_.fileBrowser.statusMessage.clear();
+    s_.fileBrowser.statusSuccess = true;
+}
+
+void InputDispatcher::on_select_r() {
+    if (qwerty_open() || !on_browser()) return;
+    if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
+    open_qwerty(QwertyContext::FOLDER_CREATE, "NEW FOLDER", "FOLDER NAME:",
+                s_.fileBrowser.currentDirectory);
+}
+
+// ─── The QWERTY keyboard ─────────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::open_qwerty(QwertyContext context, const std::string& initial_text,
+                                  const std::string& field_label, const std::string& context_extra,
+                                  int max_length, bool clear_on_first_b) {
+    QwertyKeyboardState k{};
+    k.isOpen        = true;
+    k.text          = initial_text.substr(0, static_cast<size_t>(max_length));
+    k.maxLength     = max_length;
+    k.textCursor    = static_cast<int>(k.text.size());
+    k.fieldLabel    = field_label;
+    k.contextExtra  = context_extra;
+    k.context       = context;
+    k.clearOnFirstB = clear_on_first_b;
+    k.insertBefore  = s_.insertBefore;   // read at OPEN, so flipping the setting cannot change what
+    s_.qwerty       = k;                 // the buttons mean under the user's thumb mid-word
+}
+
+void InputDispatcher::qwerty_apply() {
+    const QwertyKeyboardState k    = s_.qwerty;   // by value: every arm below closes the keyboard
+    const std::string         text = trimmed_text(k);
+    s_.qwerty = QwertyKeyboardState{};
+
+    switch (k.context) {
+        case QwertyContext::FILE_RENAME: {
+            // An empty field means "leave it alone", not "name it nothing" — Kotlin's `.ifEmpty { … }`.
+            const std::string name = text.empty() ? path_stem(k.contextExtra) : text;
+            if (fs_.rename_file(k.contextExtra, name)) {
+                refresh_browser();
+                s_.fileBrowser.statusMessage = "RENAMED";
+                s_.fileBrowser.statusSuccess = true;
+            } else {
+                s_.fileBrowser.statusMessage = "RENAME FAILED";
+                s_.fileBrowser.statusSuccess = false;
+            }
+            break;
+        }
+
+        case QwertyContext::FOLDER_CREATE: {
+            const std::string name = text.empty() ? "NewFolder" : text;
+            if (!fs_.create_folder(k.contextExtra, name).empty()) {
+                refresh_browser();
+                s_.fileBrowser.statusMessage = "CREATED";
+                s_.fileBrowser.statusSuccess = true;
+            } else {
+                s_.fileBrowser.statusMessage = "CREATE FAILED";
+                s_.fileBrowser.statusSuccess = false;
+            }
+            break;
+        }
+
+        case QwertyContext::INSTRUMENT_NAME: {
+            Instrument& ins = host_.edit_project().instruments[static_cast<size_t>(s_.currentInstrument)];
+            // A cleared name reverts to the default "INSTxx" rather than becoming blank — an unnamed
+            // instrument still has to be identifiable in the pool.
+            ins.name = text.empty() ? songcore::default_instrument_name(ins.id) : text;
+            mark_modified();
+            break;
+        }
+
+        case QwertyContext::INSTRUMENT_SAVE: {
+            const std::string name = text.empty() ? "PRESET" : text;
+            const std::string path = k.contextExtra + "/" + name + ".pti";
+            if (host_.save_instrument_preset(s_.currentInstrument, path)) {
+                s_.statusMessage = "SAVED: " + name;
+                s_.statusSuccess = true;
+            } else {
+                s_.statusMessage = "SAVE FAILED";
+                s_.statusSuccess = false;
+            }
+            break;
+        }
+    }
+}
+
+// ─── INSTRUMENT's buttons — the three cells S4 drew and could not press ──────────────────────────
+
+bool InputDispatcher::instrument_open_at_cursor() {
+    Project& p = host_.edit_project();
+
+    if (s_.currentScreen == ScreenType::INST_POOL) {
+        // A on the pool's NAME column of an EMPTY slot loads a source straight into it (M8's "tap EDIT
+        // on an empty slot"). A slot that already HAS a source is managed on the INSTRUMENT screen —
+        // loading over it from the pool, where you cannot see what is in it, would be too easy to do by
+        // accident.
+        if (s_.poolCursorColumn != 0) return false;
+        const Instrument& ins  = p.instruments[static_cast<size_t>(s_.currentInstrument)];
+        const bool        isSF = ins.instrumentType == songcore::InstrumentType::SOUNDFONT;
+        if (isSF ? ins.soundfontPath.has_value() : !songcore::instrument_is_free(ins)) return false;
+
+        open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE,
+                          isSF ? fs_.soundfonts_directory() : fs_.samples_directory(),
+                          isSF ? soundfont_extensions() : sample_extensions());
+        return true;
+    }
+
+    if (s_.currentScreen != ScreenType::INSTRUMENT) return false;
+
+    const Instrument& ins  = p.instruments[static_cast<size_t>(s_.currentInstrument)];
+    const bool        isSF = ins.instrumentType == songcore::InstrumentType::SOUNDFONT;
+    const int         row  = s_.instrumentCursorRow;
+    const int         col  = s_.instrumentCursorColumn;
+
+    // Row 0 — TYPE (col 1) + the PRESET buttons. A .pti carries the whole instrument: its params, its
+    // mod slots, its table, and the path to its source.
+    if (row == 0 && col == 2) {
+        open_file_browser(AppState::BrowserPurpose::LOAD_PRESET, fs_.instruments_directory(), {"pti"});
+        return true;
+    }
+    if (row == 0 && col == 3) {
+        const std::string dir  = fs_.instruments_directory();
+        const std::string name = ins.name.empty() ? songcore::default_instrument_name(ins.id) : ins.name;
+        open_qwerty(QwertyContext::INSTRUMENT_SAVE, name, "SAVE PRESET:", dir, /*max_length=*/20,
+                    /*clear_on_first_b=*/true);
+        return true;
+    }
+
+    // Row 5 — the SOURCE row. LOAD (col 2) browses; EDIT (col 3) is the sample editor and is S6b's.
+    if (row == 5 && col == 2) {
+        open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE,
+                          isSF ? fs_.soundfonts_directory() : fs_.samples_directory(),
+                          isSF ? soundfont_extensions() : sample_extensions());
+        return true;
+    }
+
+    // Row 1 — NAME. The one cell here whose A is DEFERRED TO RELEASE (see defer_a_to_release).
+    if (row == 1) {
+        // A default-named slot opens the box EMPTY rather than with "INST07" in it: you are naming the
+        // instrument, and having to delete the placeholder first is six button presses of nothing.
+        const std::string current = songcore::instrument_has_default_name(ins) ? "" : ins.name;
+        open_qwerty(QwertyContext::INSTRUMENT_NAME, current, "INSTRUMENT NAME:", "");
+        return true;
+    }
+
+    return false;
+}
+
+bool InputDispatcher::defer_a_to_release() const {
+    // ⚠️ The cells whose A OPENS something AND whose A+DPAD means something else. Firing the open on the
+    // PRESS would pre-empt the combo: hold A on the NAME cell, press B to reset it, and you would be
+    // looking at a keyboard instead. Kotlin defers exactly these (`openSubScreenAtCursor(peek = true)`),
+    // and the mapper cancels the deferral the moment any A-combo fires.
+    //
+    // Today that is the INSTRUMENT NAME row. The EQ cells join it when the EQ overlay lands — they are
+    // the case that makes this mechanism necessary rather than tidy, since A+DPAD dials the slot number
+    // on the very cell whose A opens the editor.
+    //
+    // The LOAD / SAVE buttons are NOT here, deliberately: they are read-only cells with no A+DPAD
+    // behaviour to protect, and Kotlin fires them on the press too.
+    return s_.currentScreen == ScreenType::INSTRUMENT && s_.instrumentCursorRow == 1;
 }
 
 }  // namespace pt::ui
