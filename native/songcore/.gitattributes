@@ -1,0 +1,9 @@
+# note_tables.h is a GENERATED conformance artifact, not ordinary source: S5NoteTableTest writes it
+# with '\n' and then byte-compares the file it reads back against a freshly rendered string. Under
+# core.autocrlf=true a checkout would hand it back with CRLF, and the comparison fails — so a FRESH
+# CLONE on Windows goes red on a file nobody touched.
+#
+# Same rule, and the same reason, as testdata/.gitattributes: an artifact that is byte-compared must
+# never be EOL-converted. It is stated again here because the rule follows the ARTIFACT, not the
+# directory, and this one does not live under /testdata.
+note_tables.h -text
