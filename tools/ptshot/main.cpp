@@ -271,6 +271,55 @@ struct DemoFeed {
         // the markers either way — but a filler that did not say it had filled anything would be a trap
         // for the next one.
         state.peaksVersion++;
+
+        fill_sample_editor(state);
+    }
+
+    /**
+     * The SAMPLE EDITOR (S6b). A sample editor with no sample is a 620×155 empty box and a "WAVEFORM"
+     * placeholder — true, and useless for checking that the S/E markers, the slice boundaries and the
+     * playhead land where Android puts them. So the waveform is SYNTHESIZED.
+     *
+     * Four decaying bursts, so the transient markers have something to point AT and the selection band
+     * has a visible edge. The 620 bins are the panel's own width — one per pixel column.
+     */
+    void fill_sample_editor(AppState& state) {
+        SampleEditorState& se = state.sampleEditor;
+
+        constexpr int kBins   = SampleEditorModule::WAVEFORM_W;   // 620
+        constexpr int kFrames = 132300;                           // 3 s at 44.1 kHz
+        const int     onsets[4] = {0, 33000, 62000, 99000};
+
+        se.waveformData.resize(static_cast<size_t>(kBins) * 2);
+        for (int i = 0; i < kBins; ++i) {
+            const int frame = static_cast<int>((static_cast<int64_t>(i) * kFrames) / kBins);
+
+            // Envelope: an exponential decay from the most recent onset at or before this frame.
+            float amp = 0.0f;
+            for (const int o : onsets)
+                if (frame >= o) amp = std::exp(-static_cast<float>(frame - o) / 9000.0f);
+
+            const float osc = std::sin(static_cast<float>(i) * 0.55f);
+            const float v   = 0.92f * amp * osc;
+            se.waveformData[static_cast<size_t>(i) * 2]     = -std::fabs(v);   // min
+            se.waveformData[static_cast<size_t>(i) * 2 + 1] = std::fabs(v);    // max
+        }
+
+        se.totalFrames   = kFrames;
+        se.sampleRate    = 44100;
+        se.hasStereoData = true;
+        se.sampleName    = "BREAK";
+
+        // A selection that is NOT the whole sample, so the lit/dim split across the bins is visible and
+        // the S and E rules are somewhere you can see both of them.
+        se.selectionStart = 24000;
+        se.selectionEnd   = 96000;
+
+        // One marker per onset after the first — N markers make N + 1 slices, so the first slice starts
+        // at 0 and needs no marker of its own.
+        se.transientMarkers = {onsets[1], onsets[2], onsets[3]};
+
+        se.playbackPosition = 0.62f;   // the playhead, over on the right of the selection
     }
 };
 
@@ -307,6 +356,8 @@ int main(int argc, char** argv) {
                      "              [--qwerty=TEXT] [--qwerty-label=L] [--qwerty-key=ROW,COL]\n"
                      "              [--qwerty-layout=0|1] [--qwerty-cursor=N]\n"
                      "              [--mod-cursor=PAIR,SIDE,ROW] [--sf-presets=COUNT,INDEX]\n"
+                     "              [--se-slice=TRANSIENT|DIVIDE|OFF] [--se-slice-index=N]\n"
+                     "              [--se-fx=N] [--se-zoom=N] [--se-source=N] [--se-confirm]\n"
                      "              [--demo] [--scale=N]\n"
                      "\n"
                      "  --demo         synthesise the visualizer, the note monitor and the MIXER's\n"
@@ -383,6 +434,28 @@ int main(int argc, char** argv) {
         state.previousColumn = clamp(std::atoi(v), 4);
 
     state.instrumentFromPool = flag(argc, argv, "--from-pool");
+
+    // ── The SAMPLE EDITOR ────────────────────────────────────────────────────────────────────────
+    //
+    // Every field here would normally come from the ENGINE (the waveform, the length, the rate, the
+    // detected transients) — and ptshot has none, by design. So they are set on the command line, for
+    // the same reason --sf-presets and --demo exist: a fixture that makes the geometry visible, compared
+    // against nothing.
+    if (const char* v = opt(argc, argv, "--se-slice")) {
+        const std::string n(v);
+        if (n == "TRANSIENT")   state.sampleEditor.sliceMethod = SampleEditorModule::SLICE_TRANSIENT;
+        else if (n == "DIVIDE") state.sampleEditor.sliceMethod = SampleEditorModule::SLICE_DIVIDE;
+        else                    state.sampleEditor.sliceMethod = SampleEditorModule::SLICE_OFF;
+    }
+    if (const char* v = opt(argc, argv, "--se-fx"))
+        state.sampleEditor.fxType = clamp(std::atoi(v), 4);
+    if (const char* v = opt(argc, argv, "--se-zoom"))
+        state.sampleEditor.zoomLevel = clamp(std::atoi(v), 4);
+    if (const char* v = opt(argc, argv, "--se-source"))
+        state.sampleEditor.sourceMode = clamp(std::atoi(v), 3);
+    if (const char* v = opt(argc, argv, "--se-slice-index"))
+        state.sampleEditor.sliceIndex = clamp(std::atoi(v), 255);
+    state.sampleEditor.showConfirmClose = flag(argc, argv, "--se-confirm");
 
     // --sf-presets=COUNT,INDEX: the SF2's preset list, which only an ENGINE can answer for — and ptshot
     // has none, by design. Supplying it here is what lets the INSTRUMENT screen's PRESET row be drawn
@@ -461,6 +534,16 @@ int main(int argc, char** argv) {
 
                 case ScreenType::EFFECTS:
                     state.effectsCursorRow = clamp(row, EffectModule::MAX_CURSOR_ROW);
+                    break;
+
+                case ScreenType::SAMPLE_EDITOR:
+                    // A SPARSE row map (1, 2, 8, 10, 11, 13, 14, 16, 18, 19) — the rest are the waveform
+                    // and the spacers. Not clamped to a range, deliberately: a screenshot of the cursor on
+                    // a spacer row is how you check that nothing highlights there.
+                    state.sampleEditor.cursorRow = clamp(row, 19);
+                    state.sampleEditor.cursorCol = clamp(
+                        col, SampleEditorModule::max_col_for_row(state.sampleEditor.cursorRow,
+                                                                 state.sampleEditor.sliceMethod));
                     break;
 
                 default: {

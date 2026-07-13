@@ -21,6 +21,7 @@
 #include "ui/fx_helper.h"
 #include "ui/modules/file_browser.h"
 #include "ui/modules/qwerty_keyboard.h"
+#include "ui/modules/sample_editor.h"
 #include "ui/selection.h"
 
 #include <string>
@@ -200,8 +201,9 @@ struct AppState {
      * `else` arm for every typo. An enum is the same information with the failure mode removed.
      */
     enum class BrowserPurpose {
-        LOAD_SOURCE,  // a sample (or an .sf2 — the instrument's TYPE decides which, at open time)
-        LOAD_PRESET   // a .pti into the current instrument slot
+        LOAD_SOURCE,        // a sample (or an .sf2 — the instrument's TYPE decides which, at open time)
+        LOAD_PRESET,        // a .pti into the current instrument slot
+        LOAD_SAMPLE_EDITOR  // a .wav into the slot the SAMPLE EDITOR is open on — and back to the editor
     };
     BrowserPurpose browserPurpose = BrowserPurpose::LOAD_SOURCE;
 
@@ -212,6 +214,18 @@ struct AppState {
     // The app's first true modal: while it is open it owns every button, and `isOpen` is checked
     // before any other arm in every handler that can reach it.
     QwertyKeyboardState qwerty{};
+
+    // ── The SAMPLE EDITOR (S6b) ─────────────────────────────────────────────────────────────────
+    //
+    // The one screen whose state is a SESSION rather than a view. Everything else in this struct is a
+    // cursor position — throw it away and you lose your place. Throw this away and you lose the
+    // selection you spent a minute dialling in, the transients you just detected, and the pending
+    // pitch shift you have not baked yet. It is created fresh when INSTRUMENT's EDIT opens the editor,
+    // and it lives until the editor closes.
+    //
+    // The AUDIO is not in here — it is in the engine, where the twelve operations already were. What
+    // this holds is the 620 min/max pairs the waveform draws from, and the state of the knobs.
+    SampleEditorState sampleEditor{};
 
     /**
      * SETTINGS "INSERT MODE" — where a typed character lands relative to the text cursor, and hence

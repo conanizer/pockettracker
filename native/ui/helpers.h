@@ -40,6 +40,22 @@ inline constexpr int SIDE_SPACER   = 10;
 using songcore::effect_name;
 using songcore::effect_value_max;
 using songcore::hex2;
+
+/**
+ * Kotlin's `Long.toHex8()` — uppercase, zero-padded to eight digits. The SAMPLE EDITOR's frame
+ * positions, which are the only values in the app too big for a hex byte.
+ *
+ * It PADS but never truncates, exactly as `padStart(8, '0')` does: a sample longer than 0xFFFFFFFF
+ * frames (27 hours at 44.1 kHz) would print nine digits rather than the wrong eight.
+ */
+inline std::string hex8(int64_t v) {
+    static const char* H = "0123456789ABCDEF";
+    if (v == 0) return "00000000";
+    std::string s;
+    for (uint64_t u = static_cast<uint64_t>(v); u != 0; u >>= 4) s.insert(s.begin(), H[u & 0xF]);
+    while (s.size() < 8) s.insert(s.begin(), '0');
+    return s;
+}
 using songcore::note_name;
 
 /** 1-digit uppercase hex — Kotlin's Int.toHex1(). Masks to the low nibble. */
@@ -55,6 +71,17 @@ inline Argb darken(Argb c, float factor) {
         return static_cast<Argb>(v < 0 ? 0 : (v > 255 ? 255 : v));
     };
     return (c & 0xFF000000u) | (ch(16) << 16) | (ch(8) << 8) | ch(0);
+}
+
+/**
+ * REPLACE the alpha channel, keeping the RGB — Compose's `Color(x).copy(alpha = a)`, which the sample
+ * editor's slice highlight uses to lay 10% of the cursor colour over the waveform without hiding it.
+ * `Canvas::fill_rect` blends src-over, so a translucent fill is a real blend rather than a flat wash.
+ */
+inline Argb with_alpha(Argb c, float alpha) {
+    const float a = alpha < 0.0f ? 0.0f : (alpha > 1.0f ? 1.0f : alpha);
+    const Argb  v = static_cast<Argb>(a * 255.0f + 0.5f);   // round, as Compose does
+    return (v << 24) | (c & 0x00FFFFFFu);
 }
 
 // ─── Row background ──────────────────────────────────────────────────────────────────────────────

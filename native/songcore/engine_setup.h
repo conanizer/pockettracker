@@ -35,6 +35,7 @@
 #include "scheduler.h"    // hex_to_float (VolumeUtils.hexToFloat)
 #include "traversal.h"    // collect_used_instruments
 #include "voice_derive.h" // Routing, push_instrument_mod_eq_sends, push_instrument_playback_params
+#include "wav_writer.h"   // read_cue_points — a WAV's slice boundaries live in its `cue ` chunk
 
 namespace songcore {
 
@@ -200,6 +201,13 @@ inline bool is_native_compressed(const std::string& ext) {
     return ext == "mp3" || ext == "flac" || ext == "ogg" || ext == "opus";
 }
 
+// A WAV's cue points as the model wants them: `Instrument::sliceMarkers` is int64 (Kotlin's
+// `List<Long>`, and Kotlin maps `readCuePoints(path).map { it.toLong() }` at every call site).
+inline std::vector<int64_t> read_cue_markers(const std::string& path) {
+    const std::vector<int> cues = read_cue_points(path);
+    return std::vector<int64_t>(cues.begin(), cues.end());
+}
+
 // Load one instrument's sample into its engine slot. Returns the FILE's sample rate (> 0) on success,
 // which is what the rate-compensation ratio is derived from, or 0 on failure / unsupported format.
 template <typename Engine>
@@ -225,11 +233,17 @@ int load_sample_file(Engine& engine, int instrumentId, const std::string& path) 
 //
 // NOT ported from the Kotlin loader, deliberately:
 //   • m4a/aac — needs MediaCodec; no native decoder exists (AudioFormats.kt).
-//   • WAV cue points → instrument.sliceMarkers. The engine's WAV decoder does not read the `cue `
-//     chunk, so an instrument whose markers came from the file loads here without them. Markers
-//     stored in the .ptp are unaffected. (Lands with the Linux Phase 1.5 media unification.)
+//
+// ⚠️ **WAV cue points → `instrument.sliceMarkers` IS ported now (S6b), and the FILE WINS.** S6a could
+// not port it — there was no cue-point reader — and said so. There is one now (`wav_writer.h`), so this
+// reads them, exactly where Kotlin reads them (`reloadProjectSamples`), and with Kotlin's precedence:
+// for a WAV the file's cue chunk REPLACES whatever markers the .ptp carried, because the audio and its
+// slice boundaries are one artifact and the file is the newer of the two (the editor's CHOP/SAVE writes
+// both, but only the file survives being loaded into a different slot or project). A COMPRESSED source
+// keeps the .ptp's markers untouched — it has no cue chunk to read, and clearing them would delete
+// markers nothing else can restore. Hence the non-const `project`.
 template <typename Engine>
-MediaLoadResult load_project_media(Engine& engine, const Project& project,
+MediaLoadResult load_project_media(Engine& engine, Project& project,
                                    const std::string& base_dir, Routing& routing) {
     // Start from a clean native slate so a previous project's PCM and SoundFonts don't accumulate —
     // the same reason reloadProjectSamples opens with clearAllSamples + clearAllSoundfonts.
@@ -240,7 +254,7 @@ MediaLoadResult load_project_media(Engine& engine, const Project& project,
     MediaLoadResult result;
     const float deviceRate = static_cast<float>(engine.getSampleRate());
 
-    for (const Instrument& ins : project.instruments) {
+    for (Instrument& ins : project.instruments) {
         if (ins.id < 0 || ins.id >= POOL_INSTRUMENTS) continue;
 
         if (ins.instrumentType == InstrumentType::SOUNDFONT && ins.soundfontPath.has_value()) {
@@ -259,6 +273,9 @@ MediaLoadResult load_project_media(Engine& engine, const Project& project,
             const int fileRate = load_sample_file(engine, ins.id, path);
             if (fileRate > 0) {
                 routing.sampleRateRatio[ins.id] = deviceRate / static_cast<float>(fileRate);
+                // The file's slice boundaries win over the project's — but only a WAV has any.
+                if (!is_native_compressed(path_extension_lower(path)))
+                    ins.sliceMarkers = read_cue_markers(path);
                 result.loaded++;
             } else {
                 result.failed++;
@@ -472,11 +489,11 @@ int preview_sample_file(Engine& engine, const std::string& path) {
  * decode is repeated on the next project load. That is Kotlin's contract (`loadSampleFromCompressed`:
  * "the instrument keeps its original path"), and `load_project_media` is the code that honours it.
  *
- * ⚠️ WAV cue points → `sliceMarkers` is NOT read here, exactly as `load_project_media` does not read
- * it: the engine's WAV decoder does not parse the `cue ` chunk. An instrument whose markers came from
- * the file therefore loads without them on this platform (markers stored in the .ptp are unaffected).
- * Kotlin reads them via WavWriter.readCuePoints. This lands with the Phase 1.5 media unification, and
- * until it does, a sliced WAV loaded on Linux plays whole. Stated, not silently dropped.
+ * ⚠️ The new source's SLICE MARKERS come from the file, and only a WAV has any — its `cue ` chunk,
+ * which is where the sample editor's CHOP and SAVE put them (S6b). A compressed source has no cue
+ * chunk, so its markers are CLEARED rather than left behind: the slot now points at different audio,
+ * and boundaries measured against the previous sample are worse than none. Kotlin does exactly this
+ * (`InstrumentController`: `if (isCompressed) emptyList() else readCuePoints(path)`).
  */
 template <typename Engine>
 bool load_instrument_sample(Engine* engine, Project& project, int id, const std::string& path,
@@ -495,7 +512,9 @@ bool load_instrument_sample(Engine* engine, Project& project, int id, const std:
     Instrument& ins   = project.instruments[static_cast<size_t>(id)];
     ins.sampleFilePath = path;
     ins.sampleId       = id;
-    ins.sliceMarkers.clear();   // a fresh source has no markers until a sample-editor CHOP writes some
+    ins.sliceMarkers   = is_native_compressed(path_extension_lower(path))
+                             ? std::vector<int64_t>{}
+                             : read_cue_markers(path);
 
     const float deviceRate = static_cast<float>(engine->getSampleRate());
     routing.sampleRateRatio[id] = deviceRate / static_cast<float>(fileRate);

@@ -44,6 +44,7 @@ public:
         poll_engine(engine, state);
         poll_soundfont_presets(host, state);
         poll_peaks(engine, state, now_ms);
+        poll_sample_editor(host, state);
     }
 
 private:
@@ -189,10 +190,82 @@ private:
         state.sfPresetName  = host.sf_preset_name(id);
     }
 
+    /**
+     * The SAMPLE EDITOR's three live reads — the C++ twin of MainActivity's three `LaunchedEffect`s.
+     *
+     * All three are EDGE-TRIGGERED, on the same keys Compose keys its effects on, and that is not an
+     * optimisation. Each one is expensive enough that doing it every frame would be felt on a handheld:
+     * the waveform re-bins the whole sample into 620 min/max pairs, and the detector walks it looking for
+     * onsets. Compose reruns a `LaunchedEffect` when its keys change; here the keys are remembered and
+     * compared, which is the same thing said explicitly.
+     *
+     * The PLAYHEAD is the exception — it has no key but time, so it polls. Kotlin polls it at ~30 fps;
+     * this is once a frame, and the read is a single float off the voice.
+     */
+    void poll_sample_editor(songcore::SongcoreHost& host, AppState& state) {
+        if (state.currentScreen != ScreenType::SAMPLE_EDITOR) {
+            wfKeyValid_ = false;   // the next entry must rebuild, whatever it is looking at
+            return;
+        }
+        SampleEditorState& se = state.sampleEditor;
+
+        // ── The playhead ─────────────────────────────────────────────────────────────────────────
+        // 0..1 while the sample sounds, −1 when it does not. It follows whichever slot is ACTUALLY
+        // playing: a stereo sample auditioned as LEFT/RIGHT/MONO comes out of the 254 scratch, not out
+        // of the instrument's own slot, and watching the wrong one would leave the playhead parked at
+        // −1 through the entire preview.
+        const int voiceSlot = (se.hasStereoData && se.sourceMode != 2)
+                                  ? songcore::SOURCE_PREVIEW_SLOT
+                                  : se.instrumentId;
+        se.playbackPosition = host.sample_playback_position(voiceSlot);
+
+        // ── The TRANSIENTS ───────────────────────────────────────────────────────────────────────
+        // Detect when the method is TRANSIENT and there are no markers — which is exactly the state
+        // `handle_input` leaves behind when the user switches INTO transient mode or changes the
+        // sensitivity (both clear the list). So "empty" IS the trigger, and the module and the feed need
+        // no other channel between them. Kotlin keys its effect the same way.
+        if (se.sliceMethod == SampleEditorModule::SLICE_TRANSIENT && se.totalFrames > 0 &&
+            se.transientMarkers.empty()) {
+            se.transientMarkers = host.detect_transients(se.instrumentId, se.sliceSensitivity);
+            se.sliceIndex       = 0;
+            // Select the FIRST slice, so the detector's result is something you can immediately hear:
+            // press START and you get slice 0, not the whole sample again.
+            se.selectionStart = 0;
+            se.selectionEnd   = se.transientMarkers.empty()
+                                    ? se.totalFrames
+                                    : se.transientMarkers.front();
+        }
+
+        // ── The WAVEFORM ─────────────────────────────────────────────────────────────────────────
+        // Re-binned when the WINDOW moves (zoom, or the view scrolling to follow the cursor or the
+        // playhead) or when the CHANNEL being drawn changes. `view_start`/`view_end` already fold in
+        // everything the window depends on, so they are the whole key.
+        const int64_t vs = se.view_start();
+        const int64_t ve = se.view_end();
+        if (!wfKeyValid_ || vs != wfStart_ || ve != wfEnd_ || se.sourceMode != wfSource_ ||
+            se.totalFrames != wfTotal_ || se.instrumentId != wfInst_) {
+            wfKeyValid_ = true;
+            wfStart_    = vs;
+            wfEnd_      = ve;
+            wfSource_   = se.sourceMode;
+            wfTotal_    = se.totalFrames;
+            wfInst_     = se.instrumentId;
+
+            const int channel = (se.sourceMode == 0) ? 0 : (se.sourceMode == 1) ? 1 : 2;
+            se.waveformData   = host.sample_waveform(se.instrumentId, SampleEditorModule::WAVEFORM_W,
+                                                     static_cast<int>(vs), static_cast<int>(ve), channel);
+        }
+    }
+
     float waveform_[WAVEFORM_SIZE]                            = {};
     float trackWaveforms_[TRACK_WAVEFORM_COUNT * WAVEFORM_SIZE] = {};
     bool  activeFlags_[TRACK_WAVEFORM_COUNT]                  = {};
     float spectrum_[OscilloscopeModule::NUM_BARS]             = {};
+
+    // The sample editor's waveform key — what the 620 bins on screen were computed FROM.
+    bool    wfKeyValid_ = false;
+    int64_t wfStart_ = 0, wfEnd_ = 0;
+    int     wfSource_ = -1, wfTotal_ = -1, wfInst_ = -1;
 
     int         sfCachedId_ = -1, sfCachedBank_ = -1, sfCachedPreset_ = -1;
     std::string sfCachedPath_{};

@@ -711,9 +711,13 @@ class Sequencer {
         return effectiveStep;
     }
 
+    // `stepIndex` is UNUSED, and it stays because the signature is a 1:1 port of Kotlin's
+    // `scheduleStepWithEffects` — which does not use it either. Dropping a parameter that the original
+    // takes would make the two files stop reading side by side, which is the whole point of the port
+    // being a transcription. Named in a comment rather than declared, so gcc stops warning about it.
     ScheduleStepResult scheduleStepWithEffects(const PhraseStep& step, int64_t targetFrame, int64_t stepDuration,
                                                int trackId, int transposeSemitones, TrackState& trackState,
-                                               int stepIndex) {
+                                               int /*stepIndex*/) {
         const Project& project = *project_;
 
         // STEP 1: cancellation of persistent REPEAT / ARPEGGIO

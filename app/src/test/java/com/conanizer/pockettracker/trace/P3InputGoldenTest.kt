@@ -38,6 +38,8 @@ import com.conanizer.pockettracker.ui.modules.ModulationModule
 import com.conanizer.pockettracker.ui.modules.ModulationState
 import com.conanizer.pockettracker.ui.modules.PhraseEditorModule
 import com.conanizer.pockettracker.ui.modules.PhraseEditorState
+import com.conanizer.pockettracker.ui.modules.SampleEditorModule
+import com.conanizer.pockettracker.ui.modules.SampleEditorState
 import com.conanizer.pockettracker.ui.modules.SongEditorModule
 import com.conanizer.pockettracker.ui.modules.SongEditorState
 import com.conanizer.pockettracker.ui.modules.TableModule
@@ -130,6 +132,7 @@ class P3InputGoldenTest {
     private val modulationModule = ModulationModule()
     private val mixerModule = MixerModule()
     private val effectModule = EffectModule()
+    private val sampleEditorModule = SampleEditorModule()
 
     // handleInput(PHRASE) wants an InstrumentController purely to record `lastEditedInstrument` —
     // a side record. The C++ module returns it in its result instead of reaching back into a
@@ -736,6 +739,187 @@ class P3InputGoldenTest {
         }
     }
 
+    // ── SAMPLE EDITOR (S6b) ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * The editor's whole editable cell — every field `handleInput` can write, in one string.
+     *
+     * Wider than it looks necessary, deliberately, and for the reason S4's INSTRUMENT sweep and S5's
+     * MIXER sweep were: the module writes into SIXTEEN different fields depending on (row, column), and a
+     * bug that puts the right value in the wrong one resolves to an IDENTICAL context and an IDENTICAL
+     * action. Only the cell afterwards can tell CRUSH from DWNSMPL, or SENS from BY.
+     *
+     * `transientMarkers` is in here because two edits REWRITE it as a side effect — switching to
+     * TRANSIENT clears it, and so does changing the sensitivity. That clearing is not cosmetic: it is the
+     * signal the detector re-runs on (an empty list in TRANSIENT mode IS the "detect now" state), so a
+     * port that forgot it would leave the markers stale forever and nothing else in the line would move.
+     */
+    private fun seStr(s: SampleEditorState): String =
+        "se=${s.zoomLevel}:${s.sourceMode}:${s.rateMode}:${s.pitchSemitones}:${s.durationIndex}:" +
+            "${if (s.snapEnabled) 1 else 0}:${s.sliceMethod}:${hex2(s.sliceSensitivity)}:" +
+            "${hex2(s.sliceDivisions)}:${s.sliceIndex}:${s.fxType}:${hex2(s.fxValue)}:${s.syncType}:" +
+            "${s.selectionStart}:${s.selectionEnd}:[${s.transientMarkers.joinToString(",")}]"
+
+    /**
+     * The three facts the editor reads but no button can WRITE: how long the sample is, what rate it was
+     * recorded at, and whether it has a second channel. They are the ENVIRONMENT the cell sits in, not
+     * part of it — which is exactly why they get their own field rather than being folded into `se=`.
+     *
+     * They have to be on the line, because the module's answer DEPENDS on them: `hasStereoData` decides
+     * whether SOURCE is a toggle or a read-only "MONO", `totalFrames` is what a DIVIDE slice is a
+     * fraction OF, and `sampleRate` is what turns a frame count into "00:03.00".
+     */
+    private fun seEnvStr(s: SampleEditorState): String =
+        "env=${s.totalFrames}:${s.sampleRate}:${if (s.hasStereoData) 1 else 0}"
+
+    /**
+     * The beds. Each is a whole editing session, and between them they cover every branch the module
+     * takes: both row maps (slicing on and off), both SOURCE states (a mono sample's channel cell is
+     * read-only), all three FX vocabularies (an amount, an EQ SLOT, a SYNC sub-type), and the ends of
+     * every range — because that is where a wrap is either right or off by one.
+     */
+    private fun sampleEditorLadder(): List<SampleEditorState> = listOf(
+        // 0: an EMPTY slot. totalFrames = 0, and it is reachable — nothing on the way into the editor
+        //    checks that the instrument has any audio in it.
+        SampleEditorState(sampleId = 0, instrumentId = 0),
+
+        // 1: a mono sample, slicing OFF. The everyday state.
+        SampleEditorState(
+            sampleId = 0, instrumentId = 0, totalFrames = 44100, sampleRate = 44100,
+            selectionStart = 0L, selectionEnd = 44100L
+        ),
+
+        // 2: a STEREO sample — the SOURCE cell becomes editable, which it is not on a mono one.
+        SampleEditorState(
+            sampleId = 0, instrumentId = 0, totalFrames = 88200, sampleRate = 22050,
+            hasStereoData = true, sourceMode = 2, zoomLevel = 3, rateMode = 1,
+            pitchSemitones = -7, durationIndex = 5, snapEnabled = false,
+            selectionStart = 1000L, selectionEnd = 50000L
+        ),
+
+        // 3: TRANSIENT, with markers. Row 11's index ceiling is the MARKER COUNT (N markers → N+1
+        //    slices), and stepping it re-selects that slice — the one edit here that writes three fields.
+        SampleEditorState(
+            sampleId = 0, instrumentId = 0, totalFrames = 100000,
+            sliceMethod = 0, sliceSensitivity = 0x40, sliceIndex = 1,
+            transientMarkers = intArrayOf(20000, 45000, 71000),
+            selectionStart = 20000L, selectionEnd = 45000L
+        ),
+
+        // 4: DIVIDE. Its ceiling is divisions − 1, which is a DIFFERENT number from the transient one,
+        //    and its bounds are computed rather than looked up.
+        SampleEditorState(
+            sampleId = 0, instrumentId = 0, totalFrames = 96000,
+            sliceMethod = 1, sliceDivisions = 8, sliceIndex = 7,
+            selectionStart = 84000L, selectionEnd = 96000L
+        ),
+
+        // 5: the FX row on EQ — where `fxValue` stops being an amount and becomes a SLOT (0..127).
+        SampleEditorState(
+            sampleId = 0, instrumentId = 0, totalFrames = 44100,
+            fxType = 3, fxValue = 127, sliceMethod = 1, sliceDivisions = 1, sliceIndex = 0,
+            selectionEnd = 44100L
+        ),
+
+        // 6: the FX row on SYNC — where the value cell is a TERNARY, not a byte at all.
+        SampleEditorState(
+            sampleId = 0, instrumentId = 0, totalFrames = 44100,
+            fxType = 4, syncType = 1, fxValue = 0x99, zoomLevel = 4,
+            pitchSemitones = 24, durationIndex = 7, selectionEnd = 44100L
+        ),
+
+        // 7: every range at an END, so the next step has to wrap or clamp and the golden says which.
+        SampleEditorState(
+            sampleId = 0, instrumentId = 0, totalFrames = 65536, hasStereoData = true,
+            sourceMode = 3, rateMode = 2, zoomLevel = 0, pitchSemitones = -24, durationIndex = 0,
+            sliceMethod = 0, sliceSensitivity = 0xFF, sliceDivisions = 0xFF, sliceIndex = 0,
+            transientMarkers = intArrayOf(), fxType = 0, fxValue = 0xFF,
+            selectionStart = 0L, selectionEnd = 65536L
+        ),
+    )
+
+    private fun sweepSampleEditor(out: MutableList<String>) {
+        out += ""
+        out += "# SAMPLE EDITOR — the sparse row map (1, 2, 8, 10, 11, 13, 14, 16, 18, 19). Rows 3..7 are"
+        out += "# the WAVEFORM and 9/12/15/17 are spacers, and both must answer none(): the whole 0..19"
+        out += "# range is swept so that a row which is not a cell is PROVEN not to be one. Rows 3..8 have"
+        out += "# no context either — their A+DPAD drags the selection edge, which no CursorContext can"
+        out += "# express, so the dispatcher owns it (and tools/ptdispatch covers it)."
+        for (row in 0..19) {
+            for (col in 0..5) {          // 5 is the op rows' rightmost; every other row must clamp below it
+                for ((probeIdx, probe) in sampleEditorLadder().withIndex()) {
+                    for (btn in BUTTONS) {
+                        val state = probe.copy(cursorRow = row, cursorCol = col)
+                        val before = seStr(state)
+
+                        val ctx = sampleEditorModule.getCursorContext(state)
+                        val act = resolve(btn, ctx)
+                        val res = sampleEditorModule.handleInput(state, act)
+                        val after = if (res.modified) state.applyResult(res) else state
+
+                        out += "EDIT scr=SAMPLE_EDITOR row=$row col=$col bed=$probeIdx " +
+                            "${seEnvStr(state)} $before btn=$btn => " +
+                            "${ctxStr(ctx)} act=${actStr(act)} ${seStr(after)}"
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * The ROW MAP itself — `rowAbove` / `rowBelow` / `maxColForRow`, which are the D-pad's whole
+     * behaviour on this screen and are pure functions of (row, sliceMethod).
+     *
+     * Goldened separately because they are not reachable through `handleInput`: they are consulted by the
+     * DISPATCHER, so the EDIT sweep above is structurally blind to them. A port that navigated into row 11
+     * with slicing OFF would land the cursor on a row the module does not draw — and every EDIT line would
+     * still match, because none of them ever asks how the cursor got where it is.
+     */
+    private fun sweepSampleEditorRows(out: MutableList<String>) {
+        out += ""
+        out += "# SEROW — the sample editor's sparse row map. With slicing OFF row 11 does not exist, so"
+        out += "# DOWN from 10 must reach 13; and CHOP (col 3 of row 19) does not exist either."
+        for (method in 0..2) {
+            for (row in 0..19) {
+                out += "SEROW method=$method row=$row => " +
+                    "above=${SampleEditorModule.rowAbove(row, method)} " +
+                    "below=${SampleEditorModule.rowBelow(row, method)} " +
+                    "maxcol=${SampleEditorModule.maxColForRow(row, method)}"
+            }
+        }
+    }
+
+    /**
+     * The DERIVED values: the slice bounds, the zoom window, and the duration readout.
+     *
+     * `viewStart` is the one worth the ink. It centres a zoomed window on whatever the cursor is pointing
+     * at — the selection edge under it, or the active slice, or the PLAYHEAD while the sample is running —
+     * and clamps it to the sample. So it is a function of six fields at once, and every one of them is a
+     * chance to be off by half a window. `durationDisplay` folds in the PENDING pitch shift, which is the
+     * only place that shift is visible before a save bakes it.
+     */
+    private fun sweepSampleEditorView(out: MutableList<String>) {
+        out += ""
+        out += "# SEVIEW — the derived values: slice bounds, the zoom window, the duration readout."
+        for ((probeIdx, probe) in sampleEditorLadder().withIndex()) {
+            // Where the cursor is CHANGES the window (row 8 centres on a selection edge; row 11 on the
+            // active slice), so the same bed is asked from several places.
+            for ((row, col) in listOf(1 to 0, 8 to 0, 8 to 1, 11 to 0, 13 to 2)) {
+                for (play in listOf(-1f, 0.75f)) {
+                    val s = probe.copy(cursorRow = row, cursorCol = col, playbackPosition = play)
+                    val bounds = (0..3).joinToString(",") { idx ->
+                        val (a, b) = s.getSliceBounds(idx)
+                        "$a-$b"
+                    }
+                    out += "SEVIEW bed=$probeIdx row=$row col=$col play=$play " +
+                        "${seEnvStr(s)} ${seStr(s)} => " +
+                        "vstart=${s.viewStart} vend=${s.viewEnd} slicepos=${s.effectiveSlicePosition} " +
+                        "dur=${s.durationDisplay} bounds=$bounds"
+                }
+            }
+        }
+    }
+
     // ── SEL — the multi-tap selection machine ───────────────────────────────────────────────────
 
     /**
@@ -1290,6 +1474,9 @@ class P3InputGoldenTest {
         sweepMods(out)
         sweepMixer(out)
         sweepEffects(out)
+        sweepSampleEditor(out)
+        sweepSampleEditorRows(out)
+        sweepSampleEditorView(out)
         sweepSelection(out)
         sweepClipboard(out)
         sweepFxHelper(out)

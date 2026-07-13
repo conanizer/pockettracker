@@ -215,6 +215,7 @@ if(NOT ANDROID)
             ui/modules/oscilloscope.cpp
             ui/modules/phrase_editor.cpp
             ui/modules/qwerty_keyboard.cpp
+            ui/modules/sample_editor.cpp
             ui/modules/song_editor.cpp
             ui/modules/table_editor.cpp
     )

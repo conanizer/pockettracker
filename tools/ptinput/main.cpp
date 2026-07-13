@@ -49,6 +49,7 @@
 #include "../../native/ui/modules/mixer.h"
 #include "../../native/ui/modules/modulation.h"
 #include "../../native/ui/modules/phrase_editor.h"
+#include "../../native/ui/modules/sample_editor.h"
 #include "../../native/ui/modules/song_editor.h"
 #include "../../native/ui/modules/table_editor.h"
 
@@ -305,6 +306,71 @@ static void parse_fx(const std::string& spec, Project& p) {
     p.delaySync       = (f[8] == "1");
 }
 
+// ─── the SAMPLE EDITOR's cell (S6b) ──────────────────────────────────────────────────────────────
+//
+// Sixteen fields, because `handle_input` writes into sixteen of them depending on where the cursor is —
+// and a bug that puts the right value in the wrong one (SENS into BY, the sync type into the amount)
+// resolves to a byte-identical context and a byte-identical action. Only the cell can see it.
+
+static std::string se_str(const SampleEditorState& s) {
+    std::string markers;
+    for (size_t i = 0; i < s.transientMarkers.size(); ++i) {
+        if (i) markers += ",";
+        markers += std::to_string(s.transientMarkers[i]);
+    }
+    return "se=" + std::to_string(s.zoomLevel) + ":" + std::to_string(s.sourceMode) + ":" +
+           std::to_string(s.rateMode) + ":" + std::to_string(s.pitchSemitones) + ":" +
+           std::to_string(s.durationIndex) + ":" + (s.snapEnabled ? "1" : "0") + ":" +
+           std::to_string(s.sliceMethod) + ":" + hex2(s.sliceSensitivity) + ":" +
+           hex2(s.sliceDivisions) + ":" + std::to_string(s.sliceIndex) + ":" +
+           std::to_string(s.fxType) + ":" + hex2(s.fxValue) + ":" + std::to_string(s.syncType) + ":" +
+           std::to_string(s.selectionStart) + ":" + std::to_string(s.selectionEnd) + ":[" + markers + "]";
+}
+
+static SampleEditorState parse_se(const std::string& spec) {
+    const std::vector<std::string> f = split(spec.substr(std::string("se=").size()), ':');
+
+    SampleEditorState s;
+    s.zoomLevel        = from_dec(f[0]);
+    s.sourceMode       = from_dec(f[1]);
+    s.rateMode         = from_dec(f[2]);
+    s.pitchSemitones   = from_dec(f[3]);
+    s.durationIndex    = from_dec(f[4]);
+    s.snapEnabled      = (f[5] == "1");
+    s.sliceMethod      = from_dec(f[6]);
+    s.sliceSensitivity = from_hex(f[7]);
+    s.sliceDivisions   = from_hex(f[8]);
+    s.sliceIndex       = from_dec(f[9]);
+    s.fxType           = from_dec(f[10]);
+    s.fxValue          = from_hex(f[11]);
+    s.syncType         = from_dec(f[12]);
+    s.selectionStart   = std::strtoll(f[13].c_str(), nullptr, 10);
+    s.selectionEnd     = std::strtoll(f[14].c_str(), nullptr, 10);
+
+    // "[a,b,c]" or "[]" — the marker list. It is inside the cell because two edits rewrite it as a side
+    // effect (switching to TRANSIENT, and changing the sensitivity), and that clearing is the signal the
+    // detector re-runs on.
+    const std::string m = f[15].substr(1, f[15].size() - 2);
+    if (!m.empty())
+        for (const std::string& v : split(m, ',')) s.transientMarkers.push_back(from_dec(v));
+
+    return s;
+}
+
+/**
+ * `env=<totalFrames>:<sampleRate>:<hasStereo>` — the three facts the module READS but no button writes.
+ *
+ * They are on the line, and separate from the cell, because the module's answer depends on them:
+ * `hasStereoData` is what makes SOURCE a toggle rather than a read-only "MONO", `totalFrames` is what a
+ * DIVIDE slice is a fraction OF, and `sampleRate` turns a frame count into "00:03.00".
+ */
+static void parse_se_env(const std::string& spec, SampleEditorState& s) {
+    const std::vector<std::string> f = split(spec, ':');
+    s.totalFrames   = from_dec(f[0]);
+    s.sampleRate    = from_dec(f[1]);
+    s.hasStereoData = (f[2] == "1");
+}
+
 // ─── context / action encodings ──────────────────────────────────────────────────────────────────
 
 static const char* value_type_name(CursorValueType t) {
@@ -393,6 +459,7 @@ static const InstrumentPoolModule   kPool{};
 static const ModulationModule       kMods{};
 static const MixerModule            kMixer{};
 static const EffectModule           kEffects{};
+static const SampleEditorModule     kSampleEditor{};
 
 static std::string recompute_edit(const std::vector<std::string>& toks, std::string& err) {
     const std::string scr = field(toks, "scr");
@@ -582,8 +649,60 @@ static std::string recompute_edit(const std::vector<std::string>& toks, std::str
         return ctx_str(ctx) + " act=" + act_str(act) + " " + fx_str(p);
     }
 
+    // ── SAMPLE EDITOR ────────────────────────────────────────────────────────────────────────────
+    if (scr == "SAMPLE_EDITOR") {
+        SampleEditorState se = parse_se("se=" + field(toks, "se"));
+        parse_se_env(field(toks, "env"), se);
+        se.cursorRow = from_dec(field(toks, "row"));
+        se.cursorCol = col;
+
+        const CursorContext ctx = kSampleEditor.cursor_context(se);
+        const InputAction   act = resolve(btn, ctx);
+        kSampleEditor.handle_input(se, act);   // mutates in place, as every C++ module does
+        return ctx_str(ctx) + " act=" + act_str(act) + " " + se_str(se);
+    }
+
     err = "unknown screen " + scr;
     return "";
+}
+
+// ─── SEROW — the sparse row map (the D-pad's whole behaviour on the sample editor) ────────────────
+//
+// Not reachable through `handle_input`, and therefore invisible to every EDIT line above: the row map is
+// consulted by the DISPATCHER, not by the module's edit path. A port that let the cursor into row 11
+// with slicing OFF would land it on a row the module does not draw — and all 4,800 EDIT lines would
+// still match, because not one of them asks how the cursor got where it is.
+
+static std::string recompute_serow(const std::vector<std::string>& toks, std::string& err) {
+    (void)err;
+    const int method = from_dec(field(toks, "method"));
+    const int row    = from_dec(field(toks, "row"));
+    return "above=" + std::to_string(SampleEditorModule::row_above(row, method)) +
+           " below=" + std::to_string(SampleEditorModule::row_below(row, method)) +
+           " maxcol=" + std::to_string(SampleEditorModule::max_col_for_row(row, method));
+}
+
+// ─── SEVIEW — the derived values: slice bounds, the zoom window, the duration readout ─────────────
+
+static std::string recompute_seview(const std::vector<std::string>& toks, std::string& err) {
+    (void)err;
+    SampleEditorState se = parse_se("se=" + field(toks, "se"));
+    parse_se_env(field(toks, "env"), se);
+    se.cursorRow        = from_dec(field(toks, "row"));
+    se.cursorCol        = from_dec(field(toks, "col"));
+    se.playbackPosition = std::strtof(field(toks, "play").c_str(), nullptr);
+
+    std::string bounds;
+    for (int idx = 0; idx <= 3; ++idx) {
+        int64_t a = 0, b = 0;
+        se.slice_bounds(idx, a, b);
+        if (idx) bounds += ",";
+        bounds += std::to_string(a) + "-" + std::to_string(b);
+    }
+
+    return "vstart=" + std::to_string(se.view_start()) + " vend=" + std::to_string(se.view_end()) +
+           " slicepos=" + std::to_string(se.effective_slice_position()) +
+           " dur=" + se.duration_display() + " bounds=" + bounds;
 }
 
 // ─── SEL ─────────────────────────────────────────────────────────────────────────────────────────
@@ -1079,6 +1198,8 @@ int main(int argc, char** argv) {
         else if (kind == "FXH")  rhsCpp = recompute_fxh(toks, err);
         else if (kind == "SORT") rhsCpp = recompute_sort(toks, err);
         else if (kind == "KBD")  rhsCpp = recompute_kbd(toks, err);
+        else if (kind == "SEROW")  rhsCpp = recompute_serow(toks, err);
+        else if (kind == "SEVIEW") rhsCpp = recompute_seview(toks, err);
         else if (kind == "CLIP") {
             const ClipOut o = recompute_clip(toks, err);
             rhsCpp          = o.rhs;

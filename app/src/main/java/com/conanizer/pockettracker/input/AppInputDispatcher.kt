@@ -2566,9 +2566,16 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
 
     /** Nudge the active sample-editor selection edge (START=col 0 / END=col 1) by [delta] frames,
      *  snapping to the nearest zero-crossing in the move direction when snap is on. Shared by A+Up/Down
-     *  (fine, ±totalFrames/256) and A+Left/Right (coarse, ±totalFrames/16). */
+     *  (fine, ±totalFrames/256) and A+Left/Right (coarse, ±totalFrames/16).
+     *
+     *  CRASH GUARD: with no sample loaded, totalFrames and selectionEnd are both 0 — so the two arms
+     *  below become coerceIn(0, -1) and coerceIn(1, 0), whose min > max. coerceIn REQUIRES min <= max and
+     *  throws IllegalArgumentException, killing the app. It is four presses away on a fresh sampler slot
+     *  (EDIT, DOWN, DOWN, A+RIGHT): nothing on the way into the editor checks that the slot has audio in
+     *  it. A selection inside a sample with no frames is meaningless, so there is nothing to nudge. */
     private fun nudgeSelectionEdge(delta: Long) {
         val maxFrame = sampleEditorState.totalFrames.toLong()
+        if (maxFrame <= 0L) return
         val dir = if (delta >= 0) 1 else -1
         fun snapFrame(f: Long) = if (sampleEditorState.snapEnabled) audioEngine.findZeroCrossing(sampleEditorState.instrumentId, f.toInt(), dir = dir).toLong() else f
         sampleEditorState = if (sampleEditorState.cursorCol == 0) {

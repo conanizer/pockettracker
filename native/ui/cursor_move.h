@@ -149,8 +149,52 @@ inline void scroll_song_to_row(AppState& s, int row) {
     else if (row >= s.songScrollPosition + 16) s.songScrollPosition = row - 15;
 }
 
+// ─── SAMPLE EDITOR ───────────────────────────────────────────────────────────────────────────────
+//
+// Its rows are a SPARSE map (1, 2, 8, 10, 11, 13, 14, 16, 18, 19) — the gaps are the waveform and the
+// section spacers — so a step is a table lookup, not `row ± 1`. And the row you land on may have fewer
+// columns than the one you left (NAME has one; the op rows have six), so the column CLAMPS on the way.
+// See ui/modules/sample_editor.h.
+namespace detail {
+
+inline void sample_editor_step_row(AppState& s, int delta) {
+    SampleEditorState& se = s.sampleEditor;
+    const int newRow = (delta < 0) ? SampleEditorModule::row_above(se.cursorRow, se.sliceMethod)
+                                   : SampleEditorModule::row_below(se.cursorRow, se.sliceMethod);
+    se.cursorRow = newRow;
+    se.cursorCol = std::min(se.cursorCol,
+                            SampleEditorModule::max_col_for_row(newRow, se.sliceMethod));
+}
+
+/**
+ * ⚠️ The two OP rows (13 = CROP…DEL, 14 = NORM…UNDO) WRAP; every other row clamps.
+ *
+ * That is not an inconsistency — it is what those rows are. They are a ring of six BUTTONS, not a range
+ * of values, and stepping right off DEL to reach CROP is the same gesture as stepping right off the
+ * master strip on the MIXER (the app's only other wrapping column, and for the same reason: a ring of
+ * channels rather than a document).
+ */
+inline void sample_editor_step_col(AppState& s, int delta) {
+    SampleEditorState& se     = s.sampleEditor;
+    const int          maxCol = SampleEditorModule::max_col_for_row(se.cursorRow, se.sliceMethod);
+    const bool         isOps  = (se.cursorRow == 13 || se.cursorRow == 14);
+
+    if (isOps) {
+        se.cursorCol = (delta < 0) ? ((se.cursorCol == 0) ? maxCol : se.cursorCol - 1)
+                                   : ((se.cursorCol + 1) % (maxCol + 1));
+    } else {
+        se.cursorCol = std::clamp(se.cursorCol + delta, 0, maxCol);
+    }
+}
+
+}  // namespace detail
+
 inline void move_cursor_up(AppState& s) {
     switch (s.currentScreen) {
+        case ScreenType::SAMPLE_EDITOR:
+            detail::sample_editor_step_row(s, -1);
+            break;
+
         case ScreenType::SONG:
             // Clamps, and drags the viewport with it.
             if (s.cursorRow > 0) {
@@ -216,6 +260,10 @@ inline void move_cursor_up(AppState& s) {
 
 inline void move_cursor_down(AppState& s) {
     switch (s.currentScreen) {
+        case ScreenType::SAMPLE_EDITOR:
+            detail::sample_editor_step_row(s, +1);
+            break;
+
         case ScreenType::SONG:
             if (s.cursorRow < 255) {
                 s.cursorRow++;
@@ -298,6 +346,10 @@ inline int max_cursor_column(ScreenType s) {
 }
 
 inline void move_cursor_left(AppState& s) {
+    if (s.currentScreen == ScreenType::SAMPLE_EDITOR) {
+        detail::sample_editor_step_col(s, -1);
+        return;
+    }
     switch (s.currentScreen) {
         case ScreenType::TABLE:
             if (s.tableCursorColumn > 1) s.tableCursorColumn--;
@@ -357,6 +409,10 @@ inline void move_cursor_left(AppState& s) {
 }
 
 inline void move_cursor_right(AppState& s) {
+    if (s.currentScreen == ScreenType::SAMPLE_EDITOR) {
+        detail::sample_editor_step_col(s, +1);
+        return;
+    }
     switch (s.currentScreen) {
         case ScreenType::TABLE:
             if (s.tableCursorColumn < 8) s.tableCursorColumn++;

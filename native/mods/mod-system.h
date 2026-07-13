@@ -127,11 +127,16 @@ struct VoiceModSlot {
     // Per-sample interpolation: snapshot envValue before block advance, interpolate in mix loop
     float prevEnvValue;  // envValue at start of this block (= end of previous block)
 
-    VoiceModSlot() : type(0), dest(0), amount(0.5f), effectiveAmt(0.5f), effectiveRateMult(1.0f),
-                     stage(0), envValue(0.0f), prevEnvValue(0.0f), stageCounter(0),
-                     attackSamples(0), holdSamples(0), decaySamples(0), releaseSamples(0),
+    // ⚠️ In DECLARATION order, which is the only order that runs. C++ initializes members in the order
+    // they are DECLARED, not the order the mem-init list names them — so a list in a different order is
+    // a lie about what happens, and gcc says so (-Wreorder). Harmless today, because every initializer
+    // here is a literal; it stops being harmless the moment one of them reads another member.
+    VoiceModSlot() : type(0), dest(0), amount(0.5f),
+                     stage(0), envValue(0.0f), stageCounter(0),
+                     attackSamples(0), holdSamples(0), decaySamples(0),
                      sustainLevel(0.5f), lfoHz(4.0f), lfoPhase(0.0f), oscShape(0),
-                     lfoTrigMode(1), lfoRandValue(0.0f), lfoRngState(1u) {}
+                     lfoTrigMode(1), lfoRandValue(0.0f), lfoRngState(1u), releaseSamples(0),
+                     effectiveAmt(0.5f), effectiveRateMult(1.0f), prevEnvValue(0.0f) {}
 };
 
 // ModRoute — a single weighted connection from one source to one destination.

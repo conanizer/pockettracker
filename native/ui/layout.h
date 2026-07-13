@@ -38,6 +38,7 @@
 #include "ui/modules/oscilloscope.h"
 #include "ui/modules/phrase_editor.h"
 #include "ui/modules/qwerty_keyboard.h"
+#include "ui/modules/sample_editor.h"
 #include "ui/modules/song_editor.h"
 #include "ui/modules/table_editor.h"
 
@@ -89,6 +90,7 @@ private:
     EffectModule          effects_;
     NavigationMapModule   navigationMap_;
     FileBrowserModule     fileBrowser_;   // full-screen: draw() returns before the furniture
+    SampleEditorModule    sampleEditor_;  // full-screen too — a waveform wants the width
     QwertyKeyboardOverlay qwerty_;        // modal: drawn LAST, over everything, including the browser
 };
 

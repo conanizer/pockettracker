@@ -46,7 +46,9 @@ enum class QwertyContext {
     FILE_RENAME,      // rename `contextExtra` (an absolute path), keeping its extension
     FOLDER_CREATE,    // create a folder named `text` inside `contextExtra` (a directory)
     INSTRUMENT_NAME,  // the current instrument's name; blank reverts it to "INSTxx"
-    INSTRUMENT_SAVE   // write the current instrument to `contextExtra`/<text>.pti
+    INSTRUMENT_SAVE,  // write the current instrument to `contextExtra`/<text>.pti
+    SAMPLE_NAME,      // the sample editor's NAME row — renames the editor's sample AND its instrument
+    SAMPLE_SAVE       // SAVE-AS: write the edited sample to `contextExtra`/<text>.wav, de-duplicating
 };
 
 /** 3 key rows of 10, then the space bar. The action row (ABORT / APPLY) is virtual — see below. */

@@ -110,7 +110,10 @@ class EngineConsumer : public IMidiConsumer {
 
   private:
     void note_on(const Event& ev) {
-        if (ev.track >= 0 && ev.track <= 7) trackMask_ |= (1 << ev.track);
+        // `ev.track <= 7` alone: the field is a uint8_t, so the `>= 0` half of Kotlin's guard is a
+        // tautology here (gcc says so). The bound that does the work is the upper one — TRACK_PREVIEW
+        // and TRACK_GLOBAL are above it, and neither belongs in an eight-bit track mask.
+        if (ev.track <= 7) trackMask_ |= (1 << ev.track);
         plan_note_on(*engine_, ev, *project_, *routing_, tableLoaded_);
     }
 

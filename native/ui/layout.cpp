@@ -30,6 +30,17 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
         return;
     }
 
+    // ── The SAMPLE EDITOR is full-screen too, and for the same reason ────────────────────────────
+    //
+    // `SampleEditorModule.height = 480`. A waveform wants every pixel of the width, and the two things
+    // the right bar shows — the BPM and the eight tracks' notes — have nothing to say about a sample
+    // being trimmed while the transport is stopped. The keyboard draws over it (A on the NAME row).
+    if (s.currentScreen == ScreenType::SAMPLE_EDITOR) {
+        sampleEditor_.draw(c, 0, 0, s.sampleEditor, t);
+        if (s.qwerty.isOpen) qwerty_.draw(c, s.qwerty, t);
+        return;
+    }
+
     const songcore::Project& p       = *s.project;
     const int                moduleX = SIDE_SPACER;
 

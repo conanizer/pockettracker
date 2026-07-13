@@ -36,6 +36,7 @@
 // the real browser over it, and removes it on the way out. The one thing it must never do is touch the
 // user's own PocketTracker folder.
 
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -44,6 +45,7 @@
 #include <vector>
 
 #include "songcore/host.h"
+#include "songcore/wav_writer.h"   // the cue-point round trip (S6b)
 #include "ui/app_state.h"
 #include "ui/cursor_move.h"
 #include "ui/input_dispatcher.h"
@@ -794,6 +796,282 @@ int main() {
         eqs(state.qwerty.text, "",
             "⚠️ INSTRUMENT: …EMPTY, not 'INST05' — a default name is a placeholder, not text to delete");
         dispatch.on_select();
+    }
+
+    // ══ S6b ══ THE SAMPLE EDITOR ════════════════════════════════════════════════════════════════
+    //
+    // ptinput proves the MODULE: given a cursor, its context, its action and the cell it writes match
+    // Kotlin's. It cannot see any of what follows — whether the cursor can REACH those cells, whether
+    // INSTRUMENT's EDIT button opens the editor at all, whether B guards an unsaved sample, or whether
+    // the WAV that comes out of a CHOP can be read back in.
+
+    // ── 1. The WAV round trip: cue points OUT, cue points IN ────────────────────────────────────
+    //
+    // ⚠️ This is the assertion that makes S6b's cue-point work REAL rather than merely compiled. S6a
+    // shipped the load path with the cue chunk deliberately unread ("a sliced WAV loaded on Linux plays
+    // whole") because there was no writer to pair a reader with. There is one now — and a writer whose
+    // output nothing can read back is not half a feature, it is a feature that silently loses data.
+    //
+    // ptdispatch is the only tool with a real filesystem, so this is its natural home.
+    {
+        const std::string wav = tree.root.string() + "/roundtrip.wav";
+
+        std::vector<float> left(1000), right(1000);
+        for (size_t i = 0; i < left.size(); ++i) {
+            left[i]  = std::sin(static_cast<float>(i) * 0.05f);
+            right[i] = -left[i];
+        }
+        const std::vector<int> cues = {100, 250, 700};
+
+        ok(songcore::write_wav(wav, left, right, 44100, cues, /*channels=*/2),
+           "wav: a stereo WAV with three cue points was written");
+
+        const std::vector<int> read = songcore::read_cue_points(wav);
+        eq(static_cast<int>(read.size()), 3, "wav: …and three cue points came back");
+        if (read.size() == 3) {
+            eq(read[0], 100, "wav: cue 0 round-tripped");
+            eq(read[1], 250, "wav: cue 1 round-tripped");
+            eq(read[2], 700, "wav: cue 2 round-tripped");
+        }
+
+        // A WAV with NO cue chunk must read back as empty rather than as garbage — that is the path
+        // every ordinary sample in the world takes through the loader.
+        const std::string plain = tree.root.string() + "/nocues.wav";
+        ok(songcore::write_wav(plain, left, right, 44100, {}, /*channels=*/1),
+           "wav: a mono WAV with no cue chunk was written");
+        eq(static_cast<int>(songcore::read_cue_points(plain).size()), 0,
+           "wav: …and it reads back with NO markers (not garbage)");
+
+        // ⚠️ Frame 0 is EXCLUDED on the way back in: it is the sample's own start, not a boundary
+        // WITHIN it, and letting it through would give every sliced file a zero-length slice 0.
+        const std::string zero = tree.root.string() + "/zerocue.wav";
+        songcore::write_wav(zero, left, right, 44100, {0, 500}, /*channels=*/1);
+        const std::vector<int> zread = songcore::read_cue_points(zero);
+        eq(static_cast<int>(zread.size()), 1, "⚠️ wav: a cue at frame 0 is DROPPED on read");
+        if (zread.size() == 1) eq(zread[0], 500, "wav: …and the real boundary survives");
+    }
+
+    // ── 2. INSTRUMENT's EDIT button opens it — and a SoundFont's does not ───────────────────────
+    {
+        state.currentScreen     = ScreenType::INSTRUMENT;
+        state.currentInstrument = 7;
+        host.edit_project().instruments[7].instrumentType = songcore::InstrumentType::SAMPLER;
+
+        state.instrumentCursorRow = 5; state.instrumentCursorColumn = 3;   // the EDIT cell
+        dispatch.on_button_a();
+        eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::SAMPLE_EDITOR),
+           "SE: A on INSTRUMENT's EDIT opens the sample editor");
+        eq(state.sampleEditor.instrumentId, 7, "SE: …on the instrument under the cursor");
+        eq(state.sampleEditor.cursorRow, 1, "SE: …with the cursor on row 1 (ZOOM), not on row 0");
+        eq(static_cast<int>(state.previousScreen), static_cast<int>(ScreenType::INSTRUMENT),
+           "SE: …and B will return to INSTRUMENT");
+
+        dispatch.on_button_b();   // nothing modified → straight out
+        eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::INSTRUMENT),
+           "SE: B on an UNMODIFIED sample leaves at once (no confirm)");
+
+        // ⚠️ A SoundFont has no single waveform to cut — it is a bank of them. The press is CONSUMED
+        // (the row is shared, so the button is drawn on both) but it opens nothing.
+        host.edit_project().instruments[7].instrumentType = songcore::InstrumentType::SOUNDFONT;
+        state.instrumentCursorRow = 5; state.instrumentCursorColumn = 3;
+        dispatch.on_button_a();
+        eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::INSTRUMENT),
+           "⚠️ SE: EDIT on a SOUNDFONT slot opens NOTHING — there is no one waveform to edit");
+        host.edit_project().instruments[7].instrumentType = songcore::InstrumentType::SAMPLER;
+    }
+
+    // ── 3. ⚠️ THE CRASH. An empty slot, four presses, and Android dies. ─────────────────────────
+    //
+    // With no sample loaded, `totalFrames` and `selectionEnd` are both 0 — and Kotlin's nudge arms are
+    // `coerceIn(0, selectionEnd - 1)` and `coerceIn(selectionStart + 1, maxFrame)`, i.e. coerceIn(0, -1)
+    // and coerceIn(1, 0). Both have min > max, which `coerceIn` REQUIRES not to be: it throws
+    // IllegalArgumentException and the app is gone. Nothing on the way into the editor checks that the
+    // slot has any audio in it, so EDIT → DOWN → DOWN → A+RIGHT is all it takes.
+    //
+    // (In C++ it would be worse than a crash — `std::clamp` with lo > hi is undefined behaviour.)
+    // Fixed on BOTH platforms, per §4's zone-B rule.
+    {
+        state.currentScreen = ScreenType::INSTRUMENT;
+        state.currentInstrument = 9;
+        state.instrumentCursorRow = 5; state.instrumentCursorColumn = 3;
+        dispatch.on_button_a();          // into the editor, on a slot with no sample at all
+
+        eq(state.sampleEditor.totalFrames, 0, "SE: the empty slot really is empty (no engine, no audio)");
+
+        dispatch.on_dpad_down();         // row 1 → 2
+        dispatch.on_dpad_down();         // row 2 → 8  (the SELECTION row — the map skips 3..7)
+        eq(state.sampleEditor.cursorRow, 8, "SE: DOWN, DOWN reaches row 8 — the waveform is not five rows");
+
+        // Each of these four is the crash on Android. What is asserted is simply that we come BACK.
+        dispatch.on_a_right();
+        dispatch.on_a_left();
+        dispatch.on_a_up();
+        dispatch.on_a_down();
+        eq(static_cast<int>(state.sampleEditor.selectionStart), 0,
+           "⚠️ SE: A+DPAD on an EMPTY sample is a NO-OP, not a crash (selection start)");
+        eq(static_cast<int>(state.sampleEditor.selectionEnd), 0,
+           "⚠️ SE: …and not a crash on the END edge either");
+
+        state.sampleEditor.cursorCol = 1;   // the END column — Kotlin's *other* throwing arm
+        dispatch.on_a_right();
+        dispatch.on_a_left();
+        eq(static_cast<int>(state.sampleEditor.selectionEnd), 0,
+           "⚠️ SE: …nor on column 1, which is the arm that throws coerceIn(1, 0)");
+
+        dispatch.on_button_b();
+    }
+
+    // ── 4. The SPARSE ROW MAP, walked through the real cursor ───────────────────────────────────
+    //
+    // ptinput's SEROW lines prove the map is Kotlin's. They do NOT prove the D-pad consults it — that is
+    // `cursor_move.h`, and it is a different file.
+    {
+        state.currentScreen = ScreenType::INSTRUMENT;
+        state.currentInstrument = 7;
+        state.instrumentCursorRow = 5; state.instrumentCursorColumn = 3;
+        dispatch.on_button_a();
+
+        SampleEditorState& se = state.sampleEditor;
+        se.sliceMethod = SampleEditorModule::SLICE_OFF;
+
+        // DOWN from the top, with slicing OFF. Row 11 (the slice detail) is NOT DRAWN, so it must not be
+        // reachable — the cursor has to step over it.
+        const int wantOff[] = {2, 8, 10, 13, 14, 16, 18, 19, 1};
+        int       rowIdx    = 0;
+        for (const int want : wantOff) {
+            dispatch.on_dpad_down();
+            eq(se.cursorRow, want,
+               "SE: DOWN #" + std::to_string(++rowIdx) + " with slicing OFF");
+        }
+        ok(se.cursorRow == 1, "SE: …and row 19 WRAPS back to row 1");
+
+        // With slicing ON, row 11 exists and DOWN from 10 must land on it.
+        se.sliceMethod = SampleEditorModule::SLICE_DIVIDE;
+        se.cursorRow   = 10;
+        dispatch.on_dpad_down();
+        eq(se.cursorRow, 11, "⚠️ SE: with slicing ON, DOWN from 10 reaches row 11 (it exists now)");
+        dispatch.on_dpad_up();
+        eq(se.cursorRow, 10, "SE: …and UP goes back");
+
+        // ⚠️ The COLUMN clamps on the way. NAME (18) has ONE column; the op rows have six. Carry a live
+        // column across and the cursor lands where nothing is drawn — S2's "the cursor vanishes" bug.
+        se.cursorRow = 13; se.cursorCol = 5;   // DEL, the rightmost op
+        dispatch.on_dpad_down();               // → 14, which also has 6
+        eq(se.cursorCol, 5, "SE: column 5 survives 13 → 14 (both op rows have six)");
+        dispatch.on_dpad_down();               // → 16, which has 3
+        eq(se.cursorCol, 2, "⚠️ SE: …but CLAMPS to 2 on the FX row, which has three columns");
+        dispatch.on_dpad_down();               // → 18 (NAME), which has ONE
+        eq(se.cursorCol, 0, "⚠️ SE: …and to 0 on NAME, which is one cell wide");
+
+        // ⚠️ The two OP rows WRAP; everything else clamps. They are a ring of buttons, not a range.
+        se.cursorRow = 13; se.cursorCol = 5;
+        dispatch.on_dpad_right();
+        eq(se.cursorCol, 0, "⚠️ SE: RIGHT off the last op WRAPS to the first (a ring of buttons)");
+        dispatch.on_dpad_left();
+        eq(se.cursorCol, 5, "⚠️ SE: …and LEFT wraps back the other way");
+
+        se.cursorRow = 1; se.cursorCol = 2;    // the view row: three columns, and it CLAMPS
+        dispatch.on_dpad_right();
+        eq(se.cursorCol, 2, "SE: RIGHT off the last column of row 1 CLAMPS — it does not wrap");
+
+        // CHOP (row 19, col 3) exists only when there ARE slices.
+        se.sliceMethod = SampleEditorModule::SLICE_OFF;
+        se.cursorRow = 19; se.cursorCol = 3;
+        dispatch.on_dpad_right();
+        eq(SampleEditorModule::max_col_for_row(19, SampleEditorModule::SLICE_OFF), 2,
+           "⚠️ SE: with slicing OFF, row 19's last column is OVERWRITE — there is no CHOP");
+    }
+
+    // ── 5. The unsaved-changes guard ────────────────────────────────────────────────────────────
+    //
+    // The editor's edits live in the ENGINE's buffer, not in the project — so leaving without saving is
+    // the one gesture in the app that can silently destroy work.
+    {
+        SampleEditorState& se = state.sampleEditor;
+        se.isModified = true;
+
+        dispatch.on_button_b();
+        ok(se.showConfirmClose, "⚠️ SE: B on a MODIFIED sample arms the confirm instead of leaving");
+        eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::SAMPLE_EDITOR),
+           "SE: …and stays on the editor");
+
+        dispatch.on_button_b();   // B = NO
+        ok(!se.showConfirmClose, "SE: B again is NO — the dialog closes");
+        eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::SAMPLE_EDITOR),
+           "SE: …and you are still in the editor, with the edit intact");
+
+        dispatch.on_button_b();   // arm it again
+        dispatch.on_button_a();   // A = YES
+        eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::INSTRUMENT),
+           "SE: A on the confirm DISCARDS and leaves");
+    }
+
+    // ── 6. START auditions, SELECT names, and neither is the transport ──────────────────────────
+    {
+        state.currentScreen = ScreenType::INSTRUMENT;
+        state.instrumentCursorRow = 5; state.instrumentCursorColumn = 3;
+        dispatch.on_button_a();
+
+        dispatch.set_now(5000);
+        dispatch.on_start();
+        ok(!host.is_playing(),
+           "⚠️ SE: START AUDITIONS the sample — it does not start the transport");
+
+        // ⚠️ SELECT on the NAME row opens the keyboard. It is the alias for the A that would otherwise
+        // be deferred to release.
+        state.sampleEditor.cursorRow = 18;
+        dispatch.on_select();
+        ok(state.qwerty.isOpen, "SE: SELECT on the NAME row opens the keyboard");
+        eqs(state.qwerty.fieldLabel, "SAMPLE NAME:", "SE: …labelled SAMPLE NAME");
+
+        // And APPLY renames BOTH the editor's sample and the instrument holding it — they are one thing
+        // to the user, and a pool showing "INST07" for a slot just named "SNARE" is the app disagreeing
+        // with itself.
+        state.qwerty.text = "SNARE";
+        dispatch.on_start();
+        eqs(state.sampleEditor.sampleName, "SNARE", "SE: …and APPLY renames the sample");
+        eqs(host.project().instruments[7].name, "SNARE",
+            "⚠️ SE: …AND the instrument holding it, which is the same thing to the user");
+
+        // SELECT on a row that is not NAME does nothing at all (the EQ editor it would open on the FX
+        // row is not ported — as no EQ cell in the app is yet).
+        state.sampleEditor.cursorRow = 13;
+        dispatch.on_select();
+        ok(!state.qwerty.isOpen, "SE: SELECT on an OP row does nothing");
+    }
+
+    // ── 7. The slice arithmetic that CHOP and SAVE both depend on ───────────────────────────────
+    //
+    // `compute_slice_cue_points` is what goes into the WAV, and `current_slices` is CHOP's work list.
+    // Neither is reachable from a module, so ptinput cannot see either.
+    {
+        SampleEditorState& se = state.sampleEditor;
+        se.totalFrames = 96000;
+
+        // DIVIDE by 4 → three internal boundaries at 24000 / 48000 / 72000. Not four: the sample's own
+        // start and end are not boundaries WITHIN it.
+        se.sliceMethod   = SampleEditorModule::SLICE_DIVIDE;
+        se.sliceDivisions = 4;
+        se.cursorRow = 19; se.cursorCol = 3;   // CHOP — with a null engine it writes nothing, but the
+        dispatch.on_button_a();                //        arithmetic below is what it would have used.
+
+        // TRANSIENT: the markers ARE the boundaries, minus any at 0 or past the end.
+        se.sliceMethod      = SampleEditorModule::SLICE_TRANSIENT;
+        se.transientMarkers = {0, 12000, 48000, 96000, 200000};
+        int64_t a = 0, b = 0;
+        se.sliceIndex = 0;
+        se.slice_bounds(0, a, b);
+        eq(static_cast<int>(a), 0, "SE: transient slice 0 starts at the sample's own start");
+        eq(static_cast<int>(b), 0, "SE: …and ends at the first marker (which is 0 here)");
+        se.slice_bounds(2, a, b);
+        eq(static_cast<int>(a), 12000, "SE: slice 2 runs from marker 1…");
+        eq(static_cast<int>(b), 48000, "SE: …to marker 2");
+        se.slice_bounds(5, a, b);   // past the last marker
+        eq(static_cast<int>(b), 96000,
+           "⚠️ SE: the LAST slice ends at the sample, not at a marker that does not exist");
+
+        dispatch.on_button_b();
+        if (state.sampleEditor.showConfirmClose) dispatch.on_button_a();
     }
 
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);

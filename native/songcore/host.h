@@ -40,6 +40,7 @@
 #include "project_io.h"
 #include "render.h"
 #include "router.h"
+#include "sample_edit.h"
 #include "scheduler.h"
 #include "sha1.h"
 #include "trace_writer.h"
@@ -195,8 +196,11 @@ class SongcoreHost {
     }
 
     // Load the project's samples and SoundFonts into the engine, and learn the Routing from them
-    // (engine_setup.h). Android does this in Kotlin — its loader also drives MediaCodec for m4a and
-    // reads WAV cue points — and pushes the result in via push_routing() instead.
+    // (engine_setup.h). Android does this in Kotlin — its loader also drives MediaCodec for m4a — and
+    // pushes the result in via push_routing() instead.
+    //
+    // ⚠️ It also WRITES to the project: a WAV's `cue ` chunk is where its slice boundaries live, and
+    // loading the audio is what learns them (S6b). See load_project_media.
     MediaLoadResult load_media(const std::string& baseDir) {
         if (!engine_) return MediaLoadResult();
         return load_project_media(*engine_, project_, baseDir, routing_);
@@ -370,6 +374,190 @@ class SongcoreHost {
     void clear_previews() {
         if (!engine_) return;
         clear_preview_slots(*engine_);
+    }
+
+    // ── ↕ THE SAMPLE EDITOR (Phase 3 S6b) ────────────────────────────────────────────────────────
+    //
+    // Almost every verb below is ONE LINE, and that is the whole story of this session: the sample
+    // editor's DSP has been in the engine since long before songcore existed (`native/sample-editor.cpp`
+    // + `native/transient-detector.cpp`), because Android's JNI layer was always a thin forward. So the
+    // port writes no DSP — it writes the SEAM, and the seam is this list.
+    //
+    // The `if (!engine_)` guard on each is not defensive noise: it is what lets `tools/ptdispatch` drive
+    // the whole editor — its cursor, its row map, its slice arithmetic, its save paths — with **no audio
+    // device at all**. An op that cannot run simply does not run, and the document is unharmed.
+
+    // ── Reading the sample (the feed) ────────────────────────────────────────────────────────────
+    int  sample_length(int id) const { return engine_ ? engine_->getSampleLength(id) : 0; }
+    bool has_stereo_data(int id) const { return engine_ && engine_->hasStereoData(id); }
+
+    /** The FILE's rate (deviceRate / ratio); 44100 when the slot is empty. See sample_edit.h. */
+    int sample_rate_of(int id) const { return original_sample_rate(engine_, routing_, id); }
+
+    /** 0..1 while the sample is sounding, −1 when it is not — the waveform's playhead. */
+    float sample_playback_position(int id) const {
+        return engine_ ? engine_->getSamplePlaybackPosition(id) : -1.0f;
+    }
+
+    /**
+     * `bins` (min, max) PAIRS — so the returned vector is 2 × bins long. `channel` is 0 = left,
+     * 1 = right, 2 = averaged, and is only consulted for a stereo sample.
+     *
+     * A frame range that COVERS the sample — (0, 0), or (0, length) — means "the whole thing", and takes
+     * the engine's whole-sample entry point. Both spellings must land on the same call, because both
+     * callers exist: the editor opens on (0, 0) and the zoom-0 view computes (0, length), and a waveform
+     * that changed subtly depending on which of those asked for it would be a bug nobody could see.
+     */
+    std::vector<float> sample_waveform(int id, int bins, int startFrame = 0, int endFrame = 0,
+                                       int channel = 2) const {
+        std::vector<float> out(static_cast<size_t>(std::max(bins, 0)) * 2, 0.0f);
+        if (!engine_ || bins <= 0) return out;
+
+        const int  len   = engine_->getSampleLength(id);
+        const bool whole = (startFrame <= 0) && (endFrame <= 0 || endFrame >= len);
+
+        if (engine_->hasStereoData(id)) {
+            // A stereo sample ALWAYS goes through the channel-aware entry point, even un-zoomed: the
+            // plain one averages, and SOURCE=LEFT must draw the left channel, not a downmix.
+            engine_->getSampleWaveformRangeSource(id, whole ? 0 : startFrame, whole ? len : endFrame,
+                                                  out.data(), bins, channel);
+        } else if (whole) {
+            engine_->getSampleWaveform(id, out.data(), bins);
+        } else {
+            engine_->getSampleWaveformRange(id, startFrame, endFrame, out.data(), bins);
+        }
+        return out;
+    }
+
+    /** The slice boundaries the detector finds at `sensitivity`. Capped at 128, as Kotlin's JNI is. */
+    std::vector<int> detect_transients(int id, int sensitivity) const {
+        if (!engine_) return {};
+        int       markers[128];
+        const int n = engine_->detectTransients(id, sensitivity, markers, 128);
+        return std::vector<int>(markers, markers + std::max(n, 0));
+    }
+
+    /** The nearest zero crossing to `frame` in direction `dir` (−1 back, +1 forward, 0 either). */
+    int find_zero_crossing(int id, int frame, int dir) const {
+        return engine_ ? engine_->findZeroCrossing(id, frame, dir) : frame;
+    }
+
+    int clipboard_length() const { return engine_ ? engine_->getClipboardLength() : 0; }
+
+    // ── The twelve operations. Every one of them is already written; these only name them. ───────
+    void backup_sample(int id) { if (engine_) engine_->backupSample(id); }
+    void undo_sample(int id) { if (engine_) engine_->undoSample(id); }
+    /** The editor is closing: its single-level undo is unreachable now, so it is just held memory. */
+    void free_sample_undo(int id) { if (engine_) engine_->freeSampleUndo(id); }
+
+    void crop_sample(int id, int start, int end) { if (engine_) engine_->cropSample(id, start, end); }
+    void delete_sample_region(int id, int start, int end) { if (engine_) engine_->deleteSampleRegion(id, start, end); }
+    void copy_region(int id, int start, int end) { if (engine_) engine_->copyRegion(id, start, end); }
+    void paste_region(int id, int insertAt) { if (engine_) engine_->pasteRegion(id, insertAt); }
+
+    void normalize_sample(int id, int start, int end) { if (engine_) engine_->normalizeSample(id, start, end); }
+    void fade_in_sample(int id, int start, int end) { if (engine_) engine_->fadeInSample(id, start, end); }
+    void fade_out_sample(int id, int start, int end) { if (engine_) engine_->fadeOutSample(id, start, end); }
+    void silence_region(int id, int start, int end) { if (engine_) engine_->silenceRegion(id, start, end); }
+    void reverse_sample(int id, int start, int end) { if (engine_) engine_->reverseSample(id, start, end); }
+
+    // ── The FX row: a NON-destructive preview, and a destructive apply ───────────────────────────
+    //
+    // The backup is what makes the FX row auditionable at all: START applies the effect for real, plays
+    // it, and the next gesture puts the clean audio back. Only APPLY keeps it. Two separate backups
+    // (this one and the undo slot) because they answer different questions — "what did it sound like
+    // before I *previewed*" and "what did it sound like before I *committed*".
+    void save_fx_preview_backup(int id) { if (engine_) engine_->saveFxPreviewBackup(id); }
+    void restore_fx_preview_backup() { if (engine_) engine_->restoreFxPreviewBackup(); }
+
+    void apply_sample_fx(int id, int fxType, int fxValue) {
+        if (!engine_) return;
+        engine_->applySampleFx(id, fxType, fxValue,
+                               static_cast<float>(sample_rate_of(id)), project_.limiterPreGain);
+    }
+
+    // ── The three that move the ratio, and therefore live in songcore (sample_edit.h) ────────────
+    void apply_rate_mode(int id, int factor) {
+        songcore::apply_rate_mode(engine_, routing_, rateCache_, id, factor);
+    }
+    void pitch_shift_sample(int id, float semitones) {
+        songcore::pitch_shift_sample(engine_, rateCache_, id, semitones);
+    }
+    void time_stretch_sample(int id, float ratio) {
+        songcore::time_stretch_sample(engine_, rateCache_, id, ratio);
+    }
+
+    // ── The audition ─────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Play the sample DRY at its root, through the SOURCE mode's channel, with the SELECTION as its
+     * window — the editor's START.
+     *
+     * ⚠️ It TEMPORARILY mutates the instrument (`sampleStart` / `sampleEnd`, and `sampleId` when a
+     * scratch slot is in play), because that is the only channel the engine has for a voice's window.
+     * The caller MUST call `finish_sample_preview()` once the voice has triggered, or the project keeps
+     * the preview's window as if the user had dialled it in. That is why the dispatcher carries a
+     * deadline rather than restoring immediately: the engine reads those fields when the note FIRES,
+     * 100 frames later, not when it is scheduled.
+     */
+    void preview_sample_editor(int id, int sourceMode, int64_t selStart, int64_t selEnd,
+                               int totalFrames, int pitchSemitones) {
+        if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return;
+        Instrument& ins = project_.instruments[static_cast<size_t>(id)];
+
+        const Note savedRoot = ins.root;
+        if (totalFrames > 0 && selEnd > selStart) {
+            ins.sampleStart = static_cast<int>(std::clamp<int64_t>((selStart * 255) / totalFrames, 0, 255));
+            ins.sampleEnd   = static_cast<int>(std::clamp<int64_t>((selEnd   * 255) / totalFrames, 0, 255));
+        }
+        // The PENDING pitch shift is auditioned by transposing the ROOT — nothing is resampled until
+        // SAVE bakes it, so this is the only way to hear what it will do.
+        if (pitchSemitones != 0)
+            ins.root = note_from_midi(std::clamp(note_to_midi(ins.root) + pitchSemitones, 0, 127));
+
+        const int slot = prepare_source_preview(*engine_, id, sourceMode);
+
+        // The engine keys a voice's window on the SLOT it plays from, so the params must be pushed at
+        // the scratch slot when there is one — pushing them at the instrument left slot 254 at its
+        // 0/255 default, playing the whole sample and ignoring the markers entirely.
+        const int savedSampleId = ins.sampleId;
+        if (slot != id) ins.sampleId = slot;
+        push_instrument_playback_params(*engine_, ins);
+        preview_instrument_dry(*engine_, ins, slot, routing_.sampleRateRatio[id]);
+        if (slot != id) ins.sampleId = savedSampleId;
+
+        ins.root = savedRoot;   // the root is read at SCHEDULE time, so it can go back at once
+    }
+
+    /**
+     * Put the instrument back: its real sample window, its EQ, its sends, its modulation. Runs on the
+     * dispatcher's 100 ms deadline, and IMMEDIATELY if a second START arrives inside that window —
+     * otherwise the second preview would save the FIRST preview's window as the "real" one.
+     */
+    void finish_sample_preview(int id, int savedStart, int savedEnd) {
+        if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return;
+        Instrument& ins = project_.instruments[static_cast<size_t>(id)];
+        ins.sampleStart = savedStart;
+        ins.sampleEnd   = savedEnd;
+        push_instrument_playback_params(*engine_, ins);
+        // The three the DRY preview switched off.
+        push_instrument_mod_eq_sends(*engine_, ins, project_.tempo, engine_->getSampleRate());
+    }
+
+    // ── SAVE and CHOP ────────────────────────────────────────────────────────────────────────────
+
+    /** The edited PCM → a WAV at `path`, with its slice boundaries in the `cue ` chunk. */
+    bool save_sample_wav(int id, const std::string& path, const std::vector<int>& cuePoints,
+                         int sourceMode, bool hasStereo) {
+        if (!engine_) return false;
+        return songcore::save_sample_wav(*engine_, routing_, id, path, cuePoints, sourceMode, hasStereo);
+    }
+
+    /** Every slice → its own WAV in `dir`. Returns how many were written. */
+    int chop_sample(int id, const std::string& dir, const std::string& baseName,
+                    const std::vector<std::pair<int64_t, int64_t>>& slices) {
+        if (!engine_) return 0;
+        return songcore::chop_sample(*engine_, routing_, id, dir, baseName, slices);
     }
 
     // ── ↕ live editing — the SDL shell's UI *is* the editing model ────────────────────────────────
@@ -547,6 +735,13 @@ class SongcoreHost {
     Project project_ = make_default_project();
     std::string projectSha_ = "-";
     Routing routing_;
+
+    /**
+     * The RATE row's ratio cache (sample_edit.h). Editor-session state, not project state — it exists
+     * only so LOFI → HIGH restores the ratio the FILE was loaded with instead of compounding factors,
+     * and it is meaningless the moment the sample is resampled.
+     */
+    RateCache rateCache_;
 
     MidiRouter     router_;
     Sequencer      seq_;

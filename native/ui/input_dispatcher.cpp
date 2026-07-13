@@ -75,6 +75,13 @@ std::set<int> used_chain_ids(const Project& p) {
 
 }  // namespace
 
+// ─── The frame tick ──────────────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::set_now(long long now_ms) {
+    now_ms_ = now_ms;
+    run_due_sample_preview_restore();   // the sample editor's 100 ms audition restore (S6b)
+}
+
 // ─── The cursor ──────────────────────────────────────────────────────────────────────────────────
 
 int InputDispatcher::cursor_row() const {
@@ -200,6 +207,9 @@ CursorContext InputDispatcher::cursor_context() const {
             return effects_.cursor_context(es);
         }
 
+        case ScreenType::SAMPLE_EDITOR:
+            return sample_.cursor_context(s_.sampleEditor);
+
         default:
             return cc::none();  // a placeholder screen has nothing to edit
     }
@@ -293,6 +303,23 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
 
         case ScreenType::EFFECTS:
             return effects_.handle_input(p, s_.effectsCursorRow, action).modified;
+
+        case ScreenType::SAMPLE_EDITOR: {
+            const SampleEditorInputResult r = sample_.handle_input(s_.sampleEditor, action);
+            if (r.rateModeChanged) apply_sample_rate_mode();
+
+            // ⚠️ `false`, and it is the honest answer rather than a shortcut. This function's question is
+            // "did the LIVE DOCUMENT change?", and the sample editor's session state is not the document:
+            // its zoom, its selection, its slice index and its pending pitch shift are invisible to the
+            // sequencer and to the engine alike, so there is nothing to push and nothing to notify. Saying
+            // `true` would send `mark_modified()` → `notify_data_changed()` on every step of a held A+UP
+            // on the ZOOM cell, rolling the lookahead back sixty times a second under a playing song, for
+            // an edit that did not change a single audible thing.
+            //
+            // The one edit here that DOES reach the engine is RATE, which re-decimates the buffer — and it
+            // says so itself, in `apply_sample_rate_mode()` above, exactly where Kotlin says it.
+            return false;
+        }
 
         default:
             return false;
@@ -562,9 +589,24 @@ bool InputDispatcher::on_instrument_type_cell() const {
 // handled above) and the browser's moves its file cursor. Swallowed, not passed through: an A held
 // down over a browser must not reach the editor screen underneath it.
 
+// ⚠️ On the SAMPLE EDITOR, A+DPAD on rows 3..8 does not step a cell — it DRAGS the selection's active
+// edge (START on col 0, END on col 1). UP/DOWN are the fine step and LEFT/RIGHT the coarse one, both
+// scaled by the ZOOM, so a nudge is always about a pixel's worth of the waveform you can actually see:
+// zoomed out, LEFT moves a sixteenth of the sample; zoomed to 16×, it moves a sixteenth of the WINDOW.
+//
+// This is checked ahead of the FX helper's column test and the instrument TYPE cell, exactly where
+// Kotlin checks it, because neither of those exists on this screen.
+static int64_t sample_fine_step(const SampleEditorState& se) {
+    return std::max<int64_t>(1, static_cast<int64_t>(se.totalFrames) / (256LL << se.zoomLevel));
+}
+static int64_t sample_coarse_step(const SampleEditorState& se) {
+    return std::max<int64_t>(1, static_cast<int64_t>(se.totalFrames) / (16LL << se.zoomLevel));
+}
+
 void InputDispatcher::on_a_up() {
     if (qwerty_open() || on_browser()) return;
     if (s_.fxHelper.isOpen) { fx_move_up(s_.fxHelper); return; }
+    if (on_sample_selection_row()) { nudge_selection_edge(+sample_fine_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) { s_.fxHelper = fx_helper_opened_at(current_fx_type_index()); return; }
     if (on_instrument_type_cell()) { toggle_instrument_type(); return; }
     selection_or_single(pt::ui::on_a);
@@ -573,6 +615,7 @@ void InputDispatcher::on_a_up() {
 void InputDispatcher::on_a_down() {
     if (qwerty_open() || on_browser()) return;
     if (s_.fxHelper.isOpen) { fx_move_down(s_.fxHelper); return; }
+    if (on_sample_selection_row()) { nudge_selection_edge(-sample_fine_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) { s_.fxHelper = fx_helper_opened_at(current_fx_type_index()); return; }
     if (on_instrument_type_cell()) { toggle_instrument_type(); return; }
     selection_or_single(pt::ui::on_b);   // A+DOWN DECREMENTS — `on_b` is the generic "step down"
@@ -581,12 +624,14 @@ void InputDispatcher::on_a_down() {
 void InputDispatcher::on_a_left() {
     if (qwerty_open() || on_browser()) return;
     if (s_.fxHelper.isOpen) { fx_move_left(s_.fxHelper); return; }
+    if (on_sample_selection_row()) { nudge_selection_edge(-sample_coarse_step(s_.sampleEditor)); return; }
     selection_or_single(pt::ui::on_a_left);
 }
 
 void InputDispatcher::on_a_right() {
     if (qwerty_open() || on_browser()) return;
     if (s_.fxHelper.isOpen) { fx_move_right(s_.fxHelper); return; }
+    if (on_sample_selection_row()) { nudge_selection_edge(+sample_coarse_step(s_.sampleEditor)); return; }
     selection_or_single(pt::ui::on_a_right);
 }
 
@@ -629,6 +674,17 @@ void InputDispatcher::on_a_b() {
         }
         mark_modified();
         s_.selection.exit();
+        return;
+    }
+
+    // ⚠️ The SAMPLE EDITOR's SELECTION row (8): A+B RESETS the edge under the cursor to the sample's own
+    // bound — START to 0, END to the last frame. It is the fast way back out of a selection you have
+    // nudged into a corner, and the only meaning "delete" can have on a cell that cannot be empty.
+    // (Rows 3..7 are the waveform, and Kotlin's arm is row 8 alone.)
+    if (on_sample_editor() && s_.sampleEditor.cursorRow == 8) {
+        SampleEditorState& se = s_.sampleEditor;
+        if (se.cursorCol == 0)      se.selectionStart = 0;
+        else if (se.cursorCol == 1) se.selectionEnd   = se.totalFrames;
         return;
     }
 
@@ -1079,8 +1135,21 @@ void InputDispatcher::on_button_a() {
     // A on the BROWSER opens a folder, goes up, or loads the file — see browser_confirm.
     if (on_browser()) { browser_confirm(); return; }
 
-    // A on a cell that OPENS something (INSTRUMENT's NAME / LOAD / SAVE, the pool's empty NAME). This
-    // runs before the insert logic below, exactly as Kotlin's `openSubScreenAtCursor(peek = false)`
+    // ⚠️ A on the SAMPLE EDITOR's confirm dialog is YES: discard the unsaved edits and leave. It is
+    // checked FIRST, because a dialog owns the buttons of the screen it is covering — pressing A to
+    // answer "ARE YOU SURE?" must not also fire whatever op the cursor happens to be parked on.
+    if (on_sample_editor()) {
+        if (s_.sampleEditor.showConfirmClose) {
+            s_.sampleEditor.showConfirmClose = false;
+            close_sample_editor();
+            return;
+        }
+        sample_editor_confirm();
+        return;
+    }
+
+    // A on a cell that OPENS something (INSTRUMENT's NAME / LOAD / SAVE / EDIT, the pool's empty NAME).
+    // This runs before the insert logic below, exactly as Kotlin's `openSubScreenAtCursor(peek = false)`
     // does, because those cells have nothing to insert.
     if (instrument_open_at_cursor()) return;
 
@@ -1180,6 +1249,18 @@ void InputDispatcher::on_button_b() {
         return;
     }
 
+    // ⚠️ B on the SAMPLE EDITOR is BACK — but it asks first if there is anything to lose. The editor's
+    // edits live in the ENGINE's buffer, not in the project, so leaving without saving is the one
+    // gesture in the app that can silently destroy work. Three states, in order: the dialog is up (B is
+    // NO — stay), the sample is modified (arm the dialog), or it is clean (just go).
+    if (on_sample_editor()) {
+        SampleEditorState& se = s_.sampleEditor;
+        if (se.showConfirmClose)  { se.showConfirmClose = false; return; }
+        if (se.isModified)        { se.showConfirmClose = true;  return; }
+        close_sample_editor();
+        return;
+    }
+
     // B inside a selection COPIES it and exits — the tracker's copy gesture. Outside one, B on these
     // five screens does nothing (they are the main row; there is nowhere to go back to).
     if (!s_.selection.active) return;
@@ -1218,6 +1299,18 @@ void InputDispatcher::on_select() {
     // is what arms those three. Kotlin's `handleSelect()` has an empty FILE_BROWSER arm for the same
     // reason.
     if (on_browser()) return;
+
+    // The SAMPLE EDITOR's SELECT is an ALIAS for the two cells whose A opens something: the NAME row
+    // (the keyboard) and the FX row's EQ slot (the EQ editor — not ported, so it is a no-op here, as
+    // every other EQ cell in the app is). It exists because A on the NAME cell is DEFERRED to release,
+    // and SELECT is the way to open it without the wait.
+    if (on_sample_editor()) {
+        if (s_.sampleEditor.showConfirmClose) return;   // a dialog owns the buttons under it
+        if (s_.sampleEditor.cursorRow == 18)
+            open_qwerty(QwertyContext::SAMPLE_NAME, s_.sampleEditor.sampleName, "SAMPLE NAME:",
+                        fs_.samples_directory());
+        return;
+    }
 
     // SELECT does NOT clear the cell under the cursor on the editor screens — deleting a value is
     // A+B. It is left free for CONTEXT ACTIONS, exactly as Kotlin leaves it, and S5 lands the first
@@ -1281,6 +1374,57 @@ void InputDispatcher::on_start() {
             s_.fileBrowser.statusMessage = "PREVIEW FAILED";
             s_.fileBrowser.statusSuccess = false;
         }
+        return;
+    }
+
+    // ⚠️ START on the SAMPLE EDITOR is an audition too — but it is the only one in the app that TOGGLES.
+    //
+    // Everywhere else a second START retriggers. Here it STOPS, because the editor is the one screen you
+    // audition a four-minute loop from, and a preview with no timed kill and no way to stop it is a
+    // sample you have to leave the screen to silence. (The "press any button to silence a preview" rule
+    // that covers the other screens deliberately exempts this one — you are pressing buttons constantly
+    // in here, and every one of them would cut the sample you are trying to listen to.)
+    //
+    // The toggle only engages while the TRANSPORT IS STOPPED: `playbackPosition` also tracks song voices
+    // playing the same sample, so during playback START keeps its retrigger meaning rather than reading a
+    // song voice as "the preview is running".
+    if (on_sample_editor()) {
+        if (s_.sampleEditor.showConfirmClose) return;
+
+        if (s_.sampleEditor.playbackPosition >= 0.0f && !host_.is_playing()) {
+            host_.stop_preview();
+            s_.sampleEditor.playbackPosition = -1.0f;
+            return;
+        }
+
+        // ⚠️ The rapid double-START guard. The preview below is about to SAVE the instrument's real
+        // sample window before overwriting it with the selection — so a pending restore from the previous
+        // preview must land FIRST, or what gets saved is the last preview's window and the user's own
+        // start/end points are gone for good.
+        run_due_sample_preview_restore(/*force=*/true);
+
+        SampleEditorState& se  = s_.sampleEditor;
+        const Instrument&  ins = s_.project->instruments[static_cast<size_t>(se.instrumentId)];
+
+        previewSavedStart_     = ins.sampleStart;
+        previewSavedEnd_       = ins.sampleEnd;
+        previewRestoreInst_    = se.instrumentId;
+        previewRestorePending_ = true;
+        previewRestoreAtMs_    = now_ms_ + 100;   // Kotlin's `delay(100)`
+
+        // The FX row is auditioned by APPLYING it for real and putting the clean audio back afterwards —
+        // there is no dry/wet path through a destructive DSP chain. The backup is what makes that safe.
+        // (EQ has no amount, so it always previews; the other three need a nonzero one.)
+        const bool hasFxPreview = (se.fxType == SampleEditorModule::FX_EQ) ||
+                                  (se.fxType <= SampleEditorModule::FX_DRIVE && se.fxValue > 0);
+        host_.restore_fx_preview_backup();
+        if (hasFxPreview) {
+            host_.save_fx_preview_backup(se.instrumentId);
+            host_.apply_sample_fx(se.instrumentId, se.fxType, se.fxValue);
+        }
+
+        host_.preview_sample_editor(se.instrumentId, se.sourceMode, se.selectionStart, se.selectionEnd,
+                                    se.totalFrames, se.pitchSemitones);
         return;
     }
 
@@ -1452,6 +1596,12 @@ void InputDispatcher::browser_confirm() {
                 ok = host_.load_sample(id, path);
             }
             break;
+
+        case AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR:
+            // The editor's own LOAD button. Same load, but it returns to the EDITOR rather than to
+            // INSTRUMENT — you came here to pick something to cut up, not to leave.
+            ok = host_.load_sample(s_.sampleEditor.instrumentId, path);
+            break;
     }
 
     if (!ok) {
@@ -1468,6 +1618,19 @@ void InputDispatcher::browser_confirm() {
     }
 
     mark_modified();
+
+    if (s_.browserPurpose == AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR) {
+        // Re-enter the EDITOR on the new audio — not `previousScreen`, which is still the INSTRUMENT
+        // screen the editor itself will return to. Everything the old sample's session knew is now false,
+        // so the state is rebuilt rather than patched.
+        host_.clear_previews();
+        s_.fileBrowser.selectionMode   = false;
+        s_.fileBrowser.selectionAnchor = -1;
+        s_.currentScreen = ScreenType::SAMPLE_EDITOR;
+        init_sample_editor_state();
+        return;
+    }
+
     close_file_browser();
 }
 
@@ -1646,6 +1809,33 @@ void InputDispatcher::qwerty_apply() {
             }
             break;
         }
+
+        case QwertyContext::SAMPLE_NAME: {
+            // It renames BOTH the editor's sample and the INSTRUMENT holding it — they are the same
+            // thing to the user, and the pool showing "INST05" for a slot you have just named "SNARE"
+            // would be the app disagreeing with itself. An empty field keeps the current name.
+            SampleEditorState& se = s_.sampleEditor;
+            const std::string  name = text.empty() ? se.sampleName : text;
+            se.sampleName = name;
+            host_.edit_project().instruments[static_cast<size_t>(se.instrumentId)].name = name;
+            mark_modified();
+            break;
+        }
+
+        case QwertyContext::SAMPLE_SAVE: {
+            // SAVE-AS. The name is DE-DUPLICATED rather than overwritten: `SNARE.wav`, `SNARE_0001.wav`,
+            // … The editor has an OVERWRITE button and this is not it — a save that silently replaced a
+            // file you did not name would be the one destructive act with no confirm in front of it.
+            const std::string base = text.empty() ? "SAMPLE" : text;
+            std::string       path = k.contextExtra + "/" + base + ".wav";
+            for (int n = 1; fs_.file_exists(path); ++n) {
+                char suffix[8];
+                std::snprintf(suffix, sizeof(suffix), "_%04d", n);
+                path = k.contextExtra + "/" + base + suffix + ".wav";
+            }
+            save_sample_to(path, /*adopt_name=*/true);
+            break;
+        }
     }
 }
 
@@ -1691,11 +1881,19 @@ bool InputDispatcher::instrument_open_at_cursor() {
         return true;
     }
 
-    // Row 5 — the SOURCE row. LOAD (col 2) browses; EDIT (col 3) is the sample editor and is S6b's.
+    // Row 5 — the SOURCE row. LOAD (col 2) browses for a file; EDIT (col 3) opens the sample editor.
     if (row == 5 && col == 2) {
         open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE,
                           isSF ? fs_.soundfonts_directory() : fs_.samples_directory(),
                           isSF ? soundfont_extensions() : sample_extensions());
+        return true;
+    }
+    // ⚠️ Samplers only, and the refusal is silent on Android too: a SoundFont has no single waveform to
+    // cut — it is a bank of them, each mapped to a key range — so there is nothing for the editor to
+    // draw. The button is drawn on both, because the row is shared; only one of them answers.
+    if (row == 5 && col == 3) {
+        if (isSF) return true;   // handled: the press is CONSUMED, it just opens nothing
+        open_sample_editor();
         return true;
     }
 
@@ -1709,6 +1907,563 @@ bool InputDispatcher::instrument_open_at_cursor() {
     }
 
     return false;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// THE SAMPLE EDITOR (Phase 3 S6b)
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+namespace {
+
+/** The waveform panel is 620px wide, so it asks the engine for 620 (min, max) pairs. */
+constexpr int WAVEFORM_BINS = SampleEditorModule::WAVEFORM_W;
+
+/** SOURCE mode → the channel the waveform is drawn from: 0 = left, 1 = right, 2 = averaged. */
+int waveform_channel(int source_mode) {
+    return (source_mode == 0) ? 0 : (source_mode == 1) ? 1 : 2;
+}
+
+/** DURATION index → beats. "1 BAR" is 4 beats; the list runs 4 BAR … 1/32. */
+double target_beats(int duration_index) {
+    switch (duration_index) {
+        case 0:  return 16.0;   // 4 BAR
+        case 1:  return 8.0;    // 2 BAR
+        case 2:  return 4.0;    // 1 BAR
+        case 3:  return 2.0;    // 1/2
+        case 4:  return 1.0;    // 1/4
+        case 5:  return 0.5;    // 1/8
+        case 6:  return 0.25;   // 1/16
+        default: return 0.125;  // 1/32
+    }
+}
+
+}  // namespace
+
+// ─── Opening and closing ─────────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::open_sample_editor() {
+    const Instrument& ins = s_.project->instruments[static_cast<size_t>(s_.currentInstrument)];
+    if (ins.instrumentType == songcore::InstrumentType::SOUNDFONT) return;
+
+    s_.sampleEditor              = SampleEditorState{};   // a fresh session, every time
+    s_.sampleEditor.sampleId     = s_.currentInstrument;
+    s_.sampleEditor.instrumentId = s_.currentInstrument;
+    s_.sampleEditor.cursorRow    = 1;
+    s_.sampleEditor.cursorCol    = 0;
+
+    s_.previousScreen = s_.currentScreen;
+    s_.currentScreen  = ScreenType::SAMPLE_EDITOR;
+    init_sample_editor_state();
+}
+
+void InputDispatcher::init_sample_editor_state() {
+    SampleEditorState& se  = s_.sampleEditor;
+    const Instrument&  ins = s_.project->instruments[static_cast<size_t>(se.instrumentId)];
+
+    // The NAME is the FILE's, not the instrument's — you are editing a sample, and its file is what you
+    // will save it back over.
+    se.sampleFilePath = ins.sampleFilePath.value_or("");
+    se.sampleName     = se.sampleFilePath.empty() ? "" : path_stem(se.sampleFilePath);
+
+    se.totalFrames   = host_.sample_length(se.instrumentId);
+    se.sampleRate    = host_.sample_rate_of(se.instrumentId);
+    se.hasStereoData = host_.has_stereo_data(se.instrumentId);
+    se.waveformData  = host_.sample_waveform(se.instrumentId, WAVEFORM_BINS, 0, 0,
+                                             waveform_channel(se.sourceMode));
+
+    // The selection opens on the instrument's OWN sample window. The instrument stores it as 0..255 (it
+    // is a playback parameter, not a frame count) and the editor works in frames, so it is scaled in
+    // here and scaled back out on the way to a preview.
+    if (se.totalFrames > 0) {
+        se.selectionStart = (static_cast<int64_t>(ins.sampleStart) * se.totalFrames) / 255;
+        se.selectionEnd   = (static_cast<int64_t>(ins.sampleEnd) * se.totalFrames) / 255;
+    } else {
+        se.selectionStart = 0;
+        se.selectionEnd   = 0;
+    }
+
+    // The markers come from the PROJECT, which got them from the file's `cue ` chunk when the sample was
+    // loaded (engine_setup.h / wav_writer.h). No file I/O here, and no race: the editor and the loader
+    // are looking at the same list. (`sliceMarkers` is int64 — Kotlin's `List<Long>` — and a frame index
+    // is an int everywhere else, so the narrowing is said out loud rather than left to the compiler.)
+    se.transientMarkers.clear();
+    se.transientMarkers.reserve(ins.sliceMarkers.size());
+    for (const int64_t m : ins.sliceMarkers) se.transientMarkers.push_back(static_cast<int>(m));
+    se.sliceIndex = 0;
+    // ⚠️ sliceMethod is deliberately NOT reset — it opens at OFF on a fresh session (the struct's
+    // default) and SURVIVES a re-entry, so loading a second sample to compare does not silently drop you
+    // back out of TRANSIENT mode.
+
+    se.isModified       = false;
+    se.showConfirmClose = false;
+    se.playbackPosition = -1.0f;
+}
+
+void InputDispatcher::close_sample_editor() {
+    // Anything the audition still owes the instrument, it pays now — leaving with a restore pending would
+    // put the preview's sample window back onto a slot that is no longer on screen.
+    run_due_sample_preview_restore(/*force=*/true);
+
+    host_.restore_fx_preview_backup();          // drop an un-applied FX preview
+    host_.free_sample_undo(s_.sampleEditor.instrumentId);   // unreachable once the editor is gone
+    host_.clear_previews();                     // the 254/255 scratch slots
+
+    s_.currentScreen = s_.previousScreen;
+}
+
+// ─── The selection: A+DPAD on rows 3..8 ──────────────────────────────────────────────────────────
+
+void InputDispatcher::nudge_selection_edge(int64_t delta) {
+    SampleEditorState& se = s_.sampleEditor;
+
+    // ⚠️ **AN ANDROID CRASH, FOUND BY PORTING.** With NO sample loaded, `totalFrames` and `selectionEnd`
+    // are both 0 — and Kotlin's arms are `coerceIn(0, selectionEnd - 1)` and `coerceIn(selectionStart + 1,
+    // maxFrame)`, i.e. `coerceIn(0, -1)` and `coerceIn(1, 0)`. Both have min > max, and `coerceIn` REQUIRES
+    // min <= max: it throws IllegalArgumentException, and the app dies. It is reachable in four presses —
+    // EDIT on a fresh sampler slot, DOWN, DOWN, A+RIGHT — because nothing on the way in checks that the
+    // slot has any audio in it. (In C++ it would be worse than a crash: `std::clamp` with lo > hi is UB.)
+    //
+    // A selection inside a sample with no frames is meaningless, so there is nothing to nudge. Zone B, so
+    // it is fixed on Android too (AppInputDispatcher.nudgeSelectionEdge), per §4's rule.
+    if (se.totalFrames <= 0) return;
+
+    const int64_t maxFrame = se.totalFrames;
+    const int     dir      = (delta >= 0) ? 1 : -1;
+
+    // SNAP moves the edge on to the nearest zero crossing IN THE DIRECTION OF TRAVEL, which is what keeps
+    // a trimmed sample from clicking at its own boundary. Searching in the direction of the nudge (rather
+    // than the nearest in either) is what stops the edge sticking: a crossing you have just left is
+    // always the nearest one.
+    auto snap = [&](int64_t f) -> int64_t {
+        if (!se.snapEnabled) return f;
+        return host_.find_zero_crossing(se.instrumentId, static_cast<int>(f), dir);
+    };
+
+    if (se.cursorCol == 0) {
+        // START can never reach END — an inverted selection is not a selection.
+        const int64_t raw = std::clamp<int64_t>(se.selectionStart + delta, 0, se.selectionEnd - 1);
+        se.selectionStart = std::min<int64_t>(snap(raw), se.selectionEnd - 1);
+    } else {
+        const int64_t raw = std::clamp<int64_t>(se.selectionEnd + delta, se.selectionStart + 1, maxFrame);
+        se.selectionEnd   = std::clamp<int64_t>(snap(raw), se.selectionStart + 1, maxFrame);
+    }
+}
+
+// ─── RATE: the destructive one on row 1 ──────────────────────────────────────────────────────────
+
+void InputDispatcher::apply_sample_rate_mode() {
+    SampleEditorState& se     = s_.sampleEditor;
+    const int          factor = (se.rateMode == 1) ? 2 : (se.rateMode == 2) ? 4 : 1;
+    const int          oldLen = se.totalFrames;
+
+    host_.apply_rate_mode(se.instrumentId, factor);
+
+    // ⚠️ The 2-phrase lookahead has ALREADY scheduled notes against the OLD base frequency — they would
+    // play the re-decimated buffer at double or half pitch. Rolling the schedule back is what makes the
+    // upcoming phrases re-derive it. (A no-op when stopped.)
+    if (host_.is_playing()) host_.notify_data_changed();
+
+    const int newLen = host_.sample_length(se.instrumentId);
+    auto scale = [&](int64_t f) -> int64_t {
+        if (oldLen <= 0) return 0;
+        return std::clamp<int64_t>((f * newLen) / oldLen, 0, newLen);
+    };
+    se.selectionStart = scale(se.selectionStart);
+    se.selectionEnd   = scale(se.selectionEnd);
+    se.slicePosition  = scale(se.slicePosition);
+
+    se.totalFrames = newLen;
+    se.sampleRate  = host_.sample_rate_of(se.instrumentId);
+    se.waveformData = host_.sample_waveform(se.instrumentId, WAVEFORM_BINS, 0, 0,
+                                            waveform_channel(se.sourceMode));
+    se.isModified = true;
+}
+
+// ─── The view, after an op ───────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::refresh_sample_view(bool reset_selection) {
+    SampleEditorState& se     = s_.sampleEditor;
+    const int          newLen = host_.sample_length(se.instrumentId);
+    se.totalFrames = newLen;
+
+    // ⚠️ RESET, not clamp. An op that SHORTENS the sample (crop, cut, a SYNC that compressed it) leaves a
+    // selection that describes frames which no longer exist; clamping it would leave you with a partial
+    // selection of the new audio that you never made. Selecting the whole result is the one answer that
+    // is always true. Kotlin's `afterResize()` does the same.
+    if (reset_selection) {
+        se.selectionStart = 0;
+        se.selectionEnd   = newLen;
+    }
+
+    se.waveformData = host_.sample_waveform(se.instrumentId, WAVEFORM_BINS,
+                                            static_cast<int>(se.view_start()),
+                                            static_cast<int>(se.view_end()),
+                                            waveform_channel(se.sourceMode));
+}
+
+// ─── A on the op rows, the FX row, the name and the save buttons ─────────────────────────────────
+
+void InputDispatcher::sample_editor_confirm() {
+    SampleEditorState& se     = s_.sampleEditor;
+    const int          instId = se.instrumentId;
+    const int          startF = static_cast<int>(se.selectionStart);
+    const int          endF   = static_cast<int>(se.selectionEnd);
+
+    // Every destructive op opens the same way: drop any un-applied FX preview (so the op acts on the
+    // CLEAN audio, not on the effect you were auditioning) and take an undo backup.
+    auto begin_destructive = [&] {
+        host_.restore_fx_preview_backup();
+        host_.backup_sample(instId);
+    };
+    auto in_place = [&](auto&& op) {   // an op that does NOT change the length
+        begin_destructive();
+        op();
+        refresh_sample_view(/*reset_selection=*/false);
+        se.isModified = true;
+    };
+    auto resizing = [&](auto&& op) {   // an op that DOES
+        begin_destructive();
+        op();
+        refresh_sample_view(/*reset_selection=*/true);
+        se.isModified = true;
+    };
+
+    switch (se.cursorRow) {
+        // ── Row 13: CROP  COPY  CUT  DUPL  PASTE  DEL ────────────────────────────────────────────
+        case 13:
+            switch (se.cursorCol) {
+                case 0:   // CROP — keep the selection, discard the rest
+                    if (startF < endF) resizing([&] { host_.crop_sample(instId, startF, endF); });
+                    break;
+                case 1:   // COPY — the ONE op on this row that changes nothing, so it takes no backup
+                    host_.copy_region(instId, startF, endF);
+                    break;
+                case 2:   // CUT = copy, then delete
+                    if (startF < endF) resizing([&] {
+                        host_.copy_region(instId, startF, endF);
+                        host_.delete_sample_region(instId, startF, endF);
+                    });
+                    break;
+                case 3:   // DUPL = copy the selection and paste it at the END
+                    if (startF < endF) resizing([&] {
+                        host_.copy_region(instId, startF, endF);
+                        host_.paste_region(instId, se.totalFrames);
+                    });
+                    break;
+                case 4:   // PASTE — inserts at the selection's START
+                    if (host_.clipboard_length() > 0)
+                        resizing([&] { host_.paste_region(instId, startF); });
+                    break;
+                case 5:   // DEL
+                    if (startF < endF)
+                        resizing([&] { host_.delete_sample_region(instId, startF, endF); });
+                    break;
+                default: break;
+            }
+            break;
+
+        // ── Row 14: NORM  FADE+  FADE-  SLNC  REV  UNDO ──────────────────────────────────────────
+        case 14:
+            switch (se.cursorCol) {
+                case 0: in_place([&] { host_.normalize_sample(instId, startF, endF); }); break;
+                case 1: in_place([&] { host_.fade_in_sample(instId, startF, endF); }); break;
+                case 2: in_place([&] { host_.fade_out_sample(instId, startF, endF); }); break;
+                case 3: in_place([&] { host_.silence_region(instId, startF, endF); }); break;
+                case 4: in_place([&] { host_.reverse_sample(instId, startF, endF); }); break;
+
+                case 5: {   // UNDO — one level, and it may restore a DIFFERENT length
+                    host_.restore_fx_preview_backup();
+                    host_.undo_sample(instId);
+                    refresh_sample_view(/*reset_selection=*/true);
+                    // ⚠️ `isModified` is deliberately NOT cleared: one undo does not mean the sample is
+                    // back to what the FILE holds — it means it is back one step. Kotlin leaves it too, and
+                    // the flag's only job is to put the "ARE YOU SURE?" in front of an unsaved exit.
+                    se.slicePosition = std::clamp<int64_t>(se.slicePosition, 0, se.totalFrames);
+                    break;
+                }
+                default: break;
+            }
+            break;
+
+        // ── Row 16: the FX row. Col 2 is APPLY; the other two are dialled with A+DPAD. ───────────
+        case 16: {
+            if (se.cursorCol != 2) break;
+
+            if (se.fxType <= SampleEditorModule::FX_EQ) {
+                // OTT / DUST / DRIVE need an AMOUNT to do anything; EQ has none (its value is a slot),
+                // so it always applies.
+                const bool worth_doing =
+                    (se.fxValue > 0) || (se.fxType == SampleEditorModule::FX_EQ);
+                if (!worth_doing) break;
+
+                begin_destructive();
+                host_.apply_sample_fx(instId, se.fxType, se.fxValue);
+                refresh_sample_view(/*reset_selection=*/false);
+                se.isModified = true;
+                break;
+            }
+
+            // ── SYNC: fit the sample to the project's grid ───────────────────────────────────────
+            //
+            // Two ways to make a sample last a bar, and they are not the same tool. RPITCH RESAMPLES it —
+            // faster is higher, which is what you want for a breakbeat. TSTRETCH holds the pitch and moves
+            // the time (SOLA), which is what you want for anything with a tune in it.
+            const int    bpm     = s_.project->tempo;
+            const double rawSecs = (se.sampleRate > 0)
+                                       ? static_cast<double>(se.totalFrames) / se.sampleRate
+                                       : 0.0;
+            if (rawSecs <= 0.0 || bpm <= 0) break;
+
+            const double targetSecs = target_beats(se.durationIndex) * 60.0 / bpm;
+            const int    oldLen     = se.totalFrames;
+
+            auto rescale_after = [&](bool clear_pitch) {
+                const int newLen = host_.sample_length(instId);
+                auto scale = [&](int64_t f) -> int64_t {
+                    if (oldLen <= 0) return 0;
+                    return std::clamp<int64_t>((f * newLen) / oldLen, 0, newLen);
+                };
+                se.slicePosition = scale(se.slicePosition);
+                if (clear_pitch) se.pitchSemitones = 0;
+                refresh_sample_view(/*reset_selection=*/true);
+                se.isModified = true;
+            };
+
+            if (se.syncType == 0) {   // RPITCH
+                const int semitones = std::clamp(
+                    static_cast<int>(std::lround(12.0 * std::log(rawSecs / targetSecs) / std::log(2.0))),
+                    -24, 24);
+                if (semitones == 0) break;   // already on the grid
+                begin_destructive();
+                host_.pitch_shift_sample(instId, static_cast<float>(semitones));
+                // The shift is BAKED, so the pending one on row 2 is spent — leaving it would apply it
+                // twice at the next save.
+                rescale_after(/*clear_pitch=*/true);
+            } else {                  // TSTRETCH
+                const float ratio = static_cast<float>(targetSecs / rawSecs);
+                // A ratio within a thousandth of 1.0 is a stretch nobody can hear, bought at the price of
+                // a full SOLA pass over the buffer.
+                if (!(ratio > 0.001f && (ratio < 0.999f || ratio > 1.001f))) break;
+                begin_destructive();
+                host_.time_stretch_sample(instId, ratio);
+                rescale_after(/*clear_pitch=*/false);   // a stretch does not change the pitch
+            }
+            break;
+        }
+
+        // ── Row 18: NAME ────────────────────────────────────────────────────────────────────────
+        case 18:
+            open_qwerty(QwertyContext::SAMPLE_NAME, se.sampleName, "SAMPLE NAME:",
+                        fs_.samples_directory());
+            break;
+
+        // ── Row 19: LOAD  SAVE  OVERWRITE  CHOP ─────────────────────────────────────────────────
+        case 19:
+            switch (se.cursorCol) {
+                case 0: {   // LOAD — a different sample, into the slot the editor is already open on
+                    // ⚠️ `previousScreen` is the EDITOR's return target (INSTRUMENT), and the browser must
+                    // not take it: it would leave B on the editor going back to the browser. Kotlin never
+                    // assigns it here for the same reason.
+                    const ScreenType keep = s_.previousScreen;
+                    open_file_browser(AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR,
+                                      fs_.samples_directory(), {"wav"});
+                    s_.previousScreen = keep;
+                    break;
+                }
+
+                case 1: {   // SAVE — to <name>.wav, or ask for a name if that one is taken
+                    const std::string base = se.sampleName.empty() ? "SAMPLE" : se.sampleName;
+                    const std::string dir  = fs_.samples_directory();
+                    bake_pending_pitch();
+
+                    const std::string target = dir + "/" + base + ".wav";
+                    if (!fs_.file_exists(target)) {
+                        save_sample_to(target, /*adopt_name=*/true);
+                        break;
+                    }
+                    // Taken. Suggest the next free `<base>_0001` and let the user confirm or change it —
+                    // SAVE is not OVERWRITE, and the button next to it is.
+                    std::string suggested = base;
+                    for (int n = 1; fs_.file_exists(dir + "/" + suggested + ".wav"); ++n) {
+                        char suffix[8];
+                        std::snprintf(suffix, sizeof(suffix), "_%04d", n);
+                        suggested = base + suffix;
+                    }
+                    open_qwerty(QwertyContext::SAMPLE_SAVE, suggested, "SAVE AS:", dir,
+                                /*max_length=*/24, /*clear_on_first_b=*/true);
+                    break;
+                }
+
+                case 2:   // OVERWRITE — back over the file it came from. Nothing to do if it has none.
+                    if (!se.sampleFilePath.empty()) {
+                        bake_pending_pitch();
+                        save_sample_to(se.sampleFilePath, /*adopt_name=*/false);
+                    }
+                    break;
+
+                case 3:   // CHOP
+                    sample_editor_chop();
+                    break;
+
+                default: break;
+            }
+            break;
+
+        default:
+            break;
+    }
+}
+
+// ─── The pending pitch shift ─────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::bake_pending_pitch() {
+    SampleEditorState& se = s_.sampleEditor;
+    if (se.pitchSemitones == 0) return;
+
+    const int oldLen = se.totalFrames;
+    host_.pitch_shift_sample(se.instrumentId, static_cast<float>(se.pitchSemitones));
+    const int newLen = host_.sample_length(se.instrumentId);
+
+    auto scale = [&](int64_t f) -> int64_t {
+        if (oldLen <= 0) return 0;
+        return std::clamp<int64_t>((f * newLen) / oldLen, 0, newLen);
+    };
+
+    // Every frame-measured thing moves with the audio. The SELECTION is scaled rather than reset here
+    // (unlike an op) because the user has not asked for anything to change — they asked to SAVE, and the
+    // shift is a thing they dialled in earlier that is only now being made real.
+    se.selectionStart = scale(se.selectionStart);
+    se.selectionEnd   = scale(se.selectionEnd);
+    se.slicePosition  = scale(se.slicePosition);
+
+    se.totalFrames    = newLen;
+    se.pitchSemitones = 0;   // spent
+    se.rateMode       = 0;   // the shifted buffer IS the new original — see sample_edit.h
+    se.waveformData   = host_.sample_waveform(se.instrumentId, WAVEFORM_BINS, 0, 0,
+                                              waveform_channel(se.sourceMode));
+
+    // The instrument's playback params were derived from the old buffer's length.
+    host_.push_instrument(se.instrumentId);
+    mark_modified();
+}
+
+// ─── The slices ──────────────────────────────────────────────────────────────────────────────────
+
+std::vector<int> InputDispatcher::compute_slice_cue_points() const {
+    const SampleEditorState& se = s_.sampleEditor;
+
+    if (se.sliceMethod == SampleEditorModule::SLICE_DIVIDE) {
+        const int div = std::max(se.sliceDivisions, 1);
+        std::vector<int> cues;
+        cues.reserve(static_cast<size_t>(std::max(div - 1, 0)));
+        for (int i = 1; i < div; ++i)
+            cues.push_back(static_cast<int>((static_cast<int64_t>(i) * se.totalFrames) / div));
+        return cues;
+    }
+
+    // TRANSIENT and OFF both carry the marker list. Frame 0 and the end frame are dropped: they are the
+    // sample's own bounds, not boundaries WITHIN it, and a cue point at 0 gives every reader a
+    // zero-length first slice.
+    std::vector<int> cues;
+    for (const int m : se.transientMarkers)
+        if (m > 0 && m < se.totalFrames) cues.push_back(m);
+    return cues;
+}
+
+std::vector<std::pair<int64_t, int64_t>> InputDispatcher::current_slices() const {
+    const SampleEditorState& se = s_.sampleEditor;
+
+    const int count = (se.sliceMethod == SampleEditorModule::SLICE_TRANSIENT)
+                          ? static_cast<int>(se.transientMarkers.size()) + 1   // N markers → N+1 slices
+                          : (se.sliceMethod == SampleEditorModule::SLICE_DIVIDE)
+                                ? std::max(se.sliceDivisions, 1)
+                                : 0;                                            // OFF → nothing to chop
+
+    std::vector<std::pair<int64_t, int64_t>> out;
+    out.reserve(static_cast<size_t>(std::max(count, 0)));
+    for (int i = 0; i < count; ++i) {
+        int64_t start = 0, end = 0;
+        se.slice_bounds(i, start, end);
+        out.emplace_back(start, end);
+    }
+    return out;
+}
+
+// ─── SAVE ────────────────────────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::save_sample_to(const std::string& path, bool adopt_name) {
+    SampleEditorState& se   = s_.sampleEditor;
+    const std::vector<int> cues = compute_slice_cue_points();
+
+    if (!host_.save_sample_wav(se.instrumentId, path, cues, se.sourceMode, se.hasStereoData)) {
+        s_.statusMessage = "SAVE FAILED";
+        s_.statusSuccess = false;
+        return;
+    }
+
+    // ⚠️ A MONO save is re-loaded from the file it just wrote, and that is not belt-and-braces. The
+    // editor's buffer may still be STEREO (SOURCE=LEFT writes one channel of a two-channel sample), and
+    // the slot would otherwise go on holding audio that no longer matches the file its instrument points
+    // at. A true stereo save (SOURCE=STEREO) already matches, so it is left alone — re-decoding a
+    // multi-megabyte file for nothing is exactly the cost the native load path exists to avoid.
+    const bool wrote_mono = !(se.hasStereoData && se.sourceMode == 2);
+    if (wrote_mono) host_.load_sample(se.instrumentId, path);
+
+    Instrument& ins = host_.edit_project().instruments[static_cast<size_t>(se.instrumentId)];
+    ins.sampleFilePath = path;
+    // The markers go into the PROJECT as well as into the file — the .ptp is what a reload reads first,
+    // and the two must agree.
+    ins.sliceMarkers.clear();
+    ins.sliceMarkers.reserve(cues.size());
+    for (const int c : cues) ins.sliceMarkers.push_back(static_cast<int64_t>(c));
+
+    se.sampleFilePath = path;
+    if (adopt_name) se.sampleName = path_stem(path);
+    se.isModified    = false;
+    se.hasStereoData = host_.has_stereo_data(se.instrumentId);
+
+    mark_modified();
+    s_.currentScreen = s_.previousScreen;   // a save LEAVES the editor, as it does on Android
+}
+
+// ─── CHOP ────────────────────────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::sample_editor_chop() {
+    SampleEditorState& se = s_.sampleEditor;
+    if (se.sliceMethod == SampleEditorModule::SLICE_OFF) return;
+
+    const std::vector<std::pair<int64_t, int64_t>> slices = current_slices();
+    if (slices.empty()) return;
+
+    // A slice becomes a FILE NAME, so anything a filesystem would choke on goes.
+    std::string base = se.sampleName.empty() ? "SAMPLE" : se.sampleName;
+    for (char& c : base) {
+        const bool safe = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                          (c >= '0' && c <= '9') || c == '_' || c == '-';
+        if (!safe) c = '_';
+    }
+
+    // Samples/Chops/<base>/ — its own folder, because a 32-slice break would otherwise bury the sample
+    // directory it came from.
+    const std::string samples = fs_.samples_directory();
+    fs_.create_folder(samples, "Chops");                     // "" if it already exists — either is fine
+    const std::string chops = samples + "/Chops";
+    fs_.create_folder(chops, base);
+    const std::string dir = chops + "/" + base;
+
+    const int written = host_.chop_sample(se.instrumentId, dir, base, slices);
+    s_.statusMessage   = written > 0 ? ("CHOPPED " + std::to_string(written)) : "CHOP FAILED";
+    s_.statusSuccess   = written > 0;
+}
+
+// ─── The audition's deferred restore ─────────────────────────────────────────────────────────────
+
+void InputDispatcher::run_due_sample_preview_restore(bool force) {
+    if (!previewRestorePending_) return;
+    if (!force && now_ms_ < previewRestoreAtMs_) return;
+
+    previewRestorePending_ = false;
+    host_.finish_sample_preview(previewRestoreInst_, previewSavedStart_, previewSavedEnd_);
 }
 
 bool InputDispatcher::defer_a_to_release() const {

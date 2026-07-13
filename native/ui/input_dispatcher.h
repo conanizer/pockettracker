@@ -9,19 +9,19 @@
 // ever asking which screen is up (ui/cursor.h). What lands here is what those five could not do —
 // selection, the clipboard, item cycling, cloning, the FX helper, the note preview.
 //
-// ── SCOPE: the eleven screens that exist ─────────────────────────────────────────────────────────
+// ── SCOPE: the twelve screens that exist ─────────────────────────────────────────────────────────
 //
-// SONG, CHAIN, PHRASE, TABLE, GROOVE, INSTRUMENT, INST.POOL, MODS (S4), MIXER, EFFECTS (S5), and —
-// since S6a — the FILE BROWSER, with the QWERTY KEYBOARD overlay behind it. The Kotlin dispatcher is
-// ~3200 lines, and what is still missing here serves screens the port has not reached: the sample
-// editor, PROJECT, SETTINGS, the EQ editor. Each lands WITH its screen, in the session that draws it.
+// SONG, CHAIN, PHRASE, TABLE, GROOVE, INSTRUMENT, INST.POOL, MODS (S4), MIXER, EFFECTS (S5), the FILE
+// BROWSER with the QWERTY KEYBOARD overlay behind it (S6a), and — since S6b — the SAMPLE EDITOR. The
+// Kotlin dispatcher is ~3200 lines, and what is still missing here serves screens the port has not
+// reached: PROJECT, SETTINGS, the EQ editor. Each lands WITH its screen, in the session that draws it.
 // The structure is built to receive them: a new screen is a new arm in `generic_input()` and
 // `apply_edit()`, not a new branch in every handler.
 //
-// ⚠️ Some cells still open a SUB-SCREEN that does not exist — INSTRUMENT's EDIT (the sample editor,
-// S6b) and every EQ cell (the EQ overlay: INSTRUMENT's, the pool's, MIXER's master EQ, EFFECTS' two
-// input EQs). On Android a plain A opens that overlay; here it is a no-op, and A+DPAD still dials the
-// slot NUMBER, which is the part of the cell that is a plain value.
+// ⚠️ Some cells still open a SUB-SCREEN that does not exist — every EQ cell (the EQ overlay:
+// INSTRUMENT's, the pool's, MIXER's master EQ, EFFECTS' two input EQs, and now the sample editor's FX
+// row). On Android a plain A opens that overlay; here it is a no-op, and A+DPAD still dials the slot
+// NUMBER, which is the part of the cell that is a plain value.
 //
 // ── ⚠️ THE MODAL RULE, which arrives with S6a ────────────────────────────────────────────────────
 //
@@ -64,10 +64,12 @@
 #include "ui/modules/modulation.h"
 #include "ui/modules/phrase_editor.h"
 #include "ui/modules/qwerty_keyboard.h"
+#include "ui/modules/sample_editor.h"
 #include "ui/modules/song_editor.h"
 #include "ui/modules/table_editor.h"
 
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace pt::ui {
@@ -84,8 +86,22 @@ class InputDispatcher {
     InputDispatcher(AppState& state, songcore::SongcoreHost& host, FileSystem& fs)
         : s_(state), host_(host), fs_(fs) {}
 
-    /** The frame's clock reading. Feeds the L+B multi-tap window and nothing else. */
-    void set_now(long long now_ms) { now_ms_ = now_ms; }
+    /**
+     * The frame's clock reading — call it once per frame, before the events.
+     *
+     * It feeds the L+B multi-tap window, and (since S6b) it RUNS ANY DEFERRED WORK THAT IS NOW DUE.
+     * There is exactly one such job and it is the sample editor's audition: the preview writes the
+     * SELECTION into the instrument's sample window, and has to put the real one back once the voice has
+     * actually triggered — which happens 100 frames after the note is scheduled, not when it is
+     * scheduled. Kotlin defers that restore with a 100 ms coroutine; there are no coroutines here, so it
+     * is a deadline, and this is the tick that checks it.
+     *
+     * ⚠️ Which means the clock is INJECTED rather than read, and that is the point: a restore that fires
+     * on a deadline cannot be tested by a tool that cannot move time. `tools/ptdispatch` drives this with
+     * a fake clock and watches the instrument come back — the same reason `SdlInput::handle_event` takes
+     * `now_ms` (S1) and `Selection::handle_select_b` does.
+     */
+    void set_now(long long now_ms);
 
     // ── D-pad alone: move the cursor (or drag a selection's edge) ────────────────────────────────
     void on_dpad_up();
@@ -311,14 +327,93 @@ class InputDispatcher {
     /** ABORT — SELECT, and A on the ABORT button. Discards the text. */
     void qwerty_cancel() { s_.qwerty = QwertyKeyboardState{}; }
 
-    // ── INSTRUMENT's three buttons, which S4 drew and could not press ────────────────────────────
+    // ── INSTRUMENT's four buttons ────────────────────────────────────────────────────────────────
     /**
      * A on one of the four cells that open something: the preset LOAD/SAVE on row 0, and the source
-     * LOAD on the SOURCE row. Returns true if it handled the press.
-     *
-     * (EDIT — the fourth — is the sample editor, and still opens nothing. S6b.)
+     * LOAD and EDIT on the SOURCE row. Returns true if it handled the press.
      */
     bool instrument_open_at_cursor();
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // THE SAMPLE EDITOR (Phase 3 S6b)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // Kotlin scatters this across ten regions of `AppInputDispatcher` — a `SAMPLE_EDITOR ->` arm inside
+    // handleButtonA, handleButtonB, handleSelect, handleStart, all four D-pad handlers, all four A+D-pad
+    // handlers, handleAB, and the qwerty commit. Gathered here, because they are one screen.
+
+    bool on_sample_editor() const { return s_.currentScreen == ScreenType::SAMPLE_EDITOR; }
+
+    /** Rows 3..8: the D-pad DRAGS the selection instead of moving a cursor. */
+    bool on_sample_selection_row() const {
+        return on_sample_editor() && s_.sampleEditor.cursorRow >= 3 && s_.sampleEditor.cursorRow <= 8;
+    }
+
+    /** INSTRUMENT's EDIT button (row 5, col 3). Samplers only — an SF2 has no waveform to cut. */
+    void open_sample_editor();
+    /** B on an unmodified sample: free the undo, drop the scratch slots, go back. */
+    void close_sample_editor();
+
+    /**
+     * Build the editor's session from the sample the engine is holding: its length, its rate, its
+     * waveform, the selection its instrument's start/end points describe, and the slice markers its file
+     * brought with it. Separate from `open_sample_editor` because the editor's own LOAD button re-enters
+     * on DIFFERENT audio — everything the previous session knew is then false, and rebuilding is safer
+     * than patching. (It must not touch `previousScreen`: that is the editor's return target, and the
+     * browser it just came back from is not it.)
+     */
+    void init_sample_editor_state();
+
+    /** A+DPAD on rows 3..8, and the whole reason those rows have no CursorContext. */
+    void nudge_selection_edge(int64_t delta);
+
+    /** RATE (row 1, col 2) re-decimates the buffer — the one row-1 edit that changes the AUDIO. */
+    void apply_sample_rate_mode();
+
+    /** A on rows 13/14/16/18/19 — the twelve ops, the FX apply, the name, and the save buttons. */
+    void sample_editor_confirm();
+
+    /**
+     * Bake the PENDING pitch shift destructively into the buffer and rescale everything measured in
+     * frames. Shared by all three save paths — a sample must be saved as it SOUNDS, and until this runs
+     * the shift is only a number on the screen.
+     */
+    void bake_pending_pitch();
+
+    /** The slice boundaries as WAV cue points: the markers, or DIVIDE's N−1 computed cuts. */
+    std::vector<int> compute_slice_cue_points() const;
+
+    /** Re-read the length and the waveform after an op. `reset_selection` re-selects the whole sample. */
+    void refresh_sample_view(bool reset_selection);
+
+    /** SAVE / SAVE-AS / OVERWRITE all end here: write the WAV, adopt it, and leave the editor. */
+    void save_sample_to(const std::string& path, bool adopt_name);
+
+    /** CHOP: every slice out to `Samples/Chops/<name>/`, as its own WAV. */
+    void sample_editor_chop();
+
+    /** The slice (start, end) pairs the current method defines — CHOP's work list. */
+    std::vector<std::pair<int64_t, int64_t>> current_slices() const;
+
+    /**
+     * ⚠️ The deferred half of the audition (see set_now). The preview writes the SELECTION into the
+     * instrument's sample window because that is the only channel the engine has for a voice's window —
+     * and the voice reads it when it TRIGGERS, 100 frames later. So the real window cannot go back
+     * until then, and these three fields are what remembers to do it.
+     *
+     * A second START inside the window runs it IMMEDIATELY, before capturing anything: otherwise the
+     * second preview would save the FIRST preview's window as the instrument's real one, and the user's
+     * start/end points would be silently replaced by whatever they last auditioned.
+     */
+    void run_due_sample_preview_restore(bool force = false);
+
+    bool      previewRestorePending_ = false;
+    long long previewRestoreAtMs_    = 0;
+    int       previewRestoreInst_    = 0;
+    int       previewSavedStart_     = 0;
+    int       previewSavedEnd_       = 255;
+
+    SampleEditorModule sample_{};
 };
 
 }  // namespace pt::ui
