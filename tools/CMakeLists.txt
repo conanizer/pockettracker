@@ -14,11 +14,20 @@ project("pockettracker-tools" LANGUAGES C CXX)
 #   ptresolve     S3   timing / FX / traversal  288 unit cases       (units/s3-units.txt)
 #   ptplay        S4   the scheduler spine      all 36 event traces  (traces/)
 #   ptvoice       S5   the below-seam consumer  77 engine-call cases (units/s5-consumer.txt)
-#   ptrender      S6b  the render, end to end   real audio, through the real engine
+#   ptrender      S6b  the render, end to end   real audio, through the real engine — and, since
+#                      Phase 3 S4, that LIVE PLAYBACK AND THE RENDER PRODUCE THE SAME AUDIO (below)
 #   ptrandom      S7   the random FX            12 distributions     (units/s7-random.txt)
 #   ptnondet      S7   which projects may be byte-compared at all   (+ a standalone .ptp diagnostic)
 #   ptshot   Phase3 S1 the UI, as pixels        any screen → a PNG, headless (no golden yet — see below)
-#   ptinput  Phase3 S3 the input layer          1647 cases           (units/p3-input.txt)
+#   ptinput  Phase3 S3 the input layer          5507 cases           (units/p3-input.txt)
+#
+# ⚠️ ptrender's `live == render` check exists because of a hole every other tool in this list is
+# STRUCTURALLY blind to. The engine holds state on its own behalf — the mixer, the master bus, reverb,
+# delay, the 128-slot EQ bank, every instrument's drive/filter/loop. None of it is an event (ptplay
+# cannot see it), none of it is issued by a note (ptvoice cannot see it), and a render pushes it (so
+# rendering, which is all ptrender used to do, went through the one path that was correct). The SDL
+# shell therefore exported a project correctly and PLAYED it on the engine's factory defaults for four
+# sessions — 84% of the bytes differed — with nothing anywhere going red.
 #
 # ptrandom is the odd one out, and deliberately so: CHA/RND/RNL/ARP-RANDOM draw from a clock-seeded
 # RNG, so the Kotlin sequencer has no repeatable event stream to record and there is no byte-exact

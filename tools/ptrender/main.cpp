@@ -486,6 +486,64 @@ int main(int argc, char** argv) {
                       "the render in between (prepare_render must resetEffectState() AND re-push the project)");
     }
 
+    // ── (ii) LIVE == RENDER — what you hear is what you export ──
+    //
+    // ⚠️ **This guards a bug class that the other seven tools are structurally blind to, and it took
+    // Phase 3 S4 to notice.** The engine holds a great deal of state on its OWN behalf — the mixer, the
+    // master bus, reverb, delay, the 128-slot EQ bank, and every instrument's drive / crush / filter /
+    // sample window / loop. None of it is an event, so ptplay cannot see it. None of it is issued by a
+    // note, so ptvoice cannot see it. And ptrender RENDERS — which goes through prepare_render, the one
+    // path that pushed it. So for the whole of Phase 2 and three Phase-3 sessions the SDL shell
+    // EXPORTED g7-audio correctly and PLAYED it on the engine's factory defaults: 84% of the bytes
+    // differed, and nothing anywhere went red.
+    //
+    // The check is the equivalence itself: set the engine up the way a LIVE app does (push_params, with
+    // no render preparation in front of it) and the audio must come out identical to the render's, to
+    // the byte. It costs one extra render of g7 and it is the only test in the tree that would have
+    // caught this.
+    std::cout << "\n== live == render (the engine state a PLAYING app has, vs the one a render has) ==\n";
+    const std::string wavLive = outDir + "/g7-audio.live.wav";
+    {
+        std::string blob;
+        if (!read_file(testdata + "/g7-audio.ptp", blob) || !host.push_project(blob)) {
+            rep.check(false, "live: reload g7-audio");
+        } else {
+            host.load_media(testdata);
+            const SongBounds bounds = find_song_bounds(host.project());
+
+            // A live app's engine state: the chains at their factory defaults (nothing has rendered),
+            // and then the project's own params pushed over them. NO prepare_render.
+            engine->setOfflineRendering(true);   // …only so the result can be written to a file at all
+            engine->stopAll();
+            engine->clearScheduledNotes();
+            engine->resetFrameCounter();
+            engine->resetEffectState();          // = the engine as it boots
+            host.push_params();                  // ← what the SDL shell now does after load_media()
+
+            const int64_t frames = host.schedule_song_range(bounds.startRow, bounds.endRow, nullptr);
+            host.render_to_wav(wavLive, frames, /*stemsMode=*/0, /*applyMasterBus=*/true);
+            host.finish_render();
+
+            std::string liveBytes;
+            if (!read_file(wavLive, liveBytes) || liveBytes.empty()) {
+                rep.check(false, "live playback and the render produce identical audio",
+                          "could not read " + wavLive + " back");
+            } else if (liveBytes.size() == bytes1.size() && liveBytes == bytes1) {
+                rep.check(true, "live playback and the render produce identical audio (" +
+                                    std::to_string(liveBytes.size()) + " bytes)");
+            } else {
+                size_t at = 0;
+                while (at < liveBytes.size() && at < bytes1.size() && liveBytes[at] == bytes1[at]) ++at;
+                rep.check(false, "live playback and the render produce identical audio",
+                          "they diverge at byte " + std::to_string(at) +
+                              " — the engine state a PLAYING app has is not the state a RENDER has. "
+                              "Something the project owns but the engine holds (the mixer, the master "
+                              "bus, reverb/delay, the EQ bank, an instrument's playback params) is "
+                              "pushed on one path and not the other. See songcore::push_live_params.");
+            }
+        }
+    }
+
     // ── (iii) the fingerprints ──
     std::cout << "\n== fingerprints (tolerance-compared) ==\n";
     check_fingerprint(testdata + "/renders/g7-audio." + std::to_string(RENDER_SAMPLE_RATE) + ".txt",

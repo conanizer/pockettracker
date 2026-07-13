@@ -267,10 +267,15 @@ int main(int argc, char** argv) {
                      "              [--theme=CLASSIC|AMBER|BLUE|MONO]\n"
                      "              [--viz=SCOPE|FLAT|OCTA|OCTA_FULL|SPECTRUM|SPECTRUM_PEAKS]\n"
                      "              [--playing=ROW] [--source-column=N] [--from-pool]\n"
+                     "              [--fx-helper=N] [--selection=r1,c1,r2,c2]\n"
+                     "              [--mod-cursor=PAIR,SIDE,ROW] [--sf-presets=COUNT,INDEX]\n"
                      "              [--demo] [--scale=N]\n"
                      "\n"
-                     "  --demo   synthesise the visualizer + note monitor, which are otherwise empty\n"
-                     "           (ptshot has no engine). A fixture for eyeballing geometry, not data.\n");
+                     "  --demo         synthesise the visualizer + note monitor, which are otherwise\n"
+                     "                 empty (ptshot has no engine). A fixture for geometry, not data.\n"
+                     "  --sf-presets   likewise for the INSTRUMENT screen's PRESET row: only an engine\n"
+                     "                 that has opened the .sf2 can answer it.\n"
+                     "  --mod-cursor   MODS has no columns — its cursor is (pair, side, row).\n");
         return 2;
     }
     const std::string projectPath = argv[1];
@@ -338,27 +343,76 @@ int main(int argc, char** argv) {
 
     state.instrumentFromPool = flag(argc, argv, "--from-pool");
 
-    // One --cursor, routed to whichever cursor the screen on show actually reads — TABLE and GROOVE
-    // carry their own, exactly as TrackerController does. Clamped to the same bounds the D-pad obeys
-    // (ui/cursor_move.h), so the tool cannot put the cursor somewhere the app never could.
+    // --sf-presets=COUNT,INDEX: the SF2's preset list, which only an ENGINE can answer for — and ptshot
+    // has none, by design. Supplying it here is what lets the INSTRUMENT screen's PRESET row be drawn
+    // and eyeballed without opening a SoundFont. Same reasoning as --demo: a fixture, not a golden.
+    if (const char* v = opt(argc, argv, "--sf-presets")) {
+        int count = 0, index = 0;
+        if (std::sscanf(v, "%d,%d", &count, &index) == 2) {
+            state.sfPresetCount = count;
+            state.sfPresetIndex = index;
+            state.sfPresetName  = "ACOUSTIC GRAND";
+        }
+    }
+
+    // --mod-cursor=PAIR,SIDE,ROW: the MODS cursor is a triple, not a (row, column) pair — there are no
+    // columns on that screen, only two slots side by side (ui/modules/modulation.h).
+    if (const char* v = opt(argc, argv, "--mod-cursor")) {
+        int pair = 0, side = 0, row = 0;
+        if (std::sscanf(v, "%d,%d,%d", &pair, &side, &row) == 3) {
+            state.modCursorPair = clamp(pair, 1);
+            state.modCursorSide = clamp(side, 1);
+            // Clamped to the slot's own depth, exactly as the D-pad clamps it: a NONE slot is one row.
+            const ModSlot& slot =
+                project.instruments[static_cast<size_t>(state.currentInstrument)]
+                    .modSlots[static_cast<size_t>(state.modCursorPair * 2 + state.modCursorSide)];
+            state.modCursorRow = clamp(row, mod_slot_row_count(slot) - 1);
+        }
+    }
+
+    // One --cursor, routed to whichever cursor the screen on show actually reads — TABLE, GROOVE,
+    // INSTRUMENT and the pool carry their own, exactly as TrackerController does. Clamped to the same
+    // bounds the D-pad obeys (ui/cursor_move.h), so the tool cannot put the cursor somewhere the app
+    // never could.
     if (const char* v = opt(argc, argv, "--cursor")) {
         int row = 0, col = 1;
         if (std::sscanf(v, "%d,%d", &row, &col) == 2) {
             const int maxRow = (state.currentScreen == ScreenType::SONG) ? 255 : 15;
-            row = clamp(row, maxRow);
 
             switch (state.currentScreen) {
                 case ScreenType::TABLE:
-                    state.tableCursorRow    = row;
+                    state.tableCursorRow    = clamp(row, maxRow);
                     state.tableCursorColumn = col < 1 ? 1 : (col > 8 ? 8 : col);
                     break;
                 case ScreenType::GROOVE:
-                    state.grooveCursorRow = row;
+                    state.grooveCursorRow = clamp(row, maxRow);
                     break;
+
+                case ScreenType::INSTRUMENT: {
+                    // Its rows are a TABLE, not a range: how many there are depends on the instrument
+                    // type, and the reachable columns depend on the row's kind. Clamp through the same
+                    // functions the D-pad uses rather than re-deriving the bounds here.
+                    // (Fully qualified: `songcore::detail` and `pt::ui::detail` are both in scope here.)
+                    const bool sf = state.project->instruments[static_cast<size_t>(state.currentInstrument)]
+                                        .instrumentType == InstrumentType::SOUNDFONT;
+                    state.instrumentCursorRow = clamp(row, instrument_row_count(sf) - 1);
+                    const int lo = pt::ui::detail::instrument_left_column(sf, state.instrumentCursorRow, col);
+                    const int hi = pt::ui::detail::instrument_right_column(sf, state.instrumentCursorRow, col);
+                    state.instrumentCursorColumn = col < lo ? lo : (col > hi ? hi : col);
+                    break;
+                }
+
+                case ScreenType::INST_POOL:
+                    // The pool's ROW is the selected instrument — so --cursor moves the selection, and
+                    // --instrument and --cursor's row are the same knob. Last one on the line wins.
+                    state.currentInstrument = clamp(row, POOL_INSTRUMENTS - 1);
+                    state.poolCursorColumn  = clamp(col, 4);
+                    break;
+
                 default: {
                     const int lo = min_cursor_column(state.currentScreen);
                     const int hi = max_cursor_column(state.currentScreen);
-                    state.cursorRow    = row;
+                    state.cursorRow    = clamp(row, maxRow);
                     state.cursorColumn = col < lo ? lo : (col > hi ? hi : col);
                     break;
                 }

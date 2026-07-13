@@ -211,6 +211,92 @@ inline CursorContext instrument(int current) {
 }
 
 /**
+ * A single hex digit, 0..F — CRUSH and DWNSMPL on the INSTRUMENT screen.
+ *
+ * ⚠️ It CLAMPS, where a hex byte wraps: HEX_NIBBLE is not in `step_value`'s wrapping set, on either
+ * side of the port. Holding A+UP on CRUSH stops at F rather than snapping back to 0 and quietly
+ * undoing the destruction you were dialling in. Large step is 4 — a quarter of the range.
+ */
+inline CursorContext hex_nibble(int current, int def = NO_DEFAULT) {
+    CursorContext c;
+    c.valueType                     = CursorValueType::HEX_NIBBLE;
+    c.capabilities.canIncrement     = true;
+    c.capabilities.canDecrement     = true;
+    c.capabilities.canIncrementFast = true;
+    c.capabilities.canDecrementFast = true;
+    c.capabilities.isEmpty          = false;   // a nibble is never empty
+    c.currentValue = current & 0x0F;
+    c.minValue     = 0;
+    c.maxValue     = 15;
+    c.smallStep    = 1;
+    c.largeStep    = 4;
+    c.emptyValue   = -1;   // unused
+    c.defaultValue = def;
+    return c;
+}
+
+/** An on/off flag — REVERSE. Wraps, so one button cycles it. */
+inline CursorContext toggle_binary(bool current) {
+    CursorContext c;
+    c.valueType                 = CursorValueType::TOGGLE_BINARY;
+    c.capabilities.canIncrement = true;
+    c.capabilities.canDecrement = true;
+    c.currentValue = current ? 1 : 0;
+    c.minValue     = 0;
+    c.maxValue     = 1;
+    c.smallStep    = 1;
+    c.largeStep    = 1;
+    c.emptyValue   = -1;
+    return c;
+}
+
+/**
+ * An N-state cycle stored as a STRING in the model — SLICE (OFF/CUT/TRU), FILTER (off/lp/hp/bp),
+ * LOOP (off/fwd/png). The context carries the INDEX; the module maps it back to the string when it
+ * writes. An unrecognised value reads as index 0, which is Kotlin's `indexOf(...).coerceAtLeast(0)`
+ * and the reason a project with a junk filterType shows "off" rather than a blank cell.
+ *
+ * (Named "ternary" after its first user; it takes any number of options — `filterType` has four.)
+ */
+inline CursorContext toggle_ternary(const std::string& current,
+                                    const std::vector<std::string>& options) {
+    int index = 0;
+    for (size_t i = 0; i < options.size(); ++i)
+        if (options[i] == current) { index = static_cast<int>(i); break; }
+
+    CursorContext c;
+    c.valueType                 = CursorValueType::TOGGLE_TERNARY;
+    c.capabilities.canIncrement = true;
+    c.capabilities.canDecrement = true;
+    c.currentValue = index;
+    c.minValue     = 0;
+    c.maxValue     = static_cast<int>(options.size()) - 1;
+    c.smallStep    = 1;
+    c.largeStep    = 1;
+    c.emptyValue   = -1;
+    return c;
+}
+
+/**
+ * A cycle through a list the model stores as an INDEX already — the MODS screen's TYPE, DEST, OSC and
+ * TRIG rows. Kotlin builds these four inline as raw `CursorContext(valueType = EFFECT_TYPE, …)`
+ * literals rather than through a factory; the EFFECT_TYPE type is reused purely because it is the one
+ * that wraps with a large step of 1. Named here so the intent survives the port.
+ */
+inline CursorContext index_cycle(int current, int count) {
+    CursorContext c;
+    c.valueType                 = CursorValueType::EFFECT_TYPE;
+    c.capabilities.canIncrement = true;
+    c.capabilities.canDecrement = true;
+    c.currentValue = current < 0 ? 0 : current;
+    c.minValue     = 0;
+    c.maxValue     = count - 1;
+    c.smallStep    = 1;
+    c.largeStep    = 1;
+    return c;
+}
+
+/**
  * Effect type. The stored value is an INDEX into songcore::EFFECT_TYPES, not an effect code — A+UP
  * walks the list, and the module converts back to a code when it writes the step.
  * A+B clears the effect, but only when it is not already NONE (FX_NONE is a valid stop on the cycle,

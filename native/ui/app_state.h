@@ -62,6 +62,20 @@ struct AppState {
     int tableCursorColumn = 1;  // starts on transpose
     int grooveCursorRow   = 0;
 
+    // INSTRUMENT. Its rows are not a uniform grid — they are the row-kind table in
+    // ui/instrument_row_layout.h, and the cursor walks that rather than a range.
+    int instrumentCursorRow    = 0;
+    int instrumentCursorColumn = 1;
+
+    /** INST.POOL. The pool's ROW is `currentInstrument` itself, so only the column lives here (0..4). */
+    int poolCursorColumn = 0;
+
+    // MODS. Four slots drawn as two pairs of two, so the cursor is a (pair, side, row) triple rather
+    // than a (row, column) pair: `activeSlot = modSlots[pair * 2 + side]`.
+    int modCursorRow  = 0;
+    int modCursorPair = 0;  // 0 = MOD1+MOD2, 1 = MOD3+MOD4
+    int modCursorSide = 0;  // 0 = left, 1 = right
+
     /**
      * Where the shared cursor was when you last left each of the three screens that share it.
      *
@@ -108,6 +122,18 @@ struct AppState {
     // What each of the 8 tracks is SOUNDING, read from the engine's voice pool rather than from the
     // sequencer — so a long sample still shows while it rings out past the end of its chain.
     songcore::Note trackNotes[8] = {};
+
+    // ── The SoundFont preset list (INSTRUMENT screen, PRESET row) ────────────────────────────────
+    //
+    // Read back from the engine for `currentInstrument`, because only the engine has opened the .sf2
+    // and knows what is in it — the Project stores a bank and a preset NUMBER, not the list they index
+    // into. Refreshed once a frame beside the note monitor (ui/engine_feed.h).
+    //
+    // With no SoundFont loaded these are 0 / 0 / "---", and that is what makes the screen drawable with
+    // no engine at all: `ptshot` renders the PRESET row from exactly these three fields.
+    std::string sfPresetName  = "---";
+    int         sfPresetCount = 0;
+    int         sfPresetIndex = 0;
 
     // ── The visualizer (right/top strip) ─────────────────────────────────────────────────────────
     // Filled by ui/engine_feed.h once a frame; null means silence, which is what `ptshot` draws with

@@ -9,14 +9,22 @@
 // ever asking which screen is up (ui/cursor.h). What lands here is what those five could not do —
 // selection, the clipboard, item cycling, cloning, the FX helper, the note preview.
 //
-// ── SCOPE: the five screens that exist ───────────────────────────────────────────────────────────
+// ── SCOPE: the eight screens that exist ──────────────────────────────────────────────────────────
 //
-// SONG, CHAIN, PHRASE, TABLE, GROOVE. The Kotlin dispatcher is ~3200 lines, but well over half of it
-// serves screens the port has not reached — the file browser, the sample editor, INSTRUMENT, MIXER,
-// SETTINGS, the EQ editor, the qwerty keyboard. Porting their input against modules that do not
-// exist would be writing code no one can run and no tool can measure; each lands WITH its screen, in
-// the session that draws it. The structure here is built to receive them: a new screen is a new arm
-// in `generic_input()` and `apply_edit()`, not a new branch in every handler.
+// SONG, CHAIN, PHRASE, TABLE, GROOVE, and — since S4 — INSTRUMENT, INST.POOL and MODS. The Kotlin
+// dispatcher is ~3200 lines, and what is still missing here serves screens the port has not reached:
+// the file browser, the sample editor, MIXER, SETTINGS, the EQ editor, the qwerty keyboard. Porting
+// their input against modules that do not exist would be writing code no one can run and no tool can
+// measure; each lands WITH its screen, in the session that draws it. The structure is built to receive
+// them: a new screen is a new arm in `generic_input()` and `apply_edit()`, not a new branch in every
+// handler.
+//
+// ⚠️ Three cells on the new screens open a SUB-SCREEN that does not exist yet — INSTRUMENT's LOAD and
+// SAVE (the file browser) and its EDIT (the sample editor), plus the EQ cells (the EQ overlay). Their
+// cursor contexts are `read_only()`, so the five generic handlers correctly do nothing on them, and
+// pressing A there is a no-op rather than a crash. They light up in the session that lands the screen
+// behind them — which is why the row layout draws them NOW: the cursor has to be able to reach a
+// button before there is anything to press it for, or the geometry gets designed twice.
 //
 // ── THE SHELL IS THE InputMapper ─────────────────────────────────────────────────────────────────
 //
@@ -37,6 +45,9 @@
 #include "ui/cursor.h"
 #include "ui/modules/chain_editor.h"
 #include "ui/modules/groove_editor.h"
+#include "ui/modules/instrument_editor.h"
+#include "ui/modules/instrument_pool.h"
+#include "ui/modules/modulation.h"
 #include "ui/modules/phrase_editor.h"
 #include "ui/modules/song_editor.h"
 #include "ui/modules/table_editor.h"
@@ -122,11 +133,14 @@ class InputDispatcher {
 
     Clipboard clip_{};
 
-    SongEditorModule   song_{};
-    ChainEditorModule  chain_{};
-    PhraseEditorModule phrase_{};
-    TableModule        table_{};
-    GrooveModule       groove_{};
+    SongEditorModule       song_{};
+    ChainEditorModule      chain_{};
+    PhraseEditorModule     phrase_{};
+    TableModule            table_{};
+    GrooveModule           groove_{};
+    InstrumentEditorModule instrument_{};
+    InstrumentPoolModule   pool_{};
+    ModulationModule       mods_{};
 
     /**
      * A,A is a DOUBLE-TAP, and a double-tap is only a double-tap if the cursor has not moved between
@@ -166,6 +180,24 @@ class InputDispatcher {
 
     /** Play the note an edit just wrote (SETTINGS "NOTE PREVIEW"). */
     void preview_edited_note();
+
+    /** True on the three screens that edit an INSTRUMENT rather than the arrangement. */
+    bool on_instrument_screen() const;
+
+    /**
+     * INSTRUMENT row 0: A+UP/DOWN toggles SAMPLER↔SOUNDFONT.
+     *
+     * ⚠️ Kotlin puts a CONFIRM DIALOG in front of this whenever a source is already loaded, because the
+     * toggle DROPS that source (a sampler has no use for an .sf2 and vice versa). There is no dialog
+     * system in the port yet, so the guard is enforced the only other way that is honest: the toggle is
+     * REFUSED on a slot that has a source, with a status message saying so. Clear the slot (A+B in the
+     * pool) and it toggles. That is stricter than Android, never destructive, and it lands its proper
+     * confirm dialog with the rest of the modal system.
+     */
+    void toggle_instrument_type();
+
+    /** True when the cursor is on INSTRUMENT's TYPE cell — where A+UP/DOWN toggles rather than steps. */
+    bool on_instrument_type_cell() const;
 
     // ── The cursor's live row/column for the screen we are on ────────────────────────────────────
     int  cursor_row() const;

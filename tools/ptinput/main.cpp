@@ -40,6 +40,9 @@
 #include "../../native/ui/selection.h"
 #include "../../native/ui/modules/chain_editor.h"
 #include "../../native/ui/modules/groove_editor.h"
+#include "../../native/ui/modules/instrument_editor.h"
+#include "../../native/ui/modules/instrument_pool.h"
+#include "../../native/ui/modules/modulation.h"
 #include "../../native/ui/modules/phrase_editor.h"
 #include "../../native/ui/modules/song_editor.h"
 #include "../../native/ui/modules/table_editor.h"
@@ -56,6 +59,11 @@
 using namespace pt::ui;
 using songcore::Chain;
 using songcore::Groove;
+using songcore::Instrument;
+using songcore::InstrumentType;
+using songcore::ModDest;
+using songcore::ModSlot;
+using songcore::ModType;
 using songcore::Note;
 using songcore::Phrase;
 using songcore::PhraseStep;
@@ -175,6 +183,76 @@ static std::string song_cell_str(int len, int ref) {
     return "scell=" + std::to_string(len) + ":" + std::to_string(ref);
 }
 
+// ─── the instrument screens (S4) ─────────────────────────────────────────────────────────────────
+//
+// The "cell" of an INSTRUMENT edit is the WHOLE INSTRUMENT: 22 writable fields, and which one an
+// action lands in is precisely what is under test. A golden that carried only the field the row claims
+// to own could not catch a handler writing the right value into the wrong place — which, on a screen
+// whose row map SHIFTS with the instrument type, is the mistake most worth catching.
+
+static std::string inst_str(const Instrument& i) {
+    return std::string("inst=") + (i.instrumentType == InstrumentType::SOUNDFONT ? "SF" : "SM") + ":" +
+           note_str(i.root) + ":" + hex2(i.detune) + ":" + hex2(i.tableTicRate) + ":" +
+           hex2(i.volume) + ":" + std::to_string(i.slicingMode) + ":" + hex2(i.pan) + ":" +
+           hex2(i.drive) + ":" + i.filterType + ":" + std::to_string(i.crush) + ":" +
+           hex2(i.filterCut) + ":" + std::to_string(i.downsample) + ":" + hex2(i.filterRes) + ":" +
+           hex2(i.reverbSend) + ":" + hex2(i.delaySend) + ":" + std::to_string(i.eqSlot) + ":" +
+           i.loopMode + ":" + hex2(i.sampleStart) + ":" + hex2(i.loopStart) + ":" +
+           hex2(i.sampleEnd) + ":" + hex2(i.loopEnd) + ":" + (i.reverse ? "1" : "0");
+}
+
+static Instrument parse_inst(const std::string& spec, int id) {
+    const std::vector<std::string> f = split(spec.substr(std::string("inst=").size()), ':');
+    Instrument i(id);
+    i.instrumentType = (f[0] == "SF") ? InstrumentType::SOUNDFONT : InstrumentType::SAMPLER;
+    i.root           = parse_note(f[1]);
+    i.detune         = from_hex(f[2]);
+    i.tableTicRate   = from_hex(f[3]);
+    i.volume         = from_hex(f[4]);
+    i.slicingMode    = from_dec(f[5]);
+    i.pan            = from_hex(f[6]);
+    i.drive          = from_hex(f[7]);
+    i.filterType     = f[8];
+    i.crush          = from_dec(f[9]);
+    i.filterCut      = from_hex(f[10]);
+    i.downsample     = from_dec(f[11]);
+    i.filterRes      = from_hex(f[12]);
+    i.reverbSend     = from_hex(f[13]);
+    i.delaySend      = from_hex(f[14]);
+    i.eqSlot         = from_dec(f[15]);
+    i.loopMode       = f[16];
+    i.sampleStart    = from_hex(f[17]);
+    i.loopStart      = from_hex(f[18]);
+    i.sampleEnd      = from_hex(f[19]);
+    i.loopEnd        = from_hex(f[20]);
+    i.reverse        = (f[21] == "1");
+    return i;
+}
+
+static std::string slot_str(const ModSlot& s) {
+    return std::string("slot=") + songcore::mod_type_name(s.type) + ":" +
+           songcore::mod_dest_name(s.dest) + ":" + hex2(s.amount) + ":" + hex2(s.attack) + ":" +
+           hex2(s.hold) + ":" + hex2(s.decay) + ":" + hex2(s.sustain) + ":" + hex2(s.release) + ":" +
+           std::to_string(s.oscShape) + ":" + std::to_string(s.lfoTrigMode) + ":" + hex2(s.lfoFreq);
+}
+
+static ModSlot parse_slot(const std::string& spec) {
+    const std::vector<std::string> f = split(spec.substr(std::string("slot=").size()), ':');
+    ModSlot s;
+    songcore::mod_type_from_name(f[0], s.type);
+    songcore::mod_dest_from_name(f[1], s.dest);
+    s.amount      = from_hex(f[2]);
+    s.attack      = from_hex(f[3]);
+    s.hold        = from_hex(f[4]);
+    s.decay       = from_hex(f[5]);
+    s.sustain     = from_hex(f[6]);
+    s.release     = from_hex(f[7]);
+    s.oscShape    = from_dec(f[8]);
+    s.lfoTrigMode = from_dec(f[9]);
+    s.lfoFreq     = from_hex(f[10]);
+    return s;
+}
+
 // ─── context / action encodings ──────────────────────────────────────────────────────────────────
 
 static const char* value_type_name(CursorValueType t) {
@@ -253,11 +331,14 @@ static InputAction resolve(const std::string& btn, const CursorContext& c) {
 
 // ─── EDIT ────────────────────────────────────────────────────────────────────────────────────────
 
-static const PhraseEditorModule kPhrase{};
-static const ChainEditorModule  kChain{};
-static const SongEditorModule   kSong{};
-static const TableModule        kTable{};
-static const GrooveModule       kGroove{};
+static const PhraseEditorModule     kPhrase{};
+static const ChainEditorModule      kChain{};
+static const SongEditorModule       kSong{};
+static const TableModule            kTable{};
+static const GrooveModule           kGroove{};
+static const InstrumentEditorModule kInstrument{};
+static const InstrumentPoolModule   kPool{};
+static const ModulationModule       kMods{};
 
 static std::string recompute_edit(const std::vector<std::string>& toks, std::string& err) {
     const std::string scr = field(toks, "scr");
@@ -350,6 +431,72 @@ static std::string recompute_edit(const std::vector<std::string>& toks, std::str
         return ctx_str(ctx) + " act=" + act_str(act) + " grow=" +
                std::to_string(groove.steps[static_cast<size_t>(row)]);
     }
+
+    // ── INSTRUMENT ───────────────────────────────────────────────────────────────────────────────
+    if (scr == "INSTRUMENT") {
+        const int  row = from_dec(field(toks, "row"));
+        Instrument ins = parse_inst("inst=" + field(toks, "inst"), 3);
+
+        const std::vector<std::string> sfp = split(field(toks, "sfp"), ',');
+
+        InstrumentEditorState st{ins};
+        st.cursorRow     = row;
+        st.cursorColumn  = col;
+        st.sfPresetCount = from_dec(sfp[0]);
+        st.sfPresetIndex = from_dec(sfp[1]);
+
+        const CursorContext ctx = kInstrument.cursor_context(st);
+        const InputAction   act = resolve(btn, ctx);
+
+        // The PRESET row's result (`presetIndexChanged`) is deliberately NOT applied: resolving an
+        // index to a bank+preset needs the SF2's own list, which only a live engine has. The Kotlin
+        // golden records the same no-op — its InstrumentController has a fake backend and no loaded
+        // SoundFont, so setSoundfontPresetByIndex returns before it writes. What the golden DOES pin is
+        // the row's cursor CONTEXT, which is where the arithmetic lives (maxIdx = count − 1, floored
+        // at 0) and where an off-by-one would hide.
+        kInstrument.handle_input(ins, row, col, act);
+        return ctx_str(ctx) + " act=" + act_str(act) + " " + inst_str(ins);
+    }
+
+    // ── INST.POOL ────────────────────────────────────────────────────────────────────────────────
+    if (scr == "INST_POOL") {
+        Project p = songcore::make_default_project();
+        const int slot = 3;
+        p.instruments[static_cast<size_t>(slot)] = parse_inst("inst=" + field(toks, "inst"), slot);
+
+        InstrumentPoolState st{p};
+        st.selectedInstrument = slot;
+        st.cursorColumn       = col;
+
+        const CursorContext ctx = kPool.cursor_context(st);
+        const InputAction   act = resolve(btn, ctx);
+        kPool.handle_input(p.instruments[static_cast<size_t>(slot)], col, act);
+        return ctx_str(ctx) + " act=" + act_str(act) + " " +
+               inst_str(p.instruments[static_cast<size_t>(slot)]);
+    }
+
+    // ── MODS ─────────────────────────────────────────────────────────────────────────────────────
+    if (scr == "MODS") {
+        const int pair = from_dec(field(toks, "pair"));
+        const int side = from_dec(field(toks, "side"));
+        const int row  = from_dec(field(toks, "row"));
+        const int slotIndex = pair * 2 + side;
+
+        Instrument ins(3);
+        ins.modSlots[static_cast<size_t>(slotIndex)] = parse_slot("slot=" + field(toks, "slot"));
+
+        ModulationState st{ins};
+        st.cursorRow  = row;
+        st.cursorPair = pair;
+        st.cursorSide = side;
+
+        const CursorContext ctx = kMods.cursor_context(st);
+        const InputAction   act = resolve(btn, ctx);
+        kMods.handle_input(ins, slotIndex, row, act);
+        return ctx_str(ctx) + " act=" + act_str(act) + " " +
+               slot_str(ins.modSlots[static_cast<size_t>(slotIndex)]);
+    }
+
     err = "unknown screen " + scr;
     return "";
 }

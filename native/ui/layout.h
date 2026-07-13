@@ -28,6 +28,9 @@
 #include "ui/helpers.h"
 #include "ui/modules/chain_editor.h"
 #include "ui/modules/groove_editor.h"
+#include "ui/modules/instrument_editor.h"
+#include "ui/modules/instrument_pool.h"
+#include "ui/modules/modulation.h"
 #include "ui/modules/navigation_map.h"
 #include "ui/modules/oscilloscope.h"
 #include "ui/modules/phrase_editor.h"
@@ -68,13 +71,16 @@ private:
     /** BPM · the 8-track note monitor · the navigation map. Hidden on the full-screen screens. */
     void draw_right_bar(Canvas& c, const AppState& s) const;
 
-    OscilloscopeModule  oscilloscope_;
-    PhraseEditorModule  phraseEditor_;
-    ChainEditorModule   chainEditor_;
-    SongEditorModule    songEditor_;
-    TableModule         tableModule_;
-    GrooveModule        grooveModule_;
-    NavigationMapModule navigationMap_;
+    OscilloscopeModule    oscilloscope_;
+    PhraseEditorModule    phraseEditor_;
+    ChainEditorModule     chainEditor_;
+    SongEditorModule      songEditor_;
+    TableModule           tableModule_;
+    GrooveModule          grooveModule_;
+    InstrumentEditorModule instrumentEditor_;
+    InstrumentPoolModule  instrumentPool_;
+    ModulationModule      modulation_;
+    NavigationMapModule   navigationMap_;
 };
 
 }  // namespace pt::ui

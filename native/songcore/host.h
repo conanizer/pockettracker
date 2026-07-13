@@ -202,6 +202,69 @@ class SongcoreHost {
         return load_project_media(*engine_, project_, baseDir, routing_);
     }
 
+    // ── ↓ the LIVE param push (engine_setup.h) ───────────────────────────────────────────────────
+    //
+    // Everything the engine holds ON ITS OWN BEHALF and therefore survives a project swap: the mixer,
+    // the master bus, reverb, delay, the 128-slot EQ bank, and every instrument's playback params.
+    // None of it is a note, so nothing on the event path pushes it.
+    //
+    // ⚠️ **Call push_params() after load_media(), or the project you loaded is not the project you
+    // hear.** Until Phase 3 S4 nothing did: `push_project_params` had exactly one caller in the tree,
+    // `prepare_render`. A project rendered to a WAV therefore had its reverb, its master EQ, its track
+    // volumes and its samplers' filters — and the same project PLAYED had the engine's defaults, or
+    // whatever the last project left behind. See push_live_params for why seven conformance tools
+    // could not see it.
+    void push_params() {
+        if (!engine_) return;
+        push_live_params(*engine_, project_);
+    }
+
+    /** One instrument's params — what an INSTRUMENT / MODS / pool edit pushes. Cheap and idempotent. */
+    void push_instrument(int id) {
+        if (!engine_) return;
+        if (id < 0 || id >= static_cast<int>(project_.instruments.size())) return;
+        push_instrument_params(*engine_, project_.instruments[id], project_.tempo, sampleRate_);
+    }
+
+    // ── ↕ the instrument operations (InstrumentController) ────────────────────────────────────────
+    // The verbs that own a SOURCE — the ones a plain field edit cannot express because freeing the old
+    // sample or SoundFont is the engine's business. See engine_setup.h for the sharing guards.
+    //
+    // ⚠️ NOT guarded on `engine_`, and that distinction cost a harness failure to find: these EDIT THE
+    // DOCUMENT and merely also free engine resources. An early `if (!engine_) return;` here would mean
+    // the whole editing path silently did nothing without an audio device — so the null-check lives
+    // around the engine CALLS, inside engine_setup.h, and the document is always written.
+
+    void set_instrument_type(int id, InstrumentType type) {
+        songcore::set_instrument_type(engine_, project_, id, type, routing_);
+        push_instrument(id);   // itself a no-op without an engine
+    }
+
+    void clear_instrument(int id) {
+        songcore::clear_instrument(engine_, project_, id, routing_);
+        push_instrument(id);
+    }
+
+    // The SF2 preset list, for the INSTRUMENT screen's PRESET row. All three answer for an instrument
+    // with no SoundFont (0 / 0 / "---"), which is what lets the screen draw before anything is loaded.
+    int sf_preset_count(int id) const {
+        if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return 0;
+        return soundfont_preset_count(*engine_, project_.instruments[static_cast<size_t>(id)], routing_);
+    }
+    int sf_preset_index(int id) const {
+        if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return 0;
+        return soundfont_preset_index(*engine_, project_.instruments[static_cast<size_t>(id)], routing_);
+    }
+    std::string sf_preset_name(int id) const {
+        if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return "---";
+        return soundfont_preset_name(*engine_, project_.instruments[static_cast<size_t>(id)], routing_);
+    }
+    void set_sf_preset_by_index(int id, int index) {
+        if (!engine_ || id < 0 || id >= POOL_INSTRUMENTS) return;
+        songcore::set_soundfont_preset_by_index(*engine_, project_.instruments[static_cast<size_t>(id)],
+                                                routing_, index);
+    }
+
     // ── ↕ live editing — the SDL shell's UI *is* the editing model ────────────────────────────────
     //
     // On Android the Kotlin UI owns a SECOND copy of the project (Compose needs an observable object
@@ -245,7 +308,16 @@ class SongcoreHost {
     // thing S5 ported the consumer to avoid. The payload below is a note with NO phrase behind it:
     // no FX, no transpose, velocity −1, the instrument's own volume and pan, and `tableId = -1`,
     // which derive_sampler_note resolves to the instrument's own table — exactly what Kotlin passes.
-    void preview_note(int instrumentId, const Note& note, int64_t durationFrames) {
+    //
+    // `durationFrames <= 0` means NO TIMED KILL — the voice rings out on its own (endlessly, for a
+    // sustaining SoundFont preset) until stop_preview(). That is the instrument audition's contract,
+    // not an edge case: an audition of a pad that dies after a 16th note tells you nothing about it.
+    //
+    // `tableIdOverride < 0` means "the instrument's own table" (which is what derive_sampler_note
+    // resolves −1 to). The TABLE screen passes the table it is SHOWING instead, so that auditioning
+    // from there plays the automation you are looking at.
+    void preview_note(int instrumentId, const Note& note, int64_t durationFrames,
+                      bool rootAudition = false, int tableIdOverride = -1) {
         if (!engine_) return;
         if (note == Note::EMPTY()) return;   // Kotlin's first line, and it matters: A on an empty
                                              // cell that inserts nothing must not thump the lane
@@ -267,16 +339,33 @@ class SongcoreHost {
         n.velGainBits = f32_bits(hex_to_float(ins.volume));        // seam arg `volume`
         n.volGainBits = f32_bits(1.0f);                            // seam arg `phraseVol`
         n.panBits     = f32_bits(hex_to_float(ins.pan));
-        n.start = -1; n.slice = -1; n.tableId = -1; n.tableRow = -1;
+        n.start = -1; n.slice = -1; n.tableId = tableIdOverride; n.tableRow = -1;
         n.transpose = 0; n.pit = 0; n.arp = 0;
         n.pslOffBits = n.pslDurBits = n.pbnRateBits = n.vibSpdBits = n.vibDepBits = f32_bits(0.0f);
 
         // A fresh cache every preview, so an edit to the instrument's table is heard immediately —
         // Kotlin calls forceReloadTable here for the same reason.
         bool tableLoaded[POOL_TABLES] = {false};
-        plan_note_on(*engine_, ev, project_, routing_, tableLoaded);
+        plan_note_on(*engine_, ev, project_, routing_, tableLoaded, rootAudition);
 
-        engine_->scheduleKill(frame + durationFrames, AudioEngine::PREVIEW_LANE);
+        if (durationFrames > 0) engine_->scheduleKill(frame + durationFrames, AudioEngine::PREVIEW_LANE);
+    }
+
+    /**
+     * Audition an instrument at its own ROOT — what START does on INSTRUMENT / INST_POOL / MODS, and
+     * (with a table override) on TABLE.
+     *
+     * Two things separate it from the phrase preview above, and both are Kotlin's
+     * `AudioEngine.previewInstrument`:
+     *   • it RINGS OUT (no timed kill) until the next plain button press stops it — you are listening
+     *     to an instrument, not to a step;
+     *   • it is a ROOT AUDITION, which the SoundFont path must be told about or ROOT does nothing (the
+     *     note IS the root, so the usual 60 − root transpose would cancel it to a flat C-4 every time).
+     */
+    void preview_instrument(int instrumentId, int tableIdOverride = -1) {
+        if (instrumentId < 0 || instrumentId >= static_cast<int>(project_.instruments.size())) return;
+        preview_note(instrumentId, project_.instruments[instrumentId].root, /*durationFrames=*/0,
+                     /*rootAudition=*/true, tableIdOverride);
     }
 
     /** Silence the audition lane. Backs the "press any button to stop the preview" gesture. */

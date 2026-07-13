@@ -26,11 +26,16 @@
 //
 // ─── WHAT IS STILL A STUB ────────────────────────────────────────────────────────────────────────
 //
-// Five screens are real (SONG, CHAIN, PHRASE, TABLE, GROOVE), R+DPAD moves between all of them, and
-// since S3 the whole input layer is here: selection, the clipboard, item cycling, cloning, the note
-// preview, the FX-helper overlay. The rest draw the "COMING SOON" placeholder that the Android app
-// itself used while its own screens were being written, and they land session by session — the
-// instrument, mixer, file and settings screens, each bringing its own arm of the dispatcher with it.
+// Eight screens are real — SONG, CHAIN, PHRASE, TABLE, GROOVE, and since S4 INSTRUMENT, INST.POOL and
+// MODS — R+DPAD moves between all of them, and the whole input layer is here: selection, the clipboard,
+// item cycling, cloning, the note preview, the FX-helper overlay, the instrument audition. The rest
+// draw the "COMING SOON" placeholder that the Android app itself used while its own screens were being
+// written, and they land session by session: MIXER and EFFECTS, then the file browser and the sample
+// editor, then PROJECT and SETTINGS — each bringing its own arm of the dispatcher with it.
+//
+// Two cells already draw a button for a screen that does not exist (INSTRUMENT's LOAD/SAVE and its
+// EDIT). Pressing them does nothing yet, on purpose: the row geometry has to be right NOW, because the
+// cursor walks it, and designing it twice is how a port grows a second layout.
 
 // <cmath> before <SDL.h> — see the note in sdl-audio-engine.h (M_PI, _USE_MATH_DEFINES, C4005).
 #include <cmath>
@@ -270,6 +275,16 @@ int main(int argc, char** argv) {
                      media.failed);
     }
 
+    // ⚠️ **Load the media, then push the PARAMS.** The engine holds a great deal of state on its own
+    // behalf that no note ever carries — the mixer, the master bus, reverb, delay, the 128-slot EQ bank,
+    // and every instrument's drive / crush / filter / sample window / loop — and until Phase 3 S4 the
+    // only thing in the whole tree that pushed any of it was the offline renderer. So this shell would
+    // RENDER a project correctly and PLAY the same project on the engine's factory defaults. See
+    // songcore::push_live_params: it survived Phase 2 and three Phase-3 sessions because it is invisible
+    // to every conformance tool (none of it is an event, none of it is made by a note, and the one tool
+    // that compares audio renders — through the path that was already right).
+    host.push_params();
+
     SdlVideo video;
     if (!video.open("PocketTracker", ui::DESIGN_W, ui::DESIGN_H)) {
         SDL_Quit();
@@ -301,7 +316,8 @@ int main(int argc, char** argv) {
     // handheld's serial/ssh terminal, a Windows box on a legacy code page), and a stray em-dash
     // arrives there as mojibake.
     std::printf("A+UP on an FX-TYPE column opens the effect picker - release A to choose\n");
-    std::printf("R+DPAD moves between screens: SONG CHAIN PHRASE TABLE GROOVE\n\n");
+    std::printf("R+DPAD moves between screens: SONG CHAIN PHRASE INSTRUMENT TABLE MODS INST.POOL GROOVE\n");
+    std::printf("START auditions the instrument on INSTRUMENT/POOL/MODS/TABLE - any button silences it\n\n");
 
     bool   running    = true;
     Uint64 lastStatus = 0;
@@ -347,9 +363,9 @@ int main(int argc, char** argv) {
         state.trackMask        = host.track_mask();
 
         // Everything the UI reads back OUT of the engine: the scope's samples, the eight monitored
-        // notes, the table's playing row. AFTER the transport fields above — the waveform decay is a
-        // function of isPlaying, and the table row is only resolved on the TABLE screen.
-        feed.poll(*engine, state);
+        // notes, the table's playing row, the SF2 preset list. AFTER the transport fields above — the
+        // waveform decay is a function of isPlaying, and the table row is only resolved on TABLE.
+        feed.poll(*engine, host, state);
 
         layout.draw(canvas, state);
         video.present(canvas);

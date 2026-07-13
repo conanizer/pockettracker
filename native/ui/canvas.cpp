@@ -25,6 +25,42 @@ inline uint32_t blend(uint32_t dst, uint32_t src) {
     return 0xFF000000u | (r << 16) | (g << 8) | b;
 }
 
+/**
+ * Decode one UTF-8 code point at `i`, advancing `i` past it. Malformed input consumes one byte and
+ * yields U+FFFD, which draws blank — a text renderer must never loop forever or run off the end on a
+ * byte it does not understand.
+ *
+ * Why the UI needs UTF-8 at all: the MODS screen draws its mod-to-mod destinations as "→M2 AMT", and
+ * that arrow is a real glyph in the Kotlin font (BitmapFont5x5 keys it by the literal '→'). It is the
+ * only non-ASCII character the whole UI draws — but a byte-wise loop would render it as THREE blanks
+ * and shift the label two cells right, which is a visible parity break, not a rounding error.
+ */
+inline uint32_t next_codepoint(const std::string& s, size_t& i) {
+    const auto b0 = static_cast<unsigned char>(s[i]);
+    const size_t n = s.size();
+
+    const auto cont = [&](size_t k) {
+        return i + k < n && (static_cast<unsigned char>(s[i + k]) & 0xC0) == 0x80;
+    };
+    const auto bits = [&](size_t k) { return static_cast<uint32_t>(s[i + k]) & 0x3F; };
+
+    if (b0 < 0x80) { i += 1; return b0; }
+    if ((b0 & 0xE0) == 0xC0 && cont(1)) {
+        const uint32_t cp = ((b0 & 0x1Fu) << 6) | bits(1);
+        i += 2; return cp;
+    }
+    if ((b0 & 0xF0) == 0xE0 && cont(1) && cont(2)) {
+        const uint32_t cp = ((b0 & 0x0Fu) << 12) | (bits(1) << 6) | bits(2);
+        i += 3; return cp;
+    }
+    if ((b0 & 0xF8) == 0xF0 && cont(1) && cont(2) && cont(3)) {
+        const uint32_t cp = ((b0 & 0x07u) << 18) | (bits(1) << 12) | (bits(2) << 6) | bits(3);
+        i += 4; return cp;
+    }
+    i += 1;
+    return 0xFFFD;
+}
+
 }  // namespace
 
 void Canvas::clear(Argb color) {
@@ -105,16 +141,23 @@ void Canvas::draw_char(char c, int x, int y, Argb color, int font_scale) {
 void Canvas::draw_text(const std::string& text, int x, int y, Argb color, int spacing,
                        int font_scale) {
     int cx = x;
-    for (const char c : text) {
-        draw_char(c, cx, y, color, font_scale);
+    for (size_t i = 0; i < text.size();) {
+        draw_glyph(glyph_for_codepoint(next_codepoint(text, i)), cx, y, color, font_scale);
         cx += 5 * font_scale + spacing;
     }
 }
 
 int Canvas::text_width(const std::string& text, int spacing, int font_scale) {
-    if (text.empty()) return 0;
-    const int n = static_cast<int>(text.size());
-    return n * (5 * font_scale + spacing) - spacing;
+    return glyph_count(text) * (5 * font_scale + spacing) - (text.empty() ? 0 : spacing);
+}
+
+int Canvas::glyph_count(const std::string& text) {
+    int n = 0;
+    for (size_t i = 0; i < text.size();) {
+        next_codepoint(text, i);
+        ++n;
+    }
+    return n;
 }
 
 }  // namespace pt::ui

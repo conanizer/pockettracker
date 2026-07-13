@@ -20,6 +20,7 @@
 // the feed is what any *shell* constructs, and a tool simply does not construct one.
 
 #include "audio-engine.h"
+#include "songcore/host.h"
 #include "ui/app_state.h"
 #include "ui/modules/oscilloscope.h"
 
@@ -34,7 +35,13 @@ public:
      * waveform decay below is a function of `isPlaying`, and the table row is only resolved on the
      * TABLE screen. Reading the engine first would decay against the previous frame's transport.
      */
-    void poll(AudioEngine& engine, AppState& state) {
+    void poll(AudioEngine& engine, songcore::SongcoreHost& host, AppState& state) {
+        poll_engine(engine, state);
+        poll_soundfont_presets(host, state);
+    }
+
+private:
+    void poll_engine(AudioEngine& engine, AppState& state) {
         // ── The visualizer ───────────────────────────────────────────────────────────────────────
         // updateWaveformWithDecay(): with the transport stopped the engine's capture ring is never
         // refilled, so without an explicit decay the scope would freeze mid-wave at the moment of the
@@ -100,11 +107,52 @@ public:
         }
     }
 
-private:
+    /**
+     * The INSTRUMENT screen's PRESET row: how many presets the loaded .sf2 has, which one this
+     * instrument is on, and its name. Only the engine has opened the file — the Project stores a bank
+     * and a preset NUMBER, not the list they index into.
+     *
+     * MEMOISED, because finding the index means walking the SF2's preset list and a big orchestral
+     * bank has hundreds of them; recomputing that 60 times a second to redraw one unchanged row is
+     * work a handheld's battery pays for. The key is everything the answer depends on.
+     */
+    void poll_soundfont_presets(songcore::SongcoreHost& host, AppState& state) {
+        if (state.currentScreen != ScreenType::INSTRUMENT || !state.project) return;
+
+        const int id = state.currentInstrument;
+        const songcore::Instrument& ins = state.project->instruments[static_cast<size_t>(id)];
+        if (ins.instrumentType != songcore::InstrumentType::SOUNDFONT) {
+            state.sfPresetName  = "---";
+            state.sfPresetCount = 0;
+            state.sfPresetIndex = 0;
+            return;
+        }
+
+        // The PATH is part of the key, not just the bank and preset: load a DIFFERENT .sf2 into this
+        // slot that happens to sit at the same bank/preset and every displayed field changes while the
+        // other three key fields do not.
+        const std::string& path = ins.soundfontPath.value_or(std::string());
+        if (id == sfCachedId_ && ins.sfBank == sfCachedBank_ && ins.sfPreset == sfCachedPreset_ &&
+            path == sfCachedPath_) {
+            return;   // nothing the answer depends on has moved
+        }
+        sfCachedId_     = id;
+        sfCachedBank_   = ins.sfBank;
+        sfCachedPreset_ = ins.sfPreset;
+        sfCachedPath_   = path;
+
+        state.sfPresetCount = host.sf_preset_count(id);
+        state.sfPresetIndex = host.sf_preset_index(id);
+        state.sfPresetName  = host.sf_preset_name(id);
+    }
+
     float waveform_[WAVEFORM_SIZE]                            = {};
     float trackWaveforms_[TRACK_WAVEFORM_COUNT * WAVEFORM_SIZE] = {};
     bool  activeFlags_[TRACK_WAVEFORM_COUNT]                  = {};
     float spectrum_[OscilloscopeModule::NUM_BARS]             = {};
+
+    int         sfCachedId_ = -1, sfCachedBank_ = -1, sfCachedPreset_ = -1;
+    std::string sfCachedPath_{};
 };
 
 }  // namespace pt::ui

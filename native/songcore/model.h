@@ -120,6 +120,48 @@ inline bool instrument_type_from_name(const std::string& s, InstrumentType& out)
     return false;
 }
 
+// ─── display names (ModType.displayName / ModDest.displayName) ──────────────────────────────────
+//
+// ⚠️ NOT the same strings as `mod_type_name` / `mod_dest_name` above, and the difference is the whole
+// reason both exist. Those are the SERIALISED names — kotlinx writes an enum entry by its Kotlin
+// identifier, so "TRACKING" and "FILTER_CUTOFF" are load-bearing bytes in every .ptp and changing one
+// breaks every saved project. These are what the MODS screen PAINTS ("TRK", "CUT"), chosen to fit a
+// narrow cell. Reusing one for the other silently either widens the UI or corrupts the file format.
+
+inline const char* mod_type_display_name(ModType t) {
+    switch (t) {
+        case ModType::NONE:     return "---";
+        case ModType::AHD:      return "AHD";
+        case ModType::ADSR:     return "ADSR";
+        case ModType::LFO:      return "LFO";
+        case ModType::DRUM:     return "DRUM";   // AHD semantics (engine type 4)
+        case ModType::TRIG:     return "TRIG";   // ADSR semantics (engine type 5)
+        case ModType::TRACKING: return "TRK";    // future — no engine implementation
+        case ModType::SCALAR:   return "SCL";    // constant value — `amount` IS the output
+    }
+    return "---";
+}
+
+inline const char* mod_dest_display_name(ModDest d) {
+    switch (d) {
+        case ModDest::NONE:          return "---";
+        case ModDest::VOLUME:        return "VOL";
+        case ModDest::PAN:           return "PAN";
+        case ModDest::PITCH:         return "PITCH";
+        case ModDest::FINE_PITCH:    return "FINE";
+        case ModDest::FILTER_CUTOFF: return "CUT";
+        case ModDest::FILTER_RES:    return "RES";
+        case ModDest::SAMPLE_START:  return "STA";
+        case ModDest::MOD_AMT:       return "MOD A";
+        case ModDest::MOD_RATE:      return "MOD R";
+        case ModDest::MOD_BOTH:      return "MOD B";
+    }
+    return "---";
+}
+
+/** How many ModDest entries there are — the MODS screen's DEST cycle wraps on it. */
+inline constexpr int MOD_DEST_COUNT = 11;
+
 // ─── leaf structs ───────────────────────────────────────────────────────────────────────────────
 
 // Note has no field defaults in Kotlin (both ctor params are required) — a Note object always
@@ -206,6 +248,28 @@ struct ModSlot {
     int lfoFreq = 0x40;
 };
 
+/**
+ * ModSlot.rowCount() — how many rows this slot occupies on the MODS screen, TYPE row included.
+ *
+ * It belongs to the data model rather than to the UI because it is a fact about the TYPE — an AHD has
+ * a HOLD and an ADSR has a SUSTAIN, and no screen gets to disagree. Both the MODS cursor (how far
+ * down you can walk) and its renderer (how many rows to paint) read it, and if they read different
+ * tables the cursor lands on a row that is not drawn.
+ */
+inline int mod_slot_row_count(const ModSlot& s) {
+    switch (s.type) {
+        case ModType::NONE:     return 1;  // TYPE
+        case ModType::AHD:      return 6;  // TYPE, DEST, AMT, ATK, HOLD, DEC
+        case ModType::ADSR:     return 7;  // TYPE, DEST, AMT, ATK, DEC, SUS, REL
+        case ModType::LFO:      return 6;  // TYPE, DEST, AMT, OSC, TRIG, FREQ
+        case ModType::DRUM:     return 6;  // as AHD
+        case ModType::TRIG:     return 7;  // as ADSR
+        case ModType::TRACKING: return 5;  // future
+        case ModType::SCALAR:   return 3;  // TYPE, DEST, AMT
+    }
+    return 1;
+}
+
 struct Groove {
     int id = 0;
     std::vector<int> steps = std::vector<int>(16, -1);  // IntArray(16){-1}
@@ -275,6 +339,31 @@ struct Instrument {
     Instrument() = default;
     explicit Instrument(int id_) : id(id_), name(default_instrument_name(id_)) {}
 };
+
+/**
+ * Instrument.hasDefaultName() — the name is still the auto-generated "INSTxx", i.e. nobody has named
+ * this slot. The INSTRUMENT screen draws "______" for it and the pool draws a dim placeholder row;
+ * loading a sample or an SF2 overwrites it with the file's name.
+ */
+inline bool instrument_has_default_name(const Instrument& ins) {
+    return ins.name == default_instrument_name(ins.id);
+}
+
+/**
+ * Instrument.isFree() — this slot holds NOTHING and may be claimed for a new sample.
+ *
+ * ⚠️ `sampleFilePath == null` alone is NOT "empty", and this is the trap the predicate exists to close:
+ * a fully configured SoundFont instrument ALSO has a null sampleFilePath. Search for a free slot with
+ * that test and a resample will happily overwrite a SoundFont, leaving a SOUNDFONT-typed slot with a
+ * WAV behind it — broken in a way that looks fine until it is played.
+ *
+ * (The sibling convention is unchanged and still holds: for "is there a sound in this slot to PLAY",
+ * `sampleFilePath == null` IS the single signal, and the note consumer drops on it.)
+ */
+inline bool instrument_is_free(const Instrument& ins) {
+    return !ins.sampleFilePath.has_value() && !ins.soundfontPath.has_value() &&
+           ins.instrumentType == InstrumentType::SAMPLER;
+}
 
 struct Project {
     int version = 0;

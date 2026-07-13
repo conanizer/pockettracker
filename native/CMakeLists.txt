@@ -204,6 +204,9 @@ if(NOT ANDROID)
             ui/modules/chain_editor.cpp
             ui/modules/fx_helper_overlay.cpp
             ui/modules/groove_editor.cpp
+            ui/modules/instrument_editor.cpp
+            ui/modules/instrument_pool.cpp
+            ui/modules/modulation.cpp
             ui/modules/navigation_map.cpp
             ui/modules/oscilloscope.cpp
             ui/modules/phrase_editor.cpp

@@ -29,13 +29,19 @@ using Glyph = std::array<uint8_t, 5>;
 // case; that only ever fired for characters no screen actually uses, so it is not reproduced.
 inline constexpr Glyph GLYPH_NONE{{0, 0, 0, 0, 0}};
 
-// The arrows live outside ASCII (Kotlin keys them by the literal '↑' '↓' '←' '→'). C++ has no char
-// key to hand them, so the canvas exposes them by name and the few call sites that want an arrow
-// ask for it explicitly.
+// The arrows live outside ASCII (Kotlin keys them by the literal '↑' '↓' '←' '→'), and a `char` cannot
+// index them. They are keyed by CODE POINT instead, and `Canvas::draw_text` decodes UTF-8 to find them
+// — see glyph_for_codepoint below.
 inline constexpr Glyph GLYPH_ARROW_UP{{0b00000, 0b00100, 0b01110, 0b11111, 0b00000}};
 inline constexpr Glyph GLYPH_ARROW_DOWN{{0b00000, 0b11111, 0b01110, 0b00100, 0b00000}};
 inline constexpr Glyph GLYPH_ARROW_LEFT{{0b00010, 0b00110, 0b01110, 0b00110, 0b00010}};
 inline constexpr Glyph GLYPH_ARROW_RIGHT{{0b01000, 0b01100, 0b01110, 0b01100, 0b01000}};
+
+// The four code points those glyphs answer to.
+inline constexpr uint32_t CP_ARROW_LEFT  = 0x2190;
+inline constexpr uint32_t CP_ARROW_UP    = 0x2191;
+inline constexpr uint32_t CP_ARROW_RIGHT = 0x2192;
+inline constexpr uint32_t CP_ARROW_DOWN  = 0x2193;
 
 namespace detail {
 
@@ -134,6 +140,24 @@ inline constexpr std::array<Glyph, 128> FONT_5X5_ASCII = detail::build_ascii();
 inline constexpr const Glyph& glyph_for(char c) {
     const auto code = static_cast<unsigned char>(c);
     return (code < 128) ? FONT_5X5_ASCII[code] : GLYPH_NONE;
+}
+
+/**
+ * The glyph for a Unicode code point — the ASCII table, plus the four arrows.
+ *
+ * Kotlin's font is a `Map<Char, ByteArray>` and so takes '→' as a key without ceremony. The C++ table
+ * is ASCII-indexed for the hot path (a full screen is ~700 glyphs × 60 fps), so the arrows are a
+ * separate arm rather than four holes punched in a 8192-entry array.
+ */
+inline constexpr const Glyph& glyph_for_codepoint(uint32_t cp) {
+    if (cp < 128) return FONT_5X5_ASCII[cp];
+    switch (cp) {
+        case CP_ARROW_LEFT:  return GLYPH_ARROW_LEFT;
+        case CP_ARROW_UP:    return GLYPH_ARROW_UP;
+        case CP_ARROW_RIGHT: return GLYPH_ARROW_RIGHT;
+        case CP_ARROW_DOWN:  return GLYPH_ARROW_DOWN;
+        default:             return GLYPH_NONE;
+    }
 }
 
 }  // namespace pt::ui

@@ -116,6 +116,41 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 break;
             }
 
+            case ScreenType::INSTRUMENT: {
+                InstrumentEditorState is{p.instruments[static_cast<size_t>(s.currentInstrument)]};
+                is.cursorRow     = s.instrumentCursorRow;
+                is.cursorColumn  = s.instrumentCursorColumn;
+                // The SF2's preset list — the engine's answer, read back once a frame (engine_feed.h).
+                // Zeroes and "---" with no engine, which is exactly what lets ptshot draw this screen.
+                is.sfPresetName  = s.sfPresetName;
+                is.sfPresetCount = s.sfPresetCount;
+                is.sfPresetIndex = s.sfPresetIndex;
+                is.theme         = t;
+                instrumentEditor_.draw(c, moduleX, EDITOR_Y, is);
+                break;
+            }
+
+            case ScreenType::INST_POOL: {
+                InstrumentPoolState ps{p};
+                // Its cursor ROW is the selected instrument itself — the pool is a navigator, not a
+                // table with a cursor of its own.
+                ps.selectedInstrument = s.currentInstrument;
+                ps.cursorColumn       = s.poolCursorColumn;
+                ps.theme              = t;
+                instrumentPool_.draw(c, moduleX, EDITOR_Y, ps);
+                break;
+            }
+
+            case ScreenType::MODS: {
+                ModulationState ms{p.instruments[static_cast<size_t>(s.currentInstrument)]};
+                ms.cursorRow  = s.modCursorRow;
+                ms.cursorPair = s.modCursorPair;
+                ms.cursorSide = s.modCursorSide;
+                ms.theme      = t;
+                modulation_.draw(c, moduleX, EDITOR_Y, ms);
+                break;
+            }
+
             default:
                 draw_placeholder(c, moduleX, EDITOR_Y, s.currentScreen, t);
                 break;

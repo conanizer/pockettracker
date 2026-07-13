@@ -3,6 +3,11 @@ package com.conanizer.pockettracker.trace
 import com.conanizer.pockettracker.core.audio.AudioEngine
 import com.conanizer.pockettracker.core.data.Chain
 import com.conanizer.pockettracker.core.data.Groove
+import com.conanizer.pockettracker.core.data.Instrument
+import com.conanizer.pockettracker.core.data.InstrumentType
+import com.conanizer.pockettracker.core.data.ModDest
+import com.conanizer.pockettracker.core.data.ModSlot
+import com.conanizer.pockettracker.core.data.ModType
 import com.conanizer.pockettracker.core.data.Note
 import com.conanizer.pockettracker.core.data.Phrase
 import com.conanizer.pockettracker.core.data.PhraseStep
@@ -20,6 +25,12 @@ import com.conanizer.pockettracker.ui.modules.ChainEditorModule
 import com.conanizer.pockettracker.ui.modules.ChainEditorState
 import com.conanizer.pockettracker.ui.modules.GrooveModule
 import com.conanizer.pockettracker.ui.modules.GrooveState
+import com.conanizer.pockettracker.ui.modules.InstrumentModule
+import com.conanizer.pockettracker.ui.modules.InstrumentPoolModule
+import com.conanizer.pockettracker.ui.modules.InstrumentPoolState
+import com.conanizer.pockettracker.ui.modules.InstrumentState
+import com.conanizer.pockettracker.ui.modules.ModulationModule
+import com.conanizer.pockettracker.ui.modules.ModulationState
 import com.conanizer.pockettracker.ui.modules.PhraseEditorModule
 import com.conanizer.pockettracker.ui.modules.PhraseEditorState
 import com.conanizer.pockettracker.ui.modules.SongEditorModule
@@ -98,6 +109,9 @@ class P3InputGoldenTest {
     private val songModule = SongEditorModule()
     private val tableModule = TableModule()
     private val grooveModule = GrooveModule()
+    private val instrumentModule = InstrumentModule()
+    private val instrumentPoolModule = InstrumentPoolModule()
+    private val modulationModule = ModulationModule()
 
     // handleInput(PHRASE) wants an InstrumentController purely to record `lastEditedInstrument` —
     // a side record. The C++ module returns it in its result instead of reaching back into a
@@ -395,6 +409,203 @@ class P3InputGoldenTest {
 
                     out += "EDIT scr=GROOVE col=$col grow=$v btn=$btn => ${ctxStr(ctx)} " +
                         "act=${actStr(act)} grow=${groove.steps[2]}"
+                }
+            }
+        }
+    }
+
+    // ── The instrument screens (Phase 3 S4) ─────────────────────────────────────────────────────
+    //
+    // INSTRUMENT is the first screen that is a FORM rather than a grid: its rows hold one, two or
+    // three parameters, some are unreachable spacers, and THE ROW MAP DEPENDS ON THE INSTRUMENT TYPE
+    // (a SoundFont gains a PRESET row and loses the four sample-window rows, shifting everything below
+    // the source section down by one). So the sweep is over the whole (type × row × column) space, not
+    // over a rectangle — and the columns that DO NOT EXIST on a given row are probed too, because
+    // "the module answers none() there" is exactly what stops the cursor landing on a cell nobody draws.
+
+    /** Every field of an instrument that any of the three screens can write. 22 of them. */
+    private fun instStr(i: Instrument): String =
+        "inst=${if (i.instrumentType == InstrumentType.SOUNDFONT) "SF" else "SM"}:" +
+            "${noteStr(i.root)}:${hex2(i.detune)}:${hex2(i.tableTicRate)}:" +
+            "${hex2(i.volume)}:${i.slicingMode}:${hex2(i.pan)}:" +
+            "${hex2(i.drive)}:${i.filterType}:${i.crush}:${hex2(i.filterCut)}:" +
+            "${i.downsample}:${hex2(i.filterRes)}:" +
+            "${hex2(i.reverbSend)}:${hex2(i.delaySend)}:${i.eqSlot}:" +
+            "${i.loopMode}:${hex2(i.sampleStart)}:${hex2(i.loopStart)}:" +
+            "${hex2(i.sampleEnd)}:${hex2(i.loopEnd)}:${if (i.reverse) 1 else 0}"
+
+    /** One mod slot, every field. */
+    private fun slotStr(s: ModSlot): String =
+        "slot=${s.type.name}:${s.dest.name}:${hex2(s.amount)}:" +
+            "${hex2(s.attack)}:${hex2(s.hold)}:${hex2(s.decay)}:${hex2(s.sustain)}:${hex2(s.release)}:" +
+            "${s.oscShape}:${s.lfoTrigMode}:${hex2(s.lfoFreq)}"
+
+    /**
+     * The instrument ladder — every state that changes what a button on this screen does.
+     * `sfPresetCount`/`sfPresetIndex` travel with it because the PRESET row's RANGE is the SF2's own
+     * list length, and that is engine knowledge the Project does not hold.
+     */
+    private data class InstProbe(val inst: Instrument, val sfCount: Int, val sfIndex: Int)
+
+    private fun instrumentLadder(): List<InstProbe> = listOf(
+        // A factory sampler: every value at its default, so "A resets to the default" is a no-op here
+        // and any movement is a real edit.
+        InstProbe(Instrument(id = 3), 0, 0),
+        // A sampler with EVERY writable field off its default and distinct from every other field —
+        // this is the case that catches a handler writing the right value into the wrong field.
+        InstProbe(Instrument(id = 3).apply {
+            root = Note.fromString("F#2"); detune = 0x41; tableTicRate = 0x0C
+            volume = 0xC0; slicingMode = 2; pan = 0x20
+            drive = 0x33; filterType = "hp"; crush = 7; filterCut = 0xA5
+            downsample = 3; filterRes = 0x55
+            reverbSend = 0x11; delaySend = 0x22; eqSlot = 9
+            loopMode = "png"; sampleStart = 0x10; loopStart = 0x30
+            sampleEnd = 0xE0; loopEnd = 0xD0; reverse = true
+        }, 0, 0),
+        // The boundaries: a nibble at its ceiling, bytes at both ends, an empty root, no EQ.
+        InstProbe(Instrument(id = 3).apply {
+            root = Note.EMPTY; detune = 0x00; tableTicRate = 0xFF
+            volume = 0x00; slicingMode = 0; pan = 0xFF
+            drive = 0xFF; filterType = "bp"; crush = 15; filterCut = 0x00
+            downsample = 15; filterRes = 0xFF
+            reverbSend = 0xFF; delaySend = 0x00; eqSlot = -1
+            loopMode = "off"; sampleStart = 0xFF; loopStart = 0xFF
+            sampleEnd = 0x00; loopEnd = 0x00; reverse = false
+        }, 0, 0),
+        // EQ at slot 0 — the boundary between "assigned" (deletable) and "empty" (insertable).
+        InstProbe(Instrument(id = 3).apply { eqSlot = 0; filterType = "lp"; loopMode = "fwd" }, 0, 0),
+
+        // ── SoundFonts. The preset list is the interesting axis: with no SF2 loaded the count is 0,
+        // so the PRESET row's max index is 0 and stepping it goes nowhere — which is what makes the row
+        // safe to draw before a file is ever opened.
+        InstProbe(Instrument(id = 3).apply { instrumentType = InstrumentType.SOUNDFONT }, 0, 0),
+        InstProbe(Instrument(id = 3).apply {
+            instrumentType = InstrumentType.SOUNDFONT
+            root = Note.fromString("A-5"); detune = 0x90; tableTicRate = 0x03
+            volume = 0x80; pan = 0xC0
+            drive = 0x0F; filterType = "lp"; crush = 2; filterCut = 0x40
+            downsample = 1; filterRes = 0x70
+            reverbSend = 0x66; delaySend = 0x77; eqSlot = 12
+        }, 128, 4),
+        // A single-preset SF2: the max index is 0, so the row exists but cannot move.
+        InstProbe(Instrument(id = 3).apply {
+            instrumentType = InstrumentType.SOUNDFONT; eqSlot = -1
+        }, 1, 0),
+        // …and one sitting on the LAST preset, where an increment must wrap rather than run off.
+        InstProbe(Instrument(id = 3).apply {
+            instrumentType = InstrumentType.SOUNDFONT; eqSlot = 127
+        }, 8, 7),
+    )
+
+    private fun sweepInstrument(out: MutableList<String>) {
+        out += ""
+        out += "# INSTRUMENT — a FORM, not a grid. 16 rows (sampler) / 15 (SoundFont), and the row map"
+        out += "# itself depends on the type. Columns 0..3 and 5 are probed on EVERY row, including the"
+        out += "# ones where they do not exist: a module that fails to answer none() there is how a"
+        out += "# cursor lands on a cell nobody draws. sfp=COUNT,INDEX is the SF2's preset list (engine"
+        out += "# knowledge; the Project does not hold it), which is what the PRESET row's range is made of."
+        for (probe in instrumentLadder()) {
+            val isSf = probe.inst.instrumentType == InstrumentType.SOUNDFONT
+            val rows = if (isSf) 15 else 16
+            for (row in 0 until rows) {
+                for (col in listOf(0, 1, 2, 3, 5)) {
+                    for (btn in BUTTONS) {
+                        // A fresh copy per case: handleInput mutates, and a ladder entry must not carry
+                        // one case's edit into the next.
+                        val inst = probe.inst.copy(modSlots = probe.inst.modSlots.copyOf())
+                        val before = instStr(inst)
+
+                        val state = InstrumentState(
+                            instrument = inst, cursorRow = row, cursorColumn = col,
+                            soundfontPresetCount = probe.sfCount, soundfontPresetIndex = probe.sfIndex
+                        )
+                        val ctx = instrumentModule.getCursorContext(state)
+                        val act = resolve(btn, ctx)
+                        instrumentModule.handleInput(state, act, instrumentController)
+
+                        out += "EDIT scr=INSTRUMENT row=$row col=$col sfp=${probe.sfCount},${probe.sfIndex} " +
+                            "$before btn=$btn => ${ctxStr(ctx)} act=${actStr(act)} ${instStr(inst)}"
+                    }
+                }
+            }
+        }
+    }
+
+    private fun sweepInstrumentPool(out: MutableList<String>) {
+        out += ""
+        out += "# INST.POOL — 5 columns. Column 0 (NAME) is selection-only: A loads a source into an"
+        out += "# empty slot and A+B clears it, both the dispatcher's, so the module answers read_only()."
+        for (probe in instrumentLadder()) {
+            for (col in 0..4) {
+                for (btn in BUTTONS) {
+                    val project = Project()
+                    val slot = 3
+                    project.instruments[slot] = probe.inst.copy(modSlots = probe.inst.modSlots.copyOf())
+                    val before = instStr(project.instruments[slot])
+
+                    val state = InstrumentPoolState(
+                        project = project, selectedInstrument = slot, cursorColumn = col
+                    )
+                    val ctx = instrumentPoolModule.getCursorContext(state)
+                    val act = resolve(btn, ctx)
+                    instrumentPoolModule.handleInput(state, act, instrumentController)
+
+                    out += "EDIT scr=INST_POOL col=$col $before btn=$btn => ${ctxStr(ctx)} " +
+                        "act=${actStr(act)} ${instStr(project.instruments[slot])}"
+                }
+            }
+        }
+    }
+
+    /**
+     * The mod-slot ladder. Its axis is the TYPE, because on MODS the type decides how many rows the
+     * slot HAS and what each of them MEANS: row 4 is HOLD on an AHD, DEC on an ADSR and the LFO's
+     * trigger mode on an LFO. There is no "the row 4 parameter" to test — only a `when(type)`.
+     */
+    private fun modLadder(): List<ModSlot> = listOf(
+        ModSlot(),                                                     // NONE — one row, everything else read-only
+        ModSlot(type = ModType.AHD, dest = ModDest.VOLUME, amount = 0x80,
+                attack = 0x10, hold = 0x20, decay = 0x30),
+        ModSlot(type = ModType.ADSR, dest = ModDest.FILTER_CUTOFF, amount = 0xFF,
+                attack = 0x01, decay = 0x02, sustain = 0x03, release = 0x04),
+        ModSlot(type = ModType.LFO, dest = ModDest.PAN, amount = 0x40,
+                oscShape = 9, lfoTrigMode = 3, lfoFreq = 0xC0),        // both list values at their ceiling
+        ModSlot(type = ModType.LFO, dest = ModDest.MOD_AMT, amount = 0x00,
+                oscShape = 0, lfoTrigMode = 0, lfoFreq = 0x00),        // …and at their floor
+        ModSlot(type = ModType.DRUM, dest = ModDest.PITCH, amount = 0x01,
+                attack = 0xFE, hold = 0xFD, decay = 0xFC),             // AHD-shaped, but a different type
+        ModSlot(type = ModType.TRIG, dest = ModDest.MOD_BOTH, amount = 0x7F,
+                attack = 0xAA, decay = 0xBB, sustain = 0xCC, release = 0xDD),  // ADSR-shaped
+        // A slot holding a HIDDEN type. A project saved before TRACKING was withdrawn from the cycle
+        // still loads and still displays — and stepping its TYPE must move it to a real one rather than
+        // sticking, which is what `indexOf(...).coerceAtLeast(0)` buys.
+        ModSlot(type = ModType.TRACKING, dest = ModDest.FINE_PITCH, amount = 0x55),
+    )
+
+    private fun sweepMods(out: MutableList<String>) {
+        out += ""
+        out += "# MODS — no columns: the cursor is (pair, side, row), and `pair*2+side` is the slot."
+        out += "# Rows 0..6 are probed against every type, including rows the type does not have (an"
+        out += "# LFO has no REL) — the module must answer read_only() there. A+B resets the WHOLE slot."
+        for ((pair, side) in listOf(0 to 0, 1 to 1)) {   // the two ends of the index math
+            for (proto in modLadder()) {
+                for (row in 0..6) {
+                    for (btn in BUTTONS) {
+                        val inst = Instrument(id = 3)
+                        val slotIndex = pair * 2 + side
+                        inst.modSlots[slotIndex] = proto.copy()
+                        val before = slotStr(inst.modSlots[slotIndex])
+
+                        val state = ModulationState(
+                            instrument = inst, cursorRow = row, cursorPair = pair, cursorSide = side
+                        )
+                        val ctx = modulationModule.getCursorContext(state)
+                        val act = resolve(btn, ctx)
+                        modulationModule.handleInput(state, act)
+
+                        out += "EDIT scr=MODS pair=$pair side=$side row=$row $before btn=$btn => " +
+                            "${ctxStr(ctx)} act=${actStr(act)} ${slotStr(inst.modSlots[slotIndex])}"
+                    }
                 }
             }
         }
@@ -768,6 +979,9 @@ class P3InputGoldenTest {
         sweepSong(out)
         sweepTable(out)
         sweepGroove(out)
+        sweepInstrument(out)
+        sweepInstrumentPool(out)
+        sweepMods(out)
         sweepSelection(out)
         sweepClipboard(out)
         sweepFxHelper(out)

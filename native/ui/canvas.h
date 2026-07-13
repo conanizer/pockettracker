@@ -65,6 +65,10 @@ public:
     /**
      * A run of text, left to right. `spacing` is the gap between 5×5 cells, so each character
      * advances `5 * font_scale + spacing`. Mirrors `DrawScope.drawBitmapText`.
+     *
+     * ⚠️ `text` is UTF-8, and the advance is per CODE POINT, not per byte. Every screen but one is
+     * pure ASCII (where the two are the same thing), but MODS draws "→M2 AMT" — and a byte-wise loop
+     * would put three blanks where Kotlin puts one arrow, shifting the rest of the label two cells.
      */
     void draw_text(const std::string& text, int x, int y, Argb color, int spacing, int font_scale);
 
@@ -74,6 +78,9 @@ public:
      * (`fun tw(s) = s.length * 17 - 2`); it is written once here instead.
      */
     static int text_width(const std::string& text, int spacing, int font_scale);
+
+    /** Glyphs (code points) in `text` — what Kotlin's `String.length` gives, since a Kotlin Char IS one. */
+    static int glyph_count(const std::string& text);
 
     // ── Clipping ─────────────────────────────────────────────────────────────────────────────────
     //

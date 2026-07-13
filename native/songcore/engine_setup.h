@@ -60,6 +60,19 @@ void push_used_instrument_params(Engine& engine, const Project& project, int sta
     }
 }
 
+// The LIVE sweep: every instrument in the pool, played or not.
+//
+// A render only needs the instruments the rows it is exporting actually use. An interactive app cannot
+// make that assumption for a second: you can sit on the INSTRUMENT screen and audition slot 7F while no
+// step in the song refers to it, and its filter and drive must already be in the engine when you do.
+template <typename Engine>
+void push_all_instrument_params(Engine& engine, const Project& project) {
+    const int sampleRate = engine.getSampleRate();
+    for (const Instrument& ins : project.instruments) {
+        push_instrument_params(engine, ins, project.tempo, sampleRate);
+    }
+}
+
 // AppInputDispatcher.pushGlobalEffectsToBackend — the state that lives ONLY in the engine and so
 // survives a project swap: the 128-slot EQ preset bank, the reverb and delay buses (+ their input EQ
 // and the delay→reverb send), and the master EQ. Without it a loaded project's reverb/delay keep
@@ -123,6 +136,35 @@ void push_project_params(Engine& engine, const Project& project, int startRow, i
     engine.setTempo(project.tempo);
     push_mixer(engine, project);
     push_used_instrument_params(engine, project, startRow, endRow);
+}
+
+/**
+ * The same thing, for an app that is going to PLAY the project rather than export it — every
+ * instrument rather than the used ones, and no `resetEffectState()` first (that would cut off whatever
+ * is currently ringing).
+ *
+ * ⚠️ **This closes a real hole, and it is worth being precise about what the hole was.** Until Phase 3
+ * S4 the ONLY caller of push_project_params in the whole tree was `prepare_render`. So a rendered WAV
+ * carried the project's mixer, master bus, reverb, delay, EQ bank and every sampler's drive / filter /
+ * crush / loop / sample window — and the SDL shell PLAYING that same project carried none of it. Live
+ * playback ran on whatever the engine happened to hold: its own defaults at startup, or the previous
+ * project's settings after a load. It was not audible on the default project (whose values happen to be
+ * the engine's own), which is exactly why it survived Phase 2 and three Phase-3 sessions.
+ *
+ * The reason it could survive at all is that it is invisible to the conformance ladder: ptplay compares
+ * EVENTS, and none of this is an event; ptvoice compares the calls a NOTE makes, and none of this is
+ * made by a note; ptrender compares audio, and ptrender renders — so it goes through the one path that
+ * was correct. Nothing in seven tools looks at what the engine holds while the app is merely running.
+ *
+ * Call it after a project is loaded, and again whenever a screen edits something in it that the engine
+ * keeps on its own (the mixer, the master bus, an instrument's params — SongcoreHost::push_params /
+ * push_instrument).
+ */
+template <typename Engine>
+void push_live_params(Engine& engine, const Project& project) {
+    engine.setTempo(project.tempo);
+    push_mixer(engine, project);
+    push_all_instrument_params(engine, project);
 }
 
 // ─── media: opens files, produces the Routing ────────────────────────────────────────────────────
@@ -224,6 +266,147 @@ MediaLoadResult load_project_media(Engine& engine, const Project& project,
         }
     }
     return result;
+}
+
+// ─── the instrument operations (core/logic/InstrumentController.kt) ──────────────────────────────
+//
+// The three verbs the INSTRUMENT screen and the pool need that are NOT a plain parameter edit, because
+// they own a SOURCE and freeing it is the engine's business. Kotlin's InstrumentController holds them,
+// together with its ~25 `updateXxx(instrument, value)` setters — and those setters are deliberately NOT
+// ported: they are `instrument.field = v.coerceIn(...)` plus an engine push, and in C++ the module's
+// own `handle_input` does the assignment (as every other screen module already does) and the dispatcher
+// makes ONE push afterwards. A controller class whose entire content is "assign, then push" is a layer
+// that exists only to be a layer, and porting it would put the model mutation somewhere no golden could
+// see it — the pool and MODS modules would then be untestable by ptinput.
+//
+// ⚠️ The SoundFont path→slot map is NOT ported either, and must not be: it lives in the ENGINE now
+// (S6b moved the whole SF bank out of jni-bridge.cpp), which already de-dups by path and evicts LRU.
+// Kotlin's `sfSlotMap` is the Kotlin-side shadow of that map. A second copy here would be a second
+// truth about which slot a file is in.
+
+/** SF2 preset count for an instrument, or 0 when it has no SoundFont loaded. */
+template <typename Engine>
+int soundfont_preset_count(Engine& engine, const Instrument& ins, const Routing& routing) {
+    if (!ins.soundfontPath.has_value()) return 0;
+    const int slot = routing.sfSlot[ins.id];
+    return (slot < 0) ? 0 : engine.getSoundfontPresetCount(slot);
+}
+
+/** The list INDEX of the instrument's current bank+preset, or 0 when not found. */
+template <typename Engine>
+int soundfont_preset_index(Engine& engine, const Instrument& ins, const Routing& routing) {
+    if (!ins.soundfontPath.has_value()) return 0;
+    const int slot = routing.sfSlot[ins.id];
+    if (slot < 0) return 0;
+    const int count = engine.getSoundfontPresetCount(slot);
+    for (int i = 0; i < count; ++i) {
+        int bank = -1, preset = -1;
+        if (!engine.getSoundfontPresetAt(slot, i, &bank, &preset)) continue;
+        if (bank == ins.sfBank && preset == ins.sfPreset) return i;
+    }
+    return 0;
+}
+
+/** The display name of the instrument's current preset — "---" when there is no SoundFont. */
+template <typename Engine>
+std::string soundfont_preset_name(Engine& engine, const Instrument& ins, const Routing& routing) {
+    if (!ins.soundfontPath.has_value()) return "---";
+    const int slot = routing.sfSlot[ins.id];
+    if (slot < 0) return "---";
+    return engine.getSoundfontPresetName(slot, ins.sfBank, ins.sfPreset);
+}
+
+/**
+ * Move to the preset at `index` in the SF2's list — the INSTRUMENT screen's PRESET row.
+ *
+ * It writes the instrument's bank+preset and nothing else. Kotlin also calls
+ * `backend.setSoundfontPreset(slot, bank, preset)` here so that previews use the new sound; the C++
+ * engine's twin of that call is a LOG LINE ("applied per-note") — the bank and preset ride with every
+ * scheduled note, from `derive_soundfont_note`, so writing them on the instrument IS the whole of it.
+ */
+template <typename Engine>
+bool set_soundfont_preset_by_index(Engine& engine, Instrument& ins, const Routing& routing, int index) {
+    if (!ins.soundfontPath.has_value()) return false;
+    const int slot = routing.sfSlot[ins.id];
+    if (slot < 0) return false;
+    int bank = -1, preset = -1;
+    if (!engine.getSoundfontPresetAt(slot, index, &bank, &preset) || bank < 0) return false;
+    ins.sfBank   = bank;
+    ins.sfPreset = preset;
+    return true;
+}
+
+/**
+ * Change an instrument's TYPE, freeing the source the old type owned.
+ *
+ * The free is the point. Without it a slot toggled SAMPLER→SOUNDFONT keeps its PCM resident (and a
+ * SoundFont toggled the other way keeps ~2× its file size in RAM) for a source the UI no longer shows
+ * and nothing can ever play again.
+ *
+ * ⚠️ The SoundFont unload is guarded on SHARING: engine slots are keyed by PATH, so two instruments
+ * pointing at one .sf2 hold ONE slot between them. Unloading it because one of them changed type would
+ * silence the other.
+ *
+ * ⚠️ **`engine` is a POINTER and may be null, and that is not defensive padding — it is the contract.**
+ * These are MODEL edits that happen to also free engine resources, and gating the model edit on an
+ * engine being present would make the whole editing path require an audio device. It does not: the S4
+ * harness drives every one of these verbs against a null engine, and `tools/ptshot` renders the screens
+ * that show them with no engine in the process at all. Guard the ENGINE CALLS, never the document.
+ */
+template <typename Engine>
+void set_instrument_type(Engine* engine, Project& project, int id, InstrumentType newType,
+                         Routing& routing) {
+    if (id < 0 || id >= static_cast<int>(project.instruments.size())) return;
+    Instrument& ins = project.instruments[id];
+    ins.instrumentType = newType;
+
+    if (newType == InstrumentType::SOUNDFONT) {
+        ins.sampleFilePath.reset();
+        if (engine) engine->clearSample(id);
+        routing.sampleRateRatio[id] = 1.0f;
+    } else {
+        const std::optional<std::string> sfPath = ins.soundfontPath;
+        ins.soundfontPath.reset();
+        if (sfPath.has_value()) {
+            bool sharedWithAnother = false;
+            for (const Instrument& other : project.instruments)
+                if (other.soundfontPath == sfPath) { sharedWithAnother = true; break; }
+            if (engine && !sharedWithAnother && routing.sfSlot[id] >= 0)
+                engine->unloadSoundfont(routing.sfSlot[id]);
+        }
+        routing.sfSlot[id] = -1;
+    }
+}
+
+/**
+ * Reset a slot to empty — the pool's A+B. The instrument TYPE is KEPT, so a SoundFont slot stays a
+ * (now empty) SoundFont slot rather than silently becoming a sampler under the user's cursor.
+ * `engine` may be null; see set_instrument_type.
+ */
+template <typename Engine>
+void clear_instrument(Engine* engine, Project& project, int id, Routing& routing) {
+    if (id < 0 || id >= static_cast<int>(project.instruments.size())) return;
+
+    const std::optional<std::string> sfPath  = project.instruments[id].soundfontPath;
+    const InstrumentType             keepType = project.instruments[id].instrumentType;
+
+    Instrument fresh(id);
+    fresh.sampleId       = id;   // the factory value — Project's Array(128) initializer
+    fresh.instrumentType = keepType;
+    project.instruments[id] = std::move(fresh);
+
+    if (engine) engine->clearSample(id);
+    routing.sampleRateRatio[id] = 1.0f;
+
+    // …and the SF2, if this was its last user. Same sharing guard as set_instrument_type.
+    if (sfPath.has_value()) {
+        bool stillUsed = false;
+        for (const Instrument& other : project.instruments)
+            if (other.soundfontPath == sfPath) { stillUsed = true; break; }
+        if (engine && !stillUsed && routing.sfSlot[id] >= 0)
+            engine->unloadSoundfont(routing.sfSlot[id]);
+    }
+    routing.sfSlot[id] = -1;
 }
 
 }  // namespace songcore

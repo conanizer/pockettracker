@@ -13,6 +13,7 @@
 namespace pt::ui {
 
 using songcore::Chain;
+using songcore::Instrument;
 using songcore::Note;
 using songcore::Phrase;
 using songcore::Project;
@@ -114,6 +115,12 @@ int InputDispatcher::max_selection_row() const {
     return (s_.currentScreen == ScreenType::SONG) ? 255 : 15;
 }
 
+bool InputDispatcher::on_instrument_screen() const {
+    return s_.currentScreen == ScreenType::INSTRUMENT ||
+           s_.currentScreen == ScreenType::INST_POOL ||
+           s_.currentScreen == ScreenType::MODS;
+}
+
 CursorContext InputDispatcher::cursor_context() const {
     const Project& p = *s_.project;
     switch (s_.currentScreen) {
@@ -147,6 +154,33 @@ CursorContext InputDispatcher::cursor_context() const {
             gs.cursorColumn = 1;
             return groove_.cursor_context(gs);
         }
+
+        case ScreenType::INSTRUMENT: {
+            InstrumentEditorState is{p.instruments[static_cast<size_t>(s_.currentInstrument)]};
+            is.cursorRow     = s_.instrumentCursorRow;
+            is.cursorColumn  = s_.instrumentCursorColumn;
+            // The PRESET row's range is the SF2's own list length, so the context needs it.
+            is.sfPresetName  = s_.sfPresetName;
+            is.sfPresetCount = s_.sfPresetCount;
+            is.sfPresetIndex = s_.sfPresetIndex;
+            return instrument_.cursor_context(is);
+        }
+
+        case ScreenType::INST_POOL: {
+            InstrumentPoolState ps{p};
+            ps.selectedInstrument = s_.currentInstrument;
+            ps.cursorColumn       = s_.poolCursorColumn;
+            return pool_.cursor_context(ps);
+        }
+
+        case ScreenType::MODS: {
+            ModulationState ms{p.instruments[static_cast<size_t>(s_.currentInstrument)]};
+            ms.cursorRow  = s_.modCursorRow;
+            ms.cursorPair = s_.modCursorPair;
+            ms.cursorSide = s_.modCursorSide;
+            return mods_.cursor_context(ms);
+        }
+
         default:
             return cc::none();  // a placeholder screen has nothing to edit
     }
@@ -205,6 +239,33 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
                               /*cursor_column=*/1, action)
                 .modified;
 
+        case ScreenType::INSTRUMENT: {
+            const InstrumentInputResult r = instrument_.handle_input(
+                p.instruments[static_cast<size_t>(s_.currentInstrument)], s_.instrumentCursorRow,
+                s_.instrumentCursorColumn, action);
+
+            // The PRESET row. The module deliberately does not resolve it — the bank+preset behind an
+            // index live in the SF2's own list, which only the ENGINE has opened. Keeping that one
+            // lookup here is what keeps the module a pure function of the Project, and therefore
+            // measurable by tools/ptinput.
+            if (r.presetIndexChanged) host_.set_sf_preset_by_index(s_.currentInstrument, r.presetIndex);
+            return r.modified;
+        }
+
+        case ScreenType::INST_POOL:
+            return pool_.handle_input(p.instruments[static_cast<size_t>(s_.currentInstrument)],
+                                      s_.poolCursorColumn, action);
+
+        case ScreenType::MODS: {
+            ModulationState ms{p.instruments[static_cast<size_t>(s_.currentInstrument)]};
+            ms.cursorPair = s_.modCursorPair;
+            ms.cursorSide = s_.modCursorSide;
+            return mods_
+                .handle_input(p.instruments[static_cast<size_t>(s_.currentInstrument)],
+                              ms.active_slot_index(), s_.modCursorRow, action)
+                .modified;
+        }
+
         default:
             return false;
     }
@@ -214,6 +275,13 @@ void InputDispatcher::mark_modified(bool table_touched) {
     // ⚠️ The consumer caches which tables it has already pushed to the engine. push_project
     // invalidates that cache; an IN-PLACE edit cannot, so the table screen must say so itself.
     if (table_touched || s_.currentScreen == ScreenType::TABLE) host_.invalidate_tables();
+
+    // ⚠️ An instrument's params are ENGINE STATE, not something a note carries: the engine holds one
+    // slot per instrument for its drive, crush, downsample, filter, sample window and loop, and reads
+    // them as a voice runs. Turn the filter while a pad rings and you must hear it turn. Nothing on the
+    // event path pushes them (a note re-pushes the mods and sends, but not these), so the edit says so
+    // here — the same call Kotlin's InstrumentController.updateDrive makes.
+    if (on_instrument_screen()) host_.push_instrument(s_.currentInstrument);
 
     // An edit made WHILE PLAYING has to reach the lookahead already scheduled past it, or it is not
     // heard until the buffer happens to roll over it. Android does this from a
@@ -386,15 +454,55 @@ void InputDispatcher::apply_fx_type_change(int effect_code) {
 // they mirror Kotlin's `InputController.handleALeft`; the methods mirror `ButtonHandlers.onALeft`.
 // Both sets are named after what they are, and both names are right.
 
+/**
+ * The INSTRUMENT screen's TYPE row. See the header for why this refuses rather than asking.
+ *
+ * The refusal is not timidity — SAMPLER↔SOUNDFONT is the one edit on this screen that DESTROYS
+ * something (the old type's source is freed; a sampler has no use for an .sf2 and vice versa). Kotlin
+ * puts a confirm dialog in front of it for exactly that reason. Silently dropping a loaded sample
+ * because the user nudged A+UP one row too far is the worst of the three options; refusing with a
+ * message is the honest one until the modal system lands.
+ */
+void InputDispatcher::toggle_instrument_type() {
+    Project&    p   = host_.edit_project();
+    Instrument& ins = p.instruments[static_cast<size_t>(s_.currentInstrument)];
+
+    if (ins.sampleFilePath.has_value() || ins.soundfontPath.has_value()) {
+        s_.statusMessage = "CLEAR SLOT FIRST";
+        s_.statusSuccess = false;
+        return;
+    }
+
+    const songcore::InstrumentType next =
+        (ins.instrumentType == songcore::InstrumentType::SOUNDFONT)
+            ? songcore::InstrumentType::SAMPLER
+            : songcore::InstrumentType::SOUNDFONT;
+    host_.set_instrument_type(s_.currentInstrument, next);
+
+    // The row map just changed under the cursor (a SoundFont gains PRESET and loses the loop rows), and
+    // the cursor is sitting on row 0 — which exists in both. Nothing to clamp, but the SF preset
+    // readback must be re-taken, and the feed does that from the path+type on the next frame.
+    s_.statusMessage = (next == songcore::InstrumentType::SOUNDFONT) ? "TYPE: SOUNDFONT" : "TYPE: SAMPLER";
+    s_.statusSuccess = true;
+}
+
+/** True when the cursor is on INSTRUMENT's TYPE cell, the one A+UP/DOWN does not merely increment. */
+bool InputDispatcher::on_instrument_type_cell() const {
+    return s_.currentScreen == ScreenType::INSTRUMENT && s_.instrumentCursorRow == 0 &&
+           s_.instrumentCursorColumn == 1;
+}
+
 void InputDispatcher::on_a_up() {
     if (s_.fxHelper.isOpen) { fx_move_up(s_.fxHelper); return; }
     if (on_fx_type_column()) { s_.fxHelper = fx_helper_opened_at(current_fx_type_index()); return; }
+    if (on_instrument_type_cell()) { toggle_instrument_type(); return; }
     selection_or_single(pt::ui::on_a);
 }
 
 void InputDispatcher::on_a_down() {
     if (s_.fxHelper.isOpen) { fx_move_down(s_.fxHelper); return; }
     if (on_fx_type_column()) { s_.fxHelper = fx_helper_opened_at(current_fx_type_index()); return; }
+    if (on_instrument_type_cell()) { toggle_instrument_type(); return; }
     selection_or_single(pt::ui::on_b);   // A+DOWN DECREMENTS — `on_b` is the generic "step down"
 }
 
@@ -447,6 +555,17 @@ void InputDispatcher::on_a_b() {
         s_.selection.exit();
         return;
     }
+
+    // The pool's NAME column: A+B CLEARS the slot (M8's EDIT+OPTION). It frees the sample's PCM and,
+    // if this was the SoundFont's last user, that .sf2's engine slot too — which is the whole reason it
+    // is a host verb and not a field assignment. The instrument TYPE survives, so a SoundFont slot
+    // stays a (now empty) SoundFont slot rather than silently becoming a sampler under the cursor.
+    if (s_.currentScreen == ScreenType::INST_POOL && s_.poolCursorColumn == 0) {
+        host_.clear_instrument(s_.currentInstrument);
+        mark_modified();
+        return;
+    }
+
     generic_input(pt::ui::on_a_b);
 }
 
@@ -519,6 +638,14 @@ void InputDispatcher::cycle_current_item(int delta) {
         case ScreenType::GROOVE:
             s_.currentGroove = wrap(s_.currentGroove, 127);
             break;
+        // INSTRUMENT and MODS cycle the same thing — the instrument — because MODS *is* a view of one.
+        // (INST_POOL is absent on purpose: there, the D-PAD already selects the instrument, so B+LEFT
+        // would be a second, redundant way to do it. Kotlin has the same gap for the same reason.)
+        case ScreenType::INSTRUMENT:
+        case ScreenType::MODS:
+            s_.currentInstrument    = wrap(s_.currentInstrument, 127);
+            s_.lastEditedInstrument = s_.currentInstrument;
+            break;
         default:
             break;
     }
@@ -528,12 +655,25 @@ void InputDispatcher::on_b_left()  { cycle_current_item(-1); }
 void InputDispatcher::on_b_right() { cycle_current_item(+1); }
 
 void InputDispatcher::on_b_up() {
+    // The pool pages by 16 like the song does — but it CLAMPS at the ends where a single D-pad step
+    // wraps 00↔7F. Paging past the end of a 128-slot list should stop at the end, not lap it.
+    if (s_.currentScreen == ScreenType::INST_POOL) {
+        s_.currentInstrument    = std::max(0, s_.currentInstrument - 16);
+        s_.lastEditedInstrument = s_.currentInstrument;
+        return;
+    }
     if (s_.currentScreen != ScreenType::SONG) return;
     s_.cursorRow = std::max(0, s_.cursorRow - 16);   // TrackerController.moveSongBigUp
     scroll_song_to_row(s_, s_.cursorRow);
 }
 
 void InputDispatcher::on_b_down() {
+    if (s_.currentScreen == ScreenType::INST_POOL) {
+        const int last = static_cast<int>(s_.project->instruments.size()) - 1;
+        s_.currentInstrument    = std::min(last, s_.currentInstrument + 16);
+        s_.lastEditedInstrument = s_.currentInstrument;
+        return;
+    }
     if (s_.currentScreen != ScreenType::SONG) return;
     s_.cursorRow = std::min(255, s_.cursorRow + 16);  // moveSongBigDown
     scroll_song_to_row(s_, s_.cursorRow);
@@ -844,22 +984,48 @@ void InputDispatcher::on_select() {
 
 void InputDispatcher::on_stop_preview() {
     // Only the screens that can START an audition can stop one — `stopActivePreview()`. On PHRASE it
-    // is gated on the setting, because with previews off there is nothing to silence.
-    const bool previewScreen = (s_.currentScreen == ScreenType::TABLE) ||
+    // is gated on the setting, because with previews off there is nothing to silence. The three
+    // instrument screens always can: their START *is* an audition, and it rings out until stopped, so
+    // "press any button to silence it" is the only way to end it.
+    const bool previewScreen = (s_.currentScreen == ScreenType::TABLE) || on_instrument_screen() ||
                                (s_.currentScreen == ScreenType::PHRASE && s_.notePreviewEnabled);
     if (previewScreen) host_.stop_preview();
 }
 
 void InputDispatcher::on_start() {
-    // What START plays depends on the screen you are ON: the phrase you are editing, the chain you
-    // are editing, or the whole song from row 0 (`playSong` takes startRow=0 — it does NOT start at
-    // the cursor). Every other screen falls back to the phrase, so START always makes a sound.
+    // ⚠️ **START IS NOT ALWAYS THE TRANSPORT.** On the four screens that edit a SOUND rather than an
+    // arrangement — INSTRUMENT, INST.POOL, MODS and TABLE — it AUDITIONS the instrument at its own
+    // root, on the preview lane, and the note rings until the next plain button press silences it. That
+    // is the whole point of sitting on one of them: you are dialling a sound in and listening to it.
+    //
+    // It does not consult `is_playing()`, and that is deliberate: auditioning an instrument OVER a
+    // running song is exactly what you want while you fit it into the mix, and the preview lane is a
+    // ninth voice — it steals nothing from the eight the song is using.
+    //
+    // ⚠️ TABLE auditions **through the table it is showing** (`previewInstrumentWithTable(currentTable,
+    // currentTable)` — the instrument id and the table id are the same number, because instrument N
+    // owns table N). Without the override you would hear the instrument's own table instead of the
+    // automation on the screen in front of you, which is the one thing the audition exists to check.
+    if (on_instrument_screen()) {
+        host_.preview_instrument(s_.currentInstrument);
+        return;
+    }
+    if (s_.currentScreen == ScreenType::TABLE) {
+        host_.preview_instrument(s_.currentTable, /*tableIdOverride=*/s_.currentTable);
+        return;
+    }
+
+    // Everywhere else START is the transport.
     if (host_.is_playing()) {
         host_.stop();
         return;
     }
     switch (s_.currentScreen) {
-        case ScreenType::SONG:  host_.play_song(0); break;
+        // ⚠️ SONG starts at the CURSOR ROW, not at row 0 — "play from here" is the gesture, and on a
+        // 200-row arrangement starting from the top every time makes the screen unusable. (The screens
+        // with no song cursor — MIXER, EFFECTS, PROJECT, SETTINGS — start at 0, because they have no
+        // "here" to start from.)
+        case ScreenType::SONG:  host_.play_song(s_.cursorRow); break;
         case ScreenType::CHAIN: host_.play_chain(s_.currentChain); break;
         default:                host_.play_phrase(s_.currentPhrase); break;
     }

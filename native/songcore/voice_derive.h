@@ -388,7 +388,8 @@ inline SamplerNoteArgs derive_sampler_note(const NoteOnPayload& n, int64_t frame
 // the SF2 never loaded and Kotlin drops the note.
 inline SoundfontNoteArgs derive_soundfont_note(const NoteOnPayload& n, int64_t frame, int trackId,
                                                int instrumentId, const Instrument& ins,
-                                               int tempo, int sampleRate, int sfSlot) {
+                                               int tempo, int sampleRate, int sfSlot,
+                                               bool rootAudition = false) {
     SoundfontNoteArgs a;
     if (!ins.soundfontPath.has_value()) return a;   // valid = false → dropped
     if (sfSlot < 0) return a;
@@ -398,8 +399,12 @@ inline SoundfontNoteArgs derive_soundfont_note(const NoteOnPayload& n, int64_t f
 
     const int baseMidi = n.note + n.arp;
     // ROOT acts as a transpose, matching the sampler: a ROOT below C-4 raises pitch, above lowers it.
-    // (isRootAudition is a preview-only flag; it is never set on the sequencer path.)
-    const int transpose = 60 - note_to_midi(ins.root);
+    //
+    // `rootAudition` is the INSTRUMENT screen's "play me my root" preview, and it is not a nicety: that
+    // preview plays note == root, so the transpose below would resolve to root + (60 − root) = 60 — a
+    // C-4, every time, for every ROOT. The button would appear to ignore the very parameter it is
+    // there to audition. The sequencer NEVER sets it (Kotlin: `isRootAudition`, default false).
+    const int transpose = rootAudition ? 0 : 60 - note_to_midi(ins.root);
 
     const float volume = f32_from_bits(n.velGainBits);
     // The V column IS the MIDI velocity — TSF applies its own dB curve, so the channel volume stays at
@@ -449,9 +454,14 @@ inline SoundfontNoteArgs derive_soundfont_note(const NoteOnPayload& n, int64_t f
 // a note is dropped instead. Nothing about the note path is left to be verified only by ear.
 //
 // `tableLoaded` is the caller's POOL_TABLES-sized cache (Kotlin's `loadedTables` set).
+//
+// `rootAudition` is a PREVIEW-only flag and it is deliberately a parameter rather than a field on the
+// Event: the event schema is ratified, its records are byte-compared against the goldens, and a
+// preview is not a bus event in the first place (it never reaches the router or the trace). See
+// derive_soundfont_note for what it does and why the INSTRUMENT screen cannot work without it.
 template <typename Engine>
 void plan_note_on(Engine& engine, const Event& ev, const Project& project, const Routing& routing,
-                  bool* tableLoaded) {
+                  bool* tableLoaded, bool rootAudition = false) {
     const NoteOnPayload& n = ev.noteOn;
     const int instrumentId = ev.instrument;
     const int trackId      = ev.track;
@@ -494,7 +504,8 @@ void plan_note_on(Engine& engine, const Event& ev, const Project& project, const
 
     if (ins.instrumentType == InstrumentType::SOUNDFONT) {
         const SoundfontNoteArgs a = derive_soundfont_note(n, ev.frame, trackId, instrumentId, ins,
-                                                          tempo, sampleRate, routing.sfSlot[instrumentId]);
+                                                          tempo, sampleRate, routing.sfSlot[instrumentId],
+                                                          rootAudition);
         if (!a.valid) return;   // no soundfontPath, or the SF2 never loaded — Kotlin drops it here
 
         push_instrument_state();
