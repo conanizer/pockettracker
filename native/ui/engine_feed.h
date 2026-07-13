@@ -34,10 +34,16 @@ public:
      * ⚠️ Call it AFTER the transport fields (`isPlaying`, the playheads) are set from the host: the
      * waveform decay below is a function of `isPlaying`, and the table row is only resolved on the
      * TABLE screen. Reading the engine first would decay against the previous frame's transport.
+     *
+     * `now_ms` is the frame's clock reading — the MIXER's meters are polled on their own 60 ms cadence
+     * rather than once a frame, and a class whose behaviour is a function of time must be handed the
+     * time rather than reach for it (the same contract `SdlInput::handle_event` and `InputDispatcher`
+     * are built on).
      */
-    void poll(AudioEngine& engine, songcore::SongcoreHost& host, AppState& state) {
+    void poll(AudioEngine& engine, songcore::SongcoreHost& host, AppState& state, long long now_ms) {
         poll_engine(engine, state);
         poll_soundfont_presets(host, state);
+        poll_peaks(engine, state, now_ms);
     }
 
 private:
@@ -108,6 +114,43 @@ private:
     }
 
     /**
+     * The MIXER's meters: eight stereo track pairs, the master pair, and the two send returns.
+     *
+     * TWO THINGS ARE DELIBERATE HERE, and both are Kotlin's — its whole peak loop is a
+     * `LaunchedEffect(currentScreen)` gated on MIXER, ticking at `delay(60)`.
+     *
+     * ⚠️ **Only on the MIXER.** `getTrackPeaks` takes the engine's peak mutex, and the AUDIO CALLBACK
+     * takes it too (that is where the peaks are written). Polling it from the UI thread on every screen
+     * would be lock contention with the audio thread bought for a readout nobody is looking at.
+     *
+     * ⚠️ **Only every 60 ms, and that is not a saving — it is the CONTRACT the peak-hold is written
+     * against.** `MixerModule::PEAK_HOLD_FRAMES = 45` counts *refreshes*: on Android a refresh is a
+     * recomposition, and the only thing that triggers one on this screen is this poll. So the marker
+     * hangs 45 × 60 ms ≈ 2.7 s. Poll (and therefore age it) at the shell's 60 Hz instead and the same
+     * constant means 0.75 s — the meters would visibly fall off a cliff compared to Android's. The
+     * cadence is what keeps one constant meaning one thing on both platforms; `peaksVersion` is how the
+     * module knows a refresh happened, since its own draw runs at 60 Hz regardless.
+     *
+     * The manual decay is the mirror of `decayWaveform`: with the transport stopped the audio callback
+     * is not running, so nothing is decaying the peaks and the meters would freeze mid-level at the
+     * moment of the stop.
+     */
+    void poll_peaks(AudioEngine& engine, AppState& state, long long now_ms) {
+        if (state.currentScreen != ScreenType::MIXER) return;
+        if (peaksPolledMs_ != 0 && now_ms - peaksPolledMs_ < PEAK_POLL_MS) return;
+        peaksPolledMs_ = now_ms;
+
+        if (!state.isPlaying) {
+            engine.decayPeaks();
+            engine.decayWaveform();
+        }
+        engine.getTrackPeaks(state.trackPeaks);
+        engine.getMasterPeaks(state.masterPeaks);
+        engine.getSendPeaks(state.sendPeaks);
+        state.peaksVersion++;
+    }
+
+    /**
      * The INSTRUMENT screen's PRESET row: how many presets the loaded .sf2 has, which one this
      * instrument is on, and its name. Only the engine has opened the file — the Project stores a bank
      * and a preset NUMBER, not the list they index into.
@@ -153,6 +196,10 @@ private:
 
     int         sfCachedId_ = -1, sfCachedBank_ = -1, sfCachedPreset_ = -1;
     std::string sfCachedPath_{};
+
+    /** Kotlin's `delay(60)` between peak reads. See poll_peaks — it is a contract, not a throttle. */
+    static constexpr long long PEAK_POLL_MS = 60;
+    long long                  peaksPolledMs_ = 0;
 };
 
 }  // namespace pt::ui

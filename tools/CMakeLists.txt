@@ -19,7 +19,16 @@ project("pockettracker-tools" LANGUAGES C CXX)
 #   ptrandom      S7   the random FX            12 distributions     (units/s7-random.txt)
 #   ptnondet      S7   which projects may be byte-compared at all   (+ a standalone .ptp diagnostic)
 #   ptshot   Phase3 S1 the UI, as pixels        any screen → a PNG, headless (no golden yet — see below)
-#   ptinput  Phase3 S3 the input layer          5507 cases           (units/p3-input.txt)
+#   ptinput  Phase3 S3 the input layer          6907 cases           (units/p3-input.txt)
+#   ptdispatch Ph3 S5  the input DISPATCHER     67 assertions — NO golden; see below and its header
+#
+# ⚠️ ptdispatch is NOT a conformance tool, and the line matters. Every tool above it byte-compares
+# against a golden recorded from the Kotlin code it replaces — they encode what Kotlin DOES. ptdispatch
+# is hand-written assertions: it encodes what the author believed Kotlin does, having read it. It exists
+# because ptinput measures the MODULES and is structurally blind to the JOIN between them (revert S5's
+# START fix and ptinput stays green while ptdispatch goes red), and because the dispatcher has now
+# carried a bug into two consecutive sessions. It does not replace the Kotlin-recorded golden S3
+# describes; that is still a session of its own.
 #
 # ⚠️ ptrender's `live == render` check exists because of a hole every other tool in this list is
 # STRUCTURALLY blind to. The engine holds state on its own behalf — the mixer, the master bus, reverb,
@@ -120,6 +129,16 @@ add_executable(ptinput ptinput/main.cpp)
 pt_ieee_exact(ptinput)
 target_link_libraries(ptinput PRIVATE pt-ui)
 
+# ptdispatch — the input DISPATCHER (Phase 3 S5). The one tool here that is NOT a conformance tool:
+# it takes no golden, because what it checks is the JOIN between the modules, cursor_move and
+# navigation, and Kotlin's side of that join is AppInputDispatcher — entangled with ~60 Compose state
+# refs and not recordable without a session of its own. Hand-written assertions, transcribed from the
+# Kotlin source; see its header for why that is a weaker claim than the other nine make, and for the
+# two dispatcher bugs (S3's START, S4's cursor refresh) that ptinput was structurally blind to.
+add_executable(ptdispatch ptdispatch/main.cpp)
+pt_ieee_exact(ptdispatch)
+target_link_libraries(ptdispatch PRIVATE pt-ui)
+
 # ptrender writes WAVs, and the fingerprint goldens live beside the projects they describe.
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/render-out")
 
@@ -136,3 +155,5 @@ add_test(NAME s7-random        COMMAND ptrandom    "${PT_TESTDATA}")
 # fails as "the two renders differ" — true, useless, and hours from the cause. This fails first, by name.
 add_test(NAME s7-determinism   COMMAND ptnondet    "${PT_TESTDATA}")
 add_test(NAME p3-input         COMMAND ptinput     "${PT_TESTDATA}/units/p3-input.txt")
+# No golden argument, because it has none — it asserts, it does not compare. See ptdispatch's header.
+add_test(NAME p3-dispatch      COMMAND ptdispatch)

@@ -27,9 +27,11 @@
 #include "ui/canvas.h"
 #include "ui/helpers.h"
 #include "ui/modules/chain_editor.h"
+#include "ui/modules/effects_editor.h"
 #include "ui/modules/groove_editor.h"
 #include "ui/modules/instrument_editor.h"
 #include "ui/modules/instrument_pool.h"
+#include "ui/modules/mixer.h"
 #include "ui/modules/modulation.h"
 #include "ui/modules/navigation_map.h"
 #include "ui/modules/oscilloscope.h"
@@ -53,8 +55,9 @@ public:
     /**
      * Paint one frame of `state` onto `c`. The only entry point the shell (or ptshot) calls.
      *
-     * NOT const, and that is the oscilloscope's doing: its peak-hold dots and falling spectrum bars
-     * are functions of the previous frame, so the module carries state across draws.
+     * NOT const, and that is the oscilloscope's doing — and, since S5, the MIXER's: both carry
+     * peak-hold state across draws, because a falling peak marker is a function of the PREVIOUS frame
+     * and there is nowhere else for that to live. They remain the only two stateful modules in the UI.
      */
     void draw(Canvas& c, const AppState& state);
 
@@ -80,6 +83,8 @@ private:
     InstrumentEditorModule instrumentEditor_;
     InstrumentPoolModule  instrumentPool_;
     ModulationModule      modulation_;
+    MixerModule           mixer_;        // stateful (peak-hold) — see draw()
+    EffectModule          effects_;
     NavigationMapModule   navigationMap_;
 };
 

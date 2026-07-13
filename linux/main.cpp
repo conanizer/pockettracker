@@ -316,8 +316,10 @@ int main(int argc, char** argv) {
     // handheld's serial/ssh terminal, a Windows box on a legacy code page), and a stray em-dash
     // arrives there as mojibake.
     std::printf("A+UP on an FX-TYPE column opens the effect picker - release A to choose\n");
-    std::printf("R+DPAD moves between screens: SONG CHAIN PHRASE INSTRUMENT TABLE MODS INST.POOL GROOVE\n");
-    std::printf("START auditions the instrument on INSTRUMENT/POOL/MODS/TABLE - any button silences it\n\n");
+    std::printf("R+DPAD moves between screens: SONG CHAIN PHRASE INSTRUMENT TABLE MODS INST.POOL\n");
+    std::printf("                             GROOVE MIXER EFFECTS\n");
+    std::printf("START auditions the instrument on INSTRUMENT/POOL/MODS/TABLE - any button silences it\n");
+    std::printf("SELECT on the EFFECTS TIME row toggles delay sync (free ms <-> note divisions)\n\n");
 
     bool   running    = true;
     Uint64 lastStatus = 0;
@@ -363,9 +365,10 @@ int main(int argc, char** argv) {
         state.trackMask        = host.track_mask();
 
         // Everything the UI reads back OUT of the engine: the scope's samples, the eight monitored
-        // notes, the table's playing row, the SF2 preset list. AFTER the transport fields above — the
-        // waveform decay is a function of isPlaying, and the table row is only resolved on TABLE.
-        feed.poll(*engine, host, state);
+        // notes, the table's playing row, the SF2 preset list, the mixer's meters. AFTER the transport
+        // fields above — the waveform decay is a function of isPlaying, and the table row is only
+        // resolved on TABLE. `now` because the meters poll on their own 60 ms cadence, not per frame.
+        feed.poll(*engine, host, state, static_cast<long long>(now));
 
         layout.draw(canvas, state);
         video.present(canvas);

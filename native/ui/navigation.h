@@ -279,6 +279,17 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
             default: break;
         }
     } else {
+        // REFRESH — every screen that owns a cursor resets it to its top-left editable cell on entry.
+        //
+        // ⚠️ INSTRUMENT, MODS and INST.POOL were MISSING here until S5 (their cursors persisted across
+        // an entry, where Android's refresh them). Harmless-looking, but INSTRUMENT is the one screen
+        // whose ROW MAP changes shape under it — a SoundFont has a different row list from a sampler —
+        // so a stale row survives onto a map that may not have one, and the cursor silently draws
+        // nowhere. `instrument_row_kind` is bounds-safe (out of range reads as SINGLE, as Kotlin's
+        // getOrElse does), so it was never a crash; it was a cursor you could lose.
+        //
+        // EFFECTS is deliberately absent: Kotlin does not reset it either, so its row persists in BOTH
+        // modes.
         switch (r.screen) {
             case ScreenType::SONG:
             case ScreenType::CHAIN:
@@ -291,6 +302,18 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
                 break;
             case ScreenType::GROOVE:
                 s.grooveCursorRow = 0;
+                break;
+            case ScreenType::INSTRUMENT:
+                s.instrumentCursorRow = 0; s.instrumentCursorColumn = 1;
+                break;
+            case ScreenType::MODS:
+                s.modCursorRow = 0; s.modCursorPair = 0; s.modCursorSide = 0;
+                break;
+            case ScreenType::INST_POOL:
+                s.poolCursorColumn = 0;   // …but NOT currentInstrument: that IS the pool's row
+                break;
+            case ScreenType::MIXER:
+                s.mixerCursorColumn = 0; s.mixerMasterRow = 0;
                 break;
             default: break;
         }

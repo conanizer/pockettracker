@@ -29,8 +29,16 @@
 //   • INST.POOL's cursor ROW *is* `currentInstrument`. Moving up and down the pool selects a different
 //     instrument; only the column lives in the pool's own state.
 //
-// The screens that still do not exist (MIXER, PROJECT, SETTINGS…) fall through to the shared 16-row
-// default, which is what the Kotlin `else` branch does for anything it has not named.
+// And the two S5 adds:
+//
+//   • MIXER is a SHAPE, not a rectangle. Rows 2 and 3 exist only in column 8, so the cursor walks the
+//     eight track meters along row 0, drops to the two send returns on row 1, and reaches the master
+//     strip by continuing DOWN column 8. Its row-0 columns are the only ones in the app that WRAP
+//     (track 0 ← master → track 0), because a mixer is a ring of channels rather than a document.
+//   • EFFECTS is one column of eight rows, and they CLAMP at both ends.
+//
+// The screens that still do not exist (PROJECT, SETTINGS…) fall through to the shared 16-row default,
+// which is what the Kotlin `else` branch does for anything it has not named.
 
 #include "ui/app_state.h"
 #include "ui/instrument_row_layout.h"
@@ -184,6 +192,22 @@ inline void move_cursor_up(AppState& s) {
             detail::move_pool_selection(s, -1);
             break;
 
+        case ScreenType::MIXER:
+            // Out of a send return, UP lands on the FIRST TRACK — not on the track above it, because
+            // there is no track above it: the sends sit under the whole meter row, not under a channel.
+            if (s.mixerMasterRow == 1 && (s.mixerCursorColumn == 0 || s.mixerCursorColumn == 1)) {
+                s.mixerMasterRow    = 0;
+                s.mixerCursorColumn = 0;
+            } else if (s.mixerMasterRow > 0) {
+                s.mixerMasterRow--;   // up the master strip: LIM → OTT → EQ → MIX, column 8 throughout
+            }
+            // Row 0 (the meters): nothing above them — stay.
+            break;
+
+        case ScreenType::EFFECTS:
+            if (s.effectsCursorRow > 0) s.effectsCursorRow--;
+            break;
+
         default:
             s.cursorRow = (s.cursorRow > 0) ? s.cursorRow - 1 : 15;
             break;
@@ -229,6 +253,22 @@ inline void move_cursor_down(AppState& s) {
 
         case ScreenType::INST_POOL:
             detail::move_pool_selection(s, +1);
+            break;
+
+        case ScreenType::MIXER:
+            if (s.mixerMasterRow == 0 && s.mixerCursorColumn < 8) {
+                // Down off ANY track meter → the REV send. (The tracks feed the sends; the gesture says
+                // so.) Column 8 is excluded because the master strip continues downward instead.
+                s.mixerMasterRow    = 1;
+                s.mixerCursorColumn = 0;
+            } else if (s.mixerCursorColumn == 8 && s.mixerMasterRow < 3) {
+                s.mixerMasterRow++;   // MIX → EQ → OTT|DUST → LIM
+            }
+            // A send return: nothing below it — stay.
+            break;
+
+        case ScreenType::EFFECTS:
+            if (s.effectsCursorRow < 7) s.effectsCursorRow++;
             break;
 
         default:
@@ -285,10 +325,33 @@ inline void move_cursor_left(AppState& s) {
             if (s.poolCursorColumn > 0) s.poolCursorColumn--;
             return;
 
+        case ScreenType::MIXER:
+            if (s.mixerMasterRow == 0) {
+                // The meter row WRAPS — the only wrapping column in the app. Track 0 → master, and the
+                // master → track 7.
+                s.mixerCursorColumn = (s.mixerCursorColumn > 0) ? s.mixerCursorColumn - 1 : 8;
+            } else if (s.mixerMasterRow == 1 && s.mixerCursorColumn == 1) {
+                s.mixerCursorColumn = 0;   // DEL → REV
+            } else if (s.mixerCursorColumn == 8) {
+                // The whole master strip (EQ / OTT / LIM) exits LEFT onto the DEL send, whichever row
+                // it was on — the strip is a column, and this is the door out of it.
+                s.mixerMasterRow    = 1;
+                s.mixerCursorColumn = 1;
+            }
+            // REV (row 1, column 0): nothing to its left — stay.
+            return;
+
         default:
             break;
     }
     // GROOVE falls through here too, and correctly does nothing: min == max == 0.
+    //
+    // ⚠️ So does EFFECTS — and there it is not a no-op: min_cursor_column(EFFECTS) is 0, so LEFT walks
+    // the SHARED `cursorColumn` (SONG / CHAIN / PHRASE's) down to 0 while you are looking at a screen
+    // that never reads it. Kotlin does exactly this, for exactly the same reason (EFFECTS is not named
+    // in its `when`, so it lands in the `else`), and it is invisible on both platforms because
+    // `go_to_screen` restores or refreshes that column on the way back into the three screens that own
+    // it. Kept bug-for-bug rather than "fixed": the fix would be a divergence with no observable.
     const int minColumn = min_cursor_column(s.currentScreen);
     if (s.cursorColumn > minColumn) s.cursorColumn--;
 }
@@ -316,6 +379,17 @@ inline void move_cursor_right(AppState& s) {
 
         case ScreenType::INST_POOL:
             if (s.poolCursorColumn < 4) s.poolCursorColumn++;
+            return;
+
+        case ScreenType::MIXER:
+            if (s.mixerMasterRow == 0) {
+                s.mixerCursorColumn = (s.mixerCursorColumn < 8) ? s.mixerCursorColumn + 1 : 0;
+            } else if (s.mixerMasterRow == 1 && s.mixerCursorColumn == 0) {
+                s.mixerCursorColumn = 1;   // REV → DEL
+            } else if (s.mixerMasterRow == 1 && s.mixerCursorColumn == 1) {
+                s.mixerCursorColumn = 8;   // DEL → the master strip, entering it at the EQ row
+            }
+            // Already in column 8: it is the rightmost — stay.
             return;
 
         default:

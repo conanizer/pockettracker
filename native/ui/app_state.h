@@ -76,6 +76,15 @@ struct AppState {
     int modCursorPair = 0;  // 0 = MOD1+MOD2, 1 = MOD3+MOD4
     int modCursorSide = 0;  // 0 = left, 1 = right
 
+    // MIXER. Two ints, but NOT a grid: rows 2 and 3 exist only in column 8 (the master strip), and the
+    // cursor reaches them by walking DOWN it. Every other (row, column) pair is unreachable, and the
+    // module answers `none()` there rather than guessing — see ui/modules/mixer.h.
+    int mixerCursorColumn = 0;  // 0..7 = tracks, 8 = master
+    int mixerMasterRow    = 0;  // 0 = volumes, 1 = sends / EQ, 2 = OTT|DUST, 3 = LIM
+
+    /** EFFECTS. Eight editable rows; the screen draws fifteen (headers and spacers between them). */
+    int effectsCursorRow = 0;
+
     /**
      * Where the shared cursor was when you last left each of the three screens that share it.
      *
@@ -146,6 +155,20 @@ struct AppState {
     int  trackMask         = 0;
     /** The preview lane had audio last block; OCTA lights its scope only while STOPPED. */
     bool previewLaneActive = false;
+
+    // ── The MIXER's meters ───────────────────────────────────────────────────────────────────────
+    //
+    // Read out of the engine ONLY while the MIXER is up, and only every 60 ms — both of which are
+    // Kotlin's (its whole peak loop is a `LaunchedEffect(currentScreen)` gated on MIXER, ticking at
+    // `delay(60)`). Neither is an optimisation for its own sake: `getTrackPeaks` takes the engine's
+    // peak mutex, which the AUDIO CALLBACK also takes, so polling it at 60 Hz on every screen would be
+    // contention with the audio thread bought for nothing.
+    //
+    // ⚠️ `peaksVersion` is what the peak-HOLD counts, not frames. See ui/modules/mixer.h.
+    float    trackPeaks[16] = {};   // L/R per track
+    float    masterPeaks[2] = {};
+    float    sendPeaks[4]   = {};   // revL, revR, delL, delR
+    unsigned peaksVersion   = 0;
 
     // ── Selection ────────────────────────────────────────────────────────────────────────────────
     // The L+B multi-tap CELL/ROW/SCREEN machine (ui/selection.h). The grid editors have asked these

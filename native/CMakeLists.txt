@@ -202,10 +202,12 @@ if(NOT ANDROID)
             ui/input_dispatcher.cpp
             ui/layout.cpp
             ui/modules/chain_editor.cpp
+            ui/modules/effects_editor.cpp
             ui/modules/fx_helper_overlay.cpp
             ui/modules/groove_editor.cpp
             ui/modules/instrument_editor.cpp
             ui/modules/instrument_pool.cpp
+            ui/modules/mixer.cpp
             ui/modules/modulation.cpp
             ui/modules/navigation_map.cpp
             ui/modules/oscilloscope.cpp

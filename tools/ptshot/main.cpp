@@ -192,11 +192,12 @@ bool viz_from_name(const std::string& n, VisualizerType& out) {
 
 // ─── --demo: a synthetic feed for the furniture ──────────────────────────────────────────────────
 //
-// The oscilloscope and the note monitor are the two pieces of S2 furniture whose GEOMETRY only exists
-// when there is data in them: forty spectrum bars at amplitude zero draw nothing at all, and eight
-// OCTA lanes with no audio are one empty panel. ptshot has no engine and never will (that is what
-// makes it proof the UI is portable), so `--demo` fills those buffers with a deterministic formula
-// instead — the same reasoning that made S6b synthesize its golden media rather than sample it.
+// The oscilloscope, the note monitor and (since S5) the MIXER's meters are the pieces of furniture
+// whose GEOMETRY only exists when there is data in them: forty spectrum bars at amplitude zero draw
+// nothing at all, eight OCTA lanes with no audio are one empty panel, and a mixer at silence is
+// twenty-two empty troughs. ptshot has no engine and never will (that is what makes it proof the UI is
+// portable), so `--demo` fills those buffers with a deterministic formula instead — the same reasoning
+// that made S6b synthesize its golden media rather than sample it.
 //
 // It is a FIXTURE, not a golden: nothing here is compared against anything. Its whole job is to make
 // the bars, lanes and note rows visible so a human can check they are where Android puts them.
@@ -237,6 +238,26 @@ struct DemoFeed {
             state.trackNotes[i] = (i == 5) ? songcore::Note::EMPTY()
                                            : songcore::Note{(i * 2) % 12, 3 + (i % 4)};
         }
+
+        // The mixer's 22 meter channels. A descending staircase across the tracks, with L and R
+        // deliberately UNEQUAL on every one (a stereo meter that draws its two bars from one value is a
+        // mono meter, and this is what would show it), and levels chosen to land in all three colour
+        // zones: track 0 well into the red, the middle ones amber, the last ones green.
+        for (int i = 0; i < 8; ++i) {
+            state.trackPeaks[i * 2]     = 1.20f * std::pow(0.72f, static_cast<float>(i));
+            state.trackPeaks[i * 2 + 1] = 0.95f * std::pow(0.72f, static_cast<float>(i));
+        }
+        state.masterPeaks[0] = 0.90f;   // just under 0 dBFS — the top of the amber zone
+        state.masterPeaks[1] = 1.05f;   // …and just over it, so the red segments light on one side only
+        state.sendPeaks[0] = 0.35f;  state.sendPeaks[1] = 0.28f;   // reverb return
+        state.sendPeaks[2] = 0.12f;  state.sendPeaks[3] = 0.16f;   // delay return
+
+        // The contract that comes with filling those arrays: whoever refreshes the peaks bumps the
+        // version, because that is what the peak-HOLD counts rather than frames (ui/modules/mixer.h).
+        // The module also treats its very first draw as a refresh, so ptshot's single frame would place
+        // the markers either way — but a filler that did not say it had filled anything would be a trap
+        // for the next one.
+        state.peaksVersion++;
     }
 };
 
@@ -271,11 +292,14 @@ int main(int argc, char** argv) {
                      "              [--mod-cursor=PAIR,SIDE,ROW] [--sf-presets=COUNT,INDEX]\n"
                      "              [--demo] [--scale=N]\n"
                      "\n"
-                     "  --demo         synthesise the visualizer + note monitor, which are otherwise\n"
-                     "                 empty (ptshot has no engine). A fixture for geometry, not data.\n"
+                     "  --demo         synthesise the visualizer, the note monitor and the MIXER's\n"
+                     "                 meters, which are otherwise empty (ptshot has no engine).\n"
+                     "                 A fixture for geometry, not data.\n"
                      "  --sf-presets   likewise for the INSTRUMENT screen's PRESET row: only an engine\n"
                      "                 that has opened the .sf2 can answer it.\n"
-                     "  --mod-cursor   MODS has no columns — its cursor is (pair, side, row).\n");
+                     "  --mod-cursor   MODS has no columns — its cursor is (pair, side, row).\n"
+                     "  --cursor       on MIXER this is (masterRow, column): rows 2 and 3 exist only\n"
+                     "                 in column 8. On EFFECTS only the row is used (0..7).\n");
         return 2;
     }
     const std::string projectPath = argv[1];
@@ -407,6 +431,19 @@ int main(int argc, char** argv) {
                     // --instrument and --cursor's row are the same knob. Last one on the line wins.
                     state.currentInstrument = clamp(row, POOL_INSTRUMENTS - 1);
                     state.poolCursorColumn  = clamp(col, 4);
+                    break;
+
+                case ScreenType::MIXER:
+                    // (row, column) here means (mixerMasterRow, mixerCursorColumn). Rows 2 and 3 exist
+                    // ONLY in column 8, and the tool deliberately does not enforce that: a screenshot of
+                    // an unreachable cursor state is exactly how you check that the module answers
+                    // `none()` there and draws nothing highlighted.
+                    state.mixerMasterRow    = clamp(row, 3);
+                    state.mixerCursorColumn = clamp(col, 8);
+                    break;
+
+                case ScreenType::EFFECTS:
+                    state.effectsCursorRow = clamp(row, EffectModule::MAX_CURSOR_ROW);
                     break;
 
                 default: {

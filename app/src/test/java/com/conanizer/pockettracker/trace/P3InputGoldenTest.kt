@@ -23,12 +23,16 @@ import com.conanizer.pockettracker.input.CursorContext
 import com.conanizer.pockettracker.input.NO_DEFAULT
 import com.conanizer.pockettracker.ui.modules.ChainEditorModule
 import com.conanizer.pockettracker.ui.modules.ChainEditorState
+import com.conanizer.pockettracker.ui.modules.EffectModule
+import com.conanizer.pockettracker.ui.modules.EffectState
 import com.conanizer.pockettracker.ui.modules.GrooveModule
 import com.conanizer.pockettracker.ui.modules.GrooveState
 import com.conanizer.pockettracker.ui.modules.InstrumentModule
 import com.conanizer.pockettracker.ui.modules.InstrumentPoolModule
 import com.conanizer.pockettracker.ui.modules.InstrumentPoolState
 import com.conanizer.pockettracker.ui.modules.InstrumentState
+import com.conanizer.pockettracker.ui.modules.MixerModule
+import com.conanizer.pockettracker.ui.modules.MixerState
 import com.conanizer.pockettracker.ui.modules.ModulationModule
 import com.conanizer.pockettracker.ui.modules.ModulationState
 import com.conanizer.pockettracker.ui.modules.PhraseEditorModule
@@ -112,6 +116,8 @@ class P3InputGoldenTest {
     private val instrumentModule = InstrumentModule()
     private val instrumentPoolModule = InstrumentPoolModule()
     private val modulationModule = ModulationModule()
+    private val mixerModule = MixerModule()
+    private val effectModule = EffectModule()
 
     // handleInput(PHRASE) wants an InstrumentController purely to record `lastEditedInstrument` —
     // a side record. The C++ module returns it in its result instead of reaching back into a
@@ -611,6 +617,113 @@ class P3InputGoldenTest {
         }
     }
 
+    // ── MIXER + EFFECTS (Phase 3 S5) ────────────────────────────────────────────────────────────
+
+    /**
+     * The mixer's "cell" is every field the screen can WRITE — all eight track volumes, the master
+     * volume, both send wets, the master EQ slot, both master-bus depths, the limiter — plus
+     * `masterBusFx`, which the screen never writes but which DECIDES which of the two depths row 2
+     * edits. Sixteen fields for one cursor cell looks excessive until you ask what a wrong one costs:
+     * writing track 4's volume into track 3, or OTT's depth into DUST's, is exactly the bug that agrees
+     * on the context AND on the action and diverges only in the model. The wide cell is what sees it.
+     */
+    private fun mixStr(p: Project): String =
+        "mix=" + (0..7).joinToString(":") { hex2(p.tracks[it].volume) } +
+            ":${hex2(p.masterVolume)}:${hex2(p.reverbWet)}:${hex2(p.delayWet)}:${p.masterEqSlot}" +
+            ":${hex2(p.ottDepth)}:${hex2(p.dustDepth)}:${hex2(p.limiterPreGain)}:${p.masterBusFx}"
+
+    private fun mixerLadder(): List<(Project) -> Unit> = listOf(
+        { },                                              // the factory defaults
+        { p ->                                            // every field distinct — a stray write cannot hide
+            for (i in 0..7) p.tracks[i].volume = 0x10 + i * 0x11
+            p.masterVolume = 0xC3; p.reverbWet = 0xA1; p.delayWet = 0x5E
+            p.masterEqSlot = 0x22; p.ottDepth = 0x33; p.dustDepth = 0x44; p.limiterPreGain = 0x55
+        },
+        { p -> p.masterEqSlot = -1 },                     // unassigned → A INSERTS slot 0
+        { p -> p.masterEqSlot = 127 },                    // its ceiling → A wraps back to 0
+        { p ->                                            // ⚠️ DUST selected: row 2 must write dustDepth
+            p.masterBusFx = 1; p.ottDepth = 0x11; p.dustDepth = 0xEE
+        },
+        { p ->                                            // both ends of every byte range at once
+            for (i in 0..7) p.tracks[i].volume = if (i % 2 == 0) 0x00 else 0xFF
+            p.masterVolume = 0x00; p.reverbWet = 0xFF; p.delayWet = 0x00
+            p.ottDepth = 0xFF; p.dustDepth = 0x00; p.limiterPreGain = 0xFF
+        },
+    )
+
+    private fun sweepMixer(out: MutableList<String>) {
+        out += ""
+        out += "# MIXER — NOT a grid. Rows 2 and 3 exist only in column 8 (the master strip); every"
+        out += "# other (row, column) pair is unreachable by navigation. They are probed anyway, because"
+        out += "# the module must answer none() there rather than reach for a track that is not there."
+        for (row in 0..3) {
+            for (col in 0..8) {
+                for (probe in mixerLadder()) {
+                    for (btn in BUTTONS) {
+                        val project = Project()
+                        probe(project)
+                        val before = mixStr(project)
+
+                        val state = MixerState(
+                            project = project, cursorColumn = col, mixerMasterRow = row
+                        )
+                        val ctx = mixerModule.getCursorContext(state)
+                        val act = resolve(btn, ctx)
+                        mixerModule.handleInput(state, act) { }
+
+                        out += "EDIT scr=MIXER row=$row col=$col $before btn=$btn => " +
+                            "${ctxStr(ctx)} act=${actStr(act)} ${mixStr(project)}"
+                    }
+                }
+            }
+        }
+    }
+
+    /** The effects screen's cell: the eight fields it writes, plus the `delaySync` flag TIME reads. */
+    private fun fxStr(p: Project): String =
+        "fx=${p.masterBusFx}:${hex2(p.reverbFeedback)}:${hex2(p.reverbDamp)}:${p.reverbInputEq}:" +
+            "${hex2(p.delayTime)}:${hex2(p.delayFeedback)}:${hex2(p.delayReverbSend)}:" +
+            "${p.delayInputEq}:${if (p.delaySync) 1 else 0}"
+
+    private fun effectsLadder(): List<(Project) -> Unit> = listOf(
+        { },                                              // factory defaults: sync off, both EQs unassigned
+        { p ->                                            // every field distinct
+            p.reverbFeedback = 0x11; p.reverbDamp = 0x22; p.reverbInputEq = 0x33
+            p.delayTime = 0x44; p.delayFeedback = 0x55; p.delayReverbSend = 0x66; p.delayInputEq = 0x77
+        },
+        { p -> p.masterBusFx = 1 },                       // TYPE at its ceiling (DUST) → A wraps to OTT
+        { p -> p.delaySync = true; p.delayTime = 5 },     // ⚠️ TIME now speaks subdivisions, not bytes
+        { p -> p.delaySync = true; p.delayTime = 11 },    // …at the top of its 12 → A wraps to 0
+        { p -> p.delaySync = true; p.delayTime = 0 },     // …and at the bottom → B wraps to 11
+        { p -> p.delayTime = 0xFF },                      // free-running, at the byte ceiling
+        { p -> p.reverbInputEq = 127; p.delayInputEq = 0 },   // the EQ slots at their two ends
+    )
+
+    private fun sweepEffects(out: MutableList<String>) {
+        out += ""
+        out += "# EFFECTS — one column of eight rows (the screen draws fifteen: headers and spacers"
+        out += "# between them). TIME is the interesting one: `delaySync` changes both the cell's"
+        out += "# VOCABULARY (a byte, or one of twelve note divisions) and its cursor RANGE, so the same"
+        out += "# button on the same row does two different things either side of it."
+        for (row in 0..EffectModule.MAX_CURSOR_ROW) {
+            for (probe in effectsLadder()) {
+                for (btn in BUTTONS) {
+                    val project = Project()
+                    probe(project)
+                    val before = fxStr(project)
+
+                    val state = EffectState(project = project, cursorRow = row)
+                    val ctx = effectModule.getCursorContext(state)
+                    val act = resolve(btn, ctx)
+                    effectModule.handleInput(state, act) { }
+
+                    out += "EDIT scr=EFFECTS row=$row $before btn=$btn => " +
+                        "${ctxStr(ctx)} act=${actStr(act)} ${fxStr(project)}"
+                }
+            }
+        }
+    }
+
     // ── SEL — the multi-tap selection machine ───────────────────────────────────────────────────
 
     /**
@@ -982,6 +1095,8 @@ class P3InputGoldenTest {
         sweepInstrument(out)
         sweepInstrumentPool(out)
         sweepMods(out)
+        sweepMixer(out)
+        sweepEffects(out)
         sweepSelection(out)
         sweepClipboard(out)
         sweepFxHelper(out)

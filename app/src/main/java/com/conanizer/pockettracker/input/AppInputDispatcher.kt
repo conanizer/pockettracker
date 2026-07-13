@@ -907,7 +907,12 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     val cursorCol = trackerController.mixerCursorColumn
                     val masterRow = trackerController.mixerMasterRow
                     when {
-                        result.masterEqChanged   -> { val slot = proj.masterEqSlot; if (slot >= 0) audioBackend.setMasterEqSlot(slot); trackerController.projectVersion++ }
+                        // -1 is the engine's BYPASS value (audio-engine.h), not a "no value" to skip:
+                        // guarding this on `slot >= 0` meant deleting the master EQ (A+B) wrote -1 into
+                        // the project and left the engine filtering with the slot it last had, until the
+                        // project was reloaded. The load path (pushGlobalEffectsToBackend) has always
+                        // pushed -1 straight through; this is the same call, so it must too.
+                        result.masterEqChanged   -> { audioBackend.setMasterEqSlot(proj.masterEqSlot); trackerController.projectVersion++ }
                         result.ottDepthChanged        -> { audioBackend.setOttDepth(proj.ottDepth); trackerController.projectVersion++ }
                         result.dustDepthChanged       -> { audioBackend.setDustDepth(proj.dustDepth); trackerController.projectVersion++ }
                         result.limiterPreGainChanged  -> { audioBackend.setLimiterPreGain(proj.limiterPreGain); trackerController.projectVersion++ }
@@ -928,12 +933,14 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val result  = effectModule.handleInput(effectState, action) { trackerController.projectVersion++ }
                 if (result.modified) {
                     val proj = trackerController.project
+                    // The three EQ pushes below are UNGUARDED on purpose — see the MIXER branch above.
+                    // -1 bypasses; skipping the call instead left a deleted input EQ audibly engaged.
                     when {
                         result.masterFxChanged        -> { audioBackend.setMasterFx(proj.masterBusFx); trackerController.projectVersion++ }
-                        result.reverbParamsChanged    -> { audioBackend.setReverbParams(proj.reverbFeedback, proj.reverbDamp, proj.reverbWet); if (proj.reverbInputEq >= 0) audioBackend.setReverbInputEq(proj.reverbInputEq); trackerController.projectVersion++ }
+                        result.reverbParamsChanged    -> { audioBackend.setReverbParams(proj.reverbFeedback, proj.reverbDamp, proj.reverbWet); audioBackend.setReverbInputEq(proj.reverbInputEq); trackerController.projectVersion++ }
                         result.delayReverbSendChanged -> { audioBackend.setDelayReverbSend(proj.delayReverbSend); trackerController.projectVersion++ }
-                        result.delayParamsChanged     -> { audioBackend.setDelayParams(proj.delayTime, proj.delayFeedback, proj.delaySync, proj.tempo.toFloat(), proj.delayWet); if (proj.delayInputEq >= 0) audioBackend.setDelayInputEq(proj.delayInputEq); trackerController.projectVersion++ }
-                        result.masterEqChanged        -> { if (proj.masterEqSlot >= 0) audioBackend.setMasterEqSlot(proj.masterEqSlot); trackerController.projectVersion++ }
+                        result.delayParamsChanged     -> { audioBackend.setDelayParams(proj.delayTime, proj.delayFeedback, proj.delaySync, proj.tempo.toFloat(), proj.delayWet); audioBackend.setDelayInputEq(proj.delayInputEq); trackerController.projectVersion++ }
+                        result.masterEqChanged        -> { audioBackend.setMasterEqSlot(proj.masterEqSlot); trackerController.projectVersion++ }
                     }
                 }
             }

@@ -9,22 +9,21 @@
 // ever asking which screen is up (ui/cursor.h). What lands here is what those five could not do —
 // selection, the clipboard, item cycling, cloning, the FX helper, the note preview.
 //
-// ── SCOPE: the eight screens that exist ──────────────────────────────────────────────────────────
+// ── SCOPE: the ten screens that exist ────────────────────────────────────────────────────────────
 //
-// SONG, CHAIN, PHRASE, TABLE, GROOVE, and — since S4 — INSTRUMENT, INST.POOL and MODS. The Kotlin
-// dispatcher is ~3200 lines, and what is still missing here serves screens the port has not reached:
-// the file browser, the sample editor, MIXER, SETTINGS, the EQ editor, the qwerty keyboard. Porting
-// their input against modules that do not exist would be writing code no one can run and no tool can
-// measure; each lands WITH its screen, in the session that draws it. The structure is built to receive
-// them: a new screen is a new arm in `generic_input()` and `apply_edit()`, not a new branch in every
-// handler.
+// SONG, CHAIN, PHRASE, TABLE, GROOVE, INSTRUMENT, INST.POOL, MODS (S4), and — since S5 — MIXER and
+// EFFECTS. The Kotlin dispatcher is ~3200 lines, and what is still missing here serves screens the
+// port has not reached: the file browser, the sample editor, PROJECT, SETTINGS, the EQ editor, the
+// qwerty keyboard. Porting their input against modules that do not exist would be writing code no one
+// can run and no tool can measure; each lands WITH its screen, in the session that draws it. The
+// structure is built to receive them: a new screen is a new arm in `generic_input()` and
+// `apply_edit()`, not a new branch in every handler.
 //
-// ⚠️ Three cells on the new screens open a SUB-SCREEN that does not exist yet — INSTRUMENT's LOAD and
-// SAVE (the file browser) and its EDIT (the sample editor), plus the EQ cells (the EQ overlay). Their
-// cursor contexts are `read_only()`, so the five generic handlers correctly do nothing on them, and
-// pressing A there is a no-op rather than a crash. They light up in the session that lands the screen
-// behind them — which is why the row layout draws them NOW: the cursor has to be able to reach a
-// button before there is anything to press it for, or the geometry gets designed twice.
+// ⚠️ Some cells open a SUB-SCREEN that does not exist yet — INSTRUMENT's LOAD and SAVE (the file
+// browser) and its EDIT (the sample editor), and every EQ cell (the EQ overlay: INSTRUMENT's, the
+// pool's, MIXER's master EQ, EFFECTS' two input EQs). On Android a plain A opens that overlay; here it
+// is a no-op, and A+DPAD still dials the slot NUMBER, which is the part of the cell that is a plain
+// value. That is the whole of the gap, and it closes when the overlay lands.
 //
 // ── THE SHELL IS THE InputMapper ─────────────────────────────────────────────────────────────────
 //
@@ -44,9 +43,11 @@
 #include "ui/clipboard.h"
 #include "ui/cursor.h"
 #include "ui/modules/chain_editor.h"
+#include "ui/modules/effects_editor.h"
 #include "ui/modules/groove_editor.h"
 #include "ui/modules/instrument_editor.h"
 #include "ui/modules/instrument_pool.h"
+#include "ui/modules/mixer.h"
 #include "ui/modules/modulation.h"
 #include "ui/modules/phrase_editor.h"
 #include "ui/modules/song_editor.h"
@@ -141,6 +142,8 @@ class InputDispatcher {
     InstrumentEditorModule instrument_{};
     InstrumentPoolModule   pool_{};
     ModulationModule       mods_{};
+    MixerModule            mixer_{};
+    EffectModule           effects_{};
 
     /**
      * A,A is a DOUBLE-TAP, and a double-tap is only a double-tap if the cursor has not moved between
@@ -183,6 +186,9 @@ class InputDispatcher {
 
     /** True on the three screens that edit an INSTRUMENT rather than the arrangement. */
     bool on_instrument_screen() const;
+
+    /** True on the two that edit the GLOBALS — the mixer, the master bus, the send buses. */
+    bool on_globals_screen() const;
 
     /**
      * INSTRUMENT row 0: A+UP/DOWN toggles SAMPLER↔SOUNDFONT.

@@ -39,9 +39,11 @@
 #include "../../native/ui/fx_helper.h"
 #include "../../native/ui/selection.h"
 #include "../../native/ui/modules/chain_editor.h"
+#include "../../native/ui/modules/effects_editor.h"
 #include "../../native/ui/modules/groove_editor.h"
 #include "../../native/ui/modules/instrument_editor.h"
 #include "../../native/ui/modules/instrument_pool.h"
+#include "../../native/ui/modules/mixer.h"
 #include "../../native/ui/modules/modulation.h"
 #include "../../native/ui/modules/phrase_editor.h"
 #include "../../native/ui/modules/song_editor.h"
@@ -253,6 +255,53 @@ static ModSlot parse_slot(const std::string& spec) {
     return s;
 }
 
+// ─── MIXER + EFFECTS (S5) ────────────────────────────────────────────────────────────────────────
+//
+// Their "cell" is the PROJECT — every global field the screen can write. Same argument as the
+// instrument's 22: an action that lands on the right VALUE in the wrong FIELD (track 4's volume into
+// track 3, OTT's depth into DUST's) agrees on the context and on the action, and diverges only here.
+
+static std::string mix_str(const Project& p) {
+    std::string s = "mix=";
+    for (int i = 0; i < 8; ++i) s += hex2(p.tracks[static_cast<size_t>(i)].volume) + ":";
+    return s + hex2(p.masterVolume) + ":" + hex2(p.reverbWet) + ":" + hex2(p.delayWet) + ":" +
+           std::to_string(p.masterEqSlot) + ":" + hex2(p.ottDepth) + ":" + hex2(p.dustDepth) + ":" +
+           hex2(p.limiterPreGain) + ":" + std::to_string(p.masterBusFx);
+}
+
+static void parse_mix(const std::string& spec, Project& p) {
+    const std::vector<std::string> f = split(spec.substr(std::string("mix=").size()), ':');
+    for (int i = 0; i < 8; ++i) p.tracks[static_cast<size_t>(i)].volume = from_hex(f[static_cast<size_t>(i)]);
+    p.masterVolume   = from_hex(f[8]);
+    p.reverbWet      = from_hex(f[9]);
+    p.delayWet       = from_hex(f[10]);
+    p.masterEqSlot   = from_dec(f[11]);
+    p.ottDepth       = from_hex(f[12]);
+    p.dustDepth      = from_hex(f[13]);
+    p.limiterPreGain = from_hex(f[14]);
+    p.masterBusFx    = from_dec(f[15]);
+}
+
+static std::string fx_str(const Project& p) {
+    return "fx=" + std::to_string(p.masterBusFx) + ":" + hex2(p.reverbFeedback) + ":" +
+           hex2(p.reverbDamp) + ":" + std::to_string(p.reverbInputEq) + ":" + hex2(p.delayTime) + ":" +
+           hex2(p.delayFeedback) + ":" + hex2(p.delayReverbSend) + ":" +
+           std::to_string(p.delayInputEq) + ":" + (p.delaySync ? "1" : "0");
+}
+
+static void parse_fx(const std::string& spec, Project& p) {
+    const std::vector<std::string> f = split(spec.substr(std::string("fx=").size()), ':');
+    p.masterBusFx     = from_dec(f[0]);
+    p.reverbFeedback  = from_hex(f[1]);
+    p.reverbDamp      = from_hex(f[2]);
+    p.reverbInputEq   = from_dec(f[3]);
+    p.delayTime       = from_hex(f[4]);
+    p.delayFeedback   = from_hex(f[5]);
+    p.delayReverbSend = from_hex(f[6]);
+    p.delayInputEq    = from_dec(f[7]);
+    p.delaySync       = (f[8] == "1");
+}
+
 // ─── context / action encodings ──────────────────────────────────────────────────────────────────
 
 static const char* value_type_name(CursorValueType t) {
@@ -339,6 +388,8 @@ static const GrooveModule           kGroove{};
 static const InstrumentEditorModule kInstrument{};
 static const InstrumentPoolModule   kPool{};
 static const ModulationModule       kMods{};
+static const MixerModule            kMixer{};
+static const EffectModule           kEffects{};
 
 static std::string recompute_edit(const std::vector<std::string>& toks, std::string& err) {
     const std::string scr = field(toks, "scr");
@@ -495,6 +546,37 @@ static std::string recompute_edit(const std::vector<std::string>& toks, std::str
         kMods.handle_input(ins, slotIndex, row, act);
         return ctx_str(ctx) + " act=" + act_str(act) + " " +
                slot_str(ins.modSlots[static_cast<size_t>(slotIndex)]);
+    }
+
+    // ── MIXER ────────────────────────────────────────────────────────────────────────────────────
+    if (scr == "MIXER") {
+        const int row = from_dec(field(toks, "row"));
+        Project   p   = songcore::make_default_project();
+        parse_mix("mix=" + field(toks, "mix"), p);
+
+        MixerState st{p};
+        st.mixerMasterRow = row;
+        st.cursorColumn   = col;
+
+        const CursorContext ctx = kMixer.cursor_context(st);
+        const InputAction   act = resolve(btn, ctx);
+        kMixer.handle_input(p, row, col, act);
+        return ctx_str(ctx) + " act=" + act_str(act) + " " + mix_str(p);
+    }
+
+    // ── EFFECTS ──────────────────────────────────────────────────────────────────────────────────
+    if (scr == "EFFECTS") {
+        const int row = from_dec(field(toks, "row"));
+        Project   p   = songcore::make_default_project();
+        parse_fx("fx=" + field(toks, "fx"), p);
+
+        EffectState st{p};
+        st.cursorRow = row;
+
+        const CursorContext ctx = kEffects.cursor_context(st);
+        const InputAction   act = resolve(btn, ctx);
+        kEffects.handle_input(p, row, act);
+        return ctx_str(ctx) + " act=" + act_str(act) + " " + fx_str(p);
     }
 
     err = "unknown screen " + scr;

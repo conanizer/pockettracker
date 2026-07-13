@@ -151,6 +151,30 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 break;
             }
 
+            case ScreenType::MIXER: {
+                MixerState xs{p};
+                xs.cursorColumn   = s.mixerCursorColumn;
+                xs.mixerMasterRow = s.mixerMasterRow;
+                // The engine's meters, as the feed last read them (ui/engine_feed.h). All zeroes with
+                // no engine — which is silence, and exactly what lets `ptshot` draw this screen.
+                xs.trackPeaks   = s.trackPeaks;
+                xs.masterPeaks  = s.masterPeaks;
+                xs.reverbPeaks  = &s.sendPeaks[0];
+                xs.delayPeaks   = &s.sendPeaks[2];
+                xs.peaksVersion = s.peaksVersion;
+                xs.theme        = t;
+                mixer_.draw(c, moduleX, EDITOR_Y, xs);
+                break;
+            }
+
+            case ScreenType::EFFECTS: {
+                EffectState es{p};
+                es.cursorRow = s.effectsCursorRow;
+                es.theme     = t;
+                effects_.draw(c, moduleX, EDITOR_Y, es);
+                break;
+            }
+
             default:
                 draw_placeholder(c, moduleX, EDITOR_Y, s.currentScreen, t);
                 break;

@@ -226,6 +226,21 @@ class SongcoreHost {
         push_instrument_params(*engine_, project_.instruments[id], project_.tempo, sampleRate_);
     }
 
+    /**
+     * The GLOBALS — the mixer, the master bus, both send buses, the EQ bank, the master EQ. What a
+     * MIXER or EFFECTS edit pushes, and the exact counterpart of push_instrument(id) above: the
+     * right-sized verb for what those two screens can actually change.
+     *
+     * ⚠️ Deliberately not push_params(). That one additionally sweeps all 128 instruments — ~2,500
+     * engine calls — and neither screen can touch an instrument. On a handheld, holding A+UP on a track
+     * volume fires an edit every 100 ms (the key-repeat interval), and re-pushing the whole pool on each
+     * one is work paid for nothing. push_params() stays what it is: the LOAD-time call.
+     */
+    void push_globals() {
+        if (!engine_) return;
+        push_mixer(*engine_, project_);
+    }
+
     // ── ↕ the instrument operations (InstrumentController) ────────────────────────────────────────
     // The verbs that own a SOURCE — the ones a plain field edit cannot express because freeing the old
     // sample or SoundFont is the engine's business. See engine_setup.h for the sharing guards.

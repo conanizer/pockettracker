@@ -121,6 +121,10 @@ bool InputDispatcher::on_instrument_screen() const {
            s_.currentScreen == ScreenType::MODS;
 }
 
+bool InputDispatcher::on_globals_screen() const {
+    return s_.currentScreen == ScreenType::MIXER || s_.currentScreen == ScreenType::EFFECTS;
+}
+
 CursorContext InputDispatcher::cursor_context() const {
     const Project& p = *s_.project;
     switch (s_.currentScreen) {
@@ -179,6 +183,19 @@ CursorContext InputDispatcher::cursor_context() const {
             ms.cursorPair = s_.modCursorPair;
             ms.cursorSide = s_.modCursorSide;
             return mods_.cursor_context(ms);
+        }
+
+        case ScreenType::MIXER: {
+            MixerState ms{p};
+            ms.cursorColumn   = s_.mixerCursorColumn;
+            ms.mixerMasterRow = s_.mixerMasterRow;
+            return mixer_.cursor_context(ms);
+        }
+
+        case ScreenType::EFFECTS: {
+            EffectState es{p};
+            es.cursorRow = s_.effectsCursorRow;
+            return effects_.cursor_context(es);
         }
 
         default:
@@ -266,6 +283,15 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
                 .modified;
         }
 
+        // MIXER and EFFECTS take the whole PROJECT, not a cell: their fields are scattered across it
+        // (a track's volume, the master strip, two send buses), and which one an action lands on is the
+        // cursor's business. Kotlin's modules likewise take the Project.
+        case ScreenType::MIXER:
+            return mixer_.handle_input(p, s_.mixerMasterRow, s_.mixerCursorColumn, action).modified;
+
+        case ScreenType::EFFECTS:
+            return effects_.handle_input(p, s_.effectsCursorRow, action).modified;
+
         default:
             return false;
     }
@@ -282,6 +308,20 @@ void InputDispatcher::mark_modified(bool table_touched) {
     // event path pushes them (a note re-pushes the mods and sends, but not these), so the edit says so
     // here — the same call Kotlin's InstrumentController.updateDrive makes.
     if (on_instrument_screen()) host_.push_instrument(s_.currentInstrument);
+
+    // The same argument one level up: the MIXER and EFFECTS screens edit state the engine holds ON ITS
+    // OWN BEHALF — the mixer, the master bus, both send buses, the master EQ. None of it is a note, so
+    // nothing on the event path pushes it, and an unpushed reverb setting is simply not heard.
+    //
+    // ⚠️ ONE DELIBERATE DIVERGENCE FROM ANDROID, and it is a bug fix. Kotlin pushes these per-field, and
+    // three of its arms are guarded — `if (slot >= 0) setMasterEqSlot(slot)`, and the same for the two
+    // input EQs. So DELETING an EQ slot (A+B) writes −1 into the project and then declines to tell the
+    // engine, which goes on filtering with the slot it last had: the screen says "off", the audio says
+    // otherwise, until the project is reloaded. −1 is the engine's own documented bypass value
+    // (audio-engine.h) and Kotlin's *load* path pushes it happily (pushGlobalEffectsToBackend), so the
+    // guard is simply wrong. Pushing the globals wholesale, as below, cannot express the bug. The Kotlin
+    // side is fixed to match (AppInputDispatcher).
+    if (on_globals_screen()) host_.push_globals();
 
     // An edit made WHILE PLAYING has to reach the lookahead already scheduled past it, or it is not
     // heard until the buffer happens to roll over it. Android does this from a
@@ -979,7 +1019,26 @@ void InputDispatcher::on_button_b() {
 
 void InputDispatcher::on_select() {
     // SELECT does NOT clear the cell under the cursor on the editor screens — deleting a value is
-    // A+B. It is left free here for context actions, exactly as Kotlin leaves it.
+    // A+B. It is left free for CONTEXT ACTIONS, exactly as Kotlin leaves it, and S5 lands the first
+    // one the port can honour.
+    //
+    // ⚠️ EFFECTS' TIME row: SELECT toggles DELAY SYNC — free-running milliseconds ↔ note divisions. It
+    // has to be a separate gesture, because the cell's VALUE means two different things on either side
+    // of it (0x40 is a delay length; 4 is a 1/16 note) and no amount of A+DPAD can express "change
+    // which of those you mean". Re-clamping delayTime into 0..B on the way IN is not optional: a free
+    // time of 0xF0 is not a subdivision, and an unclamped one would index past the end of the name list.
+    if (s_.currentScreen == ScreenType::EFFECTS &&
+        s_.effectsCursorRow == EffectModule::ROW_DLY_TIME) {
+        songcore::Project& p = host_.edit_project();
+        p.delaySync = !p.delaySync;
+        if (p.delaySync) p.delayTime = std::min(std::max(p.delayTime, 0), 11);
+        mark_modified();
+        return;
+    }
+
+    // The other SELECT actions Kotlin has here all OPEN A SUB-SCREEN that the port has not built: the
+    // EQ overlay (MIXER's master EQ, EFFECTS' two input EQs, the instrument EQ cells) and the qwerty
+    // keyboard (the PROJECT / INSTRUMENT name rows). They land with those screens.
 }
 
 void InputDispatcher::on_stop_preview() {
@@ -1022,12 +1081,22 @@ void InputDispatcher::on_start() {
     }
     switch (s_.currentScreen) {
         // ⚠️ SONG starts at the CURSOR ROW, not at row 0 — "play from here" is the gesture, and on a
-        // 200-row arrangement starting from the top every time makes the screen unusable. (The screens
-        // with no song cursor — MIXER, EFFECTS, PROJECT, SETTINGS — start at 0, because they have no
-        // "here" to start from.)
+        // 200-row arrangement starting from the top every time makes the screen unusable.
         case ScreenType::SONG:  host_.play_song(s_.cursorRow); break;
         case ScreenType::CHAIN: host_.play_chain(s_.currentChain); break;
-        default:                host_.play_phrase(s_.currentPhrase); break;
+
+        // ⚠️ …and the four screens with NO song cursor play the SONG, from the top. This is a bug fixed
+        // in S5, not a new behaviour: the S3 comment already said "MIXER, EFFECTS, PROJECT, SETTINGS
+        // start at 0" — while the code below it dropped them into the `default` and played the current
+        // PHRASE. It went unnoticed because all four were placeholder screens (you could stand on one
+        // and press START, and something plausible happened). What you want on the mixer is the MIX.
+        case ScreenType::MIXER:
+        case ScreenType::EFFECTS:
+        case ScreenType::PROJECT:
+        case ScreenType::SETTINGS: host_.play_song(0); break;
+
+        // PHRASE, GROOVE, SCALE… — Kotlin's `togglePlayback()` else-arm.
+        default: host_.play_phrase(s_.currentPhrase); break;
     }
 }
 
