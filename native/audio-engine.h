@@ -101,6 +101,15 @@ public:
     std::function<void()> onResumeRequested;
     void requestResume() { if (onResumeRequested) onResumeRequested(); }
 
+    // The ninth voice: every audition — sampler, sample, note, SF instrument — plays HERE rather than
+    // on one of the 8 song tracks, which is what lets you hear a note you are dialling in without
+    // stealing a voice from the song under it. Kotlin names the same lane PREVIEW_TRACK_ID.
+    //
+    // Public because a preview is scheduled from OUTSIDE the engine: SongcoreHost::preview_note has to
+    // name the lane it plays on, and stop_preview the lane it kills. It was private while previews
+    // were built in Kotlin and only ever *arrived* as a track id.
+    static const int PREVIEW_LANE = 8;
+
     int getActiveVoiceCount();
 
     /**
@@ -576,10 +585,9 @@ private:
     } eqPresets[128];
 
     // Per-track waveform buffers for OCTA visualizer.
-    // 8 song tracks + 1 dedicated preview lane (index PREVIEW_LANE): all previews — sampler,
-    // sample, note, and SF instrument — play on PREVIEW_TRACK_ID (outside tracks 0-7), so
-    // without their own lane they never appear on the per-track scopes.
-    static const int PREVIEW_LANE = 8;
+    // 8 song tracks + 1 dedicated preview lane (index PREVIEW_LANE, declared public above): all
+    // previews — sampler, sample, note, and SF instrument — play outside tracks 0-7, so without their
+    // own lane they would never appear on the per-track scopes.
     static const int TRACK_WAVEFORM_COUNT = 9;  // 8 tracks + preview lane
     float trackWaveformBuffer[TRACK_WAVEFORM_COUNT][WAVEFORM_SIZE] = {};
     int   trackWaveformIndex = 0;

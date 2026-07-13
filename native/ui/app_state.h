@@ -18,6 +18,10 @@
 #include "screen.h"
 #include "songcore/model.h"
 #include "theme.h"
+#include "ui/fx_helper.h"
+#include "ui/selection.h"
+
+#include <string>
 
 namespace pt::ui {
 
@@ -118,10 +122,41 @@ struct AppState {
     bool previewLaneActive = false;
 
     // ── Selection ────────────────────────────────────────────────────────────────────────────────
-    // The multi-tap CELL/ROW/SCREEN selection and the clipboard land with the dispatcher; the grid
-    // editors already ask these two questions, so they exist now and answer "no selection".
-    bool selectionMode = false;
-    bool is_cell_selected(int /*row*/, int /*column*/) const { return false; }
+    // The L+B multi-tap CELL/ROW/SCREEN machine (ui/selection.h). The grid editors have asked these
+    // two questions since S1; until S3 they were stubbed to "no selection".
+    Selection selection{};
+
+    bool selection_mode() const { return selection.active; }
+    bool is_cell_selected(int row, int column) const {
+        return selection.is_cell_selected(row, column);
+    }
+
+    // ── The FX-helper overlay ────────────────────────────────────────────────────────────────────
+    // A+UP/DOWN on an FX-TYPE column opens it; releasing A commits the highlighted effect
+    // (ui/fx_helper.h). While it is open it OWNS the D-pad — the cursor underneath must not move.
+    FxHelperState fxHelper{};
+
+    // ── "Last edited" — the memory that makes A,A and the insert defaults useful ─────────────────
+    //
+    // TrackerController's `lastEdited*`. Not cosmetic: A,A on SONG inserts the next unused chain
+    // *after the one you last touched*, and a chain row inserted on CHAIN carries the transpose you
+    // last dialled in. Without them, every insert would start its search at 0 and hand you a slot
+    // nowhere near the one you were working on.
+    int           lastEditedPhrase     = 0;
+    int           lastEditedChain      = 0;
+    int           lastEditedTable      = 0;
+    int           lastEditedInstrument = 0;
+    int           lastEditedTranspose  = 0;
+    songcore::Note lastEditedNote      = songcore::Note::C4();
+    int           lastEditedVolume     = 0x7F;
+
+    // ── The status line ──────────────────────────────────────────────────────────────────────────
+    // "CHAIN CLONED" / "NO FREE PHRASES" — what L+B+A reports back.
+    std::string statusMessage{};
+    bool        statusSuccess = true;
+
+    /** SETTINGS "NOTE PREVIEW": play the note an edit just wrote. On by default, as on Android. */
+    bool notePreviewEnabled = true;
 
     // ── Theme ────────────────────────────────────────────────────────────────────────────────────
     Theme theme = theme_classic();

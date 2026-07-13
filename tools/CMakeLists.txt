@@ -18,6 +18,7 @@ project("pockettracker-tools" LANGUAGES C CXX)
 #   ptrandom      S7   the random FX            12 distributions     (units/s7-random.txt)
 #   ptnondet      S7   which projects may be byte-compared at all   (+ a standalone .ptp diagnostic)
 #   ptshot   Phase3 S1 the UI, as pixels        any screen → a PNG, headless (no golden yet — see below)
+#   ptinput  Phase3 S3 the input layer          1647 cases           (units/p3-input.txt)
 #
 # ptrandom is the odd one out, and deliberately so: CHA/RND/RNL/ARP-RANDOM draw from a clock-seeded
 # RNG, so the Kotlin sequencer has no repeatable event stream to record and there is no byte-exact
@@ -101,6 +102,15 @@ add_executable(ptshot ptshot/main.cpp)
 pt_ieee_exact(ptshot)
 target_link_libraries(ptshot PRIVATE pt-ui)
 
+# ptinput — the input layer, byte-compared against the Kotlin one (Phase 3 S3). Also links pt-ui,
+# because what it measures is the modules' own cursor_context()/handle_input() and not a reimplementation
+# of them: a harness that re-derived the answer would prove only that the harness agrees with itself.
+# Unlike ptshot it DOES have a golden — the input layer's output is text, not pixels, so the JVM can
+# record it (P3InputGoldenTest) and CI can compare it.
+add_executable(ptinput ptinput/main.cpp)
+pt_ieee_exact(ptinput)
+target_link_libraries(ptinput PRIVATE pt-ui)
+
 # ptrender writes WAVs, and the fingerprint goldens live beside the projects they describe.
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/render-out")
 
@@ -116,3 +126,4 @@ add_test(NAME s7-random        COMMAND ptrandom    "${PT_TESTDATA}")
 # BYTE-IDENTICAL, which only holds while g7 contains nothing clock-seeded. Put a CHA in it and s6-render
 # fails as "the two renders differ" — true, useless, and hours from the cause. This fails first, by name.
 add_test(NAME s7-determinism   COMMAND ptnondet    "${PT_TESTDATA}")
+add_test(NAME p3-input         COMMAND ptinput     "${PT_TESTDATA}/units/p3-input.txt")

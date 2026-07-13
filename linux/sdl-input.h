@@ -40,9 +40,28 @@ enum class Button {
 
 enum class ButtonAction { PRESSED, RELEASED };
 
+/**
+ * Which modifiers were down AT THE MOMENT the event happened.
+ *
+ * ⚠️ Not a convenience — a correctness requirement, and the reason `is_held()` must NOT be used to
+ * resolve a combo. SDL hands us every event since the last frame at once, so by the time the queue is
+ * drained the held flags describe the END of the frame, not the instant of each event. Roll B and A
+ * down inside one 16 ms frame and a poll-time read sees A already held when it processes the B press
+ * — firing A+B (delete!) on a press Kotlin would have treated as a plain B.
+ *
+ * Kotlin's InputMapper has no such gap: it evaluates each event the instant it arrives, against the
+ * state as of that instant. Snapshotting here reproduces that exactly. Synthetic key-repeats snapshot
+ * the CURRENT state when they fire, which is also what Kotlin does — "the app re-reads the modifiers
+ * when the repeat fires", so holding A+UP keeps editing and holding UP alone keeps moving.
+ */
+struct ButtonMods {
+    bool a = false, b = false, l = false, r = false, select = false;
+};
+
 struct ButtonEvent {
     Button       button;
     ButtonAction action;
+    ButtonMods   mods;
 };
 
 class SdlInput {
@@ -79,6 +98,9 @@ public:
 private:
     void press(Button b, uint64_t now_ms);
     void release(Button b);
+
+    /** The modifiers as they stand right now — stamped onto each event as it is queued. */
+    ButtonMods mods_now() const;
 
     static constexpr uint64_t REPEAT_INITIAL_DELAY = 400;  // ms before the first repeat
     static constexpr uint64_t REPEAT_INTERVAL      = 100;  // ms between repeats

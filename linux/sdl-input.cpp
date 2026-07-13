@@ -79,11 +79,23 @@ void SdlInput::close_controllers() {
     controllers_.clear();
 }
 
+ButtonMods SdlInput::mods_now() const {
+    ButtonMods m;
+    m.a      = held_[static_cast<size_t>(Button::A)];
+    m.b      = held_[static_cast<size_t>(Button::B)];
+    m.l      = held_[static_cast<size_t>(Button::L_SHIFT)];
+    m.r      = held_[static_cast<size_t>(Button::R_SHIFT)];
+    m.select = held_[static_cast<size_t>(Button::SELECT)];
+    return m;
+}
+
 void SdlInput::press(Button b, uint64_t now_ms) {
     const size_t i = static_cast<size_t>(b);
     if (held_[i]) return;  // the OS auto-repeat is ignored; the repeat below is ours
     held_[i] = true;
-    queue_.push_back({b, ButtonAction::PRESSED});
+    // AFTER the flag is set, so a press of A itself reports A as held — which is what Kotlin's
+    // `handleButtonAction` sees, since it updates the modifier state before it resolves the combo.
+    queue_.push_back({b, ButtonAction::PRESSED, mods_now()});
 
     if (is_dpad(b)) {
         repeatActive_ = true;
@@ -96,7 +108,7 @@ void SdlInput::release(Button b) {
     const size_t i = static_cast<size_t>(b);
     if (!held_[i]) return;
     held_[i] = false;
-    queue_.push_back({b, ButtonAction::RELEASED});
+    queue_.push_back({b, ButtonAction::RELEASED, mods_now()});
 
     // Cancel the repeat when the repeating DPAD is let go — or when A or B is, because those are the
     // modifiers that gave it its meaning.
@@ -155,7 +167,10 @@ void SdlInput::tick(uint64_t now_ms) {
     // so a held A+UP would jump the value by 5 in one go. "At least 100 ms apart, quantised to the
     // frame" is also what Kotlin's Handler.postDelayed actually delivers, since its repeat is posted
     // to the same main-thread message queue the UI is draining.
-    queue_.push_back({repeatButton_, ButtonAction::PRESSED});
+    // The repeat carries the modifiers as they stand NOW, not as they stood when the D-pad went down.
+    // That is deliberate and it is Kotlin's behaviour: press A after UP is already repeating and the
+    // repeat starts editing rather than moving, with no need to remember what began it.
+    queue_.push_back({repeatButton_, ButtonAction::PRESSED, mods_now()});
     repeatNextMs_ = now_ms + REPEAT_INTERVAL;
 }
 

@@ -383,6 +383,23 @@ int main(int argc, char** argv) {
         }
     }
 
+    // --fx-helper=N: open the effect picker on effect index N (0..27). The overlay is modal and paints
+    // over the finished frame, so this composes with every other option — it is drawn on top of
+    // whatever screen and cursor the flags below asked for.
+    if (const char* v = opt(argc, argv, "--fx-helper")) {
+        state.fxHelper = fx_helper_opened_at(std::atoi(v));
+    }
+    // --selection=r1,c1,r2,c2: paint a selection region, so the row-highlight colours can be eyeballed.
+    if (const char* v = opt(argc, argv, "--selection")) {
+        int r1 = 0, c1 = 1, r2 = 0, c2 = 1;
+        if (std::sscanf(v, "%d,%d,%d,%d", &r1, &c1, &r2, &c2) == 4) {
+            state.selection.active = true;
+            state.selection.scope  = SelectionScope::CELL;
+            state.selection.start  = CursorPosition{r1, c1};
+            state.selection.end    = CursorPosition{r2, c2};
+        }
+    }
+
     DemoFeed demo;
     if (flag(argc, argv, "--demo")) demo.fill(state);
 

@@ -3,6 +3,7 @@
 #include <string>
 
 #include "ui/helpers.h"
+#include "ui/modules/fx_helper_overlay.h"
 
 namespace pt::ui {
 
@@ -57,7 +58,7 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 ps.cursorColumn   = s.cursorColumn;
                 ps.playbackRow    = s.playbackRow;
                 ps.isPlaying      = s.isPlaying;
-                ps.selectionMode  = s.selectionMode;
+                ps.selectionMode  = s.selection_mode();
                 ps.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
                 ps.theme          = t;
                 phraseEditor_.draw(c, moduleX, EDITOR_Y, ps);
@@ -70,7 +71,7 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 cs.cursorColumn   = s.cursorColumn;
                 cs.playbackRow    = s.playbackChainRow;
                 cs.isPlaying      = s.isPlaying;
-                cs.selectionMode  = s.selectionMode;
+                cs.selectionMode  = s.selection_mode();
                 cs.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
                 cs.theme          = t;
                 chainEditor_.draw(c, moduleX, EDITOR_Y, cs);
@@ -84,7 +85,7 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 ss.scrollPosition = s.songScrollPosition;
                 ss.isPlaying      = s.isPlaying;
                 ss.playbackRow    = s.playbackSongRow;
-                ss.selectionMode  = s.selectionMode;
+                ss.selectionMode  = s.selection_mode();
                 ss.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
                 ss.theme          = t;
                 songEditor_.draw(c, moduleX, EDITOR_Y, ss);
@@ -99,7 +100,7 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 // The tic rate is the INSTRUMENT's, not the table's — the same table run by two
                 // instruments runs at two speeds, and this shows the one you are looking through.
                 ts.ticRate      = p.instruments[static_cast<size_t>(s.currentInstrument)].tableTicRate;
-                ts.selectionMode  = s.selectionMode;
+                ts.selectionMode  = s.selection_mode();
                 ts.isCellSelected = [&s](int row, int col) { return s.is_cell_selected(row, col); };
                 ts.theme          = t;
                 tableModule_.draw(c, moduleX, EDITOR_Y, ts);
@@ -127,6 +128,11 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
         s.currentScreen != ScreenType::SAMPLE_EDITOR) {
         draw_right_bar(c, s);
     }
+
+    // ── The overlays ─────────────────────────────────────────────────────────────────────────────
+    // LAST, over everything, including the right bar — an overlay is modal, and its backdrop dims the
+    // whole frame. (The EQ editor, the theme editor and the qwerty keyboard join it here as they land.)
+    draw_fx_helper(c, s.fxHelper, t);
 }
 
 void TrackerLayout::draw_right_bar(Canvas& c, const AppState& s) const {

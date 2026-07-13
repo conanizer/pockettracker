@@ -232,6 +232,59 @@ class SongcoreHost {
         if (rollbackFrame >= 0 && engine_) engine_->clearScheduledNotesFrom(rollbackFrame);
     }
 
+    // ── ↕ the note preview — "hear the note you just dialled in" ──────────────────────────────────
+    //
+    // The C++ twin of AudioEngine.previewNoteWithTimeout. It plays on the DEDICATED PREVIEW LANE
+    // (AudioEngine::PREVIEW_LANE == track 8, the ninth voice), which is why auditioning a note while
+    // a song is playing steals nothing: the eight song tracks are untouched.
+    //
+    // ⚠️ It goes through `plan_note_on` — the same derivation the sequencer's own notes take, the one
+    // `tools/ptvoice` goldens against the real Kotlin `AudioEngine.scheduleNote`. Hand-rolling the
+    // engine calls here (Kotlin does, and its sampler branch has quietly drifted from its own
+    // scheduleNote as a result) would mean a second, unmeasured copy of the note path — the exact
+    // thing S5 ported the consumer to avoid. The payload below is a note with NO phrase behind it:
+    // no FX, no transpose, velocity −1, the instrument's own volume and pan, and `tableId = -1`,
+    // which derive_sampler_note resolves to the instrument's own table — exactly what Kotlin passes.
+    void preview_note(int instrumentId, const Note& note, int64_t durationFrames) {
+        if (!engine_) return;
+        if (note == Note::EMPTY()) return;   // Kotlin's first line, and it matters: A on an empty
+                                             // cell that inserts nothing must not thump the lane
+        if (instrumentId < 0 || instrumentId >= static_cast<int>(project_.instruments.size())) return;
+        const Instrument& ins = project_.instruments[instrumentId];
+
+        engine_->requestResume();
+        const int64_t frame = engine_->getCurrentFrame() + 100;  // Kotlin's +100-frame lead-in
+
+        Event ev{};
+        ev.type       = EV_NOTE_ON;
+        ev.frame      = frame;
+        ev.track      = AudioEngine::PREVIEW_LANE;
+        ev.instrument = instrumentId;
+
+        NoteOnPayload& n = ev.noteOn;
+        n.note        = static_cast<uint8_t>(note_to_midi(note));
+        n.velocity    = -1;                                        // no V column behind a preview
+        n.velGainBits = f32_bits(hex_to_float(ins.volume));        // seam arg `volume`
+        n.volGainBits = f32_bits(1.0f);                            // seam arg `phraseVol`
+        n.panBits     = f32_bits(hex_to_float(ins.pan));
+        n.start = -1; n.slice = -1; n.tableId = -1; n.tableRow = -1;
+        n.transpose = 0; n.pit = 0; n.arp = 0;
+        n.pslOffBits = n.pslDurBits = n.pbnRateBits = n.vibSpdBits = n.vibDepBits = f32_bits(0.0f);
+
+        // A fresh cache every preview, so an edit to the instrument's table is heard immediately —
+        // Kotlin calls forceReloadTable here for the same reason.
+        bool tableLoaded[POOL_TABLES] = {false};
+        plan_note_on(*engine_, ev, project_, routing_, tableLoaded);
+
+        engine_->scheduleKill(frame + durationFrames, AudioEngine::PREVIEW_LANE);
+    }
+
+    /** Silence the audition lane. Backs the "press any button to stop the preview" gesture. */
+    void stop_preview() {
+        if (!engine_) return;
+        engine_->scheduleKill(engine_->getCurrentFrame(), AudioEngine::PREVIEW_LANE);
+    }
+
     // ── ↑ feedback ───────────────────────────────────────────────────────────────────────────────
     PlaybackPosition playheads() {
         sync_clock();
@@ -239,6 +292,9 @@ class SongcoreHost {
     }
 
     bool is_playing() const { return seq_.is_playing(); }
+
+    /** The device rate the sequencer is running at — the note preview needs it for framesPerStep. */
+    int sample_rate() const { return sampleRate_; }
 
     // ── ↑ debug: the conformance trace (event-schema §6) ─────────────────────────────────────────
     // Same output contract as the Kotlin EventTrace tap — same path, same bytes — so the S1 device

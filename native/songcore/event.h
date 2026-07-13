@@ -45,10 +45,31 @@
 // ────────────────────────────────────────────────────────────────────────────────────────────────
 
 #include <cstdint>
+#include <cstring>
 
 namespace songcore {
 
 constexpr int SCHEMA_VERSION = 1;
+
+/**
+ * The schema's float encoding, in one place: an analog value is carried as the RAW BITS of its
+ * IEEE-754 binary32, never as a float field (§5 / §6 — it is what makes an event byte-comparable
+ * across a language boundary at all).
+ *
+ * `MidiRouter` keeps a private copy of this (`bits()`) because it is the schema's only *emitter*. It
+ * is public here because it is no longer the only one: `SongcoreHost::preview_note` builds a NoteOn by
+ * hand — a note with no phrase behind it — and a second bit-cast written from memory is a second
+ * chance to get the cast wrong.
+ *
+ * memcpy, not a reinterpret_cast: type-punning through a pointer is UB, and the optimiser is entitled
+ * to act on that. (The DECODER, `f32_from_bits`, lives in the generated note_tables.h, which every
+ * consumer of the bus already includes.)
+ */
+inline uint32_t f32_bits(float f) {
+    uint32_t b;
+    std::memcpy(&b, &f, sizeof b);
+    return b;
+}
 
 // ─── Envelope ───────────────────────────────────────────────────────────────────────────────────
 

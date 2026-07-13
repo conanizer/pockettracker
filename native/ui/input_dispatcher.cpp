@@ -1,0 +1,868 @@
+#include "ui/input_dispatcher.h"
+
+#include "songcore/timing.h"
+#include "songcore/traversal.h"
+#include "ui/cursor_move.h"
+#include "ui/navigation.h"
+
+#include <algorithm>
+#include <map>
+#include <set>
+#include <vector>
+
+namespace pt::ui {
+
+using songcore::Chain;
+using songcore::Note;
+using songcore::Phrase;
+using songcore::Project;
+
+namespace {
+
+/** Chain.isEmpty(row) — the row holds no phrase. */
+bool chain_row_empty(const Chain& c, int row) { return c.phraseRefs[static_cast<size_t>(row)] == -1; }
+
+/** A phrase nobody has written a note into. */
+bool phrase_is_blank(const Phrase& p) {
+    for (const songcore::PhraseStep& s : p.steps)
+        if (!songcore::step_is_empty(s)) return false;
+    return true;
+}
+
+/** A chain that references no phrase. */
+bool chain_is_blank(const Chain& c) {
+    for (const int ref : c.phraseRefs)
+        if (ref != -1) return false;
+    return true;
+}
+
+/**
+ * Kotlin's `((start..255) + (0 until start)).firstOrNull { pred }` — search forward from `start`,
+ * wrapping once. Returns −1 when the pool is full.
+ *
+ * The wrap is the point: inserting the next unused phrase should hand you one NEAR the one you were
+ * just editing, not slot 0 every time. Starting at `lastEdited + 1` and wrapping is what does that.
+ */
+template <typename Pred>
+int first_from_wrapping(int start, int count, Pred pred) {
+    for (int i = start; i < count; ++i)
+        if (pred(i)) return i;
+    for (int i = 0; i < start && i < count; ++i)
+        if (pred(i)) return i;
+    return -1;
+}
+
+/** Phrase IDs any chain references — "used" even when blank (a silent spacer inside a pad chain). */
+std::set<int> used_phrase_ids(const Project& p) {
+    std::set<int> used;
+    for (const Chain& c : p.chains)
+        for (const int ref : c.phraseRefs)
+            if (ref != -1) used.insert(ref);
+    return used;
+}
+
+/** Chain IDs any song track references — same "used even if blank" reasoning. */
+std::set<int> used_chain_ids(const Project& p) {
+    std::set<int> used;
+    for (const songcore::Track& t : p.tracks)
+        for (const int ref : t.chainRefs)
+            if (ref != -1) used.insert(ref);
+    return used;
+}
+
+}  // namespace
+
+// ─── The cursor ──────────────────────────────────────────────────────────────────────────────────
+
+int InputDispatcher::cursor_row() const {
+    switch (s_.currentScreen) {
+        case ScreenType::TABLE:  return s_.tableCursorRow;
+        case ScreenType::GROOVE: return s_.grooveCursorRow;
+        default:                 return s_.cursorRow;
+    }
+}
+
+int InputDispatcher::cursor_column() const {
+    switch (s_.currentScreen) {
+        case ScreenType::TABLE:  return s_.tableCursorColumn;
+        case ScreenType::GROOVE: return 1;
+        default:                 return s_.cursorColumn;
+    }
+}
+
+void InputDispatcher::set_cursor_row(int row) {
+    switch (s_.currentScreen) {
+        case ScreenType::TABLE:  s_.tableCursorRow = row;  break;
+        case ScreenType::GROOVE: s_.grooveCursorRow = row; break;
+        default:                 s_.cursorRow = row;       break;
+    }
+}
+
+int InputDispatcher::max_selection_column() const {
+    switch (s_.currentScreen) {
+        case ScreenType::PHRASE: return 9;
+        case ScreenType::CHAIN:  return 2;
+        case ScreenType::SONG:   return 8;
+        case ScreenType::TABLE:  return 8;
+        default:                 return 1;
+    }
+}
+
+int InputDispatcher::max_selection_row() const {
+    // SONG is 256 rows deep and shows 16. A SCREEN-scope selection there means the whole ARRANGEMENT,
+    // not the visible window — which is the only reason `maxRow` is a parameter at all.
+    return (s_.currentScreen == ScreenType::SONG) ? 255 : 15;
+}
+
+CursorContext InputDispatcher::cursor_context() const {
+    const Project& p = *s_.project;
+    switch (s_.currentScreen) {
+        case ScreenType::SONG: {
+            SongEditorState ss{p};
+            ss.cursorRow   = s_.cursorRow;
+            ss.cursorTrack = s_.cursorColumn;  // on SONG the column IS the track
+            return song_.cursor_context(ss);
+        }
+        case ScreenType::CHAIN: {
+            ChainEditorState cs{p.chains[static_cast<size_t>(s_.currentChain)]};
+            cs.cursorRow    = s_.cursorRow;
+            cs.cursorColumn = s_.cursorColumn;
+            return chain_.cursor_context(cs);
+        }
+        case ScreenType::PHRASE: {
+            PhraseEditorState ps{p.phrases[static_cast<size_t>(s_.currentPhrase)]};
+            ps.cursorRow    = s_.cursorRow;
+            ps.cursorColumn = s_.cursorColumn;
+            return phrase_.cursor_context(ps);
+        }
+        case ScreenType::TABLE: {
+            TableState ts{p.tables[static_cast<size_t>(s_.currentTable)]};
+            ts.cursorRow    = s_.tableCursorRow;
+            ts.cursorColumn = s_.tableCursorColumn;
+            return table_.cursor_context(ts);
+        }
+        case ScreenType::GROOVE: {
+            GrooveState gs{p.grooves[static_cast<size_t>(s_.currentGroove)]};
+            gs.cursorRow    = s_.grooveCursorRow;
+            gs.cursorColumn = 1;
+            return groove_.cursor_context(gs);
+        }
+        default:
+            return cc::none();  // a placeholder screen has nothing to edit
+    }
+}
+
+// ─── Applying an edit ────────────────────────────────────────────────────────────────────────────
+
+bool InputDispatcher::apply_edit(const InputAction& action) {
+    Project& p = host_.edit_project();  // the SAME Project the Sequencer is reading
+
+    switch (s_.currentScreen) {
+        case ScreenType::SONG: {
+            const SongInputResult r = song_.handle_input(p, s_.cursorRow, s_.cursorColumn, action);
+            if (r.hasChain) s_.lastEditedChain = r.lastEditedChain;
+            return r.modified;
+        }
+
+        case ScreenType::CHAIN: {
+            const ChainInputResult r = chain_.handle_input(
+                p.chains[static_cast<size_t>(s_.currentChain)], s_.cursorRow, s_.cursorColumn, action);
+            if (r.hasPhrase)    s_.lastEditedPhrase    = r.lastEditedPhrase;
+            if (r.hasTranspose) s_.lastEditedTranspose = r.lastEditedTranspose;
+            return r.modified;
+        }
+
+        case ScreenType::PHRASE: {
+            Phrase& ph = p.phrases[static_cast<size_t>(s_.currentPhrase)];
+            const PhraseInputResult r = phrase_.handle_input(ph, s_.cursorRow, s_.cursorColumn, action);
+            if (!r.modified) return false;
+
+            // The "last edited" memory + the audition, exactly where Kotlin does them. Note the two
+            // guards: the STEP must have a note (editing the velocity of an empty step remembers
+            // nothing), and only an edit to the NOTE column auditions — dialling a velocity should
+            // not retrigger the voice under your fingers.
+            if (r.hasNote || r.hasVolume || r.hasInstrument) {
+                const songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s_.cursorRow)];
+                if (step.note != Note::EMPTY()) {
+                    s_.lastEditedNote       = step.note;
+                    s_.lastEditedVolume     = step.volume;
+                    s_.lastEditedInstrument = step.instrument;
+                    if (s_.notePreviewEnabled && r.hasNote) preview_edited_note();
+                }
+            }
+            return true;
+        }
+
+        case ScreenType::TABLE:
+            return table_
+                .handle_input(p.tables[static_cast<size_t>(s_.currentTable)], s_.tableCursorRow,
+                              s_.tableCursorColumn, action)
+                .modified;
+
+        case ScreenType::GROOVE:
+            return groove_
+                .handle_input(p.grooves[static_cast<size_t>(s_.currentGroove)], s_.grooveCursorRow,
+                              /*cursor_column=*/1, action)
+                .modified;
+
+        default:
+            return false;
+    }
+}
+
+void InputDispatcher::mark_modified(bool table_touched) {
+    // ⚠️ The consumer caches which tables it has already pushed to the engine. push_project
+    // invalidates that cache; an IN-PLACE edit cannot, so the table screen must say so itself.
+    if (table_touched || s_.currentScreen == ScreenType::TABLE) host_.invalidate_tables();
+
+    // An edit made WHILE PLAYING has to reach the lookahead already scheduled past it, or it is not
+    // heard until the buffer happens to roll over it. Android does this from a
+    // `LaunchedEffect(projectVersion)`; there is no Compose here, so it is said out loud.
+    if (host_.is_playing()) host_.notify_data_changed();
+}
+
+void InputDispatcher::preview_edited_note() {
+    const Project& p = *s_.project;
+    const songcore::PhraseStep& step =
+        p.phrases[static_cast<size_t>(s_.currentPhrase)].steps[static_cast<size_t>(s_.cursorRow)];
+
+    const int sr = std::max(44100, host_.sample_rate());
+    host_.preview_note(std::min(std::max(step.instrument, 0), 127), step.note,
+                       songcore::frames_per_step(p.tempo, sr));
+}
+
+// ─── The three generic paths ─────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::generic_input(InputAction (*fn)(const CursorContext&)) {
+    const InputAction action = fn(cursor_context());
+    if (action.type == ActionType::NONE) return;
+    if (apply_edit(action)) mark_modified();
+}
+
+void InputDispatcher::selection_or_single(InputAction (*fn)(const CursorContext&)) {
+    if (!s_.selection.active) {
+        generic_input(fn);
+        return;
+    }
+    // Every row of the selection, one at a time, through the SAME path — the cursor is walked down
+    // the range and put back. Not a special-cased bulk edit: whatever a single cell does, N cells do
+    // N times, so a new column can never behave differently under a selection than outside one.
+    const SelectionBounds b       = s_.selection.bounds();
+    const int             savedRow = cursor_row();
+    bool                  any      = false;
+
+    switch (s_.currentScreen) {
+        case ScreenType::PHRASE:
+        case ScreenType::CHAIN:
+        case ScreenType::SONG:
+        case ScreenType::TABLE:
+            for (int row = b.topLeftRow; row <= b.bottomRightRow; ++row) {
+                set_cursor_row(row);
+                const InputAction action = fn(cursor_context());
+                if (action.type != ActionType::NONE && apply_edit(action)) any = true;
+            }
+            set_cursor_row(savedRow);
+            if (any) mark_modified();
+            break;
+
+        default:
+            generic_input(fn);
+            break;
+    }
+}
+
+void InputDispatcher::dpad_nav(const char* direction) {
+    if (s_.selection.active) {
+        const CursorPosition edgeBefore = s_.selection.end;
+        s_.selection.expand(direction, max_selection_row(), max_selection_column());
+
+        // Drag the CURSOR along with the selection's active edge, so it stays on screen — without
+        // this, a SONG selection whose edge runs past row 16 scrolls out from under the anchored
+        // cursor and you are editing blind. Only when the edge actually MOVED, so hitting a clamp (or
+        // a D-pad in SCREEN scope, where the bounds are fixed) cannot teleport the cursor.
+        const CursorPosition edge = s_.selection.end;
+        if (edge != edgeBefore) {
+            const ScreenType sc = s_.currentScreen;
+            if (sc == ScreenType::PHRASE || sc == ScreenType::CHAIN || sc == ScreenType::SONG) {
+                s_.cursorRow    = edge.row;
+                s_.cursorColumn = edge.column;
+                if (sc == ScreenType::SONG) scroll_song_to_row(s_, edge.row);
+            } else if (sc == ScreenType::TABLE) {
+                s_.tableCursorRow    = edge.row;
+                s_.tableCursorColumn = edge.column;
+            }
+        }
+        return;
+    }
+
+    const std::string d(direction);
+    if (d == "UP")         move_cursor_up(s_);
+    else if (d == "DOWN")  move_cursor_down(s_);
+    else if (d == "LEFT")  move_cursor_left(s_);
+    else if (d == "RIGHT") move_cursor_right(s_);
+}
+
+// ─── D-pad alone ─────────────────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::on_dpad_up()    { dpad_nav("UP"); }
+void InputDispatcher::on_dpad_down()  { dpad_nav("DOWN"); }
+void InputDispatcher::on_dpad_left()  { dpad_nav("LEFT"); }
+void InputDispatcher::on_dpad_right() { dpad_nav("RIGHT"); }
+
+// ─── The FX-type column, and the helper it opens ──────────────────────────────────────────────────
+
+bool InputDispatcher::on_fx_type_column() const {
+    switch (s_.currentScreen) {
+        case ScreenType::PHRASE:
+            return s_.cursorColumn == 4 || s_.cursorColumn == 6 || s_.cursorColumn == 8;
+        case ScreenType::TABLE:
+            return s_.tableCursorColumn == 3 || s_.tableCursorColumn == 5 ||
+                   s_.tableCursorColumn == 7;
+        default:
+            return false;
+    }
+}
+
+int InputDispatcher::current_fx_type_index() const {
+    const Project& p = *s_.project;
+    int            code = 0;
+
+    if (s_.currentScreen == ScreenType::PHRASE) {
+        const songcore::PhraseStep& step =
+            p.phrases[static_cast<size_t>(s_.currentPhrase)].steps[static_cast<size_t>(s_.cursorRow)];
+        switch (s_.cursorColumn) {
+            case 4: code = step.fx1Type; break;
+            case 6: code = step.fx2Type; break;
+            case 8: code = step.fx3Type; break;
+            default: break;
+        }
+    } else if (s_.currentScreen == ScreenType::TABLE) {
+        const songcore::TableRow& row =
+            p.tables[static_cast<size_t>(s_.currentTable)].rows[static_cast<size_t>(s_.tableCursorRow)];
+        switch (s_.tableCursorColumn) {
+            case 3: code = row.fx1Type; break;
+            case 5: code = row.fx2Type; break;
+            case 7: code = row.fx3Type; break;
+            default: break;
+        }
+    }
+    return songcore::effect_type_index(code);
+}
+
+void InputDispatcher::apply_fx_type_change(int effect_code) {
+    Project& p = host_.edit_project();
+
+    if (s_.currentScreen == ScreenType::PHRASE) {
+        songcore::PhraseStep& step =
+            p.phrases[static_cast<size_t>(s_.currentPhrase)].steps[static_cast<size_t>(s_.cursorRow)];
+        switch (s_.cursorColumn) {
+            case 4: step.fx1Type = effect_code; break;
+            case 6: step.fx2Type = effect_code; break;
+            case 8: step.fx3Type = effect_code; break;
+            default: return;
+        }
+        mark_modified();
+    } else if (s_.currentScreen == ScreenType::TABLE) {
+        songcore::TableRow& row =
+            p.tables[static_cast<size_t>(s_.currentTable)].rows[static_cast<size_t>(s_.tableCursorRow)];
+        switch (s_.tableCursorColumn) {
+            case 3: row.fx1Type = effect_code; break;
+            case 5: row.fx2Type = effect_code; break;
+            case 7: row.fx3Type = effect_code; break;
+            default: return;
+        }
+        mark_modified(/*table_touched=*/true);
+    }
+}
+
+// ─── A + D-pad ───────────────────────────────────────────────────────────────────────────────────
+
+// ⚠️ The three methods below share a NAME with the free cursor.h handlers they call
+// (`on_a_left` / `on_a_right` / `on_a_b`), and inside a member function unqualified lookup finds the
+// MEMBER first — `selection_or_single(on_a_left)` would try to pass the method to itself. The
+// `pt::ui::` qualification forces namespace-scope lookup and is load-bearing, not decoration.
+//
+// The names are worth the qualification: the free ones are S1's, they are goldened by `ptinput`, and
+// they mirror Kotlin's `InputController.handleALeft`; the methods mirror `ButtonHandlers.onALeft`.
+// Both sets are named after what they are, and both names are right.
+
+void InputDispatcher::on_a_up() {
+    if (s_.fxHelper.isOpen) { fx_move_up(s_.fxHelper); return; }
+    if (on_fx_type_column()) { s_.fxHelper = fx_helper_opened_at(current_fx_type_index()); return; }
+    selection_or_single(pt::ui::on_a);
+}
+
+void InputDispatcher::on_a_down() {
+    if (s_.fxHelper.isOpen) { fx_move_down(s_.fxHelper); return; }
+    if (on_fx_type_column()) { s_.fxHelper = fx_helper_opened_at(current_fx_type_index()); return; }
+    selection_or_single(pt::ui::on_b);   // A+DOWN DECREMENTS — `on_b` is the generic "step down"
+}
+
+void InputDispatcher::on_a_left() {
+    if (s_.fxHelper.isOpen) { fx_move_left(s_.fxHelper); return; }
+    selection_or_single(pt::ui::on_a_left);
+}
+
+void InputDispatcher::on_a_right() {
+    if (s_.fxHelper.isOpen) { fx_move_right(s_.fxHelper); return; }
+    selection_or_single(pt::ui::on_a_right);
+}
+
+void InputDispatcher::on_a_released() {
+    // The FX helper commits on RELEASE, not on a press — which is what lets you hold A, read the
+    // description of half a dozen effects, and let go on the one you want.
+    if (!s_.fxHelper.isOpen) return;
+    apply_fx_type_change(s_.fxHelper.selected_effect_code());
+    s_.fxHelper = FxHelperState{};
+}
+
+// ─── A+B: delete / reset ─────────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::on_a_b() {
+    if (s_.selection.active) {
+        const SelectionBounds b = s_.selection.bounds();
+        Project&              p = host_.edit_project();
+        switch (s_.currentScreen) {
+            case ScreenType::PHRASE:
+                clip_.delete_phrase_steps(p, s_.currentPhrase, b.topLeftRow, b.topLeftColumn,
+                                          b.bottomRightRow, b.bottomRightColumn);
+                break;
+            case ScreenType::CHAIN:
+                clip_.delete_chain_rows(p, s_.currentChain, b.topLeftRow, b.topLeftColumn,
+                                        b.bottomRightRow, b.bottomRightColumn);
+                break;
+            case ScreenType::SONG:
+                clip_.delete_song_cells(p, b.topLeftRow, b.topLeftColumn, b.bottomRightRow,
+                                        b.bottomRightColumn);
+                break;
+            case ScreenType::TABLE:
+                clip_.delete_table_rows(p, s_.currentTable, b.topLeftRow, b.topLeftColumn,
+                                        b.bottomRightRow, b.bottomRightColumn);
+                break;
+            default:
+                s_.selection.exit();
+                return;
+        }
+        mark_modified();
+        s_.selection.exit();
+        return;
+    }
+    generic_input(pt::ui::on_a_b);
+}
+
+// ─── A,A: insert the next UNUSED item ────────────────────────────────────────────────────────────
+
+void InputDispatcher::on_a_a() {
+    // A double-tap is only a double-tap if the cursor has not moved between the presses. Anything
+    // else is two separate A presses, and each of those already did something (they inserted the
+    // LAST-EDITED item — see on_button_a).
+    if (!hasInsertPos_ || insertScreen_ != s_.currentScreen || insertRow_ != s_.cursorRow ||
+        insertCol_ != s_.cursorColumn) {
+        return;
+    }
+    hasInsertPos_ = false;
+
+    Project& p = host_.edit_project();
+
+    if (s_.currentScreen == ScreenType::SONG) {
+        if (s_.cursorColumn < 1 || s_.cursorColumn > 8) return;
+        songcore::Track& track = p.tracks[static_cast<size_t>(s_.cursorColumn - 1)];
+
+        const int next = first_from_wrapping(s_.lastEditedChain + 1, 256, [&](int i) {
+            return chain_is_blank(p.chains[static_cast<size_t>(i)]);
+        });
+        if (next < 0) return;
+
+        while (static_cast<int>(track.chainRefs.size()) <= s_.cursorRow) track.chainRefs.push_back(-1);
+        track.chainRefs[static_cast<size_t>(s_.cursorRow)] = next;
+        s_.lastEditedChain                                 = next;
+        mark_modified();
+
+    } else if (s_.currentScreen == ScreenType::CHAIN) {
+        Chain& chain = p.chains[static_cast<size_t>(s_.currentChain)];
+
+        const int next = first_from_wrapping(s_.lastEditedPhrase + 1, 256, [&](int i) {
+            return phrase_is_blank(p.phrases[static_cast<size_t>(i)]);
+        });
+        if (next < 0) return;
+
+        chain.phraseRefs[static_cast<size_t>(s_.cursorRow)]      = next;
+        chain.transposeValues[static_cast<size_t>(s_.cursorRow)] = s_.lastEditedTranspose;
+        s_.lastEditedPhrase                                      = next;
+        mark_modified();
+    }
+}
+
+// ─── B + D-pad: which item am I looking at? ──────────────────────────────────────────────────────
+
+void InputDispatcher::cycle_current_item(int delta) {
+    // Kotlin's `(value + delta).mod(max + 1)` — a FLOORING modulo, so −1 wraps to the top rather than
+    // staying at −1 the way C's % would.
+    auto wrap = [delta](int value, int max) {
+        const int n = max + 1;
+        return ((value + delta) % n + n) % n;
+    };
+
+    switch (s_.currentScreen) {
+        case ScreenType::CHAIN:
+            s_.currentChain    = wrap(s_.currentChain, 255);
+            s_.lastEditedChain = s_.currentChain;
+            break;
+        case ScreenType::PHRASE:
+            s_.currentPhrase    = wrap(s_.currentPhrase, 255);
+            s_.lastEditedPhrase = s_.currentPhrase;
+            break;
+        case ScreenType::TABLE:
+            s_.currentTable    = wrap(s_.currentTable, 127);
+            s_.lastEditedTable = s_.currentTable;
+            break;
+        case ScreenType::GROOVE:
+            s_.currentGroove = wrap(s_.currentGroove, 127);
+            break;
+        default:
+            break;
+    }
+}
+
+void InputDispatcher::on_b_left()  { cycle_current_item(-1); }
+void InputDispatcher::on_b_right() { cycle_current_item(+1); }
+
+void InputDispatcher::on_b_up() {
+    if (s_.currentScreen != ScreenType::SONG) return;
+    s_.cursorRow = std::max(0, s_.cursorRow - 16);   // TrackerController.moveSongBigUp
+    scroll_song_to_row(s_, s_.cursorRow);
+}
+
+void InputDispatcher::on_b_down() {
+    if (s_.currentScreen != ScreenType::SONG) return;
+    s_.cursorRow = std::min(255, s_.cursorRow + 16);  // moveSongBigDown
+    scroll_song_to_row(s_, s_.cursorRow);
+}
+
+// ─── R + D-pad: move between screens ─────────────────────────────────────────────────────────────
+
+void InputDispatcher::on_r_up() {
+    const NavState ns = nav_state_of(s_);
+    go_to_screen(s_, navigate_up(ns));
+    s_.selection.exit();   // a selection belongs to the screen it was made on
+}
+void InputDispatcher::on_r_down() {
+    const NavState ns = nav_state_of(s_);
+    go_to_screen(s_, navigate_down(ns));
+    s_.selection.exit();
+}
+void InputDispatcher::on_r_left() {
+    const NavState ns = nav_state_of(s_);
+    go_to_screen(s_, navigate_left(ns));
+    s_.selection.exit();
+}
+void InputDispatcher::on_r_right() {
+    const NavState ns = nav_state_of(s_);
+    go_to_screen(s_, navigate_right(ns));
+    s_.selection.exit();
+}
+
+// ─── L: selection and the clipboard ──────────────────────────────────────────────────────────────
+
+void InputDispatcher::on_l_b() {
+    switch (s_.currentScreen) {
+        case ScreenType::PHRASE:
+        case ScreenType::CHAIN:
+        case ScreenType::SONG:
+        case ScreenType::TABLE:
+            s_.selection.handle_select_b(now_ms_, cursor_row(), cursor_column(),
+                                         max_selection_column(), max_selection_row());
+            break;
+        default:
+            break;  // GROOVE has one column and no clipboard type — nothing to select
+    }
+}
+
+void InputDispatcher::on_l_a() {
+    // Inside a selection L+A CUTS; outside one it PASTES. One button, two verbs, and which one you
+    // get is a function of the selection — Kotlin's `handleSelectA()`, inlined because the C++
+    // selection has no InputAction to return.
+    Project& p = host_.edit_project();
+
+    if (s_.selection.active) {
+        const SelectionBounds b = s_.selection.bounds();
+        switch (s_.currentScreen) {
+            case ScreenType::PHRASE:
+                clip_.cut_phrase_steps(p, s_.currentPhrase, b.topLeftRow, b.topLeftColumn,
+                                       b.bottomRightRow, b.bottomRightColumn);
+                break;
+            case ScreenType::CHAIN:
+                clip_.cut_chain_rows(p, s_.currentChain, b.topLeftRow, b.topLeftColumn,
+                                     b.bottomRightRow, b.bottomRightColumn);
+                break;
+            case ScreenType::SONG:
+                clip_.cut_song_cells(p, b.topLeftRow, b.topLeftColumn, b.bottomRightRow,
+                                     b.bottomRightColumn);
+                break;
+            case ScreenType::TABLE:
+                clip_.cut_table_rows(p, s_.currentTable, b.topLeftRow, b.topLeftColumn,
+                                     b.bottomRightRow, b.bottomRightColumn);
+                break;
+            default:
+                s_.selection.exit();
+                return;
+        }
+        mark_modified();
+        s_.selection.exit();
+        return;
+    }
+
+    // Paste. The target id is the item being edited; SONG has none (its clip carries its own tracks).
+    int targetId = 0;
+    switch (s_.currentScreen) {
+        case ScreenType::PHRASE: targetId = s_.currentPhrase; break;
+        case ScreenType::CHAIN:  targetId = s_.currentChain;  break;
+        case ScreenType::TABLE:  targetId = s_.currentTable;  break;
+        default:                 targetId = 0;                break;
+    }
+    const PasteResult r =
+        clip_.paste(p, s_.currentScreen, targetId, cursor_row(), cursor_column());
+    if (r.kind == PasteResult::Kind::SUCCESS && r.itemsPasted > 0) mark_modified();
+}
+
+void InputDispatcher::on_l_r() { s_.selection.exit(); }
+
+// ─── L+B+A: clone ────────────────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::on_l_b_a() {
+    Project& p = host_.edit_project();
+
+    if (s_.currentScreen == ScreenType::SONG) {
+        if (s_.cursorColumn < 1 || s_.cursorColumn > 8) { s_.selection.exit(); return; }
+        songcore::Track& track = p.tracks[static_cast<size_t>(s_.cursorColumn - 1)];
+        const int currentChainId =
+            (s_.cursorRow < static_cast<int>(track.chainRefs.size()))
+                ? track.chainRefs[static_cast<size_t>(s_.cursorRow)]
+                : -1;
+
+        if (currentChainId != -1) {
+            const Chain&        src         = p.chains[static_cast<size_t>(currentChainId)];
+            const std::set<int> usedChains  = used_chain_ids(p);
+            const std::set<int> usedPhrases = used_phrase_ids(p);
+
+            // The destination must be a FREE chain: blank AND unreferenced.
+            const int dstChainId = first_from_wrapping(currentChainId + 1, 256, [&](int i) {
+                return usedChains.count(i) == 0 && chain_is_blank(p.chains[static_cast<size_t>(i)]);
+            });
+
+            // A DEEP clone: every phrase the chain references gets its own free slot, so the copy is
+            // fully independent. `reserved` stops two source phrases claiming the same destination;
+            // duplicate refs inside the chain map to the SAME clone, which is what keeps a chain that
+            // plays phrase 5 twice still playing one phrase twice.
+            std::vector<int>   srcPhraseIds;
+            for (const int ref : src.phraseRefs)
+                if (ref != -1 &&
+                    std::find(srcPhraseIds.begin(), srcPhraseIds.end(), ref) == srcPhraseIds.end())
+                    srcPhraseIds.push_back(ref);
+
+            std::set<int>      reserved;
+            std::map<int, int> phraseMap;
+            bool               enoughPhrases = true;
+            for (const int pid : srcPhraseIds) {
+                const int slot = first_from_wrapping(0, 256, [&](int i) {
+                    return reserved.count(i) == 0 && usedPhrases.count(i) == 0 &&
+                           phrase_is_blank(p.phrases[static_cast<size_t>(i)]);
+                });
+                if (slot < 0) { enoughPhrases = false; break; }
+                reserved.insert(slot);
+                phraseMap[pid] = slot;
+            }
+
+            // Capacity is checked in FULL before anything is written. Abort, never half-clone: a
+            // partial clone leaves a chain pointing at phrases that were never copied.
+            if (dstChainId < 0) {
+                s_.statusMessage = "NO FREE CHAINS";
+                s_.statusSuccess = false;
+            } else if (!enoughPhrases) {
+                s_.statusMessage = "NO FREE PHRASES";
+                s_.statusSuccess = false;
+            } else {
+                for (const auto& kv : phraseMap)
+                    p.phrases[static_cast<size_t>(kv.second)].steps =
+                        p.phrases[static_cast<size_t>(kv.first)].steps;
+
+                Chain& dst = p.chains[static_cast<size_t>(dstChainId)];
+                for (size_t i = 0; i < src.phraseRefs.size(); ++i) {
+                    const int ref     = src.phraseRefs[i];
+                    dst.phraseRefs[i] = (ref == -1) ? -1 : phraseMap[ref];
+                }
+                dst.transposeValues = src.transposeValues;
+
+                track.chainRefs[static_cast<size_t>(s_.cursorRow)] = dstChainId;
+                s_.lastEditedChain = dstChainId;
+                s_.statusMessage   = "CHAIN CLONED";
+                s_.statusSuccess   = true;
+                mark_modified();
+            }
+        }
+
+    } else if (s_.currentScreen == ScreenType::CHAIN) {
+        Chain&    chain           = p.chains[static_cast<size_t>(s_.currentChain)];
+        const int currentPhraseId = chain.phraseRefs[static_cast<size_t>(s_.cursorRow)];
+        if (currentPhraseId != -1) {
+            const std::set<int> usedPhrases = used_phrase_ids(p);
+            const int next = first_from_wrapping(currentPhraseId + 1, 256, [&](int i) {
+                return usedPhrases.count(i) == 0 && phrase_is_blank(p.phrases[static_cast<size_t>(i)]);
+            });
+            if (next >= 0) {
+                p.phrases[static_cast<size_t>(next)].steps =
+                    p.phrases[static_cast<size_t>(currentPhraseId)].steps;
+                chain.phraseRefs[static_cast<size_t>(s_.cursorRow)] = next;
+                s_.lastEditedPhrase                                 = next;
+                mark_modified();
+            }
+        }
+
+    } else if (s_.currentScreen == ScreenType::PHRASE) {
+        const int srcPhraseId = s_.currentPhrase;
+        const std::set<int> usedPhrases = used_phrase_ids(p);
+        const int next = first_from_wrapping(srcPhraseId + 1, 256, [&](int i) {
+            return i != srcPhraseId && usedPhrases.count(i) == 0 &&
+                   phrase_is_blank(p.phrases[static_cast<size_t>(i)]);
+        });
+        if (next >= 0) {
+            p.phrases[static_cast<size_t>(next)].steps =
+                p.phrases[static_cast<size_t>(srcPhraseId)].steps;
+            s_.currentPhrase = next;   // …and follow the clone, so you are editing the copy
+            mark_modified();
+        }
+    }
+
+    s_.selection.exit();
+}
+
+// ─── The plain buttons ───────────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::on_button_a() {
+    // A on an EMPTY cell inserts the item you last edited. That is what makes A,A meaningful: press
+    // A once to lay down the last chain again, press it twice to get a fresh one.
+    Project& p = host_.edit_project();
+    hasInsertPos_ = false;
+
+    switch (s_.currentScreen) {
+        case ScreenType::PHRASE: {
+            if (s_.cursorColumn != 1 || s_.selection.active) return;
+            Phrase& ph = p.phrases[static_cast<size_t>(s_.currentPhrase)];
+            PhraseEditorState ps{ph};
+            ps.cursorRow    = s_.cursorRow;
+            ps.cursorColumn = s_.cursorColumn;
+            if (!phrase_.cursor_context(ps).capabilities.isEmpty) return;
+
+            songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s_.cursorRow)];
+            step.note       = s_.lastEditedNote;
+            step.instrument = s_.lastEditedInstrument;
+            step.volume     = s_.lastEditedVolume;
+            mark_modified();
+
+            if (s_.notePreviewEnabled && step.note != Note::EMPTY()) {
+                // A WHOLE PHRASE long, not one step: this gesture lays a note down to listen to, and
+                // an audition that dies after a 16th note tells you nothing about a pad.
+                const int sr = std::max(44100, host_.sample_rate());
+                host_.preview_note(std::min(std::max(step.instrument, 0), 127), step.note,
+                                   songcore::frames_per_step(p.tempo, sr) * 16);
+            }
+            break;
+        }
+
+        case ScreenType::CHAIN: {
+            Chain& chain = p.chains[static_cast<size_t>(s_.currentChain)];
+            if (chain_row_empty(chain, s_.cursorRow)) {
+                chain.phraseRefs[static_cast<size_t>(s_.cursorRow)]      = s_.lastEditedPhrase;
+                chain.transposeValues[static_cast<size_t>(s_.cursorRow)] = s_.lastEditedTranspose;
+                mark_modified();
+                hasInsertPos_ = true;   // arm A,A — a second press here inserts the next UNUSED phrase
+                insertScreen_ = ScreenType::CHAIN;
+                insertRow_    = s_.cursorRow;
+                insertCol_    = s_.cursorColumn;
+            }
+            break;
+        }
+
+        case ScreenType::SONG: {
+            if (s_.selection.active) return;
+            if (s_.cursorColumn < 1 || s_.cursorColumn > 8) return;
+            songcore::Track& track = p.tracks[static_cast<size_t>(s_.cursorColumn - 1)];
+            while (static_cast<int>(track.chainRefs.size()) <= s_.cursorRow)
+                track.chainRefs.push_back(-1);
+
+            if (track.chainRefs[static_cast<size_t>(s_.cursorRow)] == -1) {
+                track.chainRefs[static_cast<size_t>(s_.cursorRow)] = s_.lastEditedChain;
+                mark_modified();
+                hasInsertPos_ = true;
+                insertScreen_ = ScreenType::SONG;
+                insertRow_    = s_.cursorRow;
+                insertCol_    = s_.cursorColumn;
+            }
+            break;
+        }
+
+        default:
+            break;
+    }
+}
+
+void InputDispatcher::on_button_b() {
+    // B inside a selection COPIES it and exits — the tracker's copy gesture. Outside one, B on these
+    // five screens does nothing (they are the main row; there is nowhere to go back to).
+    if (!s_.selection.active) return;
+
+    const SelectionBounds b = s_.selection.bounds();
+    const Project&        p = *s_.project;
+
+    switch (s_.currentScreen) {
+        case ScreenType::PHRASE:
+            clip_.copy_phrase_steps(p, s_.currentPhrase, b.topLeftRow, b.topLeftColumn,
+                                    b.bottomRightRow, b.bottomRightColumn);
+            break;
+        case ScreenType::CHAIN:
+            clip_.copy_chain_rows(p, s_.currentChain, b.topLeftRow, b.topLeftColumn,
+                                  b.bottomRightRow, b.bottomRightColumn);
+            break;
+        case ScreenType::SONG:
+            clip_.copy_song_cells(p, b.topLeftRow, b.topLeftColumn, b.bottomRightRow,
+                                  b.bottomRightColumn);
+            break;
+        case ScreenType::TABLE:
+            clip_.copy_table_rows(p, s_.currentTable, b.topLeftRow, b.topLeftColumn,
+                                  b.bottomRightRow, b.bottomRightColumn);
+            break;
+        default:
+            break;
+    }
+    s_.selection.exit();
+}
+
+void InputDispatcher::on_select() {
+    // SELECT does NOT clear the cell under the cursor on the editor screens — deleting a value is
+    // A+B. It is left free here for context actions, exactly as Kotlin leaves it.
+}
+
+void InputDispatcher::on_stop_preview() {
+    // Only the screens that can START an audition can stop one — `stopActivePreview()`. On PHRASE it
+    // is gated on the setting, because with previews off there is nothing to silence.
+    const bool previewScreen = (s_.currentScreen == ScreenType::TABLE) ||
+                               (s_.currentScreen == ScreenType::PHRASE && s_.notePreviewEnabled);
+    if (previewScreen) host_.stop_preview();
+}
+
+void InputDispatcher::on_start() {
+    // What START plays depends on the screen you are ON: the phrase you are editing, the chain you
+    // are editing, or the whole song from row 0 (`playSong` takes startRow=0 — it does NOT start at
+    // the cursor). Every other screen falls back to the phrase, so START always makes a sound.
+    if (host_.is_playing()) {
+        host_.stop();
+        return;
+    }
+    switch (s_.currentScreen) {
+        case ScreenType::SONG:  host_.play_song(0); break;
+        case ScreenType::CHAIN: host_.play_chain(s_.currentChain); break;
+        default:                host_.play_phrase(s_.currentPhrase); break;
+    }
+}
+
+}  // namespace pt::ui

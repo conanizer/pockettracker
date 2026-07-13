@@ -198,8 +198,11 @@ endif()
 if(NOT ANDROID)
     add_library(pt-ui STATIC
             ui/canvas.cpp
+            ui/clipboard.cpp
+            ui/input_dispatcher.cpp
             ui/layout.cpp
             ui/modules/chain_editor.cpp
+            ui/modules/fx_helper_overlay.cpp
             ui/modules/groove_editor.cpp
             ui/modules/navigation_map.cpp
             ui/modules/oscilloscope.cpp

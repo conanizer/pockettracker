@@ -26,10 +26,11 @@
 //
 // ─── WHAT IS STILL A STUB ────────────────────────────────────────────────────────────────────────
 //
-// Five screens are real (SONG, CHAIN, PHRASE, TABLE, GROOVE) and R+DPAD moves between all of them.
-// The rest draw the "COMING SOON" placeholder that the Android app itself used while its screens were
-// being written, and they land session by session: the full input dispatcher (selection, clipboard,
-// note preview, the FX helper) next, then the instrument, mixer, file and settings screens.
+// Five screens are real (SONG, CHAIN, PHRASE, TABLE, GROOVE), R+DPAD moves between all of them, and
+// since S3 the whole input layer is here: selection, the clipboard, item cycling, cloning, the note
+// preview, the FX-helper overlay. The rest draw the "COMING SOON" placeholder that the Android app
+// itself used while its own screens were being written, and they land session by session — the
+// instrument, mixer, file and settings screens, each bringing its own arm of the dispatcher with it.
 
 // <cmath> before <SDL.h> — see the note in sdl-audio-engine.h (M_PI, _USE_MATH_DEFINES, C4005).
 #include <cmath>
@@ -41,16 +42,9 @@
 #include "songcore/host.h"
 #include "ui/app_state.h"
 #include "ui/canvas.h"
-#include "ui/cursor.h"
-#include "ui/cursor_move.h"
 #include "ui/engine_feed.h"
+#include "ui/input_dispatcher.h"
 #include "ui/layout.h"
-#include "ui/navigation.h"
-#include "ui/modules/chain_editor.h"
-#include "ui/modules/groove_editor.h"
-#include "ui/modules/phrase_editor.h"
-#include "ui/modules/song_editor.h"
-#include "ui/modules/table_editor.h"
 
 #include "sdl-audio-engine.h"
 #include "sdl-input.h"
@@ -83,195 +77,146 @@ std::string dir_of(const std::string& path) {
     return (slash == std::string::npos) ? std::string(".") : path.substr(0, slash);
 }
 
-/** Every grid editor the shell can currently show. One instance each, exactly as TrackerLayout holds. */
-struct Editors {
-    ui::SongEditorModule   song;
-    ui::ChainEditorModule  chain;
-    ui::PhraseEditorModule phrase;
-    ui::TableModule        table;
-    ui::GrooveModule       groove;
+/** The mapper's own memory. Today just the A,A double-tap window — Kotlin's `InputMapper.lastAPress`. */
+struct MapperState {
+    Uint64 lastAPress = 0;
 };
 
 /**
- * "What is under the cursor, and what can be done to it" — for whichever screen is up.
+ * The COMBO MATRIX — a 1:1 port of `InputMapper.handleButtonAction`, and the last piece of the input
+ * chain that is allowed to be platform-specific.
  *
- * The ONE place the shell asks which screen it is on. Everything downstream (the five button handlers,
- * the value stepping, the wrap-vs-clamp rules) is written against the CursorContext this returns and
- * never learns the answer. That is the whole point of the cursor-context system, and it is why adding
- * a screen below is four lines rather than a new branch in every handler.
+ * Android's chain is InputMapper → ButtonHandlers → AppInputDispatcher. This function is the first
+ * arrow: it owns nothing but the question "which of the ~30 named handlers does this press mean?",
+ * and it answers it from the button plus the modifiers held at the instant it happened. Everything
+ * downstream — what a handler DOES — is `pt::ui::InputDispatcher`, which is portable C++ and has never
+ * heard of SDL.
+ *
+ * ⚠️ **THE ORDER OF THESE CHECKS IS THE SPECIFICATION.** They run most-specific-first, and each arm
+ * RETURNS. L+B+A must be tested before L+A or a clone would paste; A+B before a plain A or a delete
+ * would insert; R+A is consumed and does nothing, so that holding R to change screens cannot also fire
+ * an edit underneath. Reordering them silently changes what the tracker does.
+ *
+ * ⚠️ **The modifiers come from the EVENT, never from `input.is_held()`.** See sdl-input.h: SDL delivers
+ * a frame's worth of events at once, so a poll-time read describes the end of the frame rather than the
+ * instant of each event — and B-then-A inside one 16 ms frame would fire A+B (delete) on the B press.
  */
-ui::CursorContext cursor_context_for(const ui::AppState& s, const Project& p, const Editors& ed) {
-    switch (s.currentScreen) {
-        case ui::ScreenType::SONG: {
-            ui::SongEditorState ss{p};
-            ss.cursorRow   = s.cursorRow;
-            ss.cursorTrack = s.cursorColumn;  // on SONG the column IS the track
-            return ed.song.cursor_context(ss);
-        }
-        case ui::ScreenType::CHAIN: {
-            ui::ChainEditorState cs{p.chains[static_cast<size_t>(s.currentChain)]};
-            cs.cursorRow    = s.cursorRow;
-            cs.cursorColumn = s.cursorColumn;
-            return ed.chain.cursor_context(cs);
-        }
-        case ui::ScreenType::PHRASE: {
-            ui::PhraseEditorState ps{p.phrases[static_cast<size_t>(s.currentPhrase)]};
-            ps.cursorRow    = s.cursorRow;
-            ps.cursorColumn = s.cursorColumn;
-            return ed.phrase.cursor_context(ps);
-        }
-        case ui::ScreenType::TABLE: {
-            ui::TableState ts{p.tables[static_cast<size_t>(s.currentTable)]};
-            ts.cursorRow    = s.tableCursorRow;
-            ts.cursorColumn = s.tableCursorColumn;
-            return ed.table.cursor_context(ts);
-        }
-        case ui::ScreenType::GROOVE: {
-            ui::GrooveState gs{p.grooves[static_cast<size_t>(s.currentGroove)]};
-            gs.cursorRow    = s.grooveCursorRow;
-            gs.cursorColumn = 1;
-            return ed.groove.cursor_context(gs);
-        }
-        default:
-            return ui::cc::none();  // a placeholder screen has nothing to edit
+void handle_button(const ButtonEvent& e, ui::InputDispatcher& d, MapperState& ms, Uint64 now) {
+    const ButtonMods& m = e.mods;
+
+    // ── RELEASE ──────────────────────────────────────────────────────────────────────────────────
+    if (e.action != ButtonAction::PRESSED) {
+        // The FX helper commits on the RELEASE of A — which is what lets you hold A, read your way
+        // through the effect grid, and let go on the one you want.
+        if (e.button == Button::A) d.on_a_released();
+        return;
     }
-}
 
-/** Apply an action to the live document. Returns true if anything changed. */
-bool apply_edit(const ui::AppState& s, SongcoreHost& host, const Editors& ed,
-                const ui::InputAction& action) {
-    Project& p = host.edit_project();  // the SAME Project the Sequencer is reading
+    // Silence a ringing audition on any "plain" press. START is exempt (it starts playback), and so is
+    // anything pressed while A is held — that covers every edit combo, and an edit should stay audible.
+    if (e.button != Button::START && !m.a) d.on_stop_preview();
 
-    switch (s.currentScreen) {
-        case ui::ScreenType::SONG:
-            return ed.song.handle_input(p, s.cursorRow, s.cursorColumn, action).modified;
-
-        case ui::ScreenType::CHAIN:
-            return ed.chain
-                .handle_input(p.chains[static_cast<size_t>(s.currentChain)], s.cursorRow,
-                              s.cursorColumn, action)
-                .modified;
-
-        case ui::ScreenType::PHRASE:
-            return ed.phrase
-                .handle_input(p.phrases[static_cast<size_t>(s.currentPhrase)], s.cursorRow,
-                              s.cursorColumn, action)
-                .modified;
-
-        case ui::ScreenType::TABLE: {
-            const bool modified =
-                ed.table
-                    .handle_input(p.tables[static_cast<size_t>(s.currentTable)], s.tableCursorRow,
-                                  s.tableCursorColumn, action)
-                    .modified;
-            // ⚠️ The consumer caches which tables it has already pushed to the engine. An in-place
-            // edit is invisible to that cache — push_project invalidates it, an edit cannot.
-            if (modified) host.invalidate_tables();
-            return modified;
+    // ── A + … : the tracker's core editing gesture ───────────────────────────────────────────────
+    if (m.a && !m.l && !m.r) {
+        switch (e.button) {
+            case Button::B:          d.on_a_b();     return;   // A+B — delete / reset to default
+            case Button::DPAD_UP:    d.on_a_up();    return;   // +1  (or open the FX helper)
+            case Button::DPAD_DOWN:  d.on_a_down();  return;   // −1
+            case Button::DPAD_RIGHT: d.on_a_right(); return;   // +16 / +1 octave
+            case Button::DPAD_LEFT:  d.on_a_left();  return;   // −16 / −1 octave
+            default: break;
         }
-
-        case ui::ScreenType::GROOVE:
-            return ed.groove
-                .handle_input(p.grooves[static_cast<size_t>(s.currentGroove)], s.grooveCursorRow,
-                              /*cursor_column=*/1, action)
-                .modified;
-
-        default:
-            return false;
     }
-}
 
-/**
- * The editing half of the input loop.
- *
- * A deliberately SMALL stand-in for `AppInputDispatcher` (~3200 lines of Kotlin), covering exactly the
- * slice these two sessions set out to prove: reach every screen, move the cursor, edit the cell under
- * it, hear the result. What matters is that it is written THROUGH the real architecture rather than
- * around it — `cursor_context()` answers what the cursor is on, and the generic `on_a` / `on_b` /
- * `on_a_left` / `on_a_right` / `on_a_b` handlers turn a button into an `InputAction` without ever
- * asking which screen is up. The dispatcher session replaces this function and keeps everything under
- * it.
- *
- * Not here yet, and each belongs to that session: the selection/clipboard combos (L+B, L+A), the
- * item-cycling B+DPAD (which is how you change WHICH phrase/chain/table you are looking at), the A,A
- * double-tap, the note preview an edit should play, and the FX-helper overlay that intercepts A+UP on
- * an FX-type column.
- */
-void handle_button(const ButtonEvent& e, ui::AppState& state, SongcoreHost& host, const Editors& ed,
-                   const SdlInput& input) {
-    if (e.action != ButtonAction::PRESSED) return;
+    // ── B + DPAD: WHICH item am I looking at? ────────────────────────────────────────────────────
+    if (m.b && !m.l && !m.r && !m.a) {
+        switch (e.button) {
+            case Button::DPAD_LEFT:  d.on_b_left();  return;   // previous phrase/chain/table/groove
+            case Button::DPAD_RIGHT: d.on_b_right(); return;   // next
+            case Button::DPAD_UP:    d.on_b_up();    return;   // SONG: page up
+            case Button::DPAD_DOWN:  d.on_b_down();  return;   // SONG: page down
+            default: break;
+        }
+    }
 
-    const bool aHeld = input.is_held(Button::A);
-    const bool bHeld = input.is_held(Button::B);
-    const bool rHeld = input.is_held(Button::R_SHIFT);
+    // ── L+R: leave selection mode ────────────────────────────────────────────────────────────────
+    if (m.l && m.r) {
+        switch (e.button) {
+            // Reserved chords: consumed so they cannot fall through to a single-button handler
+            // mid-chord and do something the user never asked for.
+            case Button::SELECT:
+            case Button::A:
+            case Button::B:       return;
+            case Button::L_SHIFT:
+            case Button::R_SHIFT: d.on_l_r(); return;
+            default: break;
+        }
+    }
+
+    // ── L+B+A: clone. BEFORE the L+button block, or L+A would paste instead. ─────────────────────
+    if (m.l && m.b && !m.r && e.button == Button::A) {
+        d.on_l_b_a();
+        return;
+    }
+
+    // ── L + … : selection and the clipboard ──────────────────────────────────────────────────────
+    if (m.l && !m.r) {
+        switch (e.button) {
+            case Button::A:     d.on_l_a(); return;   // cut (in a selection) / paste (outside one)
+            case Button::B:     d.on_l_b(); return;   // enter selection, then widen it
+            case Button::START: return;               // reserved — START must not toggle playback here
+            default: break;                           // L+DPAD is the file browser's; it has no screen yet
+        }
+    }
 
     // ── R + DPAD: move between screens ───────────────────────────────────────────────────────────
-    // Checked FIRST: R is a screen-navigation modifier, and while it is down a DPAD press must not
-    // also move the cursor underneath.
-    if (rHeld) {
-        const ui::NavState ns = ui::nav_state_of(state);
+    if (m.r && !m.l) {
         switch (e.button) {
-            case Button::DPAD_UP:    ui::go_to_screen(state, ui::navigate_up(ns));    break;
-            case Button::DPAD_DOWN:  ui::go_to_screen(state, ui::navigate_down(ns));  break;
-            case Button::DPAD_LEFT:  ui::go_to_screen(state, ui::navigate_left(ns));  break;
-            case Button::DPAD_RIGHT: ui::go_to_screen(state, ui::navigate_right(ns)); break;
+            case Button::DPAD_UP:    d.on_r_up();    return;
+            case Button::DPAD_DOWN:  d.on_r_down();  return;
+            case Button::DPAD_LEFT:  d.on_r_left();  return;
+            case Button::DPAD_RIGHT: d.on_r_right(); return;
+            // Reserved, and consumed: R is held to navigate, and a stray A must not edit underneath it.
+            case Button::A:
+            case Button::B:
+            case Button::START:      return;
             default: break;
+        }
+    }
+
+    // ── A, and the A,A double-tap ────────────────────────────────────────────────────────────────
+    // 300 ms. The window belongs to the MAPPER on Android (`InputMapper.lastAPress`), so it lives
+    // here rather than in the dispatcher — and it is passed in rather than kept in a function-local
+    // static, because a mapper that hides its own state cannot be driven by a test.
+    if (e.button == Button::A && !m.l && !m.r) {
+        if (now - ms.lastAPress < 300) {
+            ms.lastAPress = 0;   // …so a triple-tap does not read as two double-taps
+            d.on_a_a();          // insert the next UNUSED chain/phrase
+        } else {
+            ms.lastAPress = now;
+            d.on_button_a();     // insert the LAST-EDITED one
         }
         return;
     }
 
-    const ui::CursorContext ctx = cursor_context_for(state, host.edit_project(), ed);
+    if (e.button == Button::B && !m.l && !m.r && !m.a) { d.on_button_b(); return; }  // copy a selection
 
-    ui::InputAction action = ui::InputAction::none();
+    // ⚠️ SELECT and START are checked EXPLICITLY, ahead of the "no modifiers" guard below, and the
+    // reason is easy to miss: pressing SELECT sets `m.select` — its own press would be swallowed by a
+    // guard that rejects any modifier. Kotlin carries the same explicit check for the same reason.
+    if (e.button == Button::SELECT && !m.l && !m.r && !m.a && !m.b) { d.on_select(); return; }
+    if (e.button == Button::START && !m.l && !m.r && !m.a && !m.b && !m.select) { d.on_start(); return; }
 
-    // ── A + DPAD: the tracker's core editing gesture ─────────────────────────────────────────────
-    // A alone steps the value by one; A+LEFT/RIGHT by the large step (16 for a hex byte, an octave
-    // for a note). The same DPAD press therefore means two different things depending on a modifier,
-    // which is exactly why the input mapper reports HELD STATE rather than pre-baked combos.
-    if (aHeld) {
-        switch (e.button) {
-            case Button::DPAD_UP:    action = ui::on_a(ctx);       break;
-            case Button::DPAD_DOWN:  action = ui::on_b(ctx);       break;
-            case Button::DPAD_LEFT:  action = ui::on_a_left(ctx);  break;
-            case Button::DPAD_RIGHT: action = ui::on_a_right(ctx); break;
-            case Button::B:          action = ui::on_a_b(ctx);     break;  // A+B: delete / reset
-            default: break;
-        }
-    } else if (bHeld && e.button == Button::A) {
-        action = ui::on_a_b(ctx);  // the same combo, pressed in the other order
-    } else {
-        // ── DPAD alone: move the cursor ──────────────────────────────────────────────────────────
-        switch (e.button) {
-            case Button::DPAD_UP:    ui::move_cursor_up(state);    break;
-            case Button::DPAD_DOWN:  ui::move_cursor_down(state);  break;
-            case Button::DPAD_LEFT:  ui::move_cursor_left(state);  break;
-            case Button::DPAD_RIGHT: ui::move_cursor_right(state); break;
-            case Button::START:
-                // Kotlin's togglePlayback(): what START plays depends on the screen you are ON — the
-                // phrase you are editing, the chain you are editing, or the whole song from row 0
-                // (`playSong(project)` takes the startRow=0 default; it does NOT start at the cursor).
-                // Every other screen falls back to the phrase, so START always makes a sound.
-                if (host.is_playing()) {
-                    host.stop();
-                } else {
-                    switch (state.currentScreen) {
-                        case ui::ScreenType::SONG:  host.play_song(0); break;
-                        case ui::ScreenType::CHAIN: host.play_chain(state.currentChain); break;
-                        default:                    host.play_phrase(state.currentPhrase); break;
-                    }
-                }
-                break;
-            default:
-                break;
-        }
+    // ── The D-pad, unmodified: move the cursor (or drag a selection's edge) ──────────────────────
+    if (m.l || m.r || m.a || m.b || m.select) return;  // any modifier down: not a plain press
+
+    switch (e.button) {
+        case Button::DPAD_UP:    d.on_dpad_up();    break;
+        case Button::DPAD_DOWN:  d.on_dpad_down();  break;
+        case Button::DPAD_LEFT:  d.on_dpad_left();  break;
+        case Button::DPAD_RIGHT: d.on_dpad_right(); break;
+        default: break;
     }
-
-    if (action.type == ui::ActionType::NONE) return;
-
-    // An edit made WHILE PLAYING has to reach the lookahead that has already been scheduled past it —
-    // otherwise it is not heard until the buffer happens to roll over it. Kotlin calls exactly this,
-    // from exactly here.
-    if (apply_edit(state, host, ed, action) && host.is_playing()) host.notify_data_changed();
 }
 
 }  // namespace
@@ -342,11 +287,21 @@ int main(int argc, char** argv) {
     ui::Canvas        canvas;
     ui::TrackerLayout layout;
     ui::EngineFeed    feed;
-    Editors           editors;
 
-    std::printf("\nWASD/arrows move   K/Enter = A   J/Esc = B   SPACE = START (play/stop)   F10 quit\n");
-    std::printf("A+UP/DOWN edit the cell   A+LEFT/RIGHT edit fast   A+B clear\n");
-    std::printf("I(R)+DPAD moves between screens: SONG CHAIN PHRASE TABLE GROOVE\n\n");
+    // The whole input layer, in one object. It edits `host.edit_project()` — the SAME Project the
+    // Sequencer is reading — so an edit is live the instant it is made.
+    ui::InputDispatcher dispatch(state, host);
+    MapperState         mapper;
+
+    std::printf("\nWASD/arrows move   K/Enter = A   J/Esc = B   U/I = L/R   LShift = SELECT   SPACE = START   F10 quit\n");
+    std::printf("A+UP/DOWN edit   A+LEFT/RIGHT edit fast   A+B clear   A,A insert next unused\n");
+    std::printf("B+LEFT/RIGHT change WHICH phrase/chain/table   B+UP/DOWN page the song\n");
+    std::printf("L+B select (tap again to widen)   B copies   L+A cut/paste   L+R deselect   L+B+A clone\n");
+    // ASCII only, deliberately: this goes to a console whose encoding is not ours to choose (a
+    // handheld's serial/ssh terminal, a Windows box on a legacy code page), and a stray em-dash
+    // arrives there as mojibake.
+    std::printf("A+UP on an FX-TYPE column opens the effect picker - release A to choose\n");
+    std::printf("R+DPAD moves between screens: SONG CHAIN PHRASE TABLE GROOVE\n\n");
 
     bool   running    = true;
     Uint64 lastStatus = 0;
@@ -371,9 +326,13 @@ int main(int argc, char** argv) {
         }
         input.tick(now);
 
+        // The frame's clock, handed to the dispatcher once. It feeds the L+B multi-tap window — a
+        // class whose behaviour is a function of time must be GIVEN the time, not go looking for it.
+        dispatch.set_now(static_cast<long long>(now));
+
         ButtonEvent be;
         while (input.poll(be)) {
-            handle_button(be, state, host, editors, input);
+            handle_button(be, dispatch, mapper, now);
         }
 
         // The lookahead pump — the same call, on the same 60 Hz cadence, that PixelPerfectRenderer's
