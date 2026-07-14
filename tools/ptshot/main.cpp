@@ -352,6 +352,7 @@ int main(int argc, char** argv) {
                      "              [--status=TEXT] [--status-fail] [--rendering=PCT]\n"
                      "              [--eq=SLOT] [--eq-cursor=0..11] [--eq-spectrum]   (S8: the overlay)\n"
                      "              [--eq-caller=MASTER|REV|DLY|SAMPLE|INST<N>]\n"
+                     "              [--theme-editor] [--theme-row=0..17] [--theme-channel=0..2]  (S9)\n"
                      "              [--theme=CLASSIC|AMBER|BLUE|MONO]\n"
                      "              [--viz=SCOPE|FLAT|OCTA|OCTA_FULL|SPECTRUM|SPECTRUM_PEAKS]\n"
                      "              [--playing=ROW] [--source-column=N] [--from-pool]\n"
@@ -523,6 +524,26 @@ int main(int argc, char** argv) {
             state.eqSpectrum      = eqSpectrumFixture.data();
             state.eqSpectrumCount = bins;
         }
+    }
+
+    // ── The THEME EDITOR overlay (S9) ────────────────────────────────────────────────────────────
+    //
+    // `--theme-editor` raises it on the same terms as `--eq`: INSTEAD of the editor module, inside the
+    // same clip, with the furniture drawn around it.
+    //
+    // ⚠️ Note what `--theme` already did and still does — it picks the PALETTE the whole app draws in.
+    // Combining the two is the point of photographing this screen at all: `--theme=AMBER --theme-editor`
+    // shows the editor rendering ITSELF in the colours it is editing, which is the one screen in the app
+    // whose correctness you can see in its own chrome. (It is also how a swapped `textValue`/`textParam`
+    // would show up — everywhere else in the app the two are subtle; here they are the difference
+    // between the channel you are on and the two you are not.)
+    if (flag(argc, argv, "--theme-editor")) {
+        state.themeEditor.isOpen = true;
+
+        if (const char* v = opt(argc, argv, "--theme-row"))
+            state.themeEditor.cursorRow = clamp(std::atoi(v), ThemeEditorModule::MAX_ROW);
+        if (const char* v = opt(argc, argv, "--theme-channel"))
+            state.themeEditor.cursorChannel = clamp(std::atoi(v), 2);
     }
 
     using namespace songcore;

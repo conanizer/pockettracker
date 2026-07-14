@@ -224,6 +224,7 @@ if(NOT ANDROID)
             ui/modules/settings_editor.cpp
             ui/modules/song_editor.cpp
             ui/modules/table_editor.cpp
+            ui/modules/theme_editor.cpp
     )
 
     # ⚠️ std::filesystem needs a separate link library on gcc 8 and older — `stdc++fs`. It was folded

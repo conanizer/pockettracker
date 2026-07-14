@@ -508,34 +508,18 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
         }
     }
 
+    // The theme edits themselves are PURE and live on ThemeEditorModule, beside the COLOR_ROWS table
+    // they index — see the note there for why they had to move out of this class (short version: the
+    // C++ port byte-compares them against this Kotlin, and it cannot reach code buried in a class that
+    // needs ~60 Compose state refs to construct). These three are the thin state-plumbing that is left.
+
     private fun adjustThemeColor(channel: Int, delta: Int) {
-        val row = themeEditorState.cursorRow
-        if (row < 1 || row > ThemeEditorModule.COLOR_ROWS.size) return  // row 0 = THEME header
-        val colorRow = ThemeEditorModule.COLOR_ROWS[row - 1]
-        val current = colorRow.get(appTheme)
-        val r = ((current shr 16) and 0xFFL).toInt()
-        val g = ((current shr 8)  and 0xFFL).toInt()
-        val b = ( current         and 0xFFL).toInt()
-        val newColor = 0xFF000000L or when (channel) {
-            0 -> ((r + delta).coerceIn(0, 255).toLong() shl 16) or (g.toLong() shl 8) or b.toLong()
-            1 -> (r.toLong() shl 16) or ((g + delta).coerceIn(0, 255).toLong() shl 8) or b.toLong()
-            2 -> (r.toLong() shl 16) or (g.toLong() shl 8) or (b + delta).coerceIn(0, 255).toLong()
-            else -> (r.toLong() shl 16) or (g.toLong() shl 8) or b.toLong()
-        }
-        appTheme = colorRow.set(appTheme, newColor)
+        appTheme = ThemeEditorModule.adjustColor(appTheme, themeEditorState.cursorRow, channel, delta)
     }
 
-    private fun cycleNextBuiltinTheme() {
-        val idx = AppTheme.Companion.BUILTINS.indexOfFirst { it.name == appTheme.name }
-        val next = if (idx >= 0) (idx + 1) % AppTheme.Companion.BUILTINS.size else 0
-        appTheme = AppTheme.Companion.BUILTINS[next].copy(visualizerType = appTheme.visualizerType)
-    }
+    private fun cycleNextBuiltinTheme() { appTheme = ThemeEditorModule.cycleBuiltin(appTheme, +1) }
 
-    private fun cyclePrevBuiltinTheme() {
-        val idx = AppTheme.Companion.BUILTINS.indexOfFirst { it.name == appTheme.name }
-        val prev = if (idx > 0) idx - 1 else AppTheme.Companion.BUILTINS.size - 1
-        appTheme = AppTheme.Companion.BUILTINS[prev].copy(visualizerType = appTheme.visualizerType)
-    }
+    private fun cyclePrevBuiltinTheme() { appTheme = ThemeEditorModule.cycleBuiltin(appTheme, -1) }
 
     fun openEqEditor(slot: Int, caller: EqCallerContext) {
         eqEditorState = EqEditorState(
@@ -2284,7 +2268,15 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     val safeName = typedText.replace(Regex("[^a-zA-Z0-9_]"), "_").ifEmpty { "THEME" }
                     val filePath = "${qwertyKeyboardState.contextExtra}/$safeName.ptt"
                     val themeToSave = appTheme.copy(name = typedText.ifEmpty { appTheme.name })
-                    fileSystem.writeFile(filePath, Json { prettyPrint = true }.encodeToString(themeToSave))
+                    // ⚠️ `writeFile` returns a Boolean, and this arm USED TO DISCARD IT — so a theme save
+                    // onto a full or read-only volume closed the keyboard and reported success by
+                    // silence. It is the one save in the app with no result at all: PROJECT, TEMPLATE and
+                    // the preset save all set a status line. A save that reports nothing is
+                    // indistinguishable from a save that failed. (Found porting the theme editor to C++ —
+                    // Linux Phase 3 S9.)
+                    val saved = fileSystem.writeFile(filePath, Json { prettyPrint = true }.encodeToString(themeToSave))
+                    trackerController.statusMessage = if (saved) "THEME SAVED" else "SAVE FAILED"
+                    trackerController.statusSuccess = saved
                     themeEditorState = ThemeEditorState(isOpen = true)
                 }
                 QwertyContext.VIDEO_EXTRACT -> {
@@ -2657,11 +2649,29 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
     fun handleBLeft()  = cycleCurrentItem(-1)
 
     fun handleBRight() = cycleCurrentItem(+1)
-    fun handleBUp()    { when (trackerController.currentScreen) {
+    // ⚠️ THE MODAL GUARD, and these two were the ONLY handlers in this file without one — missing
+    // exactly where it is needed. Of the two screens they act on, SONG cannot raise the EQ editor,
+    // but INST_POOL can (column 4). So: open the EQ from the pool, hold B — which does NOT close the
+    // editor, because the deferred-B latch is holding it, B being both the close AND the modifier of
+    // the slot cycle — then press UP. The B+DPAD arm fires, cancels the latch, and pages
+    // currentInstrument sixteen slots UNDERNEATH the open overlay. The editor keeps showing the
+    // instrument it was raised for (the caller is captured at open time), so nothing is corrupted;
+    // close it and you are simply looking at a different instrument. Which is precisely why nobody
+    // ever reported it — it reads as a mis-press.
+    //
+    // This is the Kotlin comment on `currentCellOpensSubScreen`'s predicate coming true: every modal
+    // state MUST be tested by every handler that must not fire underneath one. (Found porting the EQ
+    // editor to C++ — Linux Phase 3 S8; the C++ twin `InputDispatcher::on_b_up` has always had it.)
+    private fun anyOverlayOwnsButtons(): Boolean =
+        qwertyKeyboardState.isOpen || eqEditorState.isOpen || themeEditorState.isOpen || confirmDialogOpen()
+
+    fun handleBUp()    { if (anyOverlayOwnsButtons()) return
+        when (trackerController.currentScreen) {
         ScreenType.SONG      -> trackerController.moveSongBigUp()
         ScreenType.INST_POOL -> trackerController.poolBigUp()
         else -> {} } }
-    fun handleBDown()  { when (trackerController.currentScreen) {
+    fun handleBDown()  { if (anyOverlayOwnsButtons()) return
+        when (trackerController.currentScreen) {
         ScreenType.SONG      -> trackerController.moveSongBigDown()
         ScreenType.INST_POOL -> trackerController.poolBigDown()
         else -> {} } }

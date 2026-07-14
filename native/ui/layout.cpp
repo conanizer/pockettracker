@@ -99,6 +99,23 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
             es.spectrumCount = s.eqSpectrumCount;
             es.theme         = t;
             eq_.draw(c, moduleX, EDITOR_Y, es);
+        } else if (s.themeEditor.isOpen) {
+            // ── The THEME EDITOR takes the editor's place, on the same terms as the EQ (S9) ──────
+            //
+            // Same origin, same clip — and the OSCILLOSCOPE STRIP above it keeps drawing, which is not a
+            // courtesy but the point. Three of the seventeen colours (VIZ BG, VIZ LINE, VIZ WAVE) are the
+            // strip, and START passes straight through this overlay to the transport, so you dial the
+            // waveform's colour against a moving waveform. Hide the strip and VIZ WAVE is a number.
+            //
+            // ⚠️ The RIGHT BAR is absent, and that is SETTINGS' doing, not this overlay's: `draw` skips
+            // it whenever `currentScreen` is SETTINGS (Kotlin: PixelPerfectRenderer:801, same list), and
+            // SETTINGS is what the editor is raised from. So the meter colours (MTR *) are the three the
+            // editor CANNOT show you in situ — the meters live on MIXER. Nothing to fix; just the honest
+            // limit of a 510px panel that has taken the editor's place.
+            ThemeState ts;
+            ts.theme  = t;
+            ts.editor = s.themeEditor;
+            themeEditor_.draw(c, moduleX, EDITOR_Y, ts);
         } else switch (s.currentScreen) {   // the overlay is drawn INSTEAD of `currentScreen`
             case ScreenType::PHRASE: {
                 PhraseEditorState ps{p.phrases[static_cast<size_t>(s.currentPhrase)]};

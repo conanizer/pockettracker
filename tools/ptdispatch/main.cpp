@@ -53,9 +53,12 @@
 #include "ui/input_dispatcher.h"
 #include "ui/navigation.h"
 #include "ui/platform_caps.h"
+#include "ui/canvas.h"           // §27(a) — the pixel check RENDERS
+#include "ui/layout.h"           // §27(a) — …through the same TrackerLayout the shell draws through
 #include "ui/settings_row_layout.h"
 #include "ui/settings_store.h"
 #include "ui/std_filesystem.h"
+#include "ui/theme_io.h"         // §27 — the .ptt round trip
 
 using namespace pt::ui;
 
@@ -2148,6 +2151,381 @@ int main() {
            "notify_data_changed roll back to frame 0 and this is the check that dies)");
         std::printf("       [info] KIL'd note RMS: before %.5f → after %.5f (%.1f%% — silence is the pass)\n",
                     pre, post, pre > 0 ? 100.0 * post / pre : 0.0);
+    }
+
+    // ── 27. THE THEME EDITOR (S9) ───────────────────────────────────────────────────────────────
+    //
+    // The join ptinput is structurally blind to. ptinput proves `theme_adjust_color` and
+    // `theme_cycle_builtin` match Kotlin GIVEN a row and a channel; nothing in it proves the cursor can
+    // reach the row, that A on SAVE raises a keyboard, that the file that lands can be read back — or
+    // the two claims below, which no golden of any kind could make.
+    {
+        songcore::SongcoreHost thost(nullptr, 44100);
+        AppState               tstate;
+        tstate.project = &thost.edit_project();
+        tstate.caps    = PlatformCaps::sdl(true);
+        InputDispatcher td(tstate, thost, fs_impl);
+
+        // ⚠️ EVERYTHING BELOW GOES THROUGH THE PUBLIC BUTTON HANDLERS, never the dispatcher's own verbs
+        // — `open_theme_editor()`, `save_theme_as()` and the rest are private, and they are private on
+        // purpose. A test that reaches past the buttons proves the plumbing works when called correctly
+        // and says nothing about whether any button calls it. The join is exactly what this tool is for,
+        // so the only key that opens this editor here is the same one a user presses: A on SETTINGS row 9.
+        const auto open_editor = [&] {
+            tstate.currentScreen     = ScreenType::SETTINGS;
+            tstate.settingsCursorRow = static_cast<int>(SettingsRow::THEME);
+            td.on_button_a();
+        };
+        // The keyboard's APPLY is START (`on_start` → `qwerty_apply`). Typing the name key by key is
+        // ptinput's job (384 KBD cases); here the text is set and the REAL apply path is pressed.
+        const auto type_and_apply = [&](const std::string& text) {
+            tstate.qwerty.text = text;
+            td.on_start();
+        };
+
+        // ── Opening it: SETTINGS row 9, the row S7 drew an arrow on and left inert ───────────────
+        ok(!tstate.themeEditor.isOpen, "THEME: closed to begin with");
+        open_editor();
+        ok(tstate.themeEditor.isOpen, "THEME: A on SETTINGS' THEME row opens the editor");
+        eq(tstate.themeEditor.cursorRow, 0, "THEME: …at row 0 (the THEME row)");
+        eq(tstate.themeEditor.cursorChannel, 0, "THEME: …channel 0");
+
+        // ── The cursor: BOTH axes WRAP. The only cursor in the app that does ─────────────────────
+        td.on_dpad_up();
+        eq(tstate.themeEditor.cursorRow, ThemeEditorModule::MAX_ROW,
+           "THEME: UP from row 0 WRAPS to row 17 (a colour list is a ring)");
+        td.on_dpad_down();
+        eq(tstate.themeEditor.cursorRow, 0, "THEME: …and DOWN wraps back to 0");
+
+        td.on_dpad_left();
+        eq(tstate.themeEditor.cursorChannel, 2, "THEME: LEFT from channel 0 WRAPS to B");
+        td.on_dpad_right();
+        eq(tstate.themeEditor.cursorChannel, 0, "THEME: …and RIGHT wraps back to R");
+
+        // Every one of the 18 rows must be reachable by walking DOWN, and land back where it started.
+        {
+            bool allSeen = true;
+            for (int i = 0; i < ThemeEditorModule::MAX_ROW + 1; ++i) {
+                if (tstate.themeEditor.cursorRow != i) allSeen = false;
+                td.on_dpad_down();
+            }
+            ok(allSeen, "THEME: DOWN walks all 18 rows in order…");
+            eq(tstate.themeEditor.cursorRow, 0, "THEME: …and returns to row 0");
+        }
+
+        // ── The edit. A+UP/DOWN are ±1; A+RIGHT/LEFT are ±0x10 ──────────────────────────────────
+        tstate.themeEditor.cursorRow     = 1;   // BACKGROUND
+        tstate.themeEditor.cursorChannel = 0;   // R
+        tstate.theme = theme_classic();
+
+        td.on_a_up();
+        eq(static_cast<int>((tstate.theme.background >> 16) & 0xFF), 0x0B,
+           "THEME: A+UP nudges the cursor's channel by +1");
+        td.on_a_right();
+        eq(static_cast<int>((tstate.theme.background >> 16) & 0xFF), 0x1B,
+           "THEME: A+RIGHT nudges it by +0x10");
+        td.on_a_left();
+        td.on_a_down();
+        eq(tstate.theme.background, 0xFF0A0A0Au, "THEME: …and A+LEFT / A+DOWN put it back exactly");
+
+        // ⚠️ On the THEME row the SAME four buttons mean something else entirely: UP/DOWN cycle the
+        // built-in palette, and LEFT/RIGHT do NOTHING. Get that wrong and A+LEFT on row 0 would nudge
+        // the red channel of a colour the cursor is not even on.
+        tstate.themeEditor.cursorRow = 0;
+        tstate.theme = theme_classic();
+        td.on_a_down();
+        ok(tstate.theme.name == "AMBER", "THEME: A+DOWN on the THEME row steps to the NEXT built-in");
+        td.on_a_up();
+        ok(tstate.theme.name == "CLASSIC", "THEME: A+UP steps back to the PREVIOUS one");
+        const Theme before = tstate.theme;
+        td.on_a_left();
+        td.on_a_right();
+        ok(tstate.theme.background == before.background && tstate.theme.name == before.name,
+           "THEME: A+LEFT / A+RIGHT on the THEME row do NOTHING (no coarse step for a palette)");
+
+        // ── THE MODAL RULE. It owns every button but START ───────────────────────────────────────
+        //
+        // ⚠️ This is the check S8 wishes it had had. Kotlin's `handleBUp`/`handleBDown` had NO modal
+        // guard at all — and S8 documented that, ported the guard, pinned it with a control on the C++…
+        // and never actually wrote the fix into the Kotlin. A control that only tests the port cannot
+        // notice that the original was left broken. So: press everything, and assert nothing moved.
+        open_editor();
+        tstate.themeEditor.cursorRow = 5;
+        {
+            const int  row    = tstate.settingsCursorRow;
+            const auto screen = tstate.currentScreen;
+            const int  inst   = tstate.currentInstrument;
+
+            td.on_b_up();     td.on_b_down();
+            td.on_b_left();   td.on_b_right();
+            td.on_r_up();     td.on_r_down();
+            td.on_r_left();   td.on_r_right();
+            td.on_l_a();      td.on_l_b();      td.on_l_r();
+            td.on_a_a();      td.on_l_b_a();
+
+            ok(tstate.themeEditor.isOpen, "THEME/MODAL: the editor survives every other button");
+            eq(tstate.themeEditor.cursorRow, 5, "THEME/MODAL: …its cursor did not move");
+            eq(tstate.settingsCursorRow, row, "THEME/MODAL: …SETTINGS' cursor underneath did not move");
+            eq(tstate.currentInstrument, inst, "THEME/MODAL: …and B+UP did not page the instrument");
+            ok(tstate.currentScreen == screen, "THEME/MODAL: …and R+DPAD did not navigate out from under it");
+        }
+
+        // B closes it. SELECT closes it.
+        td.on_button_b();
+        ok(!tstate.themeEditor.isOpen, "THEME: B closes the editor");
+        open_editor();
+        td.on_select();
+        ok(!tstate.themeEditor.isOpen, "THEME: SELECT closes it too");
+
+        // ── SAVE: A on the THEME row / column 1 raises the KEYBOARD — ON TOP of the editor ───────
+        //
+        // ⚠️ The editor stays OPEN under the keyboard (LOAD, by contrast, closes it), which is why every
+        // handler tests `qwerty_open()` BEFORE `theme_open()`. If that order were reversed, a D-pad press
+        // meant for the keyboard would walk the colour list behind it.
+        open_editor();
+        tstate.theme = theme_classic();
+        tstate.theme.vizWave = 0xFF123456;          // a palette worth keeping
+        tstate.themeEditor.cursorRow     = 0;
+        tstate.themeEditor.cursorChannel = 1;       // SAVE
+        td.on_button_a();
+        ok(tstate.qwerty.isOpen, "THEME/SAVE: A on SAVE raises the QWERTY keyboard");
+        ok(tstate.themeEditor.isOpen, "THEME/SAVE: …and the editor stays OPEN underneath it");
+        {
+            const int rowBefore = tstate.themeEditor.cursorRow;
+            td.on_dpad_down();
+            eq(tstate.themeEditor.cursorRow, rowBefore,
+               "THEME/SAVE: …so a D-pad press moves the KEY cursor, not the colour list (THE MODAL RULE)");
+        }
+
+        // Type a name and APPLY it (START). The file must land, and it must be a real `.ptt`.
+        type_and_apply("SUNSET");
+        ok(!tstate.qwerty.isOpen, "THEME/SAVE: START applies the name and closes the keyboard");
+        ok(tstate.themeEditor.isOpen, "THEME/SAVE: …returning to the editor");
+
+        const std::string pttPath = fs_impl.themes_directory() + "/SUNSET.ptt";
+        ok(fs_impl.file_exists(pttPath), "THEME/SAVE: <Themes>/SUNSET.ptt was written");
+        ok(tstate.statusSuccess && tstate.statusMessage == "THEME SAVED",
+           "THEME/SAVE: …and it REPORTS it (Kotlin discards writeFile's Boolean — S9 fixed that)");
+
+        // ⚠️ The FILENAME is sanitized but the NAME INSIDE the file is RAW. Two names, one typed string.
+        tstate.themeEditor.cursorRow     = 0;
+        tstate.themeEditor.cursorChannel = 1;
+        td.on_button_a();
+        type_and_apply("My Theme!");
+        ok(fs_impl.file_exists(fs_impl.themes_directory() + "/My_Theme_.ptt"),
+           "THEME/SAVE: the FILENAME is sanitized ('My Theme!' → My_Theme_.ptt)");
+        {
+            Theme back;
+            ok(load_theme_file(fs_impl, fs_impl.themes_directory() + "/My_Theme_.ptt", back),
+               "THEME/SAVE: …the file parses back");
+            ok(back.name == "My Theme!",
+               "THEME/SAVE: …and the NAME INSIDE it is the RAW typed text, punctuation and all");
+        }
+
+        // ⚠️ An EMPTY name must not write a DOTFILE. This is S7's bug (`<Projects>/.ptp`, invisible to the
+        // browser forever) in the one save path that was always guarded against it. Pinned so it stays so.
+        tstate.themeEditor.cursorRow     = 0;
+        tstate.themeEditor.cursorChannel = 1;
+        td.on_button_a();
+        type_and_apply("");
+        ok(fs_impl.file_exists(fs_impl.themes_directory() + "/THEME.ptt"),
+           "THEME/SAVE: an EMPTY name falls back to THEME.ptt — never the dotfile `.ptt`");
+        ok(!fs_impl.file_exists(fs_impl.themes_directory() + "/.ptt"),
+           "THEME/SAVE: …and no dotfile was written");
+
+        // ── LOAD: A on column 2 raises the BROWSER — and CLOSES the editor ───────────────────────
+        open_editor();
+        tstate.themeEditor.cursorRow     = 0;
+        tstate.themeEditor.cursorChannel = 2;   // LOAD
+        td.on_button_a();
+        ok(tstate.currentScreen == ScreenType::FILE_BROWSER, "THEME/LOAD: A on LOAD opens the browser");
+        ok(!tstate.themeEditor.isOpen,
+           "THEME/LOAD: …and CLOSES the editor (the browser is a SCREEN, not an overlay — leaving it "
+           "open would strand a modal on a screen it was never raised from)");
+
+        // ⚠️ AND NOW THE WHOLE ROUND TRIP, THROUGH THE BROWSER'S OWN A BUTTON — not through
+        // `load_theme_file`. That is the difference between "the parser works" and "the button works":
+        // it is `browser_confirm`'s LOAD_THEME arm that has to re-open the editor and put the palette
+        // into the app's one live Theme, and nothing else in the tree exercises it.
+        tstate.theme = theme_mono();                       // wreck the live palette first
+        {
+            // Park the browser's cursor on SUNSET.ptt and press A.
+            FileBrowserState& fb = tstate.fileBrowser;
+            int idx = -1;
+            for (size_t k = 0; k < fb.items.size(); ++k)
+                if (fb.items[k].displayName == "SUNSET") idx = static_cast<int>(k);
+            ok(idx >= 0, "THEME/LOAD: the browser lists SUNSET.ptt (filtered to *.ptt)");
+            if (idx >= 0) {
+                fb.cursor = idx;
+                td.on_button_a();
+
+                ok(tstate.themeEditor.isOpen,
+                   "⚠️ THEME/LOAD: A on the file RE-OPENS the editor (browser_confirm's LOAD_THEME arm)");
+                ok(tstate.currentScreen == ScreenType::SETTINGS,
+                   "THEME/LOAD: …and the browser is gone");
+                eq(static_cast<int>(tstate.theme.vizWave), static_cast<int>(0xFF123456),
+                   "⚠️ THEME/LOAD: …and the palette in the FILE is now the app's LIVE theme");
+                ok(tstate.theme.name == "SUNSET", "THEME/LOAD: …name and all");
+            }
+        }
+
+        // ⚠️ THE VISUALIZER DOES NOT COME FROM THE FILE. The palette belongs to the theme; the visualizer
+        // belongs to the USER. Loading a friend's palette must not switch your scope to their spectrum.
+        {
+            Theme withViz = theme_classic();
+            withViz.name           = "VIZTEST";
+            withViz.visualizerType = VisualizerType::SPECTRUM_PEAKS;
+            const std::string vp = fs_impl.themes_directory() + "/VIZTEST.ptt";
+            ok(save_theme_file(fs_impl, vp, withViz), "THEME/VIZ: a theme with a non-default viz saves");
+
+            Theme mine = theme_classic();
+            mine.visualizerType = VisualizerType::OCTA;     // the user's choice
+            ok(load_theme_file(fs_impl, vp, mine), "THEME/VIZ: …and loads");
+            ok(mine.name == "VIZTEST", "THEME/VIZ: …bringing its NAME");
+            ok(mine.visualizerType == VisualizerType::OCTA,
+               "THEME/VIZ: …but NOT its visualizer — the user's OCTA survives the load");
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════════════════════
+        // ⚠️⚠️ THE TWO CHECKS THAT EARN THIS SECTION, AND NEITHER IS A GOLDEN
+        // ═══════════════════════════════════════════════════════════════════════════════════════
+
+        // ── (a) THE PIXEL. Does a colour you dial actually REACH THE SCREEN? ─────────────────────
+        //
+        // Every tool in the ladder compares a VALUE. ptinput compares the theme struct after a nudge;
+        // this section, up to here, compares the theme struct after a gesture. NOT ONE OF THEM LOOKS AT
+        // A PIXEL — so a theme that is edited correctly, saved correctly, reloaded correctly and then
+        // never handed to a module would pass every check above and every case in ptinput, and the user
+        // would watch the hex digits change while the screen stayed exactly as it was.
+        //
+        // That is not a hypothetical shape. It is S4's `push_project_params` (edited correctly, never
+        // pushed — 84.4% of a render wrong) and S8's `setEqBand` (bank written, nobody told) in their
+        // third disguise, and the guardrail says to ask what the existing tools structurally cannot
+        // observe. They cannot observe pixels. So: RENDER, and read one back.
+        {
+            // ⚠️ COUNT the pixels of one unmistakable colour rather than sampling a coordinate. A
+            // coordinate is a second, silent assumption about the layout — the first attempt at this
+            // check sampled (300, 10), which is inside the OSCILLOSCOPE panel and is therefore painted
+            // with `vizBackground`, not `background`. It reported "the theme does not reach the canvas"
+            // when the theme reached the canvas perfectly well. A colour census has no geometry in it at
+            // all, so it cannot be wrong about where to look.
+            const auto count_of = [](const Canvas& c, Argb want) {
+                int n = 0;
+                for (int i = 0; i < DESIGN_W * DESIGN_H; ++i)
+                    if (c.pixels()[static_cast<size_t>(i)] == want) ++n;
+                return n;
+            };
+            constexpr Argb MAGENTA = 0xFFFF00FF;   // in no built-in palette, by construction
+
+            Canvas        canvas;
+            TrackerLayout layout;
+
+            AppState vstate;
+            vstate.project       = &thost.edit_project();
+            vstate.caps          = PlatformCaps::sdl(true);
+            vstate.currentScreen = ScreenType::PHRASE;   // a MODULE, not just the page fill
+            vstate.theme         = theme_classic();
+
+            layout.draw(canvas, vstate);
+            eq(count_of(canvas, MAGENTA), 0, "THEME/PIXEL: no magenta on screen under CLASSIC");
+
+            // Dial ROW CURSOR (row 3) to magenta through the REAL dispatcher, opened with the REAL
+            // button. R and B saturate UP at 0xFF, G floors DOWN at 0x00 — which also exercises the
+            // clamp at both ends on the way, since 0x33 ± 0x10 × n runs past both rails.
+            AppState estate2;
+            estate2.project           = &thost.edit_project();
+            estate2.caps              = PlatformCaps::sdl(true);
+            estate2.currentScreen     = ScreenType::SETTINGS;
+            estate2.settingsCursorRow = static_cast<int>(SettingsRow::THEME);
+            estate2.theme             = theme_classic();
+            InputDispatcher ed2(estate2, thost, fs_impl);
+
+            ed2.on_button_a();                             // A on SETTINGS row 9 → the editor opens
+            ok(estate2.themeEditor.isOpen, "THEME/PIXEL: the editor opened from the real button");
+            estate2.themeEditor.cursorRow = 3;             // ROW CURSOR
+
+            estate2.themeEditor.cursorChannel = 0;         // R: 0x33 → 0xFF (clamps)
+            for (int i = 0; i < 13; ++i) ed2.on_a_right();
+            estate2.themeEditor.cursorChannel = 1;         // G: 0x33 → 0x00 (clamps)
+            for (int i = 0; i < 4; ++i) ed2.on_a_left();
+            estate2.themeEditor.cursorChannel = 2;         // B: 0x33 → 0xFF (clamps)
+            for (int i = 0; i < 13; ++i) ed2.on_a_right();
+
+            eq(static_cast<int>(estate2.theme.rowCursor), static_cast<int>(MAGENTA),
+               "THEME/PIXEL: ROW CURSOR dialled to FFFF00FF through A+DPAD (and the clamp held at both rails)");
+
+            vstate.theme = estate2.theme;                  // the app's ONE live Theme
+            layout.draw(canvas, vstate);
+
+            const int magenta = count_of(canvas, MAGENTA);
+            ok(magenta > 1000,
+               "⚠️ THEME/PIXEL: the dialled colour REACHES THE CANVAS — the PHRASE editor's cursor row "
+               "is now magenta (stop passing the theme into TrackerLayout::draw and this is the ONLY "
+               "check in the entire tree that dies)");
+            std::printf("       [info] magenta pixels after dialling ROW CURSOR: %d (a 510x21 band)\n",
+                        magenta);
+        }
+
+        // ── (b) THE RELAUNCH. Does the palette SURVIVE A QUIT? ───────────────────────────────────
+        //
+        // ⚠️⚠️ THIS IS THE S9 HEADLINE, AND IT IS A BUG THE PORT SHIPPED WITH UNTIL THIS SESSION.
+        //
+        // `settings_store` stored the theme as `j["theme"] = theme.name`, and rebuilt it on load with
+        // `theme_by_name()`. That was CORRECT when S7 wrote it — the four built-ins were the entire
+        // palette set, so a name WAS a palette and the derivation was lossless. The THEME EDITOR ends
+        // that: a palette is now an arbitrary eighteen colours that exist nowhere else, and storing its
+        // name threw every one of them away, silently, on every quit, with the app coming back up in
+        // CLASSIC as though nothing had happened.
+        //
+        // NOTHING IN THE LADDER COULD SEE IT. ptinput compares the cell an edit lands in. Every check
+        // above compares the state after a gesture. **Not one of them quits and relaunches the app** —
+        // and that is the only place this bug lives. Same shape, again: an assumption that was true when
+        // it was made, invalidated by the layer built on top of it, in a channel nothing was pointed at.
+        {
+            SettingsValues sv;
+            sv.scalingBilinear = true;
+
+            Theme dialled = theme_amber();
+            dialled.name           = "SUNSET";
+            dialled.background     = 0xFF102030;   // none of these are AMBER's, and none are CLASSIC's
+            dialled.vizWave        = 0xFF123456;
+            dialled.meterHigh      = 0xFFABCDEF;
+            dialled.meterBorder    = 0xFF00FF00;   // the colour with NO editor row — persisted anyway
+            dialled.visualizerType = VisualizerType::SPECTRUM;
+
+            ok(save_settings(fs_impl, sv, dialled), "THEME/QUIT: settings.json written");
+
+            // …the app exits, and comes back. `back` starts as a FRESH default, exactly as boot does.
+            SettingsValues sv2;
+            Theme          back = theme_classic();
+            ok(load_settings(fs_impl, sv2, back), "THEME/QUIT: …and read back on the next launch");
+
+            ok(back.name == "SUNSET", "THEME/QUIT: the theme's NAME survived");
+            eq(static_cast<int>(back.background), static_cast<int>(0xFF102030),
+               "⚠️ THEME/QUIT: …and so did a colour that belongs to NO built-in "
+               "(store the theme by NAME and this is the check that dies)");
+            eq(static_cast<int>(back.vizWave), static_cast<int>(0xFF123456),
+               "THEME/QUIT: …and another");
+            eq(static_cast<int>(back.meterHigh), static_cast<int>(0xFFABCDEF),
+               "THEME/QUIT: …and another");
+            eq(static_cast<int>(back.meterBorder), static_cast<int>(0xFF00FF00),
+               "THEME/QUIT: …including meterBorder, which has no editor row but is still a field");
+            ok(back.visualizerType == VisualizerType::SPECTRUM,
+               "THEME/QUIT: …and the visualizer, which is stored beside the palette, not in it");
+
+            // ⚠️ A PRE-S9 settings.json — a `theme` string and no `appTheme` object — must still load.
+            // The reader falls back to the by-name path rather than booting into a blank palette.
+            ok(fs_impl.write_file(fs_impl.settings_path(),
+                                  "{\"theme\": \"BLUE\", \"visualizer\": 2}\n"),
+               "THEME/QUIT: a pre-S9 settings.json (no appTheme object)…");
+            SettingsValues sv3;
+            Theme          old = theme_classic();
+            ok(load_settings(fs_impl, sv3, old), "THEME/QUIT: …still loads");
+            ok(old.name == "BLUE" && old.textTitle == theme_blue().textTitle,
+               "THEME/QUIT: …and falls back to rebuilding the palette from its NAME");
+            ok(old.visualizerType == VisualizerType::OCTA,
+               "THEME/QUIT: …with the visualizer it stored");
+        }
     }
 
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);

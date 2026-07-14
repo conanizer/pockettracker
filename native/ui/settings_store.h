@@ -27,9 +27,13 @@ namespace pt::ui {
 /**
  * Read `settings.json` into `values` and `theme`.
  *
- * `theme` is REPLACED (by name, from the built-ins) rather than patched — a theme is a palette, and a
- * half-applied one would be a palette nobody chose. The visualizer rides across the swap, exactly as
- * Android carries it across a theme change.
+ * ⚠️ `theme` carries its FULL PALETTE, not just its name — see the long note in the .cpp. Until S9 this
+ * stored `theme.name` and rebuilt the palette from the four built-ins, which was lossless right up until
+ * the THEME EDITOR made a palette something you can invent. A pre-S9 file (a `theme` string and no
+ * `appTheme` object) still loads: the reader falls back to the by-name path.
+ *
+ * The visualizer is the theme's FIELD but the user's CHOICE, so it rides across a theme load rather than
+ * coming from it — exactly as Android carries it across a theme change.
  *
  * Returns false when there was no file to read. That is not an error: it is the first launch.
  */

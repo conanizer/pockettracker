@@ -56,6 +56,67 @@ class ThemeEditorModule : TrackerModule {
             ColorRow("MTR MID",    { it.meterMid },      { t, v -> t.copy(meterMid      = v) }),
             ColorRow("MTR HIGH",   { it.meterHigh },     { t, v -> t.copy(meterHigh     = v) })
         )
+
+        // ── The two edits, as PURE functions ──────────────────────────────────────────────────────
+        //
+        // These lived in AppInputDispatcher as `adjustThemeColor` / `cycleNextBuiltinTheme` /
+        // `cyclePrevBuiltinTheme`, reading `themeEditorState.cursorRow` and writing `appTheme` straight
+        // out of the dispatcher's Compose state. The arithmetic is unchanged — it has been MOVED here
+        // and given its inputs as parameters, and the dispatcher now calls it.
+        //
+        // ⚠️ WHY THE MOVE: the C++ port byte-compares this behaviour against the Kotlin original
+        // (`tools/ptinput`), and it can only do that if the Kotlin is REACHABLE from a JVM unit test.
+        // Buried in the dispatcher it was not — that class is entangled with ~60 `mutableStateOf` refs
+        // and cannot be constructed off-device. The alternative was to let the test re-implement the
+        // arithmetic and compare the port against THAT, which measures nothing: a fixture that
+        // re-derives the thing it is measuring cannot catch the thing it is measuring. Same reason
+        // EqModule's frequency formatter was made `internal` in S8.
+
+        /**
+         * Nudge one channel of the colour on `row` (1..17; row 0 is the THEME header and is rejected).
+         * `delta` is ±0x01 from A+UP/A+DOWN, ±0x10 from A+RIGHT/A+LEFT. Channels CLAMP at 0 and 255.
+         *
+         * The alpha is FORCED to 0xFF on every write — a theme colour is opaque by construction, and
+         * there is no row in this editor that could reach an alpha channel.
+         */
+        fun adjustColor(theme: AppTheme, row: Int, channel: Int, delta: Int): AppTheme {
+            if (row < 1 || row > COLOR_ROWS.size) return theme
+            val colorRow = COLOR_ROWS[row - 1]
+            val current = colorRow.get(theme)
+            val r = ((current shr 16) and 0xFFL).toInt()
+            val g = ((current shr 8)  and 0xFFL).toInt()
+            val b = ( current         and 0xFFL).toInt()
+            val newColor = 0xFF000000L or when (channel) {
+                0 -> ((r + delta).coerceIn(0, 255).toLong() shl 16) or (g.toLong() shl 8) or b.toLong()
+                1 -> (r.toLong() shl 16) or ((g + delta).coerceIn(0, 255).toLong() shl 8) or b.toLong()
+                2 -> (r.toLong() shl 16) or (g.toLong() shl 8) or (b + delta).coerceIn(0, 255).toLong()
+                else -> (r.toLong() shl 16) or (g.toLong() shl 8) or b.toLong()
+            }
+            return colorRow.set(theme, newColor)
+        }
+
+        /**
+         * Step the built-in palette: `delta` < 0 is PREV (A+UP), >= 0 is NEXT (A+DOWN).
+         *
+         * ⚠️ It REPLACES the whole theme, so any colours dialled on the current one are lost — that is
+         * what SAVE is for. And the two directions are not exact inverses: a theme whose name is not a
+         * built-in (anything loaded from a `.ptt`) has index −1, so NEXT lands on CLASSIC and PREV on
+         * MONO. Both enter the ring at an end; neither returns you to where you were, because the theme
+         * left the ring the moment it stopped being a built-in.
+         *
+         * `visualizerType` rides across the swap — the palette belongs to the theme, the visualizer to
+         * the user.
+         */
+        fun cycleBuiltin(theme: AppTheme, delta: Int): AppTheme {
+            val builtins = AppTheme.BUILTINS
+            val idx = builtins.indexOfFirst { it.name == theme.name }
+            val target = if (delta >= 0) {
+                if (idx >= 0) (idx + 1) % builtins.size else 0
+            } else {
+                if (idx > 0) idx - 1 else builtins.size - 1
+            }
+            return builtins[target].copy(visualizerType = theme.visualizerType)
+        }
     }
 
 

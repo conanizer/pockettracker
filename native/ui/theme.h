@@ -54,6 +54,54 @@ struct Theme {
     VisualizerType visualizerType = VisualizerType::SCOPE;
 };
 
+// ─── The editable colours ────────────────────────────────────────────────────────────────────────
+//
+// The THEME EDITOR's row list — Kotlin's `ThemeEditorModule.COLOR_ROWS`, in the same order, with the
+// same labels. It lives HERE, next to the fields it projects, rather than in the module: it is a view
+// of `Theme`'s own field list, and a table that can drift out of step with the struct it describes is
+// a bug waiting for someone to add a colour. Three consumers read it (the module draws it, the
+// dispatcher's colour nudge indexes it, and the ptinput golden sweeps it) and none may re-derive it.
+//
+// ⚠️ SEVENTEEN ROWS, EIGHTEEN COLOURS — `meterBorder` HAS NO ROW, AND THAT IS KOTLIN'S. It is a field
+// on the theme, it is serialized into a `.ptt`, it is read by the mixer's meter frames, and there is
+// simply no way to edit it in the UI. Ported as-is rather than "fixed" into a divergence: adding an
+// eighteenth row here would make the C++ editor a superset of the Android one and put a row in the
+// golden that Kotlin cannot produce. (A parity-ledger entry, not a port decision — see docs.)
+//
+// ⚠️ AND IT IS A POINTER-TO-MEMBER, NOT A GET/SET PAIR. Kotlin's row carries two lambdas — `get` and a
+// copy-based `set` — which are two statements of the same fact and can therefore disagree; that is
+// exactly the shape of the bug S8 found in `applyCallerEqSlotChange` (one function wrote the field and
+// made the call; the other only made the call). One member pointer reads and writes the same field by
+// construction, and a typo is a compile error instead of a colour that edits its neighbour.
+
+struct ThemeColorRow {
+    const char* label;
+    Argb Theme::* field;
+};
+
+inline const std::vector<ThemeColorRow>& theme_color_rows() {
+    static const std::vector<ThemeColorRow> rows = {
+        {"BACKGROUND", &Theme::background},
+        {"ROW 4TH",    &Theme::rowEvery4th},
+        {"ROW CURSOR", &Theme::rowCursor},
+        {"ROW PLAY",   &Theme::rowPlayback},
+        {"ROW SELECT", &Theme::rowSelection},
+        {"TXT TITLE",  &Theme::textTitle},
+        {"TXT PARAM",  &Theme::textParam},
+        {"TXT VALUE",  &Theme::textValue},
+        {"TXT CURSOR", &Theme::textCursor},
+        {"TXT EMPTY",  &Theme::textEmpty},
+        {"VIZ BG",     &Theme::vizBackground},
+        {"VIZ LINE",   &Theme::vizCenterLine},
+        {"VIZ WAVE",   &Theme::vizWave},
+        {"MTR BG",     &Theme::meterBackground},
+        {"MTR LOW",    &Theme::meterLow},
+        {"MTR MID",    &Theme::meterMid},
+        {"MTR HIGH",   &Theme::meterHigh},
+    };
+    return rows;
+}
+
 inline Theme theme_classic() { return Theme{}; }
 
 inline Theme theme_amber() {

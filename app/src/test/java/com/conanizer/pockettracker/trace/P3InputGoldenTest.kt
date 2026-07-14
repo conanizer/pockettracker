@@ -48,8 +48,12 @@ import com.conanizer.pockettracker.ui.modules.SampleEditorModule
 import com.conanizer.pockettracker.ui.modules.SampleEditorState
 import com.conanizer.pockettracker.ui.modules.SettingsModule
 import com.conanizer.pockettracker.ui.modules.SettingsState
+import com.conanizer.pockettracker.ui.modules.ThemeEditorModule
+import com.conanizer.pockettracker.ui.theme.AppTheme
 import com.conanizer.pockettracker.ui.theme.DeviceSkin
 import com.conanizer.pockettracker.ui.theme.VisualizerType
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import com.conanizer.pockettracker.ui.modules.SongEditorModule
 import com.conanizer.pockettracker.ui.modules.SongEditorState
 import com.conanizer.pockettracker.ui.modules.TableModule
@@ -1869,6 +1873,193 @@ class P3InputGoldenTest {
         }
     }
 
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // THE THEME EDITOR (Phase 3 S9)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // ⚠️ THIS EDITOR HAS NO CursorContext, so there is no ctx=/act= to record — `handleGenericInput`
+    // returns early when it is open, and the four A+DPAD handlers call `adjustThemeColor` directly. It
+    // is the third screen to work that way (the file browser and the sample editor's waveform rows are
+    // the others), and the golden shape follows the SEROW/SEVIEW precedent: drive the REAL function and
+    // record its RESULT.
+    //
+    // What is recorded is the whole THEME — all eighteen colours and the name — not just the field that
+    // was supposed to change. That is the SAME argument the EDIT lines rest on, and it is the one that
+    // earns its keep: a nudge that writes into the ADJACENT colour (MTR MID into MTR HIGH, say) leaves
+    // the intended field looking perfectly correct, and only a whole-theme comparison sees the
+    // collateral damage. Recording one colour would be a test that cannot fail the way the bug fails.
+
+    /** The 18 colours + the name, as one line. Order is the .ptt / AppTheme DECLARATION order. */
+    private fun themeStr(t: AppTheme): String =
+        "name=${t.name} " + listOf(
+            t.background, t.rowEvery4th, t.rowCursor, t.rowPlayback, t.rowSelection,
+            t.textTitle, t.textParam, t.textValue, t.textCursor, t.textEmpty,
+            t.vizBackground, t.vizCenterLine, t.vizWave,
+            t.meterBackground, t.meterLow, t.meterMid, t.meterHigh, t.meterBorder
+        ).joinToString(",") { "%08X".format(it) }
+
+    /** The four beds a colour nudge is measured against — and each is chosen to be a trap. */
+    private fun themeBeds(): List<Pair<String, AppTheme>> = listOf(
+        // The four built-ins, so every colour starts somewhere different…
+        "classic" to AppTheme.CLASSIC,
+        "amber"   to AppTheme.AMBER,
+        // …plus two SATURATED beds, every channel at 0x00 and at 0xFF, which is where a clamp is either
+        // right or wrong.
+        //
+        // ⚠️ HONESTLY MEASURED, because the first version of this comment claimed more than was true. It
+        // said the built-ins "never exercise the clamp" — they do, by accident: CLASSIC carries 0x0A
+        // (which goes negative under −0x10) and 0xFF (which saturates under +0x10). Replacing the clamp
+        // with a wrap and running the control: 282 lines go red, and 78 of them are on the built-in beds.
+        // So the built-ins WOULD have caught that particular bug.
+        //
+        // What these two beds actually buy is that EVERY row and EVERY channel is driven into both rails,
+        // rather than the handful of them a built-in palette happens to place there — they contribute the
+        // other 204 failing lines. A clamp broken on one colour row, or on one channel, is caught here
+        // and would not be by CLASSIC alone. That is a smaller claim than the one first written down, and
+        // it is the one the measurement supports.
+        "floor"   to AppTheme.CLASSIC.copy(
+            name = "FLOOR",
+            background = 0xFF000000L, rowEvery4th = 0xFF000000L, rowCursor = 0xFF000000L,
+            rowPlayback = 0xFF000000L, rowSelection = 0xFF000000L, textTitle = 0xFF000000L,
+            textParam = 0xFF000000L, textValue = 0xFF000000L, textCursor = 0xFF000000L,
+            textEmpty = 0xFF000000L, vizBackground = 0xFF000000L, vizCenterLine = 0xFF000000L,
+            vizWave = 0xFF000000L, meterBackground = 0xFF000000L, meterLow = 0xFF000000L,
+            meterMid = 0xFF000000L, meterHigh = 0xFF000000L, meterBorder = 0xFF000000L
+        ),
+        "ceiling" to AppTheme.CLASSIC.copy(
+            name = "CEILING",
+            background = 0xFFFFFFFFL, rowEvery4th = 0xFFFFFFFFL, rowCursor = 0xFFFFFFFFL,
+            rowPlayback = 0xFFFFFFFFL, rowSelection = 0xFFFFFFFFL, textTitle = 0xFFFFFFFFL,
+            textParam = 0xFFFFFFFFL, textValue = 0xFFFFFFFFL, textCursor = 0xFFFFFFFFL,
+            textEmpty = 0xFFFFFFFFL, vizBackground = 0xFFFFFFFFL, vizCenterLine = 0xFFFFFFFFL,
+            vizWave = 0xFFFFFFFFL, meterBackground = 0xFFFFFFFFL, meterLow = 0xFFFFFFFFL,
+            meterMid = 0xFFFFFFFFL, meterHigh = 0xFFFFFFFFL, meterBorder = 0xFFFFFFFFL
+        )
+    )
+
+    /**
+     * THEME — every row × every channel × every delta, on four beds.
+     *
+     * ⚠️ The row sweep runs 0..18 and the channel sweep 0..3 — one PAST the reachable range in both. A
+     * cell that is not a cell must be PROVEN not to be one (S6b swept the sample editor's whole 0..19 for
+     * the same reason): row 0 is the THEME header and must reject every nudge, and channel 3 is
+     * unreachable but hits Kotlin's `else ->` arm, which rebuilds the colour with its alpha forced on
+     * rather than returning it untouched. Those two facts are worth 40 lines of golden precisely because
+     * nobody would think to check them.
+     */
+    private fun sweepTheme(out: MutableList<String>) {
+        out += ""
+        out += "# THEME — the colour nudge. row 0 is the THEME header (no colour); rows 1..17 are the"
+        out += "# COLOR_ROWS. channels 0/1/2 = R/G/B. deltas are what A+UP/DOWN (±1) and A+RIGHT/LEFT"
+        out += "# (±0x10) send. Rows 18 and channel 3 are OUT OF RANGE and must be no-ops."
+        out += "# The WHOLE theme is recorded, not the field that changed — a nudge that writes into the"
+        out += "# neighbouring colour leaves the intended one looking right."
+        for ((bedName, bed) in themeBeds()) {
+            for (row in 0..18) {
+                for (ch in 0..3) {
+                    for (delta in listOf(1, -1, 16, -16)) {
+                        val t = ThemeEditorModule.adjustColor(bed, row, ch, delta)
+                        out += "THEME bed=$bedName row=$row ch=$ch d=$delta => ${themeStr(t)}"
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * THEMECYCLE — A+UP / A+DOWN on the THEME row.
+     *
+     * ⚠️ The beds include a theme whose name is NOT a built-in, which is the whole point: `indexOfFirst`
+     * returns −1 there, and Kotlin's two expressions treat that differently (NEXT → CLASSIC, PREV →
+     * MONO). Cycle only through the four built-ins and both directions look like a clean ring, and the
+     * asymmetry — which is what a user actually meets, the moment they load a `.ptt` — is never tested.
+     * The custom bed also proves the palette is REPLACED wholesale rather than patched.
+     */
+    private fun sweepThemeCycle(out: MutableList<String>) {
+        out += ""
+        out += "# THEMECYCLE — the built-in ring. d=-1 is A+UP (prev), d=+1 is A+DOWN (next)."
+        out += "# A theme whose name is not a built-in has index -1: NEXT lands on CLASSIC, PREV on MONO."
+        out += "# visualizerType must ride across the swap — the palette is the theme's, the viz the user's."
+        val beds = listOf(
+            "classic" to AppTheme.CLASSIC,
+            "amber"   to AppTheme.AMBER,
+            "blue"    to AppTheme.BLUE,
+            "mono"    to AppTheme.MONO,
+            // Not in the ring — and carrying a non-default visualizer, so the ride-across is measured.
+            "custom"  to AppTheme.CLASSIC.copy(name = "SUNSET", vizWave = 0xFFFF00FFL,
+                                               visualizerType = VisualizerType.SPECTRUM_PEAKS),
+            // A theme NAMED like a built-in but with different colours — it IS in the ring (the cycle
+            // keys off the name alone), so its colours are discarded. Ugly, faithful, and pinned.
+            "impostor" to AppTheme.CLASSIC.copy(name = "AMBER", vizWave = 0xFF123456L)
+        )
+        for ((bedName, bed) in beds) {
+            for (delta in listOf(-1, 1)) {
+                val t = ThemeEditorModule.cycleBuiltin(bed, delta)
+                out += "THEMECYCLE bed=$bedName d=$delta => viz=${t.visualizerType} ${themeStr(t)}"
+            }
+        }
+    }
+
+    /**
+     * THEMEPTT — the `.ptt` file itself, byte for byte.
+     *
+     * ⚠️ THIS IS THE ONE THAT MAKES THE FILE FORMAT REAL, and it is `ptroundtrip`'s argument at a
+     * twentieth of the size: a theme written on a phone must load on a handheld and back. kotlinx is the
+     * only thing that decides what those bytes ARE, so kotlinx is what has to write the golden — the C++
+     * emitter (`native/ui/theme_io.h`) then has to reproduce them exactly.
+     *
+     * The encoding is `Json { prettyPrint = true }`, which is what `QwertyContext.THEME_SAVE` uses, and
+     * its `encodeDefaults` is FALSE — so every field equal to its declared default is OMITTED. Since the
+     * declared defaults ARE the CLASSIC palette, an unmodified CLASSIC theme called "CLASSIC" serializes
+     * to `{}`. That is not a bug and it round-trips correctly; it is also the single most surprising line
+     * in this golden, and the reason it is pinned rather than reasoned about.
+     *
+     * ⚠️ The newline escaping matters too: the golden stores the JSON with literal newlines replaced by
+     * `\n` so one file is one line. ptinput un-escapes before comparing.
+     */
+    private fun sweepThemePtt(out: MutableList<String>) {
+        out += ""
+        out += "# THEMEPTT — the .ptt bytes, from kotlinx (Json { prettyPrint = true }, encodeDefaults=false)."
+        out += "# The C++ emitter in native/ui/theme_io.h must reproduce these EXACTLY: 4-space indent,"
+        out += "# declaration order, Long colours as decimal, visualizerType as its DECLARED enum name"
+        out += "# (OCTA_FULL/SPECTRUM/SPECTRUM_PEAKS — NOT the settings screen's OCTA.F/SPECT/SPCT.P labels)."
+        out += "# A default CLASSIC theme named CLASSIC serializes to {} — every field equals its default."
+        val json = Json { prettyPrint = true }
+        val cases = listOf(
+            "classic-default" to AppTheme.CLASSIC,
+            "amber"           to AppTheme.AMBER,
+            "blue"            to AppTheme.BLUE,
+            "mono"            to AppTheme.MONO,
+            // A renamed CLASSIC: only `name` differs from the defaults, so only `name` is written.
+            "renamed"         to AppTheme.CLASSIC.copy(name = "SUNSET"),
+            // One colour off default, nothing else — the minimal non-trivial file.
+            "one-colour"      to AppTheme.CLASSIC.copy(name = "ONE", vizWave = 0xFF123456L),
+            // meterBorder — the field with NO editor row. It is still serialized, and this is the only
+            // line in the golden that proves it.
+            "meter-border"    to AppTheme.CLASSIC.copy(name = "BORDER", meterBorder = 0xFF00FF00L),
+            // ⚠️ EVERY visualizer value, not a sample of them — so every DECLARED enum name is written
+            // by some case. The first version of this golden used only OCTA_FULL and SPECTRUM_PEAKS, and
+            // the negative control (write the settings screen's DISPLAY label instead of the enum's name)
+            // therefore caught OCTA_FULL and *missed FLAT, OCTA and SPECTRUM entirely* — three names a
+            // typo could have shipped in. A control that fires is not the same as a control that fires
+            // everywhere it should; that is what running it TELLS you, and this line is what it told us.
+            // (SCOPE is the field default and is OMITTED, which is itself worth pinning.)
+            "viz-scope"       to AppTheme.CLASSIC.copy(name = "V0", visualizerType = VisualizerType.SCOPE),
+            "viz-flat"        to AppTheme.CLASSIC.copy(name = "V1", visualizerType = VisualizerType.FLAT),
+            "viz-octa"        to AppTheme.CLASSIC.copy(name = "V2", visualizerType = VisualizerType.OCTA),
+            "viz-octafull"    to AppTheme.CLASSIC.copy(name = "V3", visualizerType = VisualizerType.OCTA_FULL),
+            "viz-spectrum"    to AppTheme.CLASSIC.copy(name = "V4", visualizerType = VisualizerType.SPECTRUM),
+            "viz-specpeaks"   to AppTheme.CLASSIC.copy(name = "V5", visualizerType = VisualizerType.SPECTRUM_PEAKS),
+            // A name needing JSON escaping, and one with a space — the FILE keeps the raw name (only the
+            // FILENAME is sanitized), so the escaping is real.
+            "quoted-name"     to AppTheme.CLASSIC.copy(name = "MY \"COOL\" THEME")
+        )
+        for ((label, theme) in cases) {
+            val text = json.encodeToString(theme).replace("\n", "\\n")
+            out += "THEMEPTT case=$label => $text"
+        }
+    }
+
     @Test
     fun inputGoldens() {
         val out = mutableListOf<String>()
@@ -1903,6 +2094,9 @@ class P3InputGoldenTest {
         sweepFxHelper(out)
         sweepSort(out)
         sweepQwerty(out)
+        sweepTheme(out)
+        sweepThemeCycle(out)
+        sweepThemePtt(out)
 
         val text = out.joinToString("\n") + "\n"
 

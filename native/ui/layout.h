@@ -45,6 +45,7 @@
 #include "ui/modules/settings_editor.h"
 #include "ui/modules/song_editor.h"
 #include "ui/modules/table_editor.h"
+#include "ui/modules/theme_editor.h"
 
 namespace pt::ui {
 
@@ -104,6 +105,7 @@ private:
     SampleEditorModule    sampleEditor_;  // full-screen too — a waveform wants the width
     QwertyKeyboardOverlay qwerty_;        // modal: drawn LAST, over everything, including the browser
     EqModule              eq_;            // stateful (curve cache); drawn INSTEAD of the screen module
+    ThemeEditorModule     themeEditor_;   // drawn INSTEAD of the screen module, on the EQ's terms (S9)
 };
 
 }  // namespace pt::ui

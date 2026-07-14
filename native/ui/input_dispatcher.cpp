@@ -5,6 +5,7 @@
 #include "ui/cursor_move.h"
 #include "ui/navigation.h"
 #include "ui/std_filesystem.h"   // path_name / path_stem / path_extension / to_lower
+#include "ui/theme_io.h"         // .ptt — save_theme_file / load_theme_file
 
 #include <algorithm>
 #include <map>
@@ -410,6 +411,15 @@ void InputDispatcher::preview_edited_note() {
 // ─── The three generic paths ─────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::generic_input(InputAction (*fn)(const CursorContext&)) {
+    // ⚠️ THE THEME EDITOR HAS NO CursorContext AT ALL, so it does not merely get checked first — it gets
+    // checked and RETURNS. Kotlin's `handleGenericInput` opens with the identical line
+    // (`if (themeEditorState.isOpen) return`), and the reason is in the module header: a channel of a
+    // colour is not a cell of a document, and nothing in CursorContext's vocabulary can say it. Every
+    // edit the editor makes therefore happens in `on_a_up`/`on_a_down`/`on_a_left`/`on_a_right`, not
+    // here. Without this arm, A+UP inside the editor would nudge whatever cell of SETTINGS the cursor
+    // was parked on when the editor was raised — which is, by construction, always the THEME row.
+    if (theme_open()) return;
+
     // ⚠️ THE EQ EDITOR IS CHECKED FIRST, and it has to be — it is an OVERLAY, so `currentScreen` still
     // names the screen UNDERNEATH it. Ask that screen what is under its cursor and A+UP would nudge a
     // mixer fader while the user is dialling a bell curve. Kotlin opens `handleGenericInput` with the
@@ -514,6 +524,7 @@ void InputDispatcher::dpad_nav(const char* direction) {
 void InputDispatcher::on_dpad_up() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_key_cursor_up(s_.qwerty); return; }
+    if (theme_open())  { theme_move_cursor(-1, 0); return; }
     if (eq_open())     { eq_move_cursor(0, -1); return; }
     if (on_browser())  { browser_move_cursor(-1, /*page=*/false); return; }
     dpad_nav("UP");
@@ -522,6 +533,7 @@ void InputDispatcher::on_dpad_up() {
 void InputDispatcher::on_dpad_down() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_key_cursor_down(s_.qwerty); return; }
+    if (theme_open())  { theme_move_cursor(+1, 0); return; }
     if (eq_open())     { eq_move_cursor(0, +1); return; }
     if (on_browser())  { browser_move_cursor(+1, /*page=*/false); return; }
     dpad_nav("DOWN");
@@ -530,6 +542,9 @@ void InputDispatcher::on_dpad_down() {
 void InputDispatcher::on_dpad_left() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_key_cursor_left(s_.qwerty); return; }
+    // ⚠️ In the THEME editor LEFT/RIGHT change CHANNEL (R→G→B), and they WRAP, where the EQ's clamp.
+    // Three channels are a ring you walk, not a range you scan to the end of.
+    if (theme_open())  { theme_move_cursor(0, -1); return; }
     // ⚠️ In the EQ editor LEFT/RIGHT change BAND while keeping the PARAM — they do not walk a flat list
     // of twelve. That is what lets you sweep the same parameter across all three bands without moving
     // your thumb off the row, which is how an EQ is actually dialled.
@@ -542,9 +557,113 @@ void InputDispatcher::on_dpad_left() {
 void InputDispatcher::on_dpad_right() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_key_cursor_right(s_.qwerty); return; }
+    if (theme_open())  { theme_move_cursor(0, +1); return; }
     if (eq_open())     { eq_move_cursor(+1, 0); return; }
     if (on_browser())  { browser_move_cursor(+BROWSER_VISIBLE_ROWS, /*page=*/true); return; }
     dpad_nav("RIGHT");
+}
+
+// ─── The THEME EDITOR ─────────────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::theme_move_cursor(int d_row, int d_channel) {
+    // ⚠️ BOTH AXES WRAP, and neither clamps — which makes this the only cursor in the app that wraps in
+    // BOTH directions. The rows are a ring of eighteen (Kotlin: `if (row > 0) row - 1 else MAX_ROW`)
+    // and the channels a ring of three, and the argument is the mixer's row 0 again: a list of colours
+    // is a ring you scroll, not a document you reach the end of. The panel SCROLLS to follow the row
+    // (only 16 of the 18 fit), so wrapping from row 17 to row 0 also scrolls the list back to the top.
+    if (d_row != 0) {
+        const int row = s_.themeEditor.cursorRow;
+        s_.themeEditor.cursorRow =
+            (d_row < 0) ? (row > 0 ? row - 1 : ThemeEditorModule::MAX_ROW)
+                        : (row < ThemeEditorModule::MAX_ROW ? row + 1 : 0);
+    }
+    if (d_channel != 0) {
+        const int ch = s_.themeEditor.cursorChannel;
+        s_.themeEditor.cursorChannel = (d_channel < 0) ? (ch > 0 ? ch - 1 : 2)
+                                                       : (ch < 2 ? ch + 1 : 0);
+    }
+}
+
+/**
+ * Kotlin's `name.replace(Regex("[^a-zA-Z0-9_]"), "_")` — a theme name, as a FILENAME.
+ *
+ * ⚠️ It is NOT `.ifEmpty` on its own: the fallback is applied by the callers, and both of them apply it
+ * (`"THEME"`). That is S7's dotfile bug in waiting — an all-punctuation name sanitizes to underscores,
+ * but an EMPTY one sanitizes to an empty string, and `<Themes>/.ptt` is a dotfile the browser SKIPS.
+ * Kotlin already guards it here (unlike `saveProject`, which did not until S7 fixed it), so this is the
+ * one save path in the app that was never broken. Kept explicit so it stays that way.
+ */
+static std::string sanitize_theme_filename(const std::string& name) {
+    std::string out;
+    out.reserve(name.size());
+    for (const char c : name) {
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9') || c == '_';
+        out += ok ? c : '_';
+    }
+    return out;
+}
+
+void InputDispatcher::theme_row_action() {
+    switch (s_.themeEditor.cursorChannel) {
+        case 1: {   // SAVE — name it, then write it
+            // ⚠️ The keyboard opens WITHOUT closing the editor, which is why every handler tests
+            // `qwerty_open()` before `theme_open()`. It seeds with the SANITIZED current name, so what
+            // you are shown is what the file will be called.
+            const std::string seed = sanitize_theme_filename(s_.theme.name);
+            open_qwerty(QwertyContext::THEME_SAVE, seed.empty() ? "THEME" : seed, "SAVE THEME:",
+                        fs_.themes_directory(), /*max_length=*/20, /*clear_on_first_b=*/true);
+            break;
+        }
+        case 2: {   // LOAD — browse the Themes folder for a .ptt
+            // ⚠️ This one CLOSES the editor first, where SAVE does not. The browser is a SCREEN, not an
+            // overlay — it takes over `currentScreen` — so leaving the editor open would leave a modal
+            // standing on top of a screen it was never raised from, swallowing the browser's own D-pad.
+            // `browser_confirm` re-opens the editor when a theme lands.
+            close_theme_editor();
+            open_file_browser(AppState::BrowserPurpose::LOAD_THEME, fs_.themes_directory(), {"ptt"});
+            break;
+        }
+        default:    // column 0 is the NAME, and a bare A on it does nothing. Kotlin's `when` has no arm.
+            break;
+    }
+}
+
+void InputDispatcher::save_theme_as(const std::string& dir, const std::string& typed_text) {
+    // ⚠️ TWO DIFFERENT NAMES COME OUT OF ONE TYPED STRING, and mixing them up is the whole trap here:
+    //
+    //   the FILENAME is SANITIZED  → "My Theme!"  becomes  My_Theme_.ptt
+    //   the NAME IN THE FILE is RAW → "My Theme!"  stays    "name": "My Theme!"
+    //
+    // That is deliberate on Android and it is right: the filename must survive a FAT32 SD card, and the
+    // display name must survive the user's taste. An empty field keeps the theme's CURRENT name rather
+    // than blanking it, and falls back to "THEME" for the file (never `.ptt`, which the browser hides —
+    // S7's dotfile bug, which this path has always been guarded against).
+    const std::string safe = sanitize_theme_filename(typed_text);
+    const std::string file = (safe.empty() ? std::string("THEME") : safe) + ".ptt";
+    const std::string path = dir + "/" + file;
+
+    Theme to_save = s_.theme;
+    if (!typed_text.empty()) to_save.name = typed_text;
+
+    // ⚠️ THE LIVE THEME DOES NOT ADOPT THE NAME IT WAS JUST SAVED UNDER, and that is Kotlin's, kept.
+    // `themeToSave` is a COPY (`appTheme.copy(name = …)`); `appTheme` itself is never reassigned. So you
+    // save your palette as SUNSET and the THEME row still reads CLASSIC. It is cosmetic — the FILE is
+    // correct, and loading it back does set the name — and it is left alone rather than "fixed", because
+    // the name is what the built-in cycle keys off (`theme_cycle_builtin`) and adopting a custom name
+    // would silently change which palette A+DOWN lands on. A divergence with a behavioural tail is not a
+    // tidy-up. Stated here rather than smuggled in; a parity-ledger entry, not a port decision.
+    const bool ok = save_theme_file(fs_, path, to_save);
+
+    // ⚠️ …but a save that FAILS must say so, and Kotlin's does not: it discards `writeFile`'s Boolean
+    // outright, so a full SD card or a read-only mount closes the keyboard and reports success by
+    // silence. That is S7's own headline, one screen later — "a SAVE that reports nothing is
+    // indistinguishable from a SAVE that failed" — and it is a dropped error return, not a missing
+    // nicety. Zone B, so it is fixed on Android too (AppInputDispatcher, QwertyContext.THEME_SAVE).
+    s_.statusMessage = ok ? "THEME SAVED" : "SAVE FAILED";
+    s_.statusSuccess = ok;
+
+    open_theme_editor();
 }
 
 // ─── The FX-type column, and the helper it opens ──────────────────────────────────────────────────
@@ -701,9 +820,31 @@ static int64_t sample_coarse_step(const SampleEditorState& se) {
 // exactly the kind of accident that stops being true the day someone adds an EQ cell somewhere new.
 // `generic_input()` carries the real arm; these five make sure nothing gets in front of it.
 
+// ⚠️ THE THEME ARM COMES FIRST IN ALL FOUR, and it is where the editor's whole edit lives — the module
+// has no `handle_input` and no CursorContext (see generic_input). The four gestures are not symmetric,
+// and the asymmetry is Kotlin's:
+//
+//   A+UP   / A+DOWN  → on the THEME row, step the BUILT-IN palette (prev / next).
+//                      on a colour row, nudge the cursor's channel by ±0x01.
+//   A+LEFT / A+RIGHT → on the THEME row, NOTHING (`if (cursorRow >= 1)` — there is no coarse step for a
+//                      palette, and no fifth thing for a name to do).
+//                      on a colour row, nudge the cursor's channel by ∓0x10.
+//
+// ⚠️ Note which way round the palette cycle runs: A+UP is PREV and A+DOWN is NEXT, the opposite of the
+// ±1 the same two buttons apply to a colour one row below. It reads as a bug and is not: UP walks the
+// list UP (towards CLASSIC), and the colour nudge is a NUMBER going up. Two different meanings for one
+// button, decided by the row — reproduced rather than "fixed", because a user's muscle memory for
+// "A+DOWN gives me the next theme" is the phone's.
+
 void InputDispatcher::on_a_up() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
+    if (theme_open()) {
+        if (s_.themeEditor.cursorRow == 0) theme_cycle_builtin(s_.theme, -1);
+        else theme_adjust_color(s_.theme, s_.themeEditor.cursorRow,
+                                s_.themeEditor.cursorChannel, +0x01);
+        return;
+    }
     if (eq_open()) { generic_input(pt::ui::on_a); return; }
     if (s_.fxHelper.isOpen) { fx_move_up(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_fine_step(s_.sampleEditor)); return; }
@@ -715,6 +856,12 @@ void InputDispatcher::on_a_up() {
 void InputDispatcher::on_a_down() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
+    if (theme_open()) {
+        if (s_.themeEditor.cursorRow == 0) theme_cycle_builtin(s_.theme, +1);
+        else theme_adjust_color(s_.theme, s_.themeEditor.cursorRow,
+                                s_.themeEditor.cursorChannel, -0x01);
+        return;
+    }
     if (eq_open()) { generic_input(pt::ui::on_b); return; }
     if (s_.fxHelper.isOpen) { fx_move_down(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_fine_step(s_.sampleEditor)); return; }
@@ -726,6 +873,11 @@ void InputDispatcher::on_a_down() {
 void InputDispatcher::on_a_left() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
+    if (theme_open()) {
+        // Row 0 falls through to nothing: `theme_adjust_color` rejects it, as Kotlin's `>= 1` guard does.
+        theme_adjust_color(s_.theme, s_.themeEditor.cursorRow, s_.themeEditor.cursorChannel, -0x10);
+        return;
+    }
     if (eq_open()) { generic_input(pt::ui::on_a_left); return; }
     if (s_.fxHelper.isOpen) { fx_move_left(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_coarse_step(s_.sampleEditor)); return; }
@@ -735,6 +887,10 @@ void InputDispatcher::on_a_left() {
 void InputDispatcher::on_a_right() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
+    if (theme_open()) {
+        theme_adjust_color(s_.theme, s_.themeEditor.cursorRow, s_.themeEditor.cursorChannel, +0x10);
+        return;
+    }
     if (eq_open()) { generic_input(pt::ui::on_a_right); return; }
     if (s_.fxHelper.isOpen) { fx_move_right(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_coarse_step(s_.sampleEditor)); return; }
@@ -831,7 +987,7 @@ void InputDispatcher::on_a_b() {
 
 void InputDispatcher::on_a_a() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || on_browser() || eq_open()) return;
+    if (qwerty_open() || on_browser() || eq_open() || theme_open()) return;
 
     // A double-tap is only a double-tap if the cursor has not moved between the presses. Anything
     // else is two separate A presses, and each of those already did something (they inserted the
@@ -876,6 +1032,14 @@ void InputDispatcher::on_a_a() {
 // ─── B + D-pad: which item am I looking at? ──────────────────────────────────────────────────────
 
 void InputDispatcher::cycle_current_item(int delta) {
+    // ⚠️ The THEME editor SWALLOWS B+LEFT/RIGHT rather than doing anything with it (Kotlin's
+    // `cycleCurrentItem` opens with the same line). It is not that there is nothing sensible to cycle —
+    // B+LEFT/RIGHT could plausibly walk the built-in palettes — it is that A+UP/A+DOWN already does, and
+    // a second gesture for one job is a second thing to keep in step. Without this arm the press would
+    // fall through to `currentScreen`, which is SETTINGS, whose `default:` arm does nothing — so the bug
+    // would be invisible today and would arrive the day an EQ cell or a pool lands on SETTINGS.
+    if (theme_open()) return;
+
     // ⚠️ In the EQ editor B+LEFT/RIGHT changes the SLOT — and it CLAMPS at 0 and 127 where every other
     // B+LEFT/RIGHT in the app wraps. A phrase pool is a ring you scroll through; the EQ bank is an index
     // you are pointing a mixer channel at, and wrapping from slot 127 back to 0 would silently re-point
@@ -944,7 +1108,7 @@ void InputDispatcher::on_b_right() { if (confirm_open()) return; if (qwerty_open
 
 void InputDispatcher::on_b_up() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || on_browser() || eq_open()) return;
+    if (qwerty_open() || on_browser() || eq_open() || theme_open()) return;
 
     // The pool pages by 16 like the song does — but it CLAMPS at the ends where a single D-pad step
     // wraps 00↔7F. Paging past the end of a 128-slot list should stop at the end, not lap it.
@@ -960,7 +1124,7 @@ void InputDispatcher::on_b_up() {
 
 void InputDispatcher::on_b_down() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || on_browser() || eq_open()) return;
+    if (qwerty_open() || on_browser() || eq_open() || theme_open()) return;
 
     if (s_.currentScreen == ScreenType::INST_POOL) {
         const int last = static_cast<int>(s_.project->instruments.size()) - 1;
@@ -990,7 +1154,7 @@ void InputDispatcher::on_b_down() {
 void InputDispatcher::on_r_up() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { s_.qwerty.layout = 0; clamp_col(s_.qwerty); return; }
-    if (eq_open()) return;
+    if (eq_open() || theme_open()) return;
     if (on_browser()) { browser_cycle_sort(+1); return; }
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_up(ns));
@@ -1000,7 +1164,7 @@ void InputDispatcher::on_r_up() {
 void InputDispatcher::on_r_down() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { s_.qwerty.layout = 1; clamp_col(s_.qwerty); return; }
-    if (eq_open()) return;
+    if (eq_open() || theme_open()) return;
     if (on_browser()) { browser_cycle_sort(-1); return; }
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_down(ns));
@@ -1029,7 +1193,7 @@ void InputDispatcher::browser_cycle_sort(int delta) {
 void InputDispatcher::on_r_left() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_text_cursor_left(s_.qwerty); return; }
-    if (eq_open()) return;
+    if (eq_open() || theme_open()) return;
     if (on_browser())  { navigate_to_parent(s_.fileBrowser, fs_); return; }
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_left(ns));
@@ -1039,7 +1203,7 @@ void InputDispatcher::on_r_left() {
 void InputDispatcher::on_r_right() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_text_cursor_right(s_.qwerty); return; }
-    if (eq_open()) return;
+    if (eq_open() || theme_open()) return;
     if (on_browser())  return;   // no "down a directory" — that is what A on a folder is for
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_right(ns));
@@ -1050,7 +1214,7 @@ void InputDispatcher::on_r_right() {
 
 void InputDispatcher::on_l_b() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || eq_open()) return;
+    if (qwerty_open() || eq_open() || theme_open()) return;
 
     // ⚠️ The browser's selection is a DIFFERENT machine from the grid editors'. Theirs is the multi-tap
     // CELL→ROW→SCREEN widener (ui/selection.h); the browser's is a plain anchor..cursor RANGE over a
@@ -1094,7 +1258,7 @@ void InputDispatcher::on_l_b() {
 
 void InputDispatcher::on_l_a() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || eq_open()) return;
+    if (qwerty_open() || eq_open() || theme_open()) return;
 
     // On the browser L+A is the FILE clipboard's cut/paste — the same "inside a selection it cuts,
     // outside one it pastes" shape as the grid editors below, over files instead of cells.
@@ -1167,7 +1331,7 @@ void InputDispatcher::on_l_a() {
 
 void InputDispatcher::on_l_r() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || eq_open()) return;
+    if (qwerty_open() || eq_open() || theme_open()) return;
     if (on_browser()) {
         s_.fileBrowser.selectionMode   = false;
         s_.fileBrowser.selectionAnchor = -1;
@@ -1180,7 +1344,7 @@ void InputDispatcher::on_l_r() {
 
 void InputDispatcher::on_l_b_a() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || on_browser() || eq_open()) return;
+    if (qwerty_open() || on_browser() || eq_open() || theme_open()) return;
 
     Project& p = host_.edit_project();
 
@@ -1488,11 +1652,9 @@ void InputDispatcher::project_action() {
 void InputDispatcher::settings_action() {
     switch (static_cast<SettingsRow>(s_.settingsCursorRow)) {
         case SettingsRow::THEME:
-            // ⚠️ INERT, and knowingly so. On Android this opens the THEME EDITOR, which is its own
-            // overlay and its own module in the port plan's Phase 3 list — it has not landed. The row
-            // draws the theme's name and a ">" because that is what Kotlin draws; the arrow is a
-            // promise the next session keeps. (Exactly the position every EQ cell in the app is in:
-            // it dials a slot number it cannot yet open.)
+            // The arrow S7 drew as a promise. A opens the editor (S9) — the last screen in the Kotlin
+            // dispatcher the port had not reached.
+            open_theme_editor();
             break;
 
         case SettingsRow::TEMPLATE: {
@@ -1542,6 +1704,19 @@ void InputDispatcher::on_button_a() {
     if (on_sample_editor() && s_.sampleEditor.showConfirmClose) {
         s_.sampleEditor.showConfirmClose = false;
         close_sample_editor();
+        return;
+    }
+
+    // ⚠️ A in the THEME EDITOR is meaningful on exactly ONE row and TWO of its three columns — the THEME
+    // row's SAVE and LOAD. Everywhere else (the name itself, and all seventeen colour rows) it does
+    // NOTHING, because a colour channel is dialled with A+DPAD and has nothing for a bare A to confirm.
+    //
+    // Like the EQ arm below it, this must RETURN rather than fall through: `currentScreen` is still
+    // SETTINGS underneath, and SETTINGS' own A is `settings_action()` — whose THEME row (9) is the very
+    // cell the cursor is parked on. Fall through and A would RE-OPEN the editor that is already open,
+    // resetting the cursor to row 0 under the user's thumb.
+    if (theme_open()) {
+        if (s_.themeEditor.cursorRow == 0) theme_row_action();
         return;
     }
 
@@ -1645,6 +1820,11 @@ void InputDispatcher::on_button_b() {
 
     if (qwerty_open()) { delete_char(s_.qwerty); return; }
 
+    // ⚠️ B CLOSES THE THEME EDITOR, and there is no "are you sure" — the live theme IS the applied theme
+    // (every module already draws from it; there is no apply step), so closing loses nothing that a save
+    // was needed to keep. The palette survives the close, the app and — since S9 — the QUIT.
+    if (theme_open()) { close_theme_editor(); return; }
+
     // ⚠️ B CLOSES THE EQ EDITOR — but the MAPPER holds this press until B is RELEASED
     // (`defer_b_to_release`), and cancels it outright if a B+DPAD fires in between. Without that latch
     // the slot cycle would be unreachable: B+LEFT would close the editor on B's own press and the LEFT
@@ -1723,6 +1903,12 @@ void InputDispatcher::on_select() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     // SELECT is the keyboard's ABORT — the chord alias for the button on its action row.
     if (qwerty_open()) { qwerty_cancel(); return; }
+
+    // SELECT is the THEME editor's second CLOSE, beside B — Kotlin's `handleSelect` closes it too. It
+    // does not strictly NEED one the way the EQ editor does (B is not deferred here; there is no B+DPAD
+    // gesture inside this editor to protect), but it is the same key on the same overlay and the phone
+    // does it, so the muscle memory carries.
+    if (theme_open()) { close_theme_editor(); return; }
 
     // SELECT is the EQ editor's second CLOSE, beside B. It needs one: B is deferred to release inside
     // the editor (the slot cycle owns B+DPAD), so SELECT is the way out that acts on the press.
@@ -2067,6 +2253,27 @@ void InputDispatcher::browser_confirm() {
             }
             load_project_done(path);
             return;
+
+        case AppState::BrowserPurpose::LOAD_THEME:
+            // ⚠️ A THEME IS NOT THE PROJECT AND NOT AN INSTRUMENT, so this returns early too — nothing
+            // below applies. It touches no engine, no sample, no slot: a palette is pixels.
+            //
+            // ⚠️ The extension is re-checked even though the browser was opened filtered to "ptt", and
+            // Kotlin re-checks it too (`item.file.extension.lowercase() == "ptt"`). The filter is not a
+            // guarantee: the user can navigate OUT of the Themes folder into anywhere, and the D-pad
+            // does not stop at a directory boundary. A failed parse must not blank the palette.
+            if (ext != "ptt" || !load_theme_file(fs_, path, s_.theme)) {
+                b.statusMessage = "LOAD FAILED";
+                b.statusSuccess = false;
+                return;
+            }
+            // Back to the editor that raised the browser — which `theme_row_action` CLOSED on the way
+            // out, because the browser is a screen and would have been standing underneath it.
+            close_file_browser();
+            open_theme_editor();
+            s_.statusMessage = "THEME LOADED";
+            s_.statusSuccess = true;
+            return;
     }
 
     if (!ok) {
@@ -2288,6 +2495,13 @@ void InputDispatcher::qwerty_apply() {
             }
             break;
         }
+
+        case QwertyContext::THEME_SAVE:
+            // The whole arm is `save_theme_as` — see it for the two names one typed string turns into,
+            // and for the error return Kotlin drops on the floor. ⚠️ `k.contextExtra`, not
+            // `s_.qwerty.contextExtra`: the live keyboard was cleared at the top of this function.
+            save_theme_as(k.contextExtra, text);
+            break;
 
         case QwertyContext::SAMPLE_NAME: {
             // It renames BOTH the editor's sample and the INSTRUMENT holding it — they are the same

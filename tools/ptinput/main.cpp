@@ -54,6 +54,8 @@
 #include "../../native/ui/modules/sample_editor.h"
 #include "../../native/ui/modules/settings_editor.h"
 #include "../../native/ui/modules/song_editor.h"
+#include "../../native/ui/modules/theme_editor.h"
+#include "../../native/ui/theme_io.h"
 #include "../../native/ui/modules/table_editor.h"
 #include "../../native/ui/platform_caps.h"
 #include "../../native/ui/theme.h"
@@ -891,6 +893,129 @@ static std::string recompute_serow(const std::vector<std::string>& toks, std::st
            " maxcol=" + std::to_string(SampleEditorModule::max_col_for_row(row, method));
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// THE THEME EDITOR (Phase 3 S9)
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Three kinds, and none of them is an EDIT line — the theme editor has NO CursorContext at all
+// (`generic_input` returns early when it is open), so there is no ctx=/act= to compare. What is
+// compared instead is the WHOLE THEME after a nudge, which is the same argument the EDIT lines' cell
+// comparison rests on: a nudge that writes into the neighbouring COLOUR leaves the intended one looking
+// perfectly right, and only a whole-theme diff sees it.
+
+/** The 18 colours + the name, in .ptt declaration order. Must match `themeStr` in P3InputGoldenTest. */
+static std::string theme_str(const Theme& t) {
+    const Argb cols[18] = {
+        t.background, t.rowEvery4th, t.rowCursor, t.rowPlayback, t.rowSelection,
+        t.textTitle, t.textParam, t.textValue, t.textCursor, t.textEmpty,
+        t.vizBackground, t.vizCenterLine, t.vizWave,
+        t.meterBackground, t.meterLow, t.meterMid, t.meterHigh, t.meterBorder,
+    };
+    std::string s = "name=" + t.name + " ";
+    for (int i = 0; i < 18; ++i) {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%08X", cols[i]);
+        if (i) s += ",";
+        s += buf;
+    }
+    return s;
+}
+
+/** The four beds, rebuilt exactly as the Kotlin recorder builds them. */
+static bool theme_bed(const std::string& name, Theme& out) {
+    if (name == "classic") { out = theme_classic(); return true; }
+    if (name == "amber")   { out = theme_amber();   return true; }
+    if (name == "blue")    { out = theme_blue();    return true; }
+    if (name == "mono")    { out = theme_mono();    return true; }
+
+    // The saturated beds — every channel at 0x00 and at 0xFF, which is where a clamp is either right or
+    // wrong. ⚠️ Not because the built-ins never reach the rails (they do, by accident — CLASSIC carries
+    // 0x0A and 0xFF); because these two drive EVERY row and EVERY channel into both rails, where a
+    // built-in only happens to place a few. Measured with the clamp→wrap control: 282 red lines, 78 of
+    // them on the built-in beds and 204 here. See P3InputGoldenTest.themeBeds for the full note.
+    if (name == "floor" || name == "ceiling") {
+        const Argb v = (name == "floor") ? 0xFF000000u : 0xFFFFFFFFu;
+        out = theme_classic();
+        out.name = (name == "floor") ? "FLOOR" : "CEILING";
+        for (const ThemeColorRow& r : theme_color_rows()) out.*(r.field) = v;
+        out.meterBorder = v;   // the 18th colour — no editor row, but the bed sets it like the rest
+        return true;
+    }
+
+    if (name == "custom") {
+        out = theme_classic();
+        out.name           = "SUNSET";
+        out.vizWave        = 0xFFFF00FF;
+        out.visualizerType = VisualizerType::SPECTRUM_PEAKS;
+        return true;
+    }
+    if (name == "impostor") {
+        out = theme_classic();
+        out.name    = "AMBER";       // named like a built-in, coloured like nothing
+        out.vizWave = 0xFF123456;
+        return true;
+    }
+    return false;
+}
+
+static std::string recompute_theme(const std::vector<std::string>& toks, std::string& err) {
+    Theme t;
+    if (!theme_bed(field(toks, "bed"), t)) { err = "unknown bed " + field(toks, "bed"); return ""; }
+
+    theme_adjust_color(t, from_dec(field(toks, "row")), from_dec(field(toks, "ch")),
+                       from_dec(field(toks, "d")));
+    return theme_str(t);
+}
+
+static std::string recompute_themecycle(const std::vector<std::string>& toks, std::string& err) {
+    Theme t;
+    if (!theme_bed(field(toks, "bed"), t)) { err = "unknown bed " + field(toks, "bed"); return ""; }
+
+    theme_cycle_builtin(t, from_dec(field(toks, "d")));
+    return "viz=" + std::string(visualizer_serial_name(t.visualizerType)) + " " + theme_str(t);
+}
+
+// ─── THEMEPTT — the file format, byte for byte ───────────────────────────────────────────────────
+//
+// ⚠️ THE ONE THAT MAKES THE `.ptt` REAL. kotlinx decides what those bytes ARE, so kotlinx wrote the
+// golden and `native/ui/theme_io.h` has to reproduce them exactly — 4-space indent, declaration order,
+// `encodeDefaults = false` omission, Long colours as decimal, and the enum's DECLARED name (OCTA_FULL,
+// not the settings screen's "OCTA.F" label). A theme saved on the phone has to load on the handheld and
+// back, and "semantically equivalent JSON" is a promise no test can hold you to.
+
+static std::string recompute_themeptt(const std::vector<std::string>& toks, std::string& err) {
+    const std::string label = field(toks, "case");
+
+    Theme t = theme_classic();
+    if      (label == "classic-default") { /* the defaults, untouched → must serialize to {} */ }
+    else if (label == "amber")           { t = theme_amber(); }
+    else if (label == "blue")            { t = theme_blue(); }
+    else if (label == "mono")            { t = theme_mono(); }
+    else if (label == "renamed")         { t.name = "SUNSET"; }
+    else if (label == "one-colour")      { t.name = "ONE";    t.vizWave = 0xFF123456; }
+    else if (label == "meter-border")    { t.name = "BORDER"; t.meterBorder = 0xFF00FF00; }
+    // ⚠️ ALL SIX visualizer values, so every DECLARED enum name is written by some case. The golden first
+    // had only two, and the "write the DISPLAY label instead" control then caught OCTA_FULL while missing
+    // FLAT, OCTA and SPECTRUM outright. See P3InputGoldenTest.sweepThemePtt.
+    else if (label == "viz-scope")       { t.name = "V0"; t.visualizerType = VisualizerType::SCOPE; }
+    else if (label == "viz-flat")        { t.name = "V1"; t.visualizerType = VisualizerType::FLAT; }
+    else if (label == "viz-octa")        { t.name = "V2"; t.visualizerType = VisualizerType::OCTA; }
+    else if (label == "viz-octafull")    { t.name = "V3"; t.visualizerType = VisualizerType::OCTA_FULL; }
+    else if (label == "viz-spectrum")    { t.name = "V4"; t.visualizerType = VisualizerType::SPECTRUM; }
+    else if (label == "viz-specpeaks")   { t.name = "V5"; t.visualizerType = VisualizerType::SPECTRUM_PEAKS; }
+    else if (label == "quoted-name")     { t.name = "MY \"COOL\" THEME"; }
+    else { err = "unknown ptt case " + label; return ""; }
+
+    // The golden stores one file as one line, with literal newlines escaped. Escape ours the same way
+    // rather than un-escaping the golden — a bug that ate a newline would then be invisible.
+    std::string out;
+    for (const char c : serialize_theme(t)) {
+        if (c == '\n') out += "\\n";
+        else           out += c;
+    }
+    return out;
+}
+
 // ─── SEVIEW — the derived values: slice bounds, the zoom window, the duration readout ─────────────
 
 static std::string recompute_seview(const std::vector<std::string>& toks, std::string& err) {
@@ -1409,6 +1534,9 @@ int main(int argc, char** argv) {
         else if (kind == "KBD")  rhsCpp = recompute_kbd(toks, err);
         else if (kind == "SEROW")  rhsCpp = recompute_serow(toks, err);
         else if (kind == "SEVIEW") rhsCpp = recompute_seview(toks, err);
+        else if (kind == "THEME")      rhsCpp = recompute_theme(toks, err);
+        else if (kind == "THEMECYCLE") rhsCpp = recompute_themecycle(toks, err);
+        else if (kind == "THEMEPTT")   rhsCpp = recompute_themeptt(toks, err);
         else if (kind == "CLIP") {
             const ClipOut o = recompute_clip(toks, err);
             rhsCpp          = o.rhs;

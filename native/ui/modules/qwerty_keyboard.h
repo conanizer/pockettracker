@@ -49,7 +49,8 @@ enum class QwertyContext {
     INSTRUMENT_SAVE,  // write the current instrument to `contextExtra`/<text>.pti
     SAMPLE_NAME,      // the sample editor's NAME row — renames the editor's sample AND its instrument
     SAMPLE_SAVE,      // SAVE-AS: write the edited sample to `contextExtra`/<text>.wav, de-duplicating
-    PROJECT_NAME      // the project's name (PROJECT row 2) — plain text, no file touched
+    PROJECT_NAME,     // the project's name (PROJECT row 2) — plain text, no file touched
+    THEME_SAVE        // write the live theme to `contextExtra`/<text>.ptt, and name it <text> (S9)
 };
 
 /** 3 key rows of 10, then the space bar. The action row (ABORT / APPLY) is virtual — see below. */

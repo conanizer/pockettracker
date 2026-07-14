@@ -24,6 +24,7 @@
 #include "ui/modules/file_browser.h"
 #include "ui/modules/qwerty_keyboard.h"
 #include "ui/modules/sample_editor.h"
+#include "ui/modules/theme_editor.h"
 #include "ui/modules/settings_editor.h"
 #include "ui/platform_caps.h"
 #include "ui/selection.h"
@@ -213,7 +214,8 @@ struct AppState {
         LOAD_SOURCE,        // a sample (or an .sf2 — the instrument's TYPE decides which, at open time)
         LOAD_PRESET,        // a .pti into the current instrument slot
         LOAD_SAMPLE_EDITOR, // a .wav into the slot the SAMPLE EDITOR is open on — and back to the editor
-        LOAD_PROJECT        // a .ptp — the whole document, from PROJECT's LOAD button (S7)
+        LOAD_PROJECT,       // a .ptp — the whole document, from PROJECT's LOAD button (S7)
+        LOAD_THEME          // a .ptt — and back into the THEME EDITOR, which raised the browser (S9)
     };
     BrowserPurpose browserPurpose = BrowserPurpose::LOAD_SOURCE;
 
@@ -266,6 +268,25 @@ struct AppState {
      */
     const float* eqSpectrum      = nullptr;
     int          eqSpectrumCount = 0;
+
+    // ── The THEME EDITOR (S9) ────────────────────────────────────────────────────────────────────
+    //
+    // The port's fourth modal, and the SECOND partial one: it lets START through to the transport, as the
+    // EQ editor does. That is what makes VIZ BG / VIZ LINE / VIZ WAVE dialable — they are the oscilloscope
+    // strip, which keeps drawing above the panel, and an oscilloscope with the transport stopped is a
+    // flat line. Six more colours the editor previews simply by DRAWING ITSELF in them (background,
+    // rowCursor, and the four text roles); the remaining eight it can only show as a swatch, because the
+    // pixels they describe live on screens this overlay has replaced.
+    //
+    // ⚠️ Unlike the EQ's pass-through, there is NO evidence in the Kotlin that this one is deliberate —
+    // `handleStart` simply has no theme guard where every other handler has one. The effect is right, so
+    // it is ported as-is; if it was an accident, it was a lucky one. (Stated rather than dressed up: the
+    // difference between "Kotlin means this" and "Kotlin does this" is the difference between a spec and
+    // an observation, and only one of them is evidence.)
+    //
+    // It is raised from exactly one place (SETTINGS row 9), so unlike `eq.caller` there is nothing to
+    // capture — the thing being edited is the app's single live Theme, below.
+    ThemeEditorState themeEditor{};
 
     // ── SETTINGS (S7) ────────────────────────────────────────────────────────────────────────────
     //

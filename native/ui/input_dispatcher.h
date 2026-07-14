@@ -423,7 +423,48 @@ class InputDispatcher {
     bool open_sub_screen_at_cursor(bool peek);
 
     /** Is ANY modal already up? Then no cell "opens a sub-screen" — the modal owns the button. */
-    bool any_modal_open() const { return confirm_open() || qwerty_open() || eq_open(); }
+    bool any_modal_open() const {
+        return confirm_open() || qwerty_open() || eq_open() || theme_open();
+    }
+
+    // ── The THEME EDITOR (Phase 3 S9) ───────────────────────────────────────────────────────────
+    //
+    // The port's fourth modal and its second PARTIAL one — it owns the D-pad, A, A+DPAD, B, B+DPAD and
+    // SELECT, and lets START through to the transport (ui/app_state.h says why: half the colours it
+    // edits only exist while the song plays).
+    //
+    // ⚠️ IT IS RAISED FROM SETTINGS AND `currentScreen` STAYS `SETTINGS` — the same overlay hazard the
+    // EQ editor has, and the same rule: ask `theme_open()` before reaching for the screen's cursor, or
+    // A+UP will cycle the VISUALIZER row underneath while the user is dialling a colour.
+    //
+    // ⚠️ AND THE KEYBOARD OPENS ON TOP OF IT. SAVE raises the QWERTY overlay WITHOUT closing the editor
+    // (LOAD, by contrast, closes it and re-opens it when the file lands), so `qwerty_open()` must be
+    // tested BEFORE `theme_open()` in every handler — THE MODAL RULE from S6a, and this is the second
+    // place in the app where two modals are genuinely stacked.
+
+    bool theme_open() const { return s_.themeEditor.isOpen; }
+
+    void open_theme_editor()  { s_.themeEditor = ThemeEditorState{}; s_.themeEditor.isOpen = true; }
+    void close_theme_editor() { s_.themeEditor = ThemeEditorState{}; }
+
+    /** The D-pad: UP/DOWN walk the 18 rows (WRAPPING), LEFT/RIGHT the 3 channels (WRAPPING). */
+    void theme_move_cursor(int d_row, int d_channel);
+
+    /** A on the THEME row: column 1 = SAVE (raises the keyboard), column 2 = LOAD (raises the browser). */
+    void theme_row_action();
+
+    /**
+     * Apply the typed name and write `<dir>/<name>.ptt`. The QWERTY's THEME_SAVE arm.
+     *
+     * ⚠️ `dir` is a PARAMETER and not read from `s_.qwerty.contextExtra`, which would be the obvious
+     * thing and is wrong: `qwerty_apply()` copies the keyboard state by value and CLEARS `s_.qwerty`
+     * before it dispatches, so by the time any arm runs, the live keyboard is already gone. Reading it
+     * here wrote the theme to the filesystem ROOT instead of the Themes folder — silently, because
+     * `write_file` creates its parent directories and cheerfully succeeded. Every other arm takes
+     * `k.contextExtra`; this one does too now. (Caught by ptdispatch §27 on its first run, which is
+     * precisely the join a golden cannot see.)
+     */
+    void save_theme_as(const std::string& dir, const std::string& typed_text);
 
     // ── PROJECT + SETTINGS: the buttons (Phase 3 S7) ────────────────────────────────────────────
     /** A on PROJECT: SAVE / LOAD / NEW / MIX / STEMS / SEQ / INST / SETTINGS> / EXIT. */
