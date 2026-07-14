@@ -675,15 +675,24 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                 val slot    = eqEditorState.slotIndex
                 val bandIdx = eqEditorState.cursorBand
                 val band    = trackerController.project.eqPresets[slot].bands[bandIdx]
+
+                // The BAND, into the engine's 128-slot bank.
                 audioBackend.setEqBand(slot, bandIdx, band.type, band.freq, band.gain, band.q)
-                when (val ctx = eqEditorState.callerContext) {
-                    is EqCallerContext.MasterEq      -> audioBackend.setMasterEqSlot(slot)
-                    is EqCallerContext.ReverbInputEq -> audioBackend.setReverbInputEq(slot)
-                    is EqCallerContext.DelayInputEq  -> audioBackend.setDelayInputEq(slot)
-                    is EqCallerContext.InstrumentEq  -> audioBackend.setInstrumentEqSlot(ctx.instrId, slot)
-                    is EqCallerContext.SampleEditorFx -> { }
-                }
-                trackerController.projectVersion++
+
+                // …and then the caller is re-handed the slot, which is what makes it RECOMPILE its
+                // coefficients — nothing that is filtering right now reads the bank (see AudioEngine:
+                // the master bus and each instrument keep their own copy). Without it, every band you
+                // dial does nothing you can hear.
+                //
+                // ⚠️ THIS USED TO BE AN INLINE `when` THAT CALLED ONLY THE AUDIO BACKEND, and that was a
+                // bug: opening the editor on an UNASSIGNED EQ shows slot 0 (`coerceAtLeast(0)`) without
+                // writing 0 into the project. So the first band edit told the ENGINE to use slot 0 while
+                // `masterEqSlot` stayed −1 — you could HEAR the EQ, the mixer cell still read "--", and a
+                // save-and-reload silently threw it away (`pushGlobalEffectsToBackend` re-pushes −1).
+                // The project and the engine must never disagree about which slot is live, which is
+                // exactly what `applyCallerEqSlotChange` is for: it writes the field AND makes the call.
+                // Editing a band ADOPTS the slot. (Found porting the editor to C++ — Linux Phase 3 S8.)
+                applyCallerEqSlotChange(slot)
             }
             return
         }

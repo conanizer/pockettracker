@@ -235,6 +235,56 @@ inline CursorContext hex_nibble(int current, int def = NO_DEFAULT) {
     return c;
 }
 
+/**
+ * An EQ band's GAIN — stored 0..240, read as −12.0..+12.0 dB. One small step is 0.1 dB; the fast step
+ * is 1.0 dB, which is why `largeStep` is 10 rather than the usual 16.
+ *
+ * ⚠️ It CLAMPS. GAIN and FREQ are the two CONTINUOUS PHYSICAL-UNIT types in the whole app, and they are
+ * the reason `step_value` splits wrap from clamp at all: wrapping +12 dB round to −12 dB would be a
+ * trap rather than a convenience — you would be reaching for one more dB of boost and get a full cut.
+ */
+inline CursorContext gain_db(int current, int def = 120) {
+    CursorContext c;
+    c.valueType                     = CursorValueType::GAIN;
+    c.capabilities.canIncrement     = true;
+    c.capabilities.canDecrement     = true;
+    c.capabilities.canIncrementFast = true;   // +1.0 dB
+    c.capabilities.canDecrementFast = true;   // −1.0 dB
+    c.currentValue = current;
+    c.minValue     = 0;
+    c.maxValue     = 240;
+    c.smallStep    = 1;    // 0.1 dB
+    c.largeStep    = 10;   // 1.0 dB
+    c.emptyValue   = -1;
+    c.defaultValue = def;
+    return c;
+}
+
+/**
+ * An EQ band's FREQUENCY — stored 0..255, mapped logarithmically over 20 Hz..20 kHz. Clamps, like GAIN.
+ *
+ * ⚠️ The CONTEXT is an ordinary ±1 / ±16 stepper, but the module does NOT simply store what the action
+ * resolves to: a single step is display-aware and keeps going until the READOUT changes. That lives in
+ * `EqModule::step_freq_display_aware`, not here, because it is a property of the field rather than of
+ * the button — and because the golden has to be able to measure the two separately.
+ */
+inline CursorContext freq(int current, int def = NO_DEFAULT) {
+    CursorContext c;
+    c.valueType                     = CursorValueType::FREQ;
+    c.capabilities.canIncrement     = true;
+    c.capabilities.canDecrement     = true;
+    c.capabilities.canIncrementFast = true;
+    c.capabilities.canDecrementFast = true;
+    c.currentValue = current;
+    c.minValue     = 0;
+    c.maxValue     = 255;
+    c.smallStep    = 1;
+    c.largeStep    = 16;
+    c.emptyValue   = -1;
+    c.defaultValue = def;
+    return c;
+}
+
 /** An on/off flag — REVERSE. Wraps, so one button cycles it. */
 inline CursorContext toggle_binary(bool current) {
     CursorContext c;

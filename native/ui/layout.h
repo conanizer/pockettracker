@@ -29,6 +29,7 @@
 #include "ui/modules/chain_editor.h"
 #include "ui/modules/confirm_dialog.h"
 #include "ui/modules/effects_editor.h"
+#include "ui/modules/eq_editor.h"
 #include "ui/modules/file_browser.h"
 #include "ui/modules/groove_editor.h"
 #include "ui/modules/instrument_editor.h"
@@ -63,7 +64,9 @@ public:
      *
      * NOT const, and that is the oscilloscope's doing — and, since S5, the MIXER's: both carry
      * peak-hold state across draws, because a falling peak marker is a function of the PREVIOUS frame
-     * and there is nowhere else for that to live. They remain the only two stateful modules in the UI.
+     * and there is nowhere else for that to live. Since S8 the EQ EDITOR joins them, for a different
+     * reason: it caches its response curve, which is a function of the project alone but far too
+     * expensive to recompute 60 times a second (eq_editor.h).
      */
     void draw(Canvas& c, const AppState& state);
 
@@ -100,6 +103,7 @@ private:
     FileBrowserModule     fileBrowser_;   // full-screen: draw() returns before the furniture
     SampleEditorModule    sampleEditor_;  // full-screen too — a waveform wants the width
     QwertyKeyboardOverlay qwerty_;        // modal: drawn LAST, over everything, including the browser
+    EqModule              eq_;            // stateful (curve cache); drawn INSTEAD of the screen module
 };
 
 }  // namespace pt::ui

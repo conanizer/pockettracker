@@ -35,7 +35,12 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
     // `SampleEditorModule.height = 480`. A waveform wants every pixel of the width, and the two things
     // the right bar shows — the BPM and the eight tracks' notes — have nothing to say about a sample
     // being trimmed while the transport is stopped. The keyboard draws over it (A on the NAME row).
-    if (s.currentScreen == ScreenType::SAMPLE_EDITOR) {
+    //
+    // ⚠️ `&& !s.eq.isOpen` — the EQ editor opened from the sample editor's FX row REPLACES it rather
+    // than covering it, and the frame goes back to the normal furniture (scope strip, right bar). That
+    // is Kotlin's, at PixelPerfectRenderer:474, and it is the right call: the EQ is 495×392 and would
+    // sit in a 640×480 waveform's middle like a dialog nobody asked for.
+    if (s.currentScreen == ScreenType::SAMPLE_EDITOR && !s.eq.isOpen) {
         sampleEditor_.draw(c, 0, 0, s.sampleEditor, t);
         if (s.qwerty.isOpen) qwerty_.draw(c, s.qwerty, t);
         return;
@@ -78,7 +83,23 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
     {
         Canvas::ClipScope clip(c, 0, 0, EDITOR_CLIP_RIGHT, DESIGN_H);
 
-        switch (s.currentScreen) {
+        // ── The EQ EDITOR takes the editor's place, and leaves the furniture alone ───────────────
+        //
+        // Not a dialog over the screen: it REPLACES the module, inside the same clip, at the same
+        // origin — and the oscilloscope, the BPM, the note monitor and the nav map all keep drawing
+        // around it. That is deliberate on both platforms. An EQ is dialled WHILE a note rings, and the
+        // note monitor is how you see that it still is; a full-screen editor would hide the one readout
+        // that tells you whether you are listening to anything at all.
+        if (s.eq.isOpen) {
+            EqState es{p};
+            es.slotIndex     = s.eq.slotIndex;
+            es.cursorRow     = s.eq.cursorRow;
+            es.caller        = s.eq.caller;
+            es.spectrum      = s.eqSpectrum;
+            es.spectrumCount = s.eqSpectrumCount;
+            es.theme         = t;
+            eq_.draw(c, moduleX, EDITOR_Y, es);
+        } else switch (s.currentScreen) {   // the overlay is drawn INSTEAD of `currentScreen`
             case ScreenType::PHRASE: {
                 PhraseEditorState ps{p.phrases[static_cast<size_t>(s.currentPhrase)]};
                 ps.cursorRow      = s.cursorRow;

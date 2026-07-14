@@ -246,6 +246,62 @@ class SongcoreHost {
         push_mixer(*engine_, project_);
     }
 
+    // ── ↕ the EQ editor (Phase 3 S8) ─────────────────────────────────────────────────────────────
+    //
+    // ⚠️ THE TWO CALLS ARE BOTH REQUIRED, and this is the "a push that is SKIPPED is the same bug
+    // wearing a different hat" rule in its sharpest form. `setEqBand` writes ONLY into the engine's
+    // 128-slot BANK. Nothing that USES a slot reads the bank while it runs: the master bus compiles its
+    // own biquad coefficients (`masterChain.masterEq.bands[b].setParams(…)`), and each instrument keeps
+    // its own copy (`instrumentParams[id].eqBands[i]`) — see sample-editor.cpp. So a band edit that only
+    // calls `set_eq_band` updates the bank and CHANGES NOTHING YOU CAN HEAR: the EQ goes on filtering
+    // with the coefficients it was last handed.
+    //
+    // Re-assigning the SAME slot to the same consumer is what forces the recompute, which is why Kotlin
+    // re-calls the caller's own setter after every single band nudge — and why the editor has to
+    // remember WHICH cell opened it. This is also why these are the right-sized verbs rather than
+    // `push_globals()`: holding A+UP on a GAIN cell fires an edit every 100 ms, and re-pushing the whole
+    // mixer, both send buses and all 128 EQ slots for one band's frequency is work paid for nothing.
+
+    void set_eq_band(int slot, int band, int type, int freqHex, int gainHex, int qHex) {
+        if (!engine_) return;
+        engine_->setEqBand(slot, band, type, freqHex, gainHex, qHex);
+    }
+
+    void set_master_eq_slot(int slot) {
+        if (!engine_) return;
+        engine_->setMasterEqSlot(slot);
+    }
+
+    void set_instrument_eq_slot(int id, int slot) {
+        if (!engine_) return;
+        engine_->setInstrumentEqSlot(id, slot);
+    }
+
+    void set_reverb_input_eq(int slot) {
+        if (!engine_) return;
+        engine_->setReverbInputEq(slot);
+    }
+
+    void set_delay_input_eq(int slot) {
+        if (!engine_) return;
+        engine_->setDelayInputEq(slot);
+    }
+
+    /**
+     * The spectrum of ONE signal path, for the EQ editor's visualization — the master bus (0), the
+     * delay's input (1), the reverb's input (2), or one instrument's own voices (3).
+     *
+     * Not the same question as the visualizer's `getSpectrumMagnitudes`, which is always the master bus.
+     * An EQ sitting on the reverb send drawn over the master spectrum would be a curve over a signal the
+     * band is not even in. Returns false with no engine, and the editor then draws its grid over nothing
+     * — which is exactly what `ptshot` renders.
+     */
+    bool spectrum_for_source(int source, int instrId, int numBins, float* out) const {
+        if (!engine_ || numBins <= 0 || !out) return false;
+        engine_->getSpectrumMagnitudesForSource(source, instrId, numBins, out);
+        return true;
+    }
+
     // ── ↕ the instrument operations (InstrumentController) ────────────────────────────────────────
     // The verbs that own a SOURCE — the ones a plain field edit cannot express because freeing the old
     // sample or SoundFont is the engine's business. See engine_setup.h for the sharing guards.

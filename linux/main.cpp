@@ -104,6 +104,17 @@ struct MapperState {
      * press, the combo and the release as one gesture.
      */
     bool aPressedAlone = false;
+
+    /**
+     * ⚠️ The DEFERRED-B latch (`InputMapper.bPressedAlone`), the exact mirror of the above, and it
+     * exists for exactly one screen: the EQ EDITOR (S8).
+     *
+     * There, B is BOTH the close AND the modifier of the slot cycle (B+LEFT/RIGHT walks the 128-preset
+     * bank). Fire the close on B's own press and the cycle is unreachable — you would be back on the
+     * mixer before LEFT ever arrived. So the close is held until B is RELEASED, and CANCELLED if any
+     * B-combo fires in between.
+     */
+    bool bPressedAlone = false;
 };
 
 /**
@@ -140,6 +151,14 @@ void handle_button(const ButtonEvent& e, ui::InputDispatcher& d, MapperState& ms
             // The FX helper commits on the RELEASE of A — which is what lets you hold A, read your way
             // through the effect grid, and let go on the one you want.
             d.on_a_released();
+        }
+        if (e.button == Button::B) {
+            // The DEFERRED single-B: it went down inside the EQ editor and no B-combo intervened, so
+            // the CLOSE fires now rather than on the press. Mirror of the A latch above.
+            if (ms.bPressedAlone) {
+                ms.bPressedAlone = false;
+                d.on_button_b();
+            }
         }
         return;
     }
@@ -181,10 +200,14 @@ void handle_button(const ButtonEvent& e, ui::InputDispatcher& d, MapperState& ms
     // ── B + DPAD: WHICH item am I looking at? ────────────────────────────────────────────────────
     if (m.b && !m.l && !m.r && !m.a) {
         switch (e.button) {
-            case Button::DPAD_LEFT:  d.on_b_left();  return;   // previous phrase/chain/table/groove
-            case Button::DPAD_RIGHT: d.on_b_right(); return;   // next
-            case Button::DPAD_UP:    d.on_b_up();    return;   // SONG: page up
-            case Button::DPAD_DOWN:  d.on_b_down();  return;   // SONG: page down
+            // ⚠️ Every arm CANCELS the deferred B, for the same reason the A-combos cancel the deferred
+            // A: the gesture turned out to be a combo, so the CLOSE it was holding must not fire when B
+            // comes back up. Without this, cycling the EQ slot with B+RIGHT would shut the editor the
+            // moment you let go of B.
+            case Button::DPAD_LEFT:  ms.bPressedAlone = false; d.on_b_left();  return;   // prev item / EQ slot −1
+            case Button::DPAD_RIGHT: ms.bPressedAlone = false; d.on_b_right(); return;   // next item / EQ slot +1
+            case Button::DPAD_UP:    ms.bPressedAlone = false; d.on_b_up();    return;   // SONG / pool: page up
+            case Button::DPAD_DOWN:  ms.bPressedAlone = false; d.on_b_down();  return;   // SONG / pool: page down
             default: break;
         }
     }
@@ -259,7 +282,17 @@ void handle_button(const ButtonEvent& e, ui::InputDispatcher& d, MapperState& ms
         return;
     }
 
-    if (e.button == Button::B && !m.l && !m.r && !m.a) { d.on_button_b(); return; }  // copy a selection
+    // ── B, and the deferred close ────────────────────────────────────────────────────────────────
+    if (e.button == Button::B && !m.l && !m.r && !m.a) {
+        // ⚠️ The DEFER, exactly as A's above: inside the EQ editor B is a CLOSE, but it is also the
+        // modifier of the slot cycle — so hold it until B comes back up and let a B+DPAD cancel it.
+        if (d.defer_b_to_release()) {
+            ms.bPressedAlone = true;
+            return;
+        }
+        d.on_button_b();   // copy a selection / leave the browser / back out of the sample editor
+        return;
+    }
 
     // ⚠️ SELECT and START are checked EXPLICITLY, ahead of the "no modifiers" guard below, and the
     // reason is easy to miss: pressing SELECT sets `m.select` — its own press would be swallowed by a
@@ -452,7 +485,11 @@ int main(int argc, char** argv) {
     std::printf("  SELECT+A rename   SELECT+B delete   SELECT+R new folder\n");
     std::printf("  L+B select (again within 500ms = all)   B copies   L+A cut/paste   L+R cancel\n");
     std::printf("KEYBOARD: DPAD picks a key   A types   B deletes   R+UP/DOWN = ABC/123 layout\n");
-    std::printf("          R+LEFT/RIGHT moves the text cursor   SELECT aborts   START applies\n\n");
+    std::printf("          R+LEFT/RIGHT moves the text cursor   SELECT aborts   START applies\n");
+    std::printf("\nEQ EDITOR (A on any EQ cell: INSTRUMENT/POOL/MIXER master/EFFECTS REV+DLY/SAMPLE FX):\n");
+    std::printf("  DPAD UP/DOWN picks the param, LEFT/RIGHT the band   A+UP/DOWN and A+LEFT/RIGHT dial it\n");
+    std::printf("  A+B resets it   B+LEFT/RIGHT changes the EQ SLOT   B or SELECT closes\n");
+    std::printf("  START still auditions underneath, so you can sweep a band across a ringing note\n\n");
 
     bool   running    = true;
     Uint64 lastStatus = 0;

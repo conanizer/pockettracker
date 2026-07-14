@@ -91,4 +91,17 @@ inline InstrumentRowKind instrument_row_kind(bool is_soundfont, int row) {
  */
 inline int instrument_sf_offset(bool is_soundfont) { return is_soundfont ? 1 : 0; }
 
+/**
+ * The EQ row — 12 on a sampler, 14 on a SoundFont (the two extra rows above it are PRESET and the four
+ * sample-window rows the SF layout drops, netting +2). Its column 1 is the cell that raises the EQ
+ * EDITOR (S8).
+ *
+ * Named here rather than open-coded at the three sites that need it, because it is a NUMBER READ OFF
+ * THE TABLE ABOVE and the table is what moves. Kotlin writes the literals `12` and `14` into
+ * `openSubScreenAtCursor` and `handleSelect` and its own module, which is three places to forget when a
+ * row is inserted — and S5 already found the shape of that bug once (`go_to_screen` silently skipping
+ * the three screens S4 added).
+ */
+inline int instrument_eq_row(bool is_soundfont) { return is_soundfont ? 14 : 12; }
+
 }  // namespace pt::ui

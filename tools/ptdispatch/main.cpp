@@ -355,14 +355,27 @@ int main() {
         ok(!p.delaySync, "SELECT on TIME turns it back OFF");
         eq(p.delayTime, 11, "SELECT: …leaving the value where it was (11 is a valid free time too)");
 
-        // Any OTHER row: SELECT does nothing. (The two INP EQ rows open the EQ overlay on Android;
-        // it does not exist here yet, so they must be no-ops rather than anything clever.)
+        // ⚠️ S5 ASSERTED THE OPPOSITE HERE, and was right to: "SELECT on an INP EQ row is a no-op (no
+        // overlay yet)". S8 built the overlay, so the no-op became an OPEN — and the two `eq()` checks
+        // S5 wrote still PASSED (opening the editor touches neither `reverbInputEq` nor `delaySync`),
+        // while the editor it left open silently swallowed the D-pad, A, B and R+DPAD of every section
+        // BELOW this one. Twelve browser assertions went red for a reason that was nowhere near the
+        // browser.
+        //
+        // Worth keeping as a note rather than just fixing: an assertion that encodes "X does not exist
+        // yet" is a TIME BOMB with no owner. It cannot fail when X arrives — it passes, and something
+        // three hundred lines away breaks instead.
         state.effectsCursorRow = EffectModule::ROW_REV_EQ;
-        const int eqBefore = p.reverbInputEq;
-        const bool syncBefore = p.delaySync;
+        const bool syncBefore  = p.delaySync;
+        p.reverbInputEq        = 9;
         dispatch.on_select();
-        eq(p.reverbInputEq, eqBefore, "SELECT on an INP EQ row is a no-op (no overlay yet)");
-        ok(p.delaySync == syncBefore, "SELECT on an INP EQ row does not touch delay sync");
+        ok(state.eq.isOpen, "SELECT on EFFECTS' REV EQ row OPENS the EQ editor");
+        eq(state.eq.slotIndex, 9, "…on the slot that row was pointing at");
+        ok(state.eq.caller.kind == EqCallerContext::Kind::REVERB_IN, "…with the REVERB_IN caller");
+        eq(p.reverbInputEq, 9, "…and merely OPENING it writes nothing into the project");
+        ok(p.delaySync == syncBefore, "…nor touches delay sync");
+        dispatch.on_select();
+        ok(!state.eq.isOpen, "SELECT again CLOSES it");
     }
 
     // ── 6. START is not the transport on every screen — and on these two it plays the SONG ────────
@@ -1643,6 +1656,359 @@ int main() {
         rdispatch.on_button_a();
         eqs(rstate.statusMessage, "SONG IS EMPTY", "EXPORT: an empty song is refused, not rendered");
         ok(!rstate.statusSuccess, "EXPORT: …and it is reported as a failure (red), not a success");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // ── 24. THE EQ EDITOR (S8) — the overlay, and everything ptinput is blind to ─────────────────
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // ptinput proves the MODULE matches Kotlin: given a slot and a cursor row, the context, the action
+    // and the resulting band are byte-identical, over 2,000 cases. Nothing in it proves any of the
+    // following, and every one of them is a place a real bug can live:
+    //
+    //   · that the cursor can REACH the editor at all — five different cells raise it
+    //   · that it opens on the RIGHT SLOT, remembering WHICH cell asked
+    //   · that B+LEFT/RIGHT writes the new slot back into that cell's own project field (five fields)
+    //   · that B closes it, SELECT closes it, and R+DPAD cannot navigate out from under it
+    //   · that the deferred-A / deferred-B latches answer correctly
+    //   · and — the one that needs a real engine — that a band dialled here reaches the AUDIO
+    {
+        songcore::SongcoreHost ehost(nullptr, 44100);
+        AppState               estate;
+        estate.project = &ehost.edit_project();
+        estate.caps    = PlatformCaps::sdl(true);
+        InputDispatcher ed(estate, ehost, fs_impl);
+
+        songcore::Project& p = ehost.edit_project();
+        p = songcore::make_default_project();
+
+        // ── 24a. All five callers can raise it, on the right slot ────────────────────────────────
+
+        // MIXER's master EQ. ⚠️ Start it UNASSIGNED (−1), which is the state a fresh project is in.
+        estate.currentScreen     = ScreenType::MIXER;
+        estate.mixerMasterRow    = 1;
+        estate.mixerCursorColumn = 8;
+        p.masterEqSlot           = -1;
+        ok(ed.defer_a_to_release(), "EQ: the master EQ cell DEFERS its A to release (A+DPAD dials the slot)");
+        ed.on_button_a();
+        ok(estate.eq.isOpen, "EQ: A on MIXER's master EQ cell opens the editor");
+        ok(estate.eq.caller.kind == EqCallerContext::Kind::MASTER, "EQ: …with the MASTER caller");
+        eq(estate.eq.slotIndex, 0, "⚠️ EQ: an UNASSIGNED EQ (−1) opens on slot 0 — −1 is a bypass, not a slot");
+        eq(estate.eq.cursorRow, 0, "EQ: …and the cursor starts on BAND 1 / TYPE");
+        ok(!ed.defer_a_to_release(),
+           "⚠️ EQ: with the editor OPEN, no cell 'opens a sub-screen' any more — the modal owns A");
+        ok(ed.defer_b_to_release(), "EQ: …and B is deferred, because it is both the close and the slot cycle");
+        ed.on_button_b();
+        ok(!estate.eq.isOpen, "EQ: B closes it");
+        ok(!ed.defer_b_to_release(), "EQ: …and B stops being deferred the moment it is closed");
+
+        // ⚠️ AND THIS IS WHAT THE DEFER LATCH IS PROTECTING. On the very same cell, A+DPAD must still dial
+        // the slot NUMBER — the plain value the cell has held since S5. If A fired its open on the PRESS,
+        // the editor would be up before the D-pad ever arrived and this gesture would be unreachable.
+        p.masterEqSlot = 4;
+        ed.on_a_up();
+        eq(p.masterEqSlot, 5, "⚠️ EQ: A+DPAD on the EQ cell still DIALS THE SLOT — the whole point of the defer");
+        ok(!estate.eq.isOpen, "EQ: …and does NOT open the editor");
+
+        // EFFECTS' two input EQs.
+        estate.currentScreen    = ScreenType::EFFECTS;
+        estate.effectsCursorRow = EffectModule::ROW_DLY_EQ;
+        p.delayInputEq          = 33;
+        ed.on_button_a();
+        ok(estate.eq.isOpen && estate.eq.caller.kind == EqCallerContext::Kind::DELAY_IN,
+           "EQ: A on EFFECTS' DLY EQ row opens it with the DELAY_IN caller");
+        eq(estate.eq.slotIndex, 33, "EQ: …on the slot that row held");
+        ed.on_select();
+        ok(!estate.eq.isOpen, "EQ: SELECT closes it too (B is deferred, so SELECT is the instant way out)");
+
+        // INSTRUMENT — and the row depends on the instrument TYPE (12 on a sampler, 14 on a SoundFont).
+        estate.currentScreen           = ScreenType::INSTRUMENT;
+        estate.currentInstrument       = 5;
+        p.instruments[5].eqSlot        = 77;
+        estate.instrumentCursorColumn  = 1;
+        estate.instrumentCursorRow     = 12;
+        ed.on_button_a();
+        ok(estate.eq.isOpen && estate.eq.caller.kind == EqCallerContext::Kind::INSTRUMENT,
+           "EQ: A on INSTRUMENT's EQ row (12, a SAMPLER) opens it with the INSTRUMENT caller");
+        eq(estate.eq.caller.instrId, 5, "EQ: …carrying WHICH instrument, captured at open time");
+        eq(estate.eq.slotIndex, 77, "EQ: …on that instrument's own slot");
+        ed.on_button_b();
+
+        p.instruments[5].instrumentType = songcore::InstrumentType::SOUNDFONT;
+        estate.instrumentCursorRow      = 12;
+        ed.on_button_a();
+        ok(!estate.eq.isOpen, "⚠️ EQ: row 12 is NOT the EQ row on a SOUNDFONT — its map is shifted");
+        estate.instrumentCursorRow = 14;
+        ed.on_button_a();
+        ok(estate.eq.isOpen, "EQ: …row 14 is, and it opens there");
+        ed.on_button_b();
+        p.instruments[5].instrumentType = songcore::InstrumentType::SAMPLER;
+
+        // INST.POOL, column 4.
+        estate.currentScreen    = ScreenType::INST_POOL;
+        estate.poolCursorColumn = 4;
+        ed.on_button_a();
+        ok(estate.eq.isOpen && estate.eq.caller.kind == EqCallerContext::Kind::INSTRUMENT,
+           "EQ: A on the pool's EQ column opens it for the instrument under the cursor");
+        eq(estate.eq.slotIndex, 77, "EQ: …on the same slot the INSTRUMENT screen showed");
+
+        // ── 24b. ⚠️ THE ANDROID BUG: B+UP must not page the pool out from under the overlay ──────
+        //
+        // `handleBUp`/`handleBDown` are the only two handlers in the Kotlin dispatcher that never got an
+        // EQ guard — and INST.POOL is the one screen that can BOTH raise the editor and respond to them.
+        // Hold B (which does not close the editor: the deferred-B latch is holding it), press UP, and
+        // Android pages `currentInstrument` sixteen slots while the editor stays open on the instrument
+        // it was raised for. Close it and you are looking at a different instrument.
+        {
+            const int instBefore = estate.currentInstrument;
+            ed.on_b_up();
+            ed.on_b_down();
+            eq(estate.currentInstrument, instBefore,
+               "⚠️ EQ: B+UP/B+DOWN do NOT page the pool underneath the open editor (the Android bug)");
+            ok(estate.eq.isOpen, "EQ: …and the editor is still up");
+        }
+
+        // ── 24c. The D-pad is the editor's, and it is a 3×4 grid, not a flat list of twelve ──────
+        eq(estate.eq.cursorRow, 0, "EQ: the cursor opened on BAND 1 / TYPE");
+        ed.on_dpad_up();
+        eq(estate.eq.cursorRow, 0, "EQ: UP at the top of a band CLAMPS — it does not wrap to Q");
+        ed.on_dpad_left();
+        eq(estate.eq.cursorRow, 0, "EQ: LEFT at band 1 CLAMPS");
+        ed.on_dpad_down(); ed.on_dpad_down();
+        eq(estate.eq.cursorRow, 2, "EQ: DOWN twice → BAND 1 / GAIN");
+        ed.on_dpad_right();
+        eq(estate.eq.cursorRow, 6, "⚠️ EQ: RIGHT changes BAND and KEEPS the param (band 2's GAIN, row 6)");
+        ed.on_dpad_right(); ed.on_dpad_right();
+        eq(estate.eq.cursorRow, 10, "EQ: …and RIGHT clamps at band 3 (row 10, still GAIN)");
+        ed.on_dpad_down(); ed.on_dpad_down();
+        eq(estate.eq.cursorRow, 11, "EQ: DOWN clamps at Q (row 11), the last param of the last band");
+
+        // ── 24d. R+DPAD is SWALLOWED — there is no cell in the 5×5 grid to navigate from ─────────
+        {
+            const auto screenBefore = estate.currentScreen;
+            ed.on_r_up(); ed.on_r_down(); ed.on_r_left(); ed.on_r_right();
+            eq(static_cast<int>(estate.currentScreen), static_cast<int>(screenBefore),
+               "EQ: R+DPAD cannot navigate out from under the overlay");
+            ok(estate.eq.isOpen, "EQ: …and it is still open");
+        }
+
+        // ── 24e. ⚠️ THE MODAL RULE: everything outside the editor's vocabulary is INERT ──────────
+        //
+        // The editor owns the D-pad, A, A+DPAD, A+B, B, B+DPAD and SELECT. Every OTHER button must do
+        // nothing to the screen underneath — which is the claim S8 adds explicit `eq_open()` guards for
+        // in on_a_a / on_l_a / on_l_b / on_l_b_a / on_l_r, where Kotlin has none and merely gets away
+        // with it because those five are screen-gated to screens the editor cannot be raised from.
+        {
+            const int  instBefore  = estate.currentInstrument;
+            const int  colBefore   = estate.poolCursorColumn;
+            const auto screenBefore = estate.currentScreen;
+
+            ed.on_a_a();      ed.on_a_released();
+            ed.on_l_b();      ed.on_l_a();   ed.on_l_r();  ed.on_l_b_a();
+            ed.on_select_a(); ed.on_select_b(); ed.on_select_r();
+
+            ok(estate.eq.isOpen,        "MODAL RULE: the 9 out-of-vocabulary buttons leave the editor OPEN");
+            ok(!estate.selection.active, "MODAL RULE: …L+B did not start a selection on the screen behind");
+            eq(estate.currentInstrument, instBefore, "MODAL RULE: …nothing moved the instrument");
+            eq(estate.poolCursorColumn,  colBefore,  "MODAL RULE: …nor the pool cursor");
+            eq(static_cast<int>(estate.currentScreen), static_cast<int>(screenBefore),
+               "MODAL RULE: …nor the screen");
+        }
+        ed.on_button_b();
+
+        // ── 24f. B+LEFT/RIGHT cycles the SLOT — and writes it back to the cell that opened it ────
+        //
+        // Five different project fields, one gesture. This is what the caller tag exists for, and it is
+        // the single thing ptinput is most structurally blind to: the module never learns who asked.
+        {
+            estate.currentScreen     = ScreenType::MIXER;
+            estate.mixerMasterRow    = 1;
+            estate.mixerCursorColumn = 8;
+            p.masterEqSlot           = 10;
+            ed.on_button_a();
+            ed.on_b_right();
+            eq(estate.eq.slotIndex, 11, "EQ SLOT: B+RIGHT steps the slot");
+            eq(p.masterEqSlot, 11, "⚠️ EQ SLOT: …and writes it back into `masterEqSlot`, the cell that asked");
+            ed.on_b_left(); ed.on_b_left();
+            eq(p.masterEqSlot, 9, "EQ SLOT: B+LEFT steps back down");
+
+            // ⚠️ It CLAMPS at both ends, where every other B+LEFT/RIGHT in the app WRAPS. The EQ bank is
+            // an index you are pointing a bus at, not a ring you scroll: wrapping 127 → 0 would silently
+            // re-point the master bus at a completely different curve.
+            estate.eq.slotIndex = 0;
+            ed.on_b_left();
+            eq(estate.eq.slotIndex, 0, "⚠️ EQ SLOT: it CLAMPS at 0 — it does NOT wrap to 127");
+            estate.eq.slotIndex = 127;
+            ed.on_b_right();
+            eq(estate.eq.slotIndex, 127, "⚠️ EQ SLOT: …and clamps at 127");
+            eq(p.masterEqSlot, 127, "EQ SLOT: …still writing through to the project");
+            ed.on_button_b();
+        }
+
+        // Each of the other four callers writes its OWN field, and only its own.
+        {
+            p.masterEqSlot = 1; p.reverbInputEq = 1; p.delayInputEq = 1; p.instruments[5].eqSlot = 1;
+
+            estate.currentScreen    = ScreenType::EFFECTS;
+            estate.effectsCursorRow = EffectModule::ROW_REV_EQ;
+            ed.on_button_a(); ed.on_b_right(); ed.on_button_b();
+            eq(p.reverbInputEq, 2, "EQ SLOT: the REV EQ cell writes `reverbInputEq`…");
+            eq(p.delayInputEq, 1,  "EQ SLOT: …and not `delayInputEq`");
+            eq(p.masterEqSlot, 1,  "EQ SLOT: …and not `masterEqSlot`");
+
+            estate.effectsCursorRow = EffectModule::ROW_DLY_EQ;
+            ed.on_button_a(); ed.on_b_right(); ed.on_button_b();
+            eq(p.delayInputEq, 2,  "EQ SLOT: the DLY EQ cell writes `delayInputEq`…");
+            eq(p.reverbInputEq, 2, "EQ SLOT: …and leaves the reverb's alone");
+
+            estate.currentScreen          = ScreenType::INSTRUMENT;
+            estate.instrumentCursorRow    = 12;
+            estate.instrumentCursorColumn = 1;
+            ed.on_button_a(); ed.on_b_right(); ed.on_button_b();
+            eq(p.instruments[5].eqSlot, 2, "EQ SLOT: the instrument's EQ cell writes THAT instrument's eqSlot");
+            eq(p.instruments[4].eqSlot, -1, "EQ SLOT: …and not its neighbour's");
+            eq(p.masterEqSlot, 1, "EQ SLOT: …and not the master's");
+        }
+
+        // ── 24g. ⚠️ THE SECOND ANDROID BUG: a band edit must ADOPT the slot ──────────────────────
+        //
+        // Open the editor on an UNASSIGNED EQ. It shows slot 0 (−1 is a bypass value, not a slot). Now
+        // dial a band. Kotlin told the ENGINE "use slot 0" and left `masterEqSlot` at −1 — so the EQ was
+        // audible, the mixer cell still read "--", and the next save-and-reload silently threw it away
+        // (the load path faithfully re-pushes the −1 the project still held). The project and the engine
+        // must never disagree about which slot is live.
+        {
+            p.masterEqSlot           = -1;
+            estate.currentScreen     = ScreenType::MIXER;
+            estate.mixerMasterRow    = 1;
+            estate.mixerCursorColumn = 8;
+            ed.on_button_a();
+            eq(estate.eq.slotIndex, 0, "EQ ADOPT: the editor opens on slot 0 over an unassigned EQ…");
+            eq(p.masterEqSlot, -1, "EQ ADOPT: …and merely OPENING it assigns nothing (you might be looking)");
+
+            ed.on_a_up();   // BAND 1 / TYPE: OFF → LOSHELF
+            eq(p.eqPresets[0].bands[0].type, 1, "EQ ADOPT: A+UP dials the band…");
+            eq(p.masterEqSlot, 0,
+               "⚠️ EQ ADOPT: …and EDITING it ADOPTS slot 0 into the project (the Android bug)");
+            ok(estate.project_dirty(), "EQ ADOPT: …and the song is now dirty");
+            ed.on_button_b();
+        }
+    }
+
+    // ── 25. …and the one EQ claim that needs a REAL ENGINE: does a band reach the AUDIO? ─────────
+    //
+    // ⚠️ THIS IS THE ASSERTION THE WHOLE SESSION RESTS ON, and no other tool in the ladder can make it.
+    // ptinput sees the PROJECT change. Nothing in it — or in ptplay, or ptvoice — can see whether the
+    // engine was ever TOLD. And the EQ's push is a two-call sequence where the obvious half is the
+    // useless one: `setEqBand` writes the 128-slot BANK, but the master bus compiles its own coefficients
+    // and never reads the bank again. Push only the band and the audio does not change by one sample.
+    //
+    // So: render the same song twice through the same engine — once flat, once with a savage HICUT at
+    // 20 Hz dialled in THROUGH THE EDITOR — and measure. If the second render is not dramatically
+    // quieter, the band never reached the audio.
+    {
+        auto engine = std::make_unique<AudioEngine>();   // ⚠️ HEAP — see §23
+        engine->setDeviceSampleRate(44100);
+
+        songcore::SongcoreHost qhost(engine.get(), 44100);
+        AppState               qstate;
+        qstate.project = &qhost.edit_project();
+        qstate.caps    = PlatformCaps::sdl(true);
+        InputDispatcher qd(qstate, qhost, fs_impl);
+
+        songcore::Project& p = qhost.edit_project();
+        p = songcore::make_default_project();
+        p.name = "EQ AUDIO";
+        p.tracks[0].chainRefs.assign(256, -1);
+        p.tracks[0].chainRefs[0]  = 0;
+        p.chains[0].phraseRefs[0] = 0;
+        for (int step = 0; step < 4; ++step) {
+            songcore::PhraseStep& s = p.phrases[0].steps[static_cast<size_t>(step * 4)];
+            s.note       = songcore::Note::C4();
+            s.instrument = 0;
+        }
+
+        // ⚠️ THE INSTRUMENT NEEDS A SOURCE, or the render is SILENCE and both audio checks below pass
+        // vacuously against 0.0 — which is exactly the trap S6a named about the filesystem and S6b about
+        // the engine. So the fixture is SYNTHESIZED rather than borrowed: a 1 kHz sine, decaying, mono at
+        // the render's own rate. A formula is the better fixture (S6b's argument for the golden media),
+        // and it keeps ptdispatch self-contained — it is the one tool with no /testdata argument.
+        //
+        // 1 kHz matters: it must sit WELL ABOVE the 20 Hz corner the HICUT is dialled to, so that a
+        // working low-pass has to gut it. A sine at 30 Hz would survive the filter and the check would
+        // be measuring nothing.
+        {
+            const int          rate = 44100;
+            std::vector<float> tone(static_cast<size_t>(rate));   // 1 second
+            for (size_t i = 0; i < tone.size(); ++i) {
+                const double t   = static_cast<double>(i) / rate;
+                const double env = std::exp(-4.0 * t);
+                tone[i] = static_cast<float>(0.7 * env * std::sin(2.0 * 3.14159265358979 * 1000.0 * t));
+            }
+            const fs::path wav = tree.root / "Samples" / "eqtone.wav";
+            ok(songcore::write_wav_mono(wav.generic_string(), tone, rate),
+               "EQ AUDIO: the fixture tone is written");
+            ok(qhost.load_sample(0, wav.generic_string()),
+               "EQ AUDIO: …and loads into instrument 0, so the render has something to filter");
+        }
+
+        qhost.push_params();
+
+        const auto render_rms = [&](const char* name) -> double {
+            p.name = name;
+            qstate.currentScreen       = ScreenType::PROJECT;
+            qstate.projectCursorRow    = static_cast<int>(ProjectRow::EXPORT);
+            qstate.projectCursorColumn = 1;   // MIX
+            qd.on_button_a();
+
+            const fs::path wav = tree.root / "Renders" / (std::string(name) + "_0001.wav");
+            std::ifstream  f(wav, std::ios::binary);
+            if (!f) return -1.0;
+            f.seekg(44);   // past the canonical header
+            double   sum = 0.0;
+            long long n  = 0;
+            int16_t  s16 = 0;
+            while (f.read(reinterpret_cast<char*>(&s16), sizeof(s16))) {
+                const double v = static_cast<double>(s16) / 32768.0;
+                sum += v * v;
+                ++n;
+            }
+            return n > 0 ? std::sqrt(sum / static_cast<double>(n)) : -1.0;
+        };
+
+        const double flat = render_rms("EQFLAT");
+        ok(flat > 0.001, "EQ AUDIO: the un-EQ'd render has real audio in it (RMS > 0.001)");
+
+        // Now dial a HICUT at the very bottom of the sweep, through the editor, exactly as a user would.
+        qstate.currentScreen     = ScreenType::MIXER;
+        qstate.mixerMasterRow    = 1;
+        qstate.mixerCursorColumn = 8;
+        p.masterEqSlot           = -1;
+        qd.on_button_a();
+        ok(qstate.eq.isOpen, "EQ AUDIO: the editor is open on the master bus");
+
+        // BAND 1 / TYPE → 5 (HICUT). Five A+UPs from OFF.
+        for (int i = 0; i < 5; ++i) qd.on_a_up();
+        eq(p.eqPresets[0].bands[0].type, 5, "EQ AUDIO: BAND 1 TYPE is HICUT");
+
+        // BAND 1 / FREQ → 0 (20 Hz). A+B resets it to 0x80, then A+LEFT (−16) eight times gets to 0.
+        qd.on_dpad_down();
+        for (int i = 0; i < 10; ++i) qd.on_a_left();
+        eq(p.eqPresets[0].bands[0].freq, 0, "EQ AUDIO: …at 20 Hz, so it cuts essentially everything");
+
+        qd.on_button_b();
+        eq(p.masterEqSlot, 0, "EQ AUDIO: the band edit adopted slot 0 into the project");
+
+        const double cut = render_rms("EQCUT");
+        ok(cut >= 0.0, "EQ AUDIO: the EQ'd render was written");
+
+        // ⚠️ THE CLAIM. A 20 Hz low-pass on the master bus must gut a C-4 sample. If the two renders are
+        // the same loudness, the band was written into the bank and NOBODY WAS TOLD.
+        ok(cut < flat * 0.5,
+           "⚠️ EQ AUDIO: a HICUT at 20 Hz makes the render at least 6 dB quieter — the band REACHED THE "
+           "AUDIO (remove the caller re-push in push_eq_band_to_engine and this is the check that dies)");
+        std::printf("       [info] master-bus RMS: flat %.5f → HICUT@20Hz %.5f (%.1f%% of flat)\n",
+                    flat, cut, flat > 0 ? 100.0 * cut / flat : 0.0);
     }
 
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);

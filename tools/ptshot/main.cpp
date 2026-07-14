@@ -350,6 +350,8 @@ int main(int argc, char** argv) {
                      "              [--caps=android|android-rel|sdl|sdl-rel]  (S7: which rows exist)\n"
                      "              [--confirm=CLEAN_SEQ|CLEAN_INST|NEW_PROJECT|CHANGE_TYPE|EXIT]\n"
                      "              [--status=TEXT] [--status-fail] [--rendering=PCT]\n"
+                     "              [--eq=SLOT] [--eq-cursor=0..11] [--eq-spectrum]   (S8: the overlay)\n"
+                     "              [--eq-caller=MASTER|REV|DLY|SAMPLE|INST<N>]\n"
                      "              [--theme=CLASSIC|AMBER|BLUE|MONO]\n"
                      "              [--viz=SCOPE|FLAT|OCTA|OCTA_FULL|SPECTRUM|SPECTRUM_PEAKS]\n"
                      "              [--playing=ROW] [--source-column=N] [--from-pool]\n"
@@ -473,6 +475,55 @@ int main(int argc, char** argv) {
     // the running app can only ever hold a valid slot), so a typo on the command line would otherwise
     // be an out-of-bounds read rather than an error message.
     const auto clamp = [](int v, int hi) { return v < 0 ? 0 : (v > hi ? hi : v); };
+
+    // ── The EQ EDITOR overlay (S8) ───────────────────────────────────────────────────────────────
+    //
+    // `--eq=SLOT` raises it over whatever `--screen` selected, which is exactly how it works in the app:
+    // it is drawn INSTEAD of the editor module, inside the same clip, with the scope strip and the right
+    // bar still drawn around it.
+    //
+    // `--eq-spectrum` is a FIXTURE, and it needs one for the same reason the MIXER's meters and the OCTA
+    // lanes needed `--demo`: with no engine there is no spectrum, and a spectrum panel at amplitude zero
+    // draws nothing at all — so the one thing you most want to LOOK at would be an empty box. A
+    // synthesized falling curve with two peaks is enough to see that the fill sits UNDER the grid lines,
+    // the outline sits OVER them, and the yellow response curve sits over both.
+    static std::vector<float> eqSpectrumFixture;
+    if (const char* v = opt(argc, argv, "--eq")) {
+        state.eq.isOpen    = true;
+        state.eq.slotIndex = clamp(std::atoi(v), songcore::POOL_EQPRESETS - 1);
+        state.eq.cursorRow = 0;
+
+        if (const char* c = opt(argc, argv, "--eq-cursor"))
+            state.eq.cursorRow = clamp(std::atoi(c), EqModule::MAX_CURSOR_ROW);
+
+        if (const char* c = opt(argc, argv, "--eq-caller")) {
+            const std::string n(c);
+            if      (n == "MASTER") state.eq.caller = EqCallerContext::master();
+            else if (n == "REV")    state.eq.caller = EqCallerContext::reverb_in();
+            else if (n == "DLY")    state.eq.caller = EqCallerContext::delay_in();
+            else if (n == "SAMPLE") state.eq.caller = EqCallerContext::sample_editor_fx();
+            else if (n.rfind("INST", 0) == 0)
+                state.eq.caller = EqCallerContext::instrument(std::atoi(n.c_str() + 4));
+            else {
+                std::fprintf(stderr, "unknown eq caller: %s (MASTER|REV|DLY|SAMPLE|INST<N>)\n", c);
+                return 2;
+            }
+        }
+
+        if (flag(argc, argv, "--eq-spectrum")) {
+            const int bins = 620;
+            eqSpectrumFixture.resize(static_cast<size_t>(bins));
+            for (int i = 0; i < bins; ++i) {
+                const float t    = static_cast<float>(i) / static_cast<float>(bins - 1);
+                const float tilt = 0.55f * (1.0f - t) * (1.0f - t);                         // falls with freq
+                const float p1   = 0.30f * std::exp(-90.0f * (t - 0.18f) * (t - 0.18f));    // a low peak
+                const float p2   = 0.18f * std::exp(-200.0f * (t - 0.55f) * (t - 0.55f));   // a mid one
+                eqSpectrumFixture[static_cast<size_t>(i)] = tilt + p1 + p2;
+            }
+            state.eqSpectrum      = eqSpectrumFixture.data();
+            state.eqSpectrumCount = bins;
+        }
+    }
 
     using namespace songcore;
     if (const char* v = opt(argc, argv, "--phrase"))

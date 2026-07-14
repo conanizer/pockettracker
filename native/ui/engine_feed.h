@@ -44,11 +44,60 @@ public:
         poll_engine(engine, state);
         poll_soundfont_presets(host, state);
         poll_peaks(engine, state, now_ms);
+        poll_eq_spectrum(host, state, now_ms);
         poll_sample_editor(host, state);
         poll_sample_ram(engine, state);
     }
 
 private:
+    /**
+     * The EQ editor's spectrum (S8) — the same shape as the MIXER's peaks above, and gated for the same
+     * two reasons: only while the screen that shows it is up, and only at the cadence Kotlin polls it.
+     *
+     * ⚠️ **The SOURCE depends on WHO OPENED THE EDITOR**, and that is the whole point of the call. An EQ
+     * on the reverb send filters the reverb's INPUT; an instrument's EQ filters that instrument's voices;
+     * the master EQ filters the master bus. Draw any of them over the master spectrum — which is what the
+     * visualizer's own `spectrum` field holds — and the curve would sit on top of a signal the band is
+     * not in, which is worse than drawing nothing: it looks right.
+     *
+     * ⚠️ **Only every 50 ms.** Kotlin's is a `LaunchedEffect(eqEditorState.isOpen)` ticking at
+     * `delay(50)` — an FFT is not free, and at 20 Hz the bars already move faster than an eye tracks.
+     * The DRAW still runs at 60 Hz; it simply reads the last magnitudes again, exactly as the mixer's
+     * meters do between polls.
+     *
+     * The buffer is a member, not a local: `AppState::eqSpectrum` is a POINTER the module reads during
+     * the draw, so what it points at has to outlive this call.
+     */
+    void poll_eq_spectrum(songcore::SongcoreHost& host, AppState& state, long long now_ms) {
+        if (!state.eq.isOpen) {
+            state.eqSpectrum      = nullptr;
+            state.eqSpectrumCount = 0;
+            eqPolledMs_           = 0;
+            return;
+        }
+        if (eqPolledMs_ != 0 && now_ms - eqPolledMs_ < EQ_POLL_MS) return;
+        eqPolledMs_ = now_ms;
+
+        // 0 = master bus · 1 = the delay's input · 2 = the reverb's input · 3 = one instrument's voices.
+        // The sample editor's FX EQ has no live bus of its own (it is applied destructively on APPLY), so
+        // it watches the master, exactly as Kotlin's `else -> 0` arm does.
+        int source  = 0;
+        int instrId = -1;
+        switch (state.eq.caller.kind) {
+            case EqCallerContext::Kind::DELAY_IN:  source = 1; break;
+            case EqCallerContext::Kind::REVERB_IN: source = 2; break;
+            case EqCallerContext::Kind::INSTRUMENT:
+                source  = 3;
+                instrId = state.eq.caller.instrId;
+                break;
+            default: break;   // MASTER, SAMPLE_EDITOR_FX → the master bus
+        }
+
+        if (host.spectrum_for_source(source, instrId, EQ_SPECTRUM_BINS, eqSpectrum_)) {
+            state.eqSpectrum      = eqSpectrum_;
+            state.eqSpectrumCount = EQ_SPECTRUM_BINS;
+        }
+    }
     /**
      * PROJECT's debug-only USED RAM readout.
      *
@@ -300,6 +349,19 @@ private:
     /** Kotlin's `delay(60)` between peak reads. See poll_peaks — it is a contract, not a throttle. */
     static constexpr long long PEAK_POLL_MS = 60;
     long long                  peaksPolledMs_ = 0;
+
+    /**
+     * The EQ editor's spectrum: Kotlin's `delay(50)`, and its 620 bins.
+     *
+     * ⚠️ 620, not the module's 495 pixels. That is the number Kotlin asks for
+     * (`getSpectrumMagnitudesForSource(source, instrId, 620)`) and the module is written to rescale
+     * whatever it is handed — `bin = xi / (WIDTH-1) * (n-1)`, taking the MAX of each pixel's two
+     * straddling bins so a narrow peak cannot fall between two columns and vanish.
+     */
+    static constexpr int        EQ_SPECTRUM_BINS = 620;
+    static constexpr long long  EQ_POLL_MS       = 50;
+    float                       eqSpectrum_[EQ_SPECTRUM_BINS] = {};
+    long long                   eqPolledMs_                   = 0;
 };
 
 }  // namespace pt::ui

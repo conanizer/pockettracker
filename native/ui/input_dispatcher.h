@@ -9,32 +9,36 @@
 // ever asking which screen is up (ui/cursor.h). What lands here is what those five could not do —
 // selection, the clipboard, item cycling, cloning, the FX helper, the note preview.
 //
-// ── SCOPE: the twelve screens that exist ─────────────────────────────────────────────────────────
+// ── SCOPE: every screen the app has ──────────────────────────────────────────────────────────────
 //
 // SONG, CHAIN, PHRASE, TABLE, GROOVE, INSTRUMENT, INST.POOL, MODS (S4), MIXER, EFFECTS (S5), the FILE
-// BROWSER with the QWERTY KEYBOARD overlay behind it (S6a), and — since S6b — the SAMPLE EDITOR. The
-// Kotlin dispatcher is ~3200 lines, and what is still missing here serves screens the port has not
-// reached: PROJECT, SETTINGS, the EQ editor. Each lands WITH its screen, in the session that draws it.
-// The structure is built to receive them: a new screen is a new arm in `generic_input()` and
-// `apply_edit()`, not a new branch in every handler.
+// BROWSER with the QWERTY KEYBOARD overlay behind it (S6a), the SAMPLE EDITOR (S6b), PROJECT and
+// SETTINGS with the confirm dialog (S7) — and, since S8, the EQ EDITOR overlay behind all five of the
+// EQ cells. Nothing in the Kotlin dispatcher is now unported except the THEME editor.
 //
-// ⚠️ Some cells still open a SUB-SCREEN that does not exist — every EQ cell (the EQ overlay:
-// INSTRUMENT's, the pool's, MIXER's master EQ, EFFECTS' two input EQs, and now the sample editor's FX
-// row). On Android a plain A opens that overlay; here it is a no-op, and A+DPAD still dials the slot
-// NUMBER, which is the part of the cell that is a plain value.
+// ── ⚠️ THE MODAL RULE, which arrives with S6a and grows a third member in S8 ─────────────────────
 //
-// ── ⚠️ THE MODAL RULE, which arrives with S6a ────────────────────────────────────────────────────
+// The QWERTY keyboard is the app's first true modal, the FILE BROWSER is the first full-screen popup,
+// the CONFIRM DIALOG (S7) is the topmost, and the EQ EDITOR (S8) is the first PARTIAL one. Each OWNS
+// THE BUTTONS while it is up, and every handler below therefore opens with the same questions in the
+// same order — confirm, then keyboard, then the EQ overlay, then the browser, then the screen — before
+// it does anything else. That order is the specification: the keyboard can be open ON TOP of the
+// browser (SELECT+A to rename a file), and a D-pad press there must move the KEY cursor, not the file
+// cursor.
 //
-// The QWERTY keyboard is the app's first true modal, and the FILE BROWSER is the first full-screen
-// popup. Both OWN THE BUTTONS while they are up, and every handler below therefore opens with the same
-// two questions in the same order — keyboard first, then browser — before it does anything else. That
-// order is the specification: the keyboard can be open ON TOP of the browser (SELECT+A to rename a
-// file), and a D-pad press there must move the KEY cursor, not the file cursor.
+// ⚠️ **The EQ editor is PARTIAL, and that is a design decision rather than an oversight.** It swallows
+// the D-pad, A, B and SELECT, but it lets START through to the screen underneath — because START on
+// INSTRUMENT is an AUDITION, and sweeping a band across a note you can hear is the entire reason the
+// screen exists. Kotlin is explicit about it (`stopActivePreview` counts the EQ editor as a preview
+// screen when it was opened over an instrument, so its band edits "sweep a held preview live").
+// Every other modal in the app swallows everything.
 //
 // Kotlin enforces this the same way (an `if (qwertyKeyboardState.isOpen) { … ; return }` at the top of
 // each handler) and its own comment states the rule the hard way: "every new show*Dialog-style modal
 // state MUST be added to this predicate". A modal that one handler forgets is a button that does the
 // wrong thing exactly once — and that is a bug nobody reports, because it looks like a mis-press.
+// ⚠️ S8 found exactly that bug, ON ANDROID: `handleBUp`/`handleBDown` never got the EQ guard, so B+UP
+// with the editor open over INST.POOL pages the pool cursor 16 slots underneath it. See on_b_up().
 //
 // ── THE SHELL IS THE InputMapper ─────────────────────────────────────────────────────────────────
 //
@@ -56,6 +60,7 @@
 #include "ui/filesystem.h"
 #include "ui/modules/chain_editor.h"
 #include "ui/modules/effects_editor.h"
+#include "ui/modules/eq_editor.h"
 #include "ui/modules/file_browser.h"
 #include "ui/modules/groove_editor.h"
 #include "ui/modules/instrument_editor.h"
@@ -191,6 +196,17 @@ class InputDispatcher {
      */
     bool defer_a_to_release() const;
 
+    /**
+     * ⚠️ **Asked by the MAPPER on every plain B press** (S8), and the exact mirror of the above: is B a
+     * CLOSE rather than a modifier? True while the EQ editor is open, and only then.
+     *
+     * The editor's slot is changed with B+LEFT/RIGHT, and B is also what closes it. Fire the close on the
+     * PRESS and the cycle is unreachable — you would be back on the mixer before LEFT ever arrived. So the
+     * close is held until B comes back UP, and cancelled outright if a B-combo fires in between. Kotlin
+     * carries the same latch (`deferBToRelease` → `bPressedAlone`) for the same one screen.
+     */
+    bool defer_b_to_release() const;
+
     /** The clipboard, for the top-strip readout ("PHR:2x3"). */
     const Clipboard& clipboard() const { return clip_; }
 
@@ -248,6 +264,7 @@ class InputDispatcher {
     EffectModule           effects_{};
     ProjectModule          project_{};
     SettingsModule         settings_{};
+    EqModule               eq_{};   // stateful: it caches its response curve — see eq_editor.h
 
     /**
      * A,A is a DOUBLE-TAP, and a double-tap is only a double-tap if the cursor has not moved between
@@ -356,6 +373,57 @@ class InputDispatcher {
     void confirm_accept();
     /** B on the dialog: don't. */
     void confirm_cancel() { s_.confirm.close(); }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // THE EQ EDITOR (Phase 3 S8)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // The port's third modal, and the first PARTIAL one: it owns the D-pad, A, A+DPAD, A+B, B, B+DPAD and
+    // SELECT, and lets START through on purpose (the screen underneath keeps its audition, which is the
+    // only way to HEAR what a band is doing while you dial it).
+    //
+    // ⚠️ It is an OVERLAY, so `currentScreen` still names the screen underneath — which means every
+    // handler that reaches for the cursor MUST ask `eq_open()` first, or it will edit a mixer fader while
+    // the user is dialling a bell curve. That is why `generic_input()` opens with the EQ arm rather than
+    // each caller carrying one.
+
+    bool eq_open() const { return s_.eq.isOpen; }
+
+    /** Raise the editor on `slot`, remembering WHICH cell asked (the slot cycle has to write back). */
+    void open_eq_editor(int slot, EqCallerContext caller);
+    void close_eq_editor() { s_.eq = EqEditorState{}; }
+
+    /** The D-pad: LEFT/RIGHT change band, UP/DOWN change param. Both CLAMP; neither wraps. */
+    void eq_move_cursor(int d_band, int d_param);
+
+    /**
+     * B+LEFT/RIGHT: step the slot 0..127 (CLAMPED — it is a bank index, not a ring) and re-point the
+     * cell that opened the editor at the new slot. Five different project fields, one gesture; the
+     * caller tag is the only thing that knows which.
+     */
+    void apply_caller_eq_slot_change(int new_slot);
+
+    /**
+     * ⚠️ After EVERY band nudge, and it is two engine calls, not one. See SongcoreHost::set_eq_band:
+     * writing the bank changes nothing anyone is listening to until the consumer is re-handed the slot.
+     */
+    void push_eq_band_to_engine();
+
+    /**
+     * Kotlin's `openSubScreenAtCursor(peek)` — the ONE list of cells whose plain A opens something, and
+     * the single source of truth for both halves of that claim: what A DOES (peek = false) and what the
+     * mapper must DEFER (peek = true).
+     *
+     * ⚠️ One function rather than two lists, deliberately. Split them and a cell can drift into being
+     * openable-but-not-deferred (its A+DPAD gets pre-empted by the open) or deferred-but-not-openable
+     * (its A does nothing at all, and the deferral silently eats the press). Both are bugs that look
+     * like a mis-press, and neither would show up in any golden — which is precisely the class of bug
+     * S7's one-state confirm dialog was about.
+     */
+    bool open_sub_screen_at_cursor(bool peek);
+
+    /** Is ANY modal already up? Then no cell "opens a sub-screen" — the modal owns the button. */
+    bool any_modal_open() const { return confirm_open() || qwerty_open() || eq_open(); }
 
     // ── PROJECT + SETTINGS: the buttons (Phase 3 S7) ────────────────────────────────────────────
     /** A on PROJECT: SAVE / LOAD / NEW / MIX / STEMS / SEQ / INST / SETTINGS> / EXIT. */

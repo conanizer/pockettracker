@@ -20,6 +20,7 @@
 #include "theme.h"
 #include "ui/fx_helper.h"
 #include "ui/modules/confirm_dialog.h"
+#include "ui/modules/eq_editor.h"
 #include "ui/modules/file_browser.h"
 #include "ui/modules/qwerty_keyboard.h"
 #include "ui/modules/sample_editor.h"
@@ -242,6 +243,29 @@ struct AppState {
     // state, so the "is a modal up?" question every handler must ask has exactly one answer to check.
     // See ui/modules/confirm_dialog.h for why that is worth a file.
     ConfirmDialogState confirm{};
+
+    // ── The EQ EDITOR (S8) ───────────────────────────────────────────────────────────────────────
+    //
+    // The port's third modal, and the first PARTIAL one: it owns the D-pad, A, B and SELECT, but START
+    // deliberately passes THROUGH to the screen underneath. That is not an oversight in Kotlin — it is
+    // what lets you hold an instrument audition ringing and sweep a band across it, which is the only
+    // way to hear what an EQ is doing. Every other modal in the app swallows everything.
+    //
+    // ⚠️ `eq.caller` is captured when the editor OPENS and is never re-read: five different cells raise
+    // it, and B+LEFT/RIGHT inside it has to write the new slot back into whichever field asked.
+    EqEditorState eq{};
+
+    /**
+     * The spectrum of the signal the OPEN EQ sits on — the master bus, a send's input, or one
+     * instrument's voices; `eq.caller` picks which, and ui/engine_feed.h polls it at 20 Hz (Kotlin's
+     * own cadence) only while the editor is up.
+     *
+     * Separate from `spectrum` above, which is the VISUALIZER's and is always the master bus. Same
+     * engine, two different questions — and pointing the EQ at the master bus would draw a curve over a
+     * signal the band is not even in.
+     */
+    const float* eqSpectrum      = nullptr;
+    int          eqSpectrumCount = 0;
 
     // ── SETTINGS (S7) ────────────────────────────────────────────────────────────────────────────
     //

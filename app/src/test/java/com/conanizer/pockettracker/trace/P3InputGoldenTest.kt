@@ -26,6 +26,9 @@ import com.conanizer.pockettracker.ui.modules.ChainEditorModule
 import com.conanizer.pockettracker.ui.modules.ChainEditorState
 import com.conanizer.pockettracker.ui.modules.EffectModule
 import com.conanizer.pockettracker.ui.modules.EffectState
+import com.conanizer.pockettracker.ui.modules.EqModule
+import com.conanizer.pockettracker.ui.modules.EqState
+import com.conanizer.pockettracker.ui.overlays.EqCallerContext
 import com.conanizer.pockettracker.ui.modules.GrooveModule
 import com.conanizer.pockettracker.ui.modules.GrooveState
 import com.conanizer.pockettracker.ui.modules.InstrumentModule
@@ -139,6 +142,7 @@ class P3InputGoldenTest {
     private val modulationModule = ModulationModule()
     private val mixerModule = MixerModule()
     private val effectModule = EffectModule()
+    private val eqModule = EqModule()
     private val sampleEditorModule = SampleEditorModule()
     private val projectModule = ProjectModule()
     private val settingsModule = SettingsModule()
@@ -699,6 +703,162 @@ class P3InputGoldenTest {
                             "${ctxStr(ctx)} act=${actStr(act)} ${mixStr(project)}"
                     }
                 }
+            }
+        }
+    }
+
+    // ── THE EQ EDITOR (S8) ──────────────────────────────────────────────────────────────────────
+
+    /**
+     * All TWELVE band values of the slot under the editor — three bands × (type, freq, gain, q).
+     *
+     * The whole preset, not just the band the cursor is on, and for the reason every cell string in this
+     * file is wider than it looks necessary: the cursor is ONE int over a 3×4 grid (`band = row / 4`,
+     * `param = row % 4`), so getting that arithmetic backwards writes the right value into the right
+     * PARAM of the wrong BAND — and resolves to a byte-identical context and a byte-identical action
+     * doing it. Only the preset afterwards can tell band 1's FREQ from band 2's.
+     */
+    private fun eqStr(p: Project, slot: Int): String {
+        val bands = p.eqPresets[slot].bands
+        return "eq=" + bands.joinToString(":") { b ->
+            "${hex2(b.type)}.${hex2(b.freq)}.${hex2(b.gain)}.${hex2(b.q)}"
+        }
+    }
+
+    /**
+     * The band beds. Between them they cover every branch the module takes and both ends of every range
+     * — which is where a clamp is either right or off by one.
+     *
+     * ⚠️ TYPE **wraps** (it is a HEX_BYTE, 0..5) while FREQ and GAIN **clamp** (they are the app's only
+     * two CONTINUOUS PHYSICAL-UNIT types). Beds 2/3/4 are what pin that difference: A on type 5 must
+     * land on 0, and A on gain 240 must stay at 240. A port that ran them all through the same stepper
+     * would pass every context and every action and fail exactly here.
+     */
+    private fun eqLadder(): List<(Project, Int) -> Unit> = listOf(
+        // 0: a FRESH preset — type 0 (OFF), freq 0x80, gain 120 (0 dB), q 0x80. The factory state, and
+        //    the one A+B resets back to.
+        { _, _ -> },
+
+        // 1: all three bands active, all twelve values DISTINCT. The bed that catches a band/param mix-up.
+        { p, s ->
+            val b = p.eqPresets[s].bands
+            b[0].type = 1; b[0].freq = 0x11; b[0].gain = 20;  b[0].q = 0x22
+            b[1].type = 3; b[1].freq = 0x33; b[1].gain = 90;  b[1].q = 0x44
+            b[2].type = 5; b[2].freq = 0x55; b[2].gain = 200; b[2].q = 0x66
+        },
+
+        // 2: the FLOOR of every range. B must clamp freq/gain/q at 0 — and type at 0 must WRAP to 5.
+        { p, s ->
+            for (b in p.eqPresets[s].bands) { b.type = 0; b.freq = 0; b.gain = 0; b.q = 0 }
+        },
+
+        // 3: the CEILING. A must clamp freq at 255, gain at 240, q at 255 — and type at 5 must WRAP to 0.
+        { p, s ->
+            for (b in p.eqPresets[s].bands) { b.type = 5; b.freq = 255; b.gain = 240; b.q = 255 }
+        },
+
+        // 4: gain ONE STEP below its ceiling, freq one below its own. The off-by-one that a clamp at the
+        //    exact bound cannot see: A+RIGHT here is a LARGE step (gain +10, freq +16) into the wall.
+        { p, s ->
+            for (b in p.eqPresets[s].bands) { b.type = 4; b.freq = 254; b.gain = 239; b.q = 254 }
+        },
+
+        // 5: LOWCUT (type 2) — the SVF branch of the curve math — with asymmetric values, and a freq in
+        //    the region where the display-aware nudge actually has work to do (≈1 kHz).
+        { p, s ->
+            val b = p.eqPresets[s].bands
+            b[0].type = 2; b[0].freq = 0xA0; b[0].gain = 121; b[0].q = 0x01
+            b[1].type = 0; b[1].freq = 0xA1; b[1].gain = 119; b[1].q = 0xFE
+            b[2].type = 4; b[2].freq = 0xA2; b[2].gain = 120; b[2].q = 0x80
+        },
+    )
+
+    private fun sweepEq(out: MutableList<String>) {
+        out += ""
+        out += "# EQ EDITOR — the overlay behind every EQ cell in the app. Its cursor is ONE int over a"
+        out += "# 3x4 grid: band = row/4 (the on-screen COLUMN), param = row%4 (the ROW). Both SLOT ends"
+        out += "# are swept, because the module indexes a 128-entry bank and an off-by-one in that bound"
+        out += "# dies at 127, not at 7."
+        for (slot in listOf(0, 127)) {
+            for (row in 0..EqModule.MAX_CURSOR_ROW) {
+                for ((bedIdx, bed) in eqLadder().withIndex()) {
+                    for (btn in BUTTONS) {
+                        val project = Project()
+                        bed(project, slot)
+                        val before = eqStr(project, slot)
+
+                        val state = EqState(
+                            project = project,
+                            slotIndex = slot,
+                            cursorRow = row,
+                            callerContext = EqCallerContext.MasterEq
+                        )
+                        val ctx = eqModule.getCursorContext(state)
+                        val act = resolve(btn, ctx)
+                        eqModule.handleInput(state, act) { }
+
+                        out += "EDIT scr=EQ slot=$slot row=$row bed=$bedIdx $before btn=$btn => " +
+                            "${ctxStr(ctx)} act=${actStr(act)} ${eqStr(project, slot)}"
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * ⚠️ THE DISPLAY-AWARE FREQ NUDGE, over its WHOLE domain — all 256 values × all 5 buttons.
+     *
+     * This is the one cell in the app where a single A press can move the stored value by more than one
+     * step. FREQ is 0..255 mapped logarithmically over 20 Hz..20 kHz, so one hex step is ~2.7% — finer
+     * than the readout can show near 1 kHz, where several adjacent values all print "1.2kHz". A plain +1
+     * there would leave the number on screen unchanged and the cell would feel dead. So a single step
+     * keeps advancing until [EqModule.formatFreqHz] produces a DIFFERENT STRING.
+     *
+     * Which makes a FLOAT FORMATTER load-bearing for the CELL rather than for the picture: where the
+     * nudge stops is decided by `20 * 1000^(v/255)` and a `"%.1f"` of it. Java rounds HALF_UP on the
+     * exact decimal value; C rounds to nearest-even on the exact binary one, and they part company at an
+     * exact half-way point. Whether any of the 256 values IS such a point is not something to reason
+     * about — it is something to MEASURE, and this sweep is the measurement. `lbl=` is on the line so
+     * that a divergence names itself ("1.2kHz" vs "1.3kHz") instead of arriving as `freq=8A vs 8B`.
+     *
+     * The exhaustive sweep is also what pins the two ends: the nudge is BOUNDED by 0..255, so at 255 an
+     * A that finds no new label must stop AT 255 rather than run off the end.
+     */
+    private fun sweepEqFreq(out: MutableList<String>) {
+        out += ""
+        out += "# EQ FREQ — the display-aware nudge, over all 256 values x 5 buttons. A single A/B step"
+        out += "# advances until the READOUT changes; A+LEFT/RIGHT (+-16) and A+B (reset to 0x80) are"
+        out += "# applied exactly. lbl= is Kotlin's formatFreqHz, byte-compared: it decides where a"
+        out += "# single step lands, so it is part of the CELL, not part of the picture."
+        val module = EqModule()
+        for (freq in 0..255) {
+            for (btn in BUTTONS) {
+                val project = Project()
+                val band = project.eqPresets[0].bands[0]
+                band.type = 3          // BELL — any active type; the cell does not depend on it
+                band.freq = freq
+
+                val state = EqState(
+                    project = project,
+                    slotIndex = 0,
+                    cursorRow = 1,     // band 0, param 1 = FREQ
+                    callerContext = EqCallerContext.MasterEq
+                )
+                val ctx = module.getCursorContext(state)
+                val act = resolve(btn, ctx)
+                module.handleInput(state, act) { }
+
+                val after = project.eqPresets[0].bands[0].freq
+
+                // ⚠️ The label comes from the MODULE'S OWN functions, never from a copy of the formula
+                // in this file. Re-deriving `20 * 1000^(v/255)` here would make the golden a measurement
+                // of the test rather than of the code — and it is precisely the float path that this
+                // sweep exists to hold C++ to. (This is S6a's "a fixture that cannot catch its own bug",
+                // one layer up: the two would have drifted silently, and the golden would still be green.)
+                val label = module.formatFreqHz(module.freqHzFromHex(after))
+
+                out += "EDIT scr=EQFREQ freq=${hex2(freq)} btn=$btn => " +
+                    "${ctxStr(ctx)} act=${actStr(act)} freq=${hex2(after)} lbl=$label"
             }
         }
     }
@@ -1731,6 +1891,8 @@ class P3InputGoldenTest {
         sweepMods(out)
         sweepMixer(out)
         sweepEffects(out)
+        sweepEq(out)
+        sweepEqFreq(out)
         sweepProject(out)
         sweepSettings(out)
         sweepSampleEditor(out)

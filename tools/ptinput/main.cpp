@@ -43,6 +43,7 @@
 #include "../../native/ui/std_filesystem.h"
 #include "../../native/ui/modules/chain_editor.h"
 #include "../../native/ui/modules/effects_editor.h"
+#include "../../native/ui/modules/eq_editor.h"
 #include "../../native/ui/modules/groove_editor.h"
 #include "../../native/ui/modules/instrument_editor.h"
 #include "../../native/ui/modules/instrument_pool.h"
@@ -290,6 +291,37 @@ static void parse_mix(const std::string& spec, Project& p) {
     p.masterBusFx    = from_dec(f[15]);
 }
 
+// ─── THE EQ EDITOR (S8) ──────────────────────────────────────────────────────────────────────────
+//
+// The cell is the whole 3-band PRESET — twelve values — for the reason every cell string here is wider
+// than it looks necessary. The editor's cursor is ONE int over a 3×4 grid (`band = row / 4`,
+// `param = row % 4`), so getting that arithmetic backwards writes the right value into the right PARAM
+// of the WRONG BAND, with a byte-identical context and a byte-identical action. Only the preset can see
+// it.
+
+static std::string eq_str(const Project& p, int slot) {
+    const std::vector<songcore::EqBand>& bands = p.eqPresets[static_cast<size_t>(slot)].bands;
+    std::string s = "eq=";
+    for (size_t i = 0; i < bands.size(); ++i) {
+        if (i) s += ":";
+        s += hex2(bands[i].type) + "." + hex2(bands[i].freq) + "." + hex2(bands[i].gain) + "." +
+             hex2(bands[i].q);
+    }
+    return s;
+}
+
+static void parse_eq(const std::string& spec, Project& p, int slot) {
+    const std::vector<std::string> f = split(spec.substr(std::string("eq=").size()), ':');
+    std::vector<songcore::EqBand>& bands = p.eqPresets[static_cast<size_t>(slot)].bands;
+    for (size_t i = 0; i < bands.size() && i < f.size(); ++i) {
+        const std::vector<std::string> v = split(f[i], '.');
+        bands[i].type = from_hex(v[0]);
+        bands[i].freq = from_hex(v[1]);
+        bands[i].gain = from_hex(v[2]);
+        bands[i].q    = from_hex(v[3]);
+    }
+}
+
 static std::string fx_str(const Project& p) {
     return "fx=" + std::to_string(p.masterBusFx) + ":" + hex2(p.reverbFeedback) + ":" +
            hex2(p.reverbDamp) + ":" + std::to_string(p.reverbInputEq) + ":" + hex2(p.delayTime) + ":" +
@@ -466,6 +498,7 @@ static const EffectModule           kEffects{};
 static const SampleEditorModule     kSampleEditor{};
 static const ProjectModule          kProject{};
 static const SettingsModule         kSettings{};
+static const EqModule               kEq{};
 
 // ─── PROJECT (S7) ────────────────────────────────────────────────────────────────────────────────
 
@@ -728,6 +761,60 @@ static std::string recompute_edit(const std::vector<std::string>& toks, std::str
         const InputAction   act = resolve(btn, ctx);
         kEffects.handle_input(p, row, act);
         return ctx_str(ctx) + " act=" + act_str(act) + " " + fx_str(p);
+    }
+
+    // ── THE EQ EDITOR (S8) ───────────────────────────────────────────────────────────────────────
+    if (scr == "EQ") {
+        const int slot = from_dec(field(toks, "slot"));
+        const int row  = from_dec(field(toks, "row"));
+        Project   p    = songcore::make_default_project();
+        parse_eq("eq=" + field(toks, "eq"), p, slot);
+
+        EqState st{p};
+        st.slotIndex = slot;
+        st.cursorRow = row;
+        // The CALLER does not reach the cursor or the cell at all — it decides the header text and
+        // which engine consumer a band edit is pushed back to, and neither is a document edit. So it is
+        // not on the line, and the golden is recorded with MasterEq.
+        st.caller = EqCallerContext::master();
+
+        const CursorContext ctx = kEq.cursor_context(st);
+        const InputAction   act = resolve(btn, ctx);
+        kEq.handle_input(p, slot, row, act);
+        return ctx_str(ctx) + " act=" + act_str(act) + " " + eq_str(p, slot);
+    }
+
+    // ── THE EQ EDITOR'S FREQ CELL, over its whole 0..255 domain (S8) ─────────────────────────────
+    //
+    // ⚠️ The one cell in the app where a SINGLE step can move the stored value by more than one, and the
+    // reason it gets a sweep of its own. `act=` is what the generic handler resolved (freq ± 1); `freq=`
+    // is what the module actually STORED, after advancing until the READOUT changed. The two differ on
+    // most of the domain, and a port that stored the action's value would agree on every context and
+    // every action and be wrong in the only field that matters.
+    //
+    // `lbl=` is the readout itself, byte-compared against Kotlin's. It is not decoration: it is the
+    // float path — `20 * 1000^(v/255)` and a "%.1f" of it — that DECIDES where the nudge stops, and this
+    // is the measurement that says the two languages agree about it on every one of the 256 values.
+    if (scr == "EQFREQ") {
+        const int freq = from_hex(field(toks, "freq"));
+        Project   p    = songcore::make_default_project();
+
+        songcore::EqBand& band = p.eqPresets[0].bands[0];
+        band.type = 3;   // BELL — any active type; the cell does not depend on it
+        band.freq = freq;
+
+        EqState st{p};
+        st.slotIndex = 0;
+        st.cursorRow = 1;   // band 0, param 1 = FREQ
+        st.caller    = EqCallerContext::master();
+
+        const CursorContext ctx = kEq.cursor_context(st);
+        const InputAction   act = resolve(btn, ctx);
+        kEq.handle_input(p, 0, 1, act);
+
+        const int after = p.eqPresets[0].bands[0].freq;
+        return ctx_str(ctx) + " act=" + act_str(act) + " freq=" + hex2(after) + " lbl=" +
+               EqModule::format_freq_hz(EqModule::freq_hz_from_hex(after));
     }
 
     // ── PROJECT (S7) ─────────────────────────────────────────────────────────────────────────────

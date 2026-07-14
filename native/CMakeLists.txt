@@ -207,6 +207,7 @@ if(NOT ANDROID)
             ui/modules/chain_editor.cpp
             ui/modules/confirm_dialog.cpp
             ui/modules/effects_editor.cpp
+            ui/modules/eq_editor.cpp
             ui/modules/file_browser.cpp
             ui/modules/fx_helper_overlay.cpp
             ui/modules/groove_editor.cpp
@@ -244,8 +245,15 @@ if(NOT ANDROID)
 
     # IEEE-exactness, for the same reason songcore-jni.cpp carries it: this target includes songcore
     # headers, and the rule stated above is that any TU which does must not have its math reassociated
-    # or fma-contracted. The UI does no float math worth the name today — but the rule is what keeps
-    # that true after someone adds a meter, and it costs nothing to state now.
+    # or fma-contracted.
+    #
+    # ⚠️ S1..S7 carried this on the argument that "the UI does no float math worth the name today, but
+    # the rule is what keeps that true after someone adds a meter". S8 IS THAT SOMEONE, and it turned
+    # out to be load-bearing rather than prudent: the EQ editor's FREQ stepping advances until the
+    # formatted READOUT changes (ui/modules/eq_editor.cpp), so `20 * 1000^(v/255)` and a "%.1f" of it
+    # decide the value that ends up in the project — and that value is byte-compared against Kotlin's by
+    # tools/ptinput, over all 256 of them. Reassociated math there is not a slightly different picture;
+    # it is a red golden.
     if(MSVC)
         target_compile_options(pt-ui PRIVATE /fp:precise)
     else()

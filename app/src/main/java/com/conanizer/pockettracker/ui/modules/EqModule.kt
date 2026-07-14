@@ -499,8 +499,14 @@ class EqModule : TrackerModule {
         return (t * (width - 1)).toInt().coerceIn(0, width - 1)
     }
 
-    /** EQ freq hex (0-255) → Hz, log-mapped 20Hz..20kHz. */
-    private fun freqHzFromHex(hex: Int): Float = 20f * 1000f.pow(hex / 255f)
+    /**
+     * EQ freq hex (0-255) → Hz, log-mapped 20Hz..20kHz.
+     *
+     * ⚠️ `internal`, not private, and only so that `P3InputGoldenTest` can record the LABEL this produces
+     * beside the value [stepFreqDisplayAware] lands on. The two must be the same computation — a golden
+     * that re-derives `20 * 1000^(v/255)` in the test is measuring the test.
+     */
+    internal fun freqHzFromHex(hex: Int): Float = 20f * 1000f.pow(hex / 255f)
 
     /**
      * Display-aware FREQ stepping (item 13b).
@@ -524,7 +530,8 @@ class EqModule : TrackerModule {
         return v
     }
 
-    private fun formatFreqHz(hz: Float): String {
+    /** ⚠️ `internal` for the golden — see [freqHzFromHex]. This string decides where a step STOPS. */
+    internal fun formatFreqHz(hz: Float): String {
         val rounded = hz.toInt()
         return when {
             rounded < 1000  -> "${rounded}Hz"

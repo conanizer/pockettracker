@@ -410,6 +410,33 @@ void InputDispatcher::preview_edited_note() {
 // ─── The three generic paths ─────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::generic_input(InputAction (*fn)(const CursorContext&)) {
+    // ⚠️ THE EQ EDITOR IS CHECKED FIRST, and it has to be — it is an OVERLAY, so `currentScreen` still
+    // names the screen UNDERNEATH it. Ask that screen what is under its cursor and A+UP would nudge a
+    // mixer fader while the user is dialling a bell curve. Kotlin opens `handleGenericInput` with the
+    // same arm for the same reason.
+    if (eq_open()) {
+        EqState es{*s_.project};
+        es.slotIndex = s_.eq.slotIndex;
+        es.cursorRow = s_.eq.cursorRow;
+        es.caller    = s_.eq.caller;
+
+        const CursorContext ctx = eq_.cursor_context(es);
+        const InputAction   act = fn(ctx);
+        const EqInputResult r =
+            eq_.handle_input(host_.edit_project(), s_.eq.slotIndex, s_.eq.cursorRow, act);
+
+        if (r.eqBandChanged) {
+            // NOT `mark_modified()`. That one re-pushes the whole GLOBALS (the mixer, both send buses,
+            // all 128 EQ slots) whenever `currentScreen` is MIXER or EFFECTS — and `currentScreen` is
+            // whatever is behind this overlay. Holding A+UP on a GAIN cell fires an edit every 100 ms;
+            // the right-sized verb is the two calls the band actually needs. It bumps `projectVersion`
+            // itself (via apply_caller_eq_slot_change), which is what marks the song dirty.
+            push_eq_band_to_engine();
+            if (host_.is_playing()) host_.notify_data_changed();
+        }
+        return;
+    }
+
     const InputAction action = fn(cursor_context());
     if (action.type == ActionType::NONE) return;
     if (apply_edit(action)) mark_modified();
@@ -487,6 +514,7 @@ void InputDispatcher::dpad_nav(const char* direction) {
 void InputDispatcher::on_dpad_up() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_key_cursor_up(s_.qwerty); return; }
+    if (eq_open())     { eq_move_cursor(0, -1); return; }
     if (on_browser())  { browser_move_cursor(-1, /*page=*/false); return; }
     dpad_nav("UP");
 }
@@ -494,6 +522,7 @@ void InputDispatcher::on_dpad_up() {
 void InputDispatcher::on_dpad_down() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_key_cursor_down(s_.qwerty); return; }
+    if (eq_open())     { eq_move_cursor(0, +1); return; }
     if (on_browser())  { browser_move_cursor(+1, /*page=*/false); return; }
     dpad_nav("DOWN");
 }
@@ -501,6 +530,10 @@ void InputDispatcher::on_dpad_down() {
 void InputDispatcher::on_dpad_left() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_key_cursor_left(s_.qwerty); return; }
+    // ⚠️ In the EQ editor LEFT/RIGHT change BAND while keeping the PARAM — they do not walk a flat list
+    // of twelve. That is what lets you sweep the same parameter across all three bands without moving
+    // your thumb off the row, which is how an EQ is actually dialled.
+    if (eq_open())     { eq_move_cursor(-1, 0); return; }
     // LEFT/RIGHT PAGE the browser by a screenful — the one list in the app long enough to need it.
     if (on_browser())  { browser_move_cursor(-BROWSER_VISIBLE_ROWS, /*page=*/true); return; }
     dpad_nav("LEFT");
@@ -509,6 +542,7 @@ void InputDispatcher::on_dpad_left() {
 void InputDispatcher::on_dpad_right() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_key_cursor_right(s_.qwerty); return; }
+    if (eq_open())     { eq_move_cursor(+1, 0); return; }
     if (on_browser())  { browser_move_cursor(+BROWSER_VISIBLE_ROWS, /*page=*/true); return; }
     dpad_nav("RIGHT");
 }
@@ -659,9 +693,18 @@ static int64_t sample_coarse_step(const SampleEditorState& se) {
     return std::max<int64_t>(1, static_cast<int64_t>(se.totalFrames) / (16LL << se.zoomLevel));
 }
 
+// ⚠️ THE EQ ARM COMES FIRST in all five A-combo handlers, ahead of the FX helper, the sample editor's
+// selection rows, the FX-type column and INSTRUMENT's type cell — which is Kotlin's order, and it is not
+// merely defensive. Every one of those four questions is asked of `currentScreen`, and `currentScreen`
+// is the screen UNDERNEATH the overlay. They all happen to answer "no" today (you cannot open the EQ
+// from an FX column, and the editor's own cell is row 16, not the sample editor's 3..8) — which is
+// exactly the kind of accident that stops being true the day someone adds an EQ cell somewhere new.
+// `generic_input()` carries the real arm; these five make sure nothing gets in front of it.
+
 void InputDispatcher::on_a_up() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
+    if (eq_open()) { generic_input(pt::ui::on_a); return; }
     if (s_.fxHelper.isOpen) { fx_move_up(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_fine_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) { s_.fxHelper = fx_helper_opened_at(current_fx_type_index()); return; }
@@ -672,6 +715,7 @@ void InputDispatcher::on_a_up() {
 void InputDispatcher::on_a_down() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
+    if (eq_open()) { generic_input(pt::ui::on_b); return; }
     if (s_.fxHelper.isOpen) { fx_move_down(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_fine_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) { s_.fxHelper = fx_helper_opened_at(current_fx_type_index()); return; }
@@ -682,6 +726,7 @@ void InputDispatcher::on_a_down() {
 void InputDispatcher::on_a_left() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
+    if (eq_open()) { generic_input(pt::ui::on_a_left); return; }
     if (s_.fxHelper.isOpen) { fx_move_left(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_coarse_step(s_.sampleEditor)); return; }
     selection_or_single(pt::ui::on_a_left);
@@ -690,6 +735,7 @@ void InputDispatcher::on_a_left() {
 void InputDispatcher::on_a_right() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
+    if (eq_open()) { generic_input(pt::ui::on_a_right); return; }
     if (s_.fxHelper.isOpen) { fx_move_right(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_coarse_step(s_.sampleEditor)); return; }
     selection_or_single(pt::ui::on_a_right);
@@ -709,6 +755,11 @@ void InputDispatcher::on_a_released() {
 void InputDispatcher::on_a_b() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
+
+    // A+B in the EQ editor RESETS the band param under the cursor to its default — FREQ to 0x80
+    // (≈450 Hz, the middle of the log sweep), GAIN to 120 (0 dB) and Q to 0x80. TYPE has no default and
+    // no delete, so A+B there is inert, exactly as Kotlin's inline context leaves it.
+    if (eq_open()) { generic_input(pt::ui::on_a_b); return; }
 
     if (s_.selection.active) {
         const SelectionBounds b = s_.selection.bounds();
@@ -765,9 +816,22 @@ void InputDispatcher::on_a_b() {
 
 // ─── A,A: insert the next UNUSED item ────────────────────────────────────────────────────────────
 
+// ⚠️ A STATED SUPERSET OF KOTLIN, and the one place S8 deliberately adds a guard Kotlin does not have.
+//
+// Kotlin does NOT check the EQ editor in `handleAA`, `handleLA`, `handleLB`, `handleLBA` or `handleLR`.
+// It gets away with it by accident: all five are gated on the screen, to SONG / CHAIN / PHRASE / TABLE /
+// FILE_BROWSER — and the EQ editor can only be raised from INSTRUMENT, INST.POOL, MIXER, EFFECTS and the
+// SAMPLE EDITOR. The two sets do not intersect, so every one of them is already inert under the overlay.
+//
+// That is a proof about today's screens, not about the gesture, and it is worth exactly nothing the day
+// an EQ cell appears on a screen that has a clipboard. The guard costs a token; the accident costs a
+// silent paste into a phrase you cannot see. It changes no observable behaviour on either platform
+// (ptdispatch asserts the whole button set is inert under the overlay, which is the claim that actually
+// matters and which holds with or without these lines).
+
 void InputDispatcher::on_a_a() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || on_browser()) return;
+    if (qwerty_open() || on_browser() || eq_open()) return;
 
     // A double-tap is only a double-tap if the cursor has not moved between the presses. Anything
     // else is two separate A presses, and each of those already did something (they inserted the
@@ -812,6 +876,17 @@ void InputDispatcher::on_a_a() {
 // ─── B + D-pad: which item am I looking at? ──────────────────────────────────────────────────────
 
 void InputDispatcher::cycle_current_item(int delta) {
+    // ⚠️ In the EQ editor B+LEFT/RIGHT changes the SLOT — and it CLAMPS at 0 and 127 where every other
+    // B+LEFT/RIGHT in the app wraps. A phrase pool is a ring you scroll through; the EQ bank is an index
+    // you are pointing a mixer channel at, and wrapping from slot 127 back to 0 would silently re-point
+    // it at a completely different curve.
+    if (eq_open()) {
+        const int newSlot = std::min(127, std::max(0, s_.eq.slotIndex + delta));
+        s_.eq.slotIndex   = newSlot;
+        apply_caller_eq_slot_change(newSlot);
+        return;
+    }
+
     // Kotlin's `(value + delta).mod(max + 1)` — a FLOORING modulo, so −1 wraps to the top rather than
     // staying at −1 the way C's % would.
     auto wrap = [delta](int value, int max) {
@@ -851,9 +926,25 @@ void InputDispatcher::cycle_current_item(int delta) {
 void InputDispatcher::on_b_left() { if (confirm_open()) return; if (qwerty_open() || on_browser()) return; cycle_current_item(-1); }
 void InputDispatcher::on_b_right() { if (confirm_open()) return; if (qwerty_open() || on_browser()) return; cycle_current_item(+1); }
 
+// ⚠️ AN ANDROID BUG, FOUND BY PORTING — and it is the modal rule's own warning coming true.
+//
+// `handleBUp`/`handleBDown` are the ONLY two handlers in the Kotlin dispatcher that never got an
+// `eqEditorState.isOpen` guard. Every other one has it. It survived because the guard is only MISSING
+// where it is also needed: of the two screens these two handlers act on, SONG cannot raise the EQ
+// editor at all — but INST.POOL can, from its column 4.
+//
+// So on Android: open the EQ from the pool's EQ column, hold B (which does NOT close the editor — the
+// deferred-B latch is holding it), press UP. The B+DPAD arm fires, cancels the latch, and pages
+// `currentInstrument` sixteen slots. The editor stays open on the instrument you opened it FROM (the
+// caller is captured, so the bands are still right), and the pool cursor is now somewhere else
+// entirely. Close it and you are looking at a different instrument than the one you were editing.
+//
+// Not corrupting, and that is exactly why nobody ever reported it: it reads as a mis-press. Zone B, so
+// fixed on Android too (`AppInputDispatcher.handleBUp`/`handleBDown`), per §4's rule.
+
 void InputDispatcher::on_b_up() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || on_browser()) return;
+    if (qwerty_open() || on_browser() || eq_open()) return;
 
     // The pool pages by 16 like the song does — but it CLAMPS at the ends where a single D-pad step
     // wraps 00↔7F. Paging past the end of a 128-slot list should stop at the end, not lap it.
@@ -869,7 +960,7 @@ void InputDispatcher::on_b_up() {
 
 void InputDispatcher::on_b_down() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || on_browser()) return;
+    if (qwerty_open() || on_browser() || eq_open()) return;
 
     if (s_.currentScreen == ScreenType::INST_POOL) {
         const int last = static_cast<int>(s_.project->instruments.size()) - 1;
@@ -884,18 +975,22 @@ void InputDispatcher::on_b_down() {
 
 // ─── R + D-pad: move between screens — except where it does not ──────────────────────────────────
 //
-// ⚠️ On the two modals R+DPAD is NOT navigation, and this is the one place the modal rule pays for
-// itself twice over. In the KEYBOARD, R+UP/DOWN switches layout (letters ↔ numbers) and R+LEFT/RIGHT
+// ⚠️ On the modals R+DPAD is NOT navigation, and this is the one place the modal rule pays for itself
+// several times over. In the KEYBOARD, R+UP/DOWN switches layout (letters ↔ numbers) and R+LEFT/RIGHT
 // moves the TEXT cursor — four bindings that have nowhere else to live on an eight-button device. In
 // the BROWSER, R+UP/DOWN cycles the SORT MODE and R+LEFT goes UP A DIRECTORY, which is what its own
-// bottom bar advertises ("R+<=UP R+^v=SORT").
+// bottom bar advertises ("R+<=UP R+^v=SORT"). In the EQ EDITOR it is simply SWALLOWED: the overlay has
+// no cell in the 5×5 grid, so there is nowhere for R+DPAD to go FROM — and letting it navigate would
+// leave the editor drawn over a screen it was never opened from, still writing into the caller that
+// raised it.
 //
-// Neither may fall through to `navigate_*`: a browser is a popup, not a cell in the 5×5 screen grid,
+// None of them may fall through to `navigate_*`: a browser is a popup, not a cell in the screen grid,
 // and R+RIGHT out of one would land the user on a screen with the browser's cursor state still live.
 
 void InputDispatcher::on_r_up() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { s_.qwerty.layout = 0; clamp_col(s_.qwerty); return; }
+    if (eq_open()) return;
     if (on_browser()) { browser_cycle_sort(+1); return; }
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_up(ns));
@@ -905,6 +1000,7 @@ void InputDispatcher::on_r_up() {
 void InputDispatcher::on_r_down() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { s_.qwerty.layout = 1; clamp_col(s_.qwerty); return; }
+    if (eq_open()) return;
     if (on_browser()) { browser_cycle_sort(-1); return; }
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_down(ns));
@@ -933,6 +1029,7 @@ void InputDispatcher::browser_cycle_sort(int delta) {
 void InputDispatcher::on_r_left() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_text_cursor_left(s_.qwerty); return; }
+    if (eq_open()) return;
     if (on_browser())  { navigate_to_parent(s_.fileBrowser, fs_); return; }
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_left(ns));
@@ -942,6 +1039,7 @@ void InputDispatcher::on_r_left() {
 void InputDispatcher::on_r_right() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_text_cursor_right(s_.qwerty); return; }
+    if (eq_open()) return;
     if (on_browser())  return;   // no "down a directory" — that is what A on a folder is for
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_right(ns));
@@ -952,7 +1050,7 @@ void InputDispatcher::on_r_right() {
 
 void InputDispatcher::on_l_b() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open()) return;
+    if (qwerty_open() || eq_open()) return;
 
     // ⚠️ The browser's selection is a DIFFERENT machine from the grid editors'. Theirs is the multi-tap
     // CELL→ROW→SCREEN widener (ui/selection.h); the browser's is a plain anchor..cursor RANGE over a
@@ -996,7 +1094,7 @@ void InputDispatcher::on_l_b() {
 
 void InputDispatcher::on_l_a() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open()) return;
+    if (qwerty_open() || eq_open()) return;
 
     // On the browser L+A is the FILE clipboard's cut/paste — the same "inside a selection it cuts,
     // outside one it pastes" shape as the grid editors below, over files instead of cells.
@@ -1069,7 +1167,7 @@ void InputDispatcher::on_l_a() {
 
 void InputDispatcher::on_l_r() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open()) return;
+    if (qwerty_open() || eq_open()) return;
     if (on_browser()) {
         s_.fileBrowser.selectionMode   = false;
         s_.fileBrowser.selectionAnchor = -1;
@@ -1082,7 +1180,7 @@ void InputDispatcher::on_l_r() {
 
 void InputDispatcher::on_l_b_a() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open() || on_browser()) return;
+    if (qwerty_open() || on_browser() || eq_open()) return;
 
     Project& p = host_.edit_project();
 
@@ -1320,11 +1418,10 @@ void InputDispatcher::export_song(bool stems) {
 void InputDispatcher::project_action() {
     switch (static_cast<ProjectRow>(s_.projectCursorRow)) {
         case ProjectRow::NAME:
-            // A on the NAME row opens the KEYBOARD, rather than editing one character in place. Both
-            // gestures exist: A+UP/DOWN walks the character under the cursor (that is the module's
-            // CHARACTER context), and plain A types the whole name. The deferred-A latch S6a built for
-            // INSTRUMENT's NAME cell is what keeps the two apart — see defer_a_to_release().
-            open_qwerty(QwertyContext::PROJECT_NAME, host_.project().name, "PROJECT NAME:", "", 20);
+            // ⚠️ Nothing, and that is not a gap. A on the NAME row opens the KEYBOARD — but it is one of
+            // the six DEFERRED cells, so `open_sub_screen_at_cursor` has already handled it and returned
+            // before `on_button_a` ever reached this switch. The arm stays, empty and named, because a
+            // silent `default:` here is how the row would quietly acquire a second, divergent opener.
             break;
 
         case ProjectRow::PROJECT:
@@ -1442,19 +1539,32 @@ void InputDispatcher::on_button_a() {
     // ⚠️ A on the SAMPLE EDITOR's confirm dialog is YES: discard the unsaved edits and leave. It is
     // checked FIRST, because a dialog owns the buttons of the screen it is covering — pressing A to
     // answer "ARE YOU SURE?" must not also fire whatever op the cursor happens to be parked on.
-    if (on_sample_editor()) {
-        if (s_.sampleEditor.showConfirmClose) {
-            s_.sampleEditor.showConfirmClose = false;
-            close_sample_editor();
-            return;
-        }
-        sample_editor_confirm();
+    if (on_sample_editor() && s_.sampleEditor.showConfirmClose) {
+        s_.sampleEditor.showConfirmClose = false;
+        close_sample_editor();
         return;
     }
 
-    // A on a cell that OPENS something (INSTRUMENT's NAME / LOAD / SAVE / EDIT, the pool's empty NAME).
-    // This runs before the insert logic below, exactly as Kotlin's `openSubScreenAtCursor(peek = false)`
-    // does, because those cells have nothing to insert.
+    // ⚠️ A PLAIN A DOES NOTHING IN THE EQ EDITOR, and that is Kotlin (`AppInputDispatcher:1300`), not an
+    // omission. The editor's vocabulary is A+DPAD (dial the band value), A+B (reset it), B+DPAD (change
+    // slot), and B or SELECT (close). There is no cell here for a bare A to insert into or confirm.
+    //
+    // It must RETURN rather than fall through, and that is the load-bearing half: `currentScreen` is
+    // still the screen underneath, so without this line an A in the editor would fire a sample-editor op
+    // or insert a chain on a screen the user cannot even see.
+    if (eq_open()) return;
+
+    // A on a cell that OPENS a sub-screen — the two NAME rows and all five EQ cells. Runs BEFORE the
+    // per-screen arms below, exactly as Kotlin's `openSubScreenAtCursor(peek = false)` does, because
+    // those cells have nothing to insert and the sample editor's EQ cell would otherwise run its FX
+    // APPLY instead of opening the editor.
+    if (open_sub_screen_at_cursor(/*peek=*/false)) return;
+
+    if (on_sample_editor()) { sample_editor_confirm(); return; }
+
+    // A on INSTRUMENT's LOAD / SAVE / EDIT buttons and the pool's empty NAME slot. NOT deferred to
+    // release (they are read-only cells with no A+DPAD to protect), which is why they are not part of
+    // `open_sub_screen_at_cursor` — Kotlin splits them the same way (`handleConfirmAInstrument`).
     if (instrument_open_at_cursor()) return;
 
     // A on an EMPTY cell inserts the item you last edited. That is what makes A,A meaningful: press
@@ -1535,6 +1645,12 @@ void InputDispatcher::on_button_b() {
 
     if (qwerty_open()) { delete_char(s_.qwerty); return; }
 
+    // ⚠️ B CLOSES THE EQ EDITOR — but the MAPPER holds this press until B is RELEASED
+    // (`defer_b_to_release`), and cancels it outright if a B+DPAD fires in between. Without that latch
+    // the slot cycle would be unreachable: B+LEFT would close the editor on B's own press and the LEFT
+    // would land on the mixer behind it.
+    if (eq_open()) { close_eq_editor(); return; }
+
     if (on_browser()) {
         FileBrowserState& fb = s_.fileBrowser;
 
@@ -1608,17 +1724,35 @@ void InputDispatcher::on_select() {
     // SELECT is the keyboard's ABORT — the chord alias for the button on its action row.
     if (qwerty_open()) { qwerty_cancel(); return; }
 
+    // SELECT is the EQ editor's second CLOSE, beside B. It needs one: B is deferred to release inside
+    // the editor (the slot cycle owns B+DPAD), so SELECT is the way out that acts on the press.
+    if (eq_open()) { close_eq_editor(); return; }
+
     // On the browser SELECT does nothing ALONE; it is a modifier there (SELECT+A/B/R), and its press
     // is what arms those three. Kotlin's `handleSelect()` has an empty FILE_BROWSER arm for the same
     // reason.
     if (on_browser()) return;
 
-    // The SAMPLE EDITOR's SELECT is an ALIAS for the two cells whose A opens something: the NAME row
-    // (the keyboard) and the FX row's EQ slot (the EQ editor — not ported, so it is a no-op here, as
-    // every other EQ cell in the app is). It exists because A on the NAME cell is DEFERRED to release,
-    // and SELECT is the way to open it without the wait.
+    // ⚠️ SELECT IS THE ALIAS FOR THE DEFERRED-A CELLS, and that is what it is FOR. A on those cells is
+    // held until release (`defer_a_to_release`), so that a held A+DPAD can still dial the value
+    // underneath — and SELECT is how you open the same thing without the wait. One list, one call.
+    //
+    // Kotlin keeps the two in step by hand and DRIFTED once doing it: its `handleSelect` SAMPLE_EDITOR
+    // arm tests `cursorRow == 16 && fxType == 3` with NO column check, so SELECT on the APPLY cell
+    // (col 2) opens the EQ editor there while a deferred A on the same cell does not. That difference is
+    // preserved below rather than tidied away — it is reachable, it is harmless, and a port that
+    // "fixes" it is a port that no longer matches the device.
+    if (open_sub_screen_at_cursor(/*peek=*/false)) return;
+
     if (on_sample_editor()) {
         if (s_.sampleEditor.showConfirmClose) return;   // a dialog owns the buttons under it
+
+        // Kotlin's wider EQ arm (see above): row 16 with the EQ effect selected, ANY column.
+        if (s_.sampleEditor.cursorRow == 16 && s_.sampleEditor.fxType == 3) {
+            open_eq_editor(std::min(127, std::max(0, s_.sampleEditor.fxValue)),
+                           EqCallerContext::sample_editor_fx());
+            return;
+        }
         if (s_.sampleEditor.cursorRow == 18)
             open_qwerty(QwertyContext::SAMPLE_NAME, s_.sampleEditor.sampleName, "SAMPLE NAME:",
                         fs_.samples_directory());
@@ -1642,10 +1776,6 @@ void InputDispatcher::on_select() {
         mark_modified();
         return;
     }
-
-    // The other SELECT actions Kotlin has here all OPEN A SUB-SCREEN that the port has not built: the
-    // EQ overlay (MIXER's master EQ, EFFECTS' two input EQs, the instrument EQ cells) and the qwerty
-    // keyboard (the PROJECT / INSTRUMENT name rows). They land with those screens.
 }
 
 void InputDispatcher::on_stop_preview() {
@@ -1659,8 +1789,16 @@ void InputDispatcher::on_stop_preview() {
     // ⚠️ The BROWSER is on this list too, and it has to be: its START auditions the file under the
     // cursor and the sample rings out (no timed kill). Moving the cursor to the next file must silence
     // the last one, or scrolling a folder of kicks stacks them on top of each other.
+    //
+    // ⚠️ And so is the EQ EDITOR — but ONLY when it was opened over an INSTRUMENT. That is the case
+    // where a preview can be ringing underneath it (the editor lets START through precisely so that it
+    // can be), and its band edits sweep that held note live. Opened over the MIXER or EFFECTS there is
+    // no audition to silence, and claiming otherwise would stop a preview nobody started.
+    const bool eqOverInstrument =
+        eq_open() && s_.eq.caller.kind == EqCallerContext::Kind::INSTRUMENT;
+
     const bool previewScreen = (s_.currentScreen == ScreenType::TABLE) || on_browser() ||
-                               on_instrument_screen() ||
+                               on_instrument_screen() || eqOverInstrument ||
                                (s_.currentScreen == ScreenType::PHRASE && s_.settings.notePreviewEnabled);
     if (previewScreen) host_.stop_preview();
 }
@@ -2238,15 +2376,10 @@ bool InputDispatcher::instrument_open_at_cursor() {
         return true;
     }
 
-    // Row 1 — NAME. The one cell here whose A is DEFERRED TO RELEASE (see defer_a_to_release).
-    if (row == 1) {
-        // A default-named slot opens the box EMPTY rather than with "INST07" in it: you are naming the
-        // instrument, and having to delete the placeholder first is six button presses of nothing.
-        const std::string current = songcore::instrument_has_default_name(ins) ? "" : ins.name;
-        open_qwerty(QwertyContext::INSTRUMENT_NAME, current, "INSTRUMENT NAME:", "");
-        return true;
-    }
-
+    // ⚠️ Row 1 (NAME) and row 12/14 col 1 (the EQ cell) are NOT here — they are the two DEFERRED cells,
+    // and they live in `open_sub_screen_at_cursor` with the other four. That split is Kotlin's, and it
+    // is the difference between a cell whose A fires on the PRESS (these — read-only buttons with no
+    // A+DPAD to protect) and one whose A must wait for the RELEASE.
     return false;
 }
 
@@ -2808,26 +2941,197 @@ void InputDispatcher::run_due_sample_preview_restore(bool force) {
 }
 
 bool InputDispatcher::defer_a_to_release() const {
-    // ⚠️ The cells whose A OPENS something AND whose A+DPAD means something else. Firing the open on the
-    // PRESS would pre-empt the combo: hold A on the NAME cell, press B to reset it, and you would be
-    // looking at a keyboard instead. Kotlin defers exactly these (`openSubScreenAtCursor(peek = true)`),
-    // and the mapper cancels the deferral the moment any A-combo fires.
-    //
-    // The INSTRUMENT NAME row, and — since S7 — the PROJECT NAME row, which is the sharper case of the
-    // two: its 20 characters are 20 cursor COLUMNS, each an in-place CHARACTER cell. So on one cell, A
-    // opens the keyboard, A+UP walks that character through the alphabet, and A+B blanks it. Fire the
-    // open on the press and two of those three become unreachable.
-    //
-    // The EQ cells join when the EQ overlay lands — they are the case that makes this mechanism
-    // necessary rather than tidy, since A+DPAD dials the slot number on the very cell whose A opens the
-    // editor.
-    //
-    // The LOAD / SAVE / NEW / MIX / SEQ buttons are NOT here, deliberately: they are read-only cells
-    // with no A+DPAD behaviour to protect, and Kotlin fires them on the press too.
-    if (s_.currentScreen == ScreenType::INSTRUMENT && s_.instrumentCursorRow == 1) return true;
-    if (s_.currentScreen == ScreenType::PROJECT &&
-        s_.projectCursorRow == static_cast<int>(ProjectRow::NAME)) return true;
+    // ⚠️ NO CELL OPENS A SUB-SCREEN WHILE A MODAL IS ALREADY UP, and this guard is Kotlin's
+    // (`currentCellOpensSubScreen` opens with it). It stopped being merely tidy the moment the EQ editor
+    // landed: the cursor UNDERNEATH the open editor is, by construction, always parked on the very EQ
+    // cell that raised it. Without this line every plain A inside the editor would be deferred to
+    // release, and the A,A window cleared, for a press that has nothing to open.
+    if (any_modal_open()) return false;
+
+    return const_cast<InputDispatcher*>(this)->open_sub_screen_at_cursor(/*peek=*/true);
+}
+
+bool InputDispatcher::defer_b_to_release() const {
+    // Exactly the EQ editor, and nothing else. See the header: B is both the CLOSE and the modifier of
+    // the slot cycle, so it cannot act until it is known which one the user meant — and only the release
+    // says that.
+    return eq_open();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// THE EQ EDITOR (Phase 3 S8)
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+bool InputDispatcher::open_sub_screen_at_cursor(bool peek) {
+    const Project& p = *s_.project;
+
+    switch (s_.currentScreen) {
+        case ScreenType::PROJECT:
+            // The NAME row, any column but the label. Its 20 characters are 20 cursor COLUMNS, each an
+            // in-place CHARACTER cell — so on ONE cell A opens the keyboard, A+UP walks that character
+            // through the alphabet, and A+B blanks it. The sharpest case the defer latch exists for.
+            if (s_.projectCursorRow == static_cast<int>(ProjectRow::NAME) &&
+                s_.projectCursorColumn >= 1) {
+                if (!peek) open_qwerty(QwertyContext::PROJECT_NAME, host_.project().name,
+                                       "PROJECT NAME:", "", 20);
+                return true;
+            }
+            break;
+
+        case ScreenType::INSTRUMENT: {
+            const Instrument& ins  = p.instruments[static_cast<size_t>(s_.currentInstrument)];
+            const bool        isSF = ins.instrumentType == songcore::InstrumentType::SOUNDFONT;
+
+            if (s_.instrumentCursorRow == 1) {
+                if (!peek) {
+                    // A default-named slot opens the box EMPTY rather than with "INST07" in it: you are
+                    // naming the instrument, and deleting a placeholder first is six presses of nothing.
+                    const std::string cur =
+                        songcore::instrument_has_default_name(ins) ? "" : ins.name;
+                    open_qwerty(QwertyContext::INSTRUMENT_NAME, cur, "INSTRUMENT NAME:", "");
+                }
+                return true;
+            }
+            if (s_.instrumentCursorRow == instrument_eq_row(isSF) && s_.instrumentCursorColumn == 1) {
+                // ⚠️ `max(0, …)`: an UNASSIGNED EQ is −1 in the project, and −1 is the engine's bypass
+                // value — but it is not a SLOT, and the editor has to open ON one. Kotlin's
+                // `coerceAtLeast(0)` says the same thing: opening an unassigned EQ starts you on slot 0.
+                if (!peek) open_eq_editor(std::max(0, ins.eqSlot),
+                                          EqCallerContext::instrument(s_.currentInstrument));
+                return true;
+            }
+            break;
+        }
+
+        case ScreenType::INST_POOL:
+            if (s_.poolCursorColumn == 4) {
+                const Instrument& ins = p.instruments[static_cast<size_t>(s_.currentInstrument)];
+                if (!peek) open_eq_editor(std::max(0, ins.eqSlot),
+                                          EqCallerContext::instrument(s_.currentInstrument));
+                return true;
+            }
+            break;
+
+        case ScreenType::MIXER:
+            if (s_.mixerMasterRow == 1 && s_.mixerCursorColumn == 8) {
+                if (!peek) open_eq_editor(std::max(0, p.masterEqSlot), EqCallerContext::master());
+                return true;
+            }
+            break;
+
+        case ScreenType::EFFECTS:
+            if (s_.effectsCursorRow == EffectModule::ROW_REV_EQ) {
+                if (!peek) open_eq_editor(std::max(0, p.reverbInputEq), EqCallerContext::reverb_in());
+                return true;
+            }
+            if (s_.effectsCursorRow == EffectModule::ROW_DLY_EQ) {
+                if (!peek) open_eq_editor(std::max(0, p.delayInputEq), EqCallerContext::delay_in());
+                return true;
+            }
+            break;
+
+        case ScreenType::SAMPLE_EDITOR:
+            // Only the EQ SLOT cell (row 16, col 1, with the EQ effect selected). Column 2 is APPLY and
+            // keeps its own A; A+DPAD on column 1 still dials the slot.
+            if (s_.sampleEditor.cursorRow == 16 && s_.sampleEditor.cursorCol == 1 &&
+                s_.sampleEditor.fxType == 3) {
+                if (!peek) open_eq_editor(std::min(127, std::max(0, s_.sampleEditor.fxValue)),
+                                          EqCallerContext::sample_editor_fx());
+                return true;
+            }
+            break;
+
+        default:
+            break;
+    }
     return false;
+}
+
+void InputDispatcher::open_eq_editor(int slot, EqCallerContext caller) {
+    s_.eq           = EqEditorState{};
+    s_.eq.isOpen    = true;
+    s_.eq.slotIndex = std::min(127, std::max(0, slot));
+    s_.eq.cursorRow = 0;   // BAND 1, TYPE — the top-left cell, every time
+    s_.eq.caller    = caller;
+}
+
+void InputDispatcher::eq_move_cursor(int d_band, int d_param) {
+    const int band  = std::min(2, std::max(0, s_.eq.cursor_band() + d_band));
+    const int param = std::min(3, std::max(0, s_.eq.cursor_param() + d_param));
+    s_.eq.cursorRow = band * 4 + param;
+}
+
+void InputDispatcher::apply_caller_eq_slot_change(int new_slot) {
+    Project& p = host_.edit_project();
+
+    // ⚠️ FIVE DIFFERENT PROJECT FIELDS, ONE GESTURE — and this is the whole reason `EqCallerContext`
+    // exists. Cycling the slot from inside the editor has to write back to the cell that RAISED it, and
+    // the editor's own state has no idea which that was unless it was told at open time.
+    switch (s_.eq.caller.kind) {
+        case EqCallerContext::Kind::MASTER:
+            p.masterEqSlot = new_slot;
+            host_.set_master_eq_slot(new_slot);
+            break;
+        case EqCallerContext::Kind::REVERB_IN:
+            p.reverbInputEq = new_slot;
+            host_.set_reverb_input_eq(new_slot);
+            break;
+        case EqCallerContext::Kind::DELAY_IN:
+            p.delayInputEq = new_slot;
+            host_.set_delay_input_eq(new_slot);
+            break;
+        case EqCallerContext::Kind::INSTRUMENT: {
+            const int id = s_.eq.caller.instrId;
+            if (id >= 0 && id < static_cast<int>(p.instruments.size())) {
+                p.instruments[static_cast<size_t>(id)].eqSlot = new_slot;
+                host_.set_instrument_eq_slot(id, new_slot);
+            }
+            break;
+        }
+        case EqCallerContext::Kind::SAMPLE_EDITOR_FX:
+            // No engine call, and none is missing: the sample editor's EQ is applied DESTRUCTIVELY to
+            // the buffer when its APPLY button is pressed, reading the bank at that moment. Nothing is
+            // filtering live, so there is nothing to re-point.
+            s_.sampleEditor.fxValue = new_slot;
+            break;
+    }
+
+    s_.projectVersion++;
+}
+
+void InputDispatcher::push_eq_band_to_engine() {
+    const Project& p       = *s_.project;
+    const int      slot    = s_.eq.slotIndex;
+    const int      bandIdx = s_.eq.cursor_band();
+
+    if (slot < 0 || slot >= static_cast<int>(p.eqPresets.size())) return;
+    const songcore::EqPreset& preset = p.eqPresets[static_cast<size_t>(slot)];
+    if (bandIdx < 0 || bandIdx >= static_cast<int>(preset.bands.size())) return;
+    const songcore::EqBand& band = preset.bands[static_cast<size_t>(bandIdx)];
+
+    // The BAND, into the engine's 128-slot bank.
+    host_.set_eq_band(slot, bandIdx, band.type, band.freq, band.gain, band.q);
+
+    // ⚠️ AND THEN THE CALLER IS RE-HANDED THE SLOT, and the second call is not redundant: `set_eq_band`
+    // writes the BANK, and nothing that is filtering right now reads the bank. Re-assigning the slot is
+    // what makes the consumer recompile its coefficients. Drop it and every band you dial does nothing
+    // you can hear (SongcoreHost::set_eq_band has the engine's side of it).
+    //
+    // ⚠️ AN ANDROID BUG, FOUND HERE, AND IT IS WHY THIS GOES THROUGH `apply_caller_eq_slot_change`
+    // RATHER THAN AN INLINE `when` OVER THE ENGINE SETTERS — which is what Kotlin had.
+    //
+    // Opening the editor on an UNASSIGNED EQ shows slot 0 (−1 is the bypass value, not a slot, so it is
+    // clamped up for display). But nothing WRITES 0 into the project. So Kotlin's band edit told the
+    // ENGINE "use slot 0" while `masterEqSlot` stayed at −1: you could HEAR the EQ, the mixer cell still
+    // read "--", and the next save-and-reload threw it away, because the load path faithfully re-pushes
+    // the −1 the project still held. The project and the engine disagreed about which slot was live —
+    // which is the SAME failure S5 found from the other end (deleting a slot wrote −1 to the project and
+    // never told the engine, so the EQ went on filtering).
+    //
+    // Editing a band therefore ADOPTS the slot: one call writes the field AND makes the engine call, so
+    // the two cannot come apart. For an already-assigned slot it is the same engine call plus a no-op
+    // write. Zone B, so fixed on Android too (`AppInputDispatcher.handleGenericInput`), per §4's rule.
+    apply_caller_eq_slot_change(slot);
 }
 
 }  // namespace pt::ui
