@@ -111,15 +111,33 @@ class FileSystem {
 
     // ── The app's own files ──────────────────────────────────────────────────────────────────────
     //
-    // S6a left both of these out with the note "they land with PROJECT"; the first one does, here.
-    // (The autosave path still has no caller — it arrives with the lifecycle work that gives SETTINGS
-    // its RESUME row back. Until then the row is caps-gated off rather than drawn inert.)
+    // Three files that belong to the APP rather than to the user, and none of them is ever listed by
+    // the browser. S6a left two of them out with the note "they land with PROJECT"; the template did,
+    // and the autosave lands here, with the lifecycle work that gives SETTINGS its RESUME row back.
 
     /** The song TEMPLATE: what the app boots into. SETTINGS → TEMPLATE writes and deletes it. */
     virtual std::string template_project_path() = 0;
 
     /** Where the shell keeps `settings.json`. On Android the answer is SharedPreferences, not a path. */
     virtual std::string settings_path() = 0;
+
+    /**
+     * The CRASH-RECOVERY autosave (S10).
+     *
+     * ⚠️ **Its PRESENCE is the signal, and that is the whole design.** The file is written while there
+     * is unsaved work and DELETED on every clean save / load / new / exit — so finding one at launch
+     * means the last session did not end cleanly (a launcher's kill, a flat battery, a crash), and
+     * that is exactly what the RECOVER WORK? prompt keys on. Kotlin says the same in one line:
+     * "its presence at next launch signals an unclean exit" (AutosaveManager).
+     *
+     * ⚠️ It must therefore be somewhere the browser CANNOT see — a `.ptp` in `Projects/` would be
+     * offered as a normal project to load, and deleting it from under the recovery prompt would be a
+     * button press away. Android gets this for free (app-private `filesDir`, which scoped storage
+     * keeps out of Documents); here it sits in the ROOT, beside `template.ptp` and `settings.json`,
+     * which is the same argument those two already made: the root is the app's, and the six
+     * sub-directories are the user's.
+     */
+    virtual std::string autosave_file_path() = 0;
 
     // ── Reading ─────────────────────────────────────────────────────────────────────────────────
     /** Whole file → string. False (and `out` untouched) if it cannot be read. */

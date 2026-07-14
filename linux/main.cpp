@@ -24,18 +24,18 @@
 // an observable object graph; it pushes the whole thing down as JSON on every change. There is no
 // Kotlin here.)
 //
-// ─── WHAT IS STILL A STUB ────────────────────────────────────────────────────────────────────────
+// ─── WHAT IS HERE ────────────────────────────────────────────────────────────────────────────────
 //
-// Eight screens are real — SONG, CHAIN, PHRASE, TABLE, GROOVE, and since S4 INSTRUMENT, INST.POOL and
-// MODS — R+DPAD moves between all of them, and the whole input layer is here: selection, the clipboard,
-// item cycling, cloning, the note preview, the FX-helper overlay, the instrument audition. The rest
-// draw the "COMING SOON" placeholder that the Android app itself used while its own screens were being
-// written, and they land session by session: MIXER and EFFECTS, then the file browser and the sample
-// editor, then PROJECT and SETTINGS — each bringing its own arm of the dispatcher with it.
+// All SIXTEEN screens, as of Phase 3 S9 — SONG, CHAIN, PHRASE, TABLE, GROOVE, INSTRUMENT, INST.POOL,
+// MODS, MIXER, EFFECTS, PROJECT, SETTINGS, the FILE BROWSER, the SAMPLE EDITOR, and the EQ and THEME
+// editor overlays — with the whole input layer under them: selection, the clipboard, item cycling,
+// cloning, the note preview, the FX helper, the QWERTY keyboard, the confirm dialog, the auditions.
+// Nothing in the Kotlin dispatcher is unported. There is no "COMING SOON" placeholder left to draw.
 //
-// Two cells already draw a button for a screen that does not exist (INSTRUMENT's LOAD/SAVE and its
-// EDIT). Pressing them does nothing yet, on purpose: the row geometry has to be right NOW, because the
-// cursor walks it, and designing it twice is how a port grows a second layout.
+// S10 added the LIFECYCLE, which is the part of an app that has no screen: the crash-recovery autosave,
+// the signal handler that makes a launcher's kill survivable, and the RECOVER WORK? prompt that hands
+// the work back. The three things this file does that `pt-ui` cannot are all in that shape — a window,
+// a clock, and a process that can be taken away.
 
 // <cmath> before <SDL.h> — see the note in sdl-audio-engine.h (M_PI, _USE_MATH_DEFINES, C4005).
 #include <cmath>
@@ -58,6 +58,7 @@
 #include "sdl-input.h"
 #include "sdl-video.h"
 
+#include <csignal>
 #include <cstdio>
 #include <fstream>
 #include <memory>
@@ -68,6 +69,41 @@ using namespace songcore;
 namespace ui = pt::ui;
 
 namespace {
+
+// ─── SIGTERM / SIGINT — the launcher taking the process back (S10) ────────────────────────────────
+//
+// ⚠️⚠️ **THE HANDLER SETS A FLAG. IT DOES NOTHING ELSE, AND THAT IS THE WHOLE OF THE DESIGN.**
+//
+// The port plan says "handle SIGINT/SIGTERM → autosave" (§5), and read literally — serialize the
+// project from inside the handler — it is a bug of exactly the kind the autosave exists to prevent.
+// A signal handler may only call async-signal-safe functions. Writing a .ptp is ~440 KB of JSON
+// through `malloc`, `<filesystem>` and `ofstream`, and not one of those is on the list: a SIGTERM
+// landing while the main thread happens to be inside `malloc` deadlocks the handler on the heap lock.
+// The app HANGS instead of saving, the launcher's SIGKILL arrives a second later, and the autosave has
+// failed in precisely the case it was written for. Writing to a `volatile sig_atomic_t` is the one
+// thing the standard actually promises here, so it is the only thing this does. The frame loop reads
+// the flag, leaves, and flushes on the main thread with the heap intact.
+//
+// ⚠️ **AND IT IS OURS, NOT SDL's — WHICH IS NOT WHAT S10 FIRST ASSUMED.** SDL_quit.c installs handlers
+// for SIGINT and SIGTERM that do exactly this (`send_quit_pending = SDL_TRUE`; its own comment says
+// *"We can't send it in signal handler; SDL_malloc() might be interrupted!"*), and it was tempting to
+// call the job done and write nothing. **Measured, and it is not done:**
+//
+//   • on WINDOWS the whole thing is `#ifdef HAVE_SIGNAL_H`, and SDL's generated config carries
+//     `/* #undef HAVE_SIGNAL_H */` — so `SDL_EventSignal_Init` compiles to NOTHING. A scratch harness
+//     raising SIGTERM after `SDL_Init` found the disposition still `SIG_DFL`, and the raise went
+//     straight to the CRT default: `abort()`, exit code 3. No handler, no quit event, no autosave.
+//   • on LINUX it IS compiled in — but it is *also* gated on `SDL_HINT_NO_SIGNAL_HANDLERS`, which is
+//     readable from the ENVIRONMENT (`SDL_NO_SIGNAL_HANDLERS=1`). Whether a launcher kill saves the
+//     user's song would then depend on an env var in somebody else's launch script.
+//
+// So the guarantee would have rested on how a third party's SDL was compiled and on a variable we do
+// not own — for the one path in the app whose failure mode is *losing the user's work*. Ten lines are
+// cheaper than that. ⚠️ SDL will not fight us for it: `SDL_EventSignal_Init` puts back any handler it
+// finds that is not `SIG_DFL`, so installing before `SDL_Init` leaves ours in place.
+volatile std::sig_atomic_t g_terminate = 0;
+
+extern "C" void on_terminate_signal(int) { g_terminate = 1; }
 
 bool read_file(const std::string& path, std::string& out) {
     std::ifstream f(path, std::ios::binary);
@@ -315,6 +351,20 @@ void handle_button(const ButtonEvent& e, ui::InputDispatcher& d, MapperState& ms
 }  // namespace
 
 int main(int argc, char** argv) {
+    // ⚠️ UNBUFFERED stdout, and it is a diagnostic decision rather than a stylistic one. Every line this
+    // program prints exists for a bring-up where there is no screen yet — "did my samples load?", "where
+    // did it put its folders?", "did it find my crash file?" — and stdout is FULLY buffered the moment it
+    // is not a terminal. Pipe the shell to a log during a bring-up and then kill it, which is precisely
+    // what a bring-up does, and the buffer dies with the process: the log is empty and every question is
+    // still unanswered. The once-a-second status line below already knew this and carried its own
+    // `fflush`; the START-UP banner — the half that says whether anything worked — did not, and lost
+    // itself the first time S10 piped it. One `setvbuf` retires the whole class of bug, and at a print
+    // volume of a few lines a second it costs nothing.
+    //
+    // (⚠️ Not `_IOLBF`: the MSVC CRT does not implement line buffering and silently treats it as full
+    // buffering, so the dev box would go on losing the output while Linux looked fine.)
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+
     SDL_SetMainReady();
 
     if (argc < 2) {
@@ -334,6 +384,14 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "cannot read %s\n", projectPath.c_str());
         return 1;
     }
+
+    // ⚠️ BEFORE SDL_Init, and that ordering is load-bearing in two directions. SDL only installs its own
+    // SIGINT/SIGTERM handlers over a disposition that is still SIG_DFL — find one of ours and it puts it
+    // straight back — so going first is what keeps ours. And a kill arriving during start-up (media
+    // loading a big SF2 off a slow SD card is seconds, not milliseconds) then still finds a handler that
+    // does the right thing rather than the CRT default, which is abort().
+    std::signal(SIGTERM, on_terminate_signal);
+    std::signal(SIGINT, on_terminate_signal);
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
@@ -362,8 +420,11 @@ int main(int argc, char** argv) {
     std::printf("project: %s\nmedia:   %d loaded, %d failed (base dir: %s)\n", projectPath.c_str(),
                 media.loaded, media.failed, baseDir.c_str());
     if (media.failed > 0) {
+        // ASCII, like every other line this program prints — see the banner below. (This one was NOT:
+        // it carried an em-dash, on the one path you most want legible when something has already gone
+        // wrong on a device with no screen. Found by grepping the file against its own stated rule.)
         std::fprintf(stderr,
-                     "warning: %d sample(s)/SoundFont(s) failed to load — those instruments will be "
+                     "warning: %d sample(s)/SoundFont(s) failed to load - those instruments will be "
                      "silent\n",
                      media.failed);
     }
@@ -464,6 +525,37 @@ int main(int argc, char** argv) {
     };
     dispatch.set_render_hooks(std::move(hooks));
 
+    // ── THE LIFECYCLE (S10) ──────────────────────────────────────────────────────────────────────
+    //
+    // Where a RELATIVE sample path resolves. Absolute paths (everything the browser loads) ignore it;
+    // a portable project — every golden, and anything this build ships — stores its media relative, and
+    // recovering one of those against the wrong folder brings the song back looking perfect and playing
+    // silence. So the dispatcher is TOLD the session's media dir rather than guessing one.
+    dispatch.set_media_base_dir(baseDir);
+
+    // An autosave that survived to launch means the last session did not end cleanly — a launcher's
+    // kill, a flat battery, a crash. SETTINGS → RESUME decides what happens next: ASK raises the
+    // RECOVER WORK? dialog, AUTO restores in silence.
+    //
+    // ⚠️ AFTER load_settings (RESUME is the setting being read) and AFTER push_params (a recovery
+    // re-pushes everything anyway). If there is no autosave — the common case, and the one that means
+    // everything went fine last time — this does nothing at all.
+    // Said out loud for the same reason the once-a-second status line below is: during a handheld
+    // bring-up there is no screen yet, and "did it find my crash file?" is not a question you can answer
+    // by looking at a window that is not there.
+    //
+    // ⚠️ ASCII, and that is this file's own rule being obeyed rather than a preference — the help banner
+    // below states it: the console's encoding is not ours to choose (a handheld's serial console, an ssh
+    // session, a Windows box on a legacy code page), and an em-dash arrives there as mojibake. S10 wrote
+    // one into this very line and watched it come back as `вЂ”` on the first run.
+    switch (dispatch.boot_recovery()) {
+        using BR = ui::InputDispatcher::BootRecovery;
+        case BR::NONE:     break;   // the common case, and it deserves no line of its own
+        case BR::ASKED:    std::printf("autosave: FOUND - asking (SETTINGS > RESUME = ASK)\n"); break;
+        case BR::RESTORED: std::printf("autosave: FOUND - restored (SETTINGS > RESUME = AUTO)\n"); break;
+        case BR::DROPPED:  std::printf("autosave: FOUND but UNREADABLE - dropped\n"); break;
+    }
+
     std::printf("\nWASD/arrows move   K/Enter = A   J/Esc = B   U/I = L/R   LShift = SELECT   SPACE = START   F10 quit\n");
     std::printf("A+UP/DOWN edit   A+LEFT/RIGHT edit fast   A+B clear   A,A insert next unused\n");
     std::printf("B+LEFT/RIGHT change WHICH phrase/chain/table   B+UP/DOWN page the song\n");
@@ -494,7 +586,15 @@ int main(int argc, char** argv) {
     bool   running    = true;
     Uint64 lastStatus = 0;
 
-    while (running && !state.shouldQuit) {
+    // ⚠️ `g_terminate` is the launcher's kill, read once per frame. It is a FLAG and not an action — see
+    // on_terminate_signal — so this loop condition is where a SIGTERM actually takes effect, and the
+    // flush below the loop is where the work is saved, on the main thread, with a heap to do it with.
+    //
+    // ⚠️ One honest limit, stated rather than discovered later: a kill arriving while the app is inside
+    // the SYNCHRONOUS export render is not seen until the render finishes, because the frame loop is not
+    // running. The exposure is small — the autosave for everything up to that point fired 3 s after the
+    // last edit, long before the user navigated to EXPORT and pressed A — but it is not zero.
+    while (running && !state.shouldQuit && !g_terminate) {
         // One clock reading per frame, handed to everything that needs it. The input layer's repeat
         // is a function of time, so it takes the clock rather than reaching for it.
         const Uint64 now = SDL_GetTicks64();
@@ -502,15 +602,30 @@ int main(int argc, char** argv) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) {
+                // The OTHER way a kill arrives: a window manager's close button, and — where SDL was
+                // built with HAVE_SIGNAL_H and nobody set SDL_NO_SIGNAL_HANDLERS — SDL's own SIGINT /
+                // SIGTERM translation. Both land here as an ordinary event.
+                //
+                // ⚠️ It is NOT the guarantee, and S10 assumed it was until it measured. On Windows SDL's
+                // signal code is `#undef HAVE_SIGNAL_H`'d out entirely, and on Linux it is gated on an
+                // ENVIRONMENT variable. So the shell installs its own handler (see on_terminate_signal)
+                // and this arm is the belt to that handler's braces — an UNCLEAN exit either way, so the
+                // flush below the loop keeps the work.
                 running = false;
             } else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F10) {
                 // Dev-only quit, and still NOT part of the button model — it is the desktop escape
                 // hatch, and it bypasses the dirty check on purpose (a dev killing a test run does not
                 // want to be asked).
                 //
+                // ⚠️ Not being ASKED is not the same as CHOOSING TO DISCARD, so F10 is an UNCLEAN exit
+                // and the flush below keeps the work. That is also the more useful behaviour for the
+                // person pressing it: F10 out of a test session, come back, and the session is still
+                // there. The one exit that throws work away is the one that says so first.
+                //
                 // The REAL exit is PROJECT → EXIT (S7): a handheld launcher offers no window chrome to
-                // close, so the app has to be able to give the process back from inside. It asks first
-                // when there is unsaved work, because there is no autosave yet to make that survivable.
+                // close, so the app has to be able to give the process back from inside. It asks when
+                // there is unsaved work, and its YES is the app's ONE clean death — the only path that
+                // deletes the autosave rather than writing one.
                 running = false;
             } else {
                 input.handle_event(e, now);
@@ -570,17 +685,25 @@ int main(int argc, char** argv) {
     // ⚠️ Settings are written HERE, not on every keystroke. Holding A+UP on a hex-byte setting fires
     // an edit every 100 ms (the key-repeat interval), and one file write per repeat is an SD card
     // being hammered for a value that is still moving.
-    //
-    // ⚠️ And the PROJECT is not written here, deliberately. There is no autosave yet, so EXIT asks
-    // first (the shared confirm dialog, gated on `project_dirty()`) rather than silently saving a
-    // document under a name the user did not choose. The autosave — and with it the SIGTERM handler
-    // that would make a launcher's kill survivable, and the SETTINGS RESUME row that configures it —
-    // is the lifecycle session's, and until then `PlatformCaps::sdl` hides the RESUME row rather than
-    // drawing a setting that controls nothing.
     if (state.settingsDirty) {
         if (ui::save_settings(filesystem, state.settings, state.theme))
             std::printf("settings: saved\n");
     }
+
+    // ⚠️ **THE FLUSH — and every way out of the loop above arrives here, which is the design.**
+    //
+    // The 3 s debounce can lose the last few edits if the process is taken away before it fires, and on
+    // a handheld it very often is: the CFW menu kills the port, the battery goes, the power slider is a
+    // switch and not a request. So the exit path flushes synchronously, on the main thread, while there
+    // is still a heap and a filesystem to do it with.
+    //
+    // ⚠️ It is a NO-OP when the document is clean, and that is what keeps the file's meaning intact:
+    // "an autosave exists" must mean "the last session ended badly and there is work in it". A confirmed
+    // PROJECT → EXIT has already DELETED the autosave (confirm_accept) and made the project clean, so
+    // this writes nothing — the one exit the user was asked about is the one exit that leaves no trace.
+    // Everything else — SIGTERM, SIGINT, the window's close button, F10 — never asked, so it keeps the
+    // work, and the next launch says so.
+    dispatch.flush_autosave();
 
     host.stop();
     engine->onResumeRequested = nullptr;

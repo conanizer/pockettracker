@@ -51,6 +51,15 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     values.notePreviewEnabled = get_bool(j, "notePreview",        values.notePreviewEnabled);
     values.traceEnabled       = get_bool(j, "trace",              values.traceEnabled);
 
+    // ⚠️ RESUME (S10). New here because the shell only GAINED the row in S10 — and the session that
+    // flips the cap on is the session that must add the key, or the setting resets to ASK on every
+    // launch and nothing anywhere says so. See the header: this is S9's theme-by-name bug's shape, and
+    // the only check that can catch it is a save → load round trip (ptdispatch §28).
+    //
+    // Absent from an older settings.json → the default (ASK) stays, which is the right answer for an
+    // upgrading user: a prompt they can say no to, not a silent restore they never asked for.
+    values.autosaveResumeAuto = get_bool(j, "autosaveResumeAuto", values.autosaveResumeAuto);
+
     // The visualizer is the theme's field but the USER's choice, so it survives the theme load below —
     // which is why it is read first and handed in rather than left to be overwritten.
     const int viz = clamp(get_int(j, "visualizer", static_cast<int>(theme.visualizerType)),
@@ -85,12 +94,13 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
 
 bool save_settings(FileSystem& fs, const SettingsValues& values, const Theme& theme) {
     json j;
-    j["scalingBilinear"] = values.scalingBilinear;
-    j["insertBefore"]    = values.insertBefore;
-    j["cursorRemember"]  = values.cursorRemember;
-    j["notePreview"]     = values.notePreviewEnabled;
-    j["trace"]           = values.traceEnabled;
-    j["visualizer"]      = static_cast<int>(theme.visualizerType);
+    j["scalingBilinear"]    = values.scalingBilinear;
+    j["insertBefore"]       = values.insertBefore;
+    j["cursorRemember"]     = values.cursorRemember;
+    j["notePreview"]        = values.notePreviewEnabled;
+    j["trace"]              = values.traceEnabled;
+    j["autosaveResumeAuto"] = values.autosaveResumeAuto;   // S10 — the RESUME row
+    j["visualizer"]         = static_cast<int>(theme.visualizerType);
 
     // The palette itself, through the `.ptt` serializer (see load_settings). `theme` is still written
     // beside it, and NOT as a leftover: it is what an OLDER build reads, and what a human scanning the

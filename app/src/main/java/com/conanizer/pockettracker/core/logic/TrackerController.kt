@@ -387,6 +387,31 @@ class TrackerController(
         projectVersion++
     }
 
+    /**
+     * Force a recomposition WITHOUT marking the project dirty.
+     *
+     * ⚠️ **`projectVersion` HAS TWO JOBS, AND THAT IS A TRAP.** It is the dirty counter
+     * ([isProjectDirty] compares it against [savedProjectVersion]) — *and*, because it is an
+     * `observed` property, writing it also fires `onStateChanged()`, which is what bumps MainActivity's
+     * `stateVersion` and redraws the screen. So `projectVersion++` reads like "tell Compose something
+     * changed" and quietly also means "this song has unsaved work in it".
+     *
+     * Two callers only ever wanted the redraw — the SETTINGS arm of `handleGenericInput`, and the
+     * preset-save arm of the keyboard's APPLY — and both got the dirty flag for free. Neither one
+     * touches the Project: changing the visualizer or writing a `.pti` out of an instrument does not
+     * alter a single byte of the song. But it marked it dirty, and the crash-recovery autosave keys on
+     * exactly that: **change the visualizer, wait three seconds, and an `autosave.ptp` is written for a
+     * project with no edits in it — so the next launch asks RECOVER WORK? about work that never
+     * existed.** (Or, on RESUME=AUTO, silently restores it.)
+     *
+     * Found by the Linux port's S10, which built the thing that reads the flag. The C++ side cannot
+     * express the bug — there is no recomposition there, so its counter only ever had the one job, and
+     * its SETTINGS arm had already refused to bump it (`ui/input_dispatcher.cpp`, S7).
+     */
+    fun notifyStateChanged() {
+        stateObserver.onStateChanged()
+    }
+
     fun clearStatus() {
         statusMessage = ""
         statusSuccess = true

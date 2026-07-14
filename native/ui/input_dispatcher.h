@@ -100,18 +100,82 @@ class InputDispatcher {
      * The frame's clock reading — call it once per frame, before the events.
      *
      * It feeds the L+B multi-tap window, and (since S6b) it RUNS ANY DEFERRED WORK THAT IS NOW DUE.
-     * There is exactly one such job and it is the sample editor's audition: the preview writes the
-     * SELECTION into the instrument's sample window, and has to put the real one back once the voice has
-     * actually triggered — which happens 100 frames after the note is scheduled, not when it is
-     * scheduled. Kotlin defers that restore with a 100 ms coroutine; there are no coroutines here, so it
-     * is a deadline, and this is the tick that checks it.
+     * There are TWO such jobs now, and both are deadlines because Kotlin arranges them with coroutines
+     * and there are none here:
      *
-     * ⚠️ Which means the clock is INJECTED rather than read, and that is the point: a restore that fires
-     * on a deadline cannot be tested by a tool that cannot move time. `tools/ptdispatch` drives this with
-     * a fake clock and watches the instrument come back — the same reason `SdlInput::handle_event` takes
-     * `now_ms` (S1) and `Selection::handle_select_b` does.
+     *   • the sample editor's audition restore (S6b) — the preview writes the SELECTION into the
+     *     instrument's sample window, and has to put the real one back once the voice has actually
+     *     triggered, which is 100 frames after the note is scheduled rather than when it is scheduled;
+     *   • the crash-recovery AUTOSAVE's 3 s debounce (S10) — see `mark_modified`.
+     *
+     * ⚠️ Which means the clock is INJECTED rather than read, and that is the point: work that fires on
+     * a deadline cannot be tested by a tool that cannot move time. `tools/ptdispatch` drives both of
+     * these with a fake clock — the same reason `SdlInput::handle_event` takes `now_ms` (S1) and
+     * `Selection::handle_select_b` does.
      */
     void set_now(long long now_ms);
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // THE LIFECYCLE (Phase 3 S10) — the three things the SHELL has to say
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // Everything else about the autosave is internal: `mark_modified` arms it, `set_now` fires it, and
+    // SAVE / LOAD / NEW / EXIT clear it. These three are the boundary, because only the shell knows
+    // where the media is, when the app started, and when it is being taken away.
+
+    /**
+     * Where a project's RELATIVE sample paths resolve. Call once, at start-up.
+     *
+     * ⚠️ It is the SESSION's media dir, and the autosave is why it has to be remembered rather than
+     * guessed. `resolve_media_path` leaves an ABSOLUTE path alone and joins a RELATIVE one onto this —
+     * and every sample loaded through the browser is absolute, so in normal use this changes nothing.
+     * But a *portable* project stores its media relative (every golden does, and so will anything the
+     * Linux build ships), and recovering one of those against the wrong folder loads no samples at all:
+     * the song comes back looking perfectly correct and playing silence, which is the worst way for a
+     * recovery to fail. The shell hands in what it handed `load_media` at boot.
+     */
+    void set_media_base_dir(std::string dir) { mediaBaseDir_ = std::move(dir); }
+
+    /** What `boot_recovery()` actually did. Four outcomes, and each one means exactly one thing. */
+    enum class BootRecovery {
+        NONE,      // no autosave — the last session ended cleanly. The overwhelmingly common case.
+        ASKED,     // RESUME=ASK: the RECOVER WORK? dialog is up, and nothing is decided yet.
+        RESTORED,  // RESUME=AUTO: the document is back, and DIRTY.
+        DROPPED,   // it would not parse. The file is gone, so it cannot be offered again.
+    };
+
+    /**
+     * START-UP: an autosave that survived to launch means the last session did not end cleanly.
+     *
+     * SETTINGS → RESUME decides what happens next — ASK raises the RECOVER WORK? dialog, AUTO restores
+     * it in silence — so the shell must call this AFTER loading settings.json, and after its own
+     * `push_params()`, because a recovery re-pushes everything anyway and doing it twice is only slow.
+     *
+     * ⚠️ The return value is an ENUM and not a bool, and S10 changed it to one after watching the shell
+     * print a lie. `bool found` collapsed RESTORED and DROPPED into the same answer, so a CORRUPT
+     * autosave under RESUME=AUTO — dropped, correctly, with nothing recovered — reported itself on the
+     * console as *"restored silently"*. A boot diagnostic that misreports the outcome is worse than no
+     * diagnostic at all: it is the thing you will trust at 2 a.m. on a handheld with no screen.
+     */
+    BootRecovery boot_recovery();
+
+    /**
+     * THE KILL. Flush the autosave NOW, synchronously, if there is unsaved work — and then return,
+     * because the caller is on its way out of the process.
+     *
+     * ⚠️ **CALL THIS FROM THE FRAME LOOP'S EXIT PATH, NEVER FROM A SIGNAL HANDLER.** It serializes
+     * ~440 KB of JSON and writes a file: `malloc`, `<filesystem>`, `ofstream` — not one of them is
+     * async-signal-safe, and a SIGTERM arriving while the main thread happens to be inside `malloc`
+     * would deadlock the handler on the heap lock. The app would then hang instead of saving, and the
+     * launcher's SIGKILL would arrive a second later: the autosave would fail in precisely the case it
+     * exists for. The port plan's "handle SIGTERM → autosave" (§5) is therefore a line to read twice.
+     *
+     * The shell's handler writes a `volatile sig_atomic_t` and returns; its frame loop reads that flag,
+     * leaves, and calls this. `pt-ui` never sees a signal — which is also why this is an ordinary public
+     * method and not a callback: `tools/ptdispatch` drives it directly, with no signals and no SDL, and
+     * proves the thing that actually loses data if it is wrong.
+     */
+    void flush_autosave();
 
     // ── D-pad alone: move the cursor (or drag a selection's edge) ────────────────────────────────
     void on_dpad_up();
@@ -250,6 +314,42 @@ class InputDispatcher {
     long long               now_ms_ = 0;
     RenderHooks             render_{};
 
+    /** See set_media_base_dir. Empty means "relative paths stay relative" (resolve_media_path). */
+    std::string mediaBaseDir_{};
+
+    // ── The autosave's DEBOUNCE (S10) ────────────────────────────────────────────────────────────
+    //
+    // Kotlin's is a `LaunchedEffect(projectVersion)` that DELAYS 3 s and is re-keyed — and therefore
+    // CANCELLED and restarted — by the next edit, so a burst of typing coalesces into one write. That
+    // is a deadline wearing a coroutine's clothes, and without coroutines it is just a deadline.
+    //
+    // ⚠️ RE-ARMED on every edit, never merely armed once: the write must land 3 s after the LAST
+    // keystroke, not 3 s after the first. Arm-if-not-armed would fire mid-burst, on a device where a
+    // held A+UP produces an edit every 100 ms — ten writes of ~440 KB a second onto an SD card.
+    bool      autosavePending_ = false;
+    long long autosaveDueAtMs_ = 0;
+
+    /** 3 s, and it is Kotlin's own constant (MainActivity.AUTOSAVE_DEBOUNCE_MS). */
+    static constexpr long long AUTOSAVE_DEBOUNCE_MS = 3000;
+
+    /** The deadline, checked once a frame by set_now(). */
+    void run_due_autosave();
+
+    /**
+     * Load the autosave into the live document — and LEAVE IT DIRTY.
+     *
+     * ⚠️ **The dirty flag is the whole difference between this and a LOAD, and it is deliberate on both
+     * platforms** (`TrackerController.recoverFromAutosave`: "leaving it DIRTY … so the user is nudged to
+     * Save it under a real name"). Recovered work is not *stored* work — it exists in one file the user
+     * cannot see, has never named, and did not ask for. Aligning the versions here would tell them the
+     * song is safe when the only copy of it is the crash file.
+     *
+     * ⚠️ And for the same reason it does NOT clear the autosave. The recovered document is still the
+     * only copy; deleting the file that holds it, at the exact moment the user has proved they are
+     * capable of losing the session, would be the one deletion in the app that can destroy real work.
+     */
+    bool recover_from_autosave();
+
     Clipboard clip_{};
 
     SongEditorModule       song_{};
@@ -371,8 +471,19 @@ class InputDispatcher {
 
     /** A on the dialog: do the thing it asked about. */
     void confirm_accept();
-    /** B on the dialog: don't. */
-    void confirm_cancel() { s_.confirm.close(); }
+
+    /**
+     * B on the dialog: don't.
+     *
+     * ⚠️ **NOT A PURE CLOSE ANY MORE — S10 is where that stopped being true.** For five of the six
+     * questions NO means "the world is exactly as it was", and closing the box is the whole of it. For
+     * RECOVER it means *discard my unsaved work*, and that has to DELETE the autosave: leave the file
+     * on disk and the same prompt comes back on the next launch, and the next, asking about work the
+     * user has already refused once — which is how a safety prompt teaches people to dismiss it.
+     *
+     * ptdispatch pins both halves: the other five leave the filesystem untouched, and this one does not.
+     */
+    void confirm_cancel();
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════
     // THE EQ EDITOR (Phase 3 S8)

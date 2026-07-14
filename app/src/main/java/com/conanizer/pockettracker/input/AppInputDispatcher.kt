@@ -806,7 +806,12 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     result.traceEnabled?.let        { setEventTraceEnabled(it) }
                     result.engineCpp?.let           { switchEngine(it) }
                     result.visualizerType?.let      { appTheme = appTheme.copy(visualizerType = it) }
-                    trackerController.projectVersion++
+                    // ⚠️ NOT projectVersion++ — a SETTINGS edit is not a SONG edit. That counter is the
+                    // DIRTY flag as well as the recomposition trigger, and this arm only ever wanted the
+                    // redraw: nothing above touches the Project. Bumping it marked a song with zero edits
+                    // as having unsaved work, so the 3 s crash-recovery autosave fired and the NEXT LAUNCH
+                    // asked "RECOVER WORK?" about work that never existed. See notifyStateChanged().
+                    trackerController.notifyStateChanged()
                 }
             }
             ScreenType.FILE_BROWSER -> {
@@ -1270,7 +1275,15 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
             showRecoveryDialog = false
             // A = recover: load the autosave (stays dirty so the user is nudged to Save it for real),
             // then reload its samples — the autosave stores paths, not PCM.
+            //
+            // ⚠️ …and DROP it if it will not load. The AUTO path has always guarded this ("A corrupt
+            // autosave is dropped so AUTO can't loop on it", MainActivity); this arm never did. So an
+            // unreadable autosave.ptp — which is exactly what a kill mid-write leaves behind — put the
+            // RECOVER WORK? prompt in front of the user on EVERY launch, forever, and it could never
+            // once succeed. Found by the Linux port's S10, which had to write the two arms side by side
+            // and saw that only one of them had the guard.
             if (trackerController.recoverFromAutosave()) reloadProjectSamples()
+            else fileController.clearAutosave()
             return
         }
         if (showInstrTypeDialog) {
@@ -2229,7 +2242,11 @@ class AppInputDispatcher(val ctrl: AppControllers, val refs: AppStateRefs) {
                     val filePath = "${qwertyKeyboardState.contextExtra}/$name.pti"
                     instrumentController.currentInstrument = trackerController.currentInstrument
                     instrumentController.savePreset(trackerController.project, filePath)
-                    trackerController.projectVersion++
+                    // ⚠️ The same trap as the SETTINGS arm above, and the second of its only two victims:
+                    // savePreset READS the project and writes a .pti — it does not change a byte of the
+                    // song. Bumping projectVersion marked it dirty anyway, which is a phantom autosave and
+                    // a phantom RECOVER WORK? on the next launch. See notifyStateChanged().
+                    trackerController.notifyStateChanged()
                 }
                 QwertyContext.SAMPLE_NAME -> {
                     val newName = typedText.ifEmpty { sampleEditorState.sampleName }

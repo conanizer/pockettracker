@@ -27,6 +27,7 @@ std::string confirm_dialog_title(ConfirmDialogState::Kind kind) {
         case ConfirmDialogState::Kind::NEW_PROJECT: return "NEW PROJECT?";
         case ConfirmDialogState::Kind::CHANGE_TYPE: return "CHANGE TYPE?";
         case ConfirmDialogState::Kind::EXIT:        return "EXIT?";
+        case ConfirmDialogState::Kind::RECOVER:     return "RECOVER WORK?";   // PixelPerfectRenderer:866
         case ConfirmDialogState::Kind::NONE:        break;
     }
     return "";

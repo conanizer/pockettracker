@@ -48,8 +48,18 @@ struct PlatformCaps {
     bool buttonFeedback = false;
 
     /**
-     * RESUME (ASK / AUTO). Off on the shell until the autosave itself exists — a setting that
-     * configures nothing is a lie told in the user's own UI, and hiding it is cheaper than the lie.
+     * RESUME (ASK / AUTO): what to do with a crash-recovery autosave found at launch.
+     *
+     * ⚠️ S7 gated this OFF on the shell, on the honest grounds that a setting which configures
+     * nothing is a lie told in the user's own UI. S10 built the thing it configures, so it is on for
+     * BOTH platforms now — and it is the only row in the map whose visibility has ever changed after
+     * the fact, which is the argument for the row map being DATA rather than a filtered list: the row
+     * kept its NUMBER (11) the whole time, so nothing the golden says about it had to be re-recorded.
+     *
+     * ⚠️ And it earns its keep more on a handheld than on a phone. ASK is right where the app is left
+     * running and the OS keeps it warm; AUTO is right on a device whose launcher kills the port every
+     * time the user opens a menu, where a prompt on every single return is noise rather than a
+     * safeguard. Same setting, opposite correct answer — which is exactly why it is a setting.
      */
     bool autosave = false;
 
@@ -92,7 +102,7 @@ struct PlatformCaps {
         c.touchLayouts   = false;
         c.skinOverlay    = false;
         c.buttonFeedback = false;
-        c.autosave       = false;
+        c.autosave       = true;    // S10 — the RESUME row comes back, because there is now an autosave
         c.engineToggle   = false;
         c.appExit        = true;
         return c;

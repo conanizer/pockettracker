@@ -38,6 +38,22 @@ struct ConfirmDialogState {
         NEW_PROJECT,   // PROJECT → NEW, and only when the project is DIRTY
         CHANGE_TYPE,   // INSTRUMENT → TYPE, when the slot already has a source loaded
         EXIT,          // PROJECT → EXIT, and only when the project is DIRTY (the shell only)
+
+        /**
+         * RECOVER WORK? — raised at BOOT, by nobody's button, when an autosave survived to launch
+         * (S10). The only question in the app the user did not ask for.
+         *
+         * ⚠️ **AND THE ONLY ONE WHOSE `B` DOES REAL WORK.** Every other Kind's B is a pure cancel:
+         * it closes the box and the world is exactly as it was. B here means *discard my unsaved
+         * work*, and it has to DELETE the autosave — because the file's whole meaning is "the last
+         * session ended badly", and a NO that left it on disk would ask the same question again on
+         * the next launch, and the next, forever.
+         *
+         * So `confirm_cancel()` stops being a one-liner. That is worth saying out loud rather than
+         * letting a future reader assume the symmetry still holds: cancelling this dialog is an
+         * action, and ptdispatch pins that the other five stayed pure.
+         */
+        RECOVER,
     };
 
     Kind kind = Kind::NONE;

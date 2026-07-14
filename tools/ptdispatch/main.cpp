@@ -55,6 +55,7 @@
 #include "ui/platform_caps.h"
 #include "ui/canvas.h"           // §27(a) — the pixel check RENDERS
 #include "ui/layout.h"           // §27(a) — …through the same TrackerLayout the shell draws through
+#include "ui/lifecycle.h"        // §28   — the crash-recovery autosave (S10)
 #include "ui/settings_row_layout.h"
 #include "ui/settings_store.h"
 #include "ui/std_filesystem.h"
@@ -1153,12 +1154,21 @@ int main() {
                std::string("SETTINGS[") + who + "]: UP reaches every visible row (and wraps)");
         }
 
-        // The shell has EIGHT of the thirteen; Android has all thirteen (in a debug build).
+        // The shell has NINE of the thirteen; Android has all thirteen (in a debug build).
+        //
+        // ⚠️ **EIGHT until S10, and this assertion is what noticed.** RESUME (row 11) was caps-gated OFF
+        // while there was no autosave for it to configure; S10 built one, `PlatformCaps::sdl().autosave`
+        // went true, and this line went red on the next run naming the exact delta (got 9, want 8).
+        // That is the check working, not the check breaking — a row map that can change under the port
+        // without a single test noticing is the thing worth being afraid of.
         state.caps = PlatformCaps::sdl(true);
         int shellRows = 0;
         for (int r = 0; r < SETTINGS_ROW_COUNT; ++r)
             if (settings_row_visible(static_cast<SettingsRow>(r), state.caps)) ++shellRows;
-        eq(shellRows, 8, "SETTINGS[sdl]: eight rows — SCALING, KB, CURSOR, PREV, VIZ, THEME, TPL, TRACE");
+        eq(shellRows, 9,
+           "SETTINGS[sdl]: nine rows — SCALING, KB, CURSOR, PREV, VIZ, THEME, TPL, RESUME (S10), TRACE");
+        ok(settings_row_visible(SettingsRow::RESUME, state.caps),
+           "SETTINGS[sdl]: …and RESUME is one of them — the row is BACK, because the autosave exists");
 
         state.caps = PlatformCaps::android(true);
         int androidRows = 0;
@@ -2526,6 +2536,381 @@ int main() {
             ok(old.visualizerType == VisualizerType::OCTA,
                "THEME/QUIT: …with the visualizer it stored");
         }
+    }
+
+    // ── 28. THE LIFECYCLE — the autosave, the kill, and the recovery (S10) ──────────────────────────
+    //
+    // ⚠️ **NOT ONE THING IN THIS SECTION IS A CELL, AND THAT IS WHY IT IS ALL HERE.** ptinput's whole
+    // vocabulary is (context, action, resulting cell): it can say what A+UP on the RESUME row writes into
+    // `autosaveResumeAuto` — and it does, in the 3,040 SETTINGS cases it has recorded from Kotlin since
+    // S7, because the row's NUMBER never changed even while the shell hid it. It cannot say anything at
+    // all about a FILE that appears three seconds after the last keystroke, is deleted by a save, and is
+    // read back by a process that has not started yet.
+    //
+    // The guardrail says to ask what the existing tools structurally cannot observe. They cannot observe
+    // TIME (the debounce is a deadline), they cannot observe the FILESYSTEM as a consequence (only as a
+    // fixture), and — as S9 proved the hard way — **not one of them quits and relaunches the app.** All
+    // three of those are the subject here.
+    {
+        songcore::SongcoreHost lhost(nullptr, 44100);   // no engine: a document edit never needed one
+        AppState               lstate;
+        lstate.project = &lhost.edit_project();
+        lstate.caps    = PlatformCaps::sdl(true);
+        InputDispatcher ld(lstate, lhost, fs_impl);
+        ld.set_media_base_dir(fs_impl.samples_directory());
+
+        const std::string autosavePath = fs_impl.autosave_file_path();
+        const auto file_there = [&] { return fs_impl.file_exists(autosavePath); };
+
+        // ⚠️ EVERY EDIT BELOW IS A REAL BUTTON. `mark_modified` is private and stays private: a test that
+        // reaches past the buttons proves the debounce works when armed and says nothing about whether
+        // anything arms it. So the document is dirtied the way a user dirties it — A+UP on a phrase cell.
+        const auto edit = [&] {
+            lstate.currentScreen = ScreenType::PHRASE;
+            lstate.cursorRow     = 0;
+            lstate.cursorColumn  = 1;   // the NOTE column
+            ld.on_a_up();
+        };
+        const auto press_project = [&](ProjectRow row, int col) {
+            lstate.currentScreen        = ScreenType::PROJECT;
+            lstate.projectCursorRow     = static_cast<int>(row);
+            lstate.projectCursorColumn  = col;
+            ld.on_button_a();
+        };
+
+        autosave_clear(fs_impl);   // a clean slate — §27 left settings.json behind, not an autosave
+        ok(!file_there(), "LIFE: no autosave to begin with");
+
+        // ═══ (a) THE DEBOUNCE ════════════════════════════════════════════════════════════════════
+        //
+        // 3 s after the LAST edit, not the first. Kotlin gets this from Compose — a
+        // LaunchedEffect(projectVersion) is CANCELLED and restarted whenever its key changes, so the
+        // delay(3000) inside it never completes while the edits keep coming. Here it is a deadline, and
+        // a deadline can be got wrong in exactly one interesting way: arm it only when idle.
+        ld.set_now(0);
+        edit();
+        ok(lstate.project_dirty(), "LIFE/DEBOUNCE: an edit makes the document dirty");
+
+        ld.set_now(2999);
+        ok(!file_there(), "LIFE/DEBOUNCE: …nothing is written at 2999 ms");
+        ld.set_now(3000);
+        ok(file_there(), "LIFE/DEBOUNCE: …and the autosave lands at 3000 ms");
+
+        // ⚠️ **THE COALESCE, and it is the assertion this whole sub-section exists for.** Edit at t=0 and
+        // again at t=2000: the deadline must MOVE to 5000, not stay at 3000. Get this wrong — arm only if
+        // not already armed — and a held A+UP (an edit every 100 ms, the key-repeat interval) writes ~440
+        // KB of JSON to an SD card ten times a second for a value the user is still moving.
+        autosave_clear(fs_impl);
+        ld.set_now(10000);
+        edit();                       // deadline → 13000
+        ld.set_now(12000);
+        edit();                       // …RE-ARMED → 15000
+        ld.set_now(13000);
+        ok(!file_there(),
+           "⚠️ LIFE/DEBOUNCE: a second edit RE-ARMS the deadline — nothing at 13000 ms (arm-if-idle "
+           "would have written here, mid-burst)");
+        ld.set_now(14999);
+        ok(!file_there(), "LIFE/DEBOUNCE: …still nothing at 14999 ms");
+        ld.set_now(15000);
+        ok(file_there(), "LIFE/DEBOUNCE: …and ONE write lands at 15000, 3 s after the LAST edit");
+
+        // ⚠️ **A SAVE INSIDE THE WINDOW MUST NOT BE UNDONE BY IT.** The save makes the document clean and
+        // deletes the file — and nothing cancels the pending deadline, because a save is not an edit and
+        // does not go through mark_modified. Without run_due_autosave's re-check of project_dirty(), the
+        // deadline would then fire and PUT THE FILE BACK: a crash-recovery autosave for a project that is
+        // safely on disk, and a phantom RECOVER WORK? on the next launch. Kotlin carries the identical
+        // second check for the identical reason.
+        ld.set_now(20000);
+        edit();                                        // dirty; deadline → 23000
+        lhost.edit_project().name = "SAVETEST";
+        ld.set_now(21000);
+        press_project(ProjectRow::PROJECT, 1);         // SAVE — clears the file, aligns the versions
+        ok(!lstate.project_dirty(), "LIFE/DEBOUNCE: a SAVE makes the document clean…");
+        ok(!file_there(), "LIFE/DEBOUNCE: …and deletes the autosave");
+        ld.set_now(23000);                             // the deadline the save did not cancel, firing
+        ok(!file_there(),
+           "⚠️ LIFE/DEBOUNCE: …and the deadline that was still pending does NOT put it back (drop the "
+           "re-check of project_dirty() and this is the ONLY check that dies)");
+
+        // ═══ (b) THE CLEAN POINTS — the deletions are as load-bearing as the writes ═══════════════
+        //
+        // "An autosave exists" has to mean "the last session ended badly and there is work in it". Every
+        // clean transition therefore erases it, and a clean transition that forgets to leaves the user
+        // being asked to recover a song they already saved — which is how a safety prompt teaches people
+        // to dismiss it without reading.
+        const auto dirty_with_autosave = [&](long long t) {
+            ld.set_now(t);
+            edit();
+            ld.set_now(t + 3000);
+            ok(file_there(), "LIFE/CLEAN: (setup) there is an autosave to erase");
+        };
+
+        dirty_with_autosave(30000);
+        press_project(ProjectRow::PROJECT, 3);   // NEW — the project is dirty, so this ARMS the confirm
+        ok(lstate.confirm.kind == ConfirmDialogState::Kind::NEW_PROJECT,
+           "LIFE/CLEAN: NEW on a dirty project asks first");
+        ld.on_button_a();                        // A = yes
+        ok(!file_there(), "LIFE/CLEAN: NEW erases the autosave (nothing left to recover)");
+        ok(!lstate.project_dirty(), "LIFE/CLEAN: …and the blank document is clean");
+
+        // ⚠️ …and NEW must also disarm the PENDING deadline, or it fires 3 s later and writes the blank
+        // document straight back out — an autosave whose contents are "nothing", offered as a recovery.
+        ld.set_now(40000);
+        ok(!file_there(), "⚠️ LIFE/CLEAN: …and no pending deadline re-creates it afterwards");
+
+        dirty_with_autosave(50000);
+        press_project(ProjectRow::PROJECT, 1);   // SAVE
+        ok(!file_there(), "LIFE/CLEAN: SAVE erases it (the work is in a real file the user named)");
+
+        // ═══ (c) THE CONFIRMED EXIT IS THE APP'S ONE *CLEAN* DEATH ═══════════════════════════════
+        //
+        // ⚠️ The design decision of the session, and it is not the obvious one. Now that an autosave
+        // exists, "EXIT can stop asking — the work is safe either way" is exactly the wrong conclusion:
+        // it would remove the only way to deliberately throw a session away, and make quitting silently
+        // preserve a document the user thought they were discarding. So EXIT still ASKS (S7), and its YES
+        // is the one exit that DELETES the autosave rather than writing one. Every other way out of the
+        // process — SIGTERM, a flat battery, F10 — never asked, so it keeps the work.
+        dirty_with_autosave(60000);
+        press_project(ProjectRow::EXIT, 1);
+        ok(lstate.confirm.kind == ConfirmDialogState::Kind::EXIT,
+           "LIFE/EXIT: EXIT on a dirty project still ASKS (the autosave did not make the question moot)");
+        ok(!lstate.shouldQuit, "LIFE/EXIT: …and has not quit yet");
+
+        // B = no. The dialog closes, and NOTHING ELSE HAPPENS — the autosave is still there, because the
+        // user is still working. ⚠️ Five of the six confirms have a NO that is a pure close; this checks
+        // that EXIT's still is, now that RECOVER's is not.
+        ld.on_button_b();
+        ok(!lstate.confirm.is_open(), "LIFE/EXIT: B closes it");
+        ok(!lstate.shouldQuit, "LIFE/EXIT: …without quitting");
+        ok(file_there(),
+           "⚠️ LIFE/EXIT: …and B on EXIT is a PURE CANCEL — it must not touch the autosave (only "
+           "RECOVER's NO does)");
+
+        press_project(ProjectRow::EXIT, 1);
+        ld.on_button_a();                        // A = yes, quit
+        ok(lstate.shouldQuit, "LIFE/EXIT: A quits");
+        ok(!file_there(),
+           "⚠️ LIFE/EXIT: …and a CONFIRMED exit erases the autosave — the user was shown their unsaved "
+           "work and chose to leave it, and the next launch must not offer it back");
+        lstate.shouldQuit = false;
+
+        // ═══ (d) THE KILL — what the frame loop's exit path does ═════════════════════════════════
+        //
+        // ⚠️ This is the SIGTERM path, and it runs HERE rather than in a signal handler for a reason
+        // worth repeating: writing a .ptp is ~440 KB of JSON through malloc, <filesystem> and ofstream,
+        // and not one of those is async-signal-safe. A SIGTERM arriving while the main thread happens to
+        // be inside malloc would deadlock the handler on the heap lock, the app would hang instead of
+        // saving, and the launcher's SIGKILL would land a second later — the autosave failing in exactly
+        // the case it exists for. SDL already solved it: its SIGINT/SIGTERM handler only sets a flag, and
+        // the event pump turns it into SDL_QUIT. So a kill arrives at the shell as an ordinary event, the
+        // loop ends, and `flush_autosave()` runs on the main thread. That call is what this drives.
+        autosave_clear(fs_impl);
+        ld.set_now(70000);
+        edit();
+        lhost.edit_project().name = "KILLED";
+        ld.flush_autosave();                     // ← the launcher took the process away
+        ok(file_there(), "⚠️ LIFE/KILL: the flush writes the autosave BEFORE the 3 s deadline was due");
+
+        // ⚠️ And it is a NO-OP on a clean document, which is what keeps the file's meaning intact. A
+        // flush that always wrote would leave an autosave after every single quit, and the next launch
+        // would ask RECOVER WORK? every single time — about nothing.
+        {
+            AppState        cstate;
+            cstate.project = &lhost.edit_project();
+            cstate.caps    = PlatformCaps::sdl(true);
+            InputDispatcher cd(cstate, lhost, fs_impl);
+            autosave_clear(fs_impl);
+            cd.flush_autosave();
+            ok(!file_there(),
+               "⚠️ LIFE/KILL: …but a CLEAN document flushes NOTHING (or 'an autosave exists' would stop "
+               "meaning 'the last session ended badly')");
+        }
+
+        // The file that landed is a real .ptp with the edit in it — not merely a file that exists.
+        {
+            songcore::SongcoreHost back(nullptr, 44100);
+            ld.set_now(80000);
+            edit();
+            lhost.edit_project().name = "ROUNDTRIP";
+            ld.flush_autosave();
+            ok(back.load_project_file(autosavePath, fs_impl.samples_directory()),
+               "LIFE/KILL: the flushed autosave parses back as a .ptp");
+            ok(back.project().name == "ROUNDTRIP",
+               "⚠️ LIFE/KILL: …and it is the LIVE document that was written, edits and all");
+        }
+
+        // ═══ (e) THE RELAUNCH — boot recovery, and the four ways it can go ═══════════════════════
+        //
+        // ⚠️ The only section in the whole tool that models a SECOND PROCESS. Everything above drives one
+        // app; this one has to end it and start another, because that is the only place these bugs live.
+        const auto boot = [&](bool resumeAuto) {
+            auto st = std::make_unique<AppState>();
+            st->project              = &lhost.edit_project();
+            st->caps                 = PlatformCaps::sdl(true);
+            st->settings.autosaveResumeAuto = resumeAuto;
+            return st;
+        };
+
+        // Write an autosave the way a killed session would, then relaunch onto it.
+        const auto crash_with = [&](const std::string& name) {
+            lstate.currentScreen = ScreenType::PHRASE;
+            lhost.edit_project().name = name;
+            ld.set_now(90000);
+            edit();
+            ld.flush_autosave();
+            ok(file_there(), "LIFE/BOOT: (setup) a killed session left an autosave");
+        };
+
+        // — no autosave: boot_recovery says nothing at all —
+        {
+            autosave_clear(fs_impl);
+            auto            st = boot(/*resumeAuto=*/false);
+            InputDispatcher bd(*st, lhost, fs_impl);
+            bd.set_media_base_dir(fs_impl.samples_directory());
+            ok(bd.boot_recovery() == InputDispatcher::BootRecovery::NONE,
+               "LIFE/BOOT: a clean last session finds nothing (the overwhelmingly common case)");
+            ok(!st->confirm.is_open(), "LIFE/BOOT: …and raises no prompt");
+        }
+
+        // — ASK, and A = recover —
+        {
+            crash_with("CRASHED");
+            lhost.new_project();                       // …the process died; a fresh one boots blank
+            auto            st = boot(/*resumeAuto=*/false);
+            InputDispatcher bd(*st, lhost, fs_impl);
+            bd.set_media_base_dir(fs_impl.samples_directory());
+
+            ok(bd.boot_recovery() == InputDispatcher::BootRecovery::ASKED, "LIFE/BOOT[ASK]: …is ASKED about");
+            ok(st->confirm.kind == ConfirmDialogState::Kind::RECOVER,
+               "LIFE/BOOT[ASK]: an autosave raises RECOVER WORK? — the one dialog nobody's button opened");
+
+            bd.on_button_a();
+            ok(!st->confirm.is_open(), "LIFE/BOOT[ASK]: A closes it");
+            ok(lhost.project().name == "CRASHED",
+               "⚠️ LIFE/BOOT[ASK]: …and the killed session's document is BACK");
+            ok(st->project_dirty(),
+               "⚠️ LIFE/BOOT[ASK]: …and it is DIRTY — recovered work is not STORED work, and marking it "
+               "clean would tell the user the song is safe while its only copy is the crash file");
+            ok(file_there(),
+               "⚠️ LIFE/BOOT[ASK]: …and the autosave STAYS: the recovered document is still the only copy, "
+               "and deleting it now is the one deletion in the app that can destroy real work");
+        }
+
+        // — ASK, and B = discard. The ONE confirm whose NO is an ACTION —
+        {
+            crash_with("DISCARD_ME");
+            lhost.new_project();
+            auto            st = boot(/*resumeAuto=*/false);
+            InputDispatcher bd(*st, lhost, fs_impl);
+            bd.set_media_base_dir(fs_impl.samples_directory());
+
+            (void)bd.boot_recovery();
+            bd.on_button_b();
+            ok(!st->confirm.is_open(), "LIFE/BOOT[ASK]: B closes it");
+            ok(!file_there(),
+               "⚠️ LIFE/BOOT[ASK]: …and B DELETES the autosave. Every other confirm's NO is a pure close; "
+               "leave the file here and the same prompt returns on every launch, forever");
+            ok(lhost.project().name != "DISCARD_ME",
+               "LIFE/BOOT[ASK]: …and the document was NOT loaded");
+        }
+
+        // — AUTO: no prompt at all —
+        {
+            crash_with("SILENT");
+            lhost.new_project();
+            auto            st = boot(/*resumeAuto=*/true);
+            InputDispatcher bd(*st, lhost, fs_impl);
+            bd.set_media_base_dir(fs_impl.samples_directory());
+
+            ok(bd.boot_recovery() == InputDispatcher::BootRecovery::RESTORED,
+               "LIFE/BOOT[AUTO]: …is RESTORED outright");
+            ok(!st->confirm.is_open(),
+               "⚠️ LIFE/BOOT[AUTO]: NO prompt — right on a handheld whose launcher kills the port every "
+               "time the user opens a menu, where asking on every return is noise, not a safeguard");
+            ok(lhost.project().name == "SILENT", "LIFE/BOOT[AUTO]: …the document came back anyway");
+            ok(st->project_dirty(), "LIFE/BOOT[AUTO]: …and it is dirty, exactly as the ASK path leaves it");
+        }
+
+        // ⚠️ — A CORRUPT AUTOSAVE IS DROPPED, NOT LOOPED ON. Under BOTH resume modes —
+        //
+        // Kotlin guards its AUTO arm for precisely this ("A corrupt autosave is dropped so AUTO can't loop
+        // on it") and **its ASK arm does not** — a recoverFromAutosave() that fails there leaves the file,
+        // so the prompt comes back on every launch and can NEVER succeed. S10 found that asymmetry by
+        // porting it, and fixed it on both platforms. Here, both arms drop it.
+        for (const bool autoResume : {false, true}) {
+            const char* who = autoResume ? "AUTO" : "ASK";
+            ok(fs_impl.write_file(autosavePath, "{ this is not json"),
+               std::string("LIFE/BOOT[") + who + "]: (setup) a truncated autosave — what a kill mid-write leaves");
+
+            lhost.new_project();
+            auto            st = boot(autoResume);
+            InputDispatcher bd(*st, lhost, fs_impl);
+            bd.set_media_base_dir(fs_impl.samples_directory());
+
+            const InputDispatcher::BootRecovery outcome = bd.boot_recovery();
+            if (!autoResume) {
+                ok(outcome == InputDispatcher::BootRecovery::ASKED,
+                   "LIFE/BOOT[ASK]: a corrupt autosave still raises the prompt (nothing has read it yet)");
+                ok(st->confirm.kind == ConfirmDialogState::Kind::RECOVER, "LIFE/BOOT[ASK]: …RECOVER WORK?");
+                bd.on_button_a();   // …and the recovery fails
+                ok(!st->statusSuccess && st->statusMessage == "RECOVER FAILED",
+                   "LIFE/BOOT[ASK]: …A on it fails, and SAYS so");
+            } else {
+                // ⚠️ DROPPED, not RESTORED — and the distinction is the reason this returns an enum
+                // rather than a bool. With a bool the shell printed "restored silently" for a file it had
+                // just thrown away unread, which is a boot diagnostic that lies about the one thing you
+                // are reading it to find out.
+                ok(outcome == InputDispatcher::BootRecovery::DROPPED,
+                   "⚠️ LIFE/BOOT[AUTO]: a corrupt autosave reports DROPPED, never RESTORED");
+            }
+            ok(!file_there(),
+               std::string("⚠️ LIFE/BOOT[") + who +
+                   "]: …and the unreadable file is DROPPED, not offered again — a prompt that can never "
+                   "succeed would otherwise return on every single launch");
+        }
+
+        // ═══ (f) THE ROUND TRIP — does RESUME itself survive a quit? ═════════════════════════════
+        //
+        // ⚠️⚠️ **THIS IS S9's HEADLINE BUG'S EXACT SHAPE, ONE ROW LATER, AND IT IS WHY THE CHECK EXISTS
+        // BEFORE THE BUG DOES.** S9 shipped a `settings_store` that persisted the theme by NAME — correct
+        // when written, silently lossy the moment the theme editor was built on top of it — and NOTHING IN
+        // THE LADDER COULD SEE IT, because no tool quits and relaunches the app. S10 flips
+        // `PlatformCaps::sdl().autosave` on, which gives the shell a settings row it did not have; the
+        // very same session therefore has to add the key to settings.json, or RESUME resets to ASK on
+        // every launch and not one of the 22,929 ptinput cases notices.
+        //
+        // The lesson from S9 was to point a check at the channel nothing is pointed at. This is that check,
+        // written the same day as the feature rather than one session later.
+        {
+            SettingsValues sv;
+            sv.autosaveResumeAuto = true;      // the user picks AUTO…
+            sv.notePreviewEnabled = false;
+            Theme th = theme_classic();
+            ok(save_settings(fs_impl, sv, th), "LIFE/RESUME: settings.json written with RESUME=AUTO");
+
+            SettingsValues back;                // …the app exits, and comes back to factory defaults
+            Theme          bth = theme_classic();
+            ok(!back.autosaveResumeAuto, "LIFE/RESUME: (a fresh SettingsValues defaults to ASK)");
+            ok(load_settings(fs_impl, back, bth), "LIFE/RESUME: …and reads settings.json on the next launch");
+            ok(back.autosaveResumeAuto,
+               "⚠️ LIFE/RESUME: RESUME=AUTO SURVIVED THE QUIT — drop the key from settings_store and this "
+               "is the only check in the entire tree that dies, exactly as S9's theme did");
+            ok(!back.notePreviewEnabled, "LIFE/RESUME: …and it did not clobber the row beside it");
+
+            // An OLDER settings.json — written before S10, with no such key — must still load, and must
+            // default to ASK. A prompt an upgrading user can say no to is the safe answer; a silent restore
+            // they never asked for is not.
+            ok(fs_impl.write_file(fs_impl.settings_path(), "{\"notePreview\": true}\n"),
+               "LIFE/RESUME: a pre-S10 settings.json (no autosaveResumeAuto key)…");
+            SettingsValues old;
+            old.autosaveResumeAuto = true;   // …poisoned, so a missing key CANNOT pass by accident
+            Theme oth = theme_classic();
+            ok(load_settings(fs_impl, old, oth), "LIFE/RESUME: …still loads");
+            ok(old.autosaveResumeAuto,
+               "LIFE/RESUME: …leaving the value it was handed alone (a missing key is not a false)");
+        }
+
+        autosave_clear(fs_impl);   // leave the temp tree as we found it
     }
 
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);

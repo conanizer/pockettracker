@@ -11,9 +11,20 @@
 // and prove that what was written is what comes back.
 //
 // ⚠️ ONLY THE ROWS THE SHELL ACTUALLY HAS ARE PERSISTED. The device rows (LAYOUT, OVERLAY, BTN SOUND,
-// BTN VIBRO, RESUME) are Android's, they are caps-gated off here, and writing zeroes for them would
-// be inventing a value for a question this platform never asked. If Android ever converges onto this
-// UI it brings its own answers with it — and its own keys.
+// BTN VIBRO) are Android's, they are caps-gated off here, and writing zeroes for them would be
+// inventing a value for a question this platform never asked. If Android ever converges onto this UI it
+// brings its own answers with it — and its own keys.
+//
+// ⚠️ **RESUME MOVED OUT OF THAT LIST IN S10, AND THAT IS THE ONE LINE OF THIS FILE WORTH RE-READING.**
+// The rule is "persist the rows this platform HAS", and S10 gave the shell a row it did not have — so
+// the very same session that flips `PlatformCaps::sdl().autosave` on has to add the key here, or the
+// setting silently resets to ASK on every single launch.
+//
+// That is not a hypothetical coupling: it is EXACTLY the bug S9 shipped and then found, one row later.
+// S9's `theme` was stored by NAME, which was lossless until the layer above it (the theme editor) made
+// a palette something you could invent — and **no tool in the ladder quits and relaunches the app**, so
+// the only thing that can ever catch this class is a save → load round trip. `ptdispatch` §28 carries
+// one for RESUME for precisely that reason, and its control fires.
 //
 // Missing file, missing key, unparseable value: the DEFAULT stays. A settings file is not a document,
 // and losing one is not worth a dialog — it is worth the factory settings and a working app.

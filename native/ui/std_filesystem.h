@@ -43,11 +43,16 @@ class StdFileSystem : public FileSystem {
 
     // ── The app's own files ─────────────────────────────────────────────────────────────────────
     //
-    // Both sit in the ROOT, not in a sub-directory: they are the app's, not the user's, and the six
-    // folders above are what a user sees when the SD card goes into a card reader. (A PortMaster
-    // launch script points the root at CONFDIR on the card, so both survive an app update.)
+    // All three sit in the ROOT, not in a sub-directory: they are the app's, not the user's, and the
+    // six folders above are what a user sees when the SD card goes into a card reader. (A PortMaster
+    // launch script points the root at CONFDIR on the card, so all three survive an app update.)
+    //
+    // ⚠️ The autosave especially: a `.ptp` inside `Projects/` would be listed by the browser, offered
+    // as a project to LOAD, and deletable with SELECT+B — and its whole meaning is "nobody put this
+    // here on purpose". See FileSystem::autosave_file_path.
     std::string template_project_path() override { return root_ + "/template.ptp"; }
     std::string settings_path() override         { return root_ + "/settings.json"; }
+    std::string autosave_file_path() override    { return root_ + "/autosave.ptp"; }
 
     // ── Reading ─────────────────────────────────────────────────────────────────────────────────
     bool read_file(const std::string& path, std::string& out) override;

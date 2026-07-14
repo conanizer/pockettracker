@@ -348,7 +348,7 @@ int main(int argc, char** argv) {
                      "              [--phrase=N] [--chain=N] [--table=N] [--groove=N]\n"
                      "              [--instrument=N] [--scroll=N] [--cursor=ROW,COL]\n"
                      "              [--caps=android|android-rel|sdl|sdl-rel]  (S7: which rows exist)\n"
-                     "              [--confirm=CLEAN_SEQ|CLEAN_INST|NEW_PROJECT|CHANGE_TYPE|EXIT]\n"
+                     "              [--confirm=CLEAN_SEQ|CLEAN_INST|NEW_PROJECT|CHANGE_TYPE|EXIT|RECOVER]\n"
                      "              [--status=TEXT] [--status-fail] [--rendering=PCT]\n"
                      "              [--eq=SLOT] [--eq-cursor=0..11] [--eq-spectrum]   (S8: the overlay)\n"
                      "              [--eq-caller=MASTER|REV|DLY|SAMPLE|INST<N>]\n"
@@ -454,6 +454,7 @@ int main(int argc, char** argv) {
         else if (n == "NEW_PROJECT") state.confirm.open(K::NEW_PROJECT);
         else if (n == "CHANGE_TYPE") state.confirm.open(K::CHANGE_TYPE);
         else if (n == "EXIT")        state.confirm.open(K::EXIT);
+        else if (n == "RECOVER")     state.confirm.open(K::RECOVER);   // S10 — RECOVER WORK?
         else {
             std::fprintf(stderr, "unknown confirm: %s\n", v);
             return 2;

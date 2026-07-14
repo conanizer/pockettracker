@@ -201,6 +201,7 @@ if(NOT ANDROID)
             ui/clipboard.cpp
             ui/input_dispatcher.cpp
             ui/layout.cpp
+            ui/lifecycle.cpp
             ui/std_filesystem.cpp
             ui/settings_store.cpp
             ui/project_actions.cpp

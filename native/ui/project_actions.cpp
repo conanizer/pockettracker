@@ -3,11 +3,37 @@
 #include <string>
 #include <vector>
 
+#include "songcore/project_io.h"   // serialize_project — so a save can go through the FileSystem
 #include "songcore/render.h"
+#include "ui/lifecycle.h"          // autosave_clear — a save leaves nothing to recover (S10)
 
 namespace pt::ui {
 
 namespace {
+
+/**
+ * ⚠️ **A `.ptp` IS WRITTEN THROUGH THE FileSystem, NOT THROUGH `SongcoreHost::save_project_file`** —
+ * and S10 is the session that noticed the two had drifted.
+ *
+ * `FileSystem::write_file` writes `<path>.tmp` and renames it over the target. Its own doc comment
+ * says why, and it is not hypothetical on the hardware this port is aimed at: *"a device that loses
+ * power — or a user who pulls the SD card — mid-save must not be left with a half-written project
+ * where the whole one used to be."* Android has done exactly that since the beginning
+ * (`AndroidFileSystem.writeFile`), and Kotlin's `FileController.saveProject` goes through it.
+ *
+ * `SongcoreHost::save_project_file` is a plain `ofstream` opened with `trunc`, and it is right for
+ * songcore to have one: songcore must keep compiling for the NDK, where *where files live* is scoped
+ * storage and Kotlin's problem, so it cannot depend on `ui::FileSystem`. But **pt-ui can**, and since
+ * S7 it had been calling the truncating writer anyway — so the port promised atomicity in the
+ * interface, inherited it from Android in the implementation, and then quietly opted out of it in the
+ * only two places a user's song is ever written.
+ *
+ * The failure needs no imagination and no tool could have seen it: every check in the ladder asserts
+ * the file LANDS and PARSES, which it does. None of them cuts the power halfway through.
+ */
+bool write_project(const songcore::SongcoreHost& host, FileSystem& fs, const std::string& path) {
+    return fs.write_file(path, songcore::serialize_project(host.project()));
+}
 
 /** `0001`, `0002`, … — Kotlin's `index.toString().padStart(4, '0')`. */
 std::string pad4(int v) {
@@ -41,12 +67,25 @@ ActionResult save_project(songcore::SongcoreHost& host, FileSystem& fs, AppState
 
     const std::string path = fs.projects_directory() + "/" + safeName + ".ptp";
 
-    if (!host.save_project_file(path)) return ActionResult{false, "SAVE FAILED"};
+    if (!write_project(host, fs, path)) return ActionResult{false, "SAVE FAILED"};
 
     // The document is now on disk exactly as it stands, so it is no longer dirty. This is what makes
     // NEW and EXIT stop asking (TrackerController: `savedProjectVersion = projectVersion`).
     s.savedProjectVersion = s.projectVersion;
     s.projectPath         = path;
+
+    // …and the crash-recovery autosave goes with it: the work is now safely in a real file the user
+    // named, so there is nothing left to recover (TrackerController.saveProject, same two lines). It
+    // lives HERE, beside the version alignment, rather than in the dispatcher's SAVE arm — the two are
+    // one fact ("this document is now stored"), and a caller that gets one without the other leaves a
+    // recovery prompt hanging over a project that is safely saved.
+    //
+    // ⚠️ The dispatcher's pending 3 s deadline is NOT cancelled from here and does not need to be: it
+    // re-checks `project_dirty()` when it fires, and the line above has just made that false. That
+    // re-check is the ONLY thing standing between a save-inside-the-debounce-window and the autosave
+    // being written straight back out — see InputDispatcher::run_due_autosave.
+    autosave_clear(fs);
+
     return ActionResult{true, "SAVED"};
 }
 
@@ -134,7 +173,7 @@ ActionResult render_stems(songcore::SongcoreHost& host, FileSystem& fs, AppState
 // ─── The song TEMPLATE ───────────────────────────────────────────────────────────────────────────
 
 ActionResult save_template(songcore::SongcoreHost& host, FileSystem& fs) {
-    if (!host.save_project_file(fs.template_project_path()))
+    if (!write_project(host, fs, fs.template_project_path()))
         return ActionResult{false, "SAVE FAILED"};
     return ActionResult{true, "TEMPLATE SAVED"};
 }

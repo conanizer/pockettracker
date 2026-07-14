@@ -3,6 +3,7 @@
 #include "songcore/timing.h"
 #include "songcore/traversal.h"
 #include "ui/cursor_move.h"
+#include "ui/lifecycle.h"        // the crash-recovery autosave — write / clear / load (S10)
 #include "ui/navigation.h"
 #include "ui/std_filesystem.h"   // path_name / path_stem / path_extension / to_lower
 #include "ui/theme_io.h"         // .ptt — save_theme_file / load_theme_file
@@ -81,6 +82,87 @@ std::set<int> used_chain_ids(const Project& p) {
 void InputDispatcher::set_now(long long now_ms) {
     now_ms_ = now_ms;
     run_due_sample_preview_restore();   // the sample editor's 100 ms audition restore (S6b)
+    run_due_autosave();                 // the crash-recovery autosave's 3 s debounce  (S10)
+}
+
+// ─── The crash-recovery autosave (S10) ───────────────────────────────────────────────────────────
+
+void InputDispatcher::run_due_autosave() {
+    if (!autosavePending_ || now_ms_ < autosaveDueAtMs_) return;
+    autosavePending_ = false;
+
+    // ⚠️ **RE-CHECK `project_dirty()`, and this line is not belt-and-braces.** A SAVE inside the 3 s
+    // window makes the document clean AND deletes the autosave — and nothing re-arms or cancels this
+    // deadline when it does (a save is not an edit, so it does not go through mark_modified). Without
+    // the re-check the deadline would then fire anyway and PUT THE FILE BACK: a crash-recovery autosave
+    // for a project that is safely on disk, and a spurious RECOVER WORK? on the next launch. Kotlin
+    // carries the identical second check, with the identical comment, for the identical reason.
+    if (!s_.project_dirty()) return;
+
+    autosave_write(host_, fs_);   // a failure is silent — see lifecycle.h
+}
+
+void InputDispatcher::flush_autosave() {
+    autosavePending_ = false;
+    if (!s_.project_dirty()) return;
+    autosave_write(host_, fs_);
+}
+
+bool InputDispatcher::recover_from_autosave() {
+    if (!autosave_load(host_, fs_, mediaBaseDir_)) {
+        s_.statusMessage = "RECOVER FAILED";
+        s_.statusSuccess = false;
+        return false;
+    }
+
+    reset_editing_context();
+
+    // ⚠️ **DIRTY, on purpose — the one load path in the app that is.** `load_project_done` aligns the
+    // two versions because a loaded project IS what is on disk. Recovered work is not: it lives in one
+    // file the user cannot see, has never named and did not ask for. Marking it clean would tell them
+    // the song is safe at the exact moment its only copy is the crash file. So the version is bumped
+    // and the baseline is left behind, the document reads as dirty, and the next NEW or EXIT asks —
+    // which is the nudge to save it under a real name. (TrackerController.recoverFromAutosave.)
+    //
+    // It also means the debounce is NOT armed here, and does not need to be: the file it would write is
+    // the file we just read. The next actual edit arms it, and rewrites it with the edit in.
+    s_.projectVersion      = 1;
+    s_.savedProjectVersion = 0;
+    s_.projectPath.clear();   // it came from the autosave, which is not a name the user can save over
+
+    s_.statusMessage = "RECOVERED";
+    s_.statusSuccess = true;
+    return true;
+}
+
+InputDispatcher::BootRecovery InputDispatcher::boot_recovery() {
+    if (!autosave_exists(fs_)) return BootRecovery::NONE;   // last session ended cleanly — nothing to say
+
+    if (!s_.settings.autosaveResumeAuto) {
+        // ASK. The prompt is raised by nobody's button, which makes it the only dialog in the app the
+        // user did not open — so it must be the first thing they see, before a keystroke can land on
+        // the screen underneath it. (The confirm is the topmost modal and owns every button but A/B.)
+        //
+        // ⚠️ Note it does NOT try to parse the file first. A corrupt autosave still raises the prompt,
+        // and A on it then fails and drops it (confirm_accept). That is deliberate: reading a ~440 KB
+        // document to decide whether to ASK about it would put the cost of the recovery on every launch
+        // that has one, and the answer would be the same anyway — the user is told either way.
+        s_.confirm.open(ConfirmDialogState::Kind::RECOVER);
+        return BootRecovery::ASKED;
+    }
+
+    // AUTO. Restore in silence — the right answer on a handheld whose launcher kills the port every
+    // time the user opens a menu, where a prompt on every return is noise rather than a safeguard.
+    //
+    // ⚠️ **A corrupt autosave is DROPPED, not offered again.** Without this, AUTO would try the same
+    // unreadable file on every launch forever — Kotlin guards the AUTO path for exactly this reason
+    // ("so AUTO can't loop on it"). ⚠️ And S10 found that its ASK path does NOT: a `recoverFromAutosave`
+    // that fails there leaves the file, so the prompt returns every single launch and can never
+    // succeed. Both arms drop it here, and Android's ASK arm now does too.
+    if (recover_from_autosave()) return BootRecovery::RESTORED;
+
+    autosave_clear(fs_);
+    return BootRecovery::DROPPED;
 }
 
 // ─── The cursor ──────────────────────────────────────────────────────────────────────────────────
@@ -365,7 +447,28 @@ void InputDispatcher::mark_modified(bool table_touched) {
     // edit in the app already funnels through — which is what makes "is this project dirty?" a
     // question with a single answer rather than a flag each screen must remember to set.
     // (TrackerController's projectVersion; SAVE / LOAD / NEW align savedProjectVersion to it.)
+    //
+    // ⚠️ ONE COUNTER, ONE JOB — and on Android it has two, which is a bug S10 found by building the
+    // thing that reads it. Kotlin's `projectVersion` is ALSO the Compose recomposition trigger (every
+    // write to an `observed` property calls `onStateChanged()` → `stateVersion++`), so its SETTINGS arm
+    // bumps it purely to force a redraw — and inherits "the song is dirty" for free. Change the
+    // visualizer on Android and three seconds later a crash-recovery autosave is written for a project
+    // with no edits in it; the next launch asks RECOVER WORK? about work that does not exist. There is
+    // no recomposition here, so the counter only ever had the one job, and S7's arm already refused to
+    // bump it for a settings change (see generic_input's SETTINGS case). Android is fixed to match.
     s_.projectVersion++;
+
+    // ── Arm the autosave's debounce (S10) ────────────────────────────────────────────────────────
+    //
+    // ⚠️ RE-ARMED, not armed-if-idle: the deadline is 3 s after the LAST edit, so a burst coalesces
+    // into ONE write. Holding A+UP produces an edit every 100 ms (the key-repeat interval), and an
+    // arm-once deadline would fire in the middle of it and then again, and again — ~440 KB of JSON onto
+    // an SD card, ten times a second, for a value the user is still moving. Kotlin gets the same
+    // behaviour from Compose rather than by saying it: a `LaunchedEffect(projectVersion)` is CANCELLED
+    // and restarted every time its key changes, so the `delay(3000)` inside it never completes until
+    // the edits stop.
+    autosavePending_ = true;
+    autosaveDueAtMs_ = now_ms_ + AUTOSAVE_DEBOUNCE_MS;
 
     // ⚠️ The consumer caches which tables it has already pushed to the engine. push_project
     // invalidates that cache; an IN-PLACE edit cannot, so the table screen must say so itself.
@@ -1492,12 +1595,46 @@ void InputDispatcher::confirm_accept() {
             break;
 
         case ConfirmDialogState::Kind::EXIT:
+            // ⚠️ **A CONFIRMED EXIT IS A CLEAN EXIT, SO IT LEAVES NOTHING TO RECOVER.** The user was
+            // shown their unsaved work, and said quit anyway — that is a decision, and the autosave has
+            // to honour it. Leave the file behind and the next launch offers to restore precisely the
+            // work they just chose to abandon.
+            //
+            // ⚠️ Which is also why the dialog SURVIVES the autosave rather than being made redundant by
+            // it. The obvious "there is an autosave now, so EXIT can stop asking" is wrong twice over:
+            // it removes the only way to deliberately discard a session, and it makes quitting silently
+            // preserve a document the user thought they were throwing away. So EXIT still asks (S7),
+            // and its YES is the app's one *clean* death.
+            //
+            // Everything that is NOT this — SIGTERM from a launcher's menu, a flat battery, a crash, the
+            // F10 escape hatch — is an UNCLEAN death, and those are the ones `flush_autosave()` catches
+            // on the way out of the frame loop. The user was never asked; the work is kept.
+            autosave_clear(fs_);
             s_.shouldQuit = true;
+            break;
+
+        case ConfirmDialogState::Kind::RECOVER:
+            // A = recover. The document comes back DIRTY and the file STAYS — see recover_from_autosave
+            // for why both of those are deliberate. A failure has already dropped the file (below), so
+            // there is nothing to clean up here.
+            if (!recover_from_autosave()) autosave_clear(fs_);
             break;
 
         case ConfirmDialogState::Kind::NONE:
             break;
     }
+}
+
+void InputDispatcher::confirm_cancel() {
+    const ConfirmDialogState::Kind kind = s_.confirm.kind;
+    s_.confirm.close();
+
+    // ⚠️ The ONE question whose NO is an ACTION. For the other five, "no" means the world is exactly as
+    // it was and closing the box is the whole of it. Here it means *discard my unsaved work* — and a
+    // discard that leaves the file on disk is not a discard: the prompt would return on the next launch,
+    // and the next, about work the user has already refused. That is how a safety prompt teaches people
+    // to dismiss it without reading. (Kotlin: `showRecoveryDialog = false; fileController.clearAutosave()`.)
+    if (kind == ConfirmDialogState::Kind::RECOVER) autosave_clear(fs_);
 }
 
 /**
@@ -1528,6 +1665,14 @@ void InputDispatcher::start_new_project() {
     s_.savedProjectVersion = 0;
     s_.projectPath.clear();
 
+    // …and therefore nothing to recover. A clean transition DELETES the autosave, and the deletions are
+    // as load-bearing as the writes: leave the file behind here and the next launch offers to restore a
+    // song the user deliberately started over from. (TrackerController.newProject: "fresh project,
+    // nothing to recover".) The pending deadline goes with it — it would otherwise fire three seconds
+    // from now and write the blank document straight back out.
+    autosavePending_ = false;
+    autosave_clear(fs_);
+
     reset_editing_context();
 
     s_.statusMessage = "NEW PROJECT";
@@ -1536,13 +1681,16 @@ void InputDispatcher::start_new_project() {
 
 /** A .ptp just replaced the document. Leave the browser, and forget everything about the last one. */
 void InputDispatcher::load_project_done(const std::string& path) {
-    // A freshly LOADED project is CLEAN — it is exactly what is on disk. (Kotlin aligns the two
-    // versions on load for the same reason. The one path that deliberately does NOT is autosave
-    // recovery, which leaves the document dirty so the user is nudged to save it under a real name —
-    // and that path arrives with the lifecycle session.)
+    // A freshly LOADED project is CLEAN — it is exactly what is on disk, so there is nothing unsaved and
+    // nothing to recover. (Kotlin aligns the two versions AND clears the autosave on load, for the two
+    // halves of the same reason.) ⚠️ The one load path that deliberately does NEITHER is autosave
+    // recovery — see recover_from_autosave, which is the exception this comment used to promise.
     s_.projectVersion      = 0;
     s_.savedProjectVersion = 0;
     s_.projectPath         = path;
+
+    autosavePending_ = false;   // …or it fires 3 s from now and re-creates the file this just deleted
+    autosave_clear(fs_);
 
     reset_editing_context();
 
@@ -1634,9 +1782,11 @@ void InputDispatcher::project_action() {
         }
 
         case ProjectRow::EXIT:
-            // ⚠️ The shell only — and gated on the same question NEW asks. A handheld launcher takes
-            // the process back the moment this returns, so an unsaved song is gone for good; the
-            // autosave that would make that survivable is the lifecycle session's, not this one's.
+            // ⚠️ The shell only — and gated on the same question NEW asks. It still asks, now that S10
+            // has built the autosave, and that is deliberate: the dialog is the app's ONE way to
+            // deliberately throw a session away, and its YES is the app's one clean death (which is why
+            // confirm_accept's EXIT arm deletes the autosave). Everything else — the launcher's kill, a
+            // flat battery, F10 — is unclean, and the work is kept.
             if (!s_.caps.appExit) break;
             if (s_.project_dirty()) s_.confirm.open(ConfirmDialogState::Kind::EXIT);
             else                    s_.shouldQuit = true;
