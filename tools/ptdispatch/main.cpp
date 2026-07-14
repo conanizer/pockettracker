@@ -2011,6 +2011,145 @@ int main() {
                     flat, cut, flat > 0 ? 100.0 * cut / flat : 0.0);
     }
 
+    // ── 26. A LIVE EDIT DURING PLAYBACK MUST NOT EAT A PENDING KIL ──────────────────────────────
+    //
+    // ⚠️ THIS SECTION EXISTS BECAUSE OF A BUG REPORT NOBODY COULD REPRODUCE, AND IT CLOSES A HOLE THAT
+    // WAS ALWAYS THERE.
+    //
+    // After S8 shipped, editing an EQ band on device while the song played was reported to make a KIL'd
+    // note ring forever. It could not be reproduced — a harness drove the real engine through 24
+    // configurations of it (instrument EQ slot × edit cadence × KIL placement across a phrase boundary ×
+    // both branches of Voice::noteOff) and every one killed correctly. The report may have been a stale
+    // build. What the hunt DID establish is worth a standing test on its own:
+    //
+    //   **LIVE-EDIT RESCHEDULING HAS NO COVERAGE AT ALL, ON EITHER ENGINE.** `notify_data_changed()` is
+    //   an event-schema SC-4 exclusion: the 36 golden traces are recorded from a sequencer that is never
+    //   edited mid-flight, so ptplay cannot see it, and neither can anything else in the ladder. Yet it
+    //   does the single most dangerous thing in the scheduler — it rolls the lookahead back to a
+    //   checkpoint and calls `clearScheduledNotesFrom()`, which wipes the note queue, the param queue AND
+    //   THE KILL QUEUE from that frame on. A KIL is a *pending kill-queue entry*. If a rollback ever
+    //   reaches back far enough to swallow one belonging to a note that has already STARTED, nothing
+    //   re-emits it (the step that carried it is in the past) and the voice rings until the heat death of
+    //   the phrase.
+    //
+    // So this drives the REAL dispatcher's EQ editor — the real A+UP, at the real key-repeat cadence —
+    // over a real engine with the transport actually RUNNING, and listens to what comes out.
+    //
+    // ⚠️ It covers the SHELL's path, which edits the project in place. Android's additionally
+    // re-serializes and re-parses the whole project on every edit (`PlaybackController.notifyDataChanged`
+    // → `songcorePushProject`) before rolling back; that half is NOT tested here, and it is the half the
+    // report came from. Stated rather than glossed.
+    {
+        auto engine = std::make_unique<AudioEngine>();   // ⚠️ HEAP — see §23
+        engine->setDeviceSampleRate(44100);
+
+        songcore::SongcoreHost khost(engine.get(), 44100);
+        AppState               kstate;
+        kstate.project = &khost.edit_project();
+        kstate.caps    = PlatformCaps::sdl(true);
+        InputDispatcher kd(kstate, khost, fs_impl);
+
+        // A LOOPING tone: without its KIL this voice rings forever, which is the only way "the note kept
+        // playing" is measurable rather than a matter of a sample running out on its own.
+        const fs::path tone = tree.root / "Samples" / "kiltone.wav";
+        {
+            std::vector<float> pcm(44100 / 2);
+            for (size_t i = 0; i < pcm.size(); ++i) {
+                const double t = static_cast<double>(i) / 44100.0;
+                pcm[i] = static_cast<float>(0.6 * std::sin(2.0 * 3.14159265358979 * 440.0 * t));
+            }
+            songcore::write_wav_mono(tone.generic_string(), pcm, 44100);
+        }
+
+        songcore::Project& p = khost.edit_project();
+        p = songcore::make_default_project();
+        p.tempo        = 120;
+        p.masterEqSlot = 0;
+        p.eqPresets[0].bands[1].type = 3;    // the BELL the edit dials
+        p.eqPresets[4].bands[0].type = 3;    // the INSTRUMENT's own EQ — the report said it mattered
+
+        khost.load_sample(0, tone.generic_string());
+        p.instruments[0].loopMode = "fwd";   // ⚠️ a STRING; `= 1` silently assigns a char and does nothing
+        p.instruments[0].eqSlot   = 4;
+        p.instruments[0].volume   = 0xC0;
+
+        // Chain rows 1..3 are an EMPTY phrase, so there are three phrases of guaranteed silence to
+        // measure in. ⚠️ Without them the phrase loops straight back onto its own step 0 and RE-TRIGGERS
+        // the note — which reads as "the kill never fired" no matter what the kill did. The first version
+        // of the repro harness had exactly that confound and reported the bug everywhere.
+        p.tracks[0].chainRefs.assign(256, -1);
+        p.tracks[0].chainRefs[0]  = 0;
+        p.chains[0].phraseRefs[0] = 0;
+        p.chains[0].phraseRefs[1] = 1;
+        p.chains[0].phraseRefs[2] = 1;
+        p.chains[0].phraseRefs[3] = 1;
+
+        songcore::PhraseStep& n = p.phrases[0].steps[0];
+        n.note = songcore::Note::C4();  n.instrument = 0;  n.volume = 0x7F;
+        p.phrases[0].steps[4].fx1Type  = songcore::FX_KILL;
+        p.phrases[0].steps[4].fx1Value = 0x00;
+
+        khost.push_params();
+
+        const int64_t fps       = songcore::frames_per_step(120, 44100);
+        const int64_t killFrame = fps * 4;
+
+        khost.play_song(0);
+
+        // The EQ editor, opened the way a user opens it: A on the MIXER's master EQ cell.
+        kstate.currentScreen     = ScreenType::MIXER;
+        kstate.mixerMasterRow    = 1;
+        kstate.mixerCursorColumn = 8;
+        kd.on_button_a();
+        ok(kstate.eq.isOpen, "LIVE EDIT: the EQ editor is open over the mixer, mid-playback");
+
+        // BAND 2 / FREQ, which is the cell the report named. ⚠️ RIGHT changes BAND and DOWN changes
+        // PARAM — the cursor is one int over a 3×4 grid, so this is row 1*4 + 1 = 5. (The "was it really
+        // dialled" assertion below caught the first version of this walking onto BAND 1 instead, which is
+        // exactly what such a guard is for: a test that edits the wrong cell still goes green on the
+        // thing it was actually checking.)
+        kd.on_dpad_right();
+        kd.on_dpad_down();
+        eq(kstate.eq.cursorRow, 5, "LIVE EDIT: …with the cursor on BAND 2 / FREQ");
+
+        constexpr int      BLK = 256;
+        std::vector<float> buf(BLK * 2);
+        double  sumPre = 0.0, sumPost = 0.0;
+        int64_t nPre = 0, nPost = 0;
+
+        for (int64_t f = 0; f < killFrame + fps * 6; f += BLK) {
+            khost.poll();
+
+            // ⚠️ The EDIT, through the REAL dispatcher, at the REAL key-repeat rate — every ~100 ms while
+            // the note is sounding and the kill is still pending. Each one calls notify_data_changed(),
+            // and each one is therefore a chance to roll the pending kill off the end of the world.
+            if (f > fps / 2 && f < killFrame && (f / BLK) % 17 == 0) kd.on_a_up();
+
+            engine->processLiveBlock(buf.data(), BLK, 2, 44100.0f);
+
+            for (int i = 0; i < BLK; ++i) {
+                const double  v     = buf[static_cast<size_t>(i) * 2];
+                const int64_t frame = f + i;
+                if (frame < killFrame - 44100 / 50)      { sumPre  += v * v; ++nPre;  }
+                else if (frame > killFrame + 44100 / 20) { sumPost += v * v; ++nPost; }
+            }
+        }
+
+        const double pre  = nPre  ? std::sqrt(sumPre  / static_cast<double>(nPre))  : 0.0;
+        const double post = nPost ? std::sqrt(sumPost / static_cast<double>(nPost)) : 0.0;
+
+        ok(pre > 0.02, "LIVE EDIT: the note is actually sounding before the KIL (the test can fail)");
+        ok(kstate.eq.isOpen, "LIVE EDIT: …and the editor stayed open across every repeat");
+        ok(p.eqPresets[0].bands[1].freq != 0x80, "LIVE EDIT: …and the band really was dialled");
+
+        // ⚠️ THE CLAIM. Editing an EQ while the transport runs must not cost the note its KIL.
+        ok(post < pre * 0.10,
+           "⚠️ LIVE EDIT: a KIL'd note is STILL KILLED after an EQ is dialled mid-playback (make "
+           "notify_data_changed roll back to frame 0 and this is the check that dies)");
+        std::printf("       [info] KIL'd note RMS: before %.5f → after %.5f (%.1f%% — silence is the pass)\n",
+                    pre, post, pre > 0 ? 100.0 * post / pre : 0.0);
+    }
+
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);
     std::printf("%s\n", failures == 0 ? "ALL GREEN" : "RED");
     return failures == 0 ? 0 : 1;
