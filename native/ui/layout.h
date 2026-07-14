@@ -27,6 +27,7 @@
 #include "ui/canvas.h"
 #include "ui/helpers.h"
 #include "ui/modules/chain_editor.h"
+#include "ui/modules/confirm_dialog.h"
 #include "ui/modules/effects_editor.h"
 #include "ui/modules/file_browser.h"
 #include "ui/modules/groove_editor.h"
@@ -37,8 +38,10 @@
 #include "ui/modules/navigation_map.h"
 #include "ui/modules/oscilloscope.h"
 #include "ui/modules/phrase_editor.h"
+#include "ui/modules/project_editor.h"
 #include "ui/modules/qwerty_keyboard.h"
 #include "ui/modules/sample_editor.h"
+#include "ui/modules/settings_editor.h"
 #include "ui/modules/song_editor.h"
 #include "ui/modules/table_editor.h"
 
@@ -77,6 +80,9 @@ private:
     /** BPM · the 8-track note monitor · the navigation map. Hidden on the full-screen screens. */
     void draw_right_bar(Canvas& c, const AppState& s) const;
 
+    /** The global status line — "SAVED", "SEQ CLEANED", "NO FREE PHRASES" — over the scope strip. */
+    void draw_status_line(Canvas& c, const AppState& s) const;
+
     OscilloscopeModule    oscilloscope_;
     PhraseEditorModule    phraseEditor_;
     ChainEditorModule     chainEditor_;
@@ -88,6 +94,8 @@ private:
     ModulationModule      modulation_;
     MixerModule           mixer_;        // stateful (peak-hold) — see draw()
     EffectModule          effects_;
+    ProjectModule         project_;
+    SettingsModule        settings_;
     NavigationMapModule   navigationMap_;
     FileBrowserModule     fileBrowser_;   // full-screen: draw() returns before the furniture
     SampleEditorModule    sampleEditor_;  // full-screen too — a waveform wants the width

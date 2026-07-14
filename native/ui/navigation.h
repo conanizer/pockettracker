@@ -267,7 +267,7 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
     if (r.screen == ScreenType::TABLE) s.currentTable = s.currentInstrument;
 
     // Restore — or refresh, which is the Android default.
-    if (s.cursorRemember) {
+    if (s.settings.cursorRemember) {
         switch (r.screen) {
             case ScreenType::SONG:
                 s.cursorRow = s.songCursorRow;   s.cursorColumn = s.songCursorColumn;   break;
@@ -317,6 +317,21 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
                 break;
             default: break;
         }
+    }
+
+    // ⚠️ A GUARD KOTLIN CANNOT NEED — and note that PROJECT and SETTINGS are absent from BOTH arms
+    // above, deliberately: Kotlin never resets their cursors either, so they persist in both modes
+    // (as EFFECTS' does). This is not a refresh. It is a BOUNDS check, and it exists only because the
+    // SETTINGS row map is caps-FILTERED here and is not on Android.
+    //
+    // The cursor's default row is 0 = LAYOUT, a row the SHELL does not draw. Without this, the very
+    // first entry into SETTINGS would leave the cursor on an invisible row: nothing highlighted
+    // anywhere, and A+DPAD quietly editing a touch-layout setting on a device that has no touch
+    // screen. Android's row 0 is always present, so its `restoreCursorForScreen` has nothing to clamp.
+    if (r.screen == ScreenType::SETTINGS &&
+        !settings_row_visible(static_cast<SettingsRow>(s.settingsCursorRow), s.caps)) {
+        s.settingsCursorRow    = settings_first_visible_row(s.caps);
+        s.settingsCursorColumn = 1;
     }
 
     // SONG's viewport must contain its cursor, whichever branch above set it.

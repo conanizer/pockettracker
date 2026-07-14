@@ -297,6 +297,59 @@ inline CursorContext index_cycle(int current, int count) {
 }
 
 /**
+ * A cycle through an option LIST — SETTINGS' LAYOUT, OVERLAY and VISUALIZER rows. Kotlin's
+ * `CursorContextFactory.enumCycle`.
+ *
+ * ⚠️ NOT the same context as `index_cycle` above, however interchangeable the two look. Kotlin's
+ * enumCycle is a **HEX_BYTE with emptyValue = −1**; the MODS rows index_cycle serves are inline
+ * EFFECT_TYPE literals that keep the struct's own emptyValue. The BEHAVIOUR is identical — both value
+ * types wrap, neither carries a delete, and neither is ever empty — but the CONTEXT is not, and
+ * ptinput byte-compares the context. Folding these two into one factory is a one-line "cleanup" that
+ * turns the settings golden red.
+ *
+ * `optionCount` is clamped the way Kotlin clamps it (`coerceAtLeast(0)`), so an empty option list
+ * yields a 0..0 cycle rather than a 0..−1 one.
+ */
+inline CursorContext enum_cycle(int current, int option_count) {
+    CursorContext c;
+    c.valueType                 = CursorValueType::HEX_BYTE;
+    c.capabilities.canIncrement = true;
+    c.capabilities.canDecrement = true;
+    c.currentValue = current < 0 ? 0 : current;
+    c.minValue     = 0;
+    c.maxValue     = option_count - 1 < 0 ? 0 : option_count - 1;
+    c.smallStep    = 1;
+    c.largeStep    = 1;
+    c.emptyValue   = -1;
+    return c;
+}
+
+/**
+ * One character of an in-place name editor — PROJECT's NAME row, where each of the 20 characters is
+ * its own cursor column and A+UP/DOWN walks the allowed set (`allowed_chars()`).
+ *
+ * The first user of CursorValueType::CHARACTER in the port: the stepping has been here since S1 (it
+ * came with the value type), but no ported screen had an in-place text cell until PROJECT — the
+ * INSTRUMENT NAME row opens the QWERTY keyboard instead. A+B DELETES, which for a character means
+ * writing a space; there is no "empty" character, so `isEmpty` stays false and the delete arm is
+ * always live.
+ */
+inline CursorContext character(char current) {
+    CursorContext c;
+    c.valueType                 = CursorValueType::CHARACTER;
+    c.capabilities.canIncrement = true;
+    c.capabilities.canDecrement = true;
+    c.capabilities.canDelete    = true;
+    c.currentValue = static_cast<int>(static_cast<unsigned char>(current));
+    c.minValue     = 0;   // unused for CHARACTER
+    c.maxValue     = 0;   // unused for CHARACTER
+    c.smallStep    = 1;
+    c.largeStep    = 1;   // no fast step — the set is short
+    c.emptyValue   = static_cast<int>('_');
+    return c;
+}
+
+/**
  * Effect type. The stored value is an INDEX into songcore::EFFECT_TYPES, not an effect code — A+UP
  * walks the list, and the module converts back to a code when it writes the step.
  * A+B clears the effect, but only when it is not already NONE (FX_NONE is a valid stop on the cycle,

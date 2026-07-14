@@ -202,7 +202,10 @@ if(NOT ANDROID)
             ui/input_dispatcher.cpp
             ui/layout.cpp
             ui/std_filesystem.cpp
+            ui/settings_store.cpp
+            ui/project_actions.cpp
             ui/modules/chain_editor.cpp
+            ui/modules/confirm_dialog.cpp
             ui/modules/effects_editor.cpp
             ui/modules/file_browser.cpp
             ui/modules/fx_helper_overlay.cpp
@@ -214,8 +217,10 @@ if(NOT ANDROID)
             ui/modules/navigation_map.cpp
             ui/modules/oscilloscope.cpp
             ui/modules/phrase_editor.cpp
+            ui/modules/project_editor.cpp
             ui/modules/qwerty_keyboard.cpp
             ui/modules/sample_editor.cpp
+            ui/modules/settings_editor.cpp
             ui/modules/song_editor.cpp
             ui/modules/table_editor.cpp
     )

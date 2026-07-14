@@ -39,6 +39,18 @@ class SdlAudioEngine {
     // stream is. On Android that unpauses Oboe; here it unpauses the SDL device.
     void resumeStream();
 
+    /**
+     * Stop (and restart) the callback — what an OFFLINE RENDER needs (S7).
+     *
+     * ⚠️ The render drives the engine from the UI thread. The audio callback drives it from SDL's. A
+     * paused device is the only thing that makes "one writer" true rather than merely likely: Kotlin
+     * gets away with leaving Oboe open because a stopped transport means the callback reads a silent
+     * engine, but "silent" is not "absent", and `renderOffline` is rewriting the very buffers it reads.
+     * SDL_PauseAudioDevice blocks until the callback has returned, so after this call there is no
+     * second reader — by construction, not by timing.
+     */
+    void setPaused(bool paused);
+
     // The rate the device actually negotiated, not the one we asked for.
     int sampleRate() const { return sampleRate_; }
 

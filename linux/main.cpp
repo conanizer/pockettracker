@@ -50,6 +50,8 @@
 #include "ui/engine_feed.h"
 #include "ui/input_dispatcher.h"
 #include "ui/layout.h"
+#include "ui/platform_caps.h"
+#include "ui/settings_store.h"
 #include "ui/std_filesystem.h"
 
 #include "sdl-audio-engine.h"
@@ -384,6 +386,24 @@ int main(int argc, char** argv) {
     state.project       = &host.edit_project();
     state.currentScreen = ui::ScreenType::PHRASE;
 
+    // ── What THIS platform can do (S7) ───────────────────────────────────────────────────────────
+    //
+    // Which SETTINGS rows exist, and whether PROJECT has an EXIT. A VALUE, not an #ifdef — see
+    // ui/platform_caps.h for why that is the whole design: the same module compiled with
+    // `PlatformCaps::android()` reproduces Kotlin's row map exactly, which is what lets ptinput
+    // byte-compare the port's most divergent screen against the Kotlin one it replaces.
+#ifdef NDEBUG
+    state.caps = ui::PlatformCaps::sdl(/*debug_build=*/false);
+#else
+    state.caps = ui::PlatformCaps::sdl(/*debug_build=*/true);
+#endif
+
+    // ── settings.json ────────────────────────────────────────────────────────────────────────────
+    // SharedPreferences, as a file. No file = first launch = the factory settings, which is not an
+    // error and gets no complaint.
+    if (ui::load_settings(filesystem, state.settings, state.theme))
+        std::printf("settings: %s\n", filesystem.settings_path().c_str());
+
     ui::Canvas        canvas;
     ui::TrackerLayout layout;
     ui::EngineFeed    feed;
@@ -392,6 +412,24 @@ int main(int argc, char** argv) {
     // Sequencer is reading — so an edit is live the instant it is made.
     ui::InputDispatcher dispatch(state, host, filesystem);
     MapperState         mapper;
+
+    // ── What a RENDER needs from the shell (S7) ──────────────────────────────────────────────────
+    //
+    // The render is SYNCHRONOUS — the frame loop stops and renders. Android hands it to a coroutine
+    // because Compose would ANR; there is nothing here to hand it to, and stopping is the safer
+    // answer anyway, because the ONE thing that must not touch the engine while an offline render is
+    // driving it is the audio callback.
+    //
+    // ⚠️ So the device is PAUSED, not merely stopped. Kotlin stops PLAYBACK and leaves its Oboe stream
+    // open and idle, which is a race it happens to win (an idle callback reads a silent engine). A
+    // paused SDL device is a guarantee instead of a coincidence, and it costs one call.
+    ui::InputDispatcher::RenderHooks hooks;
+    hooks.suspend_audio = [&audio](bool suspend) { audio.setPaused(suspend); };
+    hooks.repaint       = [&]() {
+        layout.draw(canvas, state);
+        video.present(canvas);
+    };
+    dispatch.set_render_hooks(std::move(hooks));
 
     std::printf("\nWASD/arrows move   K/Enter = A   J/Esc = B   U/I = L/R   LShift = SELECT   SPACE = START   F10 quit\n");
     std::printf("A+UP/DOWN edit   A+LEFT/RIGHT edit fast   A+B clear   A,A insert next unused\n");
@@ -402,7 +440,10 @@ int main(int argc, char** argv) {
     // arrives there as mojibake.
     std::printf("A+UP on an FX-TYPE column opens the effect picker - release A to choose\n");
     std::printf("R+DPAD moves between screens: SONG CHAIN PHRASE INSTRUMENT TABLE MODS INST.POOL\n");
-    std::printf("                             GROOVE MIXER EFFECTS\n");
+    std::printf("                             GROOVE MIXER EFFECTS PROJECT SETTINGS\n");
+    std::printf("PROJECT: A on SAVE/LOAD/NEW, on EXPORT MIX/STEMS, on COMPACT SEQ/INST, on SETTINGS>, on EXIT\n");
+    std::printf("         A on NAME opens the keyboard; A+UP/DOWN edits one character in place\n");
+    std::printf("         a confirm asks A=YES B=NO before anything destructive\n");
     std::printf("START auditions the instrument on INSTRUMENT/POOL/MODS/TABLE - any button silences it\n");
     std::printf("SELECT on the EFFECTS TIME row toggles delay sync (free ms <-> note divisions)\n");
     std::printf("\nFILE BROWSER (A on INSTRUMENT's LOAD, or on the pool's NAME of an empty slot):\n");
@@ -416,7 +457,7 @@ int main(int argc, char** argv) {
     bool   running    = true;
     Uint64 lastStatus = 0;
 
-    while (running) {
+    while (running && !state.shouldQuit) {
         // One clock reading per frame, handed to everything that needs it. The input layer's repeat
         // is a function of time, so it takes the clock rather than reaching for it.
         const Uint64 now = SDL_GetTicks64();
@@ -426,9 +467,13 @@ int main(int argc, char** argv) {
             if (e.type == SDL_QUIT) {
                 running = false;
             } else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F10) {
-                // Dev-only quit, and NOT part of the button model: on Android the app never exits, and
-                // on a handheld the launcher kills the port. The real EXIT lands on the PROJECT screen
-                // with a SIGTERM autosave beside it (port plan §4.5 lifecycle).
+                // Dev-only quit, and still NOT part of the button model — it is the desktop escape
+                // hatch, and it bypasses the dirty check on purpose (a dev killing a test run does not
+                // want to be asked).
+                //
+                // The REAL exit is PROJECT → EXIT (S7): a handheld launcher offers no window chrome to
+                // close, so the app has to be able to give the process back from inside. It asks first
+                // when there is unsaved work, because there is no autosave yet to make that survivable.
                 running = false;
             } else {
                 input.handle_event(e, now);
@@ -481,6 +526,23 @@ int main(int argc, char** argv) {
                 state.cursorRow, state.cursorColumn);
             std::fflush(stdout);  // block-buffered to a pipe otherwise, and then it says nothing
         }
+    }
+
+    // ── Leaving ──────────────────────────────────────────────────────────────────────────────────
+    //
+    // ⚠️ Settings are written HERE, not on every keystroke. Holding A+UP on a hex-byte setting fires
+    // an edit every 100 ms (the key-repeat interval), and one file write per repeat is an SD card
+    // being hammered for a value that is still moving.
+    //
+    // ⚠️ And the PROJECT is not written here, deliberately. There is no autosave yet, so EXIT asks
+    // first (the shared confirm dialog, gated on `project_dirty()`) rather than silently saving a
+    // document under a name the user did not choose. The autosave — and with it the SIGTERM handler
+    // that would make a launcher's kill survivable, and the SETTINGS RESUME row that configures it —
+    // is the lifecycle session's, and until then `PlatformCaps::sdl` hides the RESUME row rather than
+    // drawing a setting that controls nothing.
+    if (state.settingsDirty) {
+        if (ui::save_settings(filesystem, state.settings, state.theme))
+            std::printf("settings: saved\n");
     }
 
     host.stop();

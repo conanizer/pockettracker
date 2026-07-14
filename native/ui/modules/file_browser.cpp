@@ -33,9 +33,16 @@ std::string format_file_date(int64_t millis) {
 #else
     if (localtime_r(&secs, &tm) == nullptr) return "--------";
 #endif
+    // The `% 100` on all three is what tells the compiler these are two-digit numbers. Without it gcc
+    // has to assume `tm_mday` and `tm_mon` could be any int (they are plain `int` fields) and warns
+    // that the output might not fit — -Wformat-truncation. Behaviour-free: a valid `tm` has mday in
+    // 1..31 and mon in 0..11, so the modulo cannot change what is printed.
+    const int day   = tm.tm_mday % 100;
+    const int month = (tm.tm_mon + 1) % 100;
+    const int year  = (tm.tm_year + 1900) % 100;
+
     char buf[16];
-    std::snprintf(buf, sizeof(buf), "%02d-%02d-%02d", tm.tm_mday, tm.tm_mon + 1,
-                  (tm.tm_year + 1900) % 100);
+    std::snprintf(buf, sizeof(buf), "%02d-%02d-%02d", day, month, year);
     return buf;
 }
 
@@ -285,7 +292,11 @@ void FileBrowserModule::draw(Canvas& c, int x, int y, const FileBrowserState& s,
         else                 bg = 0xFF111111;
         c.fill_rect(x, rowY, WIDTH, ROW_HEIGHT, bg);
 
-        Argb textColor;
+        // Initialized, not merely assigned in every arm below: the `switch` covers all three
+        // enumerators, but a scoped enum can legally hold a value outside them, so gcc is right that
+        // this could be read uninitialized (-Wmaybe-uninitialized). `textValue` is the same colour the
+        // FILE arm falls back to, so no reachable case changes.
+        Argb textColor = t.textValue;
         if (isCursor) {
             textColor = t.textCursor;
         } else {

@@ -41,6 +41,14 @@ class StdFileSystem : public FileSystem {
     std::string soundfonts_directory() override  { return ensure_dir("Soundfonts"); }
     std::string themes_directory() override      { return ensure_dir("Themes"); }
 
+    // ── The app's own files ─────────────────────────────────────────────────────────────────────
+    //
+    // Both sit in the ROOT, not in a sub-directory: they are the app's, not the user's, and the six
+    // folders above are what a user sees when the SD card goes into a card reader. (A PortMaster
+    // launch script points the root at CONFDIR on the card, so both survive an app update.)
+    std::string template_project_path() override { return root_ + "/template.ptp"; }
+    std::string settings_path() override         { return root_ + "/settings.json"; }
+
     // ── Reading ─────────────────────────────────────────────────────────────────────────────────
     bool read_file(const std::string& path, std::string& out) override;
     std::vector<FileInfo> list_files(const std::string& directory) override;

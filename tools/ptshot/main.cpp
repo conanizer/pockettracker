@@ -347,6 +347,9 @@ int main(int argc, char** argv) {
                      "usage: ptshot <project.ptp> <out.png> [--screen=PHRASE]\n"
                      "              [--phrase=N] [--chain=N] [--table=N] [--groove=N]\n"
                      "              [--instrument=N] [--scroll=N] [--cursor=ROW,COL]\n"
+                     "              [--caps=android|android-rel|sdl|sdl-rel]  (S7: which rows exist)\n"
+                     "              [--confirm=CLEAN_SEQ|CLEAN_INST|NEW_PROJECT|CHANGE_TYPE|EXIT]\n"
+                     "              [--status=TEXT] [--status-fail] [--rendering=PCT]\n"
                      "              [--theme=CLASSIC|AMBER|BLUE|MONO]\n"
                      "              [--viz=SCOPE|FLAT|OCTA|OCTA_FULL|SPECTRUM|SPECTRUM_PEAKS]\n"
                      "              [--playing=ROW] [--source-column=N] [--from-pool]\n"
@@ -410,6 +413,60 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "unknown visualizer: %s\n", v);
             return 2;
         }
+    }
+
+    // ── S7: the caps, the confirm dialog, the status line, the render readout ────────────────────
+    //
+    // ⚠️ `--caps=android` is the option that pays for PlatformCaps being a VALUE rather than an
+    // #ifdef: ONE binary can draw the SETTINGS screen as Android has it (thirteen rows) and as the
+    // shell has it (eight), and the two PNGs sit side by side. An #ifdef'd screen could only ever be
+    // photographed one way per build.
+    state.caps = PlatformCaps::sdl(/*debug_build=*/true);
+    if (const char* v = opt(argc, argv, "--caps")) {
+        const std::string n(v);
+        if      (n == "android")       state.caps = PlatformCaps::android(true);
+        else if (n == "android-rel")   state.caps = PlatformCaps::android(false);
+        else if (n == "sdl")           state.caps = PlatformCaps::sdl(true);
+        else if (n == "sdl-rel")       state.caps = PlatformCaps::sdl(false);
+        else {
+            std::fprintf(stderr, "unknown caps: %s (android|android-rel|sdl|sdl-rel)\n", v);
+            return 2;
+        }
+    }
+    // The device rows only have text on the platform that has the device. A fixture, as --demo is.
+    if (state.caps.touchLayouts) {
+        state.layoutText          = "PORTRAIT";
+        state.settings.layoutCount = 3;
+        state.settings.skinCount   = 2;   // …so LAYOUT gains its second column
+        state.skinText             = "NORMAL";
+        state.overlayText          = "GRID";
+        state.settings.overlayCount = 3;
+    }
+
+    if (const char* v = opt(argc, argv, "--confirm")) {
+        const std::string n(v);
+        using K = ConfirmDialogState::Kind;
+        if      (n == "CLEAN_SEQ")   state.confirm.open(K::CLEAN_SEQ);
+        else if (n == "CLEAN_INST")  state.confirm.open(K::CLEAN_INST);
+        else if (n == "NEW_PROJECT") state.confirm.open(K::NEW_PROJECT);
+        else if (n == "CHANGE_TYPE") state.confirm.open(K::CHANGE_TYPE);
+        else if (n == "EXIT")        state.confirm.open(K::EXIT);
+        else {
+            std::fprintf(stderr, "unknown confirm: %s\n", v);
+            return 2;
+        }
+    }
+
+    // The global status line — which nothing in the port drew until S7, though the dispatcher had been
+    // setting it since S3. Being able to photograph it is how that stays true.
+    if (const char* v = opt(argc, argv, "--status")) state.statusMessage = v;
+    state.statusSuccess = !flag(argc, argv, "--status-fail");
+
+    // EXPORT's live percentage. An engine renders it for real; here it is a number, so the row can be
+    // seen with the readout in it.
+    if (const char* v = opt(argc, argv, "--rendering")) {
+        state.isRendering    = true;
+        state.renderProgress = static_cast<float>(std::atoi(v)) / 100.0f;
     }
 
     // Every slot index is clamped to its pool: the layout indexes those pools directly (as it must —
@@ -535,6 +592,27 @@ int main(int argc, char** argv) {
                 case ScreenType::EFFECTS:
                     state.effectsCursorRow = clamp(row, EffectModule::MAX_CURSOR_ROW);
                     break;
+
+                case ScreenType::PROJECT:
+                    state.projectCursorRow = clamp(row, project_row_count(state.caps) - 1);
+                    state.projectCursorColumn =
+                        col < 1 ? 1
+                                : clamp(col, project_row_max_column(
+                                                 static_cast<ProjectRow>(state.projectCursorRow)));
+                    break;
+
+                case ScreenType::SETTINGS: {
+                    // The row NUMBER is the setting's identity on both platforms, so --cursor speaks in
+                    // Kotlin's row numbers whatever the caps are. NOT clamped to the visible set,
+                    // deliberately: a screenshot of the cursor parked on a row this platform hides is
+                    // exactly how you check that nothing highlights there.
+                    state.settingsCursorRow = clamp(row, SETTINGS_ROW_COUNT - 1);
+                    const bool second = settings_row_has_second_column(
+                        static_cast<SettingsRow>(state.settingsCursorRow), state.caps,
+                        state.settings.skinCount > 0);
+                    state.settingsCursorColumn = (col >= 2 && second) ? 2 : 1;
+                    break;
+                }
 
                 case ScreenType::SAMPLE_EDITOR:
                     // A SPARSE row map (1, 2, 8, 10, 11, 13, 14, 16, 18, 19) — the rest are the waveform

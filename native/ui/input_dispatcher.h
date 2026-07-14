@@ -63,10 +63,15 @@
 #include "ui/modules/mixer.h"
 #include "ui/modules/modulation.h"
 #include "ui/modules/phrase_editor.h"
+#include "ui/modules/project_editor.h"
 #include "ui/modules/qwerty_keyboard.h"
 #include "ui/modules/sample_editor.h"
+#include "ui/modules/settings_editor.h"
 #include "ui/modules/song_editor.h"
 #include "ui/modules/table_editor.h"
+#include "ui/project_actions.h"
+
+#include <functional>
 
 #include <string>
 #include <utility>
@@ -198,11 +203,36 @@ class InputDispatcher {
     void open_file_browser(AppState::BrowserPurpose purpose, const std::string& directory,
                            const std::vector<std::string>& extensions);
 
+    /**
+     * The two things a render needs that only the SHELL can do (S7).
+     *
+     * ⚠️ THE RENDER IS SYNCHRONOUS. Android hands it to a coroutine because Compose would ANR; a
+     * single-threaded frame loop has nothing to hand it to, so it simply stops and renders — which is
+     * both simpler and SAFER, because the audio callback is the one thing that must not be reading
+     * engine state while an offline render is writing it.
+     *
+     *   `suspend_audio(true/false)` — the shell pauses its SDL audio device for the duration. Kotlin
+     *   only stops PLAYBACK (its Oboe stream stays open and idle); the shell can do better, and a
+     *   paused device is a guarantee rather than a hope.
+     *
+     *   `repaint()` — called as progress moves. It is what draws the "43%" on the EXPORT row, and it
+     *   is why the percentage is a real readout rather than a decoration.
+     *
+     * Both may be empty. `tools/ptdispatch` renders a real WAV with neither an audio device nor a
+     * window, which is exactly the proof that neither is load-bearing.
+     */
+    struct RenderHooks {
+        std::function<void(bool)> suspend_audio;
+        std::function<void()>     repaint;
+    };
+    void set_render_hooks(RenderHooks hooks) { render_ = std::move(hooks); }
+
   private:
     AppState&               s_;
     songcore::SongcoreHost& host_;
     FileSystem&             fs_;
     long long               now_ms_ = 0;
+    RenderHooks             render_{};
 
     Clipboard clip_{};
 
@@ -216,6 +246,8 @@ class InputDispatcher {
     ModulationModule       mods_{};
     MixerModule            mixer_{};
     EffectModule           effects_{};
+    ProjectModule          project_{};
+    SettingsModule         settings_{};
 
     /**
      * A,A is a DOUBLE-TAP, and a double-tap is only a double-tap if the cursor has not moved between
@@ -272,6 +304,8 @@ class InputDispatcher {
      * pool) and it toggles. That is stricter than Android, never destructive, and it lands its proper
      * confirm dialog with the rest of the modal system.
      */
+    /** A+UP/DOWN on the TYPE cell: switch outright if the slot is empty, else ASK (S7's dialog). */
+    void request_instrument_type_toggle();
     void toggle_instrument_type();
 
     /** True when the cursor is on INSTRUMENT's TYPE cell — where A+UP/DOWN toggles rather than steps. */
@@ -301,6 +335,45 @@ class InputDispatcher {
     // ── The modal guards (see the ⚠️ THE MODAL RULE note at the top of this file) ────────────────
     bool qwerty_open() const { return s_.qwerty.isOpen; }
     bool on_browser() const { return s_.currentScreen == ScreenType::FILE_BROWSER; }
+
+    /**
+     * The confirm dialog owns EVERY button but A and B. It is the topmost modal — drawn last, over
+     * even the keyboard — so it is checked FIRST, ahead of the keyboard and the browser both, and it
+     * is the one guard that simply RETURNS rather than redirecting.
+     *
+     * ⚠️ The check appears at the top of all 28 handlers, and the exceptions are exactly three:
+     * `on_button_a` and `on_button_b`, which ARE the answer, and `on_stop_preview`, which silences a
+     * ringing audition (a dialog raised over an INSTRUMENT audition must not leave the note hanging —
+     * and silencing a note is not an edit). ptdispatch asserts the rest: with a confirm up, every
+     * other button is inert. That assertion is the real guarantee here, not the code shape — Kotlin's
+     * own comment on this predicate warns that "every new show*Dialog-style modal state MUST be added"
+     * to it, and a rule that has to be remembered 28 times is a rule that will eventually be forgotten
+     * once.
+     */
+    bool confirm_open() const { return s_.confirm.is_open(); }
+
+    /** A on the dialog: do the thing it asked about. */
+    void confirm_accept();
+    /** B on the dialog: don't. */
+    void confirm_cancel() { s_.confirm.close(); }
+
+    // ── PROJECT + SETTINGS: the buttons (Phase 3 S7) ────────────────────────────────────────────
+    /** A on PROJECT: SAVE / LOAD / NEW / MIX / STEMS / SEQ / INST / SETTINGS> / EXIT. */
+    void project_action();
+    /** A on SETTINGS: only THEME (row 9) and TEMPLATE (row 10) do anything — the rest are A+DPAD. */
+    void settings_action();
+
+    /** NEW, and the engine sync a fresh project needs (SongcoreHost::new_project). */
+    void start_new_project();
+
+    /** Slot 0 across the board, and no selection. Shared by NEW and LOAD. */
+    void reset_editing_context();
+
+    /** A .ptp replaced the document: clean, no selection, browser closed. */
+    void load_project_done(const std::string& path);
+
+    /** EXPORT. Renders SYNCHRONOUSLY; `on_render_progress_` repaints the frame from inside it. */
+    void export_song(bool stems);
 
     // ── The FILE BROWSER ────────────────────────────────────────────────────────────────────────
     /** Leave the browser for the screen it was opened from, dropping the audition on the way out. */

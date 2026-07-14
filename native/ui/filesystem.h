@@ -109,6 +109,18 @@ class FileSystem {
     virtual std::string soundfonts_directory() = 0;
     virtual std::string themes_directory()     = 0;
 
+    // ── The app's own files ──────────────────────────────────────────────────────────────────────
+    //
+    // S6a left both of these out with the note "they land with PROJECT"; the first one does, here.
+    // (The autosave path still has no caller — it arrives with the lifecycle work that gives SETTINGS
+    // its RESUME row back. Until then the row is caps-gated off rather than drawn inert.)
+
+    /** The song TEMPLATE: what the app boots into. SETTINGS → TEMPLATE writes and deletes it. */
+    virtual std::string template_project_path() = 0;
+
+    /** Where the shell keeps `settings.json`. On Android the answer is SharedPreferences, not a path. */
+    virtual std::string settings_path() = 0;
+
     // ── Reading ─────────────────────────────────────────────────────────────────────────────────
     /** Whole file → string. False (and `out` untouched) if it cannot be read. */
     virtual bool read_file(const std::string& path, std::string& out) = 0;

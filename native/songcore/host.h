@@ -38,6 +38,7 @@
 #include "engine_setup.h"
 #include "model.h"
 #include "project_io.h"
+#include "project_ops.h"
 #include "render.h"
 #include "router.h"
 #include "sample_edit.h"
@@ -318,6 +319,53 @@ class SongcoreHost {
         if (!f) return false;
         f.write(blob.data(), static_cast<std::streamsize>(blob.size()));
         return f.good();
+    }
+
+    // ── PROJECT screen: NEW, and the two COMPACTs ────────────────────────────────────────────────
+    //
+    // The document surgery itself is pure and lives in project_ops.h. What lands HERE is the half
+    // that has to tell the ENGINE, and it is the whole reason these are host verbs rather than three
+    // free functions the dispatcher could call: the engine holds state that the document does not,
+    // and every one of these invalidates some of it.
+
+    /** PROJECT → NEW. A blank document, and an engine that has forgotten the last one. */
+    void new_project() {
+        stop();   // before the samples go: no voice may be reading PCM we are about to free
+        songcore::new_project(project_);
+
+        if (engine_) {
+            engine_->clearAllSamples();
+            engine_->clearAllSoundfonts();
+        }
+        routing_.reset();     // the ratios and SF slots described the OLD project's media
+
+        invalidate_tables();  // Kotlin's audioEngine.clearLoadedTables()
+        push_params();        // Kotlin's syncVolumesToAudioBackend()
+    }
+
+    /**
+     * PROJECT → COMPACT → SEQ. Unused chains and phrases back to factory.
+     *
+     * No engine call, and that is not an omission: a chain and a phrase are pure arrangement. They
+     * hold no PCM, no table, no param — nothing the engine has ever been told about.
+     */
+    void clean_seq() { songcore::clean_unused_seq(project_); }
+
+    /**
+     * PROJECT → COMPACT → INST. Unused instruments, tables and grooves back to factory.
+     *
+     * ⚠️ Every part of the engine sync below is load-bearing. Compacting replaced unused instruments
+     * with empty ones in the DOCUMENT, but their sample and SoundFont buffers are still loaded — so
+     * the RAM would only drop after a save and a reload (Kotlin hits `reloadProjectSamples` here for
+     * exactly this). The tables it reset are worse than stale: the consumer caches which tables it
+     * has already handed the engine, so without `invalidate_tables` a compacted table 5 would go on
+     * playing the OLD table 5's rows.
+     */
+    void clean_inst(const std::string& baseDir) {
+        songcore::clean_unused_inst(project_);
+        load_media(baseDir);   // clearAllSamples + clearAllSoundfonts + routing.reset + reload
+        invalidate_tables();
+        push_params();
     }
 
     /** A sample (wav/mp3/flac/ogg/opus) → instrument `id`. The browser's A on a sampler slot. */

@@ -38,8 +38,15 @@ import com.conanizer.pockettracker.ui.modules.ModulationModule
 import com.conanizer.pockettracker.ui.modules.ModulationState
 import com.conanizer.pockettracker.ui.modules.PhraseEditorModule
 import com.conanizer.pockettracker.ui.modules.PhraseEditorState
+import com.conanizer.pockettracker.platform.android.DeviceAdapter
+import com.conanizer.pockettracker.ui.modules.ProjectModule
+import com.conanizer.pockettracker.ui.modules.ProjectState
 import com.conanizer.pockettracker.ui.modules.SampleEditorModule
 import com.conanizer.pockettracker.ui.modules.SampleEditorState
+import com.conanizer.pockettracker.ui.modules.SettingsModule
+import com.conanizer.pockettracker.ui.modules.SettingsState
+import com.conanizer.pockettracker.ui.theme.DeviceSkin
+import com.conanizer.pockettracker.ui.theme.VisualizerType
 import com.conanizer.pockettracker.ui.modules.SongEditorModule
 import com.conanizer.pockettracker.ui.modules.SongEditorState
 import com.conanizer.pockettracker.ui.modules.TableModule
@@ -133,6 +140,8 @@ class P3InputGoldenTest {
     private val mixerModule = MixerModule()
     private val effectModule = EffectModule()
     private val sampleEditorModule = SampleEditorModule()
+    private val projectModule = ProjectModule()
+    private val settingsModule = SettingsModule()
 
     // handleInput(PHRASE) wants an InstrumentController purely to record `lastEditedInstrument` —
     // a side record. The C++ module returns it in its result instead of reaching back into a
@@ -1452,6 +1461,254 @@ class P3InputGoldenTest {
 
     // ════════════════════════════════════════════════════════════════════════════════════════════
 
+    // ── PROJECT (S7) ────────────────────────────────────────────────────────────────────────────
+
+    /** The name, as hex bytes: it can legally contain SPACES, and the golden is space-delimited. */
+    private fun asciiHex(s: String): String =
+        s.map { "%02X".format(it.code and 0xFF) }.joinToString("")
+
+    /** The whole editable cell — the three fields ProjectModule.handleInput can write. */
+    private fun prjStr(p: Project): String =
+        "prj=${p.tempo}:${hex2(p.transpose)}:${asciiHex(p.name)}"
+
+    private fun projectLadder(): List<(Project) -> Unit> = listOf(
+        { },                                                            // factory: 128 BPM, 00, "UNTITLED"
+        { p -> p.tempo = 20;  p.transpose = 0x00; p.name = "" },        // both floors, and an EMPTY name
+        { p -> p.tempo = 999; p.transpose = 0xFF                        // both ceilings…
+                 p.name = "ABCDEFGHIJKLMNOPQRST" },                     // …and a name FULL at 20 chars
+        { p -> p.tempo = 121; p.transpose = 0x80; p.name = "A B" },     // a SPACE inside the name
+        { p -> p.name = "AB" },                                         // short: the cursor sits PAST its end
+        { p -> p.name = "ABCDEFGHIJKLMNOPQRSTUVWXYZ" },                 // longer than 20 — the draw takes 20,
+                                                                        // the model does not, and setCharAt
+                                                                        // must stay inside the string
+    )
+
+    private fun sweepProject(out: MutableList<String>) {
+        out += ""
+        out += "# PROJECT (S7) — two value rows, one IN-PLACE TEXT row, and four rows of buttons."
+        out += "#"
+        out += "# ⚠️ Columns are swept 0..20 on EVERY row, not merely on the rows that HAVE that many."
+        out += "# Rows 0 and 1 do not bound-check the column at all — Kotlin hands back the TEMPO context"
+        out += "# for column 17 — and a probe that only visited the reachable columns could not see that."
+        out += "# Column 0 is the row LABEL and is unreachable in the app (moveCursorLeft coerces to 1),"
+        out += "# so its readOnly() arms are dead code; ported anyway, and pinned here."
+        out += "#"
+        out += "# EXIT (row 7) is absent: it is the SHELL's row. Android has no such thing, so there is"
+        out += "# nothing to record it FROM — tools/ptdispatch owns it, as it owns the whole caps filter."
+        for (row in 0..6) {
+            for (col in 0..20) {
+                for (probe in projectLadder()) {
+                    for (btn in BUTTONS) {
+                        val project = Project()
+                        probe(project)
+                        val before = prjStr(project)
+
+                        val state = ProjectState(project = project, cursorRow = row, cursorColumn = col)
+                        val ctx = projectModule.getCursorContext(state)
+                        val act = resolve(btn, ctx)
+                        projectModule.handleInput(state, act)
+
+                        out += "EDIT scr=PROJECT row=$row col=$col $before btn=$btn => " +
+                            "${ctxStr(ctx)} act=${actStr(act)} ${prjStr(project)}"
+                    }
+                }
+            }
+        }
+    }
+
+    // ── SETTINGS (S7) ───────────────────────────────────────────────────────────────────────────
+    //
+    // ⚠️ THE ROW MAP IS THE PORT'S ONLY CAPS-FILTERED ONE, AND THIS GOLDEN IS WHY IT IS STILL
+    // MEASURABLE. The C++ SettingsModule takes a `PlatformCaps` as a VALUE, so `PlatformCaps::android()`
+    // reproduces Kotlin's thirteen rows exactly — which means ptinput can drive it at row N and compare
+    // against Kotlin's row N, directly, with no mapping and no exceptions. Had the port reached for an
+    // `#ifdef` instead, the screen where the two platforms differ MOST would have been the one screen
+    // with no golden at all.
+    //
+    // ⚠️ The module edits INDICES, not layout modes. `DeviceAdapter.LayoutMode` is not ported (it would
+    // be dead code in a UI with no touch screen), so what the C++ side is handed for LAYOUT is
+    // (index, count) — and those two come from KOTLIN'S OWN CONTEXT below rather than from a copy of
+    // `layoutModeList` in this test. A test that re-implements the code it measures measures nothing.
+
+    /** Everything SETTINGS can write. The C++ twin is `pt::ui::SettingsValues`. */
+    private data class SetVals(
+        var layoutIndex: Int, var layoutCount: Int,
+        var skinIndex: Int, var skinCount: Int,
+        var overlayIndex: Int, var overlayCount: Int, var overlayStrength: Int,
+        var btnSound: Boolean, var btnSoundVol: Int,
+        var btnVibro: Boolean, var vibroPow: Int,
+        var scalingBilinear: Boolean,
+        var insertBefore: Boolean, var cursorRemember: Boolean, var notePreview: Boolean,
+        var visualizer: Int,
+        var resumeAuto: Boolean,
+        var trace: Boolean, var engineCpp: Boolean
+    )
+
+    private fun b(v: Boolean) = if (v) "1" else "0"
+
+    private fun setStr(v: SetVals): String =
+        "set=${v.layoutIndex}/${v.layoutCount}:${v.skinIndex}/${v.skinCount}:" +
+            "${v.overlayIndex}/${v.overlayCount}:${hex2(v.overlayStrength)}:" +
+            "${b(v.btnSound)}:${hex2(v.btnSoundVol)}:${b(v.btnVibro)}:${hex2(v.vibroPow)}:" +
+            "${b(v.scalingBilinear)}:${b(v.insertBefore)}:${b(v.cursorRemember)}:${b(v.notePreview)}:" +
+            "${v.visualizer}:${b(v.resumeAuto)}:${b(v.trace)}:${b(v.engineCpp)}"
+
+    private fun sweepSettings(out: MutableList<String>) {
+        out += ""
+        out += "# SETTINGS (S7) — thirteen rows, two columns, and the only caps-filtered row map in the"
+        out += "# app. Recorded under ANDROID caps (every row present), which is exactly what makes the"
+        out += "# C++ side comparable row-for-row: PlatformCaps is a VALUE there, not an #ifdef."
+        out += "#"
+        out += "# The cell is the whole SettingsValues struct, because Kotlin's handleInput returns a"
+        out += "# SIXTEEN-field nullable diff and a bug that writes the right value into the wrong field"
+        out += "# resolves to an identical context and an identical action. Only the cell can tell VOL"
+        out += "# from POW."
+        out += "#"
+        out += "#"
+        out += "# ⚠️ LAYOUT's first column (the MODE cycle) is the one cell NOT recorded, and the reason is"
+        out += "# worth stating rather than hiding. Its option list comes from `layoutModeList`, which is"
+        out += "# private AND reads `BuildConfig.LANDSCAPE_LAYOUT` — so it offers 3 modes in a debug build"
+        out += "# and 2 in a release one, and a golden recorded from it would DRIFT between the two"
+        out += "# variants of `./gradlew test`. (Measured: it does. The file differed at the first"
+        out += "# SETTINGS line, `set=0/2` vs `set=0/3`.)"
+        out += "#"
+        out += "# Nothing is lost by it. `layoutModeList` is Android-only and is NOT ported — the C++ module"
+        out += "# is handed an (index, count) and never learns what a layout mode IS. What it actually"
+        out += "# contains for that cell is an enum-cycle context plus a getOrElse-to-first write-back,"
+        out += "# which is the SAME code shape as OVERLAY's first column — and that one IS recorded here,"
+        out += "# over a file list this test owns outright. So is the SKIN column beside it, and so is"
+        out += "# VISUALIZER. The cell is covered three times over; only Kotlin's private list is not."
+
+        // The two skin lists SettingsModule.skinsForLayout can return, and the overlay file lists the
+        // Themes folder can produce. Both are ordinary data — no BuildConfig, nothing private.
+        val skinSets: List<List<DeviceSkin>> = listOf(emptyList(), DeviceSkin.ALL)
+        val overlaySets: List<List<String>> = listOf(emptyList(), listOf("grid.png", "scan.png"))
+
+        for (row in 0..12) {
+            for (col in 0..2) {
+                // ⚠️ The one skipped cell — LAYOUT's mode cycle. See the note above: it is the only
+                // thing on this screen whose answer depends on BuildConfig, and a golden that changes
+                // between the debug and release variants is not a golden.
+                if (row == 0 && col == 1) continue
+
+                for (skins in skinSets) {
+                    for (overlayFiles in overlaySets) {
+                        for (probe in 0..3) {
+                            // A four-rung ladder over every value the module can read, so each row meets
+                            // its floor and its ceiling: probe 0 = factory, 1 = everything on / at FF,
+                            // 2 = everything off / at 00, 3 = the enum cycles at their TOP (where A wraps).
+                            val vals = SetVals(
+                                // FIXED, not read back from Kotlin's context: `layoutModeList` is
+                                // BuildConfig-dependent, and letting its answer into the recorded line
+                                // would make EVERY line of this sweep differ between the debug and
+                                // release variants — not just the LAYOUT ones. The C++ side parses these
+                                // two out of the line and uses them only for the cell that is skipped.
+                                layoutIndex = 0, layoutCount = 2,
+                                skinIndex = if (probe == 3) (skins.size - 1).coerceAtLeast(0) else 0,
+                                skinCount = skins.size,
+                                // ⚠️ Always a VALID index. Kotlin's state carries the overlay's NAME and
+                                // derives the index from it; the C++ module is handed the index directly.
+                                // Feed an out-of-range one and the two disagree BY CONSTRUCTION — which
+                                // would be a broken fixture, not a caught bug. (The out-of-range WRITE is
+                                // still covered: `getOrElse { "OFF" }` is what a SET_VALUE past the end
+                                // does, and the cycle can produce one.)
+                                overlayIndex = when (probe) {
+                                    3 -> overlayFiles.size   // the TOP valid index → A wraps from here
+                                    2 -> 0
+                                    else -> if (overlayFiles.isEmpty()) 0 else 1
+                                },
+                                overlayCount = 1 + overlayFiles.size,
+                                overlayStrength = when (probe) { 1 -> 0xFF; 2 -> 0x00; else -> 0x80 },
+                                btnSound = probe == 1,
+                                btnSoundVol = when (probe) { 1 -> 0xFF; 2 -> 0x00; else -> 0x40 },
+                                btnVibro = probe == 1,
+                                vibroPow = when (probe) { 1 -> 0xFF; 2 -> 0x00; else -> 0xC0 },
+                                scalingBilinear = probe == 1,
+                                insertBefore = probe != 2,
+                                cursorRemember = probe == 1,
+                                notePreview = probe != 2,
+                                visualizer = when (probe) { 3 -> 5; 2 -> 0; else -> 2 },
+                                resumeAuto = probe == 1,
+                                trace = probe == 1,
+                                engineCpp = probe == 1
+                            )
+
+                            // The Kotlin state. `layoutMode` picks the mode; `hasPhysicalButtons` decides
+                            // how long the list Kotlin will offer is.
+                            val hasPhysical = probe != 2
+                            val layoutMode = when (probe) {
+                                1 -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
+                                2 -> DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
+                                else -> DeviceAdapter.LayoutMode.FULL
+                            }
+                            val overlayName =
+                                if (vals.overlayIndex in 1..overlayFiles.size)
+                                    overlayFiles[vals.overlayIndex - 1] else "OFF"
+
+                            val kState = SettingsState(
+                                cursorRow = row, cursorColumn = col,
+                                hasPhysicalButtons = hasPhysical,
+                                layoutMode = layoutMode,
+                                currentSkinId = skins.getOrNull(vals.skinIndex)?.id ?: "",
+                                availableSkins = skins,
+                                scalingMode = if (vals.scalingBilinear) DeviceAdapter.ScalingMode.BILINEAR
+                                              else DeviceAdapter.ScalingMode.INTEGER,
+                                overlayFiles = overlayFiles,
+                                overlayName = overlayName,
+                                overlayStrength = vals.overlayStrength,
+                                buttonSoundEnabled = vals.btnSound,
+                                buttonSoundVolume = vals.btnSoundVol,
+                                buttonVibroEnabled = vals.btnVibro,
+                                vibroPower = vals.vibroPow,
+                                insertBefore = vals.insertBefore,
+                                cursorRemember = vals.cursorRemember,
+                                notePreviewEnabled = vals.notePreview,
+                                autosaveResumeAuto = vals.resumeAuto,
+                                traceEnabled = vals.trace,
+                                engineCpp = vals.engineCpp,
+                                visualizerType = VisualizerType.values()[vals.visualizer]
+                            )
+
+                            for (btn in BUTTONS) {
+                                val after = vals.copy()
+                                val ctx = settingsModule.getCursorContext(kState)
+                                val act = resolve(btn, ctx)
+                                val r = settingsModule.handleInput(kState, act)
+
+                                // Apply Kotlin's nullable diff onto the mirror — which IS the cell the
+                                // C++ module writes directly. (`r.layoutMode` is never set here: the one
+                                // cell that can produce it is the one this sweep skips.)
+                                r.skinId?.let { id -> after.skinIndex = skins.indexOfFirst { it.id == id }
+                                    .coerceAtLeast(0) }
+                                r.scalingMode?.let {
+                                    after.scalingBilinear = it == DeviceAdapter.ScalingMode.BILINEAR }
+                                r.overlayName?.let { name ->
+                                    val options = listOf("OFF") + overlayFiles
+                                    after.overlayIndex = options.indexOf(name).coerceAtLeast(0) }
+                                r.overlayStrength?.let { after.overlayStrength = it }
+                                r.buttonSoundEnabled?.let { after.btnSound = it }
+                                r.buttonSoundVolume?.let { after.btnSoundVol = it }
+                                r.buttonVibroEnabled?.let { after.btnVibro = it }
+                                r.vibroPower?.let { after.vibroPow = it }
+                                r.insertBefore?.let { after.insertBefore = it }
+                                r.cursorRemember?.let { after.cursorRemember = it }
+                                r.notePreviewEnabled?.let { after.notePreview = it }
+                                r.autosaveResumeAuto?.let { after.resumeAuto = it }
+                                r.visualizerType?.let {
+                                    after.visualizer = VisualizerType.values().indexOf(it) }
+                                r.traceEnabled?.let { after.trace = it }
+                                r.engineCpp?.let { after.engineCpp = it }
+
+                                out += "EDIT scr=SETTINGS row=$row col=$col ${setStr(vals)} btn=$btn => " +
+                                    "${ctxStr(ctx)} act=${actStr(act)} ${setStr(after)}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     @Test
     fun inputGoldens() {
         val out = mutableListOf<String>()
@@ -1474,6 +1731,8 @@ class P3InputGoldenTest {
         sweepMods(out)
         sweepMixer(out)
         sweepEffects(out)
+        sweepProject(out)
+        sweepSettings(out)
         sweepSampleEditor(out)
         sweepSampleEditorRows(out)
         sweepSampleEditorView(out)

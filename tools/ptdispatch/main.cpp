@@ -40,16 +40,21 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
 
+#include "audio-engine.h"
 #include "songcore/host.h"
 #include "songcore/wav_writer.h"   // the cue-point round trip (S6b)
 #include "ui/app_state.h"
 #include "ui/cursor_move.h"
 #include "ui/input_dispatcher.h"
 #include "ui/navigation.h"
+#include "ui/platform_caps.h"
+#include "ui/settings_row_layout.h"
+#include "ui/settings_store.h"
 #include "ui/std_filesystem.h"
 
 using namespace pt::ui;
@@ -397,7 +402,7 @@ int main() {
 
     // ── 7. go_to_screen's REFRESH resets — including the three S4 left out ────────────────────────
     {
-        state.cursorRemember = false;   // REFRESH: Android's default
+        state.settings.cursorRemember = false;   // REFRESH: Android's default
 
         state.currentScreen         = ScreenType::MIXER;
         state.mixerMasterRow        = 3;
@@ -439,7 +444,7 @@ int main() {
         eq(state.effectsCursorRow, 5, "REFRESH: EFFECTS' row PERSISTS (Kotlin does not reset it either)");
 
         // …and in REMEMBER mode nothing is reset at all.
-        state.cursorRemember = true;
+        state.settings.cursorRemember = true;
         state.currentScreen = ScreenType::MIXER;
         state.mixerMasterRow = 2;
         state.mixerCursorColumn = 8;
@@ -456,7 +461,7 @@ int main() {
     // is the wiring — the filter, the sort order, which button does what, and whether the modal above it
     // swallows the press.
 
-    state.cursorRemember = false;
+    state.settings.cursorRemember = false;
 
     // ── 5. The listing: what is IN it, and in what order ────────────────────────────────────────
     {
@@ -1072,6 +1077,572 @@ int main() {
 
         dispatch.on_button_b();
         if (state.sampleEditor.showConfirmClose) dispatch.on_button_a();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // PROJECT + SETTINGS (S7)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // Everything below is invisible to `ptinput`, and most of it is invisible to it BY CONSTRUCTION
+    // rather than by omission:
+    //
+    //   • The SETTINGS row map is CAPS-FILTERED. Android has no such thing, so there is no Kotlin to
+    //     record a golden FROM — the visible-row walk can only be checked here.
+    //   • The EXIT row does not exist on Android either.
+    //   • ptinput proves each module matches Kotlin GIVEN a cursor. Nothing in it proves the cursor
+    //     can reach the cell, that A on SAVE writes a file, or that a modal owns the buttons.
+
+    // ── 12. The SETTINGS row map: can the cursor reach every visible row, and ONLY those? ────────
+    //
+    // ⚠️ THE CONTROL THAT MATTERS. Kotlin hides its two debug rows with a SINGLE substitution
+    // (`if (!DEBUG && prev == 12) prev = 11`), which is correct there only because no two hidden rows
+    // are ever adjacent. On the shell, rows 2, 3 and 4 (OVERLAY, BTN SOUND, BTN VIBRO) vanish
+    // TOGETHER — so a one-level hop off row 1 lands on row 3, which is not there either, and the
+    // cursor disappears onto a row nothing draws. The walk has to LOOP.
+    {
+        state.currentScreen = ScreenType::SETTINGS;
+
+        for (const bool android : {false, true}) {
+            state.caps = android ? PlatformCaps::android(/*debug=*/true)
+                                 : PlatformCaps::sdl(/*debug=*/true);
+            const char* who = android ? "android" : "sdl";
+
+            // Walk DOWN from the first visible row, all the way round, and collect what we land on.
+            state.settingsCursorRow = settings_first_visible_row(state.caps);
+            std::set<int> seen;
+            for (int i = 0; i < SETTINGS_ROW_COUNT * 2; ++i) {
+                seen.insert(state.settingsCursorRow);
+                ok(settings_row_visible(static_cast<SettingsRow>(state.settingsCursorRow), state.caps),
+                   std::string("SETTINGS[") + who + "]: DOWN never lands on a hidden row");
+                dispatch.on_dpad_down();
+            }
+
+            int expected = 0;
+            for (int r = 0; r < SETTINGS_ROW_COUNT; ++r)
+                if (settings_row_visible(static_cast<SettingsRow>(r), state.caps)) ++expected;
+
+            eq(static_cast<int>(seen.size()), expected,
+               std::string("SETTINGS[") + who + "]: DOWN reaches every visible row (and wraps)");
+
+            // …and UP, which is the direction Kotlin's substitution gets wrong first.
+            state.settingsCursorRow = settings_first_visible_row(state.caps);
+            std::set<int> seenUp;
+            for (int i = 0; i < SETTINGS_ROW_COUNT * 2; ++i) {
+                seenUp.insert(state.settingsCursorRow);
+                ok(settings_row_visible(static_cast<SettingsRow>(state.settingsCursorRow), state.caps),
+                   std::string("SETTINGS[") + who + "]: UP never lands on a hidden row");
+                dispatch.on_dpad_up();
+            }
+            eq(static_cast<int>(seenUp.size()), expected,
+               std::string("SETTINGS[") + who + "]: UP reaches every visible row (and wraps)");
+        }
+
+        // The shell has EIGHT of the thirteen; Android has all thirteen (in a debug build).
+        state.caps = PlatformCaps::sdl(true);
+        int shellRows = 0;
+        for (int r = 0; r < SETTINGS_ROW_COUNT; ++r)
+            if (settings_row_visible(static_cast<SettingsRow>(r), state.caps)) ++shellRows;
+        eq(shellRows, 8, "SETTINGS[sdl]: eight rows — SCALING, KB, CURSOR, PREV, VIZ, THEME, TPL, TRACE");
+
+        state.caps = PlatformCaps::android(true);
+        int androidRows = 0;
+        for (int r = 0; r < SETTINGS_ROW_COUNT; ++r)
+            if (settings_row_visible(static_cast<SettingsRow>(r), state.caps)) ++androidRows;
+        eq(androidRows, 13, "SETTINGS[android+debug]: all thirteen — this is what ptinput compares against");
+
+        state.caps = PlatformCaps::android(false);
+        int androidRel = 0;
+        for (int r = 0; r < SETTINGS_ROW_COUNT; ++r)
+            if (settings_row_visible(static_cast<SettingsRow>(r), state.caps)) ++androidRel;
+        eq(androidRel, 11, "SETTINGS[android+release]: OVERLAY and TRACE drop out (BuildConfig.DEBUG)");
+    }
+
+    // ── 13. The cursor cannot be LOST on entry — the guard Kotlin cannot need ────────────────────
+    //
+    // The default row is 0 (LAYOUT), which the SHELL does not draw. Without the bounds check in
+    // go_to_screen, the very first entry into SETTINGS would put the cursor on an invisible row.
+    {
+        state.caps            = PlatformCaps::sdl(true);
+        state.currentScreen   = ScreenType::PHRASE;
+        state.settingsCursorRow = 0;   // LAYOUT — hidden here
+
+        NavResult nav;
+        nav.screen = ScreenType::SETTINGS;
+        nav.column = state.previousColumn;
+        go_to_screen(state, nav);
+
+        ok(settings_row_visible(static_cast<SettingsRow>(state.settingsCursorRow), state.caps),
+           "⚠️ SETTINGS: entering with the cursor on a row this platform HIDES snaps it to a visible one");
+        eq(state.settingsCursorRow, static_cast<int>(SettingsRow::SCALING),
+           "SETTINGS: …specifically to SCALING, the shell's first visible row");
+    }
+
+    // ── 14. TRACE's second column is caps-dependent — the one row whose WIDTH differs ────────────
+    {
+        state.currentScreen      = ScreenType::SETTINGS;
+        state.settingsCursorRow  = static_cast<int>(SettingsRow::TRACE);
+
+        state.caps = PlatformCaps::android(true);
+        state.settingsCursorColumn = 1;
+        dispatch.on_dpad_right();
+        eq(state.settingsCursorColumn, 2, "SETTINGS[android]: RIGHT on TRACE reaches ENG (column 2)");
+
+        state.caps = PlatformCaps::sdl(true);
+        state.settingsCursorColumn = 1;
+        dispatch.on_dpad_right();
+        eq(state.settingsCursorColumn, 1,
+           "⚠️ SETTINGS[sdl]: RIGHT on TRACE does NOT move — there is no second sequencer to select");
+
+        // …and TEMPLATE's second column is there on both.
+        state.settingsCursorRow    = static_cast<int>(SettingsRow::TEMPLATE);
+        state.settingsCursorColumn = 1;
+        dispatch.on_dpad_right();
+        eq(state.settingsCursorColumn, 2, "SETTINGS[sdl]: RIGHT on TEMPLATE reaches CLEAR");
+        dispatch.on_dpad_left();
+        eq(state.settingsCursorColumn, 1, "SETTINGS: LEFT SNAPS back to column 1 (it does not step)");
+    }
+
+    // ── 15. PROJECT's cursor: rows wrap, and every row change snaps the column back to 1 ─────────
+    {
+        state.caps               = PlatformCaps::sdl(true);
+        state.currentScreen      = ScreenType::PROJECT;
+        state.projectCursorRow   = 0;
+        state.projectCursorColumn = 1;
+
+        dispatch.on_dpad_up();
+        eq(state.projectCursorRow, 7, "PROJECT[sdl]: UP from row 0 WRAPS to EXIT (row 7)");
+
+        state.caps = PlatformCaps::android(true);
+        state.projectCursorRow = 0;
+        dispatch.on_dpad_up();
+        eq(state.projectCursorRow, 6, "PROJECT[android]: …wraps to SYSTEM (row 6) — there is no EXIT");
+
+        // The NAME row is 20 columns wide; every other row is 1, 2 or 3. Carry a column across and it
+        // would land nowhere — which is why the row change resets it.
+        state.caps = PlatformCaps::sdl(true);
+        state.projectCursorRow = static_cast<int>(ProjectRow::NAME);
+        state.projectCursorColumn = 1;
+        for (int i = 0; i < 30; ++i) dispatch.on_dpad_right();
+        eq(state.projectCursorColumn, 20, "PROJECT: RIGHT walks NAME to column 20 and stops (20 chars)");
+
+        dispatch.on_dpad_down();
+        eq(state.projectCursorRow, static_cast<int>(ProjectRow::PROJECT),
+           "PROJECT: DOWN off NAME lands on the PROJECT row");
+        eq(state.projectCursorColumn, 1,
+           "⚠️ PROJECT: …and the column SNAPS back to 1 — column 20 does not exist on a 3-button row");
+
+        for (int i = 0; i < 5; ++i) dispatch.on_dpad_right();
+        eq(state.projectCursorColumn, 3, "PROJECT: RIGHT stops at NEW (column 3)");
+
+        for (int i = 0; i < 5; ++i) dispatch.on_dpad_left();
+        eq(state.projectCursorColumn, 1,
+           "PROJECT: LEFT stops at column 1 — column 0 is the LABEL and is not a cell");
+
+        // ⚠️ THE DEFERRED-A LATCH, which is what lets THREE gestures live on one cell. On the NAME row,
+        // plain A opens the KEYBOARD, A+UP walks that character through the alphabet, and A+B blanks it.
+        // Fire the open on the PRESS and the last two become unreachable — so the mapper holds the press
+        // until A is RELEASED, and cancels it if any A-combo fires in between (S6a built this for
+        // INSTRUMENT's NAME cell; PROJECT's is the sharper case, since its 20 characters are 20 columns).
+        state.projectCursorRow = static_cast<int>(ProjectRow::NAME);
+        ok(dispatch.defer_a_to_release(),
+           "⚠️ PROJECT: A on the NAME row is DEFERRED to the release — A+UP and A+B share the cell");
+
+        state.projectCursorRow = static_cast<int>(ProjectRow::PROJECT);
+        ok(!dispatch.defer_a_to_release(),
+           "PROJECT: …but SAVE/LOAD/NEW are NOT deferred — read-only cells with no A+DPAD to protect");
+        state.projectCursorRow = static_cast<int>(ProjectRow::EXPORT);
+        ok(!dispatch.defer_a_to_release(), "PROJECT: …nor MIX/STEMS");
+    }
+
+    // ── 16. THE MODAL RULE: a confirm owns every button but A and B ──────────────────────────────
+    //
+    // ⚠️ THIS IS THE ASSERTION THAT MAKES THE 28 GUARDS SAFE, not the code shape. Kotlin's own comment
+    // on this predicate warns that "every new show*Dialog-style modal state MUST be added" to it — a
+    // rule you must remember at 28 call sites is a rule you will forget once, and the symptom is a
+    // button that does the wrong thing exactly once, which nobody reports because it reads as a
+    // mis-press. So: raise a dialog, press EVERYTHING, and assert that nothing moved.
+    {
+        state.caps                = PlatformCaps::sdl(true);
+        state.currentScreen       = ScreenType::PROJECT;
+        state.projectCursorRow    = static_cast<int>(ProjectRow::COMPACT);
+        state.projectCursorColumn = 1;   // SEQ
+
+        dispatch.on_button_a();
+        ok(state.confirm.is_open(), "CONFIRM: A on COMPACT/SEQ raises a dialog rather than compacting");
+        eq(static_cast<int>(state.confirm.kind), static_cast<int>(ConfirmDialogState::Kind::CLEAN_SEQ),
+           "CONFIRM: …and it is the CLEAN SEQ one");
+
+        const int rowBefore    = state.projectCursorRow;
+        const int colBefore    = state.projectCursorColumn;
+        const auto screenBefore = state.currentScreen;
+
+        // Every button except A and B. Not one of them may do anything.
+        dispatch.on_dpad_up();    dispatch.on_dpad_down();
+        dispatch.on_dpad_left();  dispatch.on_dpad_right();
+        dispatch.on_a_up();       dispatch.on_a_down();
+        dispatch.on_a_left();     dispatch.on_a_right();
+        dispatch.on_a_b();        dispatch.on_a_a();      dispatch.on_a_released();
+        dispatch.on_b_left();     dispatch.on_b_right();
+        dispatch.on_b_up();       dispatch.on_b_down();
+        dispatch.on_r_up();       dispatch.on_r_down();
+        dispatch.on_r_left();     dispatch.on_r_right();
+        dispatch.on_l_b();        dispatch.on_l_a();      dispatch.on_l_r();  dispatch.on_l_b_a();
+        dispatch.on_select();     dispatch.on_select_a(); dispatch.on_select_b(); dispatch.on_select_r();
+        dispatch.on_start();
+
+        ok(state.confirm.is_open(), "⚠️ MODAL RULE: 28 other buttons leave the dialog OPEN");
+        eq(state.projectCursorRow, rowBefore, "MODAL RULE: …the cursor row did not move");
+        eq(state.projectCursorColumn, colBefore, "MODAL RULE: …nor the column");
+        eq(static_cast<int>(state.currentScreen), static_cast<int>(screenBefore),
+           "MODAL RULE: …and R+DPAD did not change screen out from under it");
+
+        dispatch.on_button_b();
+        ok(!state.confirm.is_open(), "CONFIRM: B is NO — it closes without doing the thing");
+    }
+
+    // ── 17. NEW asks only when there is something to lose ────────────────────────────────────────
+    {
+        state.caps                = PlatformCaps::sdl(true);
+        state.currentScreen       = ScreenType::PROJECT;
+        state.projectCursorRow    = static_cast<int>(ProjectRow::PROJECT);
+        state.projectCursorColumn = 3;   // NEW
+
+        // Clean: no question asked.
+        state.projectVersion = state.savedProjectVersion = 0;
+        host.edit_project().tempo = 155;
+        dispatch.on_button_a();
+        ok(!state.confirm.is_open(), "NEW: a CLEAN project is replaced with no question asked");
+        eq(host.project().tempo, 128, "NEW: …and the document really is factory-fresh again");
+        eq(host.project().version, 1, "⚠️ NEW: version = 1, not 0 — 0 means a PRE-VERSIONING file");
+
+        // Dirty: it asks.
+        state.currentScreen       = ScreenType::PHRASE;
+        state.cursorRow = 0; state.cursorColumn = 2;   // a phrase VELOCITY cell
+        dispatch.on_a_up();
+        ok(state.project_dirty(), "DIRTY: an edit on PHRASE marks the project dirty");
+
+        state.currentScreen       = ScreenType::PROJECT;
+        state.projectCursorRow    = static_cast<int>(ProjectRow::PROJECT);
+        state.projectCursorColumn = 3;
+        dispatch.on_button_a();
+        ok(state.confirm.is_open(), "NEW: a DIRTY project asks first");
+        eq(static_cast<int>(state.confirm.kind),
+           static_cast<int>(ConfirmDialogState::Kind::NEW_PROJECT), "NEW: …with the NEW PROJECT? dialog");
+
+        dispatch.on_button_a();   // YES
+        ok(!state.project_dirty(), "NEW: confirming it leaves the document clean");
+    }
+
+    // ── 18. EXIT — the shell's row, which Android has no counterpart for ─────────────────────────
+    {
+        state.caps                = PlatformCaps::sdl(true);
+        state.currentScreen       = ScreenType::PROJECT;
+        state.projectCursorRow    = static_cast<int>(ProjectRow::EXIT);
+        state.projectCursorColumn = 1;
+        state.shouldQuit          = false;
+
+        state.projectVersion = state.savedProjectVersion = 0;   // clean
+        dispatch.on_button_a();
+        ok(state.shouldQuit, "EXIT: a clean project quits outright");
+
+        state.shouldQuit = false;
+        state.projectVersion = 5; state.savedProjectVersion = 0;   // dirty
+        dispatch.on_button_a();
+        ok(!state.shouldQuit, "⚠️ EXIT: a DIRTY project does NOT quit…");
+        eq(static_cast<int>(state.confirm.kind), static_cast<int>(ConfirmDialogState::Kind::EXIT),
+           "EXIT: …it asks — there is no autosave to make a lost song survivable");
+        dispatch.on_button_b();   // NO
+        ok(!state.shouldQuit, "EXIT: B cancels, and the app stays up");
+
+        dispatch.on_button_a();   // ask again
+        dispatch.on_button_a();   // YES
+        ok(state.shouldQuit, "EXIT: A confirms, and the frame loop is told to leave");
+
+        // …and on Android there is no such row to press.
+        state.caps             = PlatformCaps::android(true);
+        state.shouldQuit       = false;
+        state.projectCursorRow = static_cast<int>(ProjectRow::EXIT);   // out of range there
+        dispatch.on_button_a();
+        ok(!state.shouldQuit, "EXIT[android]: the row does not exist, and A on it does nothing");
+    }
+
+    // ── 19. SAVE / LOAD, on a real disk ──────────────────────────────────────────────────────────
+    //
+    // ⚠️ This is the session's Definition of Done: "the shell still cannot save a project". It can now,
+    // and this is what says so — a real .ptp, written and read back, with NO engine in the process.
+    {
+        state.caps          = PlatformCaps::sdl(true);
+        state.currentScreen = ScreenType::PROJECT;
+        state.confirm.close();
+
+        songcore::Project& p = host.edit_project();
+        p.name  = "SAVE TEST";     // ⚠️ a SPACE — the filename must be sanitized, the NAME must not be
+        p.tempo = 141;
+        p.transpose = 0x0C;
+        state.projectVersion = 9; state.savedProjectVersion = 0;
+
+        state.projectCursorRow    = static_cast<int>(ProjectRow::PROJECT);
+        state.projectCursorColumn = 1;   // SAVE
+        dispatch.on_button_a();
+
+        eqs(state.statusMessage, "SAVED", "SAVE: reports back through the status line…");
+        ok(state.statusSuccess, "SAVE: …as a success");
+        ok(!state.project_dirty(), "SAVE: …and the document is no longer dirty");
+
+        const fs::path written = tree.root / "Projects" / "SAVE_TEST.ptp";
+        ok(fs::exists(written), "⚠️ SAVE: the file is SAVE_TEST.ptp — the space is sanitized OUT of the "
+                                "filename (and left alone in the project's name)");
+
+        // ⚠️ AN ANDROID BUG, FOUND BY PORTING. An EMPTY name sanitizes to an empty filename, so the
+        // save used to write "<Projects>/.ptp" — a DOTFILE, which the browser skips. The save reported
+        // SAVED, went green, and the file was invisible to the app forever. Reachable: A+B every
+        // character on the NAME row. Fixed on both platforms (FileController.saveProject).
+        p.name = "";
+        dispatch.on_button_a();
+        ok(fs::exists(tree.root / "Projects" / "UNTITLED.ptp"),
+           "⚠️ SAVE: an EMPTY name falls back to UNTITLED.ptp — never to '.ptp', which no browser lists");
+        ok(!fs::exists(tree.root / "Projects" / ".ptp"), "SAVE: …and no dotfile is left behind");
+        p.name = "SAVE TEST";
+
+        // Now break the document, and LOAD it back.
+        p.tempo = 90; p.transpose = 0; p.name = "SCRIBBLE";
+        ok(host.load_project_file(written.generic_string(), tree.root.generic_string()),
+           "LOAD: the .ptp parses back");
+        eq(host.project().tempo, 141, "LOAD: …tempo restored");
+        eq(host.project().transpose, 0x0C, "LOAD: …transpose restored");
+        eqs(host.project().name, "SAVE TEST", "LOAD: …and the NAME kept its space");
+    }
+
+    // ── 20. COMPACT — the surgery, and the transitive table walk ─────────────────────────────────
+    {
+        state.caps          = PlatformCaps::sdl(true);
+        state.currentScreen = ScreenType::PROJECT;
+        state.confirm.close();
+
+        songcore::Project& p = host.edit_project();
+        p = songcore::make_default_project();
+
+        // A song that reaches: chain 5 → phrase 9 → instrument 3, and (via a TBL in phrase 9)
+        // table 40 — which itself carries a GRV pointing at groove 7 and a TBL at table 41.
+        p.tracks[0].chainRefs.assign(256, -1);
+        p.tracks[0].chainRefs[0] = 5;
+        p.chains[5].phraseRefs[0] = 9;
+        p.phrases[9].steps[0].note       = songcore::Note::C4();
+        p.phrases[9].steps[0].instrument = 3;
+        p.phrases[9].steps[0].fx1Type    = songcore::FX_TBL;
+        p.phrases[9].steps[0].fx1Value   = 40;
+        p.tables[40].rows[0].fx1Type  = songcore::FX_GRV;
+        p.tables[40].rows[0].fx1Value = 7;
+        p.tables[40].rows[1].fx1Type  = songcore::FX_TBL;
+        p.tables[40].rows[1].fx1Value = 41;
+        p.tables[41].rows[0].transpose = 0x42;   // …so we can see whether it survived
+        p.grooves[7].steps[0] = 9;
+
+        // …and a lot that it does not.
+        p.chains[6].phraseRefs[0]  = 200;
+        p.phrases[200].steps[0].note = songcore::Note::C4();
+        p.instruments[99].name = "ORPHAN";
+        p.tables[99].rows[0].transpose = 0x11;
+        p.grooves[99].steps[0] = 3;
+
+        state.projectCursorRow    = static_cast<int>(ProjectRow::COMPACT);
+        state.projectCursorColumn = 2;   // INST
+        dispatch.on_button_a();
+        ok(state.confirm.is_open(), "COMPACT: A on INST asks first");
+        dispatch.on_button_a();          // YES
+
+        eqs(host.project().instruments[3].name, "INST03", "COMPACT INST: the USED instrument survives");
+        eqs(host.project().instruments[99].name, "INST63",   // ⚠️ HEX: slot 99 = 0x63
+            "COMPACT INST: the orphan is back to factory");
+        eq(host.project().instruments[99].sampleId, -1,
+           "⚠️ COMPACT: a cleaned slot has sampleId = -1 (the FIELD default) — where a slot in a FRESH "
+           "project has sampleId = i. The two do not even serialize alike, and that is Kotlin's.");
+
+        eq(host.project().tables[41].rows[0].transpose, 0x42,
+           "⚠️ COMPACT: table 41 SURVIVES — it is reached only from INSIDE table 40, and the walk is "
+           "TRANSITIVE");
+        eq(host.project().grooves[7].steps[0], 9,
+           "⚠️ COMPACT: groove 7 survives — reached only from a table's own GRV row");
+        eq(host.project().tables[99].rows[0].transpose, 0x00, "COMPACT: the orphan table is wiped");
+        eq(host.project().grooves[99].steps[0], -1, "COMPACT: the orphan groove is wiped");
+        eq(host.project().grooves[0].steps[0], -1, "COMPACT: groove 0 is always kept");
+
+        // SEQ leaves the instruments alone and takes the arrangement.
+        state.projectCursorColumn = 1;   // SEQ
+        dispatch.on_button_a();
+        dispatch.on_button_a();          // YES
+        eq(static_cast<int>(host.project().chains[5].phraseRefs[0]), 9,
+           "COMPACT SEQ: the used chain survives");
+        eq(static_cast<int>(host.project().chains[6].phraseRefs[0]), -1,
+           "COMPACT SEQ: the unused chain is wiped");
+        ok(host.project().phrases[200].steps[0].note == songcore::Note::EMPTY(),
+           "COMPACT SEQ: …and so is the phrase only IT referenced");
+    }
+
+    // ── 21. The song TEMPLATE, and settings.json ─────────────────────────────────────────────────
+    {
+        state.caps          = PlatformCaps::sdl(true);
+        state.currentScreen = ScreenType::SETTINGS;
+        state.confirm.close();
+
+        host.edit_project().tempo = 174;
+
+        state.settingsCursorRow    = static_cast<int>(SettingsRow::TEMPLATE);
+        state.settingsCursorColumn = 1;   // SAVE
+        dispatch.on_button_a();
+        eqs(state.statusMessage, "TEMPLATE SAVED", "TEMPLATE: A on SAVE writes it");
+        ok(fs::exists(fs::path(fs_impl.template_project_path())), "TEMPLATE: …and the file is there");
+
+        state.settingsCursorColumn = 2;   // CLEAR
+        dispatch.on_button_a();
+        eqs(state.statusMessage, "TEMPLATE CLEARED", "TEMPLATE: A on CLEAR deletes it");
+        ok(!fs::exists(fs::path(fs_impl.template_project_path())), "TEMPLATE: …and it is really gone");
+
+        dispatch.on_button_a();   // …again, on nothing
+        ok(state.statusSuccess,
+           "⚠️ TEMPLATE: clearing an ABSENT template SUCCEEDS — it is a no-op, not a failure (Kotlin's)");
+
+        // settings.json — the round trip. A setting that resets on every launch is a setting nobody
+        // will touch twice.
+        state.settings.cursorRemember    = true;
+        state.settings.insertBefore      = false;
+        state.settings.notePreviewEnabled = false;
+        state.settings.scalingBilinear   = true;
+        state.theme = theme_amber();
+        state.theme.visualizerType = VisualizerType::SPECTRUM_PEAKS;
+        ok(save_settings(fs_impl, state.settings, state.theme), "settings.json: written");
+
+        SettingsValues back{};
+        Theme          backTheme = theme_classic();
+        ok(load_settings(fs_impl, back, backTheme), "settings.json: read back");
+        ok(back.cursorRemember, "settings.json: cursorRemember round-trips");
+        ok(!back.insertBefore, "settings.json: insertBefore round-trips");
+        ok(!back.notePreviewEnabled, "settings.json: notePreview round-trips");
+        ok(back.scalingBilinear, "settings.json: scaling round-trips");
+        eqs(backTheme.name, "AMBER", "settings.json: the theme round-trips BY NAME");
+        eq(static_cast<int>(backTheme.visualizerType), static_cast<int>(VisualizerType::SPECTRUM_PEAKS),
+           "⚠️ settings.json: …and the VISUALIZER rides across the theme swap, as Android carries it");
+
+        // A file that is not there is not an error: it is the first launch.
+        StdFileSystem   emptyFs((tree.root / "nowhere").generic_string());
+        SettingsValues  fresh{};
+        Theme           freshTheme = theme_classic();
+        ok(!load_settings(emptyFs, fresh, freshTheme),
+           "settings.json: a missing file reads as FALSE (first launch), and the defaults stand");
+        ok(fresh.insertBefore, "settings.json: …with insertBefore still at its factory default");
+    }
+
+    // ── 22. The A+DPAD edit path on SETTINGS does NOT dirty the project ──────────────────────────
+    //
+    // Turning the visualizer on is not a change to the song, and it must not put a "you have unsaved
+    // work" question in front of the next NEW or EXIT.
+    {
+        state.caps          = PlatformCaps::sdl(true);
+        state.currentScreen = ScreenType::SETTINGS;
+        state.projectVersion = state.savedProjectVersion = 3;
+        state.settingsDirty  = false;
+
+        state.settingsCursorRow    = static_cast<int>(SettingsRow::NOTE_PREV);
+        state.settingsCursorColumn = 1;
+        const bool before = state.settings.notePreviewEnabled;
+        dispatch.on_a_up();
+
+        ok(state.settings.notePreviewEnabled != before, "SETTINGS: A+UP toggles NOTE PREV");
+        ok(!state.project_dirty(),
+           "⚠️ SETTINGS: …and does NOT dirty the PROJECT — a setting is not a song");
+        ok(state.settingsDirty, "SETTINGS: …but it does mark settings.json as needing a write");
+    }
+
+    // ── 23. EXPORT — the one section that needs a REAL engine ────────────────────────────────────
+    //
+    // ⚠️ Every check above runs with a NULL engine, and S4 earned the right to say that: a document
+    // edit does not need an audio device. A RENDER does. A render with no engine is not a degraded
+    // render — it is silence, and every assertion about it would pass vacuously. (S6a made exactly
+    // this argument about the FILESYSTEM, and for exactly this reason.) So this block builds its own
+    // engine, its own host and its own dispatcher, and drives the PROJECT screen's EXPORT buttons.
+    //
+    // ⚠️ HEAP. AudioEngine's DSP scratch, spectrum rings and 256-slot table pool are members, and they
+    // blow a 1 MB stack instantly if it is constructed as a local (S6b).
+    //
+    // What this proves that `ptrender` does not: ptrender calls `render_song_to_wav` directly. Nothing
+    // in it goes through the PROJECT screen — through the cursor, the A button, `export_song`, the
+    // stems PLAN, the folder creation and the `_0001` naming. That whole path is new in S7, and it is
+    // the path a user actually presses.
+    {
+        auto engine = std::make_unique<AudioEngine>();
+        engine->setDeviceSampleRate(44100);
+
+        songcore::SongcoreHost rhost(engine.get(), 44100);
+
+        AppState rstate;
+        rstate.project = &rhost.edit_project();
+        rstate.caps    = PlatformCaps::sdl(true);
+
+        InputDispatcher rdispatch(rstate, rhost, fs_impl);
+
+        // A minimal but AUDIBLE song: two tracks, so the stems plan yields two track stems, and one
+        // instrument with a reverb send, so it yields a reverb return as well.
+        songcore::Project& p = rhost.edit_project();
+        p = songcore::make_default_project();
+        p.name = "EXPORT TEST";
+        p.instruments[0].reverbSend = 0x40;
+        for (int track = 0; track < 2; ++track) {
+            p.tracks[track].chainRefs.assign(256, -1);
+            p.tracks[track].chainRefs[0] = track;
+            p.chains[track].phraseRefs[0] = track;
+            for (int step = 0; step < 4; ++step) {
+                songcore::PhraseStep& s = p.phrases[track].steps[static_cast<size_t>(step * 4)];
+                s.note       = songcore::Note::C4();
+                s.instrument = 0;
+            }
+        }
+        rhost.push_params();
+
+        // The plan, before the render — it is what decides how many files there will be.
+        const std::vector<songcore::StemPass> plan = songcore::stems_plan(p);
+        eq(static_cast<int>(plan.size()), 3,
+           "STEMS: two active tracks + the reverb return (instrument 0 feeds it) = three passes");
+        eqs(plan[0].suffix, "_1", "⚠️ STEMS: track stems are numbered SEQUENTIALLY (_1.._N), not by track id");
+        eqs(plan[2].suffix, "_reverb", "STEMS: …and the send returns come last");
+
+        // MIX, through the button.
+        rstate.currentScreen       = ScreenType::PROJECT;
+        rstate.projectCursorRow    = static_cast<int>(ProjectRow::EXPORT);
+        rstate.projectCursorColumn = 1;
+        rdispatch.on_button_a();
+
+        eqs(rstate.statusMessage, "EXPORTED!", "EXPORT: A on MIX renders and reports back");
+        ok(!rstate.isRendering, "EXPORT: …and the render flag is down again afterwards");
+
+        const fs::path mix = tree.root / "Renders" / "EXPORT_TEST_0001.wav";
+        ok(fs::exists(mix), "EXPORT: the WAV is Renders/EXPORT_TEST_0001.wav (name sanitized, counter added)");
+        ok(fs::exists(mix) && fs::file_size(mix) > 44 * 100,
+           "EXPORT: …and it has real audio in it, not just a 44-byte header");
+
+        // A second MIX must not overwrite the first — the counter walks.
+        rdispatch.on_button_a();
+        ok(fs::exists(tree.root / "Renders" / "EXPORT_TEST_0002.wav"),
+           "EXPORT: a second render counts up rather than overwriting");
+
+        // STEMS, through the button.
+        rstate.projectCursorColumn = 2;
+        rdispatch.on_button_a();
+        eqs(rstate.statusMessage, "STEMS EXPORTED!", "STEMS: A on STEMS renders the set");
+
+        const fs::path stemDir = tree.root / "Renders" / "EXPORT_TEST";
+        ok(fs::exists(stemDir / "EXPORT_TEST_1.wav"),      "STEMS: track 1 is written…");
+        ok(fs::exists(stemDir / "EXPORT_TEST_2.wav"),      "STEMS: …track 2…");
+        ok(fs::exists(stemDir / "EXPORT_TEST_reverb.wav"), "STEMS: …and the reverb return");
+        int stemCount = 0;
+        for (const auto& e : fs::directory_iterator(stemDir)) { (void)e; ++stemCount; }
+        eq(stemCount, 3, "STEMS: exactly three files — the plan and the disk agree");
+
+        // An EMPTY song has nothing to export, and says so rather than writing a 0-second WAV.
+        p = songcore::make_default_project();
+        p.name = "EMPTY";
+        rdispatch.on_button_a();
+        eqs(rstate.statusMessage, "SONG IS EMPTY", "EXPORT: an empty song is refused, not rendered");
+        ok(!rstate.statusSuccess, "EXPORT: …and it is reported as a failure (red), not a success");
     }
 
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);

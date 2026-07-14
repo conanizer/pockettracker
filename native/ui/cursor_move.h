@@ -37,11 +37,17 @@
 //     (track 0 ← master → track 0), because a mixer is a ring of channels rather than a document.
 //   • EFFECTS is one column of eight rows, and they CLAMP at both ends.
 //
-// The screens that still do not exist (PROJECT, SETTINGS…) fall through to the shared 16-row default,
-// which is what the Kotlin `else` branch does for anything it has not named.
+//   • PROJECT and SETTINGS are FORMS whose rows WRAP, and whose every row change snaps the column
+//     back to 1 — their rows have 1, 2, 3 and 20 columns, so a carried column would land nowhere.
+//     SETTINGS additionally wraps over its VISIBLE rows only (ui/settings_row_layout.h), which is a
+//     loop where Kotlin gets away with a single substitution.
+//
+// Any screen not named below falls through to the shared 16-row default, which is what the Kotlin
+// `else` branch does for anything it has not named.
 
 #include "ui/app_state.h"
 #include "ui/instrument_row_layout.h"
+#include "ui/settings_row_layout.h"
 
 namespace pt::ui {
 
@@ -252,6 +258,22 @@ inline void move_cursor_up(AppState& s) {
             if (s.effectsCursorRow > 0) s.effectsCursorRow--;
             break;
 
+        // PROJECT's rows WRAP, and every row change snaps the column back to 1 — you never arrive on
+        // a row holding the column you left the last one on, because the rows have 1, 2, 3 and 20 of
+        // them and a carried column would land nowhere.
+        case ScreenType::PROJECT: {
+            const int last = project_row_count(s.caps) - 1;
+            s.projectCursorRow = (s.projectCursorRow > 0) ? s.projectCursorRow - 1 : last;
+            s.projectCursorColumn = 1;
+            break;
+        }
+
+        // SETTINGS wraps too — over the VISIBLE rows (ui/settings_row_layout.h).
+        case ScreenType::SETTINGS:
+            s.settingsCursorRow    = settings_next_visible_row(s.settingsCursorRow, -1, s.caps);
+            s.settingsCursorColumn = 1;
+            break;
+
         default:
             s.cursorRow = (s.cursorRow > 0) ? s.cursorRow - 1 : 15;
             break;
@@ -317,6 +339,18 @@ inline void move_cursor_down(AppState& s) {
 
         case ScreenType::EFFECTS:
             if (s.effectsCursorRow < 7) s.effectsCursorRow++;
+            break;
+
+        case ScreenType::PROJECT: {
+            const int last = project_row_count(s.caps) - 1;
+            s.projectCursorRow = (s.projectCursorRow < last) ? s.projectCursorRow + 1 : 0;
+            s.projectCursorColumn = 1;
+            break;
+        }
+
+        case ScreenType::SETTINGS:
+            s.settingsCursorRow    = settings_next_visible_row(s.settingsCursorRow, +1, s.caps);
+            s.settingsCursorColumn = 1;
             break;
 
         default:
@@ -393,6 +427,18 @@ inline void move_cursor_left(AppState& s) {
             // REV (row 1, column 0): nothing to its left — stay.
             return;
 
+        // Both step back toward column 1, never to 0: column 0 is the row LABEL, and it is not a cell.
+        case ScreenType::PROJECT:
+            if (s.projectCursorColumn > 1) s.projectCursorColumn--;
+            return;
+
+        // ⚠️ SETTINGS SNAPS, it does not step. LEFT from the second column goes straight to the first,
+        // because there are only ever two and there is nothing between them. (Kotlin: a bare
+        // `settingsCursorColumn = 1`.)
+        case ScreenType::SETTINGS:
+            s.settingsCursorColumn = 1;
+            return;
+
         default:
             break;
     }
@@ -447,6 +493,26 @@ inline void move_cursor_right(AppState& s) {
             }
             // Already in column 8: it is the rightmost — stay.
             return;
+
+        // PROJECT steps right within the row's own column count: 20 on NAME (one per character),
+        // 3 on PROJECT, 2 on EXPORT and COMPACT, 1 everywhere else.
+        case ScreenType::PROJECT: {
+            const int max = project_row_max_column(static_cast<ProjectRow>(s.projectCursorRow));
+            if (s.projectCursorColumn < max) s.projectCursorColumn++;
+            return;
+        }
+
+        // ⚠️ SETTINGS SNAPS to column 2 — if the row has one at all. Which rows do is caps-dependent:
+        // TRACE's second column is ENG, and on the shell there is no second sequencer to select, so
+        // RIGHT there must not move. (Kotlin asks the same question with a hard-coded row set,
+        // `settingsCursorRow in setOf(2, 3, 4, 10, 12)`, plus the dynamic LAYOUT case.)
+        case ScreenType::SETTINGS: {
+            const SettingsRow row = static_cast<SettingsRow>(s.settingsCursorRow);
+            const bool hasSkins   = s.settings.skinCount > 0;
+            if (settings_row_has_second_column(row, s.caps, hasSkins) && s.settingsCursorColumn < 2)
+                s.settingsCursorColumn = 2;
+            return;
+        }
 
         default:
             break;

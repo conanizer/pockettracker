@@ -98,3 +98,10 @@ void SdlAudioEngine::closeStream() {
 void SdlAudioEngine::resumeStream() {
     if (device_ != 0) SDL_PauseAudioDevice(device_, 0);
 }
+
+void SdlAudioEngine::setPaused(bool paused) {
+    // SDL_PauseAudioDevice(dev, 1) does not return until any callback in flight has finished, so on
+    // the far side of this call the engine has exactly one reader: us. See the header for why an
+    // offline render needs that to be a guarantee rather than a coincidence.
+    if (device_ != 0) SDL_PauseAudioDevice(device_, paused ? 1 : 0);
+}

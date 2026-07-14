@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace pt::ui {
 
@@ -107,6 +108,28 @@ inline Theme theme_mono() {
     t.meterMid      = 0xFF888888;
     t.meterHigh     = 0xFF444444;
     return t;
+}
+
+/**
+ * The built-ins, in the order the theme cycle walks them — Kotlin's `AppTheme.BUILTINS`.
+ *
+ * ⚠️ `visualizerType` is a FIELD on a theme but is NOT part of a theme's identity. Android carries it
+ * across a theme change deliberately (`BUILTINS[next].copy(visualizerType = appTheme.visualizerType)`):
+ * the palette belongs to the theme, the visualizer belongs to the user. Anything that swaps a theme
+ * must preserve it — which is what `theme_by_name` takes it as an argument for.
+ */
+inline std::vector<Theme> theme_builtins() {
+    return {theme_classic(), theme_amber(), theme_blue(), theme_mono()};
+}
+
+/** A built-in by name, keeping `visualizer`. An unknown name reads as CLASSIC, as a bad .ptt does. */
+inline Theme theme_by_name(const std::string& name, VisualizerType visualizer) {
+    Theme found = theme_classic();
+    for (const Theme& t : theme_builtins()) {
+        if (t.name == name) { found = t; break; }
+    }
+    found.visualizerType = visualizer;
+    return found;
 }
 
 }  // namespace pt::ui

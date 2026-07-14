@@ -202,6 +202,35 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 break;
             }
 
+            case ScreenType::PROJECT: {
+                ProjectState prs{p};
+                prs.cursorRow      = s.projectCursorRow;
+                prs.cursorColumn   = s.projectCursorColumn;
+                prs.isRendering    = s.isRendering;
+                prs.renderProgress = s.renderProgress;
+                prs.sampleRamBytes = s.sampleRamBytes;
+                prs.caps           = s.caps;
+                prs.theme          = t;
+                project_.draw(c, moduleX, EDITOR_Y, prs);
+                break;
+            }
+
+            case ScreenType::SETTINGS: {
+                SettingsState ss{s.settings};
+                ss.cursorRow    = s.settingsCursorRow;
+                ss.cursorColumn = s.settingsCursorColumn;
+                // The display strings for the DEVICE rows. Empty on the shell, which does not draw
+                // them — the module edits indices; only the platform can name what an index means.
+                ss.layoutText   = s.layoutText;
+                ss.skinText     = s.skinText;
+                ss.overlayText  = s.overlayText;
+                ss.themeName    = t.name;
+                ss.caps         = s.caps;
+                ss.theme        = t;
+                settings_.draw(c, moduleX, EDITOR_Y, ss);
+                break;
+            }
+
             default:
                 draw_placeholder(c, moduleX, EDITOR_Y, s.currentScreen, t);
                 break;
@@ -209,17 +238,48 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
     }
 
     // ── The right bar ────────────────────────────────────────────────────────────────────────────
-    // Hidden on the screens that take the whole 640×480 for themselves. (FILE_BROWSER returned long
-    // before this line; SETTINGS and SAMPLE_EDITOR still route through the placeholder.)
-    if (s.currentScreen != ScreenType::SETTINGS && s.currentScreen != ScreenType::SAMPLE_EDITOR) {
-        draw_right_bar(c, s);
-    }
+    //
+    // Hidden on SETTINGS — which is NOT because it is full-screen (it is a 510×392 panel like every
+    // other editor) but because Android hides it there too (PixelPerfectRenderer:801). A settings
+    // panel has no playhead and no notes to monitor; the eight-track readout beside it would be
+    // reporting on a song nobody is looking at.
+    if (s.currentScreen != ScreenType::SETTINGS) draw_right_bar(c, s);
+
+    // ── The status line ──────────────────────────────────────────────────────────────────────────
+    // Over the scope strip, so every screen can report. See draw_status_line — and the bug that four
+    // sessions of this port shipped without it.
+    draw_status_line(c, s);
 
     // ── The overlays ─────────────────────────────────────────────────────────────────────────────
-    // LAST, over everything, including the right bar — an overlay is modal, and its backdrop dims the
-    // whole frame. (The EQ editor and the theme editor join them here as they land.)
+    // LAST, over everything, including the right bar and the status line — an overlay is modal, and
+    // its backdrop dims the whole frame. (The EQ editor and the theme editor join them here.)
     draw_fx_helper(c, s.fxHelper, t);
     if (s.qwerty.isOpen) qwerty_.draw(c, s.qwerty, t);
+    draw_confirm_dialog(c, s.confirm, t);
+}
+
+// ─── The global status line ──────────────────────────────────────────────────────────────────────
+//
+// "SAVED" · "EXPORTED!" · "SEQ CLEANED" · "CHAIN CLONED" · "NO FREE PHRASES". Drawn over the
+// oscilloscope strip's top-left corner, which is Kotlin's placement (PixelPerfectRenderer:444) and
+// costs no editor row — the point being that an action on ANY screen can report back.
+//
+// ⚠️ THE PORT HAS BEEN SETTING THIS SINCE S3 AND DRAWING IT NEVER. `AppState::statusMessage` has 22
+// writers in the dispatcher — every clone, every failed insert — and until this function existed not
+// one of them was visible. It survived because the screens that had landed all showed their result
+// in the grid itself: clone a chain and you can SEE the chain. PROJECT is the first screen where the
+// message IS the result — a SAVE looks exactly like a failed save without it — which is why S7 is
+// the session that found it.
+//
+// Full-screen editors (the browser, the sample editor) draw over this area and keep their own inline
+// status lines; both return long before this call.
+void TrackerLayout::draw_status_line(Canvas& c, const AppState& s) const {
+    if (s.statusMessage.empty()) return;
+
+    // `statusMessage.take(34)` — a longer message is cut, not wrapped: the strip is one line high.
+    const std::string text = s.statusMessage.substr(0, 34);
+    const Argb        color = s.statusSuccess ? s.theme.vizWave : 0xFFFF0000;
+    c.draw_text(text, SIDE_SPACER + 10, SCREEN_SPACER + 10, color, CHAR_SPACING, FONT_SCALE);
 }
 
 void TrackerLayout::draw_right_bar(Canvas& c, const AppState& s) const {

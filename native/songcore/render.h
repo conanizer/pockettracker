@@ -37,11 +37,13 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <set>
 #include <string>
 #include <vector>
 
 #include "engine_setup.h"
 #include "model.h"
+#include "traversal.h"
 #include "wav_writer.h"
 
 namespace songcore {
@@ -202,6 +204,83 @@ inline SongBounds find_song_bounds(const Project& project) {
         }
     }
     return b;
+}
+
+// ─── the STEMS plan (RenderController.renderStemsToWav, the pure half) ───────────────────────────
+//
+// WHICH stems a project has — deliberately NOT where they are written. Building the paths needs to
+// ask a filesystem what already exists and to create a folder, and songcore has no filesystem: it
+// must keep compiling for the Android NDK, where the answer to "where do files live" is scoped
+// storage and Kotlin's. So the POLICY is here and PURE, and the file half sits in the UI beside the
+// FileSystem interface that exists for exactly this question (ui/project_actions.h).
+
+/** The project name, made safe for a filename. Kotlin: `[^a-zA-Z0-9_\-]` → `_`, then take(32). */
+inline std::string safe_project_name(const std::string& name) {
+    std::string out;
+    for (char ch : name) {
+        const bool ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                        (ch >= '0' && ch <= '9') || ch == '_' || ch == '-';
+        out += ok ? ch : '_';
+        if (out.size() >= 32) break;
+    }
+    return out;
+}
+
+/** One pass of a stems render. `stemsMode`: 1-8 = track N, 9 = reverb return, 10 = delay return. */
+struct StemPass {
+    int         stemsMode = 0;
+    std::string suffix;   // appended to the safe project name: "_1", "_reverb", …
+    std::string label;    // the progress line
+};
+
+/**
+ * The passes a stems render will make.
+ *
+ * A track earns a stem when it is NOT MUTED and has at least one chain reference in the song. The
+ * two send returns earn one when any instrument the song actually uses feeds them. ⚠️ The track
+ * stems are numbered SEQUENTIALLY (_1.._N), not by track index — Kotlin's, and it means a song using
+ * tracks 1, 4 and 7 yields _1, _2, _3.
+ */
+inline std::vector<StemPass> stems_plan(const Project& project) {
+    std::vector<StemPass> passes;
+
+    const SongBounds bounds = find_song_bounds(project);
+    if (bounds.empty()) return passes;
+
+    std::vector<int> activeTracks;
+    for (int id = 0; id < static_cast<int>(project.tracks.size()) && id < 8; ++id) {
+        const Track& track = project.tracks[static_cast<size_t>(id)];
+        if (track.mute) continue;
+        bool hasChain = false;
+        for (int row = 0; row < 256 && row < static_cast<int>(track.chainRefs.size()); ++row) {
+            const int ref = track.chainRefs[static_cast<size_t>(row)];
+            if (ref >= 0 && ref <= 255) { hasChain = true; break; }
+        }
+        if (hasChain) activeTracks.push_back(id);
+    }
+    if (activeTracks.empty()) return passes;
+
+    const std::set<int> used = collect_used_instruments(project, bounds.startRow, bounds.endRow);
+    bool hasReverbSend = false, hasDelaySend = false;
+    for (int id : used) {
+        if (id < 0 || id >= static_cast<int>(project.instruments.size())) continue;
+        const Instrument& ins = project.instruments[static_cast<size_t>(id)];
+        if (ins.reverbSend > 0) hasReverbSend = true;
+        if (ins.delaySend  > 0) hasDelaySend  = true;
+    }
+
+    for (size_t i = 0; i < activeTracks.size(); ++i) {
+        StemPass pass;
+        pass.stemsMode = activeTracks[i] + 1;
+        pass.suffix    = "_" + std::to_string(i + 1);
+        pass.label     = "Rendering track " + std::to_string(i + 1) + "/" +
+                         std::to_string(activeTracks.size()) + "...";
+        passes.push_back(pass);
+    }
+    if (hasReverbSend) passes.push_back(StemPass{9,  "_reverb", "Rendering reverb stem..."});
+    if (hasDelaySend)  passes.push_back(StemPass{10, "_delay",  "Rendering delay stem..."});
+
+    return passes;
 }
 
 }  // namespace songcore

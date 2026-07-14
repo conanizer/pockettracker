@@ -46,7 +46,12 @@ class FileController(
     fun saveProject(project: Project, filename: String): SaveResult {
         return try {
             val dirPath = fileSystem.getProjectsDirectory()
-            val safeName = filename.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+            // ⚠️ `.ifEmpty` is not tidiness — without it an unnamed project saves to "$dirPath/.ptp",
+            // a DOTFILE, and the browser skips dotfiles (`buildItemList`). The save reports SAVED, the
+            // status line goes green, and the file is invisible to the app forever. An empty name is
+            // reachable: A+B every character on the PROJECT NAME row, or apply an empty keyboard field.
+            // Found by porting the PROJECT screen (Phase 3 S7); fixed on both platforms.
+            val safeName = filename.replace(Regex("[^a-zA-Z0-9_\\-]"), "_").ifEmpty { "UNTITLED" }
             val filePath = "$dirPath/$safeName.ptp"
             val jsonString = json.encodeToString(project)
             val success = fileSystem.writeFile(filePath, jsonString)

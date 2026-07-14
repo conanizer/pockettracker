@@ -49,9 +49,13 @@
 #include "../../native/ui/modules/mixer.h"
 #include "../../native/ui/modules/modulation.h"
 #include "../../native/ui/modules/phrase_editor.h"
+#include "../../native/ui/modules/project_editor.h"
 #include "../../native/ui/modules/sample_editor.h"
+#include "../../native/ui/modules/settings_editor.h"
 #include "../../native/ui/modules/song_editor.h"
 #include "../../native/ui/modules/table_editor.h"
+#include "../../native/ui/platform_caps.h"
+#include "../../native/ui/theme.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -460,6 +464,83 @@ static const ModulationModule       kMods{};
 static const MixerModule            kMixer{};
 static const EffectModule           kEffects{};
 static const SampleEditorModule     kSampleEditor{};
+static const ProjectModule          kProject{};
+static const SettingsModule         kSettings{};
+
+// ─── PROJECT (S7) ────────────────────────────────────────────────────────────────────────────────
+
+/** `prj=<tempo>:<transposeHex>:<nameAsAsciiHex>` — the name is hex because it can contain SPACES. */
+static std::string prj_str(const Project& p) {
+    std::string name;
+    char        buf[3];
+    for (char ch : p.name) {
+        std::snprintf(buf, sizeof(buf), "%02X", static_cast<unsigned>(static_cast<unsigned char>(ch)));
+        name += buf;
+    }
+    return "prj=" + std::to_string(p.tempo) + ":" + hex2(p.transpose) + ":" + name;
+}
+
+static void parse_prj(const std::string& spec, Project& p) {
+    const std::vector<std::string> f = split(spec.substr(std::string("prj=").size()), ':');
+    p.tempo     = from_dec(f[0]);
+    p.transpose = from_hex(f[1]);
+
+    p.name.clear();
+    const std::string& hex = f[2];
+    for (size_t i = 0; i + 1 < hex.size(); i += 2)
+        p.name += static_cast<char>(from_hex(hex.substr(i, 2)));
+}
+
+// ─── SETTINGS (S7) ───────────────────────────────────────────────────────────────────────────────
+//
+// ⚠️ Driven under `PlatformCaps::android(debug = true)`, which is the whole reason this comparison can
+// exist. The C++ SETTINGS row map is caps-FILTERED — the shell has eight of its thirteen rows — and a
+// module compiled with the other five #ifdef'd OUT could not be compared against a Kotlin module that
+// HAS them. Because the caps are a VALUE, the same code answers for both platforms, and the Android
+// answer is the one the golden holds it to, row for row, with no mapping and no exceptions.
+//
+// The VISUALIZER lives on the Theme, not in SettingsValues (Kotlin keeps it there too), so a Theme
+// rides along beside the values and the cell reads its index back out of it.
+
+static std::string set_str(const SettingsValues& v, const Theme& t) {
+    const auto b = [](bool x) { return std::string(x ? "1" : "0"); };
+    return "set=" + std::to_string(v.layoutIndex)  + "/" + std::to_string(v.layoutCount)  + ":" +
+           std::to_string(v.skinIndex)    + "/" + std::to_string(v.skinCount)    + ":" +
+           std::to_string(v.overlayIndex) + "/" + std::to_string(v.overlayCount) + ":" +
+           hex2(v.overlayStrength) + ":" +
+           b(v.buttonSoundEnabled) + ":" + hex2(v.buttonSoundVolume) + ":" +
+           b(v.buttonVibroEnabled) + ":" + hex2(v.vibroPower) + ":" +
+           b(v.scalingBilinear) + ":" + b(v.insertBefore) + ":" + b(v.cursorRemember) + ":" +
+           b(v.notePreviewEnabled) + ":" +
+           std::to_string(static_cast<int>(t.visualizerType)) + ":" +
+           b(v.autosaveResumeAuto) + ":" + b(v.traceEnabled) + ":" + b(v.engineCpp);
+}
+
+static void parse_set(const std::string& spec, SettingsValues& v, Theme& t) {
+    const std::vector<std::string> f = split(spec.substr(std::string("set=").size()), ':');
+
+    const std::vector<std::string> layout  = split(f[0], '/');
+    const std::vector<std::string> skin    = split(f[1], '/');
+    const std::vector<std::string> overlay = split(f[2], '/');
+
+    v.layoutIndex  = from_dec(layout[0]);   v.layoutCount  = from_dec(layout[1]);
+    v.skinIndex    = from_dec(skin[0]);     v.skinCount    = from_dec(skin[1]);
+    v.overlayIndex = from_dec(overlay[0]);  v.overlayCount = from_dec(overlay[1]);
+
+    v.overlayStrength     = from_hex(f[3]);
+    v.buttonSoundEnabled  = from_dec(f[4]) != 0;
+    v.buttonSoundVolume   = from_hex(f[5]);
+    v.buttonVibroEnabled  = from_dec(f[6]) != 0;
+    v.vibroPower          = from_hex(f[7]);
+    v.scalingBilinear     = from_dec(f[8]) != 0;
+    v.insertBefore        = from_dec(f[9]) != 0;
+    v.cursorRemember      = from_dec(f[10]) != 0;
+    v.notePreviewEnabled  = from_dec(f[11]) != 0;
+    t.visualizerType      = static_cast<VisualizerType>(from_dec(f[12]));
+    v.autosaveResumeAuto  = from_dec(f[13]) != 0;
+    v.traceEnabled        = from_dec(f[14]) != 0;
+    v.engineCpp           = from_dec(f[15]) != 0;
+}
 
 static std::string recompute_edit(const std::vector<std::string>& toks, std::string& err) {
     const std::string scr = field(toks, "scr");
@@ -647,6 +728,47 @@ static std::string recompute_edit(const std::vector<std::string>& toks, std::str
         const InputAction   act = resolve(btn, ctx);
         kEffects.handle_input(p, row, act);
         return ctx_str(ctx) + " act=" + act_str(act) + " " + fx_str(p);
+    }
+
+    // ── PROJECT (S7) ─────────────────────────────────────────────────────────────────────────────
+    if (scr == "PROJECT") {
+        const int row = from_dec(field(toks, "row"));
+        Project   p   = songcore::make_default_project();
+        parse_prj("prj=" + field(toks, "prj"), p);
+
+        ProjectState st{p};
+        st.cursorRow    = row;
+        st.cursorColumn = col;
+        // The golden is recorded from ANDROID, which has no EXIT row — and the caps only reach
+        // `cursor_context` for that one row, so this could be either. Said out loud rather than left
+        // to the default, because the two platforms genuinely answer differently for row 7.
+        st.caps = PlatformCaps::android(/*debug_build=*/true);
+
+        const CursorContext ctx = kProject.cursor_context(st);
+        const InputAction   act = resolve(btn, ctx);
+        kProject.handle_input(p, row, col, act);
+        return ctx_str(ctx) + " act=" + act_str(act) + " " + prj_str(p);
+    }
+
+    // ── SETTINGS (S7) ────────────────────────────────────────────────────────────────────────────
+    if (scr == "SETTINGS") {
+        const int      row = from_dec(field(toks, "row"));
+        SettingsValues v{};
+        Theme          t = theme_classic();
+        parse_set("set=" + field(toks, "set"), v, t);
+
+        const PlatformCaps caps = PlatformCaps::android(/*debug_build=*/true);
+
+        SettingsState st{v};
+        st.cursorRow    = row;
+        st.cursorColumn = col;
+        st.caps         = caps;
+        st.theme        = t;
+
+        const CursorContext ctx = kSettings.cursor_context(st);
+        const InputAction   act = resolve(btn, ctx);
+        kSettings.handle_input(v, t, caps, row, col, act);
+        return ctx_str(ctx) + " act=" + act_str(act) + " " + set_str(v, t);
     }
 
     // ── SAMPLE EDITOR ────────────────────────────────────────────────────────────────────────────

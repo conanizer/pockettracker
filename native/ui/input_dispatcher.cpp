@@ -207,6 +207,23 @@ CursorContext InputDispatcher::cursor_context() const {
             return effects_.cursor_context(es);
         }
 
+        case ScreenType::PROJECT: {
+            ProjectState prs{p};
+            prs.cursorRow    = s_.projectCursorRow;
+            prs.cursorColumn = s_.projectCursorColumn;
+            prs.caps         = s_.caps;
+            return project_.cursor_context(prs);
+        }
+
+        case ScreenType::SETTINGS: {
+            SettingsState ss{s_.settings};
+            ss.cursorRow    = s_.settingsCursorRow;
+            ss.cursorColumn = s_.settingsCursorColumn;
+            ss.caps         = s_.caps;
+            ss.theme        = s_.theme;   // VISUALIZER's value lives on the theme, not in the settings
+            return settings_.cursor_context(ss);
+        }
+
         case ScreenType::SAMPLE_EDITOR:
             return sample_.cursor_context(s_.sampleEditor);
 
@@ -250,7 +267,7 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
                     s_.lastEditedNote       = step.note;
                     s_.lastEditedVolume     = step.volume;
                     s_.lastEditedInstrument = step.instrument;
-                    if (s_.notePreviewEnabled && r.hasNote) preview_edited_note();
+                    if (s_.settings.notePreviewEnabled && r.hasNote) preview_edited_note();
                 }
             }
             return true;
@@ -304,6 +321,22 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
         case ScreenType::EFFECTS:
             return effects_.handle_input(p, s_.effectsCursorRow, action).modified;
 
+        case ScreenType::PROJECT:
+            return project_
+                .handle_input(p, s_.projectCursorRow, s_.projectCursorColumn, action)
+                .modified;
+
+        // ⚠️ SETTINGS edits the SETTINGS, not the project — so it returns `false` and mark_modified()
+        // never runs. That is the point, not an oversight: turning the visualizer on does not make a
+        // song dirty, and it must not put a "you have unsaved work" question in front of the next NEW
+        // or EXIT. (It is also why this arm is the only one that ignores `p`.) The shell persists
+        // these to settings.json instead — see the SETTINGS branch of on_a and the shell's own save.
+        case ScreenType::SETTINGS:
+            settings_.handle_input(s_.settings, s_.theme, s_.caps, s_.settingsCursorRow,
+                                   s_.settingsCursorColumn, action);
+            s_.settingsDirty = true;
+            return false;
+
         case ScreenType::SAMPLE_EDITOR: {
             const SampleEditorInputResult r = sample_.handle_input(s_.sampleEditor, action);
             if (r.rateModeChanged) apply_sample_rate_mode();
@@ -327,6 +360,12 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
 }
 
 void InputDispatcher::mark_modified(bool table_touched) {
+    // The document changed, so there is unsaved work. One counter, bumped in the one place every
+    // edit in the app already funnels through — which is what makes "is this project dirty?" a
+    // question with a single answer rather than a flag each screen must remember to set.
+    // (TrackerController's projectVersion; SAVE / LOAD / NEW align savedProjectVersion to it.)
+    s_.projectVersion++;
+
     // ⚠️ The consumer caches which tables it has already pushed to the engine. push_project
     // invalidates that cache; an IN-PLACE edit cannot, so the table screen must say so itself.
     if (table_touched || s_.currentScreen == ScreenType::TABLE) host_.invalidate_tables();
@@ -446,18 +485,21 @@ void InputDispatcher::dpad_nav(const char* direction) {
 // press there must move the KEY cursor, not the file cursor.
 
 void InputDispatcher::on_dpad_up() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_key_cursor_up(s_.qwerty); return; }
     if (on_browser())  { browser_move_cursor(-1, /*page=*/false); return; }
     dpad_nav("UP");
 }
 
 void InputDispatcher::on_dpad_down() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_key_cursor_down(s_.qwerty); return; }
     if (on_browser())  { browser_move_cursor(+1, /*page=*/false); return; }
     dpad_nav("DOWN");
 }
 
 void InputDispatcher::on_dpad_left() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_key_cursor_left(s_.qwerty); return; }
     // LEFT/RIGHT PAGE the browser by a screenful — the one list in the app long enough to need it.
     if (on_browser())  { browser_move_cursor(-BROWSER_VISIBLE_ROWS, /*page=*/true); return; }
@@ -465,6 +507,7 @@ void InputDispatcher::on_dpad_left() {
 }
 
 void InputDispatcher::on_dpad_right() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_key_cursor_right(s_.qwerty); return; }
     if (on_browser())  { browser_move_cursor(+BROWSER_VISIBLE_ROWS, /*page=*/true); return; }
     dpad_nav("RIGHT");
@@ -556,15 +599,28 @@ void InputDispatcher::apply_fx_type_change(int effect_code) {
  * because the user nudged A+UP one row too far is the worst of the three options; refusing with a
  * message is the honest one until the modal system lands.
  */
+/**
+ * A+UP/DOWN on the TYPE cell. Switching a slot's type FREES whatever source it holds, so a loaded
+ * slot has to be asked about first.
+ *
+ * ⚠️ S4 shipped this REFUSING to switch a loaded slot at all ("CLEAR SLOT FIRST") — stricter than
+ * Android, never destructive, and explicitly parked until there was a dialog to ask with. There is
+ * one now (S7), so the divergence closes: the question gets asked, and the answer is honoured.
+ */
+void InputDispatcher::request_instrument_type_toggle() {
+    const Instrument& ins =
+        host_.project().instruments[static_cast<size_t>(s_.currentInstrument)];
+
+    if (ins.sampleFilePath.has_value() || ins.soundfontPath.has_value()) {
+        s_.confirm.open(ConfirmDialogState::Kind::CHANGE_TYPE);
+        return;
+    }
+    toggle_instrument_type();   // an empty slot has nothing to lose — switch it outright
+}
+
 void InputDispatcher::toggle_instrument_type() {
     Project&    p   = host_.edit_project();
     Instrument& ins = p.instruments[static_cast<size_t>(s_.currentInstrument)];
-
-    if (ins.sampleFilePath.has_value() || ins.soundfontPath.has_value()) {
-        s_.statusMessage = "CLEAR SLOT FIRST";
-        s_.statusSuccess = false;
-        return;
-    }
 
     const songcore::InstrumentType next =
         (ins.instrumentType == songcore::InstrumentType::SOUNDFONT)
@@ -604,24 +660,27 @@ static int64_t sample_coarse_step(const SampleEditorState& se) {
 }
 
 void InputDispatcher::on_a_up() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
     if (s_.fxHelper.isOpen) { fx_move_up(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_fine_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) { s_.fxHelper = fx_helper_opened_at(current_fx_type_index()); return; }
-    if (on_instrument_type_cell()) { toggle_instrument_type(); return; }
+    if (on_instrument_type_cell()) { request_instrument_type_toggle(); return; }
     selection_or_single(pt::ui::on_a);
 }
 
 void InputDispatcher::on_a_down() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
     if (s_.fxHelper.isOpen) { fx_move_down(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_fine_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) { s_.fxHelper = fx_helper_opened_at(current_fx_type_index()); return; }
-    if (on_instrument_type_cell()) { toggle_instrument_type(); return; }
+    if (on_instrument_type_cell()) { request_instrument_type_toggle(); return; }
     selection_or_single(pt::ui::on_b);   // A+DOWN DECREMENTS — `on_b` is the generic "step down"
 }
 
 void InputDispatcher::on_a_left() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
     if (s_.fxHelper.isOpen) { fx_move_left(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_coarse_step(s_.sampleEditor)); return; }
@@ -629,6 +688,7 @@ void InputDispatcher::on_a_left() {
 }
 
 void InputDispatcher::on_a_right() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
     if (s_.fxHelper.isOpen) { fx_move_right(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_coarse_step(s_.sampleEditor)); return; }
@@ -636,6 +696,7 @@ void InputDispatcher::on_a_right() {
 }
 
 void InputDispatcher::on_a_released() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     // The FX helper commits on RELEASE, not on a press — which is what lets you hold A, read the
     // description of half a dozen effects, and let go on the one you want.
     if (!s_.fxHelper.isOpen) return;
@@ -646,6 +707,7 @@ void InputDispatcher::on_a_released() {
 // ─── A+B: delete / reset ─────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_a_b() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
 
     if (s_.selection.active) {
@@ -704,6 +766,7 @@ void InputDispatcher::on_a_b() {
 // ─── A,A: insert the next UNUSED item ────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_a_a() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
 
     // A double-tap is only a double-tap if the cursor has not moved between the presses. Anything
@@ -785,10 +848,11 @@ void InputDispatcher::cycle_current_item(int delta) {
     }
 }
 
-void InputDispatcher::on_b_left()  { if (qwerty_open() || on_browser()) return; cycle_current_item(-1); }
-void InputDispatcher::on_b_right() { if (qwerty_open() || on_browser()) return; cycle_current_item(+1); }
+void InputDispatcher::on_b_left() { if (confirm_open()) return; if (qwerty_open() || on_browser()) return; cycle_current_item(-1); }
+void InputDispatcher::on_b_right() { if (confirm_open()) return; if (qwerty_open() || on_browser()) return; cycle_current_item(+1); }
 
 void InputDispatcher::on_b_up() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
 
     // The pool pages by 16 like the song does — but it CLAMPS at the ends where a single D-pad step
@@ -804,6 +868,7 @@ void InputDispatcher::on_b_up() {
 }
 
 void InputDispatcher::on_b_down() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
 
     if (s_.currentScreen == ScreenType::INST_POOL) {
@@ -829,6 +894,7 @@ void InputDispatcher::on_b_down() {
 // and R+RIGHT out of one would land the user on a screen with the browser's cursor state still live.
 
 void InputDispatcher::on_r_up() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { s_.qwerty.layout = 0; clamp_col(s_.qwerty); return; }
     if (on_browser()) { browser_cycle_sort(+1); return; }
     const NavState ns = nav_state_of(s_);
@@ -837,6 +903,7 @@ void InputDispatcher::on_r_up() {
 }
 
 void InputDispatcher::on_r_down() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { s_.qwerty.layout = 1; clamp_col(s_.qwerty); return; }
     if (on_browser()) { browser_cycle_sort(-1); return; }
     const NavState ns = nav_state_of(s_);
@@ -864,6 +931,7 @@ void InputDispatcher::browser_cycle_sort(int delta) {
 }
 
 void InputDispatcher::on_r_left() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_text_cursor_left(s_.qwerty); return; }
     if (on_browser())  { navigate_to_parent(s_.fileBrowser, fs_); return; }
     const NavState ns = nav_state_of(s_);
@@ -872,6 +940,7 @@ void InputDispatcher::on_r_left() {
 }
 
 void InputDispatcher::on_r_right() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_text_cursor_right(s_.qwerty); return; }
     if (on_browser())  return;   // no "down a directory" — that is what A on a folder is for
     const NavState ns = nav_state_of(s_);
@@ -882,6 +951,7 @@ void InputDispatcher::on_r_right() {
 // ─── L: selection and the clipboard ──────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_l_b() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) return;
 
     // ⚠️ The browser's selection is a DIFFERENT machine from the grid editors'. Theirs is the multi-tap
@@ -925,6 +995,7 @@ void InputDispatcher::on_l_b() {
 }
 
 void InputDispatcher::on_l_a() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) return;
 
     // On the browser L+A is the FILE clipboard's cut/paste — the same "inside a selection it cuts,
@@ -997,6 +1068,7 @@ void InputDispatcher::on_l_a() {
 }
 
 void InputDispatcher::on_l_r() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) return;
     if (on_browser()) {
         s_.fileBrowser.selectionMode   = false;
@@ -1009,6 +1081,7 @@ void InputDispatcher::on_l_r() {
 // ─── L+B+A: clone ────────────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_l_b_a() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser()) return;
 
     Project& p = host_.edit_project();
@@ -1117,9 +1190,240 @@ void InputDispatcher::on_l_b_a() {
     s_.selection.exit();
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// PROJECT + SETTINGS (Phase 3 S7)
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+void InputDispatcher::confirm_accept() {
+    const ConfirmDialogState::Kind kind = s_.confirm.kind;
+    s_.confirm.close();   // FIRST — every arm below can re-open a dialog, and none should be stacked
+
+    switch (kind) {
+        case ConfirmDialogState::Kind::CLEAN_SEQ:
+            host_.clean_seq();
+            mark_modified();
+            s_.statusMessage = "SEQ CLEANED";
+            s_.statusSuccess = true;
+            break;
+
+        case ConfirmDialogState::Kind::CLEAN_INST:
+            // ⚠️ `clean_inst` also RELOADS the media and re-pushes the params, and both are needed:
+            // compacting emptied the unused instrument slots in the DOCUMENT, but their sample and
+            // SoundFont buffers are still in the engine — so without the reload the RAM would not drop
+            // until the project was saved and opened again. See SongcoreHost::clean_inst.
+            host_.clean_inst(fs_.samples_directory());
+            mark_modified();
+            s_.statusMessage = "INST CLEANED";
+            s_.statusSuccess = true;
+            break;
+
+        case ConfirmDialogState::Kind::NEW_PROJECT:
+            start_new_project();
+            break;
+
+        case ConfirmDialogState::Kind::CHANGE_TYPE:
+            // ⚠️ S4 built the TYPE toggle and then REFUSED to fire it on a slot with a source loaded,
+            // because switching a sampler to a SoundFont frees its sample and there was no dialog to
+            // ask first. This is that dialog. `toggle_instrument_type` is unchanged; what changed is
+            // that it can now be reached destructively, having asked.
+            toggle_instrument_type();
+            break;
+
+        case ConfirmDialogState::Kind::EXIT:
+            s_.shouldQuit = true;
+            break;
+
+        case ConfirmDialogState::Kind::NONE:
+            break;
+    }
+}
+
+/**
+ * The editing context, back to zero — TrackerController.resetEditingContext.
+ *
+ * Shared by NEW and LOAD, and it is not cosmetic: leaving `currentInstrument` at 0x40 after opening a
+ * document whose instruments are all empty would put INSTRUMENT on a slot the user never chose, and
+ * leaving `lastEditedChain` at 0x2F would have A,A on SONG insert a chain from the PREVIOUS song.
+ */
+void InputDispatcher::reset_editing_context() {
+    s_.currentPhrase = s_.currentChain = s_.currentInstrument = 0;
+    s_.currentTable  = s_.currentGroove = 0;
+    s_.lastEditedPhrase = s_.lastEditedChain = s_.lastEditedTable = 0;
+    s_.lastEditedInstrument = s_.lastEditedTranspose = 0;
+    s_.lastEditedNote   = songcore::Note::C4();
+    s_.lastEditedVolume = 0x7F;
+    s_.cursorRow = 0; s_.cursorColumn = 1;
+    s_.songScrollPosition = 0;
+    s_.selection = Selection{};
+}
+
+void InputDispatcher::start_new_project() {
+    host_.new_project();
+
+    // Blank document: nothing is unsaved and nothing has a path. Both matter — without the version
+    // reset the very next NEW or EXIT would ask "unsaved work?" about a project nobody has touched.
+    s_.projectVersion      = 0;
+    s_.savedProjectVersion = 0;
+    s_.projectPath.clear();
+
+    reset_editing_context();
+
+    s_.statusMessage = "NEW PROJECT";
+    s_.statusSuccess = true;
+}
+
+/** A .ptp just replaced the document. Leave the browser, and forget everything about the last one. */
+void InputDispatcher::load_project_done(const std::string& path) {
+    // A freshly LOADED project is CLEAN — it is exactly what is on disk. (Kotlin aligns the two
+    // versions on load for the same reason. The one path that deliberately does NOT is autosave
+    // recovery, which leaves the document dirty so the user is nudged to save it under a real name —
+    // and that path arrives with the lifecycle session.)
+    s_.projectVersion      = 0;
+    s_.savedProjectVersion = 0;
+    s_.projectPath         = path;
+
+    reset_editing_context();
+
+    close_file_browser();
+    s_.statusMessage = "LOADED";
+    s_.statusSuccess = true;
+}
+
+void InputDispatcher::export_song(bool stems) {
+    if (s_.isRendering) return;   // a second press while one runs is a mis-press, not a request
+
+    host_.stop();                                    // no voices, no scheduled notes
+    if (render_.suspend_audio) render_.suspend_audio(true);
+
+    s_.isRendering    = true;
+    s_.renderProgress = 0.0f;
+    s_.statusMessage  = stems ? "RENDERING STEMS..." : "RENDERING...";
+    s_.statusSuccess  = true;
+    if (render_.repaint) render_.repaint();          // …so the message is on screen before we block
+
+    const auto progress = [this](float p) {
+        s_.renderProgress = p;
+        if (render_.repaint) render_.repaint();      // the EXPORT row's "43%" — a readout, not a decoration
+    };
+
+    const ActionResult r = stems ? render_stems(host_, fs_, s_, progress)
+                                 : render_mix(host_, fs_, s_, progress);
+
+    s_.isRendering    = false;
+    s_.renderProgress = 0.0f;
+    s_.statusMessage  = r.message;
+    s_.statusSuccess  = r.ok;
+
+    if (render_.suspend_audio) render_.suspend_audio(false);
+}
+
+void InputDispatcher::project_action() {
+    switch (static_cast<ProjectRow>(s_.projectCursorRow)) {
+        case ProjectRow::NAME:
+            // A on the NAME row opens the KEYBOARD, rather than editing one character in place. Both
+            // gestures exist: A+UP/DOWN walks the character under the cursor (that is the module's
+            // CHARACTER context), and plain A types the whole name. The deferred-A latch S6a built for
+            // INSTRUMENT's NAME cell is what keeps the two apart — see defer_a_to_release().
+            open_qwerty(QwertyContext::PROJECT_NAME, host_.project().name, "PROJECT NAME:", "", 20);
+            break;
+
+        case ProjectRow::PROJECT:
+            switch (s_.projectCursorColumn) {
+                case 1: {   // SAVE
+                    const ActionResult r = save_project(host_, fs_, s_);
+                    s_.statusMessage = r.message;
+                    s_.statusSuccess = r.ok;
+                    break;
+                }
+                case 2:     // LOAD
+                    open_file_browser(AppState::BrowserPurpose::LOAD_PROJECT,
+                                      fs_.projects_directory(), {"ptp"});
+                    break;
+                case 3:     // NEW
+                    // ⚠️ Only ASK if there is something to lose. A clean project has nothing to
+                    // confirm, and a dialog that always appears is a dialog nobody reads.
+                    if (s_.project_dirty()) s_.confirm.open(ConfirmDialogState::Kind::NEW_PROJECT);
+                    else                    start_new_project();
+                    break;
+                default: break;
+            }
+            break;
+
+        case ProjectRow::EXPORT:
+            if (s_.projectCursorColumn == 1)      export_song(/*stems=*/false);
+            else if (s_.projectCursorColumn == 2) export_song(/*stems=*/true);
+            break;
+
+        case ProjectRow::COMPACT:
+            if (s_.projectCursorColumn == 1)
+                s_.confirm.open(ConfirmDialogState::Kind::CLEAN_SEQ);
+            else if (s_.projectCursorColumn == 2)
+                s_.confirm.open(ConfirmDialogState::Kind::CLEAN_INST);
+            break;
+
+        case ProjectRow::SYSTEM: {
+            // A shortcut INTO a screen the nav grid can also reach (SETTINGS is one of the twelve).
+            // It keeps the column it came from — SETTINGS owns none, exactly as PROJECT owns none — so
+            // R+UP out of it later returns to the main-row screen you were on, not to a fixed default.
+            NavResult nav;
+            nav.screen = ScreenType::SETTINGS;
+            nav.column = s_.previousColumn;
+            go_to_screen(s_, nav);
+            break;
+        }
+
+        case ProjectRow::EXIT:
+            // ⚠️ The shell only — and gated on the same question NEW asks. A handheld launcher takes
+            // the process back the moment this returns, so an unsaved song is gone for good; the
+            // autosave that would make that survivable is the lifecycle session's, not this one's.
+            if (!s_.caps.appExit) break;
+            if (s_.project_dirty()) s_.confirm.open(ConfirmDialogState::Kind::EXIT);
+            else                    s_.shouldQuit = true;
+            break;
+
+        // TEMPO / TRANSPOSE are A+DPAD cells. Plain A does nothing on them, as it does nothing on any
+        // value cell in the app.
+        default:
+            break;
+    }
+}
+
+void InputDispatcher::settings_action() {
+    switch (static_cast<SettingsRow>(s_.settingsCursorRow)) {
+        case SettingsRow::THEME:
+            // ⚠️ INERT, and knowingly so. On Android this opens the THEME EDITOR, which is its own
+            // overlay and its own module in the port plan's Phase 3 list — it has not landed. The row
+            // draws the theme's name and a ">" because that is what Kotlin draws; the arrow is a
+            // promise the next session keeps. (Exactly the position every EQ cell in the app is in:
+            // it dials a slot number it cannot yet open.)
+            break;
+
+        case SettingsRow::TEMPLATE: {
+            if (s_.settingsCursorColumn != 1 && s_.settingsCursorColumn != 2) break;
+            const ActionResult r = (s_.settingsCursorColumn == 1) ? save_template(host_, fs_)
+                                                                  : clear_template(fs_);
+            s_.statusMessage = r.message;
+            s_.statusSuccess = r.ok;
+            break;
+        }
+
+        // Every other row is a VALUE, and a value changes with A+DPAD. Kotlin says so in a comment at
+        // the top of SettingsModule ("Single A is reserved for actions only"), and it is why this
+        // switch has exactly two arms.
+        default:
+            break;
+    }
+}
+
 // ─── The plain buttons ───────────────────────────────────────────────────────────────────────────
 
 void InputDispatcher::on_button_a() {
+    // ⚠️ THE CONFIRM DIALOG IS CHECKED FIRST, ahead of the keyboard and the browser both. It is the
+    // topmost modal — drawn last, over everything — and a dialog owns the buttons of whatever it is
+    // covering: pressing A to answer "CLEAN INST?" must not also fire whatever the cursor is parked on
+    // underneath.
+    if (confirm_open()) { confirm_accept(); return; }
+
     // A on the KEYBOARD types the key under the cursor — unless the cursor is on the action row, where
     // the two buttons ARE the answer: ABORT (col 0) and APPLY (col 1).
     if (qwerty_open()) {
@@ -1173,7 +1477,7 @@ void InputDispatcher::on_button_a() {
             step.volume     = s_.lastEditedVolume;
             mark_modified();
 
-            if (s_.notePreviewEnabled && step.note != Note::EMPTY()) {
+            if (s_.settings.notePreviewEnabled && step.note != Note::EMPTY()) {
                 // A WHOLE PHRASE long, not one step: this gesture lays a note down to listen to, and
                 // an audition that dies after a 16th note tells you nothing about a pad.
                 const int sr = std::max(44100, host_.sample_rate());
@@ -1215,12 +1519,20 @@ void InputDispatcher::on_button_a() {
             break;
         }
 
+        // The two screens whose rows are BUTTONS. Nothing to insert — A *is* the action.
+        case ScreenType::PROJECT:  project_action();  break;
+        case ScreenType::SETTINGS: settings_action(); break;
+
         default:
             break;
     }
 }
 
 void InputDispatcher::on_button_b() {
+    // B is the NO of "A=YES  B=NO", and it is checked first for the same reason A's accept is: the
+    // dialog owns the buttons of the screen underneath it.
+    if (confirm_open()) { confirm_cancel(); return; }
+
     if (qwerty_open()) { delete_char(s_.qwerty); return; }
 
     if (on_browser()) {
@@ -1292,6 +1604,7 @@ void InputDispatcher::on_button_b() {
 }
 
 void InputDispatcher::on_select() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     // SELECT is the keyboard's ABORT — the chord alias for the button on its action row.
     if (qwerty_open()) { qwerty_cancel(); return; }
 
@@ -1348,11 +1661,12 @@ void InputDispatcher::on_stop_preview() {
     // the last one, or scrolling a folder of kicks stacks them on top of each other.
     const bool previewScreen = (s_.currentScreen == ScreenType::TABLE) || on_browser() ||
                                on_instrument_screen() ||
-                               (s_.currentScreen == ScreenType::PHRASE && s_.notePreviewEnabled);
+                               (s_.currentScreen == ScreenType::PHRASE && s_.settings.notePreviewEnabled);
     if (previewScreen) host_.stop_preview();
 }
 
 void InputDispatcher::on_start() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     // START is the keyboard's APPLY — the chord alias for the button on its action row.
     if (qwerty_open()) { qwerty_apply(); return; }
 
@@ -1602,6 +1916,19 @@ void InputDispatcher::browser_confirm() {
             // INSTRUMENT — you came here to pick something to cut up, not to leave.
             ok = host_.load_sample(s_.sampleEditor.instrumentId, path);
             break;
+
+        case AppState::BrowserPurpose::LOAD_PROJECT:
+            // ⚠️ The WHOLE DOCUMENT, and it returns early — everything below this switch is about an
+            // INSTRUMENT that just gained a source, and none of it applies. `load_project_file` is the
+            // guard rail S4 paid 84.4% of a render for: parse → push → load_media → push_params, in one
+            // call, so the obligation cannot be forgotten by a new caller. This is that new caller.
+            if (!host_.load_project_file(path, fs_.samples_directory())) {
+                b.statusMessage = "LOAD FAILED";
+                b.statusSuccess = false;
+                return;
+            }
+            load_project_done(path);
+            return;
     }
 
     if (!ok) {
@@ -1698,6 +2025,7 @@ void InputDispatcher::browser_paste() {
 // ─── SELECT + A / B / R — the browser's file-management chords ───────────────────────────────────
 
 void InputDispatcher::on_select_a() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || !on_browser()) return;
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
 
@@ -1718,6 +2046,7 @@ void InputDispatcher::on_select_a() {
 }
 
 void InputDispatcher::on_select_b() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || !on_browser()) return;
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
 
@@ -1731,6 +2060,7 @@ void InputDispatcher::on_select_b() {
 }
 
 void InputDispatcher::on_select_r() {
+    if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || !on_browser()) return;
     if (s_.fileBrowser.mode != BrowserMode::NORMAL) return;
     open_qwerty(QwertyContext::FOLDER_CREATE, "NEW FOLDER", "FOLDER NAME:",
@@ -1751,7 +2081,7 @@ void InputDispatcher::open_qwerty(QwertyContext context, const std::string& init
     k.contextExtra  = context_extra;
     k.context       = context;
     k.clearOnFirstB = clear_on_first_b;
-    k.insertBefore  = s_.insertBefore;   // read at OPEN, so flipping the setting cannot change what
+    k.insertBefore  = s_.settings.insertBefore;   // read at OPEN, so flipping the setting cannot change what
     s_.qwerty       = k;                 // the buttons mean under the user's thumb mid-word
 }
 
@@ -1797,6 +2127,17 @@ void InputDispatcher::qwerty_apply() {
             break;
         }
 
+        case QwertyContext::PROJECT_NAME:
+            // ⚠️ No empty-name fallback, unlike every other arm here. Kotlin's is a bare
+            // `trackerController.project.name = typedText`, and it is ported as-is — but note what it
+            // leads to: an empty name sanitizes to an empty filename, so SAVE writes `<Projects>/.ptp`
+            // (hidden on a POSIX box, and not listed by the browser's own filter). The same is true on
+            // Android today. Left bug-for-bug rather than quietly diverging; it wants a fix on BOTH
+            // platforms, which makes it a finding, not a port decision.
+            host_.edit_project().name = text;
+            mark_modified();
+            break;
+
         case QwertyContext::INSTRUMENT_SAVE: {
             const std::string name = text.empty() ? "PRESET" : text;
             const std::string path = k.contextExtra + "/" + name + ".pti";
@@ -1829,7 +2170,7 @@ void InputDispatcher::qwerty_apply() {
             const std::string base = text.empty() ? "SAMPLE" : text;
             std::string       path = k.contextExtra + "/" + base + ".wav";
             for (int n = 1; fs_.file_exists(path); ++n) {
-                char suffix[8];
+                char suffix[16];   // 16, not 8: "_%04d" of an unbounded int is up to 12 bytes, and gcc says so (-Wformat-truncation). The counter never gets near it; the buffer now cannot be the reason.
                 std::snprintf(suffix, sizeof(suffix), "_%04d", n);
                 path = k.contextExtra + "/" + base + suffix + ".wav";
             }
@@ -2285,7 +2626,7 @@ void InputDispatcher::sample_editor_confirm() {
                     // SAVE is not OVERWRITE, and the button next to it is.
                     std::string suggested = base;
                     for (int n = 1; fs_.file_exists(dir + "/" + suggested + ".wav"); ++n) {
-                        char suffix[8];
+                        char suffix[16];   // 16, not 8: "_%04d" of an unbounded int is up to 12 bytes, and gcc says so (-Wformat-truncation). The counter never gets near it; the buffer now cannot be the reason.
                         std::snprintf(suffix, sizeof(suffix), "_%04d", n);
                         suggested = base + suffix;
                     }
@@ -2472,13 +2813,21 @@ bool InputDispatcher::defer_a_to_release() const {
     // looking at a keyboard instead. Kotlin defers exactly these (`openSubScreenAtCursor(peek = true)`),
     // and the mapper cancels the deferral the moment any A-combo fires.
     //
-    // Today that is the INSTRUMENT NAME row. The EQ cells join it when the EQ overlay lands — they are
-    // the case that makes this mechanism necessary rather than tidy, since A+DPAD dials the slot number
-    // on the very cell whose A opens the editor.
+    // The INSTRUMENT NAME row, and — since S7 — the PROJECT NAME row, which is the sharper case of the
+    // two: its 20 characters are 20 cursor COLUMNS, each an in-place CHARACTER cell. So on one cell, A
+    // opens the keyboard, A+UP walks that character through the alphabet, and A+B blanks it. Fire the
+    // open on the press and two of those three become unreachable.
     //
-    // The LOAD / SAVE buttons are NOT here, deliberately: they are read-only cells with no A+DPAD
-    // behaviour to protect, and Kotlin fires them on the press too.
-    return s_.currentScreen == ScreenType::INSTRUMENT && s_.instrumentCursorRow == 1;
+    // The EQ cells join when the EQ overlay lands — they are the case that makes this mechanism
+    // necessary rather than tidy, since A+DPAD dials the slot number on the very cell whose A opens the
+    // editor.
+    //
+    // The LOAD / SAVE / NEW / MIX / SEQ buttons are NOT here, deliberately: they are read-only cells
+    // with no A+DPAD behaviour to protect, and Kotlin fires them on the press too.
+    if (s_.currentScreen == ScreenType::INSTRUMENT && s_.instrumentCursorRow == 1) return true;
+    if (s_.currentScreen == ScreenType::PROJECT &&
+        s_.projectCursorRow == static_cast<int>(ProjectRow::NAME)) return true;
+    return false;
 }
 
 }  // namespace pt::ui

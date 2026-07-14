@@ -19,11 +19,15 @@
 #include "songcore/model.h"
 #include "theme.h"
 #include "ui/fx_helper.h"
+#include "ui/modules/confirm_dialog.h"
 #include "ui/modules/file_browser.h"
 #include "ui/modules/qwerty_keyboard.h"
 #include "ui/modules/sample_editor.h"
+#include "ui/modules/settings_editor.h"
+#include "ui/platform_caps.h"
 #include "ui/selection.h"
 
+#include <cstdint>
 #include <string>
 
 namespace pt::ui {
@@ -101,11 +105,15 @@ struct AppState {
     int chainCursorRow = 0,  chainCursorColumn = 1;
     int phraseCursorRow = 0, phraseCursorColumn = 1;
 
-    /**
-     * The SETTINGS "CURSOR" row: REMEMBER restores each screen's last position, REFRESH (the default,
-     * as on Android) resets it to the top-left editable cell on every entry.
-     */
-    bool cursorRemember = false;
+    // PROJECT. Rows 0..6 (0..7 on the shell, which has an EXIT row); column 0 is the label and is
+    // unreachable, so the cursor starts on 1 — see ui/settings_row_layout.h.
+    int projectCursorRow    = 0;
+    int projectCursorColumn = 1;
+
+    // SETTINGS. `settingsCursorRow` is a SettingsRow — the row's NUMBER, which is its identity on
+    // BOTH platforms, not its position in this platform's filtered list.
+    int settingsCursorRow    = 0;
+    int settingsCursorColumn = 1;
 
     /** SONG shows 16 of its 256 rows: the first visible row. TrackerController clamps it to 0..240. */
     int songScrollPosition = 0;
@@ -203,7 +211,8 @@ struct AppState {
     enum class BrowserPurpose {
         LOAD_SOURCE,        // a sample (or an .sf2 — the instrument's TYPE decides which, at open time)
         LOAD_PRESET,        // a .pti into the current instrument slot
-        LOAD_SAMPLE_EDITOR  // a .wav into the slot the SAMPLE EDITOR is open on — and back to the editor
+        LOAD_SAMPLE_EDITOR, // a .wav into the slot the SAMPLE EDITOR is open on — and back to the editor
+        LOAD_PROJECT        // a .ptp — the whole document, from PROJECT's LOAD button (S7)
     };
     BrowserPurpose browserPurpose = BrowserPurpose::LOAD_SOURCE;
 
@@ -227,12 +236,46 @@ struct AppState {
     // this holds is the 620 min/max pairs the waveform draws from, and the state of the knobs.
     SampleEditorState sampleEditor{};
 
+    // ── The confirm dialog (S7) ──────────────────────────────────────────────────────────────────
+    //
+    // The port's second true modal, and — unlike Android's four separate `show*Dialog` booleans — ONE
+    // state, so the "is a modal up?" question every handler must ask has exactly one answer to check.
+    // See ui/modules/confirm_dialog.h for why that is worth a file.
+    ConfirmDialogState confirm{};
+
+    // ── SETTINGS (S7) ────────────────────────────────────────────────────────────────────────────
+    //
+    // Every value the SETTINGS screen edits, in one struct — which is also the unit the shell writes
+    // to settings.json. On Android these are ~16 separate `mutableStateOf` refs plus SharedPreferences
+    // (Compose leaves no choice); here the screen, the persistence and the code that READS a setting
+    // all name the same field.
+    //
+    // ⚠️ `settings.insertBefore` is read by the QWERTY keyboard when it OPENS, not while it is open,
+    // so flipping the setting mid-word cannot change what the buttons mean under the user's thumb.
+    // ⚠️ `settings.cursorRemember` is what go_to_screen consults: REMEMBER restores each screen's last
+    // cursor, REFRESH (the default, as on Android) resets it to the top-left editable cell on entry.
+    SettingsValues settings{};
+
     /**
-     * SETTINGS "INSERT MODE" — where a typed character lands relative to the text cursor, and hence
-     * which way B deletes. The keyboard reads it when it OPENS (as Kotlin does), so flipping the
-     * setting mid-word cannot change what the buttons mean under the user's thumb.
+     * A setting changed and settings.json has not caught up. The shell writes on exit rather than on
+     * every keystroke: holding A+UP on the overlay strength fires an edit every 100 ms (the key-repeat
+     * interval), and a file write per repeat is an SD card being hammered for a value still moving.
      */
-    bool insertBefore = true;
+    bool settingsDirty = false;
+
+    /** What this platform can do — and therefore which SETTINGS rows and PROJECT actions exist. */
+    PlatformCaps caps{};
+
+    // What the DEVICE rows' indices NAME on this platform — text the settings module paints but does
+    // not own, because only the platform knows that layout index 2 is "PORTRAIT". All empty on the
+    // shell, which does not draw those rows at all. (This is the seam that keeps `DeviceAdapter` out
+    // of the port: see ui/modules/settings_editor.h.)
+    std::string layoutText{};
+    std::string skinText{};
+    std::string overlayText = "OFF";
+
+    /** PROJECT's debug-only USED RAM readout: sample + SoundFont PCM the engine is holding. */
+    int64_t sampleRamBytes = 0;
 
     // ── "Last edited" — the memory that makes A,A and the insert defaults useful ─────────────────
     //
@@ -249,12 +292,44 @@ struct AppState {
     int           lastEditedVolume     = 0x7F;
 
     // ── The status line ──────────────────────────────────────────────────────────────────────────
-    // "CHAIN CLONED" / "NO FREE PHRASES" — what L+B+A reports back.
+    //
+    // "SAVED" / "CHAIN CLONED" / "NO FREE PHRASES" — what an action reports back. Drawn as a GLOBAL
+    // overlay on the visualizer header (TrackerLayout::draw), so that every screen can report without
+    // spending an editor row on it. Kotlin does the same, at PixelPerfectRenderer:444.
+    //
+    // ⚠️ S3 ADDED THESE TWO FIELDS AND NOTHING EVER DREW THEM. The dispatcher has been setting them
+    // at 22 sites since the clipboard landed, so every "CHAIN CLONED" and every "NO FREE PHRASES"
+    // this port has ever produced went straight into the void — a bug found the only way it could be,
+    // by porting the screen whose actions have NO other feedback at all: SAVE, EXPORT and COMPACT say
+    // nothing else, and a save that reports nothing is a save you cannot trust.
     std::string statusMessage{};
     bool        statusSuccess = true;
 
-    /** SETTINGS "NOTE PREVIEW": play the note an edit just wrote. On by default, as on Android. */
-    bool notePreviewEnabled = true;
+    // ── The render (PROJECT → EXPORT) ────────────────────────────────────────────────────────────
+    //
+    // The shell renders SYNCHRONOUSLY, on this thread, with the audio device paused — see the shell's
+    // export action. Android needs a coroutine because Compose would ANR; a single-threaded frame loop
+    // simply stops, and repaints itself from the progress callback. So these are written from inside
+    // the render, and read by the frame it forces.
+    bool  isRendering    = false;
+    float renderProgress = 0.0f;
+
+    // ── Is there unsaved work? ───────────────────────────────────────────────────────────────────
+    //
+    // TrackerController's `projectVersion` / `savedProjectVersion`. The counter is bumped in exactly
+    // one place — `InputDispatcher::mark_modified`, which every edit in the app already funnels
+    // through — and the SAVE / LOAD / NEW actions align the two. It is what gates the NEW PROJECT?
+    // and EXIT? confirms: a clean project needs no question asked.
+    int projectVersion      = 0;
+    int savedProjectVersion = 0;
+
+    bool project_dirty() const { return projectVersion != savedProjectVersion; }
+
+    /** The .ptp this project came from (or was last saved to). Empty until it has one. */
+    std::string projectPath{};
+
+    /** Set by EXIT. The shell's frame loop reads it and leaves. */
+    bool shouldQuit = false;
 
     // ── Theme ────────────────────────────────────────────────────────────────────────────────────
     Theme theme = theme_classic();
