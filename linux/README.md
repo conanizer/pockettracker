@@ -89,6 +89,25 @@ set CMBIN=%LOCALAPPDATA%\Android\Sdk\cmake\3.22.1\bin
 
 Linux needs SDL2's dev package (`apt install libsdl2-dev`) to use the system one, or it will fetch.
 
+### Cross-compiling for aarch64 (the PortMaster target)
+
+The handhelds are `aarch64`. Cross-compile from an amd64 Linux (the CI runners, or WSL) with the ARM
+toolchain — on Ubuntu, `apt install crossbuild-essential-arm64` — and point CMake at the toolchain
+file:
+
+```sh
+cmake -S linux -B build/aarch64 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_TOOLCHAIN_FILE=linux/toolchain-aarch64.cmake
+cmake --build build/aarch64
+file build/aarch64/pockettracker-sdl        # -> ELF 64-bit ... ARM aarch64
+```
+
+With no arm64 SDL2 on the host this FetchContent-builds SDL2 static, giving a self-contained binary
+proven to boot, decode media, run the frame loop and exit on SIGTERM under `qemu-aarch64` emulation —
+a build/CI validation, not yet a device artifact. **A device-runnable build changes two things** (see
+the toolchain file's header): build on PortMaster's ~20.04 glibc base, and link the device's own
+dynamic `libSDL2` (put an arm64 SDL2 on `CMAKE_FIND_ROOT_PATH`) instead of the static one.
+
 ## Run
 
 ```sh
