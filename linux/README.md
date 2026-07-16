@@ -104,9 +104,39 @@ file build/aarch64/pockettracker-sdl        # -> ELF 64-bit ... ARM aarch64
 
 With no arm64 SDL2 on the host this FetchContent-builds SDL2 static, giving a self-contained binary
 proven to boot, decode media, run the frame loop and exit on SIGTERM under `qemu-aarch64` emulation —
-a build/CI validation, not yet a device artifact. **A device-runnable build changes two things** (see
-the toolchain file's header): build on PortMaster's ~20.04 glibc base, and link the device's own
-dynamic `libSDL2` (put an arm64 SDL2 on `CMAKE_FIND_ROOT_PATH`) instead of the static one.
+a build/CI validation, **not a device artifact**. For one of those, use the packaging build below; it
+is the same toolchain file with the two things the header warns about actually done.
+
+### The PortMaster package
+
+```sh
+docker build -t pockettracker-build -f linux/Dockerfile.portmaster linux/
+docker run --rm -v "$PWD:/src" pockettracker-build bash /src/linux/build-portmaster.sh
+# -> build/portmaster/pockettracker.zip
+```
+
+Unzip it into the SD card's `ports/` folder, or install it through PortMaster.
+
+**Do not shortcut the container**, even though a modern dev box has a perfectly good
+`aarch64-linux-gnu-gcc` and will build this in one command. That build links, produces a valid ARM
+ELF, and cannot be loaded by any handheld: glibc symbols are versioned, so a binary demands whatever
+versions its host's libc offered, and nothing in a green build says which. `ubuntu:20.04` is glibc
+2.31, at or below every Tier-1 CFW. The build script asserts it **on the artifact** rather than
+trusting the recipe, and refuses to package a binary that fails.
+
+Two decisions worth knowing before changing anything here:
+
+- **The SDL2 the script builds is a link-time SDK and is never shipped.** The port loads the
+  *device's* `libSDL2` — the copy its CFW patched for that hardware's KMSDRM display and ALSA audio.
+  Its version is pinned at `release-2.0.18` deliberately: that is the compatibility floor
+  (`SDL_GetTicks64` is the one post-2.0.0 symbol the shell needs), and pinning it low means the
+  linker *cannot* let a newer SDL call through — a mistake fails here instead of on a stranger's
+  device as `undefined symbol`.
+- **The launch script must never run `gptokeyb`.** The shell reads the pad itself *and* reads the
+  keyboard, so gptokeyb's injected keystrokes arrive as a second, disagreeing copy of every press —
+  its default `start = enter` against `sdl-input.cpp`'s `Enter -> Button::A` made START insert a
+  chain and stopped playback from stopping. The full table is at the top of `portmaster/`
+  `PocketTracker.sh`, and `build-portmaster.sh` fails the build if it reappears.
 
 ## Run
 

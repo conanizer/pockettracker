@@ -367,20 +367,27 @@ int main(int argc, char** argv) {
 
     SDL_SetMainReady();
 
-    if (argc < 2) {
-        std::fprintf(stderr,
-                     "usage: pockettracker-sdl <project.ptp> [media-base-dir] [app-root]\n"
-                     "  media-base-dir  where the project's relative sample paths resolve against\n"
-                     "                  (default: the project file's own directory)\n"
-                     "  app-root        where Projects/ Samples/ Soundfonts/ Instruments/ live\n"
-                     "                  (default: $POCKETTRACKER_HOME, else XDG, else ~/.local/share)\n");
-        return 2;
-    }
-    const std::string projectPath = argv[1];
-    const std::string baseDir     = (argc > 2) ? argv[2] : dir_of(projectPath);
+    // ⚠️ THE PROJECT IS OPTIONAL, and on the shipping target it is always absent: PortMaster launches
+    // a port by running its .sh, which invokes this binary with NO arguments at all. A shell that
+    // answers `argc < 2` with a usage message and exit 2 is a port that cannot start — the launcher
+    // would report nothing but a return to the menu. With no project the app opens the same blank
+    // document NEW PROJECT makes, and the file browser is how a handheld user reaches their songs.
+    //
+    // usage: pockettracker-sdl [project.ptp] [media-base-dir] [app-root]
+    //   project.ptp     a song to open at boot   (default: a blank document)
+    //   media-base-dir  where the project's relative sample paths resolve against
+    //                   (default: the project file's own directory, or the app root if there is no
+    //                    project — see set_media_base_dir below)
+    //   app-root        where Projects/ Samples/ Soundfonts/ Instruments/ live
+    //                   (default: $POCKETTRACKER_HOME, else XDG, else ~/.local/share)
+    const bool        hasProject  = (argc > 1);
+    const std::string projectPath = hasProject ? argv[1] : std::string();
+    const std::string baseDir     = hasProject ? ((argc > 2) ? argv[2] : dir_of(projectPath)) : std::string();
 
+    // Read it BEFORE SDL_Init, so a bad path fails on the console instead of behind a window that has
+    // already opened.
     std::string blob;
-    if (!read_file(projectPath, blob)) {
+    if (hasProject && !read_file(projectPath, blob)) {
         std::fprintf(stderr, "cannot read %s\n", projectPath.c_str());
         return 1;
     }
@@ -410,23 +417,30 @@ int main(int argc, char** argv) {
     engine->onResumeRequested = [&audio] { audio.resumeStream(); };
 
     SongcoreHost host(engine.get(), audio.sampleRate());
-    if (!host.push_project(blob)) {
-        std::fprintf(stderr, "%s did not parse as a .ptp\n", projectPath.c_str());
-        SDL_Quit();
-        return 1;
-    }
+    if (hasProject) {
+        if (!host.push_project(blob)) {
+            std::fprintf(stderr, "%s did not parse as a .ptp\n", projectPath.c_str());
+            SDL_Quit();
+            return 1;
+        }
 
-    const MediaLoadResult media = host.load_media(baseDir);
-    std::printf("project: %s\nmedia:   %d loaded, %d failed (base dir: %s)\n", projectPath.c_str(),
-                media.loaded, media.failed, baseDir.c_str());
-    if (media.failed > 0) {
-        // ASCII, like every other line this program prints — see the banner below. (This one was NOT:
-        // it carried an em-dash, on the one path you most want legible when something has already gone
-        // wrong on a device with no screen. Found by grepping the file against its own stated rule.)
-        std::fprintf(stderr,
-                     "warning: %d sample(s)/SoundFont(s) failed to load - those instruments will be "
-                     "silent\n",
-                     media.failed);
+        const MediaLoadResult media = host.load_media(baseDir);
+        std::printf("project: %s\nmedia:   %d loaded, %d failed (base dir: %s)\n", projectPath.c_str(),
+                    media.loaded, media.failed, baseDir.c_str());
+        if (media.failed > 0) {
+            // ASCII, like every other line this program prints — see the banner below. (This one was NOT:
+            // it carried an em-dash, on the one path you most want legible when something has already gone
+            // wrong on a device with no screen. Found by grepping the file against its own stated rule.)
+            std::fprintf(stderr,
+                         "warning: %d sample(s)/SoundFont(s) failed to load - those instruments will be "
+                         "silent\n",
+                         media.failed);
+        }
+    } else {
+        // The same document NEW PROJECT builds. There is no media to load: a blank project references
+        // no samples, so load_media would walk an empty instrument pool and report 0/0.
+        host.new_project();
+        std::printf("project: (none given) - starting on a blank document\n");
     }
 
     // ⚠️ **Load the media, then push the PARAMS.** The engine holds a great deal of state on its own
@@ -531,7 +545,12 @@ int main(int argc, char** argv) {
     // a portable project — every golden, and anything this build ships — stores its media relative, and
     // recovering one of those against the wrong folder brings the song back looking perfect and playing
     // silence. So the dispatcher is TOLD the session's media dir rather than guessing one.
-    dispatch.set_media_base_dir(baseDir);
+    //
+    // ⚠️ With no project on the command line there is no project directory to be relative TO, and an
+    // empty base resolves every relative path against the process's cwd — which on a handheld is
+    // whatever the launch script last cd'd to. The app root is the honest answer: it is where Samples/
+    // lives, so it is where a recovered autosave's relative media actually is.
+    dispatch.set_media_base_dir(hasProject ? baseDir : appRoot);
 
     // An autosave that survived to launch means the last session did not end cleanly — a launcher's
     // kill, a flat battery, a crash. SETTINGS → RESUME decides what happens next: ASK raises the

@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<gameList>
+  <game>
+    <path>./PocketTracker.sh</path>
+    <name>PocketTracker</name>
+    <desc>A music tracker for handhelds. Sixteen screens of song, chain, phrase, table and groove editing over a sample engine with per-instrument modulation, a full DSP chain, a sample editor with chopping and time-stretch, and a mixer with sends and a parametric EQ. Renders a finished mix or stems to WAV on the device.</desc>
+    <releasedate>20260716T000000</releasedate>
+    <developer>conan</developer>
+    <publisher>conan</publisher>
+    <genre>Other</genre>
+    <players>1</players>
+  </game>
+</gameList>

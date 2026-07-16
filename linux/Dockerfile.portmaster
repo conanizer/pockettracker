@@ -1,0 +1,42 @@
+# The PortMaster build container — the one thing that decides whether the binary a handheld
+# downloads will start at all.
+#
+# ⚠️ `ubuntu:20.04` is not nostalgia, it is the GLIBC FLOOR, and it is the single easiest way to
+# ship a port that cannot run. glibc symbols are VERSIONED: a binary demands only the versions of
+# the symbols it actually references, so a build on a modern host silently reaches for new ones and
+# nothing says so until the device speaks up. `pthread_create` moved into libc proper at glibc 2.34,
+# so anything built on 22.04+ demands GLIBC_2.34 and dies on a CFW with
+# `version GLIBC_2.34 not found` — a message the user sees instead of the app. 20.04 carries glibc
+# 2.31, at or below every Tier-1 CFW.
+#
+# ⚠️ And it is a floor you cannot feel on the dev box: the WSL box this was written on is Ubuntu
+# 24.04 (glibc 2.39) and HAS a working aarch64 cross toolchain, so `cmake --build` there succeeds,
+# links, and produces an ELF that is correct in every respect except that no handheld can load it.
+# The build being green is not the test. build-portmaster.sh asserts the floor on the artifact:
+#
+#     readelf -V <binary> | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1     # must be <= 2.31
+#
+# ⚠️ CMake comes from Kitware, not apt — 20.04 ships 3.16 and this tree needs 3.22+.
+FROM ubuntu:20.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+ARG CMAKE_VERSION=3.28.3
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        crossbuild-essential-arm64 \
+        ninja-build \
+        git \
+        pkg-config \
+        wget \
+        ca-certificates \
+        zip \
+        unzip \
+        file \
+    && wget -qO- "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
+       | tar xz -C /opt \
+    && ln -s "/opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cmake" /usr/local/bin/cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src

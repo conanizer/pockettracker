@@ -1,0 +1,17 @@
+# Shell scripts in here are SHIPPED ARTIFACTS, and they are executed by a Linux kernel that has no
+# opinions about where they were edited. build-portmaster.sh copies PocketTracker.sh into the zip
+# byte-for-byte, so whatever the checkout put in the working tree is what the handheld runs.
+#
+# This dev box has core.autocrlf=true. Without this file, committing a launch script written with LF
+# and checking it back out hands the device CRLF — and a CFW answers a CRLF shebang with
+#
+#     /bin/bash^M: bad interpreter: No such file or directory
+#
+# i.e. the port does not start at all, and the log says nothing a user could act on. The failure
+# arrives one clone later than the mistake, on someone else's machine, which is what makes it worth
+# a file. (Same rule and same reasoning as testdata/.gitattributes and native/songcore's: EOL
+# conversion follows the ARTIFACT, not the directory.)
+*.sh text eol=lf
+
+# The container recipe is read by docker on Linux; a CRLF in a RUN line ends up inside the command.
+Dockerfile.portmaster text eol=lf
