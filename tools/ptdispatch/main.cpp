@@ -1621,7 +1621,6 @@ int main() {
         state.caps          = PlatformCaps::sdl(true);
         state.currentScreen = ScreenType::SETTINGS;
         state.projectVersion = state.savedProjectVersion = 3;
-        state.settingsDirty  = false;
 
         state.settingsCursorRow    = static_cast<int>(SettingsRow::NOTE_PREV);
         state.settingsCursorColumn = 1;
@@ -1631,7 +1630,14 @@ int main() {
         ok(state.settings.notePreviewEnabled != before, "SETTINGS: A+UP toggles NOTE PREV");
         ok(!state.project_dirty(),
            "⚠️ SETTINGS: …and does NOT dirty the PROJECT — a setting is not a song");
-        ok(state.settingsDirty, "SETTINGS: …but it does mark settings.json as needing a write");
+
+        // ⚠️⚠️ THIS LINE USED TO ASSERT A `settingsDirty` FLAG, AND THAT ASSERTION IS PART OF WHY THE
+        // THEME BUG LIVED. It pinned the one mutation path that armed the write CORRECTLY and had no
+        // counterpart for the one that did not (the theme editor — §27(c)) — a permanently green check
+        // sitting directly on top of the hole, reading as coverage. The flag is gone now; what survives
+        // is the claim it was always standing in for: after this edit, an exit WRITES.
+        ok(save_settings_if_changed(fs_impl, state.settings, state.theme) == SettingsWrite::SAVED,
+           "SETTINGS: …and an exit writes settings.json for it");
     }
 
     // ── 23. EXPORT — the one section that needs a REAL engine ────────────────────────────────────
@@ -2590,6 +2596,77 @@ int main() {
                "THEME/QUIT: …and falls back to rebuilding the palette from its NAME");
             ok(old.visualizerType == VisualizerType::OCTA,
                "THEME/QUIT: …with the visualizer it stored");
+        }
+
+        // ── (c) THE ARM. Does the app ever CALL save_settings? ───────────────────────────────────
+        //
+        // ⚠️⚠️ (b) ABOVE CANNOT FAIL ON THIS, AND THAT IS THE POINT OF WRITING IT SEPARATELY.
+        //
+        // (b) hand-builds a Theme and calls `save_settings` ITSELF. So it proves the SERIALIZER
+        // round-trips and says exactly nothing about whether any button press ever reaches it. The
+        // shell writes settings.json only `if (state.settingsDirty)` (linux/main.cpp) — and the ONLY
+        // thing in the entire tree that ever set that flag was `apply_edit`'s SETTINGS arm
+        // (input_dispatcher.cpp). The THEME EDITOR does not go through `apply_edit`: it has no
+        // CursorContext, so its four A+DPAD arms call `theme_adjust_color` / `theme_cycle_builtin` on
+        // `s_.theme` DIRECTLY and armed nothing. Same for LOAD THEME's `load_theme_file`.
+        //
+        // So a session whose ONLY change was the palette wrote NOTHING, and the colours were gone on
+        // the next launch — which is the exact bug (b) exists to prevent, one layer up. S9 fixed WHAT
+        // gets written and left WHETHER it gets written unasserted.
+        //
+        // ⚠️ AND IT IS INTERMITTENT, which is why a device session can miss it: touch ANY SETTINGS row
+        // in the same sitting and the flag is set, the exit write happens, and it carries the dialled
+        // palette with it. Change ONLY the palette and it vanishes. "It works now" is not a fix.
+        {
+            // A settings.json holding a KNOWN palette, the way a real launch finds one.
+            SettingsValues onDisk;
+            Theme          stored = theme_classic();
+            ok(save_settings(fs_impl, onDisk, stored), "THEME/ARM: a settings.json to start from");
+
+            // ── the app BOOTS ────────────────────────────────────────────────────────────────────
+            songcore::SongcoreHost h2(nullptr, 44100);
+            AppState               s2;
+            s2.project = &h2.edit_project();
+            s2.caps    = PlatformCaps::sdl(true);
+            ok(load_settings(fs_impl, s2.settings, s2.theme), "THEME/ARM: …read back at boot");
+            InputDispatcher d2(s2, h2, fs_impl);
+
+            // ── the user opens the editor and dials ONE colour. NOTHING ELSE. ────────────────────
+            // That "nothing else" is the whole fixture: any SETTINGS row touched here would arm the
+            // flag through the arm that already works, and the check would pass on the broken build.
+            s2.currentScreen     = ScreenType::SETTINGS;
+            s2.settingsCursorRow = static_cast<int>(SettingsRow::THEME);
+            d2.on_button_a();
+            ok(s2.themeEditor.isOpen, "THEME/ARM: A on SETTINGS' THEME row opens the editor");
+
+            s2.themeEditor.cursorRow     = 1;   // BACKGROUND
+            s2.themeEditor.cursorChannel = 0;   // R
+            const unsigned before = s2.theme.background;
+            d2.on_a_up();
+            ok(s2.theme.background != before,
+               "THEME/ARM: A+UP dialled the palette in memory (the fixture is live)");
+
+            // ── the app QUITS — through THE SHELL'S OWN EXIT VERB ────────────────────────────────
+            //
+            // ⚠️⚠️ CALLING `save_settings` DIRECTLY HERE WOULD MAKE THIS CHECK (b) ALL OVER AGAIN — it
+            // would prove the serializer round-trips and pass on a build that never writes at all. The
+            // whole claim is that the path the SHELL takes on exit (linux/main.cpp) picks this edit up
+            // without anything having flagged it. So the exit verb is what gets called, and nothing
+            // else. Verified RED against the dirty-flag build that preceded it, where this was
+            // `if (s2.settingsDirty) save_settings(...)` and the flag was never set: 1 failure of 627,
+            // `got 0xFF0A0A0A, want 0xFF0B0A0A` — the dialled red still sitting in memory only.
+            ok(save_settings_if_changed(fs_impl, s2.settings, s2.theme) == SettingsWrite::SAVED,
+               "⚠️ THEME/ARM: the EXIT decides on its own that this session needs writing "
+               "(nothing armed a flag — the editor never goes through apply_edit)");
+
+            // ── …and COMES BACK ─────────────────────────────────────────────────────────────────
+            SettingsValues sv4;
+            Theme          back2 = theme_classic();
+            load_settings(fs_impl, sv4, back2);
+            eq(static_cast<int>(back2.background), static_cast<int>(s2.theme.background),
+               "⚠️⚠️ THEME/ARM: a palette dialled in the EDITOR and nothing else SURVIVES THE QUIT "
+               "(the editor mutates s_.theme directly — if nothing arms the write, this is the check "
+               "that dies, while every other check in §27 stays green)");
         }
     }
 

@@ -318,12 +318,17 @@ struct AppState {
     // cursor, REFRESH (the default, as on Android) resets it to the top-left editable cell on entry.
     SettingsValues settings{};
 
-    /**
-     * A setting changed and settings.json has not caught up. The shell writes on exit rather than on
-     * every keystroke: holding A+UP on the overlay strength fires an edit every 100 ms (the key-repeat
-     * interval), and a file write per repeat is an SD card being hammered for a value still moving.
-     */
-    bool settingsDirty = false;
+    // ⚠️ THERE IS DELIBERATELY NO `settingsDirty` HERE, AND ITS ABSENCE IS LOAD-BEARING.
+    //
+    // There was one, and it was wrong. The shell wrote settings.json on exit `if (settingsDirty)`, and
+    // the only thing that ever set it was the SETTINGS screen's own edit arm — so the THEME EDITOR,
+    // which has no CursorContext and mutates `theme` directly, armed nothing: a session whose only
+    // change was the palette threw all eighteen colours away on quit, intermittently (any SETTINGS row
+    // touched in the same sitting armed the write, and it carried the theme with it).
+    //
+    // The exit now asks `save_settings_if_changed()` — which compares the bytes on disk with what memory
+    // holds — so the question is answered from the DATA and there is nothing here for a future screen to
+    // forget to set. Re-adding a flag re-adds the bug. See ui/settings_store.h.
 
     /** What this platform can do — and therefore which SETTINGS rows and PROJECT actions exist. */
     PlatformCaps caps{};

@@ -8,15 +8,20 @@
     "items_opt": null,
     "attr": {
         "title": "PocketTracker",
-        "desc": "A music tracker for handhelds. Sixteen screens of song, chain, phrase, table and groove editing over a sample engine with per-instrument modulation, a full DSP chain, a sample editor with chopping and time-stretch, and a mixer with sends and a parametric EQ. Renders a finished mix or stems to WAV on the device.",
-        "inst": "Ready to run - no BIOS, no extra files. Your songs and samples live in the port's own data/ folder: data/Projects, data/Samples, data/Soundfonts, data/Instruments, data/Themes, and data/Renders for anything you bounce. Pull the SD card and drop files straight in; the folders are created the first time you launch. WAV, MP3, FLAC, OGG and Opus all load as samples.",
+        "desc": "PocketTracker is a music tracker for retro gaming handhelds.",
+        "inst": "Ready to run - no BIOS, no extra files. Your songs and samples live in the port's own data/ folder, created on first launch.",
         "genres": [
             "Other"
         ],
         "porter": [
             "conan"
         ],
-        "image": {},
+        "image": {
+            "screenshot": "screenshot.png",
+            "covers": [],
+            "thumbnail": null,
+            "video": null
+        },
         "rtr": true,
         "runtime": null,
         "reqs": [],

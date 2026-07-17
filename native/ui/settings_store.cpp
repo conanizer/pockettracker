@@ -92,7 +92,17 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     return true;
 }
 
-bool save_settings(FileSystem& fs, const SettingsValues& values, const Theme& theme) {
+namespace {
+
+/**
+ * The exact bytes `settings.json` should hold for this state.
+ *
+ * ⚠️ ONE writer, deliberately: `save_settings_if_changed` COMPARES against this and `save_settings`
+ * WRITES it, so the two can never disagree about format. A second copy of the layout would make the
+ * comparison drift from the write, and the file would then be rewritten on every quit (harmless) or
+ * never (silent loss) depending on which way it drifted.
+ */
+std::string serialize_settings(const SettingsValues& values, const Theme& theme) {
     json j;
     j["scalingBilinear"]    = values.scalingBilinear;
     j["insertBefore"]       = values.insertBefore;
@@ -108,7 +118,26 @@ bool save_settings(FileSystem& fs, const SettingsValues& values, const Theme& th
     j["theme"]    = theme.name;
     j["appTheme"] = json::parse(serialize_theme(theme), nullptr, /*allow_exceptions=*/false);
 
-    return fs.write_file(fs.settings_path(), j.dump(2) + "\n");
+    return j.dump(2) + "\n";
+}
+
+}  // namespace
+
+bool save_settings(FileSystem& fs, const SettingsValues& values, const Theme& theme) {
+    return fs.write_file(fs.settings_path(), serialize_settings(values, theme));
+}
+
+SettingsWrite save_settings_if_changed(FileSystem& fs, const SettingsValues& values,
+                                       const Theme& theme) {
+    const std::string wanted = serialize_settings(values, theme);
+
+    // ⚠️ A file that cannot be READ is a file that must be WRITTEN — first launch (no file at all), and
+    // an unreadable or hand-mangled one, both land here and both want the current state put down. The
+    // `!=` is what makes an untouched session a no-op without anyone having to have remembered to say so.
+    std::string current;
+    if (fs.read_file(fs.settings_path(), current) && current == wanted) return SettingsWrite::UNCHANGED;
+
+    return save_settings(fs, values, theme) ? SettingsWrite::SAVED : SettingsWrite::FAILED;
 }
 
 }  // namespace pt::ui

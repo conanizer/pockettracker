@@ -50,7 +50,38 @@ namespace pt::ui {
  */
 bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme);
 
-/** Write `settings.json`. Called on exit, and after every SETTINGS edit. */
+/** Write `settings.json` unconditionally. */
 bool save_settings(FileSystem& fs, const SettingsValues& values, const Theme& theme);
+
+/** What `save_settings_if_changed` actually did — an ENUM, not a bool, for S10's reason: a caller that
+ *  cannot tell "nothing needed writing" from "the write FAILED" reports a full SD card by saying
+ *  nothing at all. That is the one answer you are reading the line to find out. */
+enum class SettingsWrite { UNCHANGED, SAVED, FAILED };
+
+/**
+ * Write `settings.json` **only if its contents would differ** — the verb the shell calls on exit.
+ *
+ * ⚠️⚠️ THIS EXISTS INSTEAD OF A DIRTY FLAG, AND THAT IS THE WHOLE POINT.
+ *
+ * The shell used to write on exit `if (state.settingsDirty)`, and the ONLY thing that ever set that flag
+ * was `apply_edit`'s SETTINGS arm. The THEME EDITOR has no CursorContext, so it never goes through
+ * `apply_edit` — its A+DPAD arms mutate `theme` directly — and neither does LOAD THEME. So a session
+ * whose only change was the palette armed nothing and **wrote nothing**, and eighteen dialled colours
+ * were gone on the next launch. It was intermittent, too: nudge any SETTINGS row in the same sitting and
+ * the flag was set, the write happened, and it carried the theme along with it.
+ *
+ * That is S9's headline bug in its second body. S9 fixed WHAT gets written (the palette, not its name)
+ * and left WHETHER it gets written resting on every future mutation site remembering to say so — which is
+ * the same "a rule you must remember at N call sites is a rule you will forget once" that Kotlin's modal
+ * predicate warns about, and it was forgotten within one session of being written.
+ *
+ * So the question is answered from the DATA rather than from a flag: *do the bytes on disk already say
+ * what memory says?* A new screen that touches the theme, a new key, a new SettingsValues field — all
+ * covered, by construction, with nothing to remember. It costs one ~200-byte read and one serialize per
+ * quit, and it keeps the property the flag was actually there for: a settings write happens on EXIT, never
+ * per keystroke (holding A+UP fires an edit every 100 ms, and one file write per repeat is an SD card
+ * hammered for a value that is still moving).
+ */
+SettingsWrite save_settings_if_changed(FileSystem& fs, const SettingsValues& values, const Theme& theme);
 
 }  // namespace pt::ui

@@ -15,3 +15,13 @@
 
 # The container recipe is read by docker on Linux; a CRLF in a RUN line ends up inside the command.
 Dockerfile.portmaster text eol=lf
+
+# ⚠️ THE REST OF THE PACKAGE IS AN ARTIFACT TOO, AND THE RULE ABOVE DOES NOT CARE THAT THESE PARSE
+# EITHER WAY. `port.json`, `gameinfo.xml` and the shipped README are copied into the zip byte-for-byte
+# exactly as PocketTracker.sh is, and they were left `unspecified` — so the bytes a handheld receives
+# depended on which OS ran `git clone`. Nothing breaks today (XML normalises \r\n, and JSON calls it
+# whitespace), which is the only reason it went unnoticed; it is pinned because "an artifact whose
+# contents vary by the porter's OS" is the same bug as the shebang, caught before rather than after.
+portmaster/*.json text eol=lf
+portmaster/*.xml  text eol=lf
+portmaster/*.md   text eol=lf

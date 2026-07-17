@@ -704,9 +704,24 @@ int main(int argc, char** argv) {
     // ⚠️ Settings are written HERE, not on every keystroke. Holding A+UP on a hex-byte setting fires
     // an edit every 100 ms (the key-repeat interval), and one file write per repeat is an SD card
     // being hammered for a value that is still moving.
-    if (state.settingsDirty) {
-        if (ui::save_settings(filesystem, state.settings, state.theme))
-            std::printf("settings: saved\n");
+    //
+    // ⚠️⚠️ …but NOT behind a dirty FLAG, and that distinction cost a real bug. This used to read
+    // `if (state.settingsDirty)`, and the only thing that ever SET that flag was the SETTINGS screen's
+    // edit arm — so a palette dialled in the THEME EDITOR (which mutates the theme directly, having no
+    // CursorContext to route through) armed nothing and was silently thrown away on quit. The verb below
+    // asks the DATA instead: it writes only when the bytes on disk differ from what memory holds, so it
+    // is still one write per session at most, and there is no longer anything for the next screen that
+    // touches the theme to forget. See ui/settings_store.h, and ptdispatch §27(c) — which fails if the
+    // arming ever comes apart again.
+    switch (ui::save_settings_if_changed(filesystem, state.settings, state.theme)) {
+        using SW = ui::SettingsWrite;
+        case SW::UNCHANGED: break;   // nothing moved this session; the file already says so
+        case SW::SAVED:     std::printf("settings: saved\n"); break;
+        // A full SD card, a read-only mount. S9's lesson, one file over: the only save in the app with
+        // no result at all was a dropped error return, and it read as success.
+        case SW::FAILED:
+            std::printf("settings: SAVE FAILED - %s\n", filesystem.settings_path().c_str());
+            break;
     }
 
     // ⚠️ **THE FLUSH — and every way out of the loop above arrives here, which is the design.**

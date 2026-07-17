@@ -82,6 +82,7 @@ echo "############ 3/5  stage the package ############"
 #   |- PocketTracker.sh
 #   `- pockettracker/
 #      |- pockettracker.aarch64
+#      |- screenshot.png
 #      `- licenses/
 rm -rf "$OUT"
 mkdir -p "$STAGE/pockettracker/licenses"
@@ -91,6 +92,16 @@ cp "$SRC/linux/portmaster/port.json"        "$STAGE/"
 cp "$SRC/linux/portmaster/gameinfo.xml"     "$STAGE/"
 cp "$SRC/linux/portmaster/README.md"        "$STAGE/"
 chmod +x "$STAGE/PocketTracker.sh"
+
+# The art. `gameinfo.xml` points the CFW's game list at it (`<image>./pockettracker/screenshot.png`)
+# and `port.json`'s `image.screenshot` names it for the PortMaster catalog — the same two channels
+# LittleGPTracker uses, which is where this layout was read off rather than guessed.
+#
+# ⚠️ It is the ANDROID capture, and that is deliberate rather than lazy: both frontends render the
+# same 640x480 design through the same 5x5 font, so it shows what the handheld actually draws. It is
+# 1280x960 — a 2x capture, so exactly 4:3 and comfortably over PortMaster's 640x480 floor — and it
+# shows the SONG screen mid-edit rather than a title card, which the porting guide asks for.
+cp "$SRC/docs/images/screenshot.png" "$STAGE/pockettracker/screenshot.png"
 
 cp "$BUILD/pockettracker-sdl" "$BIN"
 chmod +x "$BIN"

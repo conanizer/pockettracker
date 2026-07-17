@@ -417,7 +417,6 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
         case ScreenType::SETTINGS:
             settings_.handle_input(s_.settings, s_.theme, s_.caps, s_.settingsCursorRow,
                                    s_.settingsCursorColumn, action);
-            s_.settingsDirty = true;
             return false;
 
         case ScreenType::SAMPLE_EDITOR: {
