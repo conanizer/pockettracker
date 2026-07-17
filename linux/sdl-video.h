@@ -57,6 +57,9 @@ private:
     bool     create_texture();
     SDL_Rect dest_rect() const;
 
+    /** One line naming the driver, the panel, the output size and the letterbox. See the .cpp. */
+    void describe() const;
+
     static constexpr Uint64 FRAME_MS = 16;  // ~60 Hz, when we have to pace it ourselves
 
     SDL_Window*   window_   = nullptr;

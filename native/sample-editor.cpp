@@ -761,7 +761,4 @@ void AudioEngine::setInstrumentParams(int instrumentId, int start, int end, bool
     instrumentParams[instrumentId].filterType = fType;
     instrumentParams[instrumentId].filterCut = fCut;
     instrumentParams[instrumentId].filterRes = fRes;
-
-    LOGD("Instrument %d params: start=%d, end=%d, rev=%d, loop=%d, loopStart=%d, loopEnd=%d, drive=%d, crush=%d, downsample=%d, filter=%d, cut=%d, res=%d",
-         instrumentId, start, end, rev, loop, loopSt, loopEn, drv, crsh, dwn, fType, fCut, fRes);
 }

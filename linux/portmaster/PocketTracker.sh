@@ -62,9 +62,21 @@ cd "$GAMEDIR"
 # put it back. Keeping it under $GAMEDIR is what makes that reachable from a PC.
 export POCKETTRACKER_HOME="$GAMEDIR/data"
 
-# The shell opens SDL GameControllers. Without the CFW's mapping SDL sees an unrecognised joystick,
-# SDL_IsGameController() is false, no controller is opened and NOTHING responds. get_controls sets
-# this variable; exporting it is what makes the pad work.
+# The shell opens SDL GameControllers, so the pad needs a mapping or SDL_IsGameController() is false
+# and nothing responds. There are TWO channels for that, and measuring on a Miyoo Flip (spruce) showed
+# which one is load-bearing:
+#
+#   - SDL_GAMECONTROLLERCONFIG_FILE, which PortMaster's control.txt exports (a path to its bundled
+#     gamecontrollerdb.txt). THIS is what maps the pad here, together with SDL's own built-in db.
+#   - SDL_GAMECONTROLLERCONFIG (a single inline mapping string), exported below from get_controls'
+#     $sdl_controllerconfig.
+#
+# ⚠️ On spruce that variable is EMPTY: get_controls() has its assignment commented out, so this export
+# is a no-op. It is kept anyway because it is harmless (an empty value adds no mapping) and other CFWs
+# DO populate it, and PortMaster's porting guide has ports export it. What it is NOT is "the thing that
+# makes the pad work" — the file channel is. Confirmed by the app's own boot log: a bare run reports
+# `controller: X360 Controller` (SDL's built-in name), while under the launcher it reports
+# `Xbox 360 Controller` (the name in PortMaster's db) — two names, so the file mapping is in force.
 export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
 
 # No LD_LIBRARY_PATH and no libs.aarch64: this port deliberately links the DEVICE's libSDL2, which

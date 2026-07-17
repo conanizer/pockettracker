@@ -71,6 +71,26 @@ public:
     void close_controllers();
 
     /**
+     * Print one line per input event: what SDL delivered, and what this class did with it — a Button,
+     * or nothing at all. Off by default; the shell turns it on for POCKETTRACKER_INPUT_TRACE=1.
+     *
+     * ⚠️ This exists because of a specific, repeated failure. The port's two input tools (ptinput,
+     * ptdispatch) both BEGIN at a `ButtonEvent`, so everything above them — SDL, the CFW's controller
+     * mapping, the launch script — has no coverage at all. That is exactly where P4b's bug lived: the
+     * app was correct and its ENVIRONMENT fed it phantom input, and only 1 of the 4 collisions was
+     * ever reported, because `press()` silently drops a button already held and hides a duplicate
+     * wherever the two paths agree.
+     *
+     * ⭐ And it is what makes "L2/R2 and the stick are inert" a real check rather than a vacuous one.
+     * That claim's pass condition is NOTHING HAPPENING, which cannot tell "correctly ignored" from
+     * "the device never sent it" from "the app is wedged". With the trace, the same press produces
+     * POSITIVE evidence either way: an axis line with no button after it means SDL delivered it and
+     * this class dropped it on purpose. The control is built in — the buttons that DO work print their
+     * mapping on the same run, so a silent trace is a broken trace, not a passing test.
+     */
+    void set_trace(bool on) { trace_ = on; }
+
+    /**
      * Feed one SDL event. Presses/releases land in the queue; everything else is ignored.
      *
      * The clock is passed IN rather than read from SDL_GetTicks64() inside, and that is not
@@ -102,6 +122,9 @@ private:
     /** The modifiers as they stand right now — stamped onto each event as it is queued. */
     ButtonMods mods_now() const;
 
+    /** One trace line. `mapped` false prints the reason it went nowhere. */
+    void trace(const char* source, const char* what, bool mapped, Button b) const;
+
     static constexpr uint64_t REPEAT_INITIAL_DELAY = 400;  // ms before the first repeat
     static constexpr uint64_t REPEAT_INTERVAL      = 100;  // ms between repeats
 
@@ -117,6 +140,8 @@ private:
     bool     repeatActive_ = false;
     Button   repeatButton_ = Button::DPAD_UP;
     uint64_t repeatNextMs_ = 0;
+
+    bool trace_ = false;
 
     std::deque<ButtonEvent>     queue_;
     std::vector<SDL_GameController*> controllers_;

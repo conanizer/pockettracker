@@ -60,7 +60,46 @@ bool SdlVideo::open(const char* title, int windowW, int windowH, bool fullscreen
     vsync_ = (SDL_GetRendererInfo(renderer_, &info) == 0) &&
              ((info.flags & SDL_RENDERER_PRESENTVSYNC) != 0);
 
-    return create_texture();
+    if (!create_texture()) return false;
+    describe();
+    return true;
+}
+
+/**
+ * Report what the display actually IS, not what was asked for — one line, always on.
+ *
+ * ⚠️ This is the §10 bring-up row ("KMSDRM/rotation: no letterbox surprise") made answerable, and it
+ * exists because the shell asks for a 640x480 WINDOW and never asks for fullscreen. On the Miyoo Flip
+ * that is invisible: the panel IS 640x480, and KMSDRM has no window manager to put it in a box. On any
+ * device whose panel is not 640x480 the request is a guess, and nothing in the log would say what
+ * became of it.
+ *
+ * So: print the driver, the panel, what the renderer really gave us, and the rect the frame lands in.
+ * A dest rect smaller than the output IS the letterbox, in numbers, before anyone squints at a photo.
+ */
+void SdlVideo::describe() const {
+    int outW = 0, outH = 0;
+    SDL_GetRendererOutputSize(renderer_, &outW, &outH);
+
+    SDL_DisplayMode mode{};
+    const bool haveMode = SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(window_), &mode) == 0;
+
+    const SDL_Rect d = dest_rect();
+    std::printf("video:   driver=%s  panel=%dx%d@%dHz  output=%dx%d  frame=%dx%d at %d,%d  %s  %s\n",
+                SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "?",
+                haveMode ? mode.w : 0, haveMode ? mode.h : 0, haveMode ? mode.refresh_rate : 0, outW,
+                outH, d.w, d.h, d.x, d.y, scaling_ == ScalingMode::FIT ? "FIT" : "INTEGER",
+                vsync_ ? "vsync" : "SELF-PACED");
+
+    // The letterbox, named rather than left to be noticed. Bars are correct and expected on a panel
+    // that is not a whole multiple of 640x480 — what is NOT expected is the frame overhanging the
+    // output, which means the window outgrew the screen and the edges of the UI are simply gone.
+    if (d.w > outW || d.h > outH) {
+        std::printf("video:   ⚠️ the frame is LARGER than the display — edges are cut off\n");
+    } else if (d.w < outW || d.h < outH) {
+        std::printf("video:   letterbox: %dpx horizontal, %dpx vertical bars\n", (outW - d.w) / 2,
+                    (outH - d.h) / 2);
+    }
 }
 
 bool SdlVideo::create_texture() {

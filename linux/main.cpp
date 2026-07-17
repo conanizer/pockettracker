@@ -487,6 +487,20 @@ int main(int argc, char** argv) {
     }
 
     SdlInput input;
+
+    // ⚠️ POCKETTRACKER_INPUT_TRACE=1 — the bring-up instrument for a NEW device or CFW, and the only
+    // eye the port has on the layer between the hardware and `ButtonEvent`. ptinput and ptdispatch
+    // both start one layer BELOW this: neither can see SDL, the CFW's controller mapping, or the
+    // launch script — which is precisely the layer P4b's bug lived in.
+    //
+    // An env var rather than a flag because PortMaster invokes the binary with NO arguments, so a
+    // flag would be unreachable on the device this exists for. Off unless asked: it prints per event.
+    const char* inputTrace = SDL_getenv("POCKETTRACKER_INPUT_TRACE");
+    if (inputTrace && inputTrace[0] == '1') {
+        input.set_trace(true);
+        std::printf("input:   TRACE ON — every event prints, with what it mapped to (or did not)\n");
+    }
+
     input.open_controllers();
 
     // The UI state points at the host's live project — one document, edited in place.
