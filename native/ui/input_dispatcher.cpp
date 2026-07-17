@@ -1702,7 +1702,7 @@ void InputDispatcher::load_project_done(const std::string& path) {
 void InputDispatcher::export_song(bool stems) {
     if (s_.isRendering) return;   // a second press while one runs is a mis-press, not a request
 
-    host_.stop();                                    // no voices, no scheduled notes
+    host_.stop();                                    // the session ends; a render is not playback
     if (render_.suspend_audio) render_.suspend_audio(true);
 
     s_.isRendering    = true;
@@ -1774,6 +1774,11 @@ void InputDispatcher::project_action() {
             // A shortcut INTO a screen the nav grid can also reach (SETTINGS is one of the twelve).
             // It keeps the column it came from — SETTINGS owns none, exactly as PROJECT owns none — so
             // R+UP out of it later returns to the main-row screen you were on, not to a fixed default.
+            //
+            // …and B's way out is a SECOND, dedicated target, captured here exactly as Kotlin captures it
+            // on this same gesture (`settingsReturnScreen = currentScreen`, AppInputDispatcher.kt:1666).
+            // See AppState::settingsReturnScreen for why it cannot just be `previousScreen`.
+            s_.settingsReturnScreen = s_.currentScreen;
             NavResult nav;
             nav.screen = ScreenType::SETTINGS;
             nav.column = s_.previousColumn;
@@ -2004,6 +2009,26 @@ void InputDispatcher::on_button_b() {
         }
 
         close_file_browser();
+        return;
+    }
+
+    // ⚠️ B LEAVES SETTINGS — the port had no such arm until Phase 4, so the screen could only be left by
+    // R+DPAD, which is not a way out any other full-screen destination makes you use.
+    //
+    // Its POSITION is the specification, and it is Kotlin's (AppInputDispatcher.kt:2057):
+    //   • AFTER the modals. The THEME EDITOR is raised FROM this screen (SETTINGS' own A, row 9), and the
+    //     EQ editor and the keyboard can be over it too — while one is up it owns B, or closing SETTINGS
+    //     would yank the screen out from under it.
+    //   • BEFORE the selection arm below. B inside a selection COPIES, and `return`s. Put this after it
+    //     and B on SETTINGS with a live selection copies nothing (SETTINGS has no clipboard arm) and never
+    //     reaches here — the screen would be stuck exactly as it was, only intermittently. Kotlin's own
+    //     `exitSelectionMode()` on this path is the tell that the two CAN overlap.
+    if (s_.currentScreen == ScreenType::SETTINGS) {
+        s_.selection.exit();   // Kotlin: trackerController.inputController.exitSelectionMode()
+        NavResult nav;
+        nav.screen = s_.settingsReturnScreen;
+        nav.column = s_.previousColumn;   // SETTINGS owns no column — the way out keeps the one it came in with
+        go_to_screen(s_, nav);            // …and NOT a bare assignment: the port's cursors are saved/restored here
         return;
     }
 

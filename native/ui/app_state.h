@@ -222,6 +222,23 @@ struct AppState {
     /** The screen the browser (or a full-screen overlay) will return to when it closes. */
     ScreenType previousScreen = ScreenType::INSTRUMENT;
 
+    /**
+     * Where B goes from SETTINGS — and ⚠️ it is deliberately NOT `previousScreen`.
+     *
+     * Android keeps a second, dedicated field for exactly this (`AppInputDispatcher.settingsReturnScreen`),
+     * and the duplication is the point: `previousScreen` is the FILE BROWSER's and the SAMPLE EDITOR's
+     * return target, so anything that raises one of those MOVES it. Ride on it and B out of SETTINGS
+     * lands wherever the last overlay happened to be opened from — a screen the user never came from.
+     * Two questions, two answers.
+     *
+     * PROJECT is the default because PROJECT → SYSTEM is the only thing that writes it, on Android and
+     * here (Kotlin: the `6 ->` arm of handleConfirmAProject, and `settingsReturnScreen = PROJECT` at its
+     * declaration). ⚠️ So the nav grid can also land on SETTINGS WITHOUT setting it, and B then returns
+     * to PROJECT rather than to wherever R+DPAD came from. That is Android's own behaviour, quirk and
+     * all, and the port matches it rather than improving on it — R+DPAD's way back out is R+DPAD.
+     */
+    ScreenType settingsReturnScreen = ScreenType::PROJECT;
+
     // ── The QWERTY keyboard ─────────────────────────────────────────────────────────────────────
     // The app's first true modal: while it is open it owns every button, and `isOpen` is checked
     // before any other arm in every handler that can reach it.

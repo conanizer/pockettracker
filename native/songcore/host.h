@@ -112,15 +112,46 @@ class SongcoreHost {
     int64_t play_chain(int chainId)   { sync_clock(); seq_.playChain(chainId);     return after_play(); }
     int64_t play_phrase(int phraseId) { sync_clock(); seq_.playPhrase(phraseId);   return after_play(); }
 
+    /**
+     * Stop the transport — the scheduler AND the engine.
+     *
+     * ⚠️ THIS USED TO STOP ONLY THE SCHEDULER, and it is the whole Phase-4 "START won't stop playback"
+     * bug. `seq_.stop()` halts the thing that DECIDES what to play; the notes it has already handed to
+     * the engine live in `noteQueue` with target frames in the future, and `processAudioBlock` goes on
+     * draining them. The scheduler runs `BUFFER_PHRASES` (2) phrases ahead — ≈4 s at the default tempo
+     * — so the button did nothing audible for four seconds, and the next START (correctly seeing
+     * `isPlaying_ == false`) scheduled a SECOND stream on top of the stale one. That is what "layered"
+     * playback was: two live schedules in one queue, not the voice allocator.
+     *
+     * ⚠️ THE ASSUMPTION WAS TRUE WHEN IT WAS MADE. On Android this host is only ever reached through
+     * `PlaybackController.stop()`, which does the engine-side cleanup itself immediately afterwards —
+     * and says so: *"songcore resets its own transport, per-track state and master EQ; the engine-side
+     * cleanup below (queues, voices) is shared and runs for both engines"* (PlaybackController.kt:415).
+     * It was shared right up until the SDL shell called `host_.stop()` with no PlaybackController under
+     * it. The layer built on top invalidated the assumption, in a channel nothing was pointed at.
+     * Android's calls are now redundant rather than wrong — both verbs are idempotent.
+     *
+     * ORDER IS LOAD-BEARING, and it is Kotlin's: the master EQ is restored BEFORE the queues are
+     * cleared, because the EQM override lives in the param queue — drop those entries first and the bus
+     * stays stuck on the last EQM preset forever. Guarded on a live project: the render path leaves
+     * `currentProject_` null and restores its own master EQ in RenderController.
+     *
+     * `play_song`/`play_chain`/`play_phrase` deliberately do NOT call this. Kotlin's play* verbs each
+     * open with `stop()`, but on both platforms the caller has already done it — the shell's `on_start`
+     * stops before it starts (input_dispatcher.cpp), and the JNI's caller is that same
+     * `PlaybackController.play*`. A second stop here would buy nothing and would put an extra `t_stop`
+     * into the event trace the 36 goldens byte-compare.
+     */
     void stop() {
-        // Mirrors PlaybackController.stop() ordering: restore the master EQ (undoing a transient EQM
-        // override) BEFORE the queues are cleared, and only when a live project is set — the render
-        // path leaves currentProject_ null and restores its own master EQ in RenderController.
         if (engine_ && seq_.eqm_active() && seq_.has_live_project()) {
             engine_->setMasterEqSlot(project_.masterEqSlot);
         }
         sync_clock();
         seq_.stop();
+        if (engine_) {
+            engine_->clearScheduledNotes();   // the lookahead: notes, kills AND param updates
+            engine_->stopAll();               // …and the voices already sounding (instant — no fade)
+        }
         consumer_.clear_track_mask();   // Kotlin clears phraseTrackMask in clearScheduledNotes/stopAll
         flush_trace();
     }
@@ -386,7 +417,14 @@ class SongcoreHost {
 
     /** PROJECT → NEW. A blank document, and an engine that has forgotten the last one. */
     void new_project() {
-        stop();   // before the samples go: no voice may be reading PCM we are about to free
+        // ⚠️ This comment used to read "before the samples go: no voice may be reading PCM we are about
+        // to free" — which was BOTH a false description of stop() (it stopped no voices until the Phase-4
+        // fix above) and the wrong reason. The PCM is not safe because of this line: `clearAllSamples()`
+        // stops every voice and clears all three queues INSIDE `sampleEditMutex`, which is the only way
+        // to do it correctly, since the audio thread can be mid-read and takes that lock with try_to_lock.
+        // A stop() out here races it by construction. This is the TRANSPORT stopping because NEW ends the
+        // session — a user-facing fact, not a memory-safety mechanism. Do not lean on it for the latter.
+        stop();
         songcore::new_project(project_);
 
         if (engine_) {

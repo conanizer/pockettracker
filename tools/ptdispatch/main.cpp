@@ -1183,6 +1183,61 @@ int main() {
         eq(androidRel, 11, "SETTINGS[android+release]: OVERLAY and TRACE drop out (BuildConfig.DEBUG)");
     }
 
+    // ── 12b. B LEAVES SETTINGS — and lands on the screen it was entered FROM ─────────────────────
+    //
+    // Reported from the device (Phase 4): SETTINGS could only be left with R+DPAD. Every other
+    // full-screen destination in the app answers B, and the port simply had no arm — Kotlin's
+    // `handleButtonB` opens with one (AppInputDispatcher.kt:2057) and the transcription missed it.
+    //
+    // ⚠️ ptinput is structurally blind to this and always will be: B here is not an EDIT. It resolves no
+    // cursor context, produces no action and writes no cell — the three things every one of its 22,929
+    // cases compares. It is a screen change, which is the join between the dispatcher and navigation, and
+    // that join is the whole reason this file exists.
+    {
+        state.caps = PlatformCaps::sdl(true);
+
+        // Entered the way a user enters it: PROJECT → SYSTEM → A.
+        state.currentScreen       = ScreenType::PROJECT;
+        state.projectCursorRow    = static_cast<int>(ProjectRow::SYSTEM);
+        state.projectCursorColumn = 1;
+        dispatch.on_button_a();
+        ok(state.currentScreen == ScreenType::SETTINGS,
+           "SETTINGS/B(control): PROJECT → SYSTEM → A opens SETTINGS — so the B below acts on the real screen");
+
+        // ⚠️ THE CHECK THAT CAN TELL THE TWO FIELDS APART, and without it this section proves nothing:
+        // `previousScreen` is poisoned to a screen SETTINGS was never entered from. It is the FILE
+        // BROWSER's and the SAMPLE EDITOR's return target, and raising either FROM settings (LOAD THEME
+        // does exactly that) moves it — so a B arm riding on `previousScreen`, which is the obvious way
+        // to write this, passes every test that does not poison it and strands the user on a screen they
+        // never came from. That is why Android carries a second field, and why the port now does.
+        state.previousScreen = ScreenType::SAMPLE_EDITOR;
+
+        dispatch.on_button_b();
+        ok(state.currentScreen == ScreenType::PROJECT,
+           "⚠️ SETTINGS/B: B returns to where SETTINGS was opened from — settingsReturnScreen, NOT previousScreen");
+        eq(state.projectCursorRow, static_cast<int>(ProjectRow::SYSTEM),
+           "SETTINGS/B: …with PROJECT's cursor still on SYSTEM (go_to_screen resets neither PROJECT nor SETTINGS)");
+
+        // The modal rule, and the reason this arm sits BELOW the modals rather than at the top of B:
+        // SETTINGS' own A raises the THEME EDITOR. While it is up B must close IT — close the SCREEN
+        // instead and the editor is yanked out from under the user, still flagged open. It is opened here
+        // through the REAL gesture (A on row 9) rather than by poking `themeEditor.isOpen`: the modal's
+        // own entry path is part of what is under test, and `open_theme_editor` is private for good reason.
+        state.currentScreen     = ScreenType::SETTINGS;
+        state.settingsCursorRow = static_cast<int>(SettingsRow::THEME);
+        dispatch.on_button_a();
+        ok(state.themeEditor.isOpen,
+           "SETTINGS/B(control): A on the THEME row raises the theme editor — so the B below has a modal to own it");
+
+        dispatch.on_button_b();
+        ok(state.currentScreen == ScreenType::SETTINGS,
+           "⚠️ SETTINGS/B: a modal over SETTINGS still owns B — the theme editor closes, the screen stays");
+        ok(!state.themeEditor.isOpen, "SETTINGS/B: …and it is the editor that closed");
+
+        dispatch.on_button_b();   // now that the modal is gone, B means leave
+        ok(state.currentScreen == ScreenType::PROJECT, "SETTINGS/B: …and the next B leaves");
+    }
+
     // ── 13. The cursor cannot be LOST on entry — the guard Kotlin cannot need ────────────────────
     //
     // The default row is 0 (LAYOUT), which the SHELL does not draw. Without the bounds check in
@@ -2911,6 +2966,167 @@ int main() {
         }
 
         autosave_clear(fs_impl);   // leave the temp tree as we found it
+    }
+
+    // ── 29. THE TRANSPORT — what the ENGINE is still holding after STOP ──────────────────────────
+    //
+    // ⚠️ ELEVEN TOOLS, AND NOT ONE OF THEM EVER ASKED WHAT STOP LEAVES BEHIND. Every one of them is
+    // blind to it by construction, and the blindness has the same shape as S4's `push_params` bug:
+    //   • ptplay and the seven goldens read the EVENT BUS — and the bus stops correctly. `seq_.stop()`
+    //     does call `router_.t_stop()`, so the trace ends exactly where it should. The trace is not the
+    //     audio, and the queue the audio drains from is BELOW the router.
+    //   • ptrender renders — and `prepare_render` calls `stopAll()` + `clearScheduledNotes()` itself
+    //     (render.h:89). So the render path was already correct and could never expose it.
+    //   • ptdispatch (this file) ran §23/§24 through a real engine — but only ever RENDERED. Nothing
+    //     had driven `processLiveBlock` and then pressed stop.
+    // Not an event, not a note, and the render path was already right. The one channel nothing pointed at.
+    //
+    // What it hid (Phase 4, reported from the device, 2026-07-17): `SongcoreHost::stop()` stops the
+    // SCHEDULER and never touches the ENGINE. On Android that is invisible, because the host is only
+    // ever reached through `PlaybackController.stop()`, which does the engine-side cleanup itself and
+    // whose own comment says it is "shared and runs for both engines" (PlaybackController.kt:415-430).
+    // The SDL shell calls `host_.stop()` DIRECTLY — there is no PlaybackController under it — so the
+    // BUFFER_PHRASES=2 lookahead (≈4 s at the default tempo) went on playing after the button, and the
+    // next START, seeing `isPlaying_ == false`, scheduled a SECOND stream on top of the stale one.
+    //
+    // ⚠️ Both checks below pass by DOING NOTHING (silence, and "not louder"), which S10 named as the
+    // trap: a test whose pass is nothing happening cannot tell a fix from a misfire. Two things answer
+    // that. Each has a POSITIVE control inside it — the transport is proven AUDIBLE before it is asked
+    // to go quiet. And the real control is that both were RUN AGAINST THE BROKEN BUILD FIRST and went
+    // red, naming it: the bug is its own control, and it was free.
+    {
+        // ⚠️ THE FIXTURE MUST BE SHORTER THAN ONE STEP (0.125 s at 120 BPM) or every note runs into the
+        // next, the voice never goes idle, and §29b's energy stops being a count of what FIRED. It is
+        // synthesized rather than borrowed, as §24's is: ptdispatch is the one tool with no /testdata.
+        const int      rate     = 44100;
+        const fs::path tonePath = tree.root / "Samples" / "stoptone.wav";
+        {
+            std::vector<float> tone(static_cast<size_t>(rate / 12));   // ≈83 ms
+            for (size_t i = 0; i < tone.size(); ++i) {
+                const double t   = static_cast<double>(i) / rate;
+                const double env = std::exp(-60.0 * t);
+                tone[i] = static_cast<float>(0.7 * env * std::sin(2.0 * 3.14159265358979 * 1000.0 * t));
+            }
+            ok(songcore::write_wav_mono(tonePath.generic_string(), tone, rate),
+               "STOP: the fixture tone is written");
+        }
+
+        struct Rig {
+            std::unique_ptr<AudioEngine>            engine;
+            std::unique_ptr<songcore::SongcoreHost> host;
+            AppState                                state;
+            std::unique_ptr<InputDispatcher>        dispatch;
+        };
+
+        // A whole rig per case: playback is a pure function of the project, and two cases sharing an
+        // engine would let the first one's state decide the second one's verdict (S6b's argument for
+        // rendering a DIFFERENT project between the two determinism renders).
+        const auto make_rig = [&]() {
+            auto r    = std::make_unique<Rig>();
+            r->engine = std::make_unique<AudioEngine>();   // ⚠️ HEAP — see §23
+            r->engine->setDeviceSampleRate(rate);
+            r->host = std::make_unique<songcore::SongcoreHost>(r->engine.get(), rate);
+
+            songcore::Project& p = r->host->edit_project();
+            p      = songcore::make_default_project();
+            p.name = "STOP TEST";
+            for (int step = 0; step < 16; ++step) {   // a note on EVERY step — plenty still queued at the stop
+                songcore::PhraseStep& s = p.phrases[0].steps[static_cast<size_t>(step)];
+                s.note       = songcore::Note::C4();
+                s.instrument = 0;
+            }
+            ok(r->host->load_sample(0, tonePath.generic_string()),
+               "STOP: …and loads into instrument 0, so the phrase is AUDIBLE rather than vacuously silent");
+            r->host->push_params();
+
+            r->state.project       = &p;
+            r->state.caps          = PlatformCaps::sdl(true);
+            r->state.currentScreen = ScreenType::PHRASE;   // ⚠️ where START IS the transport (§S4)
+            r->state.currentPhrase = 0;
+            r->dispatch = std::make_unique<InputDispatcher>(r->state, *r->host, fs_impl);
+            return r;
+        };
+
+        // The shell's frame loop in miniature: the audio callback drains the queues, the poll refills
+        // them. It calls `processLiveBlock` — the SDL callback's own entry point (sdl-audio-engine.cpp:33)
+        // — and NOT renderOffline, which is the one path that already cleaned up after itself. It polls
+        // unconditionally, as the shell does (`poll()` no-ops while stopped).
+        constexpr int      BLOCK = 512;                       // ≈11.6 ms
+        std::vector<float> buf(BLOCK * 2);
+        struct Pumped { double peak = 0.0; double energy = 0.0; };
+        const auto pump = [&](Rig& r, int blocks) {
+            Pumped out;
+            for (int b = 0; b < blocks; ++b) {
+                r.host->poll();
+                r.engine->processLiveBlock(buf.data(), BLOCK, 2, static_cast<float>(rate));
+                for (int i = 0; i < BLOCK * 2; ++i) {
+                    const double v = static_cast<double>(buf[i]);
+                    out.peak = std::max(out.peak, std::abs(v));
+                    out.energy += v * v;
+                }
+            }
+            return out;
+        };
+
+        // ── 29a. STOP SILENCES THE ENGINE ────────────────────────────────────────────────────────
+        {
+            auto r = make_rig();
+
+            r->dispatch->on_start();   // the real gesture, not host->stop() — the button is what regressed
+            ok(r->host->is_playing(), "STOP: START on PHRASE starts the transport");
+
+            const Pumped playing = pump(*r, 43);   // ≈0.5 s
+            ok(playing.peak > 0.01,
+               "⚠️ STOP(control): …and it is genuinely AUDIBLE. Without this the silence below would pass "
+               "on a rig that never made a sound at all");
+
+            r->dispatch->on_start();   // a second press = STOP
+            ok(!r->host->is_playing(), "STOP: a second START stops the transport");
+
+            pump(*r, 2);   // let the block the stop landed in finish
+            eq(r->engine->getActiveVoiceCount(), 0,
+               "⚠️ STOP: no voice is left ringing — this is stopAll(), and Voice::stop() is instant "
+               "(isActive = false), so there is no fade to wait out");
+
+            // ≈4.5 s — deliberately LONGER than the BUFFER_PHRASES=2 lookahead (2 phrases × 16 steps ×
+            // 5512 frames ≈ 4.0 s), so a queue that was never cleared has time to play itself out and
+            // be caught, rather than still being pending when the window closes.
+            const Pumped after = pump(*r, 388);
+            ok(after.peak < 0.001,
+               "⚠️ STOP: THE ENGINE IS SILENT AFTER STOP — clearScheduledNotes(). Without it the 2-phrase "
+               "lookahead keeps playing for ~4 s after the button, which is the device's "
+               "'START won't stop it' verbatim");
+        }
+
+        // ── 29b. …AND A RESTART PLAYS ONE SCHEDULE, NOT TWO ──────────────────────────────────────
+        //
+        // The second face of the same bug, and worth pinning directly rather than leaving as a corollary
+        // of 29a: the device report guessed "voice stealing or something", and this is the check that
+        // answers it. Layering is a STALE QUEUE. Nothing is wrong with the voice allocator.
+        {
+            auto clean = make_rig();
+            clean->dispatch->on_start();
+            const double base = pump(*clean, 86).energy;   // ≈1 s of exactly ONE schedule
+            ok(base > 0.0, "STOP/RESTART(control): the reference run made sound");
+
+            auto r = make_rig();
+            r->dispatch->on_start();
+            // ⚠️ THE CLOCK MUST ADVANCE BEFORE THE STOP, or this test passes by construction: playPhrase
+            // latches `playbackStartFrame_ = getCurrentFrame()`, so a stop-and-restart with no audio in
+            // between re-schedules onto the SAME frames and the stale copy hides inside the new one. A
+            // quarter second offsets them, which is also what a human hand does.
+            pump(*r, 22);
+            r->dispatch->on_start();   // stop…
+            r->dispatch->on_start();   // …and start again
+            const double again = pump(*r, 86).energy;
+
+            // With the queue cleared the restart is bit-for-bit the reference run's work; the tolerance is
+            // for DSP state carried across the 0.25 s (limiter/OTT envelopes), not for a second schedule —
+            // that one lands at ≈2×, nowhere near the line.
+            ok(again < base * 1.3,
+               "⚠️ STOP/RESTART: a restart plays ONE schedule, not two. A stale queue is what layers "
+               "playback — NOT voice stealing");
+        }
     }
 
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);
