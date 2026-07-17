@@ -417,6 +417,14 @@ int main(int argc, char** argv) {
     engine->onResumeRequested = [&audio] { audio.resumeStream(); };
 
     SongcoreHost host(engine.get(), audio.sampleRate());
+
+    // THIS install's app root — where Projects/ Samples/ Soundfonts/… live (also the FileSystem's root,
+    // set up below). Handed to the host BEFORE the first load: a project opened at boot may have been
+    // authored on another install (a phone's Documents/PocketTracker) whose absolute media paths are dead
+    // here until re-rooted onto ours. Computed once; StdFileSystem reuses it below. See set_app_root.
+    const std::string appRoot = (argc > 3) ? argv[3] : ui::default_app_root();
+    host.set_app_root(appRoot);
+
     if (hasProject) {
         if (!host.push_project(blob)) {
             std::fprintf(stderr, "%s did not parse as a .ptp\n", projectPath.c_str());
@@ -464,8 +472,7 @@ int main(int argc, char** argv) {
     //
     // The SUB-directory names are identical to Android's on purpose: a user who copies their
     // `PocketTracker/` folder off a phone onto an SD card must find their projects where the app looks.
-    const std::string appRoot = (argc > 3) ? argv[3] : ui::default_app_root();
-    ui::StdFileSystem filesystem(appRoot);
+    ui::StdFileSystem filesystem(appRoot);   // appRoot computed above (host.set_app_root)
 
     // ⚠️ Create them NOW, at boot, rather than lazily on the first browse. `ensure_dir` runs inside each
     // getter, so the folders would otherwise not exist until the user opened the browser once — and on a

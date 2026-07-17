@@ -3206,6 +3206,114 @@ int main() {
         }
     }
 
+    // ── §30 — an Android project's dead sample paths re-root onto THIS install's app root ─────────────
+    //
+    // The bug the user hit bringing phone projects up on the handheld: a .ptp authored on Android stores
+    // sample paths ABSOLUTE under /storage/emulated/0/Documents/PocketTracker/…, which on a handheld point
+    // nowhere — so every instrument loads silent. resolve_media_path now re-roots the app-root-relative
+    // tail onto SongcoreHost::set_app_root(). This drives the REAL host.load_media — the exact call the
+    // browser's LOAD makes — and reads its loaded/failed count.
+    //
+    // ⚠️ THE CONTROL IS THE OLD BEHAVIOUR ITSELF (b): a host never told its app root runs the code that
+    // shipped before this change, and the SAME path fails. So the control fires red on the pre-fix logic —
+    // this is not a check whose "pass" is nothing happening.
+    {
+        namespace sc = songcore;
+        const std::string root = tree.root.generic_string();
+
+        auto write_tone = [](const fs::path& at) {
+            fs::create_directories(at.parent_path());
+            std::vector<float> pcm(4410);   // 0.1 s — enough for the decoder to accept it
+            for (size_t i = 0; i < pcm.size(); ++i)
+                pcm[i] = static_cast<float>(0.5 * std::sin(2.0 * 3.14159265358979 * 440.0 *
+                                                           (static_cast<double>(i) / 44100.0)));
+            sc::write_wav_mono(at.generic_string(), pcm, 44100);
+        };
+        auto proj_with = [](const std::string& samplePath) {
+            sc::Project p = sc::make_default_project();
+            p.instruments[0].id             = 0;
+            p.instruments[0].instrumentType = sc::InstrumentType::SAMPLER;
+            p.instruments[0].sampleFilePath = samplePath;
+            return p;
+        };
+
+        write_tone(tree.root / "Samples" / "reloc.wav");                       // where THIS install keeps it
+        const std::string androidPath =
+            "/storage/emulated/0/Documents/PocketTracker/Samples/reloc.wav";   // the phone's dead path
+
+        write_tone(tree.root / "decoys" / "Samples" / "keep.wav");   // (c)'s valid path, inside the tree
+        const std::string base    = fs_impl.samples_directory();
+        const std::string decoy   = (tree.root / "decoys" / "Samples" / "keep.wav").generic_string();
+
+        auto engine = std::make_unique<AudioEngine>();   // ⚠️ HEAP — see §23; ONE engine for all four
+        engine->setDeviceSampleRate(44100);
+
+        // (a) THE FIX, through the REAL host wiring: set_app_root → load_media re-roots and loads.
+        {
+            sc::SongcoreHost host(engine.get(), 44100);
+            host.set_app_root(root);
+            host.edit_project() = proj_with(androidPath);
+            auto r = host.load_media(base);
+            ok(r.loaded == 1 && r.failed == 0,
+               "RELOC: an Android absolute sample path re-roots onto this app root and loads");
+        }
+
+        // (b) THE CONTROL — the pre-fix behaviour IS load_project_media with an EMPTY app root; on the same
+        //     input it fails. Called directly on the same engine (it clears samples first), so nothing but
+        //     app_root differs from (a).
+        {
+            sc::Project p = proj_with(androidPath);
+            sc::Routing rt;
+            auto r = sc::load_project_media(*engine, p, base, /*app_root=*/"", rt);
+            ok(r.loaded == 0 && r.failed == 1,
+               "RELOC control: with no app root the SAME path fails — the bug, reproduced on demand");
+        }
+
+        // (c) A VALID absolute path is used as-authored, NOT rewritten. The decoy contains "/Samples/" (so
+        //     the tail extractor WOULD fire) but the file exists THERE, and its re-root target
+        //     <root>/Samples/keep.wav does not — so loaded==1 proves the existence check let the real path
+        //     win. A re-root-always bug fails here.
+        {
+            sc::Project p = proj_with(decoy);
+            sc::Routing rt;
+            auto r = sc::load_project_media(*engine, p, base, root, rt);
+            ok(r.loaded == 1, "RELOC: an existing absolute path is used as-authored, never re-rooted");
+        }
+
+        // (d) A path under NO app sub-tree cannot be recovered — the user's own stated limitation, pinned.
+        {
+            sc::Project p = proj_with("/nowhere/at/all/ghost.wav");
+            sc::Routing rt;
+            auto r = sc::load_project_media(*engine, p, base, root, rt);
+            ok(r.loaded == 0 && r.failed == 1,
+               "RELOC: a path under no app sub-tree is left as-authored (fails, as the user accepted)");
+        }
+
+        // (e) CASE DRIFT — the P4f-device reality, and it ONLY reproduces on a case-SENSITIVE filesystem.
+        //     Android storage is case-INsensitive, the SD card is not, so a project's "Samples/Breaks/…" is
+        //     dead against the card's real "Samples/breaks/…". On a case-INsensitive host (this Windows dev
+        //     box, macOS) "Breaks"=="breaks" so there is nothing to resolve — skip rather than assert what
+        //     cannot be true here. The CI's Linux runners and the device DO exercise the walk.
+        bool caseSensitiveFs = false;
+        {
+            const fs::path probe = tree.root / "casetest.tmp";
+            { std::ofstream(probe.string()) << "x"; }
+            caseSensitiveFs = !fs::exists(tree.root / "CASETEST.TMP");
+            std::error_code pec; fs::remove(probe, pec);
+        }
+        if (caseSensitiveFs) {
+            write_tone(tree.root / "Samples" / "breaks" / "amen.wav");   // on disk: LOWERCASE folder
+            const std::string capital = (tree.root / "Samples" / "Breaks" / "amen.wav").generic_string();
+            ok(!sc::path_exists(capital),
+               "RELOC/case control: the exact capitalised path really is dead (case-sensitive host)");
+            sc::Project p = proj_with("/storage/emulated/0/Documents/PocketTracker/Samples/Breaks/amen.wav");
+            sc::Routing rt;
+            auto r = sc::load_project_media(*engine, p, base, root, rt);
+            ok(r.loaded == 1 && r.failed == 0,
+               "RELOC/case: a wrong-case Android folder loads via case-insensitive resolution");
+        }
+    }
+
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);
     std::printf("%s\n", failures == 0 ? "ALL GREEN" : "RED");
     return failures == 0 ? 0 : 1;

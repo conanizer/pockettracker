@@ -28,6 +28,8 @@
 // Template over the engine, like voice_derive.h — AudioEngine satisfies it as-is, and a recorder can
 // be substituted in a host test without an interface or a virtual call.
 
+#include <filesystem>   // resolve_case_insensitive — Android storage is case-insensitive, the SD card is not
+#include <fstream>      // path_exists — an <fstream> probe (see resolve_media_path)
 #include <string>
 #include <vector>
 
@@ -175,15 +177,137 @@ struct MediaLoadResult {
     int failed = 0;
 };
 
+// A cheap "is this file actually here?" — an <fstream> open probe, NOT <filesystem>, so it stays inside
+// the no-extra-link-library rule the path helpers below keep. Used only to decide whether an absolute
+// path needs relocating; a false negative (a file that exists but cannot be opened) at worst re-roots to
+// the same-or-a-worse guess, and the load fails either way, so it costs nothing it did not already cost.
+inline bool path_exists(const std::string& path) {
+    if (path.empty()) return false;
+    std::ifstream f(path, std::ios::binary);
+    return f.good();
+}
+
+// The app-root-relative tail of an absolute media path authored under ANOTHER install — the portable
+// part naming where UNDER the app root a file lives ("Samples/Pads/kick.wav"), with the foreign root
+// stripped. Empty when the path is under no recognisable app sub-tree (a sample the user kept elsewhere).
+inline std::string app_root_relative_tail(const std::string& path) {
+    // 1) An Android phone hard-codes its root to ".../PocketTracker" (AndroidFileSystem), so everything
+    //    after the LAST "/PocketTracker/" is exactly the tail. This is the case a user copying a project
+    //    off a phone hits, and the anchor the user themselves named. rfind, so a user sub-folder that
+    //    happens to be called "PocketTracker" loses to the real root above it.
+    static const std::string kPtAnchor = "/PocketTracker/";
+    const size_t pt = path.rfind(kPtAnchor);
+    if (pt != std::string::npos) return path.substr(pt + kPtAnchor.size());
+
+    // 2) A root NOT named PocketTracker (another handheld whose $POCKETTRACKER_HOME is e.g. ".../data")
+    //    has no such anchor — fall back to the media sub-trees themselves, keeping the sub-dir IN the
+    //    tail so it re-roots whole ("Samples/x.wav" onto <root> → <root>/Samples/x.wav).
+    static const std::string kSubtrees[] = { "/Samples/", "/Soundfonts/", "/Renders/" };
+    size_t best = std::string::npos;
+    for (const std::string& sub : kSubtrees) {
+        const size_t at = path.rfind(sub);
+        if (at != std::string::npos && (best == std::string::npos || at > best)) best = at;
+    }
+    if (best == std::string::npos) return "";
+    return path.substr(best + 1);   // drop the leading '/', keep "Samples/…"
+}
+
+inline std::string to_lower_ascii(std::string s) {
+    for (char& c : s) if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + 32);
+    return s;
+}
+
+// Resolve a path whose stored CASE may not match the disk. A project authored on Android references
+// "Samples/Breaks/x.wav", but Android storage is case-INsensitive (FAT/sdcardfs) while a Linux SD card is
+// case-SENSITIVE — so the real file is "Samples/breaks/x.wav" and the exact path is dead. Walk the path a
+// component at a time from the longest existing prefix; where an exact child is missing, take the entry
+// whose name matches case-insensitively. Returns the ORIGINAL path when no such chain exists, so a
+// genuinely-absent file (a sample the user never copied) still fails naming what the project asked for.
+//
+// ⭐ It returns IMMEDIATELY when the exact path exists — which is every host-tool/golden case (their paths
+// match the disk exactly) — so nothing there moves, and the only directory listing ever done is on a real
+// miss. This is the one place songcore reaches for <filesystem>; it is never instantiated on Android
+// (load_project_media has no caller there), so the APK neither runs nor links it.
+inline std::string resolve_case_insensitive(const std::string& path) {
+    if (path.empty()) return path;
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (fs::exists(fs::path(path), ec)) return path;   // exact hit — the overwhelmingly common case
+
+    // Split on both separators OURSELVES rather than via fs::path's relative_path(): the real device app
+    // root is "//mnt/SDCARD/Roms/PORTS//ports/…" and fs::path treats a leading "//" in an
+    // implementation-defined way. Dropping empty components collapses every redundant slash cleanly.
+    const bool absolute = path[0] == '/' || path[0] == '\\';
+    std::vector<std::string> parts;
+    std::string cur;
+    for (const char c : path) {
+        if (c == '/' || c == '\\') { if (!cur.empty()) { parts.push_back(cur); cur.clear(); } }
+        else                       { cur.push_back(c); }
+    }
+    if (!cur.empty()) parts.push_back(cur);
+
+    fs::path have = absolute ? fs::path("/") : fs::path(".");
+    size_t start = 0;
+    if (!absolute && !parts.empty() && parts[0].size() == 2 && parts[0][1] == ':') {
+        have = fs::path(parts[0] + "/");   // a Windows drive ("C:") anchors the walk (dev box)
+        start = 1;
+    }
+    if (!fs::exists(have, ec)) return path;   // nothing to anchor the walk on
+
+    for (size_t i = start; i < parts.size(); ++i) {
+        const fs::path exact = have / parts[i];
+        if (fs::exists(exact, ec)) { have = exact; continue; }
+        bool matched = false;
+        if (fs::is_directory(have, ec)) {
+            const std::string target = to_lower_ascii(parts[i]);
+            for (const auto& entry : fs::directory_iterator(have, ec)) {
+                if (to_lower_ascii(entry.path().filename().string()) == target) {
+                    have = entry.path();
+                    matched = true;
+                    break;
+                }
+            }
+        }
+        if (!matched) return path;   // give up; let the failure name the intended path
+    }
+    return have.string();
+}
+
 // Project media paths are absolute on device, but a portable project (the /testdata goldens, anything
 // the Linux build ships) stores them RELATIVE to the project file. Absolute wins; relative resolves
 // against base_dir. Deliberately not <filesystem>: it drags in a separate link library on some
 // toolchains, for a job that is one string concat.
-inline std::string resolve_media_path(const std::string& path, const std::string& base_dir) {
-    if (path.empty() || base_dir.empty()) return path;
+//
+// ⚠️ THE ONE EXCEPTION — a project MOVED between installs. Its paths were written absolute under the
+// AUTHORING install's root (an Android phone's ".../Documents/PocketTracker/", another handheld's own
+// $POCKETTRACKER_HOME); copied onto THIS device they point nowhere. `app_root` — the folder THIS install
+// keeps Samples/, Soundfonts/… directly under — is the anchor that fixes it: an absolute path that does
+// not exist here but carries an app-root-relative tail is re-rooted onto our own root. Bounded to the app
+// tree on purpose (app_root_relative_tail returns "" otherwise) — a sample parked OUTSIDE PocketTracker/
+// is genuinely unfindable and is left as-authored so the failure names the real path. Resolution only:
+// the Project's stored string is NOT rewritten, so a re-save stays portable back to the phone.
+//
+// ⭐ app_root EMPTY ⇒ the whole exception is skipped ⇒ byte-for-byte the old two-line behaviour. Every
+// host TOOL leaves it empty (SongcoreHost::appRoot_ defaults to ""), which is why not one golden moves;
+// only the SDL shell, which calls set_app_root() at boot, ever re-roots.
+inline std::string resolve_media_path(const std::string& path, const std::string& base_dir,
+                                      const std::string& app_root) {
+    if (path.empty()) return path;
     const bool absolute = path[0] == '/' || path[0] == '\\' ||
                           (path.size() > 1 && path[1] == ':');   // C:\… on Windows
-    return absolute ? path : base_dir + "/" + path;
+
+    std::string resolved = (!absolute && !base_dir.empty()) ? base_dir + "/" + path : path;
+
+    // Absolute wins — UNLESS it points nowhere here and was authored under another install's app tree.
+    if (absolute && !app_root.empty() && !path_exists(resolved)) {
+        const std::string tail = app_root_relative_tail(resolved);
+        if (!tail.empty()) resolved = app_root + "/" + tail;
+    }
+
+    // Last: fix any case drift (an Android-authored "Breaks/" vs the card's "breaks/"). A no-op when the
+    // path already exists exactly, so goldens/tools — whose paths match the disk — are byte-for-byte
+    // unchanged; it only ever lists a directory on a real miss.
+    return resolve_case_insensitive(resolved);
 }
 
 inline std::string path_extension_lower(const std::string& path) {
@@ -244,7 +368,8 @@ int load_sample_file(Engine& engine, int instrumentId, const std::string& path) 
 // markers nothing else can restore. Hence the non-const `project`.
 template <typename Engine>
 MediaLoadResult load_project_media(Engine& engine, Project& project,
-                                   const std::string& base_dir, Routing& routing) {
+                                   const std::string& base_dir, const std::string& app_root,
+                                   Routing& routing) {
     // Start from a clean native slate so a previous project's PCM and SoundFonts don't accumulate —
     // the same reason reloadProjectSamples opens with clearAllSamples + clearAllSoundfonts.
     engine.clearAllSamples();
@@ -258,7 +383,7 @@ MediaLoadResult load_project_media(Engine& engine, Project& project,
         if (ins.id < 0 || ins.id >= POOL_INSTRUMENTS) continue;
 
         if (ins.instrumentType == InstrumentType::SOUNDFONT && ins.soundfontPath.has_value()) {
-            const std::string path = resolve_media_path(*ins.soundfontPath, base_dir);
+            const std::string path = resolve_media_path(*ins.soundfontPath, base_dir, app_root);
             const int slot = engine.loadSoundfont(ins.id, path.c_str());
             if (slot >= 0) {
                 routing.sfSlot[ins.id] = slot;
@@ -269,7 +394,7 @@ MediaLoadResult load_project_media(Engine& engine, Project& project,
         } else if (ins.sampleFilePath.has_value()) {
             // sampleFilePath == null is the single "empty slot" signal — an instrument with no path
             // loads nothing and its note is dropped at the seam, exactly as on Android.
-            const std::string path = resolve_media_path(*ins.sampleFilePath, base_dir);
+            const std::string path = resolve_media_path(*ins.sampleFilePath, base_dir, app_root);
             const int fileRate = load_sample_file(engine, ins.id, path);
             if (fileRate > 0) {
                 routing.sampleRateRatio[ins.id] = deviceRate / static_cast<float>(fileRate);

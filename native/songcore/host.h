@@ -235,8 +235,18 @@ class SongcoreHost {
     // loading the audio is what learns them (S6b). See load_project_media.
     MediaLoadResult load_media(const std::string& baseDir) {
         if (!engine_) return MediaLoadResult();
-        return load_project_media(*engine_, project_, baseDir, routing_);
+        return load_project_media(*engine_, project_, baseDir, appRoot_, routing_);
     }
+
+    /**
+     * THIS install's app root — the folder Samples/, Soundfonts/… live directly under. The SDL shell
+     * hands in `$POCKETTRACKER_HOME` once at boot; a project copied off ANOTHER install (a phone, another
+     * handheld) then has its absolute-but-dead media paths re-rooted onto it at load (resolve_media_path).
+     *
+     * ⚠️ Leave it UNSET and every load behaves exactly as before — which is precisely what the host tools
+     * do, so their goldens do not move. Only a caller that sets it gets the relocation.
+     */
+    void set_app_root(std::string root) { appRoot_ = std::move(root); }
 
     // ── ↓ the LIVE param push (engine_setup.h) ───────────────────────────────────────────────────
     //
@@ -876,6 +886,7 @@ class SongcoreHost {
 
     Project project_ = make_default_project();
     std::string projectSha_ = "-";
+    std::string appRoot_;   // set_app_root(); "" ⇒ no media re-rooting (the tools' default)
     Routing routing_;
 
     /**
