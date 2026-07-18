@@ -510,10 +510,11 @@ int main(int argc, char** argv) {
 
     input.open_controllers();
 
-    // The UI state points at the host's live project — one document, edited in place.
+    // The UI state points at the host's live project — one document, edited in place. The boot
+    // screen is AppState's own default (SONG, as Android): restating it here would be a second
+    // place for it to rot, which is exactly how it sat on PHRASE for four phases.
     ui::AppState state;
-    state.project       = &host.edit_project();
-    state.currentScreen = ui::ScreenType::PHRASE;
+    state.project = &host.edit_project();
 
     // ── What THIS platform can do (S7) ───────────────────────────────────────────────────────────
     //

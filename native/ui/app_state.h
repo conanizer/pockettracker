@@ -49,7 +49,10 @@ struct AppState {
     songcore::Project* project = nullptr;
 
     // ── Navigation ───────────────────────────────────────────────────────────────────────────────
-    ScreenType currentScreen = ScreenType::PHRASE;
+    // SONG, as Android boots (TrackerController.kt:41) — not PHRASE, which was an S1 relic from when
+    // PHRASE was the only screen that existed. The shell adds no boot assignment of its own: a boot
+    // line that merely restates a default is a second place for the default to rot.
+    ScreenType currentScreen = ScreenType::SONG;
 
     /**
      * Which column of the 5×5 screen grid a SHARED screen was entered from (PROJECT / MIXER /

@@ -169,6 +169,16 @@ int main() {
     StdFileSystem fs_impl(tree.root.generic_string());
 
     AppState state;
+
+    // ── 0. The freshly-constructed state boots on SONG, as Android does ──────────────────────────
+    //
+    // TrackerController.kt:41 — `var currentScreen = ScreenType.SONG`, and no startup navigation
+    // overrides it. The port said PHRASE in two places (the app_state.h default and a main.cpp
+    // re-assignment), both S1 relics from when PHRASE was the only screen that existed. The check
+    // reads the DEFAULT, before anything below drives a navigation — exactly the assertion that did
+    // not exist while both sites quietly agreed with each other.
+    ok(state.currentScreen == ScreenType::SONG, "BOOT: a fresh AppState starts on SONG, as Android does");
+
     state.project = &host.edit_project();
     InputDispatcher dispatch(state, host, fs_impl);
 
