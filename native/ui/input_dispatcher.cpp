@@ -1292,13 +1292,83 @@ void InputDispatcher::browser_cycle_sort(int delta) {
     b.statusSuccess = true;
 }
 
+// ─── The R+LEFT/R+RIGHT deep-link (AppInputDispatcher.syncLastEditedOnScreenSwitch) ──────────────
+//
+// What makes SONG-over-chain-04 → R+RIGHT land ON chain 04 rather than on chain 00. TWO halves,
+// transcribed from :2760–2787:
+//
+//   • CAPTURE — the ref under the DEPARTING screen's cursor becomes the lastEdited memory. PHRASE
+//     asks the module's own cursor_context whether the cell is empty (the CELL, column and all: an
+//     empty FX cell of a noted step captures nothing); CHAIN and SONG guard on `ref >= 0`.
+//   • APPLY — the ARRIVING screen deep-links its current* to the matching lastEdited*.
+//
+// ⚠️ HORIZONTAL MOVES ONLY, and only when the screen actually changes. Kotlin's handleRUp/handleRDown
+// do plain cursor save/restore + selection exit (:2695/:2716) — sync them too and the port diverges
+// the other way. ptdispatch §30 pins both directions of that trap.
+void InputDispatcher::sync_last_edited_on_screen_switch(ScreenType from, ScreenType to) {
+    const Project& p = *s_.project;
+
+    switch (from) {
+        case ScreenType::PHRASE:
+            // `currentScreen` is still the departing PHRASE here, so cursor_context() is the same
+            // question Kotlin puts to phraseEditorModule.getCursorContext. No `>= 0` guard on the
+            // instrument, exactly as Kotlin has none (:2772) — the CLAMP below is what makes -1 safe.
+            if (!cursor_context().capabilities.isEmpty) {
+                s_.lastEditedInstrument = p.phrases[static_cast<size_t>(s_.currentPhrase)]
+                                              .steps[static_cast<size_t>(s_.cursorRow)]
+                                              .instrument;
+            }
+            break;
+
+        case ScreenType::CHAIN: {
+            const int ref = p.chains[static_cast<size_t>(s_.currentChain)]
+                                .phraseRefs[static_cast<size_t>(s_.cursorRow)];
+            if (ref >= 0) s_.lastEditedPhrase = ref;
+            break;
+        }
+
+        case ScreenType::SONG: {
+            // On SONG the cursor column IS the track, 1-based — and the size guard is load-bearing,
+            // not defensive: a track's chainRefs vector may be SHORTER than the 256-row screen
+            // (the model's default is empty, as Kotlin's mutableListOf() is).
+            const auto& refs = p.tracks[static_cast<size_t>(s_.cursorColumn - 1)].chainRefs;
+            if (s_.cursorRow < static_cast<int>(refs.size()) &&
+                refs[static_cast<size_t>(s_.cursorRow)] >= 0) {
+                s_.lastEditedChain = refs[static_cast<size_t>(s_.cursorRow)];
+            }
+            break;
+        }
+
+        default:
+            break;
+    }
+
+    switch (to) {
+        case ScreenType::PHRASE: s_.currentPhrase = s_.lastEditedPhrase; break;
+        case ScreenType::CHAIN:  s_.currentChain  = s_.lastEditedChain;  break;
+        case ScreenType::INSTRUMENT: {
+            // Kotlin assigns through the currentInstrument SETTER (TrackerController.kt:167–172),
+            // which coerces into the pool and mirrors the CLAMPED value back into the memory — a
+            // captured -1 must land on 00, not on "slot -1". Plain fields here, so both are said.
+            const int last          = static_cast<int>(p.instruments.size()) - 1;
+            s_.currentInstrument    = std::min(last, std::max(0, s_.lastEditedInstrument));
+            s_.lastEditedInstrument = s_.currentInstrument;
+            break;
+        }
+        default:
+            break;
+    }
+}
+
 void InputDispatcher::on_r_left() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open()) { move_text_cursor_left(s_.qwerty); return; }
     if (eq_open() || theme_open()) return;
     if (on_browser())  { navigate_to_parent(s_.fileBrowser, fs_); return; }
     const NavState ns = nav_state_of(s_);
-    go_to_screen(s_, navigate_left(ns));
+    const NavResult r = navigate_left(ns);
+    if (r.screen != s_.currentScreen) sync_last_edited_on_screen_switch(s_.currentScreen, r.screen);
+    go_to_screen(s_, r);
     s_.selection.exit();
 }
 
@@ -1308,7 +1378,9 @@ void InputDispatcher::on_r_right() {
     if (eq_open() || theme_open()) return;
     if (on_browser())  return;   // no "down a directory" — that is what A on a folder is for
     const NavState ns = nav_state_of(s_);
-    go_to_screen(s_, navigate_right(ns));
+    const NavResult r = navigate_right(ns);
+    if (r.screen != s_.currentScreen) sync_last_edited_on_screen_switch(s_.currentScreen, r.screen);
+    go_to_screen(s_, r);
     s_.selection.exit();
 }
 

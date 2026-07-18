@@ -399,6 +399,15 @@ class InputDispatcher {
     /** `handleDPadNavigation`: move the cursor, or drag the selection's active edge. */
     void dpad_nav(const char* direction);
 
+    /**
+     * `AppInputDispatcher.syncLastEditedOnScreenSwitch` (:2760) — the R+LEFT/R+RIGHT deep-link.
+     * CAPTURE the ref under the departing screen's cursor into lastEdited*, then APPLY lastEdited*
+     * to the arriving screen's current*. ⚠️ The two HORIZONTAL moves only, and only when the screen
+     * actually changes: Kotlin's handleRUp/handleRDown do plain save/restore + selection exit, and
+     * syncing them too would diverge the other way (parity audit, finding 2's scope trap).
+     */
+    void sync_last_edited_on_screen_switch(ScreenType from, ScreenType to);
+
     /** An edit happened: tell the sequencer, so a note already scheduled past the cursor is redone. */
     void mark_modified(bool table_touched = false);
 

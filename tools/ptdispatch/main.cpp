@@ -3335,6 +3335,108 @@ int main() {
         }
     }
 
+    // ══ P4h ══ THE PARITY-AUDIT PINS — the joins the audit found no assertion on ═════════════════
+    //
+    // docs/internal/port-parity-audit.md (P4g). Each block below ran RED against the pre-fix build
+    // before its fix landed — two of the audit's three reported symptoms lived precisely where no
+    // assertion existed, so the pins are the point, not the ceremony.
+
+    // ── 30. R+LEFT / R+RIGHT carry the lastEdited memory across the switch — and ONLY they do ────
+    //
+    // AppInputDispatcher.syncLastEditedOnScreenSwitch (:2760), called from handleRLeft/handleRRight
+    // alone, and only when the screen actually changes. TWO halves: CAPTURE the ref under the
+    // departing screen's cursor into lastEdited*, APPLY lastEdited* to the arriving screen's
+    // current*. Without it every horizontal screen change lands on slot 00 — "every screen starts
+    // from 00", the audit's second reported symptom.
+    {
+        state.caps                    = PlatformCaps::sdl(true);
+        state.settings.cursorRemember = false;
+        state.confirm.close();
+        state.eq          = EqEditorState{};
+        state.themeEditor = ThemeEditorState{};
+        state.qwerty      = QwertyKeyboardState{};
+
+        songcore::Project& p = host.edit_project();
+        p = songcore::make_default_project();
+
+        // SONG → CHAIN: the chain ref under the cursor is captured AND applied in one gesture.
+        // Column 3 is tracks[2] — on SONG the cursor column IS the track, 1-based.
+        p.tracks[2].chainRefs.assign(256, -1);
+        p.tracks[2].chainRefs[7] = 0x04;
+        state.currentScreen  = ScreenType::SONG;
+        state.previousColumn = 0;
+        state.cursorRow = 7; state.cursorColumn = 3;
+        state.currentChain = 0; state.lastEditedChain = 0;
+        dispatch.on_r_right();
+        ok(state.currentScreen == ScreenType::CHAIN, "SYNC: SONG x R+RIGHT lands on CHAIN");
+        eq(state.currentChain, 0x04, "SYNC: ...deep-linked to the chain under the SONG cursor");
+        eq(state.lastEditedChain, 0x04, "SYNC: ...and lastEditedChain remembers it");
+
+        // CHAIN → PHRASE: same shape, one screen over.
+        p.chains[0x04].phraseRefs[2] = 0x09;
+        state.cursorRow = 2; state.cursorColumn = 1;
+        state.currentPhrase = 0; state.lastEditedPhrase = 0;
+        dispatch.on_r_right();
+        ok(state.currentScreen == ScreenType::PHRASE, "SYNC: CHAIN x R+RIGHT lands on PHRASE");
+        eq(state.currentPhrase, 0x09, "SYNC: ...deep-linked to the phrase under the CHAIN cursor");
+
+        // PHRASE → INSTRUMENT: the capture asks the CELL, through the module's own cursor_context —
+        // a noted step under the NOTE column is non-empty, so its instrument is captured.
+        p.phrases[0x09].steps[5].note       = songcore::Note::C4();
+        p.phrases[0x09].steps[5].instrument = 0x05;
+        state.cursorRow = 5; state.cursorColumn = 1;
+        state.currentInstrument = 0; state.lastEditedInstrument = 0;
+        dispatch.on_r_right();
+        ok(state.currentScreen == ScreenType::INSTRUMENT, "SYNC: PHRASE x R+RIGHT lands on INSTRUMENT");
+        eq(state.currentInstrument, 0x05, "SYNC: ...on the instrument of the step under the cursor");
+
+        // …and an EMPTY cell captures NOTHING — the arriving screen shows the lastEdited memory,
+        // not a scavenged value. (Row 6 is untouched; the memory is parked at 0x22.)
+        dispatch.on_r_left();                       // back to PHRASE (apply: currentPhrase = 0x09 again)
+        eq(state.currentPhrase, 0x09, "SYNC: R+LEFT back into PHRASE re-applies the phrase memory");
+        state.cursorRow = 6; state.cursorColumn = 1;
+        state.lastEditedInstrument = 0x22;
+        dispatch.on_r_right();
+        eq(state.currentInstrument, 0x22, "SYNC: an empty PHRASE cell captures nothing - the memory wins");
+
+        // ⚠️ THE CLAMP TRAP: Kotlin's apply runs through the currentInstrument SETTER
+        // (TrackerController.kt:167-172), which coerces to the pool and mirrors the clamped value
+        // back. A noted step whose instrument is -1 lands on 00 — never on "slot -1".
+        dispatch.on_r_left();
+        p.phrases[0x09].steps[8].note       = songcore::Note::C4();
+        p.phrases[0x09].steps[8].instrument = -1;
+        state.cursorRow = 8; state.cursorColumn = 1;
+        dispatch.on_r_right();
+        eq(state.currentInstrument, 0, "SYNC: a noted step with instrument -1 clamps to 00 on apply");
+        eq(state.lastEditedInstrument, 0, "SYNC: ...and the setter's mirror writes the clamp back");
+
+        // ⚠️ THE SCOPE TRAP, pinned from both sides: R+UP/R+DOWN do NOT sync (Kotlin's
+        // handleRUp/handleRDown do only cursor save/restore + selection exit — :2695/:2716).
+        // "Fixing" the vertical moves too would diverge the other way.
+        state.currentScreen  = ScreenType::CHAIN;
+        state.previousColumn = 1;
+        p.chains[0x04].phraseRefs[3] = 0x0B;
+        state.cursorRow = 3; state.cursorColumn = 1;
+        state.currentChain = 0x04; state.lastEditedChain = 0x04;
+        state.currentPhrase = 0x09; state.lastEditedPhrase = 0x02;   // memory != current, on purpose
+        dispatch.on_r_down();                       // CHAIN → MIXER
+        ok(state.currentScreen == ScreenType::MIXER, "SYNC-NEG: R+DOWN reaches MIXER");
+        eq(state.lastEditedPhrase, 0x02, "SYNC-NEG: R+DOWN captured NOTHING from the chain cursor");
+        dispatch.on_r_up();                         // MIXER → CHAIN
+        ok(state.currentScreen == ScreenType::CHAIN, "SYNC-NEG: R+UP returns to CHAIN");
+        eq(state.currentChain, 0x04, "SYNC-NEG: ...and applied NOTHING - currentChain is untouched");
+
+        // The SIZE guard is load-bearing, not defensive: a track's chainRefs vector may be SHORTER
+        // than the 256-row screen (the model's default is EMPTY, as Kotlin's mutableListOf() is).
+        // Leaving SONG over such a row must neither crash nor capture.
+        state.currentScreen  = ScreenType::SONG;
+        state.previousColumn = 0;
+        state.cursorRow = 5; state.cursorColumn = 1;   // tracks[0].chainRefs was never assigned
+        state.lastEditedChain = 0x02;
+        dispatch.on_r_right();
+        eq(state.currentChain, 0x02, "SYNC: an out-of-range SONG row captures nothing (size guard)");
+    }
+
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);
     std::printf("%s\n", failures == 0 ? "ALL GREEN" : "RED");
     return failures == 0 ? 0 : 1;
