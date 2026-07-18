@@ -463,6 +463,17 @@ int main() {
         eq(state.currentInstrument, 42,
            "REFRESH: …but NOT currentInstrument — that IS the pool's row, and it must persist");
 
+        // ⚠️ TABLE-follow runs through the Kotlin SETTER's semantics, not a bare assignment: Android's
+        // `currentTable = currentInstrument` fires the currentTable setter (TrackerController.kt:124–129),
+        // which also mirrors lastEditedTable (and clamps to the pool). Assign the field bare and
+        // lastEditedTable trails one navigation behind whatever consumes it (parity audit, finding 6).
+        state.currentTable    = 7;
+        state.lastEditedTable = 7;
+        go_to_screen(state, NavResult{ScreenType::TABLE, 4});
+        eq(state.currentTable, 42, "TABLE-follow: entering TABLE syncs currentTable to the instrument");
+        eq(state.lastEditedTable, 42,
+           "TABLE-follow: …and MIRRORS lastEditedTable, as the Kotlin setter does");
+
         // EFFECTS is deliberately absent from the reset, on both platforms.
         state.currentScreen    = ScreenType::EFFECTS;
         state.effectsCursorRow = 5;

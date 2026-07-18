@@ -31,6 +31,8 @@
 #include "cursor_move.h"
 #include "screen.h"
 
+#include <algorithm>
+
 namespace pt::ui {
 
 /** Where R+DPAD lands, and the column memory that must be stored with it. */
@@ -264,7 +266,14 @@ inline void go_to_screen(AppState& s, const NavResult& r) {
 
     s.instrumentFromPool = (r.screen == ScreenType::INSTRUMENT) ? r.instrumentFromPool : false;
 
-    if (r.screen == ScreenType::TABLE) s.currentTable = s.currentInstrument;
+    if (r.screen == ScreenType::TABLE) {
+        // Kotlin runs this line through the currentTable SETTER (TrackerController.kt:124–129),
+        // which clamps to the pool and mirrors lastEditedTable. Plain fields here, so both are
+        // said out loud — assign the field bare and lastEditedTable trails one navigation behind.
+        const int last    = static_cast<int>(s.project->tables.size()) - 1;
+        s.currentTable    = std::min(last, std::max(0, s.currentInstrument));
+        s.lastEditedTable = s.currentTable;
+    }
 
     // Restore — or refresh, which is the Android default.
     if (s.settings.cursorRemember) {
