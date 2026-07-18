@@ -335,6 +335,24 @@ class InputDispatcher {
     /** The deadline, checked once a frame by set_now(). */
     void run_due_autosave();
 
+    // ── The status line's auto-dismiss (parity audit, finding 5) ─────────────────────────────────
+    //
+    // MainActivity.kt:734–747 clears the status 5 s after it is SET — a LaunchedEffect keyed on the
+    // VALUE, so re-setting an identical message does not restart the delay. The port's "setter" is
+    // 22 plain assignments, so the dismissal is derived from the DATA instead: set_now watches the
+    // field for CHANGES (the settingsDirty lesson — a stamp 22 call sites must remember is one they
+    // will forget once, and the 23rd site gets this for free). Detection therefore lands on the
+    // frame AFTER the set — one ~16 ms tick late on the shell, invisible on a 5 s timer, and
+    // ptdispatch §33 encodes the tick explicitly.
+    std::string statusLastSeen_{};
+    long long   statusDismissAtMs_ = 0;
+
+    /** 5 s — Kotlin's own delay (MainActivity's two status LaunchedEffects). */
+    static constexpr long long STATUS_DISMISS_MS = 5000;
+
+    /** The watcher and the deadline, both run once a frame by set_now(). */
+    void run_due_status_dismiss();
+
     /**
      * Load the autosave into the live document — and LEAVE IT DIRTY.
      *

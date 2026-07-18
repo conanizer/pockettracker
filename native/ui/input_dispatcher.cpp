@@ -83,6 +83,7 @@ void InputDispatcher::set_now(long long now_ms) {
     now_ms_ = now_ms;
     run_due_sample_preview_restore();   // the sample editor's 100 ms audition restore (S6b)
     run_due_autosave();                 // the crash-recovery autosave's 3 s debounce  (S10)
+    run_due_status_dismiss();           // the status line's 5 s auto-dismiss (parity finding 5)
 }
 
 // ─── The crash-recovery autosave (S10) ───────────────────────────────────────────────────────────
@@ -106,6 +107,28 @@ void InputDispatcher::flush_autosave() {
     autosavePending_ = false;
     if (!s_.project_dirty()) return;
     autosave_write(host_, fs_);
+}
+
+// ─── The status line's 5 s auto-dismiss (MainActivity.kt:734–747) ────────────────────────────────
+
+void InputDispatcher::run_due_status_dismiss() {
+    // The WATCHER half: a CHANGE in the message re-arms the window; a change TO empty cancels it.
+    // The field is the funnel, not its 22 call sites — any site that assigns it, including ones not
+    // written yet, gets the dismissal for free. And it matches Kotlin's key semantics exactly:
+    // LaunchedEffect(statusMessage) restarts only when the VALUE changes, so an identical message
+    // re-set inside the window does NOT extend it (ptdispatch §33 pins that case).
+    if (s_.statusMessage != statusLastSeen_) {
+        statusLastSeen_    = s_.statusMessage;
+        statusDismissAtMs_ = s_.statusMessage.empty() ? 0 : now_ms_ + STATUS_DISMISS_MS;
+    }
+
+    if (statusDismissAtMs_ != 0 && now_ms_ >= statusDismissAtMs_) {
+        // TrackerController.clearStatus: the message goes, and statusSuccess returns to true.
+        s_.statusMessage.clear();
+        statusLastSeen_.clear();
+        s_.statusSuccess   = true;
+        statusDismissAtMs_ = 0;
+    }
 }
 
 bool InputDispatcher::recover_from_autosave() {

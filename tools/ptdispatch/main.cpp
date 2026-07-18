@@ -3531,6 +3531,64 @@ int main() {
         autosave_clear(fs_impl);
     }
 
+    // ── 33. The status line auto-dismisses 5 s after it is set — and only on a CHANGE ────────────
+    //
+    // MainActivity.kt:734–747: two LaunchedEffects clear the status 5 s after it is set; the port
+    // painted "SAVED" until the next message replaced it (parity audit, finding 5). The dismissal
+    // is derived from the DATA — set_now watches the field for changes rather than trusting 22
+    // call sites to stamp a deadline — so the window opens on the frame tick AFTER the action.
+    // The +16 ms latches below make that explicit: the shell's loop calls set_now once per frame,
+    // BEFORE it dispatches the frame's buttons.
+    {
+        state.caps          = PlatformCaps::sdl(true);
+        state.currentScreen = ScreenType::PROJECT;
+        state.confirm.close();
+        state.eq          = EqEditorState{};
+        state.themeEditor = ThemeEditorState{};
+        state.qwerty      = QwertyKeyboardState{};
+        state.projectCursorRow    = static_cast<int>(ProjectRow::PROJECT);
+        state.projectCursorColumn = 3;   // NEW — sets "NEW PROJECT" with no disk involved
+        state.statusMessage.clear();     // …and the line starts empty, whatever §31 left painted
+        state.statusSuccess = true;
+
+        // (a) set → hold through 4999 ms → gone at 5000 ms, with statusSuccess restored.
+        state.projectVersion = state.savedProjectVersion = 0;   // clean: NEW asks nothing
+        dispatch.set_now(2000000);
+        dispatch.on_button_a();
+        eqs(state.statusMessage, "NEW PROJECT", "STATUS: the action reported");
+        dispatch.set_now(2000016);   // the next frame — the watcher opens the window from HERE
+        dispatch.set_now(2005015);
+        eqs(state.statusMessage, "NEW PROJECT", "STATUS: still painted 4999 ms into the window");
+        state.statusSuccess = false;   // paint it red by hand: the dismissal must restore green
+        dispatch.set_now(2005016);
+        eqs(state.statusMessage, "", "STATUS: auto-dismissed 5 s after the frame loop noticed it");
+        ok(state.statusSuccess, "STATUS: ...and statusSuccess resets to true (clearStatus parity)");
+
+        // (b) after a dismissal, a fresh message opens a fresh window. ⚠️ NEW resets the PROJECT
+        // cursor home (finding 4), so every press below re-aims at the NEW cell first — the first
+        // draft did not, and its "re-raise" check passed on the pre-fix build only because the STALE
+        // message was still painted. A pass has to be read, not counted.
+        state.projectCursorRow    = static_cast<int>(ProjectRow::PROJECT);
+        state.projectCursorColumn = 3;
+        dispatch.set_now(2010000);
+        dispatch.on_button_a();
+        eqs(state.statusMessage, "NEW PROJECT", "STATUS: a later action re-raises the line");
+        dispatch.set_now(2010016);
+        dispatch.set_now(2015015);
+        eqs(state.statusMessage, "NEW PROJECT", "STATUS: ...and its window is fresh (4999 ms in)");
+
+        // (c) ⚠️ an IDENTICAL message inside the window does NOT extend it. Kotlin's effect is keyed
+        // on the VALUE — an equal key does not restart the delay — and deriving the dismissal from
+        // the field CHANGING reproduces exactly that.
+        state.projectCursorRow    = static_cast<int>(ProjectRow::PROJECT);
+        state.projectCursorColumn = 3;
+        dispatch.on_button_a();      // the same text again, 4999 ms into the window
+        eqs(state.statusMessage, "NEW PROJECT", "STATUS: (setup) the identical re-set really happened");
+        dispatch.set_now(2015016);
+        eqs(state.statusMessage, "",
+            "STATUS: an identical re-set does NOT extend the window (LaunchedEffect key semantics)");
+    }
+
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);
     std::printf("%s\n", failures == 0 ? "ALL GREEN" : "RED");
     return failures == 0 ? 0 : 1;
