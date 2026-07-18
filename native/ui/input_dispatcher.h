@@ -343,7 +343,7 @@ class InputDispatcher {
     // field for CHANGES (the settingsDirty lesson — a stamp 22 call sites must remember is one they
     // will forget once, and the 23rd site gets this for free). Detection therefore lands on the
     // frame AFTER the set — one ~16 ms tick late on the shell, invisible on a 5 s timer, and
-    // ptdispatch §33 encodes the tick explicitly.
+    // ptdispatch §34 encodes the tick explicitly.
     std::string statusLastSeen_{};
     long long   statusDismissAtMs_ = 0;
 

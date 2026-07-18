@@ -129,7 +129,7 @@ void InputDispatcher::run_due_status_dismiss() {
     // The field is the funnel, not its 22 call sites — any site that assigns it, including ones not
     // written yet, gets the dismissal for free. And it matches Kotlin's key semantics exactly:
     // LaunchedEffect(statusMessage) restarts only when the VALUE changes, so an identical message
-    // re-set inside the window does NOT extend it (ptdispatch §33 pins that case).
+    // re-set inside the window does NOT extend it (ptdispatch §34 pins that case).
     if (s_.statusMessage != statusLastSeen_) {
         statusLastSeen_    = s_.statusMessage;
         statusDismissAtMs_ = s_.statusMessage.empty() ? 0 : now_ms_ + STATUS_DISMISS_MS;
@@ -506,7 +506,7 @@ void InputDispatcher::mark_dirty_and_arm_autosave() {
     // ⚠️ These two blocks travel TOGETHER, which is why they are one function: on Android every
     // projectVersion bump re-keys the autosave effect, so "dirty" and "armed" cannot come apart. A
     // bare `projectVersion++` here is a document that reads as dirty with no crash protection behind
-    // it — exactly what the EQ path had (parity audit, finding 7; ptdispatch §32).
+    // it — exactly what the EQ path had (parity audit, finding 7; ptdispatch §33).
     autosavePending_ = true;
     autosaveDueAtMs_ = now_ms_ + AUTOSAVE_DEBOUNCE_MS;
 }
@@ -1349,7 +1349,7 @@ void InputDispatcher::browser_cycle_sort(int delta) {
 //
 // ⚠️ HORIZONTAL MOVES ONLY, and only when the screen actually changes. Kotlin's handleRUp/handleRDown
 // do plain cursor save/restore + selection exit (:2695/:2716) — sync them too and the port diverges
-// the other way. ptdispatch §30 pins both directions of that trap.
+// the other way. ptdispatch §31 pins both directions of that trap.
 void InputDispatcher::sync_last_edited_on_screen_switch(ScreenType from, ScreenType to) {
     const Project& p = *s_.project;
 
@@ -1789,7 +1789,7 @@ void InputDispatcher::reset_editing_context() {
 
     // ⚠️ NOT mixerMasterRow, NOT the SETTINGS cursor, NOT poolCursorColumn: Kotlin leaves all three
     // alone (the pool's ROW is currentInstrument, which IS reset above). Match the quirk exactly —
-    // ptdispatch §31 pins the negatives too.
+    // ptdispatch §32 pins the negatives too.
     s_.selection = Selection{};
 }
 

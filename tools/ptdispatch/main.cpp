@@ -3345,7 +3345,10 @@ int main() {
     // before its fix landed — two of the audit's three reported symptoms lived precisely where no
     // assertion existed, so the pins are the point, not the ceremony.
 
-    // ── 30. R+LEFT / R+RIGHT carry the lastEdited memory across the switch — and ONLY they do ────
+    // ── 31. R+LEFT / R+RIGHT carry the lastEdited memory across the switch — and ONLY they do ────
+    //        (§30 is P4f's RELOC block above — its header spells the number `§30`, which is how a
+    //        sweep for `── N.` numbered this batch into a collision. Renumbered; the P4h commit
+    //        messages for findings 2/4/7/5 say sections 30–33, which are these, 31–34.)
     //
     // AppInputDispatcher.syncLastEditedOnScreenSwitch (:2760), called from handleRLeft/handleRRight
     // alone, and only when the screen actually changes. TWO halves: CAPTURE the ref under the
@@ -3441,7 +3444,7 @@ int main() {
         eq(state.currentChain, 0x02, "SYNC: an out-of-range SONG row captures nothing (size guard)");
     }
 
-    // ── 31. NEW / LOAD reset the WHOLE editing context — every Kotlin-reset cursor goes home ─────
+    // ── 32. NEW / LOAD reset the WHOLE editing context — every Kotlin-reset cursor goes home ─────
     //
     // TrackerController.resetEditingContext (:272–304) resets every secondary screen's cursor and
     // the three REMEMBER slots on top of the current*/lastEdited* set; the port reset a subset, so
@@ -3500,7 +3503,7 @@ int main() {
         eq(state.poolCursorColumn, 4,  "RESET-NEG: poolCursorColumn is NOT reset (Kotlin quirk)");
     }
 
-    // ── 32. An EQ-only session still gets crash protection — the band edit ARMS the autosave ─────
+    // ── 33. An EQ-only session still gets crash protection — the band edit ARMS the autosave ─────
     //
     // The EQ path deliberately bypasses mark_modified (its wholesale push_globals is oversized for a
     // 100 ms-repeat band dial) and ended in a bare projectVersion++ — dirty, but the autosave
@@ -3535,7 +3538,7 @@ int main() {
         autosave_clear(fs_impl);
     }
 
-    // ── 33. The status line auto-dismisses 5 s after it is set — and only on a CHANGE ────────────
+    // ── 34. The status line auto-dismisses 5 s after it is set — and only on a CHANGE ────────────
     //
     // MainActivity.kt:734–747: two LaunchedEffects clear the status 5 s after it is set; the port
     // painted "SAVED" until the next message replaced it (parity audit, finding 5). The dismissal
