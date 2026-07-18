@@ -178,6 +178,10 @@ int main() {
     // reads the DEFAULT, before anything below drives a navigation — exactly the assertion that did
     // not exist while both sites quietly agreed with each other.
     ok(state.currentScreen == ScreenType::SONG, "BOOT: a fresh AppState starts on SONG, as Android does");
+    // Likely unreachable — every overlay open writes it first — but the default is Android's
+    // (MainActivity.kt:777), and "likely" is not a spec (parity audit, finding 8).
+    ok(state.previousScreen == ScreenType::PROJECT,
+       "BOOT: ...and previousScreen defaults to PROJECT, as Android's does");
 
     state.project = &host.edit_project();
     InputDispatcher dispatch(state, host, fs_impl);

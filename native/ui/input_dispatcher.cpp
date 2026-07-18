@@ -84,6 +84,19 @@ void InputDispatcher::set_now(long long now_ms) {
     run_due_sample_preview_restore();   // the sample editor's 100 ms audition restore (S6b)
     run_due_autosave();                 // the crash-recovery autosave's 3 s debounce  (S10)
     run_due_status_dismiss();           // the status line's 5 s auto-dismiss (parity finding 5)
+    run_instrument_entry_push();        // Android's on-entry instrument push (parity finding 8)
+}
+
+void InputDispatcher::run_instrument_entry_push() {
+    if (s_.currentScreen != lastScreenSeen_) {
+        // Entering INSTRUMENT re-pushes the selected instrument's params, as Android's screen setter
+        // does on every entry (TrackerController.kt:46–48 → updateInstrumentPlaybackParams). Belt and
+        // braces by design: edits push for themselves (mark_modified), loads push wholesale — this
+        // covers an instrument changed anywhere the cursor was not, one frame after arrival.
+        if (s_.currentScreen == ScreenType::INSTRUMENT)
+            host_.push_instrument(std::min(127, std::max(0, s_.currentInstrument)));
+        lastScreenSeen_ = s_.currentScreen;
+    }
 }
 
 // ─── The crash-recovery autosave (S10) ───────────────────────────────────────────────────────────
@@ -2298,6 +2311,14 @@ void InputDispatcher::on_start() {
     // a file before committing a slot to it — and it is the one note in the port that does not go
     // through `plan_note_on`, because a file being auditioned has no instrument to derive from
     // (songcore::preview_sample_file).
+    //
+    // ⚠️ A SECOND DELIBERATE DIVERGENCE FROM ANDROID, stated rather than transcribed (parity audit,
+    // finding 8). Kotlin gates ONLY the `.wav` arm on where the browser was opened from
+    // (`previousScreen ∈ {INSTRUMENT, INST_POOL}`, AppInputDispatcher.kt:2364) — while the very next
+    // arms preview mp3/flac/ogg/opus from ANY browser. So on Android the project-LOAD browser plays
+    // an .mp3 and sits silent on the .wav beside it, an asymmetry no user could predict. The port
+    // previews every audible extension from every browser context: the coherent superset, kept on
+    // purpose rather than ported bug-for-bug.
     if (on_browser()) {
         const BrowserItem* item = s_.fileBrowser.current();
         if (!item || item->kind != BrowserItem::Kind::FILE) return;

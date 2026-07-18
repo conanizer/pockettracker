@@ -222,8 +222,12 @@ struct AppState {
     };
     BrowserPurpose browserPurpose = BrowserPurpose::LOAD_SOURCE;
 
-    /** The screen the browser (or a full-screen overlay) will return to when it closes. */
-    ScreenType previousScreen = ScreenType::INSTRUMENT;
+    /**
+     * The screen the browser (or a full-screen overlay) will return to when it closes.
+     * PROJECT, as Android defaults it (MainActivity.kt:777) — likely unreachable, since every
+     * overlay open writes it first, but "likely" is not a spec (parity audit, finding 8).
+     */
+    ScreenType previousScreen = ScreenType::PROJECT;
 
     /**
      * Where B goes from SETTINGS — and ⚠️ it is deliberately NOT `previousScreen`.

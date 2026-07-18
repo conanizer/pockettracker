@@ -20,7 +20,7 @@ project("pockettracker-tools" LANGUAGES C CXX)
 #   ptnondet      S7   which projects may be byte-compared at all   (+ a standalone .ptp diagnostic)
 #   ptshot   Phase3 S1 the UI, as pixels        any screen → a PNG, headless (no golden yet — see below)
 #   ptinput  Phase3 S3 the input layer          21687 cases          (units/p3-input.txt)
-#   ptdispatch Ph3 S5  the input DISPATCHER     478 assertions — NO golden; see below and its header
+#   ptdispatch Ph3 S5  the input DISPATCHER     686 assertions — NO golden; see below and its header
 #
 # ⚠️ ptdispatch is NOT a conformance tool, and the line matters. Every tool above it byte-compares
 # against a golden recorded from the Kotlin code it replaces — they encode what Kotlin DOES. ptdispatch

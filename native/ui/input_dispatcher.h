@@ -353,6 +353,20 @@ class InputDispatcher {
     /** The watcher and the deadline, both run once a frame by set_now(). */
     void run_due_status_dismiss();
 
+    // ── The INSTRUMENT-entry param push (parity audit, finding 8) ────────────────────────────────
+    //
+    // Android's currentScreen SETTER calls `instrumentController.syncToLastEdited(project)` on every
+    // entry into INSTRUMENT (TrackerController.kt:46–48), which ends in
+    // `audioEngine.updateInstrumentPlaybackParams` — a belt-and-braces push of engine state the
+    // event path never carries (the S4 family). The port's screen changes have no single setter
+    // (go_to_screen from R+DPAD, bare assignments on overlay close), so the push is derived from the
+    // DATA: set_now watches `currentScreen` and pushes on the frame after INSTRUMENT is entered, by
+    // any route — including routes not written yet.
+    ScreenType lastScreenSeen_ = ScreenType::SONG;   // the boot screen — see app_state.h
+
+    /** The watcher, run once a frame by set_now(). */
+    void run_instrument_entry_push();
+
     /**
      * Load the autosave into the live document — and LEAVE IT DIRTY.
      *
