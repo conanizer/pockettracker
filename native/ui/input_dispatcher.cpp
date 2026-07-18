@@ -1722,8 +1722,29 @@ void InputDispatcher::reset_editing_context() {
     s_.lastEditedInstrument = s_.lastEditedTranspose = 0;
     s_.lastEditedNote   = songcore::Note::C4();
     s_.lastEditedVolume = 0x7F;
+
+    // …and EVERY secondary screen's own cursor, exactly the set Kotlin resets (:286–300). Resetting
+    // a subset left INSTRUMENT / MIXER / EFFECTS / TABLE / GROOVE / MODS / PROJECT — and the
+    // REMEMBER slots below — pointing into the PREVIOUS song after a LOAD (parity audit, finding 4).
     s_.cursorRow = 0; s_.cursorColumn = 1;
     s_.songScrollPosition = 0;
+    s_.instrumentCursorRow = 0; s_.instrumentCursorColumn = 1;
+    s_.mixerCursorColumn = 0;
+    s_.effectsCursorRow  = 0;
+    s_.tableCursorRow = 0; s_.tableCursorColumn = 1;
+    s_.grooveCursorRow = 0;
+    s_.modCursorRow = 0; s_.modCursorPair = 0; s_.modCursorSide = 0;
+    s_.projectCursorRow = 0; s_.projectCursorColumn = 1;
+
+    // The three REMEMBER slots (Kotlin's resetCursorRememberPositions) — or REMEMBER mode restores
+    // a cursor that was saved inside the previous song.
+    s_.songCursorRow = 0;   s_.songCursorColumn = 1;
+    s_.chainCursorRow = 0;  s_.chainCursorColumn = 1;
+    s_.phraseCursorRow = 0; s_.phraseCursorColumn = 1;
+
+    // ⚠️ NOT mixerMasterRow, NOT the SETTINGS cursor, NOT poolCursorColumn: Kotlin leaves all three
+    // alone (the pool's ROW is currentInstrument, which IS reset above). Match the quirk exactly —
+    // ptdispatch §31 pins the negatives too.
     s_.selection = Selection{};
 }
 

@@ -3437,6 +3437,65 @@ int main() {
         eq(state.currentChain, 0x02, "SYNC: an out-of-range SONG row captures nothing (size guard)");
     }
 
+    // ── 31. NEW / LOAD reset the WHOLE editing context — every Kotlin-reset cursor goes home ─────
+    //
+    // TrackerController.resetEditingContext (:272–304) resets every secondary screen's cursor and
+    // the three REMEMBER slots on top of the current*/lastEdited* set; the port reset a subset, so
+    // a LOAD left INSTRUMENT / MIXER / EFFECTS / TABLE / GROOVE / MODS / PROJECT — and the REMEMBER
+    // slots — pointing into the PREVIOUS song. Driven through the dispatcher's own NEW, the same
+    // reset_editing_context funnel that LOAD and RECOVER run through.
+    {
+        state.caps          = PlatformCaps::sdl(true);
+        state.currentScreen = ScreenType::PROJECT;
+        state.confirm.close();
+        state.projectCursorRow    = static_cast<int>(ProjectRow::PROJECT);
+        state.projectCursorColumn = 3;   // NEW
+        state.projectVersion = state.savedProjectVersion = 0;   // clean: no confirm in the way
+
+        // Dirty EVERYTHING — first the Kotlin-reset set…
+        state.instrumentCursorRow = 9; state.instrumentCursorColumn = 3;
+        state.mixerCursorColumn   = 7;
+        state.effectsCursorRow    = 5;
+        state.tableCursorRow      = 12; state.tableCursorColumn = 6;
+        state.grooveCursorRow     = 11;
+        state.modCursorRow = 4; state.modCursorPair = 1; state.modCursorSide = 1;
+        state.songCursorRow = 40; state.songCursorColumn = 5;
+        state.chainCursorRow = 9; state.chainCursorColumn = 2;
+        state.phraseCursorRow = 13; state.phraseCursorColumn = 7;
+        // …then the three Kotlin deliberately LEAVES alone.
+        state.mixerMasterRow    = 3;
+        state.settingsCursorRow = 5; state.settingsCursorColumn = 1;
+        state.poolCursorColumn  = 4;
+
+        dispatch.on_button_a();   // NEW — clean project, so no question asked (§17)
+        eqs(state.statusMessage, "NEW PROJECT", "RESET: the NEW actually ran");
+
+        eq(state.instrumentCursorRow, 0,    "RESET: instrument cursor row went home");
+        eq(state.instrumentCursorColumn, 1, "RESET: ...and its column");
+        eq(state.mixerCursorColumn, 0,      "RESET: mixer column went home");
+        eq(state.effectsCursorRow, 0,       "RESET: effects row went home");
+        eq(state.tableCursorRow, 0,         "RESET: table cursor row went home");
+        eq(state.tableCursorColumn, 1,      "RESET: ...and its column");
+        eq(state.grooveCursorRow, 0,        "RESET: groove row went home");
+        eq(state.modCursorRow, 0,           "RESET: mod row went home");
+        eq(state.modCursorPair, 0,          "RESET: ...its pair");
+        eq(state.modCursorSide, 0,          "RESET: ...and its side");
+        eq(state.projectCursorRow, 0,       "RESET: PROJECT's own cursor row went home");
+        eq(state.projectCursorColumn, 1,    "RESET: ...and its column");
+        eq(state.songCursorRow, 0,          "RESET: the SONG remember slot went home (row)");
+        eq(state.songCursorColumn, 1,       "RESET: ...and column");
+        eq(state.chainCursorRow, 0,         "RESET: the CHAIN remember slot went home (row)");
+        eq(state.chainCursorColumn, 1,      "RESET: ...and column");
+        eq(state.phraseCursorRow, 0,        "RESET: the PHRASE remember slot went home (row)");
+        eq(state.phraseCursorColumn, 1,     "RESET: ...and column");
+
+        // ⚠️ The QUIRKS are part of the spec: Kotlin does NOT reset these three. Match exactly —
+        // the pool's ROW is currentInstrument, which IS reset; its column is not.
+        eq(state.mixerMasterRow, 3,    "RESET-NEG: mixerMasterRow is NOT reset (Kotlin quirk)");
+        eq(state.settingsCursorRow, 5, "RESET-NEG: the SETTINGS cursor is NOT reset (Kotlin quirk)");
+        eq(state.poolCursorColumn, 4,  "RESET-NEG: poolCursorColumn is NOT reset (Kotlin quirk)");
+    }
+
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);
     std::printf("%s\n", failures == 0 ? "ALL GREEN" : "RED");
     return failures == 0 ? 0 : 1;
