@@ -411,6 +411,16 @@ class InputDispatcher {
     /** An edit happened: tell the sequencer, so a note already scheduled past the cursor is redone. */
     void mark_modified(bool table_touched = false);
 
+    /**
+     * The first HALF of mark_modified — dirty the document and (re-)arm the crash autosave — split
+     * out for the one caller that must not take the second half: the EQ editor's band path, whose
+     * right-sized engine push is two calls, not mark_modified's wholesale push_globals. On Android
+     * the two halves cannot come apart (EVERY projectVersion++ re-keys the autosave LaunchedEffect,
+     * MainActivity.kt:754); here a bare `projectVersion++` is a dirty flag with no crash protection
+     * behind it — P4d's shape, third body (parity audit, finding 7).
+     */
+    void mark_dirty_and_arm_autosave();
+
     /** Play the note an edit just wrote (SETTINGS "NOTE PREVIEW"). */
     void preview_edited_note();
 

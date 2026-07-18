@@ -441,7 +441,7 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
     }
 }
 
-void InputDispatcher::mark_modified(bool table_touched) {
+void InputDispatcher::mark_dirty_and_arm_autosave() {
     // The document changed, so there is unsaved work. One counter, bumped in the one place every
     // edit in the app already funnels through — which is what makes "is this project dirty?" a
     // question with a single answer rather than a flag each screen must remember to set.
@@ -466,8 +466,17 @@ void InputDispatcher::mark_modified(bool table_touched) {
     // behaviour from Compose rather than by saying it: a `LaunchedEffect(projectVersion)` is CANCELLED
     // and restarted every time its key changes, so the `delay(3000)` inside it never completes until
     // the edits stop.
+    //
+    // ⚠️ These two blocks travel TOGETHER, which is why they are one function: on Android every
+    // projectVersion bump re-keys the autosave effect, so "dirty" and "armed" cannot come apart. A
+    // bare `projectVersion++` here is a document that reads as dirty with no crash protection behind
+    // it — exactly what the EQ path had (parity audit, finding 7; ptdispatch §32).
     autosavePending_ = true;
     autosaveDueAtMs_ = now_ms_ + AUTOSAVE_DEBOUNCE_MS;
+}
+
+void InputDispatcher::mark_modified(bool table_touched) {
+    mark_dirty_and_arm_autosave();
 
     // ⚠️ The consumer caches which tables it has already pushed to the engine. push_project
     // invalidates that cache; an IN-PLACE edit cannot, so the table screen must say so itself.
@@ -3577,7 +3586,11 @@ void InputDispatcher::apply_caller_eq_slot_change(int new_slot) {
             break;
     }
 
-    s_.projectVersion++;
+    // Dirty AND armed — not a bare projectVersion++. This path bypasses mark_modified on purpose
+    // (its wholesale push_globals is oversized for a 100 ms-repeat band dial; the right-sized push
+    // is push_eq_band_to_engine's two calls), but the bypass must not also skip the crash autosave:
+    // a session whose only edits are EQ bands deserves the same protection as any other edit.
+    mark_dirty_and_arm_autosave();
 }
 
 void InputDispatcher::push_eq_band_to_engine() {

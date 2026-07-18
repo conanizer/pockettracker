@@ -3496,6 +3496,41 @@ int main() {
         eq(state.poolCursorColumn, 4,  "RESET-NEG: poolCursorColumn is NOT reset (Kotlin quirk)");
     }
 
+    // ── 32. An EQ-only session still gets crash protection — the band edit ARMS the autosave ─────
+    //
+    // The EQ path deliberately bypasses mark_modified (its wholesale push_globals is oversized for a
+    // 100 ms-repeat band dial) and ended in a bare projectVersion++ — dirty, but the autosave
+    // debounce was never armed. On Android EVERY projectVersion bump re-keys the autosave
+    // LaunchedEffect (MainActivity.kt:754), so a session whose only edits are EQ bands had crash
+    // protection there and NONE here — P4d's "the write nobody armed", third body (parity audit,
+    // finding 7).
+    {
+        state.caps          = PlatformCaps::sdl(true);
+        state.currentScreen = ScreenType::MIXER;
+        state.confirm.close();
+        state.eq          = EqEditorState{};
+        state.themeEditor = ThemeEditorState{};
+        state.qwerty      = QwertyKeyboardState{};
+
+        host.edit_project() = songcore::make_default_project();
+        state.projectVersion = state.savedProjectVersion = 0;   // clean FIRST, so a stale pending
+        autosave_clear(fs_impl);                                // deadline cannot write on set_now
+        dispatch.set_now(1000000);
+
+        state.mixerMasterRow = 1; state.mixerCursorColumn = 8;  // the master strip's EQ cell
+        dispatch.on_button_a();
+        ok(state.eq.isOpen, "EQ-ARM: A on the mixer's EQ cell opens the editor");
+
+        dispatch.on_a_up();   // dial the band under the default cursor (BAND 1, TYPE)
+        ok(state.project_dirty(), "EQ-ARM: a band edit marks the project dirty");
+        dispatch.set_now(1002999);
+        ok(!autosave_exists(fs_impl), "EQ-ARM: ...and respects the debounce (nothing at 2999 ms)");
+        dispatch.set_now(1003000);
+        ok(autosave_exists(fs_impl),
+           "EQ-ARM: a session of ONLY EQ edits writes its crash autosave at 3000 ms");
+        autosave_clear(fs_impl);
+    }
+
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);
     std::printf("%s\n", failures == 0 ? "ALL GREEN" : "RED");
     return failures == 0 ? 0 : 1;
