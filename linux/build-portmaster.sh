@@ -110,9 +110,18 @@ aarch64-linux-gnu-strip "$BIN"
 # PocketTracker is GPL-3.0, and it statically links its decoders — so their notices ship with the
 # binary that contains them, not just with the source tree that built it. A missing one is a licence
 # breach in the artifact, which is the only thing a user ever receives.
-cp "$SRC/LICENSE"                     "$STAGE/pockettracker/licenses/LICENSE"
-cp "$SRC/native/vendor/ogg/COPYING"   "$STAGE/pockettracker/licenses/libogg-COPYING"
-cp "$SRC/native/vendor/opus/COPYING"  "$STAGE/pockettracker/licenses/libopus-COPYING"
+#
+# ⚠️ This shipped THREE notices for a binary containing ELEVEN components until the Phase 5 sweep
+# (2026-07-19). Two were not merely unshipped but missing from the source tree as well: KissFFT
+# arrived with its copyright banner stripped (BSD-3-Clause requires it in source AND binary
+# redistributions), and opusfile was vendored without the COPYING its every header points at.
+# `licenses/THIRD-PARTY-NOTICES.md` is now the single source of truth — add a component there in the
+# same commit that vendors it.
+cp "$SRC/LICENSE"                                       "$STAGE/pockettracker/licenses/LICENSE"
+cp "$SRC/licenses/THIRD-PARTY-NOTICES.md"               "$STAGE/pockettracker/licenses/"
+cp "$SRC/native/vendor/ogg/COPYING"                     "$STAGE/pockettracker/licenses/libogg-COPYING"
+cp "$SRC/native/vendor/opus/COPYING"                    "$STAGE/pockettracker/licenses/libopus-COPYING"
+cp "$SRC/native/vendor/opus/LICENSE_PLEASE_READ.txt"    "$STAGE/pockettracker/licenses/libopus-LICENSE_PLEASE_READ.txt"
 ls -1 "$STAGE/pockettracker/licenses/"
 
 echo
@@ -167,9 +176,54 @@ fi
 echo "debug instr.       : none"
 echo "SDL2 link floor    : $SDL2_TAG"
 
+# --- every statically linked component must have a notice -------------------------------------
+# ⚠️ DERIVED FROM THE TREE, NOT FROM A LIST SOMEONE MUST REMEMBER TO UPDATE. The failure this
+# guards against already happened once: libraries were vendored and their notices were never added,
+# and no list-based check could have caught it, because the same commit that forgets the notice
+# forgets the list entry. So the vendor directory IS the list — add `native/vendor/foo/` and this
+# build fails until THIRD-PARTY-NOTICES.md names `foo`.
+NOTICES="$STAGE/pockettracker/licenses/THIRD-PARTY-NOTICES.md"
+echo
+echo "licence notices:"
+MISSING=""
+# ⚠️ `basename`, not `ls -1`: some shells list directories with a trailing slash, and `dr_flac/`
+# then matches the PATH `native/vendor/dr_flac/` in this file's prose rather than the component
+# name — the check would pass without ever proving a notice exists. It did exactly that when first
+# written. Look at WHERE a check fires, not just whether it went green.
+VENDORED=""
+for D in "$SRC"/native/vendor/*/; do VENDORED="$VENDORED $(basename "$D")"; done
+# The vendored tree, plus the three third-party components that live outside it.
+for COMPONENT in $VENDORED kissfft daisysp soundpipe; do
+    if grep -qi -- "$COMPONENT" "$NOTICES"; then
+        echo "  ok      $COMPONENT"
+    else
+        echo "  MISSING $COMPONENT"
+        MISSING="$MISSING $COMPONENT"
+    fi
+done
+if [ -n "$MISSING" ]; then
+    echo "FAIL: statically linked but not named in THIRD-PARTY-NOTICES.md:$MISSING"
+    echo "      The artifact is the only thing a user receives. Document it there, then rebuild."
+    exit 1
+fi
+
 echo
 echo "############ 5/5  zip ############"
 ( cd "$STAGE" && zip -r "$OUT/pockettracker.zip" . -x '.*' )
 echo
 ls -lh "$OUT/pockettracker.zip"
 unzip -l "$OUT/pockettracker.zip"
+
+# ⚠️ READ THE LICENCES BACK OUT OF THE ZIP, not out of the staging dir. Everything above this line
+# inspected files that a broken `zip` step could still have failed to include — and the zip is what
+# ships. Same discipline as verifying the launch script's CR bytes out of the archive.
+echo
+echo "licences, read back out of the zip:"
+for L in LICENSE THIRD-PARTY-NOTICES.md libogg-COPYING libopus-COPYING libopus-LICENSE_PLEASE_READ.txt; do
+    BYTES=$(unzip -p "$OUT/pockettracker.zip" "pockettracker/licenses/$L" | wc -c)
+    echo "  $BYTES bytes   $L"
+    if [ "$BYTES" -lt 100 ]; then
+        echo "FAIL: pockettracker/licenses/$L is missing or empty inside the zip."
+        exit 1
+    fi
+done
