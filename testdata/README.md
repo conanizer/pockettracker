@@ -147,7 +147,32 @@ year-old Gradle build running again gets harder every month.
 
 ## 5. Reclassification — conformance → regression
 
-*(To be dated and tagged by convergence Phase B3.)*
+**Tag: `kotlin-golden-source`, created 2026-07-20 (convergence Phase B3).**
+
+That commit is the last one from which a golden can be recorded from Kotlin — resolve it with
+`git rev-parse kotlin-golden-source^{commit}`. Its tag message carries the full regeneration recipe
+and the file list. (Referred to by name rather than by SHA on purpose: the tag points at the commit
+containing this very paragraph, which no SHA written here could name.)
+
+**Verified at that commit rather than assumed:** all 50 Kotlin-sourced goldens were deleted and
+regenerated from scratch, and every one came back **byte-identical** to the committed version (md5
+across all 50, corroborated by a clean `git status`). So the goldens committed here *are* what this
+tree's Kotlin produces — no stale file is hiding a drift — and the recorders are deterministic.
+
+**The reclassification itself takes effect when convergence Phase E deletes the Kotlin UI, not
+today.** Until then these files are still conformance goldens and still answer "does the C++ match
+the Kotlin original?". Afterwards they answer only "does today's C++ still do what last month's C++
+did?" — which is the weaker claim, and the one that catches a refactor breaking a screen six months
+out. Whoever lands Phase E writes the date here.
+
+⚠️ **If any further golden is recorded from Kotlin before Phase E, this tag must MOVE** — a tag that
+does not contain the recorder cannot regenerate its golden. Re-point it and update the file list in
+its message.
+
+⚠️ **The tag is only as durable as the branch it sits on.** It was created on `sdl-shell`, which is
+unpushed by standing decision until the F-Droid MR merges, so today it exists on exactly one disk.
+The one irreversible step in the convergence plan currently has no off-site copy. Push the branch
+and the tag (`git push origin sdl-shell --tags`) as soon as that decision allows.
 
 ---
 
