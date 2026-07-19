@@ -5,9 +5,28 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
-#include <time.h>
 
 namespace {
+
+/**
+ * A monotonic nanosecond stamp, for the profiler in audioCallback.
+ *
+ * ⚠️ SDL's clock, not POSIX's. This was `clock_gettime(CLOCK_MONOTONIC)` — which MSVC does not have, so
+ * the shell did not compile on Windows AT ALL, and nothing said so because no CI job has ever built a
+ * shell for any platform (convergence plan A4; every desktop artifact to date was hand-made on one
+ * Linux box). The rest of the shell tells time with SDL_GetTicks64, but that is millisecond-resolution
+ * and the work measured here runs in tens of microseconds — so this takes SDL's high-resolution
+ * monotonic counter instead, which is the same clock underneath on both platforms.
+ *
+ * Integer arithmetic, split around the division: `counter * 1e9` overflows uint64 outright on a box
+ * that has been up a while (a 10 MHz counter reaches 1e13 in a few weeks, and 1e13 * 1e9 does not fit),
+ * which would make the profiler print garbage on exactly the long-running session worth profiling.
+ */
+uint64_t now_ns() {
+    static const Uint64 freq = SDL_GetPerformanceFrequency();
+    const Uint64        c    = SDL_GetPerformanceCounter();
+    return (c / freq) * 1000000000ull + ((c % freq) * 1000000000ull) / freq;
+}
 
 // Frames per callback. 512 @ 44.1 kHz ≈ 11.6 ms — the same order as Oboe's low-latency burst on
 // device, and well under the engine's MAX_BLOCK (processLiveBlock chunks anyway, so this is a
@@ -45,17 +64,14 @@ void SDLCALL SdlAudioEngine::audioCallback(void* userdata, Uint8* out, int lenBy
         return;
     }
     static uint64_t lastNs = 0, printNs = 0, maxBlk = 0, maxGap = 0, sumBlk = 0, cnt = 0, over = 0;
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    uint64_t t0 = uint64_t(ts.tv_sec) * 1000000000ull + uint64_t(ts.tv_nsec);
+    uint64_t t0 = now_ns();
     if (lastNs != 0) { uint64_t g = t0 - lastNs; if (g > maxGap) maxGap = g; }
     lastNs = t0;
 
     self->core_->processLiveBlock(reinterpret_cast<float*>(out), numFrames, self->channels_,
                                   float(self->sampleRate_));
 
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    uint64_t t1 = uint64_t(ts.tv_sec) * 1000000000ull + uint64_t(ts.tv_nsec);
+    uint64_t t1 = now_ns();
     uint64_t blk = t1 - t0;
     if (blk > maxBlk) maxBlk = blk;
     sumBlk += blk; ++cnt;
