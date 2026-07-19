@@ -32,7 +32,6 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.conanizer.pockettracker.ui.theme.DeviceTheme
-import kotlin.math.floor
 
 /**
  * Callback fired on every virtual button press and release.
@@ -117,31 +116,24 @@ fun VirtualControlsLeft(
 ) {
     if (availableWidth <= 0 || availableHeight <= 0) return
 
-    val PATTERN_WIDTH  = 3.4f
-    val PATTERN_HEIGHT = 5.1f
     val density = LocalDensity.current.density
 
-    val boxRatio    = availableWidth.toFloat() / availableHeight.toFloat()
-    val patternRatio = PATTERN_WIDTH / PATTERN_HEIGHT
+    // The arithmetic lives in TouchLayoutMetrics so the convergence golden can
+    // record the values this screen actually uses. See that file's header.
+    val m = TouchLayoutMetrics.left(availableWidth, availableHeight, density)
 
-    val X = if (boxRatio < patternRatio) {
-        floor(availableWidth / PATTERN_WIDTH)
-    } else {
-        floor(availableHeight / PATTERN_HEIGHT)
-    }.toInt()
+    val buttonSize        = m.buttonSize
+    val lButtonWidth      = m.lButtonWidth
+    val lButtonHeight     = m.lButtonHeight
+    val selectWidth       = m.selectWidth
+    val selectHeight      = m.selectHeight
+    val smallSpacer       = m.smallSpacer
+    val largeSpacer       = m.largeSpacer
+    val mediumSpacerWidth = m.mediumSpacerWidth
 
-    val buttonSize       = X
-    val lButtonWidth     = floor(X * 1.5f).toInt()
-    val lButtonHeight    = floor(X * 0.7f).toInt()
-    val selectWidth      = floor(X * 1.2f).toInt()
-    val selectHeight     = floor(X * 0.6f).toInt()
-    val smallSpacer      = floor(X * 0.2f).toInt()
-    val largeSpacer      = floor(X * 2.0f).toInt()
-    val mediumSpacerWidth = floor(X * 1.0f).toInt()
-
-    val mainFontSize    = (X * 0.4f  / density).sp
-    val triggerFontSize = (X * 0.35f / density).sp
-    val smallFontSize   = (X * 0.25f / density).sp
+    val mainFontSize    = m.mainFontSp.sp
+    val triggerFontSize = m.triggerFontSp.sp
+    val smallFontSize   = m.smallFontSp.sp
 
     Column(
         modifier = Modifier
@@ -228,33 +220,24 @@ fun VirtualControlsRight(
 ) {
     if (availableWidth <= 0 || availableHeight <= 0) return
 
-    val PATTERN_WIDTH  = 3.4f
-    val PATTERN_HEIGHT = 5.1f
     val density = LocalDensity.current.density
 
-    val boxRatio     = availableWidth.toFloat() / availableHeight.toFloat()
-    val patternRatio = PATTERN_WIDTH / PATTERN_HEIGHT
+    val m = TouchLayoutMetrics.right(availableWidth, availableHeight, density)
 
-    val X = if (boxRatio < patternRatio) {
-        floor(availableWidth / PATTERN_WIDTH)
-    } else {
-        floor(availableHeight / PATTERN_HEIGHT)
-    }.toInt()
+    val buttonSize    = m.buttonSize
+    val rButtonWidth  = m.rButtonWidth
+    val rButtonHeight = m.rButtonHeight
+    val startWidth    = m.startWidth
+    val startHeight   = m.startHeight
+    val smallSpacer   = m.smallSpacer
+    val mediumSpacer  = m.mediumSpacer
+    val largeSpacer   = m.largeSpacer
+    val leftSpacer    = m.leftSpacer
+    val rightSpacer   = m.rightSpacer
 
-    val buttonSize   = X
-    val rButtonWidth  = floor(X * 1.5f).toInt()
-    val rButtonHeight = floor(X * 0.7f).toInt()
-    val startWidth    = floor(X * 1.2f).toInt()
-    val startHeight   = floor(X * 0.6f).toInt()
-    val smallSpacer   = floor(X * 0.2f).toInt()
-    val mediumSpacer  = floor(X * 0.7f).toInt()
-    val largeSpacer   = floor(X * 2.0f).toInt()
-    val leftSpacer    = floor(X * 1.7f).toInt()
-    val rightSpacer   = floor(X * 0.7f).toInt()
-
-    val mainFontSize    = (X * 0.4f  / density).sp
-    val triggerFontSize = (X * 0.35f / density).sp
-    val smallFontSize   = (X * 0.25f / density).sp
+    val mainFontSize    = m.mainFontSp.sp
+    val triggerFontSize = m.triggerFontSp.sp
+    val smallFontSize   = m.smallFontSp.sp
 
     Column(
         modifier = Modifier
@@ -399,24 +382,20 @@ fun VirtualControlsPortrait2(
 
     val density = LocalDensity.current.density
 
-    // X = base unit as a Float so that 135X fills the available space exactly.
-    // Using floor() here would leave sub-unit gaps at the edges on resolutions
-    // that are not a perfect multiple of 135 (e.g. 2800px → floor=20, 135×20=2700,
-    // 100px gap). Keeping it as a Float means 135X == availableWidth always.
-    val X = minOf(availableWidth / 135f, availableHeight / 135f).coerceAtLeast(1f)
+    // X is a Float so that 135X fills the available space exactly — see
+    // TouchLayoutMetrics.portrait2 for why flooring would leave edge gaps.
+    val m = TouchLayoutMetrics.portrait2(availableWidth, availableHeight, density)
 
-    fun px(units: Float) = (X * units / density).dp
+    val cellDp    = m.cellDp.dp   // square button cell height (and width unit); rows use weight() for width
+    val paddingDp = m.paddingDp.dp // outer padding
 
-    val cellDp    = px(33f)   // square button cell height (and width unit); rows use weight() for width
-    val paddingDp = px(1.5f)  // outer padding
+    val largeSp = m.largeSp.sp  // A, B, arrows
+    val smallSp = m.smallSp.sp  // Sel, Start, L/R Shift
 
-    val largeSp = (X * 11f / density).sp  // A, B, arrows
-    val smallSp = (X *  7f / density).sp  // Sel, Start, L/R Shift
-
-    val sqOffXDp   = X * 7f / density
-    val wideOffXDp = X * 8f / density
-    val offYDp     = X * 4f / density
-    val pressedDp  = X * 1f / density
+    val sqOffXDp   = m.sqOffXDp
+    val wideOffXDp = m.wideOffXDp
+    val offYDp     = m.offYDp
+    val pressedDp  = m.pressedDp
 
     // Cluster box fills the full available area. clipToBounds() ensures per-dp rounding of
     // individual button sizes never lets them visually overflow the backing image boundary.
@@ -515,24 +494,15 @@ fun VirtualControls(
 ) {
     if (availableWidth <= 0 || availableHeight <= 0) return
 
-    val SINGLE_BOX_PATTERN_WIDTH  = 3.4f
-    val SINGLE_BOX_PATTERN_HEIGHT = 5.1f
     val density = LocalDensity.current.density
 
-    val boxAvailableWidth  = availableWidth / 2
-    val boxAvailableHeight = availableHeight
+    // Each box gets half the width; the size computed here is handed down to
+    // VirtualControlsLeft/Right as THEIR available size, so an error here moves
+    // every button on the screen.
+    val m = TouchLayoutMetrics.portrait(availableWidth, availableHeight)
 
-    val boxRatio     = boxAvailableWidth.toFloat() / boxAvailableHeight.toFloat()
-    val patternRatio = SINGLE_BOX_PATTERN_WIDTH / SINGLE_BOX_PATTERN_HEIGHT
-
-    val X = if (boxRatio < patternRatio) {
-        floor(boxAvailableWidth / SINGLE_BOX_PATTERN_WIDTH)
-    } else {
-        floor(boxAvailableHeight / SINGLE_BOX_PATTERN_HEIGHT)
-    }.toInt()
-
-    val boxWidth  = floor(X * SINGLE_BOX_PATTERN_WIDTH).toInt()
-    val boxHeight = floor(X * SINGLE_BOX_PATTERN_HEIGHT).toInt()
+    val boxWidth  = m.boxWidth
+    val boxHeight = m.boxHeight
 
     val boxWidthDp  = (boxWidth  / density).dp
     val boxHeightDp = (boxHeight / density).dp
