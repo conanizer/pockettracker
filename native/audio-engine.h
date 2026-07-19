@@ -434,6 +434,21 @@ private:
     // larger blocks (processLiveBlock, renderOffline) must chunk.
     static constexpr int MAX_BLOCK = 1024;
 
+    // ⚠️ THE GRANULARITY AT WHICH EVENTS ARE RESOLVED — and it is a CORRECTNESS constant, not a
+    // buffer bound. processAudioBlock applies a block's note-ons inside one pass: each retrigger
+    // fades the previous same-track voice and takes a new slot, but a faded voice only frees up as
+    // it is MIXED. So when several same-track retriggers land in ONE block they pile up slots,
+    // exhaust the voice pool, and get recycled — i.e. notes are silently DROPPED.
+    //
+    // That makes the audible result a function of the caller's block size, which is exactly the
+    // Phase-4 "retrig sounds different on the device" bug: the Flip's ALSA period is 940 frames and
+    // an RPT 01 at 128 BPM retriggers every ~430, so 2+ retriggers shared every block. Measured on
+    // the user's REPEAT_TEST over 20 s (tools/blocktest): 128 → 4454 onsets/44 gaps, 256 →
+    // 4457/53, 512 → 4158/277, 940 → 3680/421 (17% of the retriggers gone, gaps up to 26 ms).
+    // renderOffline always chunked at 256, which is why the EXPORT was correct while live playback
+    // pulsed. Both paths now chunk here, so what you hear is what you export.
+    static constexpr int PROCESS_SUBBLOCK = 256;
+
     // Device output sample rate, cached from the platform backend (see setDeviceSampleRate). Defaults to
     // 44100 so getSampleRate()/pitch math stay correct if read before the stream opens — matches every
     // other 44100 fallback in the engine. Atomic: written by the shell thread, read by the scheduler.

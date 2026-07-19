@@ -110,6 +110,13 @@ add_executable(ptrender ptrender/main.cpp)
 pt_ieee_exact(ptrender)
 target_link_libraries(ptrender PRIVATE pockettracker)
 
+# blocktest — DEBUG diagnostic (not a conformance tool, no ctest): render a .ptp through the LIVE
+# audio path at a chosen callback block size, to compare the device's 940-frame block against
+# renderOffline's 256. See docs/internal/port-parity-audit.md finding 3.
+add_executable(blocktest blocktest/main.cpp)
+pt_ieee_exact(blocktest)
+target_link_libraries(blocktest PRIVATE pockettracker)
+
 # ptshot — a screen, rendered to a PNG with no window (Phase 3). It links pt-ui, the portable UI, and
 # that link is itself the point: pt-ui knows nothing about SDL or a display, so a screen can be drawn
 # in CI on a headless runner. It has no ctest yet and that is deliberate — the golden for a pixel diff

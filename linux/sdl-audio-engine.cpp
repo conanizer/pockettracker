@@ -3,13 +3,16 @@
 #include "audio-engine.h"
 
 #include <cstdio>
+#include <cstdint>
+#include <cstdlib>
+#include <time.h>
 
 namespace {
 
 // Frames per callback. 512 @ 44.1 kHz ≈ 11.6 ms — the same order as Oboe's low-latency burst on
 // device, and well under the engine's MAX_BLOCK (processLiveBlock chunks anyway, so this is a
 // latency choice, never a correctness one). Handhelds may want more; that is a Phase 4 dial.
-constexpr int FRAMES_PER_CALLBACK = 512;
+constexpr int FRAMES_PER_CALLBACK = 512;  // device rounds up to its own period (940 on the Flip) regardless
 
 // What we ask for. The device is free to say otherwise — see openStream.
 constexpr int PREFERRED_RATE = 44100;
@@ -30,8 +33,43 @@ void SDLCALL SdlAudioEngine::audioCallback(void* userdata, Uint8* out, int lenBy
     // everything: sets flush-to-zero, CLEARS the buffer (SDL does not hand us a zeroed one), bails
     // to silence during an offline render, chunks into MAX_BLOCK processAudioBlock calls, and
     // captures the oscilloscope/spectrum/peak data.
+    //
+    // ── DIAGNOSTIC (env POCKETTRACKER_AUDIO_PROFILE=1): time the real-time work against the callback
+    //    budget and the inter-callback gap. block>budget => compute underrun; big gap with a fast
+    //    block => the audio thread was preempted; both fine => the artifact is not the audio thread.
+    //    Single audio thread, so plain static locals; one rate-limited printf/sec. Off by default.
+    static const bool prof = (std::getenv("POCKETTRACKER_AUDIO_PROFILE") != nullptr);
+    if (!prof) {
+        self->core_->processLiveBlock(reinterpret_cast<float*>(out), numFrames, self->channels_,
+                                      float(self->sampleRate_));
+        return;
+    }
+    static uint64_t lastNs = 0, printNs = 0, maxBlk = 0, maxGap = 0, sumBlk = 0, cnt = 0, over = 0;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    uint64_t t0 = uint64_t(ts.tv_sec) * 1000000000ull + uint64_t(ts.tv_nsec);
+    if (lastNs != 0) { uint64_t g = t0 - lastNs; if (g > maxGap) maxGap = g; }
+    lastNs = t0;
+
     self->core_->processLiveBlock(reinterpret_cast<float*>(out), numFrames, self->channels_,
                                   float(self->sampleRate_));
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    uint64_t t1 = uint64_t(ts.tv_sec) * 1000000000ull + uint64_t(ts.tv_nsec);
+    uint64_t blk = t1 - t0;
+    if (blk > maxBlk) maxBlk = blk;
+    sumBlk += blk; ++cnt;
+    uint64_t budgetNs = uint64_t(numFrames) * 1000000000ull / uint64_t(self->sampleRate_ ? self->sampleRate_ : 44100);
+    if (blk > budgetNs) ++over;
+    if (printNs == 0) printNs = t1;
+    if (t1 - printNs >= 1000000000ull) {
+        std::printf("PROF: n=%llu avgBlk=%.2fms maxBlk=%.2fms over=%llu maxGap=%.2fms budget=%.2fms frames=%d\n",
+                    (unsigned long long)cnt, cnt ? double(sumBlk) / double(cnt) / 1e6 : 0.0,
+                    double(maxBlk) / 1e6, (unsigned long long)over, double(maxGap) / 1e6,
+                    double(budgetNs) / 1e6, numFrames);
+        std::fflush(stdout);
+        printNs = t1; maxBlk = 0; maxGap = 0; sumBlk = 0; cnt = 0; over = 0;
+    }
 }
 
 bool SdlAudioEngine::openStream() {

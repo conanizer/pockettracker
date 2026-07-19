@@ -1785,12 +1785,14 @@ void AudioEngine::processLiveBlock(float* output, int numFrames, int channelCoun
         return;
     }
 
-    // Oboe bursts are normally 192-960 frames, but the None/Shared fallback path or unusual
-    // ROMs can exceed MAX_BLOCK — and every per-block buffer in processAudioBlock is sized to
-    // MAX_BLOCK. Chunk to keep them in bounds (renderOffline already does the same).
+    // ⚠️ Chunk at PROCESS_SUBBLOCK, not MAX_BLOCK, and the difference is AUDIBLE — see the constant.
+    // A device hands us whatever its period is (the Flip's ALSA: 940 frames; Oboe: 192-960), and
+    // processing that in one pass resolves a block's note-ons too coarsely: same-track retriggers
+    // sharing a block exhaust the voice pool and get dropped. renderOffline has always chunked at
+    // this size, so chunking here is what makes live playback and the export agree.
     int processed = 0;
     while (processed < numFrames) {
-        int chunk = std::min((int)numFrames - processed, MAX_BLOCK);
+        int chunk = std::min((int)numFrames - processed, PROCESS_SUBBLOCK);
         processAudioBlock(output + processed * channelCount, chunk, channelCount, sampleRate);
         processed += chunk;
     }
@@ -2508,10 +2510,11 @@ void AudioEngine::renderOffline(int numFrames, float* output, int sampleRate) {
     setFlushToZeroForCurrentThread();
     for (int i = 0; i < numFrames * 2; i++) output[i] = 0.0f;
 
-    const int BLOCK_SIZE = 256;
+    // The same granularity live playback now uses — the two must not drift apart, or the export
+    // stops matching what you heard. See PROCESS_SUBBLOCK. (Value unchanged: this was already 256.)
     int rendered = 0;
     while (rendered < numFrames) {
-        int chunk = std::min(BLOCK_SIZE, numFrames - rendered);
+        int chunk = std::min(PROCESS_SUBBLOCK, numFrames - rendered);
         processAudioBlock(output + rendered * 2, chunk, 2, (float)sampleRate);
         rendered += chunk;
     }
