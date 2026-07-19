@@ -149,19 +149,44 @@ jobs:
       - name: Build
         run: cmake --build linux/build --config Release
 
-      # Both layouts, because the generator differs per runner: ninja/make put the binary in the build
-      # root, while windows-latest defaults to a multi-config Visual Studio generator that puts it in
-      # Release/. `error` rather than `warn` on no match — a shell that silently stopped being produced
-      # is exactly the failure this job exists to catch, and a green job with an empty artifact would
+      # `error` rather than `warn` on no match — a shell that silently stopped being produced is
+      # exactly the failure this job exists to catch, and a green job with an empty artifact would
       # hide it.
-      - name: Upload the shell
+      - name: Upload the shell (Linux)
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: pockettracker-shell-${{ matrix.name }}
-          path: |
-            linux/build/pockettracker-sdl
-            linux/build/pockettracker-sdl.exe
-            linux/build/Release/pockettracker-sdl.exe
+          path: linux/build/pockettracker-sdl
+          if-no-files-found: error
+          retention-days: 7
+
+      # ─── The double-clickable Windows package (convergence plan A3) ──────────────────────────────
+      #
+      # Windows uploads the ZIP rather than the bare exe, because the zip is the artifact that is
+      # meant to reach a person: exe renamed to PocketTracker.exe, README, and the licences that a
+      # statically linked SDL2 + decoder stack obliges us to ship.
+      #
+      # The script verifies the ARTIFACT before it zips — that the VC runtime is static (a stranger
+      # has no redistributable installed), that the icon in the binary is ours, that the version
+      # matches app/build.gradle.kts, and that every statically linked component has a notice — and
+      # then reads the whole package back out of the zip. It handles both build layouts itself
+      # (ninja puts the exe in the build root, a multi-config VS generator in Release/).
+      #
+      # ⚠️ `powershell` explicitly, NOT the runner's default shell. It is Windows PowerShell 5.1 the
+      # script was written and tested against; pwsh 7 cannot load some of the assemblies it uses, and
+      # a package step that only fails on the runner is the exact failure mode this job exists for.
+      - name: Package the Windows desktop zip
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File linux/build-windows.ps1
+
+      - name: Upload the Windows package
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pockettracker-windows-x64
+          path: build/windows/*.zip
           if-no-files-found: error
           retention-days: 7
 

@@ -25,3 +25,16 @@ Dockerfile.portmaster text eol=lf
 portmaster/*.json text eol=lf
 portmaster/*.xml  text eol=lf
 portmaster/*.md   text eol=lf
+
+# The same rule pointing the other way, which is the point of stating it as "EOL follows the
+# ARTIFACT" rather than "this repo uses LF". README.txt is copied into the WINDOWS zip and opened by
+# a Windows user in Notepad, so CRLF is what it should contain — pinned here so it does not depend
+# on which OS ran `git clone`, exactly as the PortMaster files above do not.
+windows/*.txt text eol=crlf
+
+# ⚠️ The icon is BINARY and must never be EOL-converted. It is committed (make-icon.ps1 regenerates
+# it but no build runs that), and with core.autocrlf=true on this box an unmarked .ico would have
+# every 0x0A in its pixel data rewritten to 0x0D 0x0A on checkout — a corrupt icon, on someone
+# else's clone, from a setting nobody touched. `git check-attr binary -- linux/windows/*.ico`
+# answers this rather than the file extension being trusted to be recognised.
+windows/*.ico binary

@@ -7,6 +7,7 @@ with the source tree that built it. A user who receives only the artifact must s
 This file is the single source of truth for the notices and is shipped verbatim in:
 
 - the **PortMaster zip** → `pockettracker/licenses/THIRD-PARTY-NOTICES.md` (`linux/build-portmaster.sh`)
+- the **Windows zip** → `licenses/THIRD-PARTY-NOTICES.md` (`linux/build-windows.ps1`)
 - the **repo** → `licenses/THIRD-PARTY-NOTICES.md`
 
 ⚠️ **Scope: this file lists what is compiled into the ENGINE**, i.e. everything that ships in *both*
@@ -248,10 +249,50 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ---
 
-## SDL2 — zlib licence (linked, **not** shipped)
+## SDL2 — zlib licence (**shipped on Windows**, linked-not-shipped on the handhelds)
 
-The Linux port links `libSDL2-2.0.so.0` **dynamically against the device's own copy** — the one its
-CFW patched for that hardware's display and audio. PocketTracker ships no SDL2 binary
-(`linux/build-portmaster.sh` asserts `libs.aarch64` is absent), so no SDL2 notice is required in the
-artifact. Recorded here because "we link it" and "we distribute it" are different questions and the
-answer should not have to be re-derived.
+⚠️ **The answer differs per artifact, and it changed on 2026-07-20.** This section used to say
+flatly that PocketTracker ships no SDL2 binary. That was true of every artifact that existed when it
+was written, and the Windows desktop package (convergence plan A3) made it false — which is the
+same shape as the P5-S1 finding: the notices were accurate about the *source tree* and wrong about
+the thing a user actually receives.
+
+| artifact | how SDL2 is linked | ships an SDL2 binary? |
+|---|---|---|
+| **PortMaster zip** (`linux/build-portmaster.sh`) | dynamically, against the **device's own** `libSDL2-2.0.so.0` — the copy its CFW patched for that hardware's display and audio | **no** (the build asserts `libs.aarch64` is absent) |
+| **Windows zip** (`linux/build-windows.ps1`) | **statically, into `PocketTracker.exe`** — a Windows box has no system SDL2, so `linux/CMakeLists.txt` falls through to FetchContent | **yes — inside the exe** |
+| **APK** | no SDL2 at all until convergence phase C1 | no |
+
+So the Windows package carries the notice below, and `build-windows.ps1` copies it out of the SDL
+source tree that was actually compiled (`_deps/sdl2-src/LICENSE.txt`) rather than from a stale copy
+in this repo — the licence that ships is then the licence of the code that shipped, by construction.
+
+⚠️ **The vendor-directory guard cannot catch this one.** `build-portmaster.sh` derives its
+component list from `native/vendor/*/` precisely so that vendoring a library and forgetting its
+notice fails the build. SDL2 is fetched at configure time and has never been in `native/vendor/`, so
+it is invisible to that mechanism; `build-windows.ps1` therefore checks for the SDL notice **by
+name**, as a special case, with this paragraph as the reason.
+
+Used for: window, renderer, audio output, gamepad and keyboard input (`linux/`). Version: whatever
+`SDL2_TAG` / the FetchContent pin in `linux/CMakeLists.txt` names at build time — currently
+`release-2.30.9` on Windows, `release-2.0.18` as the PortMaster link floor.
+
+```
+Copyright (C) 1997-2024 Sam Lantinga <slouken@libsdl.org>
+
+This software is provided 'as-is', without any express or implied
+warranty.  In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+```

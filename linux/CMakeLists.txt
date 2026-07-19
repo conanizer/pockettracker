@@ -23,6 +23,48 @@ project("pockettracker-sdl" LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ─── The version, PARSED from the one place that already had it ────────────────────────────────
+# The Windows resource stamps a version into the exe (Explorer > Properties > Details) and
+# build-windows.ps1 names the zip after it. Neither may become a SECOND place a release has to
+# remember to bump — that is the shape of bug this project keeps paying for — so the number is read
+# out of app/build.gradle.kts, which is where `versionName` has always lived.
+#
+# FATAL_ERROR rather than a warning-and-a-default: the file is in this repo and cannot be missing,
+# so the only way here is somebody changing the Gradle syntax, and then a three-second regex fix is
+# the right outcome. A default would let a build ship a version string that is quietly a lie.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../app/build.gradle.kts" PT_GRADLE)
+if(NOT PT_GRADLE MATCHES "versionName[ \t]*=[ \t]*\"([0-9]+)\\.([0-9]+)\\.([0-9]+)\"")
+    message(FATAL_ERROR
+            "could not find versionName in app/build.gradle.kts - if its syntax changed, update "
+            "this regex in linux/CMakeLists.txt")
+endif()
+set(PT_VERSION       "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
+set(PT_VERSION_COMMA "${CMAKE_MATCH_1},${CMAKE_MATCH_2},${CMAKE_MATCH_3},0")
+message(STATUS "PocketTracker ${PT_VERSION} (from app/build.gradle.kts)")
+
+# ─── A self-contained exe: the MSVC runtime goes IN ────────────────────────────────────────────
+#
+# ⚠️ Set BEFORE add_subdirectory and FetchContent below, or the engine and SDL compile against a
+# different CRT than this target and the link mixes two heaps.
+#
+# Without this the shell links MSVCP140.dll / VCRUNTIME140.dll / VCRUNTIME140_1.dll, and a machine
+# without Visual Studio on it does not have those: a stranger who unzips the A3 package and
+# double-clicks gets a Windows error dialog naming a DLL, not a tracker. That is the ENTIRE failure
+# the package exists to prevent, and it is invisible on any box that builds the thing — which is
+# every box that has ever run this shell.
+#
+# The UCRT (api-ms-win-crt-*) is a different matter and needs nothing: it is part of Windows itself
+# from 10 onwards, and 10 is the floor here anyway.
+#
+# ⚠️ This works on SDL because SDL2's own CMakeLists sets CMAKE_POLICY_DEFAULT_CMP0091 NEW at its
+# very first line (before its cmake_minimum_required, which would otherwise reset the policy to a
+# 3.0-era default and make it ignore this variable). Its SDL_FORCE_STATIC_VCRT option is therefore
+# NOT needed and must not be set: it only assigns this same variable `if(NOT DEFINED)`, so setting
+# both would be one instruction with two spellings.
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 # ─── The engine, as a host static lib ──────────────────────────────────────────────────────────
 # native/CMakeLists.txt's non-ANDROID branch gives us `pockettracker`: the same portable core the
 # APK ships, minus the Oboe/JNI shell (its ANDROID_PLATFORM_SOURCES, which this directory replaces).
@@ -53,11 +95,29 @@ if(NOT SDL2_FOUND)
     FetchContent_MakeAvailable(SDL2)
 endif()
 
+# ─── The Windows resource: the icon and the version stamp (A3) ─────────────────────────────────
+# Generated rather than committed, because it carries the icon's path and the version parsed above.
+# The icon file ITSELF is committed (linux/windows/PocketTracker.ico) and is regenerated from
+# docs/images/logo-plain.png by linux/windows/make-icon.ps1 — which no build runs.
+#
+# One embedded icon is all the shell needs: SDL takes the first RT_GROUP_ICON as the window icon, so
+# this is also why there is no SDL_SetWindowIcon anywhere. See the header of pockettracker.rc.in.
+if(WIN32)
+    # Not in project(LANGUAGES) at the top, because WIN32 is only defined once project() has run.
+    # Ninja in particular will not compile a .rc without this; the VS generators are more forgiving,
+    # which is exactly how a build breaks on the runner and not on the dev box.
+    enable_language(RC)
+    set(PT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/windows/PocketTracker.ico")
+    configure_file(windows/pockettracker.rc.in "${CMAKE_CURRENT_BINARY_DIR}/pockettracker.rc" @ONLY)
+    set(PT_WIN_RESOURCES "${CMAKE_CURRENT_BINARY_DIR}/pockettracker.rc")
+endif()
+
 add_executable(pockettracker-sdl
         main.cpp
         sdl-audio-engine.cpp
         sdl-input.cpp
         sdl-video.cpp
+        ${PT_WIN_RESOURCES}
 )
 
 # ─── IEEE-exactness: a CORRECTNESS requirement, not an optimisation choice ─────────────────────

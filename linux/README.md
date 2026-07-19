@@ -138,6 +138,39 @@ Two decisions worth knowing before changing anything here:
   chain and stopped playback from stopping. The full table is at the top of `portmaster/`
   `PocketTracker.sh`, and `build-portmaster.sh` fails the build if it reappears.
 
+### The Windows package
+
+```bat
+:: build first (see above), then:
+powershell -ExecutionPolicy Bypass -File linux\build-windows.ps1
+:: -> build\windows\PocketTracker-<version>-windows-x64.zip
+```
+
+Unzip anywhere and double-click `PocketTracker.exe`. **Nothing to install** — one self-contained
+exe, a README and the licences. CI builds it on every push (`.github/workflows/build.yml`, the
+`shell` job's windows-x64 leg).
+
+Unlike `build-portmaster.sh` this script only packages; it does not build, because the compiler
+lives behind whichever `vcvars64.bat` the machine happens to have and guessing at that is worse than
+failing loudly. It refuses to package an exe older than the sources.
+
+Three decisions worth knowing:
+
+- **SDL2 is linked statically, INTO the exe** — the exact opposite of the PortMaster package, and
+  correct for the same reason: a handheld has a CFW-patched `libSDL2` that knows its display, and a
+  Windows box has no system SDL2 at all. ⚠️ That makes this zip a *binary distribution of SDL2*, so
+  it ships SDL's licence — copied out of the source tree that was actually compiled. The
+  `native/vendor/*/`-derived notice guard **cannot see SDL2** (it is fetched, never vendored), which
+  is why `build-windows.ps1` checks for it by name.
+- **The MSVC runtime is linked in too** (`CMAKE_MSVC_RUNTIME_LIBRARY`). Without it the exe imports
+  `VCRUNTIME140.dll` / `MSVCP140.dll`, which every machine that can *build* this has and a stranger's
+  machine does not — a failure invisible on any box you would test it on. The package script asserts
+  the imports are gone.
+- **The icon is a resource, and that is also the window icon.** SDL takes the first `RT_GROUP_ICON`
+  out of the exe when no hint is set, so there is no `SDL_SetWindowIcon` call and no PNG decoder in
+  the C++ tree — which convergence D2 does not want pulled forward. `linux/windows/make-icon.ps1`
+  regenerates the `.ico` from `docs/images/logo-plain.png`; no build runs it.
+
 ## Run
 
 ```sh
