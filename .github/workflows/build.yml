@@ -106,3 +106,102 @@ jobs:
           path: tools/build/render-out/*.wav
           retention-days: 7
           if-no-files-found: ignore
+
+  # ─── The SDL shell (convergence plan A4) ────────────────────────────────────────────────────────
+  #
+  # Until this job existed, CI built the APK and the conformance tools and NO SHELL AT ALL, for any
+  # platform — every desktop and PortMaster artifact to date was hand-built on one Linux box. That is
+  # not a hypothetical gap: the first Windows configure attempted after the convergence plan was
+  # written failed outright, because the audio profiler in sdl-audio-engine.cpp used POSIX
+  # clock_gettime, which MSVC does not have. It had been broken for as long as it had existed and
+  # nothing was watching.
+  #
+  # The two runners also cover BOTH branches of linux/CMakeLists.txt's SDL2 lookup, which is worth
+  # more than doubling the platform count: ubuntu apt-installs libsdl2-dev, so find_package(SDL2)
+  # succeeds and the link is against the SYSTEM SDL — the model every PortMaster CFW requires. Windows
+  # has no system SDL, so it falls through to FetchContent and builds SDL from source, which is the
+  # model the desktop package (A3) ships. Neither path can rot unnoticed now.
+  shell:
+    name: SDL shell (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  name: linux-x64 }
+          - { os: windows-latest, name: windows-x64 }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # System SDL2 on Linux only — see the job comment. Windows deliberately gets none, so that
+      # runner exercises the FetchContent fallback.
+      - name: Install SDL2 (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+
+      # CMAKE_BUILD_TYPE explicitly, per linux/CMakeLists.txt's own warning: a Debug engine may not
+      # keep up with a real-time audio callback, and the usual "default it if empty" guard does not
+      # fire on MSVC.
+      - name: Configure
+        run: cmake -S linux -B linux/build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build linux/build --config Release
+
+      # Both layouts, because the generator differs per runner: ninja/make put the binary in the build
+      # root, while windows-latest defaults to a multi-config Visual Studio generator that puts it in
+      # Release/. `error` rather than `warn` on no match — a shell that silently stopped being produced
+      # is exactly the failure this job exists to catch, and a green job with an empty artifact would
+      # hide it.
+      - name: Upload the shell
+        uses: actions/upload-artifact@v4
+        with:
+          name: pockettracker-shell-${{ matrix.name }}
+          path: |
+            linux/build/pockettracker-sdl
+            linux/build/pockettracker-sdl.exe
+            linux/build/Release/pockettracker-sdl.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  # ─── The pt-ui NDK canary (convergence plan A5) ─────────────────────────────────────────────────
+  #
+  # pt-ui — the ~18,000-line portable UI — is gated `if(NOT ANDROID)` in native/CMakeLists.txt, so
+  # until this job it had never been compiled by the NDK's clang against Android's libc++ by anything,
+  # ever. Convergence phase C2 is the deletion of that gate. This job is what makes C2 the un-gating of
+  # a target already known to compile, instead of the day a pile of platform breakage is discovered.
+  #
+  # The artifact is thrown away on purpose: this is a COMPILE check, and pt-ui is a static archive, so
+  # nothing here links. arm64-v8a and android-26 match the shipping ABI and minSdk in app/build.gradle.
+  #
+  # PT_UI_ON_ANDROID also drops the Oboe/JNI shell from the engine target, because this configures
+  # native/ standalone — outside Gradle there is no Prefab and find_package(oboe) would have nothing to
+  # find. The APK build never sets the option and is bit-for-bit unaffected.
+  ndk-canary:
+    name: pt-ui NDK canary
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Install the NDK
+        run: sdkmanager "ndk;27.0.12077973"
+
+      - name: Compile pt-ui with the NDK toolchain
+        run: |
+          NDK="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
+          cmake -S native -B build-ndk-canary \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-26 \
+            -DANDROID_STL=c++_shared \
+            -DPT_UI_ON_ANDROID=ON \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-ndk-canary --target pt-ui

@@ -8,9 +8,33 @@ project("pockettracker")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ─── The convergence canary (plan A5) ──────────────────────────────────────────────────────────
+#
+# pt-ui is gated `if(NOT ANDROID)` far below, so its ~18,000 lines have never once been compiled by the
+# NDK's clang against Android's libc++ — and convergence phase C2 is exactly the deletion of that gate.
+# For C2 to be "un-gate a target that already compiles" rather than "discover a pile of platform
+# breakage one character in", that toolchain has to build the target NOW, with the artifact thrown
+# away. This option is that build, and CI is its only caller (.github/workflows/build.yml).
+#
+# It also drops the Oboe/JNI shell, and not for convenience: the canary configures `native/` STANDALONE
+# with the NDK toolchain, and outside Gradle there is no Prefab, so `find_package(oboe)` has nothing to
+# find. Skipping it costs the canary nothing — the APK build compiles those three files on every run.
+#
+# ⚠️ OFF by definition of shipping. The APK never sets it, and with it OFF every branch below is
+# character-for-character the build that shipped.
+option(PT_UI_ON_ANDROID "Compile pt-ui with the NDK toolchain — the convergence canary. Never for shipping." OFF)
+
+# "A real Android build": Android, and not the canary. The Oboe/JNI shell hangs off this rather than
+# off ANDROID, so the canary can be an Android build WITHOUT the parts that need Gradle.
+if(ANDROID AND NOT PT_UI_ON_ANDROID)
+    set(PT_ANDROID_SHELL ON)
+else()
+    set(PT_ANDROID_SHELL OFF)
+endif()
+
 # Oboe is the ANDROID audio backend only (via Prefab). A desktop build provides its own
 # shell (SDL/ALSA/JACK) against processLiveBlock() and never sees this.
-if(ANDROID)
+if(PT_ANDROID_SHELL)
     find_package(oboe REQUIRED CONFIG)
 endif()
 
@@ -89,10 +113,12 @@ set(ANDROID_PLATFORM_SOURCES
         songcore-jni.cpp
 )
 
-if(ANDROID)
+if(PT_ANDROID_SHELL)
     add_library(pockettracker SHARED ${ENGINE_CORE_SOURCES} ${ANDROID_PLATFORM_SOURCES})
 else()
-    # Desktop consumers link the core as a static lib and provide their own shell/main.
+    # Desktop consumers link the core as a static lib and provide their own shell/main. So does the A5
+    # canary, deliberately: it is a COMPILE check, and a static archive is not link-complete — which
+    # keeps it from going red over an Oboe symbol it was never meant to test.
     add_library(pockettracker STATIC ${ENGINE_CORE_SOURCES})
 endif()
 
@@ -174,12 +200,16 @@ target_link_libraries(pockettracker opusfile)
 if(NOT WIN32)
     target_link_libraries(pockettracker m)
 endif()
-if(ANDROID)
+if(PT_ANDROID_SHELL)
     target_link_libraries(pockettracker
             oboe::oboe
             android
             log
     )
+elseif(ANDROID)
+    # The canary: the same two NDK system libs (the logging shim in audio-defs.h needs `log`), but no
+    # Oboe — there is no Prefab outside Gradle to provide it.
+    target_link_libraries(pockettracker android log)
 endif()
 
 # ─── pt-ui: the portable UI (Linux-port plan Phase 3) ──────────────────────────────────────────
@@ -192,10 +222,15 @@ endif()
 # 'Android on SDL' is a shell swap, not a rewrite".
 #
 # ⚠️ NOT in the Android build. Android draws these screens in Compose today, and will keep doing so
-# until the convergence decision point (linux-port-plan §12.8, taken after the port ships). Gating it
-# out means the port cannot grow the APK by a byte or break it in any way while it is being written —
-# and when convergence comes, this `if` is what changes, not where the code lives.
-if(NOT ANDROID)
+# until convergence phase C2, which deletes this gate (linux-port-plan §12.8 took the decision after
+# the port shipped). Gating it out means the port cannot grow the APK by a byte or break it in any way
+# while it is being written — and when convergence comes, this `if` is what changes, not where the
+# code lives.
+#
+# PT_UI_ON_ANDROID is the A5 canary and the ONE exception: it builds this target with the NDK toolchain
+# so that C2 inherits a target already known to compile there. It is never set by the APK build, so
+# with it OFF this reads exactly as `if(NOT ANDROID)` always did.
+if(NOT ANDROID OR PT_UI_ON_ANDROID)
     add_library(pt-ui STATIC
             ui/canvas.cpp
             ui/clipboard.cpp
