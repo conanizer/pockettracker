@@ -110,6 +110,10 @@ PocketTracker is built on excellent open-source work — Oboe, DaisySP, TinySoun
 
 Full attributions, licenses, and DSP algorithm references: [`CREDITS.md`](CREDITS.md).
 
+**Third-party license notices** for everything compiled into the audio engine — the code that ships
+in both the Android app and the Linux handheld port — are reproduced in full in
+[`licenses/THIRD-PARTY-NOTICES.md`](licenses/THIRD-PARTY-NOTICES.md).
+
 ---
 
 ## License
@@ -119,3 +123,8 @@ PocketTracker is free software: you can redistribute it and/or modify it under t
 It is distributed in the hope that it will be useful, but **without any warranty** — without even the implied warranty of merchantability or fitness for a particular purpose. See the [GNU General Public License](https://www.gnu.org/licenses/gpl-3.0.html) for details.
 
 Full license text: [`LICENSE`](LICENSE).
+
+PocketTracker statically links several third-party components, each under its own license (BSD-3-Clause,
+MIT, LGPL-2.1, and public-domain dedications). Their copyright notices and license terms are reproduced
+in [`licenses/THIRD-PARTY-NOTICES.md`](licenses/THIRD-PARTY-NOTICES.md), which also ships inside the
+Linux port's release archive.
