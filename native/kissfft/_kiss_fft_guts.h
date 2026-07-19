@@ -1,3 +1,11 @@
+/*
+ *  Copyright (c) 2003-2010, Mark Borgerding. All rights reserved.
+ *  This file is part of KISS FFT - https://github.com/mborgerding/kissfft
+ *
+ *  SPDX-License-Identifier: BSD-3-Clause
+ *  See licenses/THIRD-PARTY-NOTICES.md for the full licence text.
+ */
+
 #ifndef KISS_FFT_GUTS_H
 #define KISS_FFT_GUTS_H
 
