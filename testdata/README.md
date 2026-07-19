@@ -1,54 +1,172 @@
-# /testdata — songcore conformance goldens
+# /testdata — the conformance goldens
 
-The measuring stick for songcore Phase 1 (`linux-port-plan.md` §4.3, `event-schema.md`).
-Everything here is **generated** — by `app/src/test/java/.../trace/GoldenTraceTest.kt` from the
-synthetic golden projects in `GoldenProjects.kt`, driven through the real Kotlin sequencer
-(`PlaybackController`/`EffectProcessor`/`AudioEngine`) via the `EventTrace` tap; or, for the media and
-the render fingerprints, by the generators named below. Do not edit by hand.
+The measuring stick for songcore and the Linux/Windows port (`linux-port-plan.md` §4.3,
+`event-schema.md`). Everything here is **generated** — do not edit by hand.
 
-- `*.ptp` — the golden projects, serialized with the app's exact Json config. C++ songcore loads these
-  same files for its side of the conformance run (`tools/ptroundtrip`, `tools/ptplay`).
+---
+
+## 1. The inventory
+
+⚠️ **Most of these are recorded FROM KOTLIN, and the Kotlin is scheduled for deletion**
+(convergence Phase E). Once it is gone no new golden can be recorded from it, and the existing
+files silently change job — from **conformance** ("does the C++ match the Kotlin original?") to
+**regression** ("does today's C++ still do what last month's C++ did?"). Both are worth having, but
+the change is a dated, deliberate reclassification and not something to discover while regenerating.
+See §5.
+
+| golden | what it covers | recorded from | dies with Kotlin? |
+|---|---|---|---|
+| `g1..g8.ptp` (8) | the golden projects, serialized with the app's exact Json config | `GoldenTraceTest` ← `GoldenProjects.kt` | ⚠️ yes |
+| `traces/*.trace` (36) | schema-v1 event traces, per project × {44100, 48000} × {render, song, chain, phrase} | `GoldenTraceTest` | ⚠️ yes |
+| `units/p3-input.txt` (23,453 lines = 23,313 records + 115 comments + 25 blank) | the INPUT layer. `EDIT` 20,895 (cursor context + resolved action + the cell actually written), `THEME` 1,216, `R00`..`R15` 384 (24 each), `KBD` 384, `FXH` 170, `SEVIEW` 80, `SEL` 64, `SEROW` 60, `CLIP` 28, `THEMEPTT` 14, `THEMECYCLE` 12, `SORT` 6 | `P3InputGoldenTest` ← the real `InputController` + 14 screen modules + `ClipboardManager` + `FxHelperOverlay` | ⚠️ yes |
+| `units/s3-units.txt` (317) | the pure functions: `framesPerStep`, groove timing, `byteToSignedSemitones`, `resolveStepParams`, `collectUsedInstruments` | `S3UnitGoldenTest` | ⚠️ yes |
+| `units/s5-consumer.txt` (838) | the consumer call sequences a note produces | `S5ConsumerGoldenTest` | ⚠️ yes |
+| `units/s7-random.txt` (35) | the random FX: draw COUNT and SUPPORT (exact), plus the distribution law (statistical) | `S7RandomGoldenTest` | ⚠️ yes |
+| `units/touch-layout.txt` (675) | the touch layout **sizes** for all four entry points — see the warning below | `TouchLayoutGoldenTest` ← `TouchLayoutMetrics` | ⚠️ yes |
+| **`native/songcore/note_tables.h`** (100) | 132 note frequencies + 256 detune multipliers, as raw binary32 bits | `S5NoteTableTest` ← `Note.toFrequency()` / `Instrument.detuneMultiplier()` | ⚠️ yes |
+| `renders/*.txt` (2) | `ptrender` audio fingerprints: peak, RMS, per-second RMS in dBFS, tolerance-compared at ±1 dB | `tools/ptrender` (C++) | no |
+| `golden/{kick,pad}.wav`, `test.sf2` | the media the projects play | `golden/make-golden-media.cpp` (C++) | no |
+| `device/` | optional device-recorded traces (gitignored) | a real device | n/a |
+
+⚠️ **`native/songcore/note_tables.h` does not live in this directory** and an inventory scoped to
+`/testdata` misses it entirely. It is a generated C++ **source file** in the songcore tree, written
+and guarded by a Kotlin test, and it is the only such file — verified by grepping every
+`File(repoRoot(), …)` in `app/src/test/.../trace/` for a destination outside `testdata/`. If that
+ever stops being true, this table is wrong.
+
+⚠️ **`units/touch-layout.txt` pins SIZES, not POSITIONS, and the distinction is not a detail.**
+`VirtualControls.kt` computes how big each button is and how much space sits between them; *where*
+each button lands is computed by Compose's measure/layout pass (`Column`/`Row` +
+`Arrangement.Center`, and `Modifier.weight(1f)` in Portrait2). Those positions exist only once
+Android lays out a real screen, so no JVM test can record them. A port that matches all 675 lines
+can still stack the D-pad in the wrong order. That hole is deliberate: a wrong arrangement is
+obvious on a phone, a wrong proportion at an unowned screen size is not.
+
+---
+
+## 2. Regeneration
+
+⚠️⚠️ **"Delete the file and re-run the tests" DOES NOT WORK, and it fails silently in the most
+damaging possible way.** The files here are not declared Gradle inputs or outputs, so deleting one
+does not invalidate `:app:testDebugUnitTest`. Gradle reports `UP-TO-DATE`, prints
+`BUILD SUCCESSFUL`, runs nothing — and the golden stays **deleted**. Follow the old recipe on
+`traces/` and you delete 36 files, see green, and commit the deletion.
+
+Measured on 2026-07-20, not argued: delete `units/touch-layout.txt`, run `./gradlew
+testDebugUnitTest`, get `UP-TO-DATE` + `BUILD SUCCESSFUL`, and the file is still missing.
+
+**The recipe that works:**
+
+```sh
+# regenerate ONE golden (after an intentional behaviour change)
+rm testdata/units/p3-input.txt
+./gradlew testDebugUnitTest --rerun-tasks        # --rerun-tasks is NOT optional
+
+# regenerate everything Kotlin-sourced
+rm -rf testdata/traces testdata/units testdata/*.ptp native/songcore/note_tables.h
+./gradlew testDebugUnitTest --rerun-tasks
+
+# verify a run actually happened, and compared rather than regenerated
+git status --porcelain testdata/      # empty  => every golden byte-compared against its file
+```
+
+Each recorder follows one contract: **missing file → generate; existing file → byte-compare.** That
+is what makes the drift guard work, and also what makes a *silently missing* file dangerous — a
+regenerating run is always green, whatever it writes.
+
+⚠️ **A green `./gradlew test` proves nothing on its own.** It reports `BUILD SUCCESSFUL` off cached
+results; on 2026-07-20 it did so from results dated 2026-07-14. Always confirm the run executed
+(`26 actionable tasks: 26 executed`, not `up-to-date`), and confirm `git status testdata/` is clean
+afterwards — a green suite that regenerated a golden and a green suite that compared against it look
+identical from the exit code.
+
+Commit any regenerated golden **in the same commit as the behaviour change that caused it**, per the
+event-schema §9 discipline.
+
+---
+
+## 3. What is NOT covered
+
+Named holes, so nobody has to rediscover them by being bitten:
+
+- **The combo matrix.** `InputMapper` (`ButtonHandlers.kt`) turns raw presses into the named
+  handlers — combos, key repeat, deferred A/B, held-modifier state — and **nothing covers it on
+  either side.** `ptinput` sits one layer below (it drives modules directly) and `ptdispatch` sits
+  one layer below too (named handlers). The C++ twin in `linux/main.cpp` carries the comment *"the
+  order of these checks IS the specification"* and has no tool either. Recording it needs a way past
+  the `Handler(Looper.getMainLooper())` built in `InputMapper`'s field initialiser, since there is no
+  Robolectric and no `testOptions { returnDefaultValues }`.
+- **Touch button POSITIONS** — see §1.
+- **`DeviceAdapter.LayoutMode` semantics.** `p3-input.txt`'s own header records that the module edits
+  *indices*, so the C++ side is handed `(index, count)` rather than layout modes, because
+  `LayoutMode` "would be dead code in a UI with no touch screen". Convergence Phase D makes that
+  assumption false. `layoutModeList(hasPhysical)` and `skinsForLayout` are unrecorded.
+- **Theme / `DeviceSkin` colour tables.** `THEME` lines cover the theme *editor*; the colour values
+  behind each named theme and skin have never been byte-compared.
+- **`ptdispatch` is not a golden at all.** It is hand-written assertions — what its author believed
+  Kotlin does, having read it — and its own header says so at length. Do not count it as recorded
+  behaviour.
+
+None of these are lost if left unrecorded *provided the tag in §5 survives*: the Kotlin can be
+checked out and a recorder written against it later. What decays is the practicality — getting a
+year-old Gradle build running again gets harder every month.
+
+---
+
+## 4. The files in detail
+
+- `*.ptp` — the golden projects. C++ songcore loads these same files for its side of the run
+  (`tools/ptroundtrip`, `tools/ptplay`).
 - `traces/<project>.<samplerate>.<mode>.trace` — schema-v1 event traces (format frozen in
   `native/songcore/event.h`), recorded per project in render mode and each live mode
   (`song`/`chain`/`phrase` + start arg), at 44100 and 48000 Hz.
-- `units/` — the S3 pure-function cases (`s3-units.txt`) and the S5 consumer call sequences
-  (`s5-consumer.txt`), replayed by `tools/ptresolve` and `tools/ptvoice`.
-- `golden/` — **the media the projects play**: `kick.wav`, `pad.wav`, `test.sf2`. The projects have
-  referenced these paths from the beginning and the files did not exist, which is why the goldens were
-  "silent by design" — fine for event traces, which stop at the router far above sample loading, and
-  useless for `tools/ptrender`, which renders real audio. They are **synthesized**, not sampled:
-  `make-golden-media.cpp` is both their provenance and their regenerator. Each exercises a path — the
-  kick is mono at the render's own rate (no resampling), the pad is **stereo at 22050** (a second
-  channel buffer *and* a rate ratio of 2.0), and `test.sf2` is a hand-built minimal SoundFont at
-  bank 0 / preset 5. Everything decays to silence and **nothing loops**, so no voice can run a render's
-  decay tail out to its 30-second cap.
-- `renders/<project>.<samplerate>.txt` — `tools/ptrender`'s audio fingerprints: peak, RMS and
-  per-second RMS in dBFS. **Tolerance-compared (±1 dB), not byte-compared** — the DSP uses
-  transcendentals and is built with `-ffast-math` on arm, so toolchains legitimately disagree on the
-  last bit of a reverb tail. See `tools/ptrender/README.md` for why that is the strongest honest claim,
-  and what carries the exactness instead (a same-binary determinism check).
-- `device/` (gitignored, optional) — drop a device-recorded `event.trace` here (any filename
-  ending `.trace`, no renaming) and rerun the test. Each PLAY..STOP session identifies its own
-  golden from its header (project sha, sr, mode, start arg); render sessions compare
-  byte-for-byte, live sessions prefix-compare in emission order with preview-lane noise
-  ignored (JVM↔ART float identity check). Step-by-step: `docs/internal/songcore-s1-device-test.md`.
+- `units/` — the S3 pure-function cases, the S5 consumer call sequences, the S7 random-FX
+  support/law, the P3 input cases, and the touch-layout sizes; replayed by `tools/ptresolve`,
+  `tools/ptvoice`, `tools/ptrandom` and `tools/ptinput`.
+- `golden/` — **the media the projects play**: `kick.wav`, `pad.wav`, `test.sf2`. The projects
+  referenced these paths from the beginning and the files did not exist, which is why the goldens
+  were "silent by design" — fine for event traces, which stop at the router far above sample
+  loading, and useless for `tools/ptrender`, which renders real audio. They are **synthesized**, not
+  sampled: `make-golden-media.cpp` is both their provenance and their regenerator. Each exercises a
+  path — the kick is mono at the render's own rate (no resampling), the pad is **stereo at 22050** (a
+  second channel buffer *and* a rate ratio of 2.0), and `test.sf2` is a hand-built minimal SoundFont
+  at bank 0 / preset 5. Everything decays to silence and **nothing loops**, so no voice can run a
+  render's decay tail out to its 30-second cap.
+- `renders/<project>.<samplerate>.txt` — `tools/ptrender`'s audio fingerprints. **Tolerance-compared
+  (±1 dB), not byte-compared** — the DSP uses transcendentals and is built with `-ffast-math` on arm,
+  so toolchains legitimately disagree on the last bit of a reverb tail. See `tools/ptrender/README.md`
+  for why that is the strongest honest claim, and what carries the exactness instead (a same-binary
+  determinism check).
+- `device/` (gitignored, optional) — drop a device-recorded `event.trace` here (any filename ending
+  `.trace`, no renaming) and rerun the test. Each PLAY..STOP session identifies its own golden from
+  its header (project sha, sr, mode, start arg); render sessions compare byte-for-byte, live sessions
+  prefix-compare in emission order with preview-lane noise ignored (JVM↔ART float identity check).
+  Step-by-step: `docs/internal/songcore-s1-device-test.md`.
 
-Rules:
+---
 
-1. **Any diff in `traces/` is a sequencing behavior change.** `GoldenTraceTest` fails on drift. If the
-   change is deliberate, regenerate (delete `traces/`, rerun tests) and commit the new goldens
-   in the same commit as the behavior change, per the event-schema §9 discipline.
+## 5. Reclassification — conformance → regression
+
+*(To be dated and tagged by convergence Phase B3.)*
+
+---
+
+## 6. Rules
+
+1. **Any diff in `traces/` is a sequencing behavior change.** `GoldenTraceTest` fails on drift. If
+   the change is deliberate, regenerate per §2 and commit the new goldens in the same commit as the
+   behavior change, per the event-schema §9 discipline.
 2. Traces compare **byte-for-byte** (after the canonical `(frame, track, rank)` stable sort for
-   cross-implementation runs). `.gitattributes` pins `-text` — never let EOL conversion touch
-   these files.
+   cross-implementation runs). `.gitattributes` pins `-text` — never let EOL conversion touch these
+   files.
 3. Golden projects are random-free (no CHA/RND/RNL/ARP-RANDOM) per SC-1. Random FX get separate
-   statistical tests in a later session. `g7-audio` additionally avoids everything else that is
-   seeded from the wall clock (the RND/DRNK LFO shapes, DUST), because ptrender asserts that two
-   renders of it are byte-identical.
+   statistical tests. `g7-audio` additionally avoids everything else that is seeded from the wall
+   clock (the RND/DRNK LFO shapes, DUST), because ptrender asserts that two renders of it are
+   byte-identical.
 4. Live SONG/CHAIN/PHRASE traces run to a fixed fake-clock horizon then stop — they intentionally
-   include the look-ahead scheduling past the loop point (2-phrase buffer). Deterministic by
-   FIX-1 + the fixed drive cadence in `TraceHarness`.
+   include the look-ahead scheduling past the loop point (2-phrase buffer). Deterministic by FIX-1 +
+   the fixed drive cadence in `TraceHarness`.
 5. **Adding a project to `GoldenProjects.all` writes into three places**, and all of them are
-   compare-if-present goldens: its `.ptp`, its `traces/`, and two lines in `units/s3-units.txt`
-   (the `collectUsedInstruments` cases). Mirror the new spec into `tools/ptplay`'s `SPECS` table too,
-   or the C++ side simply never checks it.
+   compare-if-present goldens: its `.ptp`, its `traces/`, and two lines in `units/s3-units.txt` (the
+   `collectUsedInstruments` cases). Mirror the new spec into `tools/ptplay`'s `SPECS` table too, or
+   the C++ side simply never checks it.
