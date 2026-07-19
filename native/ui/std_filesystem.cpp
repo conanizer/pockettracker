@@ -9,6 +9,15 @@
 #include <fstream>
 #include <system_error>
 
+#if defined(_WIN32)
+// The ONLY platform header in pt-ui, and it buys exactly one thing: the answer to "where is Documents",
+// which no portable API can give (see documents_directory below). NOMINMAX because <windows.h> defines
+// `min`/`max` as macros and this file uses std::min.
+#define NOMINMAX
+#include <windows.h>
+#include <shlobj.h>
+#endif
+
 namespace fs = std::filesystem;
 
 namespace pt::ui {
@@ -51,6 +60,52 @@ const char* env_or_null(const char* key) {
     return (v && *v) ? v : nullptr;
 }
 
+#if defined(_WIN32)
+
+/**
+ * UTF-16 → the Windows NARROW encoding, which is the one thing on this path that must not be guessed.
+ *
+ * ⚠️ `CP_ACP`, deliberately, NOT `CP_UTF8`. Everything downstream of this string takes it as narrow
+ * `char`: `fs::path(std::string)` and `std::ifstream(const char*)` both decode with the process's ACTIVE
+ * code page on MSVC. Hand them UTF-8 bytes on a machine whose ACP is still legacy and a user called
+ * "José" gets a path that does not exist — silently, because every one of those calls reports failure by
+ * returning an empty listing.
+ *
+ * CP_ACP is also the choice that stays right AFTER the fix: an app manifest with `ActiveCodePage=UTF-8`
+ * (Windows 10 1903+) makes the ACP *be* UTF-8, and this line then produces UTF-8 without being touched.
+ * That manifest is the real repair for names the legacy ACP cannot represent at all (Cyrillic on a
+ * Western-European box, where the conversion below substitutes '?'), and it belongs with the packaging —
+ * it is A3 on the convergence plan, not this function.
+ */
+std::string narrow(const wchar_t* wide) {
+    if (!wide || !*wide) return {};
+    const int n = ::WideCharToMultiByte(CP_ACP, 0, wide, -1, nullptr, 0, nullptr, nullptr);
+    if (n <= 1) return {};                       // 1 == the terminator alone, i.e. it converted to nothing
+    std::string out(static_cast<size_t>(n - 1), '\0');
+    ::WideCharToMultiByte(CP_ACP, 0, wide, -1, out.data(), n, nullptr, nullptr);
+    return out;
+}
+
+/**
+ * `Documents`, as EXPLORER resolves it. Empty if Windows will not say.
+ *
+ * ⚠️ Not `%USERPROFILE%\Documents`, and the difference is not pedantry — it is most Windows 11 machines.
+ * With OneDrive's "back up your folders" on (the default on a consumer install), Explorer's Documents is
+ * `…\OneDrive\Documents`, while `%USERPROFILE%\Documents` is a leftover empty directory beside it. Guess
+ * the second and the app writes songs into a folder its owner is not looking at — which is the exact
+ * failure the Documents decision was taken to avoid.
+ */
+std::string documents_directory() {
+    PWSTR         wide = nullptr;
+    const HRESULT hr   = ::SHGetKnownFolderPath(FOLDERID_Documents, KF_FLAG_CREATE, nullptr, &wide);
+    std::string   out;
+    if (SUCCEEDED(hr)) out = narrow(wide);
+    ::CoTaskMemFree(wide);   // documented as required even on failure, where it is handed nullptr
+    return out;
+}
+
+#endif  // _WIN32
+
 }  // namespace
 
 // ─── Path helpers ────────────────────────────────────────────────────────────────────────────────
@@ -79,10 +134,37 @@ std::string to_lower(std::string s) {
 }
 
 std::string default_app_root() {
+    // An explicit override wins on every platform, and on the handheld it is the only answer that ever
+    // runs: a PortMaster launch script exports it to point the app at the SD card's ports directory.
     if (const char* home = env_or_null("POCKETTRACKER_HOME")) return home;
+
+#if defined(_WIN32)
+    // ⚠️ BEFORE the XDG/HOME chain rather than after it, and that ordering is most of the point of this
+    // branch. MSYS2, Git Bash and Cygwin all export HOME on Windows, so the fall-through would send a
+    // shell launched from any of those to `C:/Users/<name>/.local/share/PocketTracker` — a directory no
+    // Windows user would think to look in — while the same binary double-clicked from Explorer answered
+    // differently. One binary, one root, whatever started it.
+    //
+    // Documents, NOT %APPDATA%: projects, samples and renders are the USER's documents, which is the
+    // same argument that put Android's under /Documents/PocketTracker. A song saved into AppData is a
+    // song its owner cannot find from Explorer.
+    if (const std::string docs = documents_directory(); !docs.empty())
+        return generic(fs::path(docs) / "PocketTracker");
+    if (const char* profile = env_or_null("USERPROFILE"))
+        return generic(fs::path(profile) / "Documents" / "PocketTracker");
+#elif defined(__APPLE__)
+    // The same argument as Windows, so the same answer: ~/Documents, not ~/Library/Application Support.
+    if (const char* home = env_or_null("HOME")) return std::string(home) + "/Documents/PocketTracker";
+#else
     if (const char* xdg = env_or_null("XDG_DATA_HOME")) return std::string(xdg) + "/PocketTracker";
     if (const char* home = env_or_null("HOME"))
         return std::string(home) + "/.local/share/PocketTracker";
+#endif
+
+    // Every branch above missed — a stripped-down CFW with no HOME, a Windows install that will not name
+    // its own Documents folder. Relative to the CWD is a poor root (it scatters an app tree wherever the
+    // binary was run from, which is how a `PocketTracker/` folder once appeared inside the source
+    // checkout) but it is a WRITABLE one, and the alternative is an app that cannot save at all.
     return "PocketTracker";
 }
 

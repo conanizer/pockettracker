@@ -379,7 +379,8 @@ int main(int argc, char** argv) {
     //                   (default: the project file's own directory, or the app root if there is no
     //                    project — see set_media_base_dir below)
     //   app-root        where Projects/ Samples/ Soundfonts/ Instruments/ live
-    //                   (default: $POCKETTRACKER_HOME, else XDG, else ~/.local/share)
+    //                   (default: $POCKETTRACKER_HOME, else the platform's — Documents on Windows and
+    //                    macOS, XDG/~/.local/share on Linux; see ui::default_app_root)
     const bool        hasProject  = (argc > 1);
     const std::string projectPath = hasProject ? argv[1] : std::string();
     const std::string baseDir     = hasProject ? ((argc > 2) ? argv[2] : dir_of(projectPath)) : std::string();
@@ -466,9 +467,10 @@ int main(int argc, char** argv) {
     // The seven app directories — Projects, Samples, Soundfonts, Instruments, Renders, Themes — live
     // under ONE root, and the root is the only per-platform fact about files. Android hard-codes
     // `Documents/PocketTracker` because that is the one place scoped storage lets it write and the user
-    // browse; a handheld has no Documents directory, so it is chosen here (`$POCKETTRACKER_HOME`, then
-    // XDG, then `$HOME/.local/share` — see default_app_root), and a PortMaster launch script sets the
-    // env var to point at the SD card's ports folder.
+    // browse; everywhere else it is chosen here, by `$POCKETTRACKER_HOME` if the launcher says (which is
+    // how a PortMaster script points the app at the SD card's ports folder) and otherwise by platform —
+    // Documents on a desktop, where a file manager is how the user reaches their songs, and XDG on a
+    // handheld, which has no Documents folder. See default_app_root.
     //
     // The SUB-directory names are identical to Android's on purpose: a user who copies their
     // `PocketTracker/` folder off a phone onto an SD card must find their projects where the app looks.

@@ -98,10 +98,20 @@ std::string to_lower(std::string s);
 /**
  * Where the app's folder goes when the shell does not say.
  *
- * `$POCKETTRACKER_HOME` wins if it is set — which is what a PortMaster launch script uses to point the
- * app at the SD card's ports directory. Otherwise `$XDG_DATA_HOME/PocketTracker`, then
- * `$HOME/.local/share/PocketTracker`, and finally `./PocketTracker` for a box with neither (a Windows
- * dev machine, a stripped-down CFW).
+ * `$POCKETTRACKER_HOME` wins on every platform if it is set — which is what a PortMaster launch script
+ * uses to point the app at the SD card's ports directory. Otherwise, per platform:
+ *
+ *   Windows   `Documents\PocketTracker`, Documents as Explorer resolves it (so: the OneDrive one, if
+ *             that is what the machine has), falling back to `%USERPROFILE%\Documents`
+ *   macOS     `$HOME/Documents/PocketTracker`
+ *   Linux     `$XDG_DATA_HOME/PocketTracker`, then `$HOME/.local/share/PocketTracker`
+ *
+ * and finally the relative `./PocketTracker` for a box that answered none of the above.
+ *
+ * ⚠️ Windows and macOS choose Documents where Linux chooses a data directory, and that is deliberate,
+ * not an inconsistency: a handheld has no Documents folder and its user reaches files over the SD card,
+ * while a desktop user reaches them through a file manager. It is the same reasoning that put Android's
+ * root under `/Documents/PocketTracker`, and it keeps the seven folder names identical on all four.
  */
 std::string default_app_root();
 

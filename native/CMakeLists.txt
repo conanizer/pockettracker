@@ -245,6 +245,15 @@ if(NOT ANDROID)
     # inherits the engine's include roots too — the same reasoning as pockettracker's own PUBLIC roots.
     target_link_libraries(pt-ui PUBLIC pockettracker)
 
+    # ui/std_filesystem.cpp asks Windows where `Documents` is — SHGetKnownFolderPath (shell32) and the
+    # CoTaskMemFree that releases its result (ole32). Stated explicitly rather than inherited: CMake puts
+    # both in MSVC's default CMAKE_CXX_STANDARD_LIBRARIES, so this line changes nothing there, but a
+    # MinGW or clang-mingw build links neither by default and would fail with two undefined references
+    # in a file whose Windows branch nothing else in the tree exercises.
+    if(WIN32)
+        target_link_libraries(pt-ui PUBLIC shell32 ole32)
+    endif()
+
     # IEEE-exactness, for the same reason songcore-jni.cpp carries it: this target includes songcore
     # headers, and the rule stated above is that any TU which does must not have its math reassociated
     # or fma-contracted.
