@@ -190,6 +190,23 @@ goldens, anything the Linux build ships) store sample paths **relative** to the 
 project saved on a device stores absolute paths, and both resolve correctly
 (`engine_setup.h: resolve_media_path`).
 
+### Environment
+
+| variable | |
+|---|---|
+| `POCKETTRACKER_HOME` | the app root (`Projects/`, `Samples/`…). Overrides the platform default on every platform; a PortMaster launch script exports it to point at the SD card. |
+| `POCKETTRACKER_LOG` | **`=1` turns the engine's `LOGD` chatter back on.** Off by default. |
+| `POCKETTRACKER_AUDIO_PROFILE` | the audio-callback profiler (`sdl-audio-engine.cpp`). |
+
+⚠️ **`POCKETTRACKER_LOG` is off by default and that is a deliberate reversal (2026-07-20).** On
+Android `LOGD` is a debug-priority line nobody sees; off Android there is no logcat, so the same 35
+call sites went straight to stderr — meaning the shipped desktop console filled with
+`[D/NativeAudio] 🔊 Track 0 volume set to 1.00` on every boot, emoji mojibaked on any non-UTF-8
+console. **The PortMaster build had always done this too**; it went unnoticed because a handheld's
+stderr goes nowhere anyone looks. During a bring-up, set the variable — that is what it is for.
+`LOGE` is **not** gated: an error is not spam, and the console is only worth keeping if a user can
+paste it back.
+
 ### Controls
 
 The keyboard map is copied key-for-key from the Android one (`InputMapper.keyboardMapping`), so

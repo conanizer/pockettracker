@@ -105,3 +105,12 @@ SOMETHING WRONG?
 
 https://github.com/conanizer/pockettracker/issues - and please paste the text from the
 console window, it usually says what happened.
+
+For a report about sound - a note that will not stop, a sample that will not load -
+there is a verbose mode. Open a Command Prompt in this folder and run:
+
+    set POCKETTRACKER_LOG=1
+    PocketTracker.exe
+
+The console then also prints what the audio engine is doing internally. It is off by
+default because it is noisy and none of it means anything is wrong.

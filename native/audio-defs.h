@@ -11,7 +11,46 @@
 #  define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #else
 #  include <cstdio>
-#  define LOGD(...) do { fprintf(stderr, "[D/" LOG_TAG "] "); fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } while (0)
+#  include <cstdlib>
+
+// ⚠️ OFF ANDROID THERE IS NO LOGCAT TO FILTER THESE. On Android LOGD is a debug-priority line that a
+// user never sees; here the same 35 call sites go straight to stderr — which, in a shipped desktop
+// build, is the console window sitting behind the tracker. A2's first-run experience was a wall of
+//
+//     [D/NativeAudio] 🔊 Track 0 volume set to 1.00
+//
+// on every boot, with the emoji arriving as mojibake on any console that is not UTF-8 (which is
+// main.cpp's own stated ASCII rule, broken by a header that predates it). The PortMaster build has
+// always done this too; nobody noticed because a handheld's stderr goes nowhere anyone looks.
+//
+// So LOGD is OPT-IN off Android:  POCKETTRACKER_LOG=1 ./pockettracker-sdl
+// Anything but unset/empty/"0" turns it on, matching how POCKETTRACKER_HOME is read.
+//
+// ⚠️ LOGE IS NOT GATED, deliberately. An error is not spam, and a shipped build that swallows its
+// errors is worse than one that is chatty — the whole reason the console is worth keeping is that a
+// user can paste it back when something breaks.
+//
+// ⚠️ A PLAIN BOOL READ ONCE, not getenv() per call. getenv allocates nothing but walks the
+// environment and is not real-time safe, and while processAudioBlock currently contains no log call
+// at all (checked), the control-path functions that do are reachable from queue drains. A C++17
+// inline variable is initialised before main, so every LOGD after start-up costs one predictable
+// branch on an already-hot bool — cheaper than today's unconditional fprintf, and safe if a log
+// line ever does land on the audio thread.
+namespace ptlog {
+inline const bool debug_enabled = [] {
+    const char* v = std::getenv("POCKETTRACKER_LOG");
+    return v != nullptr && v[0] != '\0' && !(v[0] == '0' && v[1] == '\0');
+}();
+}  // namespace ptlog
+
+#  define LOGD(...)                                            \
+      do {                                                     \
+          if (::ptlog::debug_enabled) {                        \
+              fprintf(stderr, "[D/" LOG_TAG "] ");             \
+              fprintf(stderr, __VA_ARGS__);                    \
+              fputc('\n', stderr);                             \
+          }                                                    \
+      } while (0)
 #  define LOGE(...) do { fprintf(stderr, "[E/" LOG_TAG "] "); fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } while (0)
 #endif
 
