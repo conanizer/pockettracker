@@ -23,6 +23,12 @@
 
 1 ICON "@PT_ICON@"
 
+// The application manifest — activeCodePage=UTF-8, and why that is load-bearing, is explained in
+// the file itself. Numeric resource type on purpose: 1 is CREATEPROCESS_MANIFEST_RESOURCE_ID and
+// 24 is RT_MANIFEST, and spelling them as numbers means this line does not depend on which SDK
+// header happens to define the macros for whichever resource compiler is in use.
+1 24 "@PT_MANIFEST@"
+
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION    @PT_VERSION_COMMA@
  PRODUCTVERSION @PT_VERSION_COMMA@

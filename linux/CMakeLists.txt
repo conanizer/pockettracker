@@ -107,7 +107,8 @@ if(WIN32)
     # Ninja in particular will not compile a .rc without this; the VS generators are more forgiving,
     # which is exactly how a build breaks on the runner and not on the dev box.
     enable_language(RC)
-    set(PT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/windows/PocketTracker.ico")
+    set(PT_ICON     "${CMAKE_CURRENT_SOURCE_DIR}/windows/PocketTracker.ico")
+    set(PT_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/windows/pockettracker.manifest")
     configure_file(windows/pockettracker.rc.in "${CMAKE_CURRENT_BINARY_DIR}/pockettracker.rc" @ONLY)
     set(PT_WIN_RESOURCES "${CMAKE_CURRENT_BINARY_DIR}/pockettracker.rc")
 endif()
@@ -136,6 +137,11 @@ add_executable(pockettracker-sdl
 # countermand the ENGINE's own -ffast-math policy, which it is entitled to make for itself.
 if(MSVC)
     target_compile_options(pockettracker-sdl PRIVATE /fp:precise)
+    # ⚠️ The manifest embedded by the .rc above is the ONLY one. MSVC's linker synthesises its own
+    # by default (the bare asInvoker one it has always produced), and two manifests in one image is
+    # a link error at best and the wrong one winning at worst — losing activeCodePage=UTF-8, whose
+    # absence is silent until a user has a non-ASCII character in a path.
+    target_link_options(pockettracker-sdl PRIVATE /MANIFEST:NO)
 else()
     target_compile_options(pockettracker-sdl PRIVATE -fno-fast-math -ffp-contract=off)
 endif()

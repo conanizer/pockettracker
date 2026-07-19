@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  The application manifest — convergence plan A3, completing a job A1 deliberately left here.
+
+  activeCodePage=UTF-8 is the point of this file. Every narrow string this program takes from the
+  OS — argv, getenv, and everything it then hands to std::ifstream and std::filesystem::path — is
+  decoded through the process ANSI code page, which is a per-machine locale setting (1251 here, 1252
+  on a Western install, 932 on a Japanese one). Pinning it to UTF-8 makes one binary read one disk
+  the same way everywhere instead of differently per install. Windows 10 1903+ honours it; older
+  Windows ignores it and behaves exactly as before, so there is nothing to fall back to.
+
+  ⚠️ WHAT WAS AND WAS NOT DEMONSTRATED (2026-07-20). Do not upgrade this claim without new
+  measurement. Two attempts to show a behavioural difference on this box BOTH came back with the
+  control passing:
+    - a Cyrillic+Japanese POCKETTRACKER_HOME: both builds created the folder tree correctly;
+    - opening `日本語のうた.ptp` by argv, straight into std::ifstream: both builds read it,
+      neither printed main.cpp's "cannot read".
+  This machine's ACP is 1251, which cannot represent 日本語, so the control was expected to fail and
+  did not — meaning the mechanism is not the simple one assumed, and MSVC's filesystem picks its
+  code page at runtime (`__std_fs_code_page`) rather than the fixed ACP that std_filesystem.cpp's
+  own comment describes.
+
+  It is kept because it is Microsoft's documented setting for exactly this class of bug, it is inert
+  where unsupported, and A1 chose CP_ACP in `documents_directory()` on the stated expectation that
+  this would land (CP_ACP is right on a legacy code page and stays right once the ACP *is* UTF-8).
+  But one locale on one machine is not a proof, and "no difference observed here" is not "no
+  difference". ⚠️ The open question A1 and this file jointly raise — whether CP_ACP is still the
+  correct conversion given what `__std_fs_code_page` actually does — is unanswered and worth a
+  session of its own.
+
+  ⚠️ The linker is told NOT to generate its own manifest (/MANIFEST:NO in linux/CMakeLists.txt), or
+  there would be two and the embedded one here would be the loser. The trustInfo block below is
+  therefore not decoration: it is the asInvoker level the auto-generated manifest used to supply,
+  restated so that suppressing it changes nothing else.
+
+  ⚠️ The linker is told NOT to generate its own manifest (/MANIFEST:NO in linux/CMakeLists.txt), or
+  there would be two and the embedded one here would be the loser. The trustInfo block below is
+  therefore not decoration: it is the asInvoker level the auto-generated manifest used to supply,
+  restated so that suppressing it changes nothing else.
+--><assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <!-- A tracker has no business asking for elevation. -->
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 / 11. Declaring the supported OS is what opts the process in to the
+           per-version behaviour below rather than the compatibility-shimmed defaults. -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+
+</assembly>
