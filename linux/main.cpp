@@ -1,41 +1,27 @@
-// PocketTracker — the SDL shell. Linux-port plan Phase 2 (the sound) + Phase 3 (the UI).
+// PocketTracker — the DESKTOP/HANDHELD entry point. Everything in this file is platform residue.
+//
+// Convergence C0.2 split the old 771-line main.cpp in two. The boot sequence, the frame loop and the
+// teardown were portable orchestration and moved to `app.{h,cpp}`, which every platform shares; what
+// is left here is the small, nameable remainder that genuinely is not:
+//
+//   • the COMMAND LINE — a desktop and a PortMaster launch script have one; an APK does not;
+//   • the SIGNAL HANDLER — POSIX. Android's lifecycle arrives as `SDL_APP_*` events instead (C4);
+//   • `SDL_Init` and `SDL_Quit` — Android's `SDLActivity` owns its own;
+//   • the AUDIO BACKEND — `SdlAudioEngine` here, `OboeAudioEngine` there (C3, audio-backend.h);
+//   • the ROOT and the FILESYSTEM — `default_app_root()` + `StdFileSystem`. C5 decides Android's;
+//   • the CAPS profile, and whether there is a console to print a banner to.
+//
+// That is the whole list, and it is the point of the split: convergence C1–C4 add a second file
+// beside this one rather than forking the tracker.
 //
 // Everything that decides how a song SOUNDS — the sequencer, effect resolution, the voices, the whole
 // DSP chain — is the same C++ the APK ships, linked from native/ and reached through one class:
 //
 //     songcore::SongcoreHost          (native/songcore/host.h)
 //
-// which is the same class songcore-jni.cpp marshals for Android. Since Phase 3 began, everything that
+// which is the same class songcore-jni.cpp marshals for Android. Since Phase 3, everything that
 // decides how the app LOOKS is shared too — `pt-ui` (native/ui/) draws the screens into a 640×480
-// framebuffer and knows nothing about SDL. So what is left in this file is only, and exactly, the
-// shell: a window, an audio device, an input source, and a clock.
-//
-//     ┌─────────────────────────────────────────────┐
-//     │  native/ui       the screens, the canvas     │  ← portable, no SDL   (tools/ptshot draws it headless)
-//     │  native/songcore the sequencer, the project  │  ← portable, no SDL
-//     │  native/         the engine, the DSP         │  ← portable, no SDL
-//     ├─────────────────────────────────────────────┤
-//     │  linux/          window · audio · input      │  ← the only SDL in the program
-//     └─────────────────────────────────────────────┘
-//
-// The one thing worth stating plainly: the UI edits `host.edit_project()` — the SAME Project object
-// the Sequencer is reading — so an edit is live the instant it is made. There is no second copy of the
-// document and therefore nothing that can desync. (Android needs a second copy because Compose needs
-// an observable object graph; it pushes the whole thing down as JSON on every change. There is no
-// Kotlin here.)
-//
-// ─── WHAT IS HERE ────────────────────────────────────────────────────────────────────────────────
-//
-// All SIXTEEN screens, as of Phase 3 S9 — SONG, CHAIN, PHRASE, TABLE, GROOVE, INSTRUMENT, INST.POOL,
-// MODS, MIXER, EFFECTS, PROJECT, SETTINGS, the FILE BROWSER, the SAMPLE EDITOR, and the EQ and THEME
-// editor overlays — with the whole input layer under them: selection, the clipboard, item cycling,
-// cloning, the note preview, the FX helper, the QWERTY keyboard, the confirm dialog, the auditions.
-// Nothing in the Kotlin dispatcher is unported. There is no "COMING SOON" placeholder left to draw.
-//
-// S10 added the LIFECYCLE, which is the part of an app that has no screen: the crash-recovery autosave,
-// the signal handler that makes a launcher's kill survivable, and the RECOVER WORK? prompt that hands
-// the work back. The three things this file does that `pt-ui` cannot are all in that shape — a window,
-// a clock, and a process that can be taken away.
+// framebuffer and knows nothing about SDL.
 
 // <cmath> before <SDL.h> — see the note in sdl-audio-engine.h (M_PI, _USE_MATH_DEFINES, C4005).
 #include <cmath>
@@ -44,21 +30,11 @@
 #include <SDL.h>
 
 #include "audio-engine.h"
-#include "songcore/host.h"
-#include "ui/app_state.h"
-#include "ui/button_mapper.h"
-#include "ui/buttons.h"
-#include "ui/canvas.h"
-#include "ui/engine_feed.h"
-#include "ui/input_dispatcher.h"
-#include "ui/layout.h"
 #include "ui/platform_caps.h"
-#include "ui/settings_store.h"
 #include "ui/std_filesystem.h"
 
+#include "app.h"
 #include "sdl-audio-engine.h"
-#include "sdl-input.h"
-#include "sdl-video.h"
 
 #include <csignal>
 #include <cstdio>
@@ -67,7 +43,6 @@
 #include <sstream>
 #include <string>
 
-using namespace songcore;
 namespace ui = pt::ui;
 
 namespace {
@@ -84,7 +59,8 @@ namespace {
 // The app HANGS instead of saving, the launcher's SIGKILL arrives a second later, and the autosave has
 // failed in precisely the case it was written for. Writing to a `volatile sig_atomic_t` is the one
 // thing the standard actually promises here, so it is the only thing this does. The frame loop reads
-// the flag, leaves, and flushes on the main thread with the heap intact.
+// the flag through `AppConfig::terminate_requested`, leaves, and flushes on the main thread with the
+// heap intact.
 //
 // ⚠️ **AND IT IS OURS, NOT SDL's — WHICH IS NOT WHAT S10 FIRST ASSUMED.** SDL_quit.c installs handlers
 // for SIGINT and SIGTERM that do exactly this (`send_quit_pending = SDL_TRUE`; its own comment says
@@ -131,10 +107,10 @@ int main(int argc, char** argv) {
     // did it put its folders?", "did it find my crash file?" — and stdout is FULLY buffered the moment it
     // is not a terminal. Pipe the shell to a log during a bring-up and then kill it, which is precisely
     // what a bring-up does, and the buffer dies with the process: the log is empty and every question is
-    // still unanswered. The once-a-second status line below already knew this and carried its own
-    // `fflush`; the START-UP banner — the half that says whether anything worked — did not, and lost
-    // itself the first time S10 piped it. One `setvbuf` retires the whole class of bug, and at a print
-    // volume of a few lines a second it costs nothing.
+    // still unanswered. The once-a-second status line already knew this and carried its own `fflush`;
+    // the START-UP banner — the half that says whether anything worked — did not, and lost itself the
+    // first time S10 piped it. One `setvbuf` retires the whole class of bug, and at a print volume of a
+    // few lines a second it costs nothing.
     //
     // (⚠️ Not `_IOLBF`: the MSVC CRT does not implement line buffering and silently treats it as full
     // buffering, so the dev box would go on losing the output while Linux looked fine.)
@@ -152,7 +128,7 @@ int main(int argc, char** argv) {
     //   project.ptp     a song to open at boot   (default: a blank document)
     //   media-base-dir  where the project's relative sample paths resolve against
     //                   (default: the project file's own directory, or the app root if there is no
-    //                    project — see set_media_base_dir below)
+    //                    project — see the mediaBaseDir note below)
     //   app-root        where Projects/ Samples/ Soundfonts/ Instruments/ live
     //                   (default: $POCKETTRACKER_HOME, else the platform's — Documents on Windows and
     //                    macOS, XDG/~/.local/share on Linux; see ui::default_app_root)
@@ -176,6 +152,9 @@ int main(int argc, char** argv) {
     std::signal(SIGTERM, on_terminate_signal);
     std::signal(SIGINT, on_terminate_signal);
 
+    // ⚠️ NO `SDL_INIT_AUDIO`. `SdlAudioEngine::openStream` initialises the audio subsystem itself, which
+    // is what lets Android drop this backend for Oboe without SDL ever opening a device to fight over —
+    // see audio-backend.h.
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return 1;
@@ -190,359 +169,48 @@ int main(int argc, char** argv) {
         SDL_Quit();
         return 1;
     }
-    engine->onResumeRequested = [&audio] { audio.resumeStream(); };
 
-    SongcoreHost host(engine.get(), audio.sampleRate());
-
-    // THIS install's app root — where Projects/ Samples/ Soundfonts/… live (also the FileSystem's root,
-    // set up below). Handed to the host BEFORE the first load: a project opened at boot may have been
-    // authored on another install (a phone's Documents/PocketTracker) whose absolute media paths are dead
-    // here until re-rooted onto ours. Computed once; StdFileSystem reuses it below. See set_app_root.
+    // THIS install's app root — where Projects/ Samples/ Soundfonts/… live, and the FileSystem's root.
+    // `$POCKETTRACKER_HOME` if the launcher says (which is how a PortMaster script points the app at the
+    // SD card's ports folder) and otherwise by platform — Documents on a desktop, where a file manager
+    // is how the user reaches their songs, and XDG on a handheld, which has no Documents folder.
     const std::string appRoot = (argc > 3) ? argv[3] : ui::default_app_root();
-    host.set_app_root(appRoot);
+    ui::StdFileSystem filesystem(appRoot);
 
-    if (hasProject) {
-        if (!host.push_project(blob)) {
-            std::fprintf(stderr, "%s did not parse as a .ptp\n", projectPath.c_str());
-            SDL_Quit();
-            return 1;
-        }
+    ptshell::AppConfig cfg;
+    cfg.engine      = engine.get();
+    cfg.audio       = &audio;
+    cfg.appRoot     = appRoot;
+    cfg.filesystem  = &filesystem;
+    cfg.projectBlob = blob;
+    cfg.projectPath = projectPath;
 
-        const MediaLoadResult media = host.load_media(baseDir);
-        std::printf("project: %s\nmedia:   %d loaded, %d failed (base dir: %s)\n", projectPath.c_str(),
-                    media.loaded, media.failed, baseDir.c_str());
-        if (media.failed > 0) {
-            // ASCII, like every other line this program prints — see the banner below. (This one was NOT:
-            // it carried an em-dash, on the one path you most want legible when something has already gone
-            // wrong on a device with no screen. Found by grepping the file against its own stated rule.)
-            std::fprintf(stderr,
-                         "warning: %d sample(s)/SoundFont(s) failed to load - those instruments will be "
-                         "silent\n",
-                         media.failed);
-        }
-    } else {
-        // The same document NEW PROJECT builds. There is no media to load: a blank project references
-        // no samples, so load_media would walk an empty instrument pool and report 0/0.
-        host.new_project();
-        std::printf("project: (none given) - starting on a blank document\n");
-    }
+    // ⚠️ Never empty — an empty base resolves every relative sample path against the process's cwd,
+    // which on a handheld is whatever the launch script last cd'd to. With no project on the command
+    // line there is no project directory to be relative TO, and the app root is the honest answer: it
+    // is where Samples/ lives, so it is where a recovered autosave's relative media actually is.
+    cfg.mediaBaseDir = hasProject ? baseDir : appRoot;
 
-    // ⚠️ **Load the media, then push the PARAMS.** The engine holds a great deal of state on its own
-    // behalf that no note ever carries — the mixer, the master bus, reverb, delay, the 128-slot EQ bank,
-    // and every instrument's drive / crush / filter / sample window / loop — and until Phase 3 S4 the
-    // only thing in the whole tree that pushed any of it was the offline renderer. So this shell would
-    // RENDER a project correctly and PLAY the same project on the engine's factory defaults. See
-    // songcore::push_live_params: it survived Phase 2 and three Phase-3 sessions because it is invisible
-    // to every conformance tool (none of it is an event, none of it is made by a note, and the one tool
-    // that compares audio renders — through the path that was already right).
-    host.push_params();
-
-    // ── The file system (S6a) ────────────────────────────────────────────────────────────────────
-    //
-    // The seven app directories — Projects, Samples, Soundfonts, Instruments, Renders, Themes — live
-    // under ONE root, and the root is the only per-platform fact about files. Android hard-codes
-    // `Documents/PocketTracker` because that is the one place scoped storage lets it write and the user
-    // browse; everywhere else it is chosen here, by `$POCKETTRACKER_HOME` if the launcher says (which is
-    // how a PortMaster script points the app at the SD card's ports folder) and otherwise by platform —
-    // Documents on a desktop, where a file manager is how the user reaches their songs, and XDG on a
-    // handheld, which has no Documents folder. See default_app_root.
-    //
-    // The SUB-directory names are identical to Android's on purpose: a user who copies their
-    // `PocketTracker/` folder off a phone onto an SD card must find their projects where the app looks.
-    ui::StdFileSystem filesystem(appRoot);   // appRoot computed above (host.set_app_root)
-
-    // ⚠️ Create them NOW, at boot, rather than lazily on the first browse. `ensure_dir` runs inside each
-    // getter, so the folders would otherwise not exist until the user opened the browser once — and on a
-    // handheld that is exactly backwards. The first thing anyone does with a new port is plug the SD
-    // card into a PC and copy their samples in, and they cannot do that if the app has not yet said
-    // where. (Android gets this for free: it calls the getters all through start-up.)
-    filesystem.projects_directory();
-    filesystem.samples_directory();
-    filesystem.renders_directory();
-    filesystem.instruments_directory();
-    filesystem.soundfonts_directory();
-    filesystem.themes_directory();
-    std::printf("files:   %s\n", appRoot.c_str());
-
-    SdlVideo video;
-    if (!video.open("PocketTracker", ui::DESIGN_W, ui::DESIGN_H)) {
-        SDL_Quit();
-        return 1;
-    }
-
-    SdlInput input;
-
-    // ⚠️ POCKETTRACKER_INPUT_TRACE=1 — the bring-up instrument for a NEW device or CFW, and the only
-    // eye the port has on the layer between the hardware and `ButtonEvent`. ptinput and ptdispatch
-    // both start one layer BELOW this: neither can see SDL, the CFW's controller mapping, or the
-    // launch script — which is precisely the layer P4b's bug lived in.
-    //
-    // An env var rather than a flag because PortMaster invokes the binary with NO arguments, so a
-    // flag would be unreachable on the device this exists for. Off unless asked: it prints per event.
-    const char* inputTrace = SDL_getenv("POCKETTRACKER_INPUT_TRACE");
-    if (inputTrace && inputTrace[0] == '1') {
-        input.set_trace(true);
-        std::printf("input:   TRACE ON — every event prints, with what it mapped to (or did not)\n");
-    }
-
-    input.open_controllers();
-
-    // The UI state points at the host's live project — one document, edited in place. The boot
-    // screen is AppState's own default (SONG, as Android): restating it here would be a second
-    // place for it to rot, which is exactly how it sat on PHRASE for four phases.
-    ui::AppState state;
-    state.project = &host.edit_project();
-
-    // ── What THIS platform can do (S7) ───────────────────────────────────────────────────────────
-    //
     // Which SETTINGS rows exist, and whether PROJECT has an EXIT. A VALUE, not an #ifdef — see
     // ui/platform_caps.h for why that is the whole design: the same module compiled with
     // `PlatformCaps::android()` reproduces Kotlin's row map exactly, which is what lets ptinput
     // byte-compare the port's most divergent screen against the Kotlin one it replaces.
 #ifdef NDEBUG
-    state.caps = ui::PlatformCaps::sdl(/*debug_build=*/false);
+    cfg.caps = ui::PlatformCaps::sdl(/*debug_build=*/false);
 #else
-    state.caps = ui::PlatformCaps::sdl(/*debug_build=*/true);
+    cfg.caps = ui::PlatformCaps::sdl(/*debug_build=*/true);
 #endif
 
-    // ── settings.json ────────────────────────────────────────────────────────────────────────────
-    // SharedPreferences, as a file. No file = first launch = the factory settings, which is not an
-    // error and gets no complaint.
-    if (ui::load_settings(filesystem, state.settings, state.theme))
-        std::printf("settings: %s\n", filesystem.settings_path().c_str());
+    // A desktop and a handheld both have somewhere for this to go — a terminal, an ssh session, a
+    // PortMaster log. The banner and the once-a-second status line are the bring-up instrument.
+    cfg.console = true;
 
-    ui::Canvas        canvas;
-    ui::TrackerLayout layout;
-    ui::EngineFeed    feed;
+    // The launcher's kill, as a question the shared loop can ask once a frame. The handler above only
+    // ever sets this flag; everything that has to happen because of it happens in the loop.
+    cfg.terminate_requested = [] { return g_terminate != 0; };
 
-    // The whole input layer, in one object. It edits `host.edit_project()` — the SAME Project the
-    // Sequencer is reading — so an edit is live the instant it is made.
-    ui::InputDispatcher dispatch(state, host, filesystem);
-    ui::MapperState     mapper;
+    const int rc = ptshell::run(cfg);
 
-    // ── What a RENDER needs from the shell (S7) ──────────────────────────────────────────────────
-    //
-    // The render is SYNCHRONOUS — the frame loop stops and renders. Android hands it to a coroutine
-    // because Compose would ANR; there is nothing here to hand it to, and stopping is the safer
-    // answer anyway, because the ONE thing that must not touch the engine while an offline render is
-    // driving it is the audio callback.
-    //
-    // ⚠️ So the device is PAUSED, not merely stopped. Kotlin stops PLAYBACK and leaves its Oboe stream
-    // open and idle, which is a race it happens to win (an idle callback reads a silent engine). A
-    // paused SDL device is a guarantee instead of a coincidence, and it costs one call.
-    ui::InputDispatcher::RenderHooks hooks;
-    hooks.suspend_audio = [&audio](bool suspend) { audio.setPaused(suspend); };
-    hooks.repaint       = [&]() {
-        layout.draw(canvas, state);
-        video.present(canvas);
-    };
-    dispatch.set_render_hooks(std::move(hooks));
-
-    // ── THE LIFECYCLE (S10) ──────────────────────────────────────────────────────────────────────
-    //
-    // Where a RELATIVE sample path resolves. Absolute paths (everything the browser loads) ignore it;
-    // a portable project — every golden, and anything this build ships — stores its media relative, and
-    // recovering one of those against the wrong folder brings the song back looking perfect and playing
-    // silence. So the dispatcher is TOLD the session's media dir rather than guessing one.
-    //
-    // ⚠️ With no project on the command line there is no project directory to be relative TO, and an
-    // empty base resolves every relative path against the process's cwd — which on a handheld is
-    // whatever the launch script last cd'd to. The app root is the honest answer: it is where Samples/
-    // lives, so it is where a recovered autosave's relative media actually is.
-    dispatch.set_media_base_dir(hasProject ? baseDir : appRoot);
-
-    // An autosave that survived to launch means the last session did not end cleanly — a launcher's
-    // kill, a flat battery, a crash. SETTINGS → RESUME decides what happens next: ASK raises the
-    // RECOVER WORK? dialog, AUTO restores in silence.
-    //
-    // ⚠️ AFTER load_settings (RESUME is the setting being read) and AFTER push_params (a recovery
-    // re-pushes everything anyway). If there is no autosave — the common case, and the one that means
-    // everything went fine last time — this does nothing at all.
-    // Said out loud for the same reason the once-a-second status line below is: during a handheld
-    // bring-up there is no screen yet, and "did it find my crash file?" is not a question you can answer
-    // by looking at a window that is not there.
-    //
-    // ⚠️ ASCII, and that is this file's own rule being obeyed rather than a preference — the help banner
-    // below states it: the console's encoding is not ours to choose (a handheld's serial console, an ssh
-    // session, a Windows box on a legacy code page), and an em-dash arrives there as mojibake. S10 wrote
-    // one into this very line and watched it come back as `вЂ”` on the first run.
-    switch (dispatch.boot_recovery()) {
-        using BR = ui::InputDispatcher::BootRecovery;
-        case BR::NONE:     break;   // the common case, and it deserves no line of its own
-        case BR::ASKED:    std::printf("autosave: FOUND - asking (SETTINGS > RESUME = ASK)\n"); break;
-        case BR::RESTORED: std::printf("autosave: FOUND - restored (SETTINGS > RESUME = AUTO)\n"); break;
-        case BR::DROPPED:  std::printf("autosave: FOUND but UNREADABLE - dropped\n"); break;
-    }
-
-    std::printf("\nWASD/arrows move   K/Enter = A   J/Esc = B   U/I = L/R   LShift = SELECT   SPACE = START   F10 quit\n");
-    std::printf("A+UP/DOWN edit   A+LEFT/RIGHT edit fast   A+B clear   A,A insert next unused\n");
-    std::printf("B+LEFT/RIGHT change WHICH phrase/chain/table   B+UP/DOWN page the song\n");
-    std::printf("L+B select (tap again to widen)   B copies   L+A cut/paste   L+R deselect   L+B+A clone\n");
-    // ASCII only, deliberately: this goes to a console whose encoding is not ours to choose (a
-    // handheld's serial/ssh terminal, a Windows box on a legacy code page), and a stray em-dash
-    // arrives there as mojibake.
-    std::printf("A+UP on an FX-TYPE column opens the effect picker - release A to choose\n");
-    std::printf("R+DPAD moves between screens: SONG CHAIN PHRASE INSTRUMENT TABLE MODS INST.POOL\n");
-    std::printf("                             GROOVE MIXER EFFECTS PROJECT SETTINGS\n");
-    std::printf("PROJECT: A on SAVE/LOAD/NEW, on EXPORT MIX/STEMS, on COMPACT SEQ/INST, on SETTINGS>, on EXIT\n");
-    std::printf("         A on NAME opens the keyboard; A+UP/DOWN edits one character in place\n");
-    std::printf("         a confirm asks A=YES B=NO before anything destructive\n");
-    std::printf("START auditions the instrument on INSTRUMENT/POOL/MODS/TABLE - any button silences it\n");
-    std::printf("SELECT on the EFFECTS TIME row toggles delay sync (free ms <-> note divisions)\n");
-    std::printf("\nFILE BROWSER (A on INSTRUMENT's LOAD, or on the pool's NAME of an empty slot):\n");
-    std::printf("  A opens a folder or LOADS the file   B goes back   START auditions the file\n");
-    std::printf("  R+LEFT = up a directory   R+UP/DOWN = sort (name/date/size)   DPAD L/R = page\n");
-    std::printf("  SELECT+A rename   SELECT+B delete   SELECT+R new folder\n");
-    std::printf("  L+B select (again within 500ms = all)   B copies   L+A cut/paste   L+R cancel\n");
-    std::printf("KEYBOARD: DPAD picks a key   A types   B deletes   R+UP/DOWN = ABC/123 layout\n");
-    std::printf("          R+LEFT/RIGHT moves the text cursor   SELECT aborts   START applies\n");
-    std::printf("\nEQ EDITOR (A on any EQ cell: INSTRUMENT/POOL/MIXER master/EFFECTS REV+DLY/SAMPLE FX):\n");
-    std::printf("  DPAD UP/DOWN picks the param, LEFT/RIGHT the band   A+UP/DOWN and A+LEFT/RIGHT dial it\n");
-    std::printf("  A+B resets it   B+LEFT/RIGHT changes the EQ SLOT   B or SELECT closes\n");
-    std::printf("  START still auditions underneath, so you can sweep a band across a ringing note\n\n");
-
-    bool   running    = true;
-    Uint64 lastStatus = 0;
-
-    // ⚠️ `g_terminate` is the launcher's kill, read once per frame. It is a FLAG and not an action — see
-    // on_terminate_signal — so this loop condition is where a SIGTERM actually takes effect, and the
-    // flush below the loop is where the work is saved, on the main thread, with a heap to do it with.
-    //
-    // ⚠️ One honest limit, stated rather than discovered later: a kill arriving while the app is inside
-    // the SYNCHRONOUS export render is not seen until the render finishes, because the frame loop is not
-    // running. The exposure is small — the autosave for everything up to that point fired 3 s after the
-    // last edit, long before the user navigated to EXPORT and pressed A — but it is not zero.
-    while (running && !state.shouldQuit && !g_terminate) {
-        // One clock reading per frame, handed to everything that needs it. The input layer's repeat
-        // is a function of time, so it takes the clock rather than reaching for it.
-        const Uint64 now = SDL_GetTicks64();
-
-        SDL_Event e;
-        while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT) {
-                // The OTHER way a kill arrives: a window manager's close button, and — where SDL was
-                // built with HAVE_SIGNAL_H and nobody set SDL_NO_SIGNAL_HANDLERS — SDL's own SIGINT /
-                // SIGTERM translation. Both land here as an ordinary event.
-                //
-                // ⚠️ It is NOT the guarantee, and S10 assumed it was until it measured. On Windows SDL's
-                // signal code is `#undef HAVE_SIGNAL_H`'d out entirely, and on Linux it is gated on an
-                // ENVIRONMENT variable. So the shell installs its own handler (see on_terminate_signal)
-                // and this arm is the belt to that handler's braces — an UNCLEAN exit either way, so the
-                // flush below the loop keeps the work.
-                running = false;
-            } else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F10) {
-                // Dev-only quit, and still NOT part of the button model — it is the desktop escape
-                // hatch, and it bypasses the dirty check on purpose (a dev killing a test run does not
-                // want to be asked).
-                //
-                // ⚠️ Not being ASKED is not the same as CHOOSING TO DISCARD, so F10 is an UNCLEAN exit
-                // and the flush below keeps the work. That is also the more useful behaviour for the
-                // person pressing it: F10 out of a test session, come back, and the session is still
-                // there. The one exit that throws work away is the one that says so first.
-                //
-                // The REAL exit is PROJECT → EXIT (S7): a handheld launcher offers no window chrome to
-                // close, so the app has to be able to give the process back from inside. It asks when
-                // there is unsaved work, and its YES is the app's ONE clean death — the only path that
-                // deletes the autosave rather than writing one.
-                running = false;
-            } else {
-                input.handle_event(e, now);
-            }
-        }
-        input.tick(now);
-
-        // The frame's clock, handed to the dispatcher once. It feeds the L+B multi-tap window — a
-        // class whose behaviour is a function of time must be GIVEN the time, not go looking for it.
-        dispatch.set_now(static_cast<long long>(now));
-
-        ButtonEvent be;
-        while (input.poll(be)) {
-            ui::handle_button(be, dispatch, mapper, now);
-        }
-
-        // The lookahead pump — the same call, on the same 60 Hz cadence, that PixelPerfectRenderer's
-        // loop makes on Android.
-        host.poll();
-
-        const PlaybackPosition pos = host.playheads();
-        state.isPlaying        = host.is_playing();
-        state.playbackRow      = pos.phraseStep;
-        state.playbackChainRow = pos.chainRow;
-        state.playbackSongRow  = pos.songRow;
-        state.trackMask        = host.track_mask();
-
-        // Everything the UI reads back OUT of the engine: the scope's samples, the eight monitored
-        // notes, the table's playing row, the SF2 preset list, the mixer's meters. AFTER the transport
-        // fields above — the waveform decay is a function of isPlaying, and the table row is only
-        // resolved on TABLE. `now` because the meters poll on their own 60 ms cadence, not per frame.
-        feed.poll(*engine, host, state, static_cast<long long>(now));
-
-        layout.draw(canvas, state);
-        video.present(canvas);
-
-        // A status line once a second, kept from the Phase 2 shell and kept for the same reason: on a
-        // headless box, over ssh, or during a handheld bring-up where you cannot yet see or hear
-        // anything, these numbers are what tell you the chain is alive. The FRAME COUNTER means the
-        // audio device is calling back, the PLAYHEAD means the sequencer is advancing, and VOICES
-        // means events are reaching the engine and turning into sound. Any one stuck at zero names the
-        // broken link. A window on screen does not answer that question when there is no screen.
-        if (now - lastStatus >= 1000) {
-            lastStatus = now;
-            std::printf(
-                "%s  frame %-10lld  song %3d  chain %2d  step %2d   voices %2d   %-10s cursor %X,%d\n",
-                host.is_playing() ? "play" : "stop",
-                static_cast<long long>(engine->getCurrentFrame()), pos.songRow, pos.chainRow,
-                pos.phraseStep, engine->getActiveVoiceCount(), ui::screen_label(state.currentScreen),
-                state.cursorRow, state.cursorColumn);
-            std::fflush(stdout);  // block-buffered to a pipe otherwise, and then it says nothing
-        }
-    }
-
-    // ── Leaving ──────────────────────────────────────────────────────────────────────────────────
-    //
-    // ⚠️ Settings are written HERE, not on every keystroke. Holding A+UP on a hex-byte setting fires
-    // an edit every 100 ms (the key-repeat interval), and one file write per repeat is an SD card
-    // being hammered for a value that is still moving.
-    //
-    // ⚠️⚠️ …but NOT behind a dirty FLAG, and that distinction cost a real bug. This used to read
-    // `if (state.settingsDirty)`, and the only thing that ever SET that flag was the SETTINGS screen's
-    // edit arm — so a palette dialled in the THEME EDITOR (which mutates the theme directly, having no
-    // CursorContext to route through) armed nothing and was silently thrown away on quit. The verb below
-    // asks the DATA instead: it writes only when the bytes on disk differ from what memory holds, so it
-    // is still one write per session at most, and there is no longer anything for the next screen that
-    // touches the theme to forget. See ui/settings_store.h, and ptdispatch §27(c) — which fails if the
-    // arming ever comes apart again.
-    switch (ui::save_settings_if_changed(filesystem, state.settings, state.theme)) {
-        using SW = ui::SettingsWrite;
-        case SW::UNCHANGED: break;   // nothing moved this session; the file already says so
-        case SW::SAVED:     std::printf("settings: saved\n"); break;
-        // A full SD card, a read-only mount. S9's lesson, one file over: the only save in the app with
-        // no result at all was a dropped error return, and it read as success.
-        case SW::FAILED:
-            std::printf("settings: SAVE FAILED - %s\n", filesystem.settings_path().c_str());
-            break;
-    }
-
-    // ⚠️ **THE FLUSH — and every way out of the loop above arrives here, which is the design.**
-    //
-    // The 3 s debounce can lose the last few edits if the process is taken away before it fires, and on
-    // a handheld it very often is: the CFW menu kills the port, the battery goes, the power slider is a
-    // switch and not a request. So the exit path flushes synchronously, on the main thread, while there
-    // is still a heap and a filesystem to do it with.
-    //
-    // ⚠️ It is a NO-OP when the document is clean, and that is what keeps the file's meaning intact:
-    // "an autosave exists" must mean "the last session ended badly and there is work in it". A confirmed
-    // PROJECT → EXIT has already DELETED the autosave (confirm_accept) and made the project clean, so
-    // this writes nothing — the one exit the user was asked about is the one exit that leaves no trace.
-    // Everything else — SIGTERM, SIGINT, the window's close button, F10 — never asked, so it keeps the
-    // work, and the next launch says so.
-    dispatch.flush_autosave();
-
-    host.stop();
-    engine->onResumeRequested = nullptr;
-    audio.closeStream();
-    input.close_controllers();
-    video.close();
     SDL_Quit();
-    return 0;
+    return rc;
 }

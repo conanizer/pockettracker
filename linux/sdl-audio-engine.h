@@ -22,22 +22,28 @@
 
 #include <SDL.h>
 
+#include "audio-backend.h"
+
 class AudioEngine;
 
-class SdlAudioEngine {
+// `AudioBackend` since convergence C0.2 — the shared shell reaches its device through those five
+// methods and nothing else, so that C3 can hand it `OboeAudioEngine` on Android without app.cpp
+// changing a character. The interface came from THIS class's shape; see audio-backend.h for why the
+// virtuals cost nothing (they are lifecycle, never the callback).
+class SdlAudioEngine : public AudioBackend {
   public:
     explicit SdlAudioEngine(AudioEngine* core);
-    ~SdlAudioEngine();
+    ~SdlAudioEngine() override;
 
     // Opens a stereo float32 device and starts it. False if the platform cannot give us stereo
     // float — processAudioBlock has a stereo-only contract, so letting SDL convert behind its back
     // would be worse than failing loudly.
-    bool openStream();
-    void closeStream();
+    bool openStream() override;
+    void closeStream() override;
 
     // AudioEngine::onResumeRequested — the engine asks for its stream back without knowing what a
     // stream is. On Android that unpauses Oboe; here it unpauses the SDL device.
-    void resumeStream();
+    void resumeStream() override;
 
     /**
      * Stop (and restart) the callback — what an OFFLINE RENDER needs (S7).
@@ -49,10 +55,10 @@ class SdlAudioEngine {
      * SDL_PauseAudioDevice blocks until the callback has returned, so after this call there is no
      * second reader — by construction, not by timing.
      */
-    void setPaused(bool paused);
+    void setPaused(bool paused) override;
 
     // The rate the device actually negotiated, not the one we asked for.
-    int sampleRate() const { return sampleRate_; }
+    int sampleRate() const override { return sampleRate_; }
 
   private:
     static void SDLCALL audioCallback(void* userdata, Uint8* out, int lenBytes);

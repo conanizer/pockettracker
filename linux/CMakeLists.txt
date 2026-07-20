@@ -113,7 +113,12 @@ if(WIN32)
     set(PT_WIN_RESOURCES "${CMAKE_CURRENT_BINARY_DIR}/pockettracker.rc")
 endif()
 
+# app.cpp is the SHARED shell — the boot sequence, the frame loop and the teardown, identical on every
+# platform (convergence C0.2). main.cpp is the desktop/handheld residue beside it: argv, the signal
+# handler, SDL_Init/SDL_Quit, and the choice of audio backend, root and caps. Convergence C1 adds an
+# Android entry point ALONGSIDE main.cpp and links the same app.cpp.
 add_executable(pockettracker-sdl
+        app.cpp
         main.cpp
         sdl-audio-engine.cpp
         sdl-input.cpp
@@ -124,10 +129,15 @@ add_executable(pockettracker-sdl
 # ─── IEEE-exactness: a CORRECTNESS requirement, not an optimisation choice ─────────────────────
 #
 # This is copied from tools/CMakeLists.txt on purpose, and it is the least obvious line in this file.
-# main.cpp #includes songcore/host.h, so the SEQUENCER is compiled into this target's translation
+# app.cpp #includes songcore/host.h, so the SEQUENCER is compiled into this target's translation
 # units. Its float params (velGain/volGain/pan, PSL/PBN/vibrato rates) are the ones the conformance
 # traces compare as raw binary32 BITS (event-schema §5/§6) — and aarch64 clang contracts `a + b*c`
 # into an fma BY DEFAULT, -ffast-math or not, which rounds once where the JVM rounds twice.
+#
+# ⚠️ PER-TARGET is what keeps this correct across the C0.2 split: the flags below apply to every TU in
+# `pockettracker-sdl`, so moving the host include from main.cpp to app.cpp did not move the guarantee.
+# A future Android entry point linking app.cpp must restate it in ITS build (the APK's own
+# native/CMakeLists.txt already does, for songcore-jni.cpp, for exactly this reason).
 #
 # Without this, the handheld build would quietly sequence differently from the APK the goldens were
 # recorded against, on the exact architecture we ship to, and nothing in this directory would say so.
