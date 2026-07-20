@@ -1,8 +1,18 @@
 name: Build
 
+# ⚠️ `sdl-shell` is here DELIBERATELY and TEMPORARILY (convergence C3, 2026-07-20). The branch is
+# pushed for CI but is NOT merged to main while the fdroiddata MR is under review: main has to stay a
+# clean hotfix path, so that a reviewer-requested change (SAF being the live one) can ship as a small
+# diff from the last release tag rather than dragging an unfinished UI convergence along with it.
+#
+# A `pull_request` trigger would have fired without touching this file, but only via a PR visible on
+# the public repo during that review. This line is the quieter equivalent and costs one revert.
+#
+# ⚠️ REMOVE THIS BRANCH when sdl-shell merges — a stale entry here is a workflow that keeps building a
+# branch nobody is on.
 on:
   push:
-    branches: [ main ]
+    branches: [ main, sdl-shell ]
   pull_request:
     branches: [ main ]
 
