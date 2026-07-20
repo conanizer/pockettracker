@@ -106,6 +106,26 @@ android {
         debug {
             // Landscape layout stays available in debug for testing.
             buildConfigField("boolean", "LANDSCAPE_LAYOUT", "true")
+
+            // ⚠️ A SEPARATE PACKAGE, SO THE DEV BUILD DOES NOT EVICT THE ONE BEING USED TO MAKE
+            // MUSIC. Convergence C3. Debug and release are signed with different keys, so a debug
+            // APK cannot install over a release install — the only way to test on a device that has
+            // a real install is to UNINSTALL it, which takes the user's SharedPreferences (theme,
+            // layout, RESUME mode) with it. A suffix makes them two apps that coexist.
+            //
+            // This is also what the convergence plan asks for, expressed on the device: phases C
+            // and D require BOTH UIs to be available at once, and that is a poor property if
+            // installing the SDL build means losing the Compose one.
+            //
+            // ⚠️ Songs are NOT package-scoped and never were: they live in
+            // /storage/emulated/0/Documents/PocketTracker, which is public external storage. Both
+            // packages therefore open the SAME projects — which is exactly what makes an SDL build
+            // testable against real songs rather than an empty folder.
+            //
+            // ⚠️ The debug package needs its OWN MANAGE_EXTERNAL_STORAGE grant (permissions are
+            // per-package), or its file browser comes up empty for a reason that has nothing to do
+            // with C5's std::filesystem question.
+            applicationIdSuffix = ".debug"
         }
         release {
             // R8 + resource shrinking. Smaller dex → faster cold start and less code pinned in
