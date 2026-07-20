@@ -125,8 +125,24 @@ bool SdlVideo::create_texture() {
 
 void SdlVideo::set_scaling(ScalingMode m) {
     if (m == scaling_) return;
-    scaling_ = m;
+    const ScalingMode was = scaling_;
+    scaling_              = m;
     create_texture();
+
+    // Once per CHANGE, never per frame — the early return above is what makes this cheap enough to
+    // call from the frame loop, which is where SETTINGS > SCALING is polled from (app.cpp).
+    //
+    // ⚠️ The RECT is printed beside the mode, and it is the whole point of the line. "SCALING =
+    // BILINEAR" only says what was asked for; `frame=1280x960` versus `frame=640x480` says what the
+    // user will actually see — and this setting's entire history is of being asked for and not
+    // applied. On a handheld with no console you read this back out of the log; on a phone it is the
+    // difference between "the setting does nothing" and "the setting works, the WINDOW is wrong",
+    // which are the two bugs C4 had to tell apart.
+    const SDL_Rect d = dest_rect();
+    std::printf("video:   scaling %s -> %s   frame=%dx%d at %d,%d\n",
+                was == ScalingMode::FIT ? "FIT" : "INTEGER",
+                scaling_ == ScalingMode::FIT ? "FIT" : "INTEGER", d.w, d.h, d.x, d.y);
+    std::fflush(stdout);
 }
 
 void SdlVideo::close() {
@@ -183,6 +199,23 @@ void SdlVideo::present(const Canvas& canvas) {
         }
     }
     SDL_UnlockTexture(texture_);
+
+    // ⚠️ **RE-DESCRIBE WHEN THE OUTPUT CHANGES, AND ANDROID IS WHY (C4).** `describe()` used to run
+    // exactly once, at `open()` — which on this platform is the one moment it is guaranteed to be
+    // WRONG. `SdlActivity.hideSystemBars()` has to POST itself (API 30+ wants an attached DecorView),
+    // so the surface is still 1280x904 when the window is created and becomes 1280x960 a few frames
+    // later. The boot line therefore reported a 1x letterboxed window for a session that was actually
+    // running 2x full-screen, and on a handheld with no console that line is the ONLY account of what
+    // the user is looking at. An instrument aimed at the wrong instant is worse than none.
+    //
+    // Fires on change only: a window resize, a rotation, or the system bars coming and going.
+    int outW = 0, outH = 0;
+    SDL_GetRendererOutputSize(renderer_, &outW, &outH);
+    if (outW != lastOutW_ || outH != lastOutH_) {
+        if (lastOutW_ != 0) describe();   // not at boot; open() has just printed the same thing
+        lastOutW_ = outW;
+        lastOutH_ = outH;
+    }
 
     SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
     SDL_RenderClear(renderer_);  // paints the letterbox bars

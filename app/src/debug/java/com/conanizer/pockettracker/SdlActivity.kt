@@ -1,9 +1,17 @@
 package com.conanizer.pockettracker
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.provider.Settings
 import android.util.Log
+import android.view.View
+import android.view.WindowInsets
+import android.view.WindowInsetsController
+import android.view.WindowManager
+import androidx.core.view.WindowCompat
 import org.libsdl.app.SDLActivity
 import java.io.File
 
@@ -22,11 +30,13 @@ import java.io.File
  * alternative is `adb shell am start` every time, and a device round trip is the expensive part of
  * this phase.
  *
- * What this class does NOT do is as important as what it does. There is no permission request, no
- * lifecycle handling and no back-button mapping here: those are **C4**, they are subtle
- * (`SDL_AddEventWatch` rather than the frame loop, because SDL freezes the native thread on pause),
- * and writing a half version now would be a thing to un-write. This activity boots the tracker and
- * gets out of the way.
+ * ⚠️ **C4 (2026-07-20) added the three things C3 deliberately left out**, and two of them are not
+ * here at all — which is the point. The permission request and the system bars are Java's, so they
+ * are below. The lifecycle is NOT: the autosave/settings flush is a `SDL_AddEventWatch` watcher in
+ * `shell/app.cpp`, shared with every other platform, because `SDL_APP_WILLENTERBACKGROUND` turns out
+ * to fire on the NATIVE thread inside the frame loop's own `SDL_PollEvent` — not on this thread, as
+ * the plan assumed. The back button is likewise split: the hint is armed in `shell/android-main.cpp`
+ * and the key is mapped in `shell/sdl-input.cpp`. Nothing about the lifecycle needs Kotlin.
  */
 class SdlActivity : SDLActivity() {
 
@@ -66,29 +76,132 @@ class SdlActivity : SDLActivity() {
             "PocketTracker"
         ).absolutePath
 
+    /**
+     * Hide the status and navigation bars (immersive sticky) — **C4, and NOT cosmetic.**
+     *
+     * ⚠️⚠️ **THE STATUS BAR COSTS A WHOLE SCALING FACTOR.** With it visible the SDL window is
+     * **1280×904**, not 1280×960, because the bar keeps 56 px — and 2× of the 640×480 design needs
+     * exactly 960. So `SdlVideo::dest_rect`'s INTEGER scale computes `min(1280/640, 904/480)` =
+     * `min(2, 1)` = **1×**, and the tracker draws at a quarter of the area it should with 320 px
+     * letterbox bars either side. Nothing is wrong with the scaler; it is doing the right thing with
+     * the wrong window. Hidden, the panel is 1280×960 and 2× is pixel-exact and full-screen.
+     *
+     * ⚠️ This is a lesson this app already paid for once: `MainActivity.kt:158` says in its own
+     * comment that reserving inset padding "can drop scale from 2× to 1×". The Compose activity has
+     * always hidden the bars; `SdlActivity` simply never inherited the knowledge.
+     *
+     * Nothing on the C++ side has to be told: `dest_rect()` asks `SDL_GetRendererOutputSize` every
+     * frame, so the resize is picked up on the next present with no resize handler at all.
+     *
+     * ⚠️ `decorView.post` because API 30+ requires the DecorView to be ATTACHED before
+     * `insetsController` is non-null — the same reason MainActivity posts it.
+     */
+    private fun hideSystemBars() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.decorView.post {
+                window.insetsController?.apply {
+                    hide(WindowInsets.Type.systemBars())
+                    systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = (
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                or View.SYSTEM_UI_FLAG_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            )
+        }
+    }
+
+    /** Re-apply immersive mode whenever the window regains focus — a swipe-down or the permission
+     *  screen returning otherwise leaves the bars up, and with them the 1× window. */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideSystemBars()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
-        // ⚠️ Logged, not requested, and not fixed. Without MANAGE_EXTERNAL_STORAGE the C++
-        // `StdFileSystem` cannot see /storage/emulated/0 and the file browser comes up EMPTY — which
-        // looks exactly like "C5's spike says std::filesystem does not work on Android", the single
-        // most important open question this phase answers. A wrong answer there would be recorded as
-        // an architectural fact and cost `AndroidFileSystem.kt` its deletion in Phase E.
+        // ⚠️ Without MANAGE_EXTERNAL_STORAGE the C++ `StdFileSystem` cannot see /storage/emulated/0
+        // and the file browser comes up EMPTY — which looks exactly like "C5's spike says
+        // std::filesystem does not work on Android", the single most important open question phase C
+        // answered. A wrong answer there would have been recorded as an architectural fact and cost
+        // `AndroidFileSystem.kt` its deletion in Phase E. So the state is still LOGGED beside the
+        // result, which is this project's standing rule for instruments — read this line before
+        // believing an empty browser.
         //
-        // So the state is printed beside the result, which is this project's standing rule for
-        // instruments: the permission is granted by the Compose activity (or by hand in Settings),
-        // and C4 moves the request here. Until then, read this line before believing an empty browser.
+        // C3 logged it and left the granting to the Compose activity. C4 asks.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val granted = Environment.isExternalStorageManager()
             Log.i(TAG, "MANAGE_EXTERNAL_STORAGE granted=$granted  appRoot=${appRoot()}")
-            if (!granted) {
-                Log.w(
-                    TAG,
-                    "storage permission NOT granted - the file browser will be empty and that is " +
-                        "NOT a C5 result. Grant it (launch the Compose activity once, or " +
-                        "Settings > Apps > PocketTracker > All files access) and relaunch."
-                )
+            if (!granted) requestAllFilesAccess()
+        }
+
+        // ⚠️⚠️ **EDGE-TO-EDGE, AND `hideSystemBars()` ALONE DOES NOT DO IT — MEASURED, NOT ASSUMED.**
+        // The first C4 build hid the bars and the window STAYED 1280x904: `dumpsys` reported
+        // `statusBars visible=false` while SDL's renderer output was still 904 px tall, so INTEGER
+        // scaling was still falling back to 1x. Hiding a bar and letting the content DRAW WHERE IT WAS
+        // are two different requests — without this line Android keeps reserving inset padding for a
+        // bar that is no longer on screen, and the SurfaceView is laid out inside the reduced area.
+        //
+        // `MainActivity.kt:156` has carried this call, and a comment naming this exact symptom ("can
+        // drop scale from 2x to 1x"), since long before the port. The SDL activity had to learn it the
+        // expensive way.
+        //
+        // ⚠️ BEFORE `super.onCreate()`, which is where SDLActivity builds its layout and surface: set
+        // afterwards, the surface is created at the inset size and then resized, and every consumer
+        // (including the boot `video:` line) sees the wrong number first. Set here, the FIRST surface
+        // is already 1280x960. `getWindow()` is valid from `attach()`, well before onCreate.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
+        // Draw behind a punch-hole/notch too. In landscape the cutout is on a short edge, so without
+        // this the panel gives back less height than it has — the same 2x-becomes-1x arithmetic,
+        // arriving through a different subtraction. Harmless on a device with no cutout, like this one.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
+
+        super.onCreate(savedInstanceState)
+        hideSystemBars()
+    }
+
+    /**
+     * Send the user to the All files access settings page.
+     *
+     * ⚠️ There is no runtime-permission dialog for `MANAGE_EXTERNAL_STORAGE` — it is granted only
+     * through Settings, so this is a `startActivity`, not a permission request, and it cannot be
+     * answered inline. `READ_MEDIA_AUDIO` and friends are deliberately NOT requested here: they
+     * govern MediaStore, and nothing in the SDL build goes through MediaStore. The native
+     * `std::filesystem` path this port rests on is governed by All files access alone.
+     *
+     * ⚠️ Both intents, in order, and the fallback is not theoretical — `MainActivity` carries the
+     * same pair because some custom ROMs (/e/OS was the one that bit us) do not expose the
+     * app-specific page at all. If neither resolves, the app still runs; the browser is just empty
+     * and the log above says why.
+     *
+     * ⚠️ Called BEFORE `super.onCreate()`, i.e. before the SDL thread exists. Settings comes up over
+     * us and the activity is immediately paused — which is fine, and is in fact the first real
+     * exercise of C4's background watcher, on a blank document where every step of it is a no-op.
+     */
+    private fun requestAllFilesAccess() {
+        Log.i(TAG, "requesting MANAGE_EXTERNAL_STORAGE - the file browser is empty without it")
+        try {
+            startActivity(
+                Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                    .setData(Uri.parse("package:$packageName"))
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "app-specific All-files-access page unavailable: ${e.message}")
+            try {
+                startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+            } catch (e2: Exception) {
+                Log.e(TAG, "All-files-access settings unavailable entirely: ${e2.message}")
             }
         }
-        super.onCreate(savedInstanceState)
     }
 
     private companion object {

@@ -129,6 +129,22 @@ int main(int argc, char** argv) {
         appRoot = kFallbackAppRoot;
     }
 
+    // ⚠️ **THE BACK BUTTON, TRAPPED BEFORE SDL_Init (C4).** Untrapped, Android's back runs
+    // `SDLActivity.onBackPressed()` → `finish()`, which closes the activity out from under the frame
+    // loop mid-edit — and it is the easiest button on a phone to hit by accident. Set, the activity
+    // ignores it (SDLActivity.java:623 returns early) and the key still reaches native as
+    // `SDLK_AC_BACK`, which sdl-input.cpp maps to B, the app's own cancel.
+    //
+    // ⚠️ This is read by JAVA, through `nativeGetHintBoolean`, at the moment back is pressed — so it
+    // is a hint about the activity's behaviour rather than about any subsystem, and setting it before
+    // `SDL_Init` is belt-and-braces rather than a requirement.
+    //
+    // ⚠️ It works because `android:enableOnBackInvokedCallback` is NOT set in the manifest: at
+    // targetSdk 34 that defaults to false, so the legacy `onBackPressed` path SDL hooks is still the
+    // one Android uses. A future targetSdk bump that opts into predictive back silently un-traps this
+    // — the symptom being the app closing on back again, with nothing here having changed.
+    SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+
     // ⚠️ NO `SDL_INIT_AUDIO`, and on this platform it is load-bearing rather than tidy: Oboe owns the
     // device here. Asking SDL for the audio subsystem as well would put two libraries on one output
     // stream — convergence-plan §1's "SDL and Oboe are not a choice". `SdlAudioEngine::openStream`

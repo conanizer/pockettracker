@@ -27,6 +27,117 @@ namespace ui = pt::ui;
 
 namespace ptshell {
 
+namespace {
+
+// ─── THE BACKGROUND WATCHER (C4) ─────────────────────────────────────────────────────────────────
+//
+// Everything the "the platform is taking the app away" handler needs, borrowed from `run`'s frame.
+// ⚠️ It lives on `run`'s STACK, so the watcher MUST be removed before `run` returns — see the
+// SDL_DelEventWatch below the loop. A watcher outliving its userdata is a use-after-free that fires
+// during teardown, which is the least debuggable moment available.
+struct BackgroundContext {
+    SongcoreHost*        host       = nullptr;
+    ui::InputDispatcher* dispatch   = nullptr;
+    ui::FileSystem*      filesystem = nullptr;
+    ui::AppState*        state      = nullptr;
+    bool                 console    = false;
+};
+
+/**
+ * `SDL_APP_WILLENTERBACKGROUND` — the Android Home press, and the last moment this process is
+ * guaranteed to run.
+ *
+ * ⚠️⚠️ **THE PLAN SAID THIS FIRES ON THE JAVA ACTIVITY THREAD. IT DOES NOT, AND THE DIFFERENCE IS
+ * THE WHOLE DESIGN OF THIS FUNCTION.** Read out of the vendored SDL 2.30.9 rather than remembered:
+ *
+ *   1. `SDLActivity.onPause()` → `nativePause()` (SDL_android.c:1264) does exactly ONE thing:
+ *      `SDL_SemPost(Android_PauseSem)`. It sends no event and calls nothing of ours.
+ *   2. The NATIVE thread discovers that semaphore inside its own `SDL_PollEvent` →
+ *      `Android_PumpEvents_Blocking` (SDL_androidevents.c:156), which is what sends
+ *      `SDL_APP_WILLENTERBACKGROUND` — and `SDL_PushEvent` dispatches event watchers SYNCHRONOUSLY
+ *      (SDL_events.c:1184) before the event is ever queued.
+ *   3. Only on the NEXT pump does `isPaused` send the thread into `SDL_SemWait(Android_ResumeSem)`
+ *      and freeze it.
+ *
+ * So this runs **on the native thread, inside the frame loop's own `SDL_PollEvent` call**, one full
+ * frame before anything freezes. There is no concurrency with the loop because it IS the loop — which
+ * is why this touches `host`, `state` and the project directly with no lock, and why a lock would in
+ * fact have been the bug (the loop is not running to release it).
+ *
+ * ⚠️ A poll-loop `case SDL_APP_WILLENTERBACKGROUND:` would ALSO work here, for a reason worth writing
+ * down: `SDL_PollEvent` pumps only when no poll sentinel is pending (SDL_events.c:1092), so a
+ * `while (SDL_PollEvent(...))` drain pumps exactly once and cannot block partway through. The watcher
+ * is still the right mechanism — it does not depend on that property surviving a future refactor of
+ * the loop, and SDL's own `nativeSendQuit` says in as many words that "the user should have handled
+ * state storage in SDL_APP_WILLENTERBACKGROUND", because after a quit it FLUSHES the event queue.
+ *
+ * ⚠️ Inert everywhere else, by construction rather than by `#ifdef`: SDL sends this event on Android
+ * and iOS only, so on desktop this function is installed and never called.
+ *
+ * ⚠️ Every step is IDEMPOTENT, because background→foreground→background fires it again: `stop()` on a
+ * stopped transport does nothing, `flush_autosave` is a no-op on a clean document, and
+ * `save_settings_if_changed` compares against the bytes on disk.
+ */
+int SDLCALL on_app_event(void* userdata, SDL_Event* e) {
+    if (e->type != SDL_APP_WILLENTERBACKGROUND) return 0;
+
+    auto* c = static_cast<BackgroundContext*>(userdata);
+
+    // ⚠️ **UNCONDITIONAL, AND IT IS THE ONLY LINE HERE THAT ALWAYS PRINTS — ON PURPOSE.** Every step
+    // below is a no-op in the common case (nothing playing, document clean, settings unmoved), so a
+    // watcher that ran perfectly and a watcher that never fired at all produce EXACTLY the same empty
+    // log. That ambiguity is not hypothetical: it is what the first device test of this function ran
+    // into — the autosave was on disk afterwards and there was no way to tell whether this code had
+    // written it or the 3 s debounce had beaten it there. A lifecycle handler whose correct behaviour
+    // is silence needs one line saying it woke up, or it cannot be told from a handler that is never
+    // installed.
+    if (c->console) std::printf("lifecycle: entering background\n");
+
+    // ── 1. Playback stops. THE USER'S DECISION, and the alternative is not "it keeps playing" ──
+    //
+    // SDL freezes the native thread on the next pump, and `host.poll()` — the lookahead pump — rides
+    // this loop. Oboe's callback thread is NOT frozen (SDL pauses its OWN audio devices in
+    // Android_PumpEvents_Blocking, and it has never heard of Oboe), so the engine would keep pulling
+    // samples against a scheduler that has stopped filling the buffer: ~4 s of lookahead drains and
+    // the song dies mid-phrase. That is P4c's shape exactly — the bus keeps running, the notes stop
+    // arriving — and the only difference between the two options is whether the user hears a defined
+    // stop or a song rotting away in the background. Stopping is the honest one.
+    if (c->host->is_playing()) {
+        c->host->stop();
+        if (c->console) std::printf("lifecycle: backgrounded - playback stopped\n");
+    }
+
+    // ── 2. The autosave. THE REASON THIS FUNCTION EXISTS ──
+    //
+    // A backgrounded Android app is killed without further notice, and the 3 s autosave debounce may
+    // not have fired. `MainActivity.kt:1054` has flushed on ON_STOP since long before this port for
+    // exactly this reason; until C4 the SDL build had NOTHING here, so every Home press risked the
+    // last few edits and no crash recovery existed at all on this platform.
+    c->dispatch->flush_autosave();
+
+    // ── 3. Settings. THE BUG THE USER REPORTED ──
+    //
+    // `save_settings_if_changed` is called once, below the frame loop — and on Android the loop is
+    // only left on a clean destroy (`nativeSendQuit` → SDL_QUIT). A Home press never reaches it, so
+    // settings.json was never written and every setting was back to factory on the next launch.
+    switch (ui::save_settings_if_changed(*c->filesystem, c->state->settings, c->state->theme)) {
+        using SW = ui::SettingsWrite;
+        case SW::UNCHANGED: break;
+        case SW::SAVED:
+            if (c->console) std::printf("lifecycle: backgrounded - settings saved\n");
+            break;
+        case SW::FAILED:
+            std::printf("lifecycle: backgrounded - settings SAVE FAILED - %s\n",
+                        c->filesystem->settings_path().c_str());
+            break;
+    }
+    std::fflush(stdout);
+
+    return 0;  // watchers do not consume; the event still reaches the queue
+}
+
+}  // namespace
+
 int run(const AppConfig& cfg) {
     AudioEngine&  engineRef  = *cfg.engine;
     AudioBackend& audio      = *cfg.audio;
@@ -205,6 +316,14 @@ int run(const AppConfig& cfg) {
         case BR::DROPPED:  std::printf("autosave: FOUND but UNREADABLE - dropped\n"); break;
     }
 
+    // ── The lifecycle watcher (C4) ───────────────────────────────────────────────────────────────
+    // Installed AFTER boot_recovery, so a backgrounding that arrives during start-up cannot flush an
+    // autosave over the one still being decided about. Removed below the loop — `bg` is a stack
+    // object and the watcher must not outlive it. See on_app_event for why this is not a thread
+    // boundary despite what the plan assumed.
+    BackgroundContext bg{&host, &dispatch, &filesystem, &state, cfg.console};
+    SDL_AddEventWatch(on_app_event, &bg);
+
     // The banner and the once-a-second status line below are the two HIGH-VOLUME things this file
     // prints, and they are the bring-up instrument for a platform whose screen is not up yet. A
     // platform whose stdout goes nowhere — an APK's does — turns them off and pays nothing; the
@@ -323,6 +442,19 @@ int run(const AppConfig& cfg) {
         // resolved on TABLE. `now` because the meters poll on their own 60 ms cadence, not per frame.
         feed.poll(engineRef, host, state, static_cast<long long>(now));
 
+        // ⚠️ **SETTINGS > SCALING, APPLIED — AND UNTIL C4 NOTHING APPLIED IT.** `scalingBilinear` was
+        // read from settings.json, written back to it, and drawn as the `SCALING: BILINEAR/INT` row,
+        // and `SdlVideo::set_scaling` had ZERO call sites in the entire tree: the video stayed on its
+        // `ScalingMode::INTEGER` default for the life of the process, on every platform. That is
+        // exactly what platform_caps.h calls "a setting which configures nothing is a lie told in the
+        // user's own UI", shipped on desktop and PortMaster as well as here.
+        //
+        // Polled rather than pushed on change, because there is no change notification to hook and
+        // there are two ways in (the SETTINGS row and a settings.json written by hand). `set_scaling`
+        // early-returns when the mode is unchanged, so the steady-state cost is one comparison per
+        // frame — and the texture recreation it does otherwise is why this cannot go in `present`.
+        video.set_scaling(state.settings.scalingBilinear ? ScalingMode::FIT : ScalingMode::INTEGER);
+
         layout.draw(canvas, state);
         video.present(canvas);
 
@@ -345,6 +477,16 @@ int run(const AppConfig& cfg) {
     }
 
     // ── Leaving ──────────────────────────────────────────────────────────────────────────────────
+    //
+    // ⚠️ The watcher goes FIRST, and it is not tidiness: `bg` is a stack object in this frame and
+    // every line below can push an SDL event. A watcher left installed past this point is a
+    // use-after-free during teardown.
+    //
+    // ⚠️ Removing it does NOT make the Android exit path unsafe. A real destroy (`nativeSendQuit`)
+    // injects SDL_QUIT and unblocks the loop, so control arrives here and the two saves below run
+    // normally — the watcher's job was the Home press that never reaches this line at all.
+    SDL_DelEventWatch(on_app_event, &bg);
+
     //
     // ⚠️ Settings are written HERE, not on every keystroke. Holding A+UP on a hex-byte setting fires
     // an edit every 100 ms (the key-repeat interval), and one file write per repeat is an SD card

@@ -68,6 +68,11 @@ private:
     ScalingMode   scaling_  = ScalingMode::INTEGER;
     bool          vsync_    = false;
     Uint64        lastPresentMs_ = 0;
+
+    /** The last renderer output size `present` saw, so a change can re-`describe()` itself. Zero
+     *  until the first present, which is what suppresses a duplicate line at boot. See the .cpp. */
+    int lastOutW_ = 0;
+    int lastOutH_ = 0;
 };
 
 #endif  // POCKETTRACKER_SDL_VIDEO_H

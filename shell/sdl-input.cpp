@@ -25,6 +25,20 @@ bool key_to_button(SDL_Keycode k, Button& out) {
         case SDLK_LSHIFT: out = Button::SELECT; return true;
         case SDLK_SPACE:  out = Button::START;  return true;
 
+        // ⚠️ **ANDROID'S BACK BUTTON, AND WITHOUT THIS LINE IT CLOSES THE APP MID-EDIT** (C4).
+        //
+        // It arrives as an ordinary key once `SDL_HINT_ANDROID_TRAP_BACK_BUTTON` is set — see
+        // android-main.cpp, which is where the trap has to be armed, because the UNTRAPPED default is
+        // `SDLActivity.onBackPressed()` finishing the activity out from under the frame loop.
+        //
+        // B, not SELECT and not a quit: B is already this app's universal cancel — it closes the file
+        // browser, aborts the keyboard, leaves the EQ and theme editors — so the gesture a phone user
+        // arrives with maps onto the verb the UI already has. The app is still leavable by Home (the
+        // watcher in app.cpp saves) and by PROJECT > EXIT (`PlatformCaps::sdl().appExit`).
+        //
+        // Harmless on every other platform: no desktop keyboard produces AC_BACK.
+        case SDLK_AC_BACK: out = Button::B; return true;
+
         default: return false;
     }
 }
