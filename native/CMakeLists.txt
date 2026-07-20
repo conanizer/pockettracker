@@ -8,33 +8,13 @@ project("pockettracker")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ─── The convergence canary (plan A5) ──────────────────────────────────────────────────────────
-#
-# pt-ui is gated `if(NOT ANDROID)` far below, so its ~18,000 lines have never once been compiled by the
-# NDK's clang against Android's libc++ — and convergence phase C2 is exactly the deletion of that gate.
-# For C2 to be "un-gate a target that already compiles" rather than "discover a pile of platform
-# breakage one character in", that toolchain has to build the target NOW, with the artifact thrown
-# away. This option is that build, and CI is its only caller (.github/workflows/build.yml).
-#
-# It also drops the Oboe/JNI shell, and not for convenience: the canary configures `native/` STANDALONE
-# with the NDK toolchain, and outside Gradle there is no Prefab, so `find_package(oboe)` has nothing to
-# find. Skipping it costs the canary nothing — the APK build compiles those three files on every run.
-#
-# ⚠️ OFF by definition of shipping. The APK never sets it, and with it OFF every branch below is
-# character-for-character the build that shipped.
-option(PT_UI_ON_ANDROID "Compile pt-ui with the NDK toolchain — the convergence canary. Never for shipping." OFF)
-
-# "A real Android build": Android, and not the canary. The Oboe/JNI shell hangs off this rather than
-# off ANDROID, so the canary can be an Android build WITHOUT the parts that need Gradle.
-if(ANDROID AND NOT PT_UI_ON_ANDROID)
-    set(PT_ANDROID_SHELL ON)
-else()
-    set(PT_ANDROID_SHELL OFF)
-endif()
-
 # Oboe is the ANDROID audio backend only (via Prefab). A desktop build provides its own
 # shell (SDL/ALSA/JACK) against processLiveBlock() and never sees this.
-if(PT_ANDROID_SHELL)
+#
+# (Until convergence C2 this read `if(PT_ANDROID_SHELL)` — a variable that existed so the A5 canary
+# could be an Android build WITHOUT the parts that need Gradle. C2 retired the canary, so the
+# distinction collapsed back to plain ANDROID and the indirection went with it.)
+if(ANDROID)
     find_package(oboe REQUIRED CONFIG)
 endif()
 
@@ -90,11 +70,7 @@ target_link_libraries(opusfile PUBLIC opus ogg)
 # 2.30.9 and is documented in native/vendor/SDL2/PT-VENDORING.md; it is regenerated only by
 # native/vendor/revendor-sdl2.sh and must never be hand-edited.
 #
-# ⚠️ PT_ANDROID_SHELL, not ANDROID — same reasoning as the Oboe block above. The A5 canary is a
-# COMPILE check for pt-ui and is an Android build without the parts that need Gradle; making it also
-# build the whole of SDL would cost minutes per run and hand it an unrelated failure surface to go
-# red on. The APK builds SDL for real on every CI run, which is where that coverage belongs.
-if(PT_ANDROID_SHELL)
+if(ANDROID)
     # ─── The C/Java version lock, asserted at configure time ───────────────────────────────────
     #
     # SDL's Android support is half C and half Java, and the two halves are version-locked:
@@ -207,12 +183,10 @@ set(ANDROID_PLATFORM_SOURCES
         songcore-jni.cpp
 )
 
-if(PT_ANDROID_SHELL)
+if(ANDROID)
     add_library(pockettracker SHARED ${ENGINE_CORE_SOURCES} ${ANDROID_PLATFORM_SOURCES})
 else()
-    # Desktop consumers link the core as a static lib and provide their own shell/main. So does the A5
-    # canary, deliberately: it is a COMPILE check, and a static archive is not link-complete — which
-    # keeps it from going red over an Oboe symbol it was never meant to test.
+    # Desktop consumers link the core as a static lib and provide their own shell/main.
     add_library(pockettracker STATIC ${ENGINE_CORE_SOURCES})
 endif()
 
@@ -294,16 +268,12 @@ target_link_libraries(pockettracker opusfile)
 if(NOT WIN32)
     target_link_libraries(pockettracker m)
 endif()
-if(PT_ANDROID_SHELL)
+if(ANDROID)
     target_link_libraries(pockettracker
             oboe::oboe
             android
             log
     )
-elseif(ANDROID)
-    # The canary: the same two NDK system libs (the logging shim in audio-defs.h needs `log`), but no
-    # Oboe — there is no Prefab outside Gradle to provide it.
-    target_link_libraries(pockettracker android log)
 endif()
 
 # ─── pt-ui: the portable UI (Linux-port plan Phase 3) ──────────────────────────────────────────
@@ -315,88 +285,110 @@ endif()
 # and it is the §12.8 obligation — "write the SDL UI as portable C++ with no Linux-isms, so that
 # 'Android on SDL' is a shell swap, not a rewrite".
 #
-# ⚠️ NOT in the Android build. Android draws these screens in Compose today, and will keep doing so
-# until convergence phase C2, which deletes this gate (linux-port-plan §12.8 took the decision after
-# the port shipped). Gating it out means the port cannot grow the APK by a byte or break it in any way
-# while it is being written — and when convergence comes, this `if` is what changes, not where the
-# code lives.
+# ⭐ UNCONDITIONAL since convergence phase C2 (2026-07-20). For the whole of the Linux port this
+# target was gated `if(NOT ANDROID)`, so that a UI still being written could not grow the APK by a
+# byte or break it in any way. That `if` was the one line standing between two UIs and one, and
+# deleting it is the convergence.
 #
-# PT_UI_ON_ANDROID is the A5 canary and the ONE exception: it builds this target with the NDK toolchain
-# so that C2 inherits a target already known to compile there. It is never set by the APK build, so
-# with it OFF this reads exactly as `if(NOT ANDROID)` always did.
-if(NOT ANDROID OR PT_UI_ON_ANDROID)
-    add_library(pt-ui STATIC
-            ui/canvas.cpp
-            ui/clipboard.cpp
-            ui/input_dispatcher.cpp
-            ui/layout.cpp
-            ui/lifecycle.cpp
-            ui/std_filesystem.cpp
-            ui/settings_store.cpp
-            ui/project_actions.cpp
-            ui/modules/chain_editor.cpp
-            ui/modules/confirm_dialog.cpp
-            ui/modules/effects_editor.cpp
-            ui/modules/eq_editor.cpp
-            ui/modules/file_browser.cpp
-            ui/modules/fx_helper_overlay.cpp
-            ui/modules/groove_editor.cpp
-            ui/modules/instrument_editor.cpp
-            ui/modules/instrument_pool.cpp
-            ui/modules/mixer.cpp
-            ui/modules/modulation.cpp
-            ui/modules/navigation_map.cpp
-            ui/modules/oscilloscope.cpp
-            ui/modules/phrase_editor.cpp
-            ui/modules/project_editor.cpp
-            ui/modules/qwerty_keyboard.cpp
-            ui/modules/sample_editor.cpp
-            ui/modules/settings_editor.cpp
-            ui/modules/song_editor.cpp
-            ui/modules/table_editor.cpp
-            ui/modules/theme_editor.cpp
-    )
+# ⚠️ Android COMPILES pt-ui; it does not yet USE it. Nothing links this archive until C3 constructs
+# the shared shell's main against Oboe, so no pt-ui code reaches the APK and the shipped app still
+# draws its screens in Compose. Doing it in this order is the point: C2 buys the standing proof that
+# these ~18,000 lines compile with the NDK's clang against Android's libc++ — on BOTH shipping ABIs,
+# in the exact configuration that ships — before anything depends on them.
+#
+# ⚠️⚠️ BUT `assembleDebug` DOES NOT BUILD THIS TARGET, AND DELETING THE GATE DID NOT MAKE IT.
+# Measured, not assumed: with the gate gone, `:app:externalNativeBuildDebug` printed BUILD SUCCESSFUL
+# and "5 actionable tasks: 5 executed" in 29 seconds having compiled pt-ui ZERO times. AGP fills the
+# `{LIST_OF_TARGETS_TO_BUILD}` placeholder in its ninja command with the targets it can PACKAGE — the
+# .so files — plus whatever ninja pulls in transitively; a static archive nothing links is never
+# named. The independent witness is `SDL2main`: libogg/libopus/libopusfile.a are all built (the
+# packaged libpockettracker.so links them) while libSDL2main.a has sat unbuilt since C1 for exactly
+# the same reason. So un-gating alone is a change that is real in the MODEL (pt-ui appears in
+# android_gradle_build.json with a declared libpt-ui.a output) and vacuous in the BUILD.
+#
+# The coverage therefore comes from CI naming the target explicitly, per ABI, against AGP's own
+# configure — .github/workflows/build.yml, "Compile pt-ui with the shipping NDK configuration".
+# ⚠️ Do NOT "fix" this by listing targets in app/build.gradle.kts's externalNativeBuild.cmake.targets:
+# that field is a WHITELIST, so it would work today and silently stop packaging the first .so a
+# future session forgets to add to it. Correctness that rests on every future site remembering is
+# already broken — the same rule this project keeps relearning. C3 removes the question entirely by
+# giving pt-ui a real linker, which is the only honest way a target gets built.
+add_library(pt-ui STATIC
+        ui/canvas.cpp
+        ui/clipboard.cpp
+        ui/input_dispatcher.cpp
+        ui/layout.cpp
+        ui/lifecycle.cpp
+        ui/std_filesystem.cpp
+        ui/settings_store.cpp
+        ui/project_actions.cpp
+        ui/modules/chain_editor.cpp
+        ui/modules/confirm_dialog.cpp
+        ui/modules/effects_editor.cpp
+        ui/modules/eq_editor.cpp
+        ui/modules/file_browser.cpp
+        ui/modules/fx_helper_overlay.cpp
+        ui/modules/groove_editor.cpp
+        ui/modules/instrument_editor.cpp
+        ui/modules/instrument_pool.cpp
+        ui/modules/mixer.cpp
+        ui/modules/modulation.cpp
+        ui/modules/navigation_map.cpp
+        ui/modules/oscilloscope.cpp
+        ui/modules/phrase_editor.cpp
+        ui/modules/project_editor.cpp
+        ui/modules/qwerty_keyboard.cpp
+        ui/modules/sample_editor.cpp
+        ui/modules/settings_editor.cpp
+        ui/modules/song_editor.cpp
+        ui/modules/table_editor.cpp
+        ui/modules/theme_editor.cpp
+)
 
-    # ⚠️ std::filesystem needs a separate link library on gcc 8 and older — `stdc++fs`. It was folded
-    # into libstdc++ proper in gcc 9. The CI runners are far newer (gcc 13, clang 18, MSVC), but a
-    # PortMaster cross-toolchain can easily be gcc 8, and the failure mode is a wall of undefined
-    # references at LINK time on a box the port author does not have.
-    #
-    # A compiler-version test, NOT a check_cxx_source_compiles probe: the probe does not inherit
-    # CMAKE_CXX_STANDARD, so it compiles as C++14 on MSVC, fails to find <filesystem>, and concludes
-    # that MSVC needs `stdc++fs` — a library that does not exist there. (Measured, not guessed: that is
-    # exactly what the first version of this block did.)
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
-        target_link_libraries(pt-ui PUBLIC stdc++fs)
-    endif()
+# ⚠️ std::filesystem needs a separate link library on gcc 8 and older — `stdc++fs`. It was folded
+# into libstdc++ proper in gcc 9. The CI runners are far newer (gcc 13, clang 18, MSVC), but a
+# PortMaster cross-toolchain can easily be gcc 8, and the failure mode is a wall of undefined
+# references at LINK time on a box the port author does not have.
+#
+# A compiler-version test, NOT a check_cxx_source_compiles probe: the probe does not inherit
+# CMAKE_CXX_STANDARD, so it compiles as C++14 on MSVC, fails to find <filesystem>, and concludes
+# that MSVC needs `stdc++fs` — a library that does not exist there. (Measured, not guessed: that is
+# exactly what the first version of this block did.)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
+    target_link_libraries(pt-ui PUBLIC stdc++fs)
+endif()
 
-    # PUBLIC: pt-ui's headers include songcore's (model.h, effects.h), so anything linking pt-ui
-    # inherits the engine's include roots too — the same reasoning as pockettracker's own PUBLIC roots.
-    target_link_libraries(pt-ui PUBLIC pockettracker)
+# PUBLIC: pt-ui's headers include songcore's (model.h, effects.h), so anything linking pt-ui
+# inherits the engine's include roots too — the same reasoning as pockettracker's own PUBLIC roots.
+target_link_libraries(pt-ui PUBLIC pockettracker)
 
-    # ui/std_filesystem.cpp asks Windows where `Documents` is — SHGetKnownFolderPath (shell32) and the
-    # CoTaskMemFree that releases its result (ole32). Stated explicitly rather than inherited: CMake puts
-    # both in MSVC's default CMAKE_CXX_STANDARD_LIBRARIES, so this line changes nothing there, but a
-    # MinGW or clang-mingw build links neither by default and would fail with two undefined references
-    # in a file whose Windows branch nothing else in the tree exercises.
-    if(WIN32)
-        target_link_libraries(pt-ui PUBLIC shell32 ole32)
-    endif()
+# ui/std_filesystem.cpp asks Windows where `Documents` is — SHGetKnownFolderPath (shell32) and the
+# CoTaskMemFree that releases its result (ole32). Stated explicitly rather than inherited: CMake puts
+# both in MSVC's default CMAKE_CXX_STANDARD_LIBRARIES, so this line changes nothing there, but a
+# MinGW or clang-mingw build links neither by default and would fail with two undefined references
+# in a file whose Windows branch nothing else in the tree exercises.
+if(WIN32)
+    target_link_libraries(pt-ui PUBLIC shell32 ole32)
+endif()
 
-    # IEEE-exactness, for the same reason songcore-jni.cpp carries it: this target includes songcore
-    # headers, and the rule stated above is that any TU which does must not have its math reassociated
-    # or fma-contracted.
-    #
-    # ⚠️ S1..S7 carried this on the argument that "the UI does no float math worth the name today, but
-    # the rule is what keeps that true after someone adds a meter". S8 IS THAT SOMEONE, and it turned
-    # out to be load-bearing rather than prudent: the EQ editor's FREQ stepping advances until the
-    # formatted READOUT changes (ui/modules/eq_editor.cpp), so `20 * 1000^(v/255)` and a "%.1f" of it
-    # decide the value that ends up in the project — and that value is byte-compared against Kotlin's by
-    # tools/ptinput, over all 256 of them. Reassociated math there is not a slightly different picture;
-    # it is a red golden.
-    if(MSVC)
-        target_compile_options(pt-ui PRIVATE /fp:precise)
-    else()
-        target_compile_options(pt-ui PRIVATE -fno-fast-math -ffp-contract=off)
-    endif()
+# IEEE-exactness, for the same reason songcore-jni.cpp carries it: this target includes songcore
+# headers, and the rule stated above is that any TU which does must not have its math reassociated
+# or fma-contracted.
+#
+# ⚠️ S1..S7 carried this on the argument that "the UI does no float math worth the name today, but
+# the rule is what keeps that true after someone adds a meter". S8 IS THAT SOMEONE, and it turned
+# out to be load-bearing rather than prudent: the EQ editor's FREQ stepping advances until the
+# formatted READOUT changes (ui/modules/eq_editor.cpp), so `20 * 1000^(v/255)` and a "%.1f" of it
+# decide the value that ends up in the project — and that value is byte-compared against Kotlin's by
+# tools/ptinput, over all 256 of them. Reassociated math there is not a slightly different picture;
+# it is a red golden.
+#
+# ⚠️ On Android this is not merely inherited discipline: the APK build sets -ffast-math for
+# aarch64 on the `pockettracker` target above, and pt-ui is the other target that includes songcore
+# headers. Without these two flags the converged UI would compute its EQ readouts under different
+# rounding than the tools that certify them.
+if(MSVC)
+    target_compile_options(pt-ui PRIVATE /fp:precise)
+else()
+    target_compile_options(pt-ui PRIVATE -fno-fast-math -ffp-contract=off)
 endif()

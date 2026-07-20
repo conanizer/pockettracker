@@ -110,6 +110,77 @@ jobs:
 
           exit $FAIL
 
+      # ─── pt-ui compiles with the NDK, and does NOT ship yet (convergence plan C2) ──────────────
+      #
+      # C2 deleted the `if(NOT ANDROID)` gate the whole Linux port was written behind. That deletion
+      # is real in the CMake model and VACUOUS in the build: AGP fills its ninja command with the
+      # targets it can PACKAGE plus their transitive dependencies, and pt-ui is a static archive
+      # nothing links until C3 — so `assembleDebug` reports BUILD SUCCESSFUL having compiled none of
+      # it. (Measured, not assumed: 29 seconds, "5 actionable tasks: 5 executed", zero pt-ui objects.
+      # The independent witness is libSDL2main.a, unbuilt since C1 for exactly the same reason, while
+      # libogg/libopus/libopusfile.a are built because the packaged libpockettracker.so links them.)
+      #
+      # So the target is named explicitly, per ABI, against AGP's OWN configure directory — which is
+      # what makes this the shipping toolchain, STL, API level and flags rather than a second
+      # configuration free to drift from them. This step REPLACES the A5 canary job and strictly
+      # widens it: A5 compiled one ABI, standalone, Release; this compiles both shipping ABIs in the
+      # configuration that ships. ⚠️ Do not "simplify" it into externalNativeBuild.cmake.targets —
+      # that field is a whitelist and would silently stop packaging the first .so somebody forgets.
+      #
+      # The second half is the invariant C2 must not break: pt-ui is COMPILED and NOT PACKAGED.
+      - name: Compile pt-ui with the shipping NDK configuration (convergence C2)
+        run: |
+          # ⚠️ Explicit per-check failure, and every verdict prints the number it rests on — the C1
+          # lesson: a step whose pass is the absence of an error cannot tell a working build from a
+          # broken instrument.
+          FAIL=0
+          NINJA="$ANDROID_SDK_ROOT/cmake/3.22.1/bin/ninja"
+          if [ ! -x "$NINJA" ]; then
+            echo "FAIL  ninja not found at $NINJA - the compile check cannot run"; exit 1
+          fi
+
+          for ABI in arm64-v8a x86_64; do
+            # AGP picks the hash in the path, so resolve it — and fail if it is not EXACTLY one.
+            # A glob that silently matches nothing is how this step would pass having built nothing,
+            # and a stale second directory is how C1 nearly "proved" SDL was not configured at all.
+            N=$(ls -d app/.cxx/Debug/*/"$ABI" 2>/dev/null | wc -l)
+            if [ "$N" -ne 1 ]; then
+              echo "FAIL  expected exactly 1 AGP configure dir for $ABI, found $N"; FAIL=1; continue
+            fi
+            DIR=$(ls -d app/.cxx/Debug/*/"$ABI")
+
+            if ! "$NINJA" -C "$DIR" pt-ui; then
+              echo "FAIL  pt-ui did not compile for $ABI"; FAIL=1; continue
+            fi
+
+            # 29 = the source count of the pt-ui target (8 top-level + 21 ui/modules). ⚠️ It is NOT
+            # 30: ninja's last edge, "[30/30] Linking CXX static library", is the ARCHIVE, not a
+            # translation unit — which is where the A5 note's "all 30 TUs" came from. The first
+            # draft of this check asserted >= 30 and would therefore have failed a perfectly good
+            # build; it printed "objects=29" beside its own verdict, which is the only reason that
+            # was caught rather than debugged later as an Android regression.
+            AR="$DIR/libpt-ui.a"
+            OBJS=$(find "$DIR/CMakeFiles/pt-ui.dir" -name '*.o' 2>/dev/null | wc -l)
+            if [ -f "$AR" ] && [ "$OBJS" -ge 29 ]; then
+              echo "ok    $ABI: libpt-ui.a $(stat -c%s "$AR") bytes, from $OBJS objects"
+            else
+              echo "FAIL  $ABI: libpt-ui.a exists=$([ -f "$AR" ] && echo yes || echo no), objects=$OBJS (expected >= 29)"
+              FAIL=1
+            fi
+          done
+
+          # Compiled, not packaged. A static archive cannot reach the APK, so libpt-ui.so appearing
+          # would mean someone made the target SHARED and grew every install by a dead copy of the UI.
+          APK=$(ls app/build/outputs/apk/debug/*.apk)
+          if unzip -l "$APK" | grep -q 'libpt-ui\.so'; then
+            echo "FAIL  libpt-ui.so is in the APK - pt-ui stays a static archive until C3 links it"
+            FAIL=1
+          else
+            echo "ok    no libpt-ui.so in the APK (compiled, not packaged - correct for C2)"
+          fi
+
+          exit $FAIL
+
       - name: Run unit tests
         run: ./gradlew test --no-daemon
 
@@ -253,43 +324,10 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # ─── The pt-ui NDK canary (convergence plan A5) ─────────────────────────────────────────────────
-  #
-  # pt-ui — the ~18,000-line portable UI — is gated `if(NOT ANDROID)` in native/CMakeLists.txt, so
-  # until this job it had never been compiled by the NDK's clang against Android's libc++ by anything,
-  # ever. Convergence phase C2 is the deletion of that gate. This job is what makes C2 the un-gating of
-  # a target already known to compile, instead of the day a pile of platform breakage is discovered.
-  #
-  # The artifact is thrown away on purpose: this is a COMPILE check, and pt-ui is a static archive, so
-  # nothing here links. arm64-v8a and android-26 match the shipping ABI and minSdk in app/build.gradle.
-  #
-  # PT_UI_ON_ANDROID also drops the Oboe/JNI shell from the engine target, because this configures
-  # native/ standalone — outside Gradle there is no Prefab and find_package(oboe) would have nothing to
-  # find. The APK build never sets the option and is bit-for-bit unaffected.
-  ndk-canary:
-    name: pt-ui NDK canary
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept SDK licenses
-        run: yes | sdkmanager --licenses || true
-
-      - name: Install the NDK
-        run: sdkmanager "ndk;27.0.12077973"
-
-      - name: Compile pt-ui with the NDK toolchain
-        run: |
-          NDK="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
-          cmake -S native -B build-ndk-canary \
-            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-26 \
-            -DANDROID_STL=c++_shared \
-            -DPT_UI_ON_ANDROID=ON \
-            -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-ndk-canary --target pt-ui
+# The A5 "pt-ui NDK canary" job lived here until convergence C2 (2026-07-20). Its purpose was to
+# compile pt-ui with the NDK while the target was still gated out of the Android build, so that C2
+# would be the un-gating of a target already known to compile rather than the day a pile of platform
+# breakage was discovered. It did that job — it compiled clean on the first attempt — and C2 retired
+# it, because the `build` job above now compiles pt-ui against AGP's own configure on BOTH shipping
+# ABIs. Keeping a second, standalone NDK configuration alongside the real one would have been exactly
+# the drift this plan exists to delete. Its option, PT_UI_ON_ANDROID, went with it.
