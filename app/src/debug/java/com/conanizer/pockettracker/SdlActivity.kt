@@ -13,6 +13,7 @@ import android.view.WindowInsetsController
 import android.view.WindowManager
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
+import org.json.JSONObject
 import org.libsdl.app.SDLActivity
 import java.io.File
 
@@ -188,8 +189,149 @@ class SdlActivity : SDLActivity() {
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
 
+        // ⚠️ BEFORE `super.onCreate()` for a harder reason than the two above: that call starts the
+        // SDL thread, which runs `SDL_main`, which calls `load_settings()`. Anything this writes after
+        // that point is a file the app has already read past.
+        importLegacySettings()
+
         super.onCreate(savedInstanceState)
         hideSystemBars()
+    }
+
+    /**
+     * **C6 — the one-time SharedPreferences → settings.json migration.**
+     *
+     * Android has kept its settings in SharedPreferences since the app existed; `pt-ui` keeps them in
+     * `settings.json`. Without this, every existing user's settings silently reset the day the SDL UI
+     * becomes the shipping one — their theme included, which is the one they would notice.
+     *
+     * It is written HERE rather than in C++ because SharedPreferences is a Java API backed by an XML
+     * file whose format is Android's business, not ours: `getBoolean` with the same default the
+     * Compose app used is a fact, and parsing that XML from C++ would be a guess maintained forever.
+     *
+     * ⚠️⚠️ **VERSIONED, NOT KEYED OFF "settings.json IS ABSENT" — and that distinction is the whole
+     * design.** The obvious guard is *"no settings.json + prefs exist → import"*, and it gets exactly
+     * ONE chance: the moment the SDL app runs once, settings.json exists forever after and no later
+     * migration can ever fire. Phase D adds LAYOUT, SKIN and OVERLAY (all three are INDICES into lists
+     * that do not exist yet — see the note in `settings_store.cpp`), so a second pass is already known
+     * to be coming, and the "absent file" guard would have made it unreachable before it was written.
+     * A version counter costs one integer and makes Phase D a `if (version < 2)` arm.
+     *
+     * ⚠️ **The defaults below are ANDROID's, not `SettingsValues`'s, and they disagree on purpose.**
+     * `button_sound` and `button_vibro` default TRUE in the Compose app while the C++ struct defaults
+     * them FALSE; `button_sound_volume` is 0x80 there and 255 here. What must survive a migration is
+     * what the user actually EXPERIENCED, and for a row they never touched that is the value the
+     * Compose app was using — so the pref's own default is the correct thing to read and write. Taking
+     * the C++ defaults instead would silently switch off button sound for every user who had left it
+     * alone, which is exactly the class of upgrade bug this whole function exists to prevent.
+     *
+     * ⚠️ **`app_theme` is passed through VERBATIM, and that is sound rather than lazy.**
+     * `theme_io.h`'s `serialize_theme` states in its own comment that it emits kotlinx's bytes, and
+     * all 18 colour defaults plus `name` and `visualizerType` were compared field by field against
+     * `AppTheme.kt` — they are identical. Since both sides OMIT fields equal to their default, a
+     * mismatch anywhere would have silently recoloured a theme, which is why it was checked rather
+     * than assumed. Re-serialising it here would add a second format to keep in step for no gain.
+     *
+     * ⚠️ **Debug and release do NOT share SharedPreferences.** `applicationIdSuffix = ".debug"` gives
+     * this build its own data directory, so what this reads today is whatever the *debug* Compose
+     * activity wrote — not the songs-and-settings of the real install. That is a testing note, not a
+     * defect: in Phase E the SDL activity replaces `MainActivity` inside the one real package and the
+     * prefs it reads are the user's own. To exercise it, run "PocketTracker" (debug Compose), change
+     * some settings, delete settings.json, then run "PT (SDL)".
+     */
+    private fun importLegacySettings() {
+        val prefs = getSharedPreferences("pockettracker_ui", MODE_PRIVATE)
+        val done  = prefs.getInt(IMPORT_VERSION_KEY, 0)
+        if (done >= SETTINGS_IMPORT_VERSION) {
+            Log.i(TAG, "settings import: already at v$done, nothing to do")
+            return
+        }
+
+        val target = File(appRoot(), "settings.json")
+
+        // ⚠️ An existing settings.json WINS, and the version is still stamped. During phases C and D
+        // this activity has already been run by hand, so a settings.json is sitting there with values
+        // chosen through the SDL UI itself — clobbering those with older prefs would be a regression
+        // dressed as a migration. Stamping the version regardless is what stops this from re-arming
+        // later and overwriting a settled file the first time a user clears their prefs.
+        if (target.exists()) {
+            prefs.edit().putInt(IMPORT_VERSION_KEY, SETTINGS_IMPORT_VERSION).apply()
+            Log.i(TAG, "settings import: ${target.name} already exists - keeping it, marked v$SETTINGS_IMPORT_VERSION")
+            return
+        }
+
+        // Nothing to migrate FROM is not a failure: it is a fresh install, and the C++ defaults are
+        // the right answer. Stamp it so this never runs again.
+        if (prefs.all.isEmpty()) {
+            prefs.edit().putInt(IMPORT_VERSION_KEY, SETTINGS_IMPORT_VERSION).apply()
+            Log.i(TAG, "settings import: no prefs to migrate (fresh install), marked v$SETTINGS_IMPORT_VERSION")
+            return
+        }
+
+        try {
+            val json = JSONObject()
+
+            // ── The rows every platform has ──────────────────────────────────────────────────────
+            json.put("scalingBilinear",
+                     prefs.getString("scaling_mode", null) == "BILINEAR")
+            json.put("insertBefore",       prefs.getBoolean("kb_insert_before", true))
+            json.put("cursorRemember",     prefs.getBoolean("cursor_remember", false))
+            json.put("notePreview",        prefs.getBoolean("note_preview", true))
+            json.put("autosaveResumeAuto", prefs.getBoolean("autosave_resume_auto", false))
+
+            // ⚠️ `trace` is NOT imported. It is a developer switch, it is off in every shipped build,
+            // and `engine_cpp_v2` is not imported either: the converged app has no Kotlin sequencer to
+            // switch TO, so the value is not merely stale, it is unanswerable. That is the same call
+            // the `engine_cpp` key got in songcore S7 — a stored value that was never the user's
+            // choice must be abandoned rather than honoured (see order-of-work.md).
+
+            // ── The device rows that are plain scalars ───────────────────────────────────────────
+            // LAYOUT / SKIN / OVERLAY are absent by design — they are indices into Phase D's lists.
+            json.put("buttonSound",       prefs.getBoolean("button_sound", true))
+            json.put("buttonSoundVolume", prefs.getInt("button_sound_volume", 0x80))
+            json.put("buttonVibro",       prefs.getBoolean("button_vibro", true))
+            json.put("vibroPower",        prefs.getInt("vibro_power", 255))
+            json.put("overlayStrength",   prefs.getInt("overlay_strength", 128))
+
+            // ── The theme ────────────────────────────────────────────────────────────────────────
+            // The palette the user dialled in is the single most visible thing in this migration, and
+            // the one they could not reconstruct. Both `appTheme` (what the C++ reader prefers) and
+            // `theme` (the name, what an older build reads) are written, mirroring what
+            // `serialize_settings` itself emits.
+            val storedTheme = prefs.getString("app_theme", null)
+            if (storedTheme != null) {
+                val parsed = JSONObject(storedTheme)
+                json.put("appTheme", parsed)
+                json.put("theme", parsed.optString("name", "CLASSIC"))
+                // The visualizer is the theme's FIELD but the user's CHOICE — settings.json carries it
+                // as a top-level int, so it is translated out of the theme object here exactly as
+                // `load_settings` expects to find it.
+                json.put("visualizer", visualizerIndex(parsed.optString("visualizerType", "SCOPE")))
+            }
+
+            target.parentFile?.mkdirs()
+            target.writeText(json.toString(2) + "\n")
+            prefs.edit().putInt(IMPORT_VERSION_KEY, SETTINGS_IMPORT_VERSION).apply()
+            Log.i(TAG, "settings import: wrote ${target.absolutePath} " +
+                       "(${json.length()} keys, theme=${json.optString("theme", "-")}), marked v$SETTINGS_IMPORT_VERSION")
+        } catch (e: Exception) {
+            // ⚠️ NOT stamped on failure, so the next launch tries again. And deliberately not fatal:
+            // losing a migration costs the user their settings, and crashing on the way in costs them
+            // the app. The log line is the only thing that says which happened.
+            Log.e(TAG, "settings import FAILED - settings will fall back to defaults: ${e.message}", e)
+        }
+    }
+
+    /** `VisualizerType`'s ordinal, which is what settings.json stores. The order is the enum's, and it
+     *  is the same list in `AppTheme.kt`, `theme.h` and `settings_store.cpp`'s VISUALIZER_COUNT. */
+    private fun visualizerIndex(name: String): Int = when (name) {
+        "SCOPE"          -> 0
+        "FLAT"           -> 1
+        "OCTA"           -> 2
+        "OCTA_FULL"      -> 3
+        "SPECTRUM"       -> 4
+        "SPECTRUM_PEAKS" -> 5
+        else             -> 0
     }
 
     /**
@@ -229,5 +371,16 @@ class SdlActivity : SDLActivity() {
 
     private companion object {
         const val TAG = "PocketTrackerSDL"
+
+        /**
+         * Bump this when a later phase has new keys to migrate, and add an arm for them.
+         *
+         * **v1 (C6)** — the rows that exist today: the four every-platform ones, RESUME, the four
+         * button-feedback scalars, overlay STRENGTH, and the theme.
+         * **v2 (Phase D, expected)** — LAYOUT, SKIN and OVERLAY selection, once the lists those
+         * indices point into exist and a stored name can be resolved to one.
+         */
+        const val SETTINGS_IMPORT_VERSION = 1
+        const val IMPORT_VERSION_KEY = "settings_import_version"
     }
 }

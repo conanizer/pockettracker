@@ -60,6 +60,36 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     // upgrading user: a prompt they can say no to, not a silent restore they never asked for.
     values.autosaveResumeAuto = get_bool(j, "autosaveResumeAuto", values.autosaveResumeAuto);
 
+    // ── The Android device rows (C6) ─────────────────────────────────────────────────────────────
+    //
+    // ⚠️⚠️ **THESE ARE READ AND WRITTEN ON EVERY PLATFORM WHILE NO PLATFORM DISPLAYS THEM, AND THAT IS
+    // DELIBERATE.** This file's header states the rule they appear to break — "only the rows the shell
+    // actually HAS are persisted", because writing a value for a question the platform never asked is
+    // inventing an answer. C6 is the case that rule anticipated in its own next sentence: *"if Android
+    // ever converges onto this UI it brings its own answers with it — and its own keys."* This is that,
+    // arriving one phase before the rows do.
+    //
+    // The ordering is forced, and it is the whole reason these land now rather than in Phase D. The
+    // one-shot prefs import (`SdlActivity.importLegacySettings`) runs BEFORE native boot and writes
+    // these keys into settings.json. If `serialize_settings` did not know them, the very first quit
+    // would rewrite the file without them and the user's BTN SOUND / VIBRO / overlay strength would be
+    // gone — silently, between the import that rescued them and the phase that finally shows them.
+    // A key that is written by one component and dropped by another is worse than a key nobody writes.
+    //
+    // ⚠️ LAYOUT, SKIN and OVERLAY (the row's *selection*) are deliberately NOT here. Those three are
+    // INDICES into lists that do not exist yet — the layouts, the skinned D-pads and the overlay PNGs
+    // all arrive in Phase D — and an index is meaningless without the list it indexes. Android stores
+    // them as stable strings (`layout_mode`, `portrait_skin`, `overlay_name`) and they stay in
+    // SharedPreferences, which the OS keeps regardless of what this repo deletes, until Phase D can
+    // resolve a name to an index. That is what `SETTINGS_IMPORT_VERSION` exists to make safe: the
+    // migration is versioned, so Phase D runs a second pass rather than needing this one to have been
+    // clairvoyant.
+    values.buttonSoundEnabled = get_bool(j, "buttonSound",  values.buttonSoundEnabled);
+    values.buttonVibroEnabled = get_bool(j, "buttonVibro",  values.buttonVibroEnabled);
+    values.buttonSoundVolume  = clamp(get_int(j, "buttonSoundVolume", values.buttonSoundVolume), 0, 255);
+    values.vibroPower         = clamp(get_int(j, "vibroPower",        values.vibroPower),        0, 255);
+    values.overlayStrength    = clamp(get_int(j, "overlayStrength",   values.overlayStrength),   0, 255);
+
     // The visualizer is the theme's field but the USER's choice, so it survives the theme load below —
     // which is why it is read first and handed in rather than left to be overwritten.
     const int viz = clamp(get_int(j, "visualizer", static_cast<int>(theme.visualizerType)),
@@ -111,6 +141,15 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
     j["trace"]              = values.traceEnabled;
     j["autosaveResumeAuto"] = values.autosaveResumeAuto;   // S10 — the RESUME row
     j["visualizer"]         = static_cast<int>(theme.visualizerType);
+
+    // The Android device rows — see the matching block in load_settings for why these are written on
+    // every platform a full phase before any of them is displayed. On the shell they are simply their
+    // defaults; on Android they are what the C6 import rescued out of SharedPreferences.
+    j["buttonSound"]        = values.buttonSoundEnabled;
+    j["buttonSoundVolume"]  = values.buttonSoundVolume;
+    j["buttonVibro"]        = values.buttonVibroEnabled;
+    j["vibroPower"]         = values.vibroPower;
+    j["overlayStrength"]    = values.overlayStrength;
 
     // The palette itself, through the `.ptt` serializer (see load_settings). `theme` is still written
     // beside it, and NOT as a leftover: it is what an OLDER build reads, and what a human scanning the
