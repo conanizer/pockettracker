@@ -34,6 +34,7 @@
 
 #include "songcore/project_io.h"
 #include "ui/app_state.h"
+#include "ui/clipboard.h"
 #include "ui/cursor_move.h"
 #include "ui/layout.h"
 #include "ui/modules/file_browser.h"
@@ -356,7 +357,7 @@ int main(int argc, char** argv) {
                      "              [--theme=CLASSIC|AMBER|BLUE|MONO]\n"
                      "              [--viz=SCOPE|FLAT|OCTA|OCTA_FULL|SPECTRUM|SPECTRUM_PEAKS]\n"
                      "              [--playing=ROW] [--source-column=N] [--from-pool]\n"
-                     "              [--fx-helper=N] [--selection=r1,c1,r2,c2]\n"
+                     "              [--fx-helper=N] [--selection=r1,c1,r2,c2] [--clipboard=r1,c1,r2,c2]\n"
                      "              [--browser=DIR] [--browser-ext=wav,mp3] [--browser-cursor=N]\n"
                      "              [--browser-mode=delete] [--browser-select=N] [--browser-clip=N]\n"
                      "              [--qwerty=TEXT] [--qwerty-label=L] [--qwerty-key=ROW,COL]\n"
@@ -739,6 +740,25 @@ int main(int argc, char** argv) {
             state.selection.scope  = SelectionScope::CELL;
             state.selection.start  = CursorPosition{r1, c1};
             state.selection.end    = CursorPosition{r2, c2};
+        }
+    }
+
+    // --clipboard=r1,c1,r2,c2: fill the clipboard by COPYING that region on the current screen, so the
+    // "PHR:2x3" top-strip readout can be eyeballed. Unlike --browser-clip's fake, this is a REAL copy
+    // through `Clipboard`, so the TYPE and WxH it prints are the ones the app would show. `clip` lives
+    // in main's scope on purpose — AppState only holds a POINTER to it, and it must outlive the draw.
+    Clipboard clip;
+    if (const char* v = opt(argc, argv, "--clipboard")) {
+        int r1 = 0, c1 = 1, r2 = 0, c2 = 1;
+        if (std::sscanf(v, "%d,%d,%d,%d", &r1, &c1, &r2, &c2) == 4) {
+            switch (state.currentScreen) {
+                case ScreenType::PHRASE: clip.copy_phrase_steps(project, state.currentPhrase, r1, c1, r2, c2); break;
+                case ScreenType::CHAIN:  clip.copy_chain_rows(project, state.currentChain, r1, c1, r2, c2); break;
+                case ScreenType::SONG:   clip.copy_song_cells(project, r1, c1, r2, c2); break;
+                case ScreenType::TABLE:  clip.copy_table_rows(project, state.currentTable, r1, c1, r2, c2); break;
+                default: break;  // the other screens have no clipboard
+            }
+            if (clip.has_data()) state.clipboard = &clip;
         }
     }
 

@@ -256,6 +256,16 @@ void SdlVideo::pace() {
 
 void SdlVideo::idle_frame() { pace(); }
 
+void SdlVideo::invalidate_backbuffer(bool texture_lost) {
+    // GL context loss (an Android DEVICE reset) takes the streaming texture with it — recreate it, or
+    // the forced present below uploads into a dead handle. A plain re-expose keeps the texture.
+    if (texture_lost) create_texture();
+
+    // The one line that matters: the next present cannot take its "identical to what's on screen" skip,
+    // because what is on screen is no longer what we last drew. See the header for the full mechanism.
+    haveLast_ = false;
+}
+
 bool SdlVideo::present(const Canvas& canvas, uint32_t letterboxArgb) {
     // ⚠️ **RE-DESCRIBE WHEN THE OUTPUT CHANGES, AND ANDROID IS WHY (C4).** `describe()` used to run
     // exactly once, at `open()` — which on this platform is the one moment it is guaranteed to be

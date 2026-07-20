@@ -87,6 +87,9 @@ private:
     /** The global status line — "SAVED", "SEQ CLEANED", "NO FREE PHRASES" — over the scope strip. */
     void draw_status_line(Canvas& c, const AppState& s) const;
 
+    /** The selection scope ("SEL:CELL") and clipboard contents ("PHR:2x3") — top-RIGHT of the scope strip. */
+    void draw_selection_clipboard(Canvas& c, const AppState& s) const;
+
     OscilloscopeModule    oscilloscope_;
     PhraseEditorModule    phraseEditor_;
     ChainEditorModule     chainEditor_;

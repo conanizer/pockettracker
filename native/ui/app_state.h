@@ -34,6 +34,11 @@
 
 namespace pt::ui {
 
+// The clipboard lives in the InputDispatcher (ui/clipboard.h), one instance as in MainActivity. AppState
+// needs only a POINTER to it — for the top-strip "PHR:2x3" readout — so a forward declaration keeps
+// clipboard.h out of every translation unit that includes this header.
+class Clipboard;
+
 struct AppState {
     // ── The document ─────────────────────────────────────────────────────────────────────────────
     //
@@ -195,6 +200,13 @@ struct AppState {
     bool is_cell_selected(int row, int column) const {
         return selection.is_cell_selected(row, column);
     }
+
+    // ── The clipboard's readout ──────────────────────────────────────────────────────────────────
+    // A POINTER to the dispatcher's clipboard, set once by its constructor — exactly as `project` above
+    // points at the host's one document. The layout draws its "PHR:2x3" contents beside the selection
+    // label. NULL when there is no input layer (ptshot renders screens with no dispatcher): the readout
+    // is then simply absent, which is correct — there is no clipboard to report.
+    const Clipboard* clipboard = nullptr;
 
     // ── The FX-helper overlay ────────────────────────────────────────────────────────────────────
     // A+UP/DOWN on an FX-TYPE column opens it; releasing A commits the highlighted effect

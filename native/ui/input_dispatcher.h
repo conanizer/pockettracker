@@ -107,7 +107,12 @@ class InputDispatcher {
      * what `tools/ptdispatch` does.
      */
     InputDispatcher(AppState& state, songcore::SongcoreHost& host, FileSystem& fs)
-        : s_(state), host_(host), fs_(fs) {}
+        : s_(state), host_(host), fs_(fs) {
+        // The layout draws the clipboard's "PHR:2x3" readout beside the selection label and reaches it
+        // through AppState — so point AppState at our clipboard here, once, the same way the shell points
+        // it at the host's document. `clip_` is a member and outlives every frame this dispatcher drives.
+        s_.clipboard = &clip_;
+    }
 
     /**
      * The frame's clock reading — call it once per frame, before the events.

@@ -447,6 +447,30 @@ int run(const AppConfig& cfg) {
             // `present` is for.
             sawInput = true;
 
+            // ⚠️ **THE BLACK-SCREEN-ON-RESUME FIX.** `sawInput` above makes this frame DRAW, but C7's
+            // pixel gate in `present` still SKIPS the upload when the drawn frame is byte-identical to
+            // the last one — and on an Android sleep→resume nothing has changed, so it is identical,
+            // while the PLATFORM has blanked the real surface behind that gate's back. The frame stays
+            // black until the next real state change (the reported "renders only after a button press").
+            // Re-expose and a renderer reset are the same shape. So force the next present here; a DEVICE
+            // reset (GL context loss) also loses the streaming texture and must recreate it. ONE
+            // unconditional log line, because a forced present that fired and one that never installed
+            // look identical on an idle screen — the C4 silent-handler lesson.
+            const char* redrawReason = nullptr;
+            if (e.type == SDL_RENDER_DEVICE_RESET) {
+                video.invalidate_backbuffer(/*texture_lost=*/true);
+                redrawReason = "device reset - texture recreated";
+            } else if (e.type == SDL_RENDER_TARGETS_RESET || e.type == SDL_APP_WILLENTERFOREGROUND ||
+                       e.type == SDL_APP_DIDENTERFOREGROUND ||
+                       (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_EXPOSED)) {
+                video.invalidate_backbuffer(/*texture_lost=*/false);
+                redrawReason = "foreground / re-expose / targets reset";
+            }
+            if (redrawReason && cfg.console) {
+                std::printf("video:   backbuffer no longer ours (%s) - forcing a redraw\n", redrawReason);
+                std::fflush(stdout);
+            }
+
             if (e.type == SDL_QUIT) {
                 // The OTHER way a kill arrives: a window manager's close button, and — where SDL was
                 // built with HAVE_SIGNAL_H and nobody set SDL_NO_SIGNAL_HANDLERS — SDL's own SIGINT /

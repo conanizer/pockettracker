@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "ui/clipboard.h"
 #include "ui/helpers.h"
 #include "ui/modules/fx_helper_overlay.h"
 
@@ -283,10 +284,12 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
     // reporting on a song nobody is looking at.
     if (s.currentScreen != ScreenType::SETTINGS) draw_right_bar(c, s);
 
-    // ── The status line ──────────────────────────────────────────────────────────────────────────
-    // Over the scope strip, so every screen can report. See draw_status_line — and the bug that four
-    // sessions of this port shipped without it.
+    // ── The status line, and the selection/clipboard readout ──────────────────────────────────────
+    // Both sit over the scope strip so every screen can report: the status message top-LEFT, the
+    // selection scope + clipboard contents top-RIGHT. See each method — and the bug that four sessions
+    // of this port shipped without EITHER (the readouts were computed and drawn nowhere).
     draw_status_line(c, s);
+    draw_selection_clipboard(c, s);
 
     // ── The overlays ─────────────────────────────────────────────────────────────────────────────
     // LAST, over everything, including the right bar and the status line — an overlay is modal, and
@@ -318,6 +321,37 @@ void TrackerLayout::draw_status_line(Canvas& c, const AppState& s) const {
     const std::string text = s.statusMessage.substr(0, 34);
     const Argb        color = s.statusSuccess ? s.theme.vizWave : 0xFFFF0000;
     c.draw_text(text, SIDE_SPACER + 10, SCREEN_SPACER + 10, color, CHAR_SPACING, FONT_SCALE);
+}
+
+// ─── The selection scope and the clipboard, top-right of the scope strip ───────────────────────────
+//
+// A direct port of PixelPerfectRenderer.kt:407-438. Two stacked lines in the scope strip's top-right
+// corner (the status line owns the top-left): the LIVE selection scope — "SEL:CELL" / "SEL:ROW" /
+// "SEL:ALL", in vizWave green — and, below it, the CLIPBOARD's contents — "PHR:2x3" / "SNG:4x1" / …, in
+// textTitle. Same right-edge inset (WIDTH − 150), same 21px stack gap, same two colours as the Kotlin.
+//
+// ⚠️ THE PORT COMPUTED BOTH STRINGS AND DREW NEITHER. `Selection::info()` and `Clipboard::info()` — and
+// the dispatcher's `clipboard()` accessor, whose own comment says it is "for the top-strip readout" —
+// were dead seams: defined, zero callers. It is the exact shape of the status line beside it, which was
+// "set since S3 and drawn never" until S7 found it; this is the same miss, one readout over.
+//
+// ⚠️ The clipboard is reached through AppState's pointer, NULL under a tool with no dispatcher (ptshot).
+// Then only the selection half can appear — which is correct, because with no dispatcher there is no
+// clipboard, and `s.selection` is the tool's own to set (`--selection`).
+void TrackerLayout::draw_selection_clipboard(Canvas& c, const AppState& s) const {
+    const std::string sel  = s.selection.info();
+    const std::string clip = s.clipboard ? s.clipboard->info() : std::string();
+    if (sel.empty() && clip.empty()) return;
+
+    // moduleX + WIDTH − 150, i.e. 150px in from the scope strip's right edge (Kotlin: moduleX + 620 - 150).
+    const int x = SIDE_SPACER + OscilloscopeModule::WIDTH - 150;
+    const int y = SCREEN_SPACER + 10;
+
+    if (!sel.empty())
+        c.draw_text(sel, x, y, s.theme.vizWave, CHAR_SPACING, FONT_SCALE);
+    if (!clip.empty())
+        // Below the selection line when both are up, else in its place — Kotlin's `clipY`.
+        c.draw_text(clip, x, sel.empty() ? y : y + 21, s.theme.textTitle, CHAR_SPACING, FONT_SCALE);
 }
 
 void TrackerLayout::draw_right_bar(Canvas& c, const AppState& s) const {

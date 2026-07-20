@@ -83,6 +83,24 @@ public:
      *  draw entirely, so a still screen costs the same wall-clock as a moving one. */
     void idle_frame();
 
+    /**
+     * Force the NEXT present, whatever the pixels say — the frame on screen is no longer the one we
+     * last put there.
+     *
+     * ⚠️⚠️ **THE C7 PIXEL GATE IS BLIND TO A SURFACE THE PLATFORM CLEARED BEHIND ITS BACK.** `present`
+     * skips uploading a frame byte-identical to `lastFrame_`, on the safe assumption that the display is
+     * still SHOWING lastFrame_. Android breaks that assumption on sleep→resume: it blanks the window
+     * while the activity is paused, so the redrawn frame equals lastFrame_, the present is WRONGLY
+     * skipped, and the screen stays black until the next real state change (a keypress) — the reported
+     * bug. A re-expose and a renderer reset are the same shape. The shell calls this on those events;
+     * it drops the "already on screen" assumption so the next `present` really uploads.
+     *
+     * @param texture_lost  The renderer's DEVICE was reset — GL context loss on an Android resume — so
+     *                      the streaming texture is gone with it and is recreated here, or the forced
+     *                      present would upload into a dead texture. A plain re-expose does NOT lose it.
+     */
+    void invalidate_backbuffer(bool texture_lost);
+
     /** Recreates the texture: the sampling filter is fixed at creation time in SDL2, and the two
      *  modes want different ones (INTEGER → nearest, FIT → linear). */
     void        set_scaling(ScalingMode m);
