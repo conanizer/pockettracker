@@ -4,9 +4,15 @@
 // into presses and releases of the ten buttons the app actually knows about, and it owns the custom
 // key repeat. What it deliberately does NOT do is decide what a button MEANS — the combo matrix
 // (A+DPAD edits, B+DPAD cycles the item, L+B selection, R+DPAD screen navigation, the A,A double-tap,
-// the press-vs-release deferral) belongs to `AppInputDispatcher`, which is ~3200 lines of Kotlin and
-// lands with its own session of the port. Splitting there is not a shortcut: the mapper half is the
-// only part that is platform-specific, and it is the only part in this directory.
+// the press-vs-release deferral) is `ui/button_mapper.h`, and what a meaning DOES is
+// `ui/input_dispatcher.h`. Splitting there is not a shortcut: THIS half — a keycode, a game-controller
+// button, an axis — is the only part of the input chain that is platform-specific, and it is the only
+// part left in this directory.
+//
+// ⚠️ The button model itself (`Button`, `ButtonMods`, `ButtonEvent`) was declared HERE until
+// convergence C0.1 and now lives in `ui/buttons.h`, because none of those four types ever named an
+// SDL type — see that header for why "a ButtonEvent is an SDL-side type" was a fact about this file
+// rather than about the design, and what it was costing.
 //
 // The keyboard map is copied from the Kotlin one exactly (WASD/arrows, K/Enter = A, J/Esc = B, U/I =
 // shoulders, LShift = SELECT, Space = START), so a dev's muscle memory transfers between the two
@@ -19,50 +25,20 @@
 
 #include <SDL.h>
 
+#include "ui/buttons.h"
+
 #include <cstdint>
 #include <deque>
 #include <vector>
 
-/** The virtual gamepad. Identical to Kotlin's `VirtualButton` — every input source maps onto it. */
-enum class Button {
-    DPAD_UP,
-    DPAD_DOWN,
-    DPAD_LEFT,
-    DPAD_RIGHT,
-    A,
-    B,
-    L_SHIFT,
-    R_SHIFT,
-    SELECT,
-    START,
-    COUNT
-};
-
-enum class ButtonAction { PRESSED, RELEASED };
-
-/**
- * Which modifiers were down AT THE MOMENT the event happened.
- *
- * ⚠️ Not a convenience — a correctness requirement, and the reason `is_held()` must NOT be used to
- * resolve a combo. SDL hands us every event since the last frame at once, so by the time the queue is
- * drained the held flags describe the END of the frame, not the instant of each event. Roll B and A
- * down inside one 16 ms frame and a poll-time read sees A already held when it processes the B press
- * — firing A+B (delete!) on a press Kotlin would have treated as a plain B.
- *
- * Kotlin's InputMapper has no such gap: it evaluates each event the instant it arrives, against the
- * state as of that instant. Snapshotting here reproduces that exactly. Synthetic key-repeats snapshot
- * the CURRENT state when they fire, which is also what Kotlin does — "the app re-reads the modifiers
- * when the repeat fires", so holding A+UP keeps editing and holding UP alone keeps moving.
- */
-struct ButtonMods {
-    bool a = false, b = false, l = false, r = false, select = false;
-};
-
-struct ButtonEvent {
-    Button       button;
-    ButtonAction action;
-    ButtonMods   mods;
-};
+// The button model is `pt::ui`'s (C0.1). Named unqualified here because every file in this directory
+// is shell code, there is nothing else in it called `Button`, and the alternative was ~40 mechanical
+// edits across sdl-input.cpp on the same day the combo matrix moved — two changes at once in the one
+// part of the tree no golden covers. These four are the whole of the leak, and it stops at the shell.
+using pt::ui::Button;
+using pt::ui::ButtonAction;
+using pt::ui::ButtonEvent;
+using pt::ui::ButtonMods;
 
 class SdlInput {
 public:

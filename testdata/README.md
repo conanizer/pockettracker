@@ -89,13 +89,27 @@ event-schema §9 discipline.
 
 Named holes, so nobody has to rediscover them by being bitten:
 
-- **The combo matrix.** `InputMapper` (`ButtonHandlers.kt`) turns raw presses into the named
-  handlers — combos, key repeat, deferred A/B, held-modifier state — and **nothing covers it on
-  either side.** `ptinput` sits one layer below (it drives modules directly) and `ptdispatch` sits
-  one layer below too (named handlers). The C++ twin in `linux/main.cpp` carries the comment *"the
-  order of these checks IS the specification"* and has no tool either. Recording it needs a way past
-  the `Handler(Looper.getMainLooper())` built in `InputMapper`'s field initialiser, since there is no
-  Robolectric and no `testOptions { returnDefaultValues }`.
+- **The combo matrix — HALF answered since convergence C0.1 (2026-07-20), and the remaining half is
+  the one that matters here.** `InputMapper` (`ButtonHandlers.kt`) turns raw presses into the named
+  handlers — combos, key repeat, deferred A/B, held-modifier state. `ptinput` sits one layer below
+  (it drives modules directly) and `ptdispatch` sits one layer below too (named handlers).
+  - ✅ **The C++ side now has `tools/ptmapper`** (ctest `c0-mapper`). C0.1 moved the matrix out of
+    `linux/main.cpp` into `native/ui/button_mapper.h` and templated it on the dispatcher, so a
+    recording stub can drive it. 64 assertions over the order-sensitive arms. **Proven non-vacuous:
+    reorder the L+B+A arm below the L+… block — the reordering the matrix's own comment warns about —
+    and a clone silently PASTES; `ptmapper` is the only one of the ten tests that goes red.**
+  - ⚠️ **It is NOT a golden, and this hole is still open on the KOTLIN side.** `ptmapper` is
+    hand-written assertions in ptdispatch's sense — what its author believed after reading
+    `ButtonHandlers.kt:402` — so it pins the C++ against future drift and proves nothing about
+    conformance. Recording the Kotlin still needs a way past the `Handler(Looper.getMainLooper())`
+    built in `InputMapper`'s field initialiser, since there is no Robolectric and no
+    `testOptions { returnDefaultValues }`. **Writing that recorder is still gated on the tag in §5.**
+  - ⚠️ **One divergence is already known and PINNED rather than fixed** (`ptmapper` §8, red-on-fix):
+    Kotlin's double-tap reads `System.currentTimeMillis()` — absolute epoch ms — so a first A press
+    can never satisfy `now - lastAPress < 300`. The shell passes `SDL_GetTicks64()`, which counts
+    from `SDL_Init`, so an A press inside the first 300 ms reads as a double-tap and inserts the next
+    UNUSED item where Kotlin inserts the LAST-EDITED one. Arrived with the clock substitution in
+    Phase 3 S1, not with C0.1.
 - **Touch button POSITIONS** — see §1.
 - **`DeviceAdapter.LayoutMode` semantics.** `p3-input.txt`'s own header records that the module edits
   *indices*, so the C++ side is handed `(index, count)` rather than layout modes, because

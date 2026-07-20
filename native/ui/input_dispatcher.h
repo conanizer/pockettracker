@@ -40,13 +40,26 @@
 // ⚠️ S8 found exactly that bug, ON ANDROID: `handleBUp`/`handleBDown` never got the EQ guard, so B+UP
 // with the editor open over INST.POOL pages the pool cursor 16 slots underneath it. See on_b_up().
 //
-// ── THE SHELL IS THE InputMapper ─────────────────────────────────────────────────────────────────
+// ── THE MAPPER IS SPLIT IN TWO, AND ONLY ONE HALF IS THE SHELL'S ─────────────────────────────────
 //
 // Android's chain is InputMapper → ButtonHandlers → AppInputDispatcher: the mapper owns the physical
-// keys, the held-modifier state and the key repeat, and calls a NAMED handler. The split is kept
-// exactly — `linux/sdl-input.h` is the mapper, and the methods below are the ButtonHandlers. That is
-// why there is no `handle(ButtonEvent)` here: pt-ui must not know SDL exists (a `ButtonEvent` is an
-// SDL-side type), and a dispatcher that took one could not be driven by a headless tool.
+// keys, the held-modifier state and the key repeat, and calls a NAMED handler. The split is kept —
+// the methods below are the ButtonHandlers — but Kotlin's one `InputMapper` class answers to TWO
+// files here, and the boundary between them is the only platform seam in the input chain:
+//
+//   • `linux/sdl-input.h`  — a keycode, a game-controller button, an axis, the key repeat. SDL's.
+//   • `ui/button_mapper.h` — the COMBO MATRIX: which named handler a press means. Portable.
+//
+// ⚠️ **This header used to say there is no `handle(ButtonEvent)` here because "pt-ui must not know
+// SDL exists (a `ButtonEvent` is an SDL-side type)". The rule is right and the parenthesis was
+// wrong** — `ButtonEvent` never named an SDL type, it was merely DECLARED in a header that included
+// `<SDL.h>`, and convergence C0.1 moved it to `ui/buttons.h` where that accident cannot be mistaken
+// for a design again. The cost of the mistake was real: it kept the combo matrix in `linux/main.cpp`,
+// in one copy, where no tool could reach it (`tools/ptmapper` covers it now).
+//
+// There is still no `handle(ButtonEvent)` on this class, and that part stands on its own feet: the
+// matrix is a free function so a headless tool can drive it with a recording stub, and keeping the
+// dispatcher's surface at NAMED handlers is what lets ptdispatch drive them one at a time.
 //
 // ⚠️ **The clock is injected.** `set_now()` once a frame, and `on_l_b()` reads it. The multi-tap
 // window is a function of time, and a class that reaches for the clock itself cannot be tested —

@@ -21,6 +21,7 @@ project("pockettracker-tools" LANGUAGES C CXX)
 #   ptshot   Phase3 S1 the UI, as pixels        any screen → a PNG, headless (no golden yet — see below)
 #   ptinput  Phase3 S3 the input layer          21687 cases          (units/p3-input.txt)
 #   ptdispatch Ph3 S5  the input DISPATCHER     686 assertions — NO golden; see below and its header
+#   ptmapper   conv C0 the COMBO MATRIX         assertions     — NO golden; the layer above ptdispatch
 #
 # ⚠️ ptdispatch is NOT a conformance tool, and the line matters. Every tool above it byte-compares
 # against a golden recorded from the Kotlin code it replaces — they encode what Kotlin DOES. ptdispatch
@@ -136,6 +137,22 @@ add_executable(ptinput ptinput/main.cpp)
 pt_ieee_exact(ptinput)
 target_link_libraries(ptinput PRIVATE pt-ui)
 
+# ptmapper — the COMBO MATRIX (convergence C0.1). Hand-written assertions, like ptdispatch and for
+# the same reason: Kotlin's `InputMapper.handleButtonAction` has no recorded golden either, so there
+# is nothing to byte-compare against. What it covers is the one block of the input chain that had NO
+# coverage at all — ptdispatch calls the named handlers DIRECTLY, one layer below it, so swapping two
+# arms of a matrix whose own comment says "the order of these checks IS the specification" left every
+# tool in this file green.
+#
+# ⚠️ It deliberately links NOTHING — not even pt-ui — and that is an assertion, not an economy.
+# `ui/button_mapper.h` and `ui/buttons.h` are supposed to need `<cstdint>` and each other and nothing
+# else; give either of them a dependency on the engine, songcore or a platform header and this target
+# stops linking and says which. It is the standing proof that the button model is as portable as C0.1
+# claimed when it moved these out of the SDL header.
+add_executable(ptmapper ptmapper/main.cpp)
+pt_ieee_exact(ptmapper)   # no float in this TU today; kept so the rule cannot be lost by an edit
+target_include_directories(ptmapper PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../native)
+
 # ptdispatch — the input DISPATCHER (Phase 3 S5). The one tool here that is NOT a conformance tool:
 # it takes no golden, because what it checks is the JOIN between the modules, cursor_move and
 # navigation, and Kotlin's side of that join is AppInputDispatcher — entangled with ~60 Compose state
@@ -164,3 +181,5 @@ add_test(NAME s7-determinism   COMMAND ptnondet    "${PT_TESTDATA}")
 add_test(NAME p3-input         COMMAND ptinput     "${PT_TESTDATA}/units/p3-input.txt")
 # No golden argument, because it has none — it asserts, it does not compare. See ptdispatch's header.
 add_test(NAME p3-dispatch      COMMAND ptdispatch)
+# Likewise no golden: the combo matrix is uncovered on the Kotlin side too. See ptmapper's header.
+add_test(NAME c0-mapper        COMMAND ptmapper)
