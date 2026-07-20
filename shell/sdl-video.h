@@ -4,7 +4,9 @@
 // knows nothing about a display; this file is the only code that does. It uploads that framebuffer to
 // one streaming texture and blits it to the screen, which is the port plan's §4.5 video plan
 // unchanged: "render the 640×480 design into a streaming texture; present with integer scale
-// (default) or fit-stretch (setting)".
+// (default) or fit-stretch (setting)". ⚠️ Read "fit-stretch" as "fit at a fractional scale", NOT as
+// "stretch to the window edges" — taking that word literally is what put an aspect-breaking stretch
+// behind the SCALING row; see `ScalingMode` below.
 //
 // GPU-optional on purpose. SDL_Renderer will take an accelerated backend when the device has one and
 // fall back to software when it does not — and a single 640×480 blit is trivial either way. That
@@ -26,15 +28,22 @@ class Canvas;
 }
 
 /**
- * INTEGER keeps pixels square — every design pixel becomes an N×N block, and the remainder is
- * letterboxed. FIT fills the screen and accepts non-square pixels.
+ * INTEGER scales by a whole number — every design pixel becomes an N×N block. FIT scales by a
+ * FRACTIONAL factor and filters the result. **Both preserve the 4:3 aspect ratio and letterbox the
+ * remainder**; neither ever stretches the design out of shape.
  *
  * This is a real choice rather than a preference, and the reason is the device zoo: 640×480 is 1×
  * exactly on the RG35xx class, but a TrimUI Smart Pro is 1280×720 and an RGB30 is 720×720. On those,
- * INTEGER means 1× with thick borders (crisp, small) while FIT means a stretched, filtered image
- * (full-screen, soft). Neither is right for everyone, so it becomes a setting — with INTEGER as the
- * default, because a pixel-art tracker that has been pixel-perfect since it was born should not go
- * blurry the first time it meets a 720p handheld.
+ * INTEGER means 1× with thick borders (crisp, small) while FIT means 1.5× filling the height with
+ * thinner ones (bigger, soft). Neither is right for everyone, so it becomes a setting — with INTEGER
+ * as the default, because a pixel-art tracker that has been pixel-perfect since it was born should
+ * not go blurry the first time it meets a 720p handheld.
+ *
+ * ⚠️ FIT used to stretch to the window edges, which is a divergence from the Kotlin app this ports —
+ * see `dest_rect()` in the .cpp for the mechanism and the three Kotlin call sites that settle it.
+ * ⚠️ On an output that IS a whole multiple of the design the two modes now compute the same rect, and
+ * differ only in the sampling filter. That is correct, not a bug: it is why the setting was invisible
+ * on desktop until the window became resizable.
  */
 enum class ScalingMode { INTEGER, FIT };
 

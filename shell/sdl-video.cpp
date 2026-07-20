@@ -198,7 +198,35 @@ SDL_Rect SdlVideo::dest_rect() const {
     SDL_GetRendererOutputSize(renderer_, &outW, &outH);
 
     if (scaling_ == ScalingMode::FIT) {
-        return SDL_Rect{0, 0, outW, outH};
+        // ⚠️⚠️ **FIT PRESERVES THE ASPECT RATIO. IT IS NOT A STRETCH TO THE WINDOW EDGES**, and it
+        // used to be — `return {0, 0, outW, outH}`, which squashes the 4:3 design into whatever shape
+        // the window happens to be. Reported by the user against the resizable desktop window, which
+        // is what made the setting visible on a non-4:3 output for the first time.
+        //
+        // ⭐ **The Kotlin this is a port OF has never stretched.** All three BILINEAR paths in
+        // `ScreenLayouts.kt` (FullScreen :189, Portrait :228, the bezel layout :472) compute ONE
+        // factor as a `minOf` of the two axis ratios and apply it to BOTH — `scaleX = scaleY =
+        // fillFactor` — and the bezel path even computes explicit `transX`/`transY` centring offsets,
+        // i.e. it expects a letterbox gap. So square pixels are not what INTEGER buys over FIT; the
+        // difference is only that FIT allows a FRACTIONAL scale and filters the result.
+        //
+        // ⭐ The row is called "BILINEAR", which says the same thing: it names a FILTERING choice, not
+        // a geometry one. The geometry divergence arrived with the wording "fit-stretch" in the port
+        // plan's §4.5 and was never checked against the app being converged onto.
+        // ⚠️ INTEGER arithmetic, not `float scale = min(outW/640.0f, outH/480.0f)`. A float scale
+        // truncates: at 1280×960 it computes 960/480 = 2.0f, and `480 * 2.0f` can land at 959.99997,
+        // giving a 1px bar on an output that is an EXACT multiple of the design and should have none.
+        // Cross-multiplying answers "which axis binds?" exactly, and the bound axis then keeps the
+        // window's own size rather than a value round-tripped through a ratio.
+        int w, h;
+        if (outW * DESIGN_H >= outH * DESIGN_W) {  // window wider than 4:3 → height binds
+            h = outH;
+            w = outH * DESIGN_W / DESIGN_H;
+        } else {                                   // taller than 4:3 → width binds
+            w = outW;
+            h = outW * DESIGN_H / DESIGN_W;
+        }
+        return SDL_Rect{(outW - w) / 2, (outH - h) / 2, w, h};
     }
 
     // INTEGER: the largest whole multiple that fits, centred. Clamped to 1 so a window smaller than
