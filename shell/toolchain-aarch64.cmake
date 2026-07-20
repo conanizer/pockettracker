@@ -2,12 +2,12 @@
 #
 # Host: an amd64 Linux with the aarch64 cross toolchain (Ubuntu: `crossbuild-essential-arm64`).
 #
-#   cmake -S linux -B build/aarch64 -G Ninja -DCMAKE_BUILD_TYPE=Release \
-#         -DCMAKE_TOOLCHAIN_FILE=linux/toolchain-aarch64.cmake
+#   cmake -S shell -B build/aarch64 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+#         -DCMAKE_TOOLCHAIN_FILE=shell/toolchain-aarch64.cmake
 #   cmake --build build/aarch64
 #   file build/aarch64/pockettracker-sdl        # -> ELF 64-bit ... ARM aarch64
 #
-# SDL2: linux/CMakeLists.txt calls find_package(SDL2) and FetchContent-builds it STATIC when the host
+# SDL2: shell/CMakeLists.txt calls find_package(SDL2) and FetchContent-builds it STATIC when the host
 # has none — which is what happens on a cross box. That yields a self-contained binary, ideal for CI
 # build-validation and a qemu-user smoke-test (proven: it boots, decodes media, runs the frame loop and
 # exits on SIGTERM under emulation).

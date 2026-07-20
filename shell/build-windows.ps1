@@ -2,9 +2,9 @@
 #
 # Convergence plan A3. Run from the repo root, after building the shell:
 #
-#     cmake -S linux -B linux/build -DCMAKE_BUILD_TYPE=Release
-#     cmake --build linux/build --config Release
-#     powershell -ExecutionPolicy Bypass -File linux/build-windows.ps1
+#     cmake -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release
+#     cmake --build shell/build --config Release
+#     powershell -ExecutionPolicy Bypass -File shell/build-windows.ps1
 #
 # This script PACKAGES, it does not build — unlike build-portmaster.sh, whose container owns its
 # whole toolchain. Here the compiler lives behind vcvars64.bat in whatever Visual Studio the machine
@@ -17,7 +17,7 @@
 #
 # ⚠️ SDL2 IS INSIDE THE EXE, and that is the difference from the PortMaster package that matters
 # most here. A handheld links the CFW's own libSDL2 and ships none; a Windows box has no system SDL
-# at all, so linux/CMakeLists.txt falls through to FetchContent and links it statically. That makes
+# at all, so shell/CMakeLists.txt falls through to FetchContent and links it statically. That makes
 # this zip a binary distribution of SDL2 and puts its notice in the artifact — see the SDL2 section
 # of licenses/THIRD-PARTY-NOTICES.md, which said the opposite until this package existed.
 
@@ -28,7 +28,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 Add-Type -AssemblyName System.IO.Compression
 
 $repo  = Split-Path -Parent $PSScriptRoot
-$build = Join-Path $repo 'linux\build'
+$build = Join-Path $repo 'shell\build'
 $out   = Join-Path $repo 'build\windows'
 $stage = Join-Path $out  'stage'
 
@@ -54,7 +54,7 @@ Write-Output ("     {0:N0} bytes, built {1}" -f (Get-Item $exe).Length, (Get-Ite
 # burned by a stale artifact, and unlike those, this one would ship. Sources only (*.cpp/*.h/CMake),
 # so editing a README does not trip it.
 $newest = Get-ChildItem -Recurse -File `
-              (Join-Path $repo 'linux'), (Join-Path $repo 'native') `
+              (Join-Path $repo 'shell'), (Join-Path $repo 'native') `
               -Include *.cpp, *.h, *.hpp, *.c, *.rc, *.rc.in, CMakeLists.txt |
           Where-Object { $_.FullName -notlike "*\build\*" } |
           Sort-Object LastWriteTime -Descending | Select-Object -First 1
@@ -66,7 +66,7 @@ if ($newest -and $newest.LastWriteTime -gt (Get-Item $exe).LastWriteTime) {
 }
 Write-Output "not stale: no source newer than the exe"
 
-# The version, from the same place linux/CMakeLists.txt read it — see the comment there.
+# The version, from the same place shell/CMakeLists.txt read it — see the comment there.
 $gradle = Get-Content (Join-Path $repo 'app\build.gradle.kts') -Raw
 if ($gradle -notmatch 'versionName[ \t]*=[ \t]*"([0-9]+\.[0-9]+\.[0-9]+)"') {
     throw "could not find versionName in app/build.gradle.kts"
@@ -108,7 +108,7 @@ Copy-Item (Join-Path $repo 'native\vendor\opus\LICENSE_PLEASE_READ.txt') (Join-P
 
 # ⚠️ SDL's licence comes out of the SOURCE THAT WAS ACTUALLY COMPILED, not from a copy kept in this
 # repo. FetchContent put it in the build tree, so the licence that ships is the licence of the code
-# that shipped, by construction — and if the SDL2 pin in linux/CMakeLists.txt ever moves, this file
+# that shipped, by construction — and if the SDL2 pin in shell/CMakeLists.txt ever moves, this file
 # moves with it rather than quietly describing the old one.
 $sdlLicense = Join-Path $build '_deps\sdl2-src\LICENSE.txt'
 if (-not (Test-Path $sdlLicense)) {
@@ -148,12 +148,12 @@ Write-Output "import scan        : working (KERNEL32.dll found)"
 # the Visual C++ redistributable, which a developer's machine has and a stranger's does not: they
 # would double-click and get a Windows error dialog naming a DLL. It is invisible on every box that
 # can build the thing, which is every box this shell had ever run on.
-# linux/CMakeLists.txt's CMAKE_MSVC_RUNTIME_LIBRARY is the fix; this is the assertion.
+# shell/CMakeLists.txt's CMAKE_MSVC_RUNTIME_LIBRARY is the fix; this is the assertion.
 $dynamicCrt = @('VCRUNTIME140.dll', 'VCRUNTIME140_1.dll', 'MSVCP140.dll', 'MSVCR120.dll') |
               Where-Object { $text -match [regex]::Escape($_) }
 if ($dynamicCrt) {
     throw ("the exe imports the DYNAMIC VC runtime ($($dynamicCrt -join ', ')). A machine without " +
-           "Visual Studio cannot run it. Check CMAKE_MSVC_RUNTIME_LIBRARY in linux/CMakeLists.txt.")
+           "Visual Studio cannot run it. Check CMAKE_MSVC_RUNTIME_LIBRARY in shell/CMakeLists.txt.")
 }
 Write-Output "VC runtime         : static (no VCRUNTIME/MSVCP imports)"
 
@@ -188,7 +188,7 @@ $e128     = 6 + 16 * 5                                        # the 128x128 dire
 $off128   = [BitConverter]::ToUInt32($icoBytes, $e128 + 12)
 $slice    = [System.Text.Encoding]::GetEncoding(28591).GetString($icoBytes, $off128 + 20040, 64)
 if (-not $text.Contains($slice)) {
-    throw ("the exe does not contain the pixels of linux/windows/PocketTracker.ico - the icon " +
+    throw ("the exe does not contain the pixels of shell/windows/PocketTracker.ico - the icon " +
            "resource is missing or is not ours (check the .rc and that enable_language(RC) ran)")
 }
 Write-Output "icon resource      : present and matches PocketTracker.ico (SDL takes the first RT_GROUP_ICON as the window icon)"

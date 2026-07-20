@@ -116,7 +116,7 @@ jobs:
   # clock_gettime, which MSVC does not have. It had been broken for as long as it had existed and
   # nothing was watching.
   #
-  # The two runners also cover BOTH branches of linux/CMakeLists.txt's SDL2 lookup, which is worth
+  # The two runners also cover BOTH branches of shell/CMakeLists.txt's SDL2 lookup, which is worth
   # more than doubling the platform count: ubuntu apt-installs libsdl2-dev, so find_package(SDL2)
   # succeeds and the link is against the SYSTEM SDL — the model every PortMaster CFW requires. Windows
   # has no system SDL, so it falls through to FetchContent and builds SDL from source, which is the
@@ -140,14 +140,14 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
 
-      # CMAKE_BUILD_TYPE explicitly, per linux/CMakeLists.txt's own warning: a Debug engine may not
+      # CMAKE_BUILD_TYPE explicitly, per shell/CMakeLists.txt's own warning: a Debug engine may not
       # keep up with a real-time audio callback, and the usual "default it if empty" guard does not
       # fire on MSVC.
       - name: Configure
-        run: cmake -S linux -B linux/build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build linux/build --config Release
+        run: cmake --build shell/build --config Release
 
       # `error` rather than `warn` on no match — a shell that silently stopped being produced is
       # exactly the failure this job exists to catch, and a green job with an empty artifact would
@@ -157,7 +157,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pockettracker-shell-${{ matrix.name }}
-          path: linux/build/pockettracker-sdl
+          path: shell/build/pockettracker-sdl
           if-no-files-found: error
           retention-days: 7
 
@@ -179,7 +179,7 @@ jobs:
       - name: Package the Windows desktop zip
         if: runner.os == 'Windows'
         shell: powershell
-        run: powershell -ExecutionPolicy Bypass -File linux/build-windows.ps1
+        run: powershell -ExecutionPolicy Bypass -File shell/build-windows.ps1
 
       - name: Upload the Windows package
         if: runner.os == 'Windows'

@@ -28,12 +28,12 @@
   correct conversion given what `__std_fs_code_page` actually does — is unanswered and worth a
   session of its own.
 
-  ⚠️ The linker is told NOT to generate its own manifest (/MANIFEST:NO in linux/CMakeLists.txt), or
+  ⚠️ The linker is told NOT to generate its own manifest (/MANIFEST:NO in shell/CMakeLists.txt), or
   there would be two and the embedded one here would be the loser. The trustInfo block below is
   therefore not decoration: it is the asInvoker level the auto-generated manifest used to supply,
   restated so that suppressing it changes nothing else.
 
-  ⚠️ The linker is told NOT to generate its own manifest (/MANIFEST:NO in linux/CMakeLists.txt), or
+  ⚠️ The linker is told NOT to generate its own manifest (/MANIFEST:NO in shell/CMakeLists.txt), or
   there would be two and the embedded one here would be the loser. The trustInfo block below is
   therefore not decoration: it is the asInvoker level the auto-generated manifest used to supply,
   restated so that suppressing it changes nothing else.

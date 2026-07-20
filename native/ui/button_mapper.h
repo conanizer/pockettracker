@@ -8,7 +8,7 @@
 //
 // ── WHY THIS MOVED, AND WHY IT IS A TEMPLATE (convergence C0.1) ──────────────────────────────────
 //
-// It lived in `linux/main.cpp`'s anonymous namespace from Phase 3 S1 until convergence C0, where it
+// It lived in `shell/main.cpp`'s anonymous namespace from Phase 3 S1 until convergence C0, where it
 // had two properties that were fine for a Linux port and are not fine for a shared shell:
 //
 //   • **it existed in exactly one copy, in a file Android cannot link.** C1 gives Android the same

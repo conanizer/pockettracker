@@ -31,7 +31,7 @@
 // A test that hand-wrote `mods.a = false` on an A press would be testing a gesture the app can never
 // produce, and would "pass" while proving nothing — §26's shape from the guardrails. So `Rig` below
 // keeps a held-set and derives the mods from it, transcribed from `SdlInput::press`/`release`
-// (linux/sdl-input.cpp): set the flag, then snapshot. The gestures here are the ones a user's thumbs
+// (shell/sdl-input.cpp): set the flag, then snapshot. The gestures here are the ones a user's thumbs
 // can actually make.
 
 #include <cstdio>

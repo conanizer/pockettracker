@@ -35,6 +35,6 @@ windows/*.txt text eol=crlf
 # ⚠️ The icon is BINARY and must never be EOL-converted. It is committed (make-icon.ps1 regenerates
 # it but no build runs that), and with core.autocrlf=true on this box an unmarked .ico would have
 # every 0x0A in its pixel data rewritten to 0x0D 0x0A on checkout — a corrupt icon, on someone
-# else's clone, from a setting nobody touched. `git check-attr binary -- linux/windows/*.ico`
+# else's clone, from a setting nobody touched. `git check-attr binary -- shell/windows/*.ico`
 # answers this rather than the file extension being trusted to be recognised.
 windows/*.ico binary

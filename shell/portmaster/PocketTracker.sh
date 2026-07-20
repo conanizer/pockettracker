@@ -10,7 +10,7 @@
 # reintroduces a bug that took a device session to find.
 #
 # gptokeyb exists to fake KEYBOARD presses for games that cannot read a gamepad. PocketTracker
-# reads the pad itself, through SDL's GameController API (linux/sdl-input.cpp), and it ALSO reads
+# reads the pad itself, through SDL's GameController API (shell/sdl-input.cpp), and it ALSO reads
 # the keyboard, because the same source builds the desktop dev binary. So with gptokeyb running,
 # every physical press arrives TWICE by two different paths - and gptokeyb's built-in defaults do
 # not agree with the app's keyboard map about what the buttons mean:

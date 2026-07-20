@@ -7,7 +7,7 @@
 //
 // ── WHY THIS MOVED (convergence C0.1) ────────────────────────────────────────────────────────────
 //
-// These four types were declared in `linux/sdl-input.h` from Phase 3 S1 until convergence C0, and
+// These four types were declared in `shell/sdl-input.h` from Phase 3 S1 until convergence C0, and
 // `ui/input_dispatcher.h`'s own header says in as many words why there is no `handle(ButtonEvent)`
 // on the dispatcher: *"pt-ui must not know SDL exists (a `ButtonEvent` is an SDL-side type)"*.
 //

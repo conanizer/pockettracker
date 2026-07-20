@@ -10,9 +10,9 @@ project("pockettracker-sdl" LANGUAGES C CXX)
 # reaches it through the SAME class Android's JNI layer marshals (songcore::SongcoreHost), so there
 # is no second implementation of anything that decides how a song sounds. See main.cpp.
 #
-#   cmake -S linux -B linux/build -DCMAKE_BUILD_TYPE=Release
-#   cmake --build linux/build --config Release
-#   linux/build/pockettracker-sdl testdata/g7-audio.ptp testdata
+#   cmake -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release
+#   cmake --build shell/build --config Release
+#   shell/build/pockettracker-sdl testdata/g7-audio.ptp testdata
 #
 # Pass CMAKE_BUILD_TYPE explicitly, as above. The usual "default to Release if it is empty" guard is
 # not portable: MSVC's platform module pre-seeds CMAKE_BUILD_TYPE to Debug (via CMAKE_BUILD_TYPE_INIT)
@@ -36,7 +36,7 @@ file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../app/build.gradle.kts" PT_GRADLE)
 if(NOT PT_GRADLE MATCHES "versionName[ \t]*=[ \t]*\"([0-9]+)\\.([0-9]+)\\.([0-9]+)\"")
     message(FATAL_ERROR
             "could not find versionName in app/build.gradle.kts - if its syntax changed, update "
-            "this regex in linux/CMakeLists.txt")
+            "this regex in shell/CMakeLists.txt")
 endif()
 set(PT_VERSION       "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
 set(PT_VERSION_COMMA "${CMAKE_MATCH_1},${CMAKE_MATCH_2},${CMAKE_MATCH_3},0")
@@ -97,8 +97,8 @@ endif()
 
 # ─── The Windows resource: the icon and the version stamp (A3) ─────────────────────────────────
 # Generated rather than committed, because it carries the icon's path and the version parsed above.
-# The icon file ITSELF is committed (linux/windows/PocketTracker.ico) and is regenerated from
-# docs/images/logo-plain.png by linux/windows/make-icon.ps1 — which no build runs.
+# The icon file ITSELF is committed (shell/windows/PocketTracker.ico) and is regenerated from
+# docs/images/logo-plain.png by shell/windows/make-icon.ps1 — which no build runs.
 #
 # One embedded icon is all the shell needs: SDL takes the first RT_GROUP_ICON as the window icon, so
 # this is also why there is no SDL_SetWindowIcon anywhere. See the header of pockettracker.rc.in.

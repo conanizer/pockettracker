@@ -3,6 +3,17 @@
 **Linux-port plan Phase 2 (the sound) + Phase 3 (the UI).** A build of PocketTracker with no Kotlin in
 it: it opens an audio device, hands songcore a `.ptp`, draws the tracker, and plays it.
 
+> ⚠️ **This directory was `linux/` until convergence C0.3.** It was named for the platform that made
+> it necessary, and it stopped being true in the same phase that made it matter: `platform_caps.h`
+> had already argued the point for its own reasons (its profile is `sdl()`, not `linux()`), and
+> convergence Phase C gives Android this same shell. Windows has shipped out of here since A3.
+>
+> Since C0.2 the split inside the directory says the same thing: **`app.{h,cpp}` is the shared shell**
+> — the boot sequence, the frame loop, the teardown, identical on every platform — and **`main.cpp` is
+> the desktop/handheld residue** beside it (argv, the signal handler, `SDL_Init`/`SDL_Quit`, and the
+> choice of audio backend, root and caps). C1's Android entry point is a second file next to
+> `main.cpp` linking the same `app.cpp`.
+
 ## Why this directory is small
 
 Almost nothing here is new code, and that is the point.
@@ -21,12 +32,14 @@ framebuffer and contains no SDL, no POSIX and no window.
 
 So what is left in here is only, and exactly, the shell:
 
-| | Android | Linux/SDL |
+| | Android | shell/SDL |
 |---|---|---|
-| Audio backend | `native/oboe-audio-engine.cpp` | `linux/sdl-audio-engine.cpp` |
-| Video / window | Compose `Canvas` | `linux/sdl-video.cpp` |
-| Input source | `InputMapper` (Android keys) | `linux/sdl-input.cpp` |
-| Entry point | `native/songcore-jni.cpp` (JNI) | `linux/main.cpp` |
+| Audio backend | `native/oboe-audio-engine.cpp` | `shell/sdl-audio-engine.cpp` (both are an `AudioBackend`, C0.2) |
+| Video / window | Compose `Canvas` | `shell/sdl-video.cpp` |
+| Input source | `InputMapper` (Android keys) | `shell/sdl-input.cpp` — the physical half only |
+| Combo matrix | `InputMapper.handleButtonAction` | `native/ui/button_mapper.h` — **shared** since C0.1 |
+| Entry point | `native/songcore-jni.cpp` (JNI) | `shell/main.cpp` |
+| Boot · frame loop · exit | `PixelPerfectRenderer` | `shell/app.cpp` — **shared** since C0.2 |
 | **Engine · songcore · UI** | **shared — the same files** | **shared — the same files** |
 
 Both audio backends do the same one thing in their callback: hand the device buffer to
@@ -69,8 +82,8 @@ AmberELEC…) ship their own `libSDL2`, and a port links the one the OS provides
 fallback exists so a Windows dev box needs no setup at all.
 
 ```sh
-cmake -S linux -B linux/build -DCMAKE_BUILD_TYPE=Release
-cmake --build linux/build --config Release
+cmake -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release
+cmake --build shell/build --config Release
 ```
 
 Pass `CMAKE_BUILD_TYPE` explicitly. The usual "default to Release if it's empty" guard is not
@@ -83,8 +96,8 @@ Visual Studio, so it cannot generate for it. Use Ninja, from a `vcvars64` shell:
 ```bat
 call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
 set CMBIN=%LOCALAPPDATA%\Android\Sdk\cmake\3.22.1\bin
-%CMBIN%\cmake -S linux -B linux\build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MAKE_PROGRAM=%CMBIN%\ninja.exe
-%CMBIN%\cmake --build linux\build
+%CMBIN%\cmake -S shell -B shell\build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MAKE_PROGRAM=%CMBIN%\ninja.exe
+%CMBIN%\cmake --build shell\build
 ```
 
 Linux needs SDL2's dev package (`apt install libsdl2-dev`) to use the system one, or it will fetch.
@@ -96,8 +109,8 @@ toolchain — on Ubuntu, `apt install crossbuild-essential-arm64` — and point 
 file:
 
 ```sh
-cmake -S linux -B build/aarch64 -G Ninja -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_TOOLCHAIN_FILE=linux/toolchain-aarch64.cmake
+cmake -S shell -B build/aarch64 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_TOOLCHAIN_FILE=shell/toolchain-aarch64.cmake
 cmake --build build/aarch64
 file build/aarch64/pockettracker-sdl        # -> ELF 64-bit ... ARM aarch64
 ```
@@ -110,8 +123,8 @@ is the same toolchain file with the two things the header warns about actually d
 ### The PortMaster package
 
 ```sh
-docker build -t pockettracker-build -f linux/Dockerfile.portmaster linux/
-docker run --rm -v "$PWD:/src" pockettracker-build bash /src/linux/build-portmaster.sh
+docker build -t pockettracker-build -f shell/Dockerfile.portmaster shell/
+docker run --rm -v "$PWD:/src" pockettracker-build bash /src/shell/build-portmaster.sh
 # -> build/portmaster/pockettracker.zip
 ```
 
@@ -142,7 +155,7 @@ Two decisions worth knowing before changing anything here:
 
 ```bat
 :: build first (see above), then:
-powershell -ExecutionPolicy Bypass -File linux\build-windows.ps1
+powershell -ExecutionPolicy Bypass -File shell\build-windows.ps1
 :: -> build\windows\PocketTracker-<version>-windows-x64.zip
 ```
 
@@ -168,13 +181,13 @@ Three decisions worth knowing:
   the imports are gone.
 - **The icon is a resource, and that is also the window icon.** SDL takes the first `RT_GROUP_ICON`
   out of the exe when no hint is set, so there is no `SDL_SetWindowIcon` call and no PNG decoder in
-  the C++ tree — which convergence D2 does not want pulled forward. `linux/windows/make-icon.ps1`
+  the C++ tree — which convergence D2 does not want pulled forward. `shell/windows/make-icon.ps1`
   regenerates the `.ico` from `docs/images/logo-plain.png`; no build runs it.
 
 ## Run
 
 ```sh
-linux/build/pockettracker-sdl testdata/g7-audio.ptp testdata
+shell/build/pockettracker-sdl testdata/g7-audio.ptp testdata
 ```
 
 `g7-audio` is the golden project built for the DSP rather than the sequencer — both send buses, the

@@ -4,12 +4,12 @@
 #
 # Run from the repo root, on a box with docker:
 #
-#     docker build -t pockettracker-build -f linux/Dockerfile.portmaster linux/
-#     docker run --rm -v "$PWD:/src" pockettracker-build bash /src/linux/build-portmaster.sh
+#     docker build -t pockettracker-build -f shell/Dockerfile.portmaster shell/
+#     docker run --rm -v "$PWD:/src" pockettracker-build bash /src/shell/build-portmaster.sh
 #
 # ⚠️ Do NOT run this on the host toolchain just because the host HAS an aarch64 cross compiler.
 # It will build, link and produce a perfectly good ELF that no handheld can load. The container is
-# the glibc floor; see linux/Dockerfile.portmaster.
+# the glibc floor; see shell/Dockerfile.portmaster.
 #
 # ⚠️ Nothing here is filtered down to the word "error". Every command prints its own output. Four
 # separate sessions of this project have been burned by a build step that failed quietly and left a
@@ -27,7 +27,7 @@ SRC=${SRC:-/src}
 # linked against, so if the shell ever reaches for a newer SDL API this build FAILS HERE, loudly, on
 # a dev box — instead of on a stranger's handheld as `undefined symbol`. 2.0.18 is the floor because
 # the shell calls SDL_GetTicks64(), which landed in exactly that release; everything else it needs is
-# 2.0.0-era. Raise this ONLY together with the requirement in linux/portmaster/README.md.
+# 2.0.0-era. Raise this ONLY together with the requirement in shell/portmaster/README.md.
 SDL2_TAG=${SDL2_TAG:-release-2.0.18}
 
 # Every Tier-1 CFW is at or above Ubuntu 20.04's glibc. This is asserted on the artifact below.
@@ -64,9 +64,9 @@ cmake --install "$SDL2_BUILD"
 echo
 echo "############ 2/5  cross-build PocketTracker ############"
 rm -rf "$BUILD"
-cmake -S "$SRC/linux" -B "$BUILD" -G Ninja \
+cmake -S "$SRC/shell" -B "$BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_TOOLCHAIN_FILE="$SRC/linux/toolchain-aarch64.cmake" \
+    -DCMAKE_TOOLCHAIN_FILE="$SRC/shell/toolchain-aarch64.cmake" \
     -DSDL2_DIR="$SYSROOT/lib/cmake/SDL2"
 cmake --build "$BUILD"
 
@@ -87,10 +87,10 @@ echo "############ 3/5  stage the package ############"
 rm -rf "$OUT"
 mkdir -p "$STAGE/pockettracker/licenses"
 
-cp "$SRC/linux/portmaster/PocketTracker.sh" "$STAGE/"
-cp "$SRC/linux/portmaster/port.json"        "$STAGE/"
-cp "$SRC/linux/portmaster/gameinfo.xml"     "$STAGE/"
-cp "$SRC/linux/portmaster/README.md"        "$STAGE/"
+cp "$SRC/shell/portmaster/PocketTracker.sh" "$STAGE/"
+cp "$SRC/shell/portmaster/port.json"        "$STAGE/"
+cp "$SRC/shell/portmaster/gameinfo.xml"     "$STAGE/"
+cp "$SRC/shell/portmaster/README.md"        "$STAGE/"
 chmod +x "$STAGE/PocketTracker.sh"
 
 # The art. `gameinfo.xml` points the CFW's game list at it (`<image>./pockettracker/screenshot.png`)

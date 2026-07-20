@@ -2629,7 +2629,7 @@ int main() {
         //
         // (b) hand-builds a Theme and calls `save_settings` ITSELF. So it proves the SERIALIZER
         // round-trips and says exactly nothing about whether any button press ever reaches it. The
-        // shell writes settings.json only `if (state.settingsDirty)` (linux/main.cpp) — and the ONLY
+        // shell writes settings.json only `if (state.settingsDirty)` (shell/main.cpp) — and the ONLY
         // thing in the entire tree that ever set that flag was `apply_edit`'s SETTINGS arm
         // (input_dispatcher.cpp). The THEME EDITOR does not go through `apply_edit`: it has no
         // CursorContext, so its four A+DPAD arms call `theme_adjust_color` / `theme_cycle_builtin` on
@@ -2675,7 +2675,7 @@ int main() {
             //
             // ⚠️⚠️ CALLING `save_settings` DIRECTLY HERE WOULD MAKE THIS CHECK (b) ALL OVER AGAIN — it
             // would prove the serializer round-trips and pass on a build that never writes at all. The
-            // whole claim is that the path the SHELL takes on exit (linux/main.cpp) picks this edit up
+            // whole claim is that the path the SHELL takes on exit (shell/main.cpp) picks this edit up
             // without anything having flagged it. So the exit verb is what gets called, and nothing
             // else. Verified RED against the dirty-flag build that preceded it, where this was
             // `if (s2.settingsDirty) save_settings(...)` and the flag was never set: 1 failure of 627,

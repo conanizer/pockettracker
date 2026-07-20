@@ -1,6 +1,6 @@
 # /testdata — the conformance goldens
 
-The measuring stick for songcore and the Linux/Windows port (`linux-port-plan.md` §4.3,
+The measuring stick for songcore and the shell/Windows port (`linux-port-plan.md` §4.3,
 `event-schema.md`). Everything here is **generated** — do not edit by hand.
 
 ---
@@ -94,7 +94,7 @@ Named holes, so nobody has to rediscover them by being bitten:
   handlers — combos, key repeat, deferred A/B, held-modifier state. `ptinput` sits one layer below
   (it drives modules directly) and `ptdispatch` sits one layer below too (named handlers).
   - ✅ **The C++ side now has `tools/ptmapper`** (ctest `c0-mapper`). C0.1 moved the matrix out of
-    `linux/main.cpp` into `native/ui/button_mapper.h` and templated it on the dispatcher, so a
+    `shell/main.cpp` into `native/ui/button_mapper.h` and templated it on the dispatcher, so a
     recording stub can drive it. 64 assertions over the order-sensitive arms. **Proven non-vacuous:
     reorder the L+B+A arm below the L+… block — the reordering the matrix's own comment warns about —
     and a clone silently PASTES; `ptmapper` is the only one of the ten tests that goes red.**

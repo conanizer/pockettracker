@@ -47,14 +47,14 @@
 // the methods below are the ButtonHandlers — but Kotlin's one `InputMapper` class answers to TWO
 // files here, and the boundary between them is the only platform seam in the input chain:
 //
-//   • `linux/sdl-input.h`  — a keycode, a game-controller button, an axis, the key repeat. SDL's.
+//   • `shell/sdl-input.h`  — a keycode, a game-controller button, an axis, the key repeat. SDL's.
 //   • `ui/button_mapper.h` — the COMBO MATRIX: which named handler a press means. Portable.
 //
 // ⚠️ **This header used to say there is no `handle(ButtonEvent)` here because "pt-ui must not know
 // SDL exists (a `ButtonEvent` is an SDL-side type)". The rule is right and the parenthesis was
 // wrong** — `ButtonEvent` never named an SDL type, it was merely DECLARED in a header that included
 // `<SDL.h>`, and convergence C0.1 moved it to `ui/buttons.h` where that accident cannot be mistaken
-// for a design again. The cost of the mistake was real: it kept the combo matrix in `linux/main.cpp`,
+// for a design again. The cost of the mistake was real: it kept the combo matrix in `shell/main.cpp`,
 // in one copy, where no tool could reach it (`tools/ptmapper` covers it now).
 //
 // There is still no `handle(ButtonEvent)` on this class, and that part stands on its own feet: the

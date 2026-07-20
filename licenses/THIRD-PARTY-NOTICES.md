@@ -6,8 +6,8 @@ with the source tree that built it. A user who receives only the artifact must s
 
 This file is the single source of truth for the notices and is shipped verbatim in:
 
-- the **PortMaster zip** → `pockettracker/licenses/THIRD-PARTY-NOTICES.md` (`linux/build-portmaster.sh`)
-- the **Windows zip** → `licenses/THIRD-PARTY-NOTICES.md` (`linux/build-windows.ps1`)
+- the **PortMaster zip** → `pockettracker/licenses/THIRD-PARTY-NOTICES.md` (`shell/build-portmaster.sh`)
+- the **Windows zip** → `licenses/THIRD-PARTY-NOTICES.md` (`shell/build-windows.ps1`)
 - the **repo** → `licenses/THIRD-PARTY-NOTICES.md`
 
 ⚠️ **Scope: this file lists what is compiled into the ENGINE**, i.e. everything that ships in *both*
@@ -259,8 +259,8 @@ the thing a user actually receives.
 
 | artifact | how SDL2 is linked | ships an SDL2 binary? |
 |---|---|---|
-| **PortMaster zip** (`linux/build-portmaster.sh`) | dynamically, against the **device's own** `libSDL2-2.0.so.0` — the copy its CFW patched for that hardware's display and audio | **no** (the build asserts `libs.aarch64` is absent) |
-| **Windows zip** (`linux/build-windows.ps1`) | **statically, into `PocketTracker.exe`** — a Windows box has no system SDL2, so `linux/CMakeLists.txt` falls through to FetchContent | **yes — inside the exe** |
+| **PortMaster zip** (`shell/build-portmaster.sh`) | dynamically, against the **device's own** `libSDL2-2.0.so.0` — the copy its CFW patched for that hardware's display and audio | **no** (the build asserts `libs.aarch64` is absent) |
+| **Windows zip** (`shell/build-windows.ps1`) | **statically, into `PocketTracker.exe`** — a Windows box has no system SDL2, so `shell/CMakeLists.txt` falls through to FetchContent | **yes — inside the exe** |
 | **APK** | no SDL2 at all until convergence phase C1 | no |
 
 So the Windows package carries the notice below, and `build-windows.ps1` copies it out of the SDL
@@ -273,8 +273,8 @@ notice fails the build. SDL2 is fetched at configure time and has never been in 
 it is invisible to that mechanism; `build-windows.ps1` therefore checks for the SDL notice **by
 name**, as a special case, with this paragraph as the reason.
 
-Used for: window, renderer, audio output, gamepad and keyboard input (`linux/`). Version: whatever
-`SDL2_TAG` / the FetchContent pin in `linux/CMakeLists.txt` names at build time — currently
+Used for: window, renderer, audio output, gamepad and keyboard input (`shell/`). Version: whatever
+`SDL2_TAG` / the FetchContent pin in `shell/CMakeLists.txt` names at build time — currently
 `release-2.30.9` on Windows, `release-2.0.18` as the PortMaster link floor.
 
 ```

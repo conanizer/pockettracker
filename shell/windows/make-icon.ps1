@@ -1,6 +1,6 @@
 # Regenerate PocketTracker.ico from docs/images/logo-plain.png.
 #
-#     powershell -ExecutionPolicy Bypass -File linux/windows/make-icon.ps1
+#     powershell -ExecutionPolicy Bypass -File shell/windows/make-icon.ps1
 #
 # The .ico is COMMITTED — this script is not part of any build, and CI never runs it. It exists so
 # the icon is a derived artifact with a stated source rather than a binary someone once dropped in
