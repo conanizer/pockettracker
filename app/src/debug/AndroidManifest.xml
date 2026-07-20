@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    DEBUG-ONLY manifest additions. Convergence C3.
+
+    AGP merges this into the main manifest for debug builds and for debug builds ONLY, which is what
+    keeps the release APK free of the SDL activity entirely — no class, no manifest entry, no second
+    launcher icon, and no flag anybody has to remember to flip. The plan requires both UIs to ship
+    side by side through phases C and D (touch does not work until D, so an SDLActivity cannot be the
+    release entry point yet); this file is the whole mechanism for "both", and deleting it in Phase E
+    is how the SDL app becomes the app.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!--
+            The C++ tracker. A second launcher icon on a debug install, deliberately: the alternative
+            is `adb shell am start -n com.conanizer.pockettracker/.SdlActivity` on every device round
+            trip, and the round trip is the expensive part of this phase.
+
+            android:configChanges mirrors MainActivity's so a rotation does not restart the native
+            thread mid-session.
+
+            ⚠️ hardwareAccelerated is left at its default (true): SDL renders through SDL_Renderer on
+            a SurfaceView, and turning it off would silently drop it to a software blit.
+        -->
+        <activity
+            android:name=".SdlActivity"
+            android:exported="true"
+            android:label="PT (SDL)"
+            android:theme="@style/Theme.Pockettracker"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

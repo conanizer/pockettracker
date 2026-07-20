@@ -7,6 +7,16 @@
 // which on a tracker is the difference between a keypress sounding *now* and the app feeling laggy.
 // That is convergence-plan §1's "SDL and Oboe are not a choice — take both", expressed as a type.
 //
+// ⚠️ **THIS FILE LIVES IN `native/`, NOT `shell/`, AND C3 MOVED IT THERE.** It was written in
+// `shell/` because the shell was its only consumer, which was true right up until Oboe implemented
+// it. The two implementations sit in different directories — `SdlAudioEngine` in `shell/`,
+// `OboeAudioEngine` in `native/` — so an interface in `shell/` would have meant the engine layer
+// including a header from the shell layer above it, which is the dependency edge this architecture
+// spends its effort not having. `native/`'s include root is PUBLIC and every consumer already
+// inherits it, so the move cost no include line anywhere: `#include "audio-backend.h"` resolves from
+// both sides exactly as before. There is no SDL, no POSIX and no Oboe in this file, which is what
+// makes it belong to the layer both backends can see rather than to either one of them.
+//
 // ⚠️ **THIS IS NOT IN THE REAL-TIME PATH, AND THAT IS WHY IT IS ALLOWED TO BE VIRTUAL.** The audio
 // callback never comes through here: SDL calls `SdlAudioEngine::audioCallback` and Oboe calls
 // `OboeAudioEngine::onAudioReady`, each straight into `AudioEngine::processLiveBlock`. The five
@@ -20,9 +30,11 @@
 // initialised at all and the two cannot fight over it — the property convergence-plan C3 requires,
 // already true today rather than something C3 has to arrange.
 //
-// The Oboe side implements three of these already with the same shapes (`openStream` / `closeStream`
-// / `resumeStream`). C3's whole audio task is adding `setPaused` and `sampleRate` and inheriting
-// here.
+// ✅ **Both sides implement this as of C3.** The Oboe side already had three with the same shapes
+// (`openStream` / `closeStream` / `resumeStream`); C3 added `setPaused` and `sampleRate` and
+// inherited here. ⚠️ Read `OboeAudioEngine::setPaused` before changing either implementation — the
+// two are NOT free to differ in whether they guarantee the callback has finished, and Oboe's version
+// documents a second reason for its choice that the SDL one does not have.
 
 #ifndef POCKETTRACKER_AUDIO_BACKEND_H
 #define POCKETTRACKER_AUDIO_BACKEND_H

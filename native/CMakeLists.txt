@@ -290,11 +290,14 @@ endif()
 # byte or break it in any way. That `if` was the one line standing between two UIs and one, and
 # deleting it is the convergence.
 #
-# ⚠️ Android COMPILES pt-ui; it does not yet USE it. Nothing links this archive until C3 constructs
-# the shared shell's main against Oboe, so no pt-ui code reaches the APK and the shipped app still
-# draws its screens in Compose. Doing it in this order is the point: C2 buys the standing proof that
-# these ~18,000 lines compile with the NDK's clang against Android's libc++ — on BOTH shipping ABIs,
-# in the exact configuration that ships — before anything depends on them.
+# ✅ **C3 GAVE THIS ARCHIVE A LINKER** — `pockettracker-sdl` at the bottom of this file. Android now
+# COMPILES pt-ui *and* SHIPS it, inside that .so. The C2-era warning below is kept because it is
+# still true of the mechanism and is the reason the CI check exists, but the specific claim it opens
+# with ("nothing links this archive") is no longer the state of the tree.
+#
+# ⚠️ The shipped app still draws its screens in Compose: the SDL activity is debug-only through
+# phases C and D, because the moment the app becomes an SDLActivity, touch stops working and touch is
+# Phase D. Two activities, one APK, deliberately — see the pockettracker-sdl block.
 #
 # ⚠️⚠️ BUT `assembleDebug` DOES NOT BUILD THIS TARGET, AND DELETING THE GATE DID NOT MAKE IT.
 # Measured, not assumed: with the gate gone, `:app:externalNativeBuildDebug` printed BUILD SUCCESSFUL
@@ -311,8 +314,9 @@ endif()
 # ⚠️ Do NOT "fix" this by listing targets in app/build.gradle.kts's externalNativeBuild.cmake.targets:
 # that field is a WHITELIST, so it would work today and silently stop packaging the first .so a
 # future session forgets to add to it. Correctness that rests on every future site remembering is
-# already broken — the same rule this project keeps relearning. C3 removes the question entirely by
-# giving pt-ui a real linker, which is the only honest way a target gets built.
+# already broken — the same rule this project keeps relearning. ✅ C3 removed the question the honest
+# way instead: pt-ui now has a real linker (`pockettracker-sdl`), so AGP builds it because it packages
+# the thing that needs it — no list to keep in sync.
 add_library(pt-ui STATIC
         ui/canvas.cpp
         ui/clipboard.cpp
@@ -391,4 +395,66 @@ if(MSVC)
     target_compile_options(pt-ui PRIVATE /fp:precise)
 else()
     target_compile_options(pt-ui PRIVATE -fno-fast-math -ffp-contract=off)
+endif()
+
+# ─── The Android SDL app: pt-ui's first real linker (convergence C3) ───────────────────────────
+#
+# ⭐ **THIS TARGET IS WHAT MAKES C2 REAL.** C2 removed the `if(NOT ANDROID)` gate above and pt-ui
+# became an unconditional target — and nothing changed in the build, because AGP only names the
+# targets it can PACKAGE plus their transitive dependencies, and a static archive nothing links is
+# never compiled. The fix was never to whitelist targets (that is correctness resting on every
+# future session remembering, which this project has written down as broken by construction); it was
+# to give the archive a consumer that AGP has to build because it packages the result. That is this
+# `.so`, and pt-ui arrives inside it as an ordinary link-time dependency.
+#
+# ⚠️ **TWO APPS IN ONE APK, DELIBERATELY, FOR THE LENGTH OF PHASES C AND D.** `libpockettracker.so`
+# above keeps the Compose app running through the JNI facade, and this library is the SDL app beside
+# it. The plan requires it: the moment the app becomes an SDLActivity, Compose is gone and touch does
+# not work — and touch is Phase D. Release ships the Compose activity until Phase D is device-proven;
+# this one is debug-only (see the manifest). Phase E deletes the first and this becomes the app.
+#
+# The two never coexist in one process: they are separate activities, each constructing its own
+# engine and its own OboeAudioEngine. Nothing here is a singleton.
+if(ANDROID)
+    set(PT_SHELL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../shell")
+
+    # app.cpp is the SHARED shell — the same boot sequence, frame loop and teardown the desktop runs,
+    # character for character (C0.2). sdl-input/sdl-video are shared too. android-main.cpp is the only
+    # file here that is Android's, and it is the twin of shell/main.cpp; set them side by side and the
+    # difference is the whole of the port.
+    add_library(pockettracker-sdl SHARED
+            "${PT_SHELL_DIR}/app.cpp"
+            "${PT_SHELL_DIR}/android-main.cpp"
+            "${PT_SHELL_DIR}/sdl-input.cpp"
+            "${PT_SHELL_DIR}/sdl-video.cpp"
+    )
+
+    # app.h, sdl-input.h, sdl-video.h. The engine's and pt-ui's roots arrive PUBLIC through the link
+    # below, so this is the only path that has to be stated.
+    target_include_directories(pockettracker-sdl PRIVATE "${PT_SHELL_DIR}")
+
+    # ─── IEEE-exactness: a CORRECTNESS requirement, and one this file was WARNED to restate ───────
+    #
+    # ⚠️⚠️ shell/CMakeLists.txt says, in as many words: "A future Android entry point linking app.cpp
+    # must restate it in ITS build." This is that entry point and this is that restatement.
+    #
+    # app.cpp #includes songcore/host.h, so the SEQUENCER is compiled into this target. Its float
+    # params (velGain/volGain/pan, PSL/PBN/vibrato rates) are what the conformance traces compare as
+    # raw binary32 BITS (event-schema §5/§6) — and aarch64 clang contracts `a + b*c` into an fma BY
+    # DEFAULT, -ffast-math or not, which rounds once where the JVM rounds twice. The `pockettracker`
+    # target above sets -ffast-math for aarch64, and without these two flags this target would inherit
+    # nothing to stop it: the converged Android app would sequence differently from the APK every
+    # golden was recorded against, on the exact architecture we ship to, and no test in the tree would
+    # say so. It would present as a song that plays subtly wrong only on a phone.
+    #
+    # PER-TARGET, never add_compile_options(): a directory-scope flag would countermand the ENGINE's
+    # own -ffast-math policy, which it is entitled to make for itself.
+    target_compile_options(pockettracker-sdl PRIVATE -fno-fast-math -ffp-contract=off)
+
+    # pt-ui brings the engine and songcore with it (it links `pockettracker` PUBLIC), so this one line
+    # is the whole tracker. SDL2 is the vendored shared library from C1 — the same libSDL2.so
+    # SDLActivity.java loads by name, so there is exactly one copy in the APK and the C/Java version
+    # lock above governs it. `log` is android-main.cpp's own __android_log_print for the boot path,
+    # before the shell's console has anywhere to go.
+    target_link_libraries(pockettracker-sdl PRIVATE pt-ui SDL2 log android)
 endif()

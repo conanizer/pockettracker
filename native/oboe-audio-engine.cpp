@@ -66,9 +66,12 @@ bool OboeAudioEngine::openStream() {
          oboe::convertToText(stream->getPerformanceMode()),
          oboe::convertToText(stream->getSharingMode()));
 
-    // Hand the negotiated device rate to the core (it caches it for getSampleRate()/pitch math).
+    // Hand the negotiated device rate to the core (it caches it for getSampleRate()/pitch math), and
+    // keep our own copy for AudioBackend::sampleRate() — see the header for why the shell is not
+    // allowed to reach into the stream object and ask.
+    sampleRate_ = stream->getSampleRate();
     if (core) {
-        core->setDeviceSampleRate(stream->getSampleRate());
+        core->setDeviceSampleRate(sampleRate_);
     }
 
     result = stream->requestStart();
@@ -93,6 +96,26 @@ void OboeAudioEngine::resumeStream() {
     if (stream && stream->getState() == oboe::StreamState::Paused) {
         stream->start();
         LOGD("Stream resumed");
+    }
+}
+
+void OboeAudioEngine::setPaused(bool paused) {
+    if (!stream) return;
+
+    // ⚠️ stop(), not requestPause() — and the header explains why at length, because the difference
+    // is not "stronger" but "correct": resumeStream() restarts a stream it finds Paused, and the
+    // engine asks it to before every scheduled note. Stopped is the state that keeps the render's
+    // exclusive access exclusive.
+    //
+    // The blocking forms (stop()/start(), not requestStop()/requestStart()) for the same reason
+    // SDL_PauseAudioDevice is the right call on the other side: on the far side of this call there
+    // must be exactly one reader of the engine, by construction rather than by timing.
+    const oboe::Result r = paused ? stream->stop() : stream->start();
+    if (r != oboe::Result::OK) {
+        // Not fatal, and deliberately not silent. A render that proceeds against a stream which
+        // failed to stop is the race this method exists to prevent, and it would otherwise present
+        // as an intermittently corrupted WAV export with nothing in the log to explain it.
+        LOGE("setPaused(%d) failed: %s", (int)paused, oboe::convertToText(r));
     }
 }
 
