@@ -204,10 +204,15 @@ Write-Output "debug instr.       : none"
 # same reasoning as build-portmaster.sh: the same commit that forgets the notice would forget the
 # list entry, so `native/vendor/` IS the list.
 #
-# ⚠️ SDL2 IS THE ONE EXCEPTION AND HAS TO BE NAMED BY HAND. It is fetched at configure time and has
-# never lived in native/vendor/, so the derived list cannot see it — and on THIS artifact, unlike
-# the PortMaster one, it is compiled in. A guard that cannot see the component most specific to the
-# package it guards is worth stating out loud rather than leaving to be discovered.
+# ⚠️ SDL2 IS THE ONE EXCEPTION AND STAYS NAMED BY HAND, even though convergence C1 put a
+# native/vendor/SDL2/ in the tree. THIS build does not use it: the Android APK needs SDL vendored
+# because F-Droid compiles offline from source, while this package takes SDL from FetchContent at
+# configure time. So the directory the derived list globs and the SDL that is actually compiled into
+# this exe are two different things, and the list would be naming SDL2 for the wrong reason — it
+# would keep passing if the FetchContent SDL vanished, and it would stop naming SDL2 the moment the
+# Android build stopped vendoring it. Neither has anything to do with this artifact. A guard that
+# cannot see the component most specific to the package it guards is worth stating out loud rather
+# than leaving to be discovered.
 $notices  = Get-Content (Join-Path $lic 'THIRD-PARTY-NOTICES.md') -Raw
 $vendored = Get-ChildItem (Join-Path $repo 'native\vendor') -Directory | ForEach-Object { $_.Name }
 $missing  = @()

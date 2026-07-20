@@ -249,33 +249,52 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ---
 
-## SDL2 — zlib licence (**shipped on Windows**, linked-not-shipped on the handhelds)
+## SDL2 — zlib licence (**shipped on Windows and in the APK**, linked-not-shipped on the handhelds)
 
-⚠️ **The answer differs per artifact, and it changed on 2026-07-20.** This section used to say
+⚠️ **The answer differs per artifact, and it has now changed twice.** This section used to say
 flatly that PocketTracker ships no SDL2 binary. That was true of every artifact that existed when it
-was written, and the Windows desktop package (convergence plan A3) made it false — which is the
-same shape as the P5-S1 finding: the notices were accurate about the *source tree* and wrong about
-the thing a user actually receives.
+was written; the Windows desktop package (convergence plan A3) made it false on 2026-07-20, and
+convergence C1 made it false again the same day for the APK — which is the same shape as the P5-S1
+finding both times: the notices were accurate about the *source tree* and wrong about the thing a
+user actually receives.
 
 | artifact | how SDL2 is linked | ships an SDL2 binary? |
 |---|---|---|
 | **PortMaster zip** (`shell/build-portmaster.sh`) | dynamically, against the **device's own** `libSDL2-2.0.so.0` — the copy its CFW patched for that hardware's display and audio | **no** (the build asserts `libs.aarch64` is absent) |
 | **Windows zip** (`shell/build-windows.ps1`) | **statically, into `PocketTracker.exe`** — a Windows box has no system SDL2, so `shell/CMakeLists.txt` falls through to FetchContent | **yes — inside the exe** |
-| **APK** | no SDL2 at all until convergence phase C1 | no |
+| **APK** | **dynamically, against a `libSDL2.so` built from the vendored source** (`native/vendor/SDL2/`) and packaged in the APK — F-Droid builds offline from source and rejects prebuilts, so Android is the one target that carries SDL in-tree | **yes — `lib/<abi>/libSDL2.so`, one per ABI** |
 
 So the Windows package carries the notice below, and `build-windows.ps1` copies it out of the SDL
 source tree that was actually compiled (`_deps/sdl2-src/LICENSE.txt`) rather than from a stale copy
 in this repo — the licence that ships is then the licence of the code that shipped, by construction.
 
-⚠️ **The vendor-directory guard cannot catch this one.** `build-portmaster.sh` derives its
-component list from `native/vendor/*/` precisely so that vendoring a library and forgetting its
-notice fails the build. SDL2 is fetched at configure time and has never been in `native/vendor/`, so
-it is invisible to that mechanism; `build-windows.ps1` therefore checks for the SDL notice **by
-name**, as a special case, with this paragraph as the reason.
+⚠️ **On the APK's obligation specifically:** zlib's three conditions bind *source* distributions
+(clause 3 is "may not be removed or altered from any **source** distribution"); unlike the
+BSD-3-Clause components in this file, it imposes no reproduce-in-binary-form requirement. So
+shipping `libSDL2.so` in the APK does **not** enlarge the open finding that the APK shows a user no
+notices at all — that finding is driven by libogg/libopus/opusfile/KissFFT, and it is still open.
+Stated rather than assumed, because "we now ship one more library" is the kind of change that looks
+like it must have made a compliance problem worse.
 
-Used for: window, renderer, audio output, gamepad and keyboard input (`shell/`). Version: whatever
-`SDL2_TAG` / the FetchContent pin in `shell/CMakeLists.txt` names at build time — currently
-`release-2.30.9` on Windows, `release-2.0.18` as the PortMaster link floor.
+⚠️ **The vendor-directory guard was blind to this and now is not — but only on one side.**
+`build-portmaster.sh` derives its component list from `native/vendor/*/` precisely so that vendoring
+a library and forgetting its notice fails the build. Until C1, SDL2 was *fetched* at configure time
+and had never been in `native/vendor/`, so it was invisible to that mechanism and `build-windows.ps1`
+had to check for the SDL notice **by name**, as a special case. C1 puts `native/vendor/SDL2/` in the
+tree, so the derived guard now covers it — including, over-inclusively, in the PortMaster zip, which
+links SDL rather than shipping it (see the note at that loop). **The Windows special case stays**:
+that build takes its SDL from FetchContent, not from `native/vendor/`, so for *that* artifact the
+guard is still structurally blind.
+
+Used for: window, renderer, audio output, gamepad and keyboard input (`shell/`, and the Android
+shell from convergence C1). **Two versions, deliberately** — different linkage models get different
+version policies:
+
+| | version | why |
+|---|---|---|
+| Android (vendored, `native/vendor/SDL2/`) | **2.30.9** (`release-2.30.9`, commit `c98c4fbf`) | the APK bundles its own, so it should carry a current 2.x |
+| Windows (FetchContent pin, `shell/CMakeLists.txt`) | **2.30.9** | built from source into the exe |
+| PortMaster (`SDL2_TAG`, the *link floor*) | **2.0.18** | ports are expected to link the CFW's own libSDL2; this is the compatibility floor they are built against, not a copy we ship |
 
 ```
 Copyright (C) 1997-2024 Sam Lantinga <slouken@libsdl.org>

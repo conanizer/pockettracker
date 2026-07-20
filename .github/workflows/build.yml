@@ -47,6 +47,69 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug --no-daemon
 
+      # ─── SDL2 must be IN the APK, not merely in the build (convergence plan C1) ────────────────
+      #
+      # `assembleDebug` going green proves the NDK COMPILED the vendored SDL2. It proves nothing
+      # about the artifact, and every one of the three things below is decided somewhere else:
+      # whether a .so exists at all is SDL_SHARED, whether it is packaged is AGP, and whether the
+      # Java half reaches the DEX is one sourceSet line in app/build.gradle.kts that NOTHING in the
+      # app references until phase C3 — so a refactor could delete it and no compiler would say a
+      # word. The failure would surface as an inscrutable crash the first time an SDLActivity boots.
+      #
+      # So the check is on the ARTIFACT, and it names literals only a correct build produces.
+      - name: Assert the APK carries SDL2 (convergence C1)
+        run: |
+          # ⚠️ EVERY check fails EXPLICITLY. An earlier draft of this step relied on `set -e` plus
+          # bare `test` lines, and when the llvm-nm lookup silently produced nothing it printed
+          # "ALL CHECKS PASSED" over a symbol count of ZERO. A step whose pass is the absence of an
+          # error cannot tell a working build from a broken instrument — so nothing here reports a
+          # verdict it did not measure, and the evidence is printed either way.
+          FAIL=0
+          APK=$(ls app/build/outputs/apk/debug/*.apk)
+          echo "APK: $APK"
+
+          # (1) the native library, per ABI.
+          for ABI in arm64-v8a x86_64; do
+            if unzip -l "$APK" | grep -q "lib/$ABI/libSDL2.so"; then
+              echo "ok    lib/$ABI/libSDL2.so"
+            else
+              echo "FAIL  lib/$ABI/libSDL2.so is not in the APK"; FAIL=1
+            fi
+          done
+
+          # (2) the JNI entry point SDLActivity's static initialiser calls to compare its own
+          # hardcoded version triple against the C library's, refusing to start on a mismatch.
+          # ⚠️ Read out of the DYNAMIC SYMBOL TABLE, not grepped out of the file: the symbol name
+          # also appears in debug info, so a plain `grep libSDL2.so` passes on a library that
+          # exports nothing at all.
+          NM=$(find "$ANDROID_SDK_ROOT/ndk" -type f -name llvm-nm | head -1)
+          if [ -z "$NM" ] || [ ! -x "$NM" ]; then
+            echo "FAIL  llvm-nm not found under $ANDROID_SDK_ROOT/ndk - the symbol check cannot run"
+            FAIL=1
+          else
+            unzip -p "$APK" lib/arm64-v8a/libSDL2.so > /tmp/libSDL2.so
+            "$NM" -D --defined-only /tmp/libSDL2.so | grep ' T Java_org_libsdl_app_' > /tmp/sdl-jni.txt || true
+            COUNT=$(wc -l < /tmp/sdl-jni.txt)
+            if grep -q ' T Java_org_libsdl_app_SDLActivity_nativeGetVersion$' /tmp/sdl-jni.txt; then
+              echo "ok    nativeGetVersion exported, with $COUNT org.libsdl.app JNI entry points"
+            else
+              echo "FAIL  nativeGetVersion is not an exported symbol (found $COUNT entry points)"
+              FAIL=1
+            fi
+            [ "$COUNT" -ge 40 ] || { echo "FAIL  only $COUNT JNI entry points exported, expected >= 40"; FAIL=1; }
+          fi
+
+          # (3) the Java half, in the DEX.
+          FOUND=0
+          for D in $(unzip -l "$APK" | grep -o 'classes[0-9]*\.dex'); do
+            if unzip -p "$APK" "$D" | grep -aq 'org/libsdl/app/SDLActivity'; then
+              echo "ok    org/libsdl/app/SDLActivity in $D"; FOUND=1
+            fi
+          done
+          [ "$FOUND" -eq 1 ] || { echo "FAIL  org/libsdl/app/SDLActivity is in no classes*.dex"; FAIL=1; }
+
+          exit $FAIL
+
       - name: Run unit tests
         run: ./gradlew test --no-daemon
 

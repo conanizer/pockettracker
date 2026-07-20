@@ -76,6 +76,100 @@ target_include_directories(opusfile
 )
 target_link_libraries(opusfile PUBLIC opus ogg)
 
+# ─── Vendored SDL2 — the ANDROID build only (convergence plan C1) ──────────────────────────────
+#
+# Android is the one target that has to carry SDL in-tree, and it is F-Droid that decides that: their
+# builder compiles offline, from source, and rejects prebuilt binaries. So neither of the two ways
+# the shell gets SDL is available here — shell/CMakeLists.txt takes the SYSTEM libSDL2 when there is
+# one (mandatory on the PortMaster CFWs, whose SDL carries that hardware's display and audio patches)
+# and FetchContent's it otherwise, and FetchContent needs a network at configure time.
+#
+# ⚠️ Two SDL versions in one repo, deliberately, and it is not an inconsistency: the handhelds link
+# the DEVICE's SDL against a 2.0.18 compatibility floor, while Android BUNDLES its own and should
+# carry a current 2.x. Different linkage models, different version policies. native/vendor/SDL2 is
+# 2.30.9 and is documented in native/vendor/SDL2/PT-VENDORING.md; it is regenerated only by
+# native/vendor/revendor-sdl2.sh and must never be hand-edited.
+#
+# ⚠️ PT_ANDROID_SHELL, not ANDROID — same reasoning as the Oboe block above. The A5 canary is a
+# COMPILE check for pt-ui and is an Android build without the parts that need Gradle; making it also
+# build the whole of SDL would cost minutes per run and hand it an unrelated failure surface to go
+# red on. The APK builds SDL for real on every CI run, which is where that coverage belongs.
+if(PT_ANDROID_SHELL)
+    # ─── The C/Java version lock, asserted at configure time ───────────────────────────────────
+    #
+    # SDL's Android support is half C and half Java, and the two halves are version-locked:
+    # SDLActivity.java hardcodes the version triple and, in its static initialiser, compares it
+    # against the C library's nativeGetVersion(), refusing to start on a mismatch with
+    # "SDL C/Java version mismatch". Upstream added that check because mixing the halves is a
+    # classic SDL-on-Android failure, and it presents as an inscrutable crash at init.
+    #
+    # ⚠️ But upstream's check fires on a DEVICE, at runtime, in front of a user. This one fires here,
+    # at configure time, on the two files themselves — and it is derived from the DATA rather than
+    # resting on whoever next bumps SDL remembering to copy both halves. (revendor-sdl2.sh copies
+    # them out of ONE clone, so the drift this catches is a hand-edit, which is exactly the case a
+    # habit would not catch.) The names differ across the seam on purpose — upstream calls the third
+    # component PATCHLEVEL in C and MICRO_VERSION in Java — so this cannot be a naive text compare.
+    set(SDL_VERSION_LOCK_H    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/SDL2/include/SDL_version.h")
+    set(SDL_VERSION_LOCK_JAVA "${CMAKE_CURRENT_SOURCE_DIR}/vendor/SDL2/android/java/org/libsdl/app/SDLActivity.java")
+    # ⚠️ Without this the guard is checked only when something ELSE happens to force a reconfigure.
+    # CMake has no reason to depend on a .java file, and SDL_version.h is not in any target's source
+    # list either — so editing the exact two files this check exists to police would leave a cached
+    # configure in place and the check would simply not run. A guard that does not fire on the change
+    # it guards against is not a guard. (Found by trying to drive this red and noticing it stayed
+    # green: the negative control caught the control.)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+            "${SDL_VERSION_LOCK_H}" "${SDL_VERSION_LOCK_JAVA}")
+    file(READ "${SDL_VERSION_LOCK_H}"    SDL_VERSION_H_TEXT)
+    file(READ "${SDL_VERSION_LOCK_JAVA}" SDL_VERSION_JAVA_TEXT)
+    string(REGEX MATCH "#define SDL_MAJOR_VERSION[ \t]+([0-9]+)" _m "${SDL_VERSION_H_TEXT}")
+    set(SDL_C_MAJOR "${CMAKE_MATCH_1}")
+    string(REGEX MATCH "#define SDL_MINOR_VERSION[ \t]+([0-9]+)" _m "${SDL_VERSION_H_TEXT}")
+    set(SDL_C_MINOR "${CMAKE_MATCH_1}")
+    string(REGEX MATCH "#define SDL_PATCHLEVEL[ \t]+([0-9]+)"    _m "${SDL_VERSION_H_TEXT}")
+    set(SDL_C_PATCH "${CMAKE_MATCH_1}")
+    string(REGEX MATCH "SDL_MAJOR_VERSION[ \t]*=[ \t]*([0-9]+)" _m "${SDL_VERSION_JAVA_TEXT}")
+    set(SDL_J_MAJOR "${CMAKE_MATCH_1}")
+    string(REGEX MATCH "SDL_MINOR_VERSION[ \t]*=[ \t]*([0-9]+)" _m "${SDL_VERSION_JAVA_TEXT}")
+    set(SDL_J_MINOR "${CMAKE_MATCH_1}")
+    string(REGEX MATCH "SDL_MICRO_VERSION[ \t]*=[ \t]*([0-9]+)" _m "${SDL_VERSION_JAVA_TEXT}")
+    set(SDL_J_PATCH "${CMAKE_MATCH_1}")
+    set(SDL_C_VERSION    "${SDL_C_MAJOR}.${SDL_C_MINOR}.${SDL_C_PATCH}")
+    set(SDL_JAVA_VERSION "${SDL_J_MAJOR}.${SDL_J_MINOR}.${SDL_J_PATCH}")
+    # An empty capture would make two blank strings compare EQUAL and the guard pass vacuously —
+    # the shape this project keeps paying for — so assert the parse landed before comparing it.
+    if(NOT SDL_C_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$" OR
+       NOT SDL_JAVA_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+        message(FATAL_ERROR
+                "SDL_VERSION_LOCK: could not parse a version out of the vendored SDL2 "
+                "(C='${SDL_C_VERSION}' Java='${SDL_JAVA_VERSION}'). If upstream changed how it "
+                "declares these, fix the regexes here - do not delete the check.")
+    endif()
+    if(NOT SDL_C_VERSION STREQUAL SDL_JAVA_VERSION)
+        message(FATAL_ERROR
+                "SDL_VERSION_LOCK: the vendored SDL2's C and Java halves disagree - "
+                "include/SDL_version.h says ${SDL_C_VERSION}, SDLActivity.java says "
+                "${SDL_JAVA_VERSION}. SDLActivity refuses to start on a mismatch, so this would be "
+                "a crash at app launch. Re-run native/vendor/revendor-sdl2.sh <tag>; never edit "
+                "one half by hand.")
+    endif()
+    message(STATUS "SDL2 ${SDL_C_VERSION} (vendored; C and Java halves agree)")
+
+    # Shared, not static: SDLActivity.java does System.loadLibrary("SDL2") and then calls JNI
+    # entry points that live inside it, so libSDL2.so has to exist as its own object in the APK.
+    set(SDL_SHARED ON  CACHE BOOL "" FORCE)
+    set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+    set(SDL_TEST   OFF CACHE BOOL "" FORCE)
+
+    # The same CMake-4 workaround the vendored codecs need, and for the same reason: SDL declares
+    # cmake_minimum_required(VERSION 3.0.0...3.5), which CMake 4 rejects outright. The APK builds
+    # with the NDK's bundled CMake 3.22.1 (pinned in app/build.gradle.kts) so this cannot bite
+    # today - it is here so that configuring native/ with a modern host CMake does not become the
+    # way somebody discovers it. See the long note above add_subdirectory(vendor/ogg).
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+    add_subdirectory(vendor/SDL2)
+    unset(CMAKE_POLICY_VERSION_MINIMUM)
+endif()
+
 # ─── Engine sources: portable core vs platform shell ───────────────────────────────────────────
 # ENGINE_CORE_SOURCES is the whole portable engine — no <oboe/*>, <android/*>, or <jni.h>
 # anywhere in it (logging goes through the audio-defs.h shim). A desktop/Linux build reuses

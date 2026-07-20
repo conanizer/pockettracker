@@ -1,0 +1,4 @@
+# Vendored upstream source: store and check out the bytes exactly as SDL published them, on every
+# platform. This repo sets core.autocrlf=true, which would otherwise rewrite line endings on
+# checkout and destroy the byte-for-byte comparison against upstream that revendor-sdl2.sh makes.
+* -text

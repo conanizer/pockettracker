@@ -65,6 +65,22 @@ android {
         }
     }
 
+    // SDL2's Java half, compiled straight out of the vendored source tree (convergence plan C1).
+    //
+    // ⚠️ NOT copied into app/src/main/java, and that is the whole point. SDL's Android support is
+    // half C and half Java: SDLActivity hardcodes the SDL version and refuses to start against a
+    // libSDL2.so reporting a different one. Pointing the sourceSet at the vendored tree means the
+    // Java compiled here and the C compiled by native/CMakeLists.txt are the same release BY
+    // CONSTRUCTION — one directory, updated only by native/vendor/revendor-sdl2.sh. A copy would
+    // reintroduce exactly the drift the version check exists to catch. (native/CMakeLists.txt
+    // asserts the two halves agree at configure time anyway — search SDL_VERSION_LOCK — because a
+    // structural guarantee is worth having a guard on.)
+    sourceSets {
+        getByName("main") {
+            java.srcDir("../native/vendor/SDL2/android/java")
+        }
+    }
+
     // Strip AGP's Google "dependency metadata" blob from the APK signing block. F-Droid's
     // scanner rejects any extra signing block ("Found extra signing block 'Dependency
     // metadata'"), so its build fails without this. No runtime effect; also trims the APK.

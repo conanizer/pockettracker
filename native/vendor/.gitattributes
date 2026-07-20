@@ -1,0 +1,18 @@
+# revendor-sdl2.sh is run from bash — WSL, Git Bash, a CI runner, a maintainer's Linux box. This dev
+# box has core.autocrlf=true, and `git add` said so out loud when the script was first staged:
+#
+#     warning: in the working copy of 'native/vendor/revendor-sdl2.sh',
+#              LF will be replaced by CRLF the next time Git touches it
+#
+# A CRLF shebang is answered with `/bin/bash^M: bad interpreter: No such file or directory`, i.e. the
+# script does not run at all, one clone later than the mistake and on somebody else's machine. Same
+# rule and same reasoning as shell/.gitattributes, which pins the PortMaster launch scripts for
+# exactly this: EOL conversion follows the ARTIFACT, not the directory.
+*.sh text eol=lf
+
+# ⚠️ NOTE: native/vendor/SDL2/ has its OWN .gitattributes (`* -text`), and it is not a duplicate of
+# this rule — it is a different one. That tree is vendored upstream source whose whole value is being
+# byte-identical to what SDL published, proven by comparing git blob hashes against upstream's own
+# object IDs. `-text` means "store and check out these bytes verbatim, convert nothing, in either
+# direction", which is what makes that comparison mean anything on a Windows checkout. Do not
+# "simplify" the two into one.

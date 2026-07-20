@@ -26,6 +26,29 @@
     void onProgress(float);
 }
 
+# ─── SDL2's Java glue (convergence plan C1) ───────────────────────────────────────────────────
+#
+# org.libsdl.app.* is the Java half of SDL's Android support, compiled out of the vendored tree
+# (native/vendor/SDL2/android/java). It is JNI on both sides at once, and BOTH directions are
+# by-name:
+#   - libSDL2.so registers Java_org_libsdl_app_SDLActivity_* natives against these exact classes;
+#   - SDL's C calls back INTO them by name through GetStaticMethodID — setActivityTitle,
+#     setWindowStyle, getContext, the whole SDLAudioManager/SDLControllerManager surface, and the
+#     HIDDevice* stack — none of which any Kotlin in this app references.
+#
+# So to R8 almost all of it is unreachable code with unreachable members: it would strip or rename
+# it and the app would die at launch, in RELEASE ONLY, because debug never runs R8. That is
+# precisely the failure that killed every render in the first v0.9.3 APK, and the reason the
+# `includedescriptorclasses` note above is written the way it is — keeping a CLASS is not keeping
+# its MEMBERS.
+#
+# ⚠️ It is added HERE, in the commit that vendors SDL, rather than in the phase that first launches
+# an SDLActivity: at C1 nothing loads SDL yet, so the breakage would be invisible until C3 and would
+# then look like an SDL bug rather than a keep rule nobody wrote. `{ *; }` deliberately — this is
+# upstream's code, we do not get to decide which of its members its own C half calls.
+-keep class org.libsdl.app.** { *; }
+-keepclassmembers class org.libsdl.app.** { *; }
+
 # Strip debug/verbose/info logging from release builds. Every logger.d / Log.d call site
 # (including its string building) is removed by R8, so the scheduling path and UI layer
 # don't build emoji strings or cross into liblog on the Miyoo. Log.w / Log.e are kept.

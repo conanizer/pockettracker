@@ -87,6 +87,11 @@ obj/
 # CMake
 cmake-build-*/
 
+# The WSL/Linux build tree of tools/, used by the device loop. `build/` above is unanchored and so
+# already catches tools/build, shell/build and native/build at any depth — this one needs its own
+# line only because the directory is not called `build`.
+/tools/build-wsl/
+
 # OS-specific files
 # macOS
 .DS_Store

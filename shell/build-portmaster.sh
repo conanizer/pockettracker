@@ -193,6 +193,13 @@ MISSING=""
 VENDORED=""
 for D in "$SRC"/native/vendor/*/; do VENDORED="$VENDORED $(basename "$D")"; done
 # The vendored tree, plus the three third-party components that live outside it.
+#
+# ⚠️ Since convergence C1 this list also contains SDL2, which THIS artifact does not ship: the
+# PortMaster zip links the device's own libSDL2 (see the SDL2_TAG floor above), and native/vendor/SDL2
+# exists for the Android build, which has to carry SDL in-tree because F-Droid compiles offline from
+# source. Over-inclusive on purpose — the question this loop asks is "is every vendored component
+# documented?", and the answer must be yes regardless of which artifact links which. THIRD-PARTY-NOTICES.md
+# is the file that then answers per artifact; it has a table for exactly this.
 for COMPONENT in $VENDORED kissfft daisysp soundpipe; do
     if grep -qi -- "$COMPONENT" "$NOTICES"; then
         echo "  ok      $COMPONENT"
