@@ -179,14 +179,97 @@ jobs:
             fi
           done
 
-          # Compiled, not packaged. A static archive cannot reach the APK, so libpt-ui.so appearing
-          # would mean someone made the target SHARED and grew every install by a dead copy of the UI.
+          # pt-ui stays a STATIC archive: it reaches the APK linked INSIDE libpockettracker-sdl.so
+          # (C3), never as a library of its own. A libpt-ui.so appearing would mean someone made the
+          # target SHARED and grew every install by a second, dead copy of the UI.
           APK=$(ls app/build/outputs/apk/debug/*.apk)
           if unzip -l "$APK" | grep -q 'libpt-ui\.so'; then
-            echo "FAIL  libpt-ui.so is in the APK - pt-ui stays a static archive until C3 links it"
+            echo "FAIL  libpt-ui.so is in the APK - pt-ui is linked into the shell .so, not shipped alone"
             FAIL=1
           else
-            echo "ok    no libpt-ui.so in the APK (compiled, not packaged - correct for C2)"
+            echo "ok    no libpt-ui.so in the APK (static archive, linked into the shell .so)"
+          fi
+
+          exit $FAIL
+
+      - name: Assert the SDL app links pt-ui and is reachable (convergence C3)
+        run: |
+          # ⚠️ C2's whole finding was that a green build proves nothing about what was COMPILED, and
+          # C3's equivalent is that a link line proves nothing about what ENDED UP in the .so. So
+          # every check below reads the artifact, and every verdict prints the number it rests on.
+          FAIL=0
+          NDK="$ANDROID_SDK_ROOT/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          NM="$NDK/llvm-nm"
+          READELF="$NDK/llvm-readelf"
+          for T in "$NM" "$READELF"; do
+            if [ ! -x "$T" ]; then echo "FAIL  $T not found - the C3 checks cannot run"; exit 1; fi
+          done
+
+          APK=$(ls app/build/outputs/apk/debug/*.apk)
+
+          for ABI in arm64-v8a x86_64; do
+            # ── 1. Is it in the APK at all? ──────────────────────────────────────────────────────
+            SZ=$(unzip -l "$APK" | awk -v p="lib/$ABI/libpockettracker-sdl.so" '$4==p {print $1}')
+            if [ -z "$SZ" ]; then
+              echo "FAIL  $ABI: libpockettracker-sdl.so is NOT in the APK"; FAIL=1; continue
+            fi
+            echo "ok    $ABI: libpockettracker-sdl.so packaged, $SZ bytes"
+
+            # ── 2. SDL_main, in the DYNAMIC symbol table ─────────────────────────────────────────
+            # SDLActivity.getMainSharedObject() dlsym's this name out of the last library
+            # getLibraries() returns. ⚠️ .dynsym specifically: a plain `grep` of the .so, or a hit in
+            # .symtab, would pass on a library that exports nothing — the C1 lesson about reading a
+            # symbol out of the debug info and calling it an export.
+            unzip -p "$APK" "lib/$ABI/libpockettracker-sdl.so" > /tmp/sdl-$ABI.so
+            N=$("$READELF" --dyn-syms /tmp/sdl-$ABI.so | grep -cw "SDL_main")
+            if [ "$N" -ge 1 ]; then
+              echo "ok    $ABI: SDL_main exported in .dynsym ($N entries)"
+            else
+              echo "FAIL  $ABI: SDL_main NOT in .dynsym - SDLActivity would fail to find the entry point"
+              FAIL=1
+            fi
+
+            # ── 3. Is pt-ui actually INSIDE it? ──────────────────────────────────────────────────
+            # ⚠️ This must read the UNSTRIPPED intermediate, not the APK copy: pt::ui symbols are
+            # internal to the .so, so stripping removes them from the packaged artifact. Checking the
+            # APK copy here would find zero and mean nothing.
+            #
+            # ⚠️ And the comparison is against libpt-ui.a's OWN symbol list rather than a hand-picked
+            # name. A first draft grepped for "phrase_editor" and friends and got 0 for three of five
+            # — because C++ mangled names carry namespaces and classes, not source filenames. A check
+            # built on a guessed discriminator fails in both directions.
+            D=$(ls -d app/.cxx/Debug/*/"$ABI")
+            OBJ=$(ls app/build/intermediates/cxx/Debug/*/obj/"$ABI"/libpockettracker-sdl.so 2>/dev/null | head -1)
+            if [ ! -f "$OBJ" ]; then
+              echo "FAIL  $ABI: no unstripped libpockettracker-sdl.so to inspect"; FAIL=1; continue
+            fi
+            "$NM" --defined-only "$D/libpt-ui.a" 2>/dev/null | grep ' T ' | awk '{print $3}' \
+              | grep '^_ZN2pt2ui' | sort -u > /tmp/ptui-$ABI.txt
+            "$NM" --defined-only "$OBJ" 2>/dev/null | awk '{print $3}' | sort -u > /tmp/so-$ABI.txt
+            TOTAL=$(wc -l < /tmp/ptui-$ABI.txt)
+            FOUND=$(comm -12 /tmp/ptui-$ABI.txt /tmp/so-$ABI.txt | wc -l)
+            if [ "$TOTAL" -gt 0 ] && [ "$FOUND" -eq "$TOTAL" ]; then
+              echo "ok    $ABI: $FOUND of $TOTAL pt::ui symbols are defined in the shell .so"
+            else
+              echo "FAIL  $ABI: only $FOUND of $TOTAL pt::ui symbols reached the .so (0/0 means the check found nothing - fix the check)"
+              FAIL=1
+            fi
+          done
+
+          # ── 4. Debug-only, verified on the RELEASE manifest ────────────────────────────────────
+          # The plan requires both UIs to ship side by side through phases C and D. src/debug/ is the
+          # whole mechanism; this asserts the mechanism actually holds, because "it is in src/debug so
+          # it cannot be in release" is a belief about AGP until something reads the output.
+          ./gradlew :app:processReleaseManifest --rerun-tasks --no-daemon
+          RELMF=$(ls app/build/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml)
+          RN=$(grep -c 'SdlActivity' "$RELMF" || true)
+          DBGMF=$(ls app/build/intermediates/merged_manifests/debug/processDebugManifest/AndroidManifest.xml)
+          DN=$(grep -c 'SdlActivity' "$DBGMF" || true)
+          if [ "$RN" -eq 0 ] && [ "$DN" -ge 1 ]; then
+            echo "ok    SdlActivity: debug=$DN release=$RN (present where it should be, absent where it must be)"
+          else
+            echo "FAIL  SdlActivity: debug=$DN release=$RN - expected debug>=1 and release==0"
+            FAIL=1
           fi
 
           exit $FAIL
