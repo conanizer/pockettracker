@@ -110,6 +110,24 @@ struct AppConfig {
     bool console = true;
 
     /**
+     * A WINDOWED host — one whose window the user can drag to any size. Desktop sets it; the window
+     * then opens at the largest integer multiple of the design that fits the display, and SETTINGS >
+     * SCALING finally has somewhere to show (FIT and INTEGER agree at exactly 640×480, which is why
+     * that setting looked dead on desktop even after C4 wired it).
+     *
+     * ⚠️⚠️ **ANDROID MUST LEAVE THIS FALSE, AND THE REASON IS ORIENTATION, NOT RESIZING.** It becomes
+     * `SDL_WINDOW_RESIZABLE`, which SDL hands to `SDLActivity.setOrientationBis` — and a resizable
+     * window there means `SCREEN_ORIENTATION_FULL_USER`, i.e. the activity may rotate into PORTRAIT,
+     * undoing C4's device-proven 2× landscape geometry. Defaulting to false is what makes the safe
+     * answer the one a platform gets by saying nothing. See sdl-video.h::open.
+     *
+     * ⚠️ PortMaster is unaffected by construction rather than by exclusion: the size is derived from
+     * the panel, so a 640×480 handheld computes 1× — exactly what shipped — and KMSDRM has no window
+     * manager for the resizable flag to mean anything to.
+     */
+    bool windowed = false;
+
+    /**
      * Polled once a frame; true ends the session as an UNCLEAN exit, so the autosave is kept.
      *
      * Desktop hands its SIGTERM/SIGINT flag through here. ⚠️ May be null, and Android's will be —

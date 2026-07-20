@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 
 #include "ui/canvas.h"
 
@@ -9,9 +10,47 @@ using pt::ui::Canvas;
 using pt::ui::DESIGN_H;
 using pt::ui::DESIGN_W;
 
-bool SdlVideo::open(const char* title, int windowW, int windowH, bool fullscreen) {
+bool SdlVideo::open(const char* title, int windowW, int windowH, bool fullscreen, bool resizable) {
     Uint32 flags = SDL_WINDOW_SHOWN;
     if (fullscreen) flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+
+    // ── The WINDOWED host: resizable, and opened at a sensible size for THIS display ──────────────
+    //
+    // Until now every platform opened at exactly 640×480 and could not be resized at all, which had
+    // two consequences that only ever showed up away from a handheld. On a desktop the tracker was a
+    // postage stamp on a 1440p monitor with no way to grow it — and, less obviously, it is why
+    // SETTINGS > SCALING was invisible there even after C4 finally wired it up: FIT and INTEGER
+    // compute the SAME rect when the output is exactly the design size, so the setting genuinely had
+    // nothing to do. Making the window resizable is what gives that setting somewhere to show.
+    //
+    // ⚠️ The size is DERIVED from the display rather than hardcoded to 2×, and that is what makes one
+    // code path correct on three very different targets with no build-time discriminator to test —
+    // and there is none: desktop Linux and PortMaster are the same Linux build of the same main.cpp.
+    // A 640×480 handheld panel computes 1× and is therefore byte-for-byte what shipped; a 1280×720
+    // TrimUI computes 1× (2× does not fit); a 1920×1080 desktop computes 2×; 4K computes 3×.
+    // Hardcoding 2× would have overflowed every handheld panel in the zoo, which is exactly the
+    // "frame is LARGER than the display" case describe() warns about.
+    //
+    // The 90% margin is for the things a desktop puts around a window and a handheld does not: a
+    // title bar, a taskbar, a dock. Without it a 1280×960 desktop would compute a 2× window whose
+    // chrome does not fit on the screen it has to sit on.
+    if (resizable) {
+        flags |= SDL_WINDOW_RESIZABLE;
+
+        SDL_DisplayMode desktop{};
+        if (SDL_GetDesktopDisplayMode(0, &desktop) == 0 && desktop.w > 0 && desktop.h > 0) {
+            const int scale = std::max(1, std::min(desktop.w * 9 / 10 / windowW,
+                                                   desktop.h * 9 / 10 / windowH));
+            // ASCII, and this line got it WRONG first time round: a U+00D7 multiplication sign came
+            // back on a 1251 console as `1Г—`. This file's own describe() comment and app.cpp's
+            // banner both state the rule — the console's encoding is not ours to choose — and the
+            // mojibake was in the very first run's output.
+            std::printf("video:   desktop=%dx%d  opening at %dx (%dx%d), resizable\n", desktop.w,
+                        desktop.h, scale, windowW * scale, windowH * scale);
+            windowW *= scale;
+            windowH *= scale;
+        }
+    }
 
     window_ = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, windowW,
                                windowH, flags);
@@ -171,20 +210,73 @@ SDL_Rect SdlVideo::dest_rect() const {
     return SDL_Rect{(outW - w) / 2, (outH - h) / 2, w, h};
 }
 
-void SdlVideo::present(const Canvas& canvas) {
-    // The WHOLE frame is uploaded every time, with no dirty-rect tracking. That is a deliberate
-    // difference from the Android renderer, which goes to some trouble to avoid repainting when
-    // nothing has changed — but Compose is avoiding a full RECOMPOSITION there (walking the tree,
-    // allocating, and risking the GC pauses that crashed RenderThread on Snapdragon drivers), not a
-    // memcpy. Here the frame is already drawn into RAM; handing 1.2 MB to the GPU costs microseconds.
+/**
+ * Pace a frame that presented nothing.
+ *
+ * ⚠️⚠️ **THIS IS THE TRAP IN C7 AND IT INVERTS THE FEATURE IF MISSED.** With vsync it is
+ * `SDL_RenderPresent` that BLOCKS until the display is ready — that call is what paces the entire app
+ * loop. Skip it to save power and nothing blocks at all: the loop spins as fast as the CPU allows,
+ * burning a whole core to avoid a blit. The idle path would then cost MORE than the busy one, which
+ * is the exact opposite of what C7 exists for. So every path that does not present must pace here.
+ */
+void SdlVideo::pace() {
+    const Uint64 now     = SDL_GetTicks64();
+    const Uint64 elapsed = now - lastPresentMs_;
+    if (elapsed < FRAME_MS) SDL_Delay(static_cast<Uint32>(FRAME_MS - elapsed));
+    lastPresentMs_ = SDL_GetTicks64();
+}
+
+void SdlVideo::idle_frame() { pace(); }
+
+bool SdlVideo::present(const Canvas& canvas, uint32_t letterboxArgb) {
+    // ⚠️ **RE-DESCRIBE WHEN THE OUTPUT CHANGES, AND ANDROID IS WHY (C4).** `describe()` used to run
+    // exactly once, at `open()` — which on this platform is the one moment it is guaranteed to be
+    // WRONG. `SdlActivity.hideSystemBars()` has to POST itself (API 30+ wants an attached DecorView),
+    // so the surface is still 1280x904 when the window is created and becomes 1280x960 a few frames
+    // later. The boot line therefore reported a 1x letterboxed window for a session that was actually
+    // running 2x full-screen, and on a handheld with no console that line is the ONLY account of what
+    // the user is looking at. An instrument aimed at the wrong instant is worse than none.
     //
-    // What still matters on a handheld is not repainting when nothing MOVED — that is a battery
-    // question, and it is answered one level up, in the app loop, by not calling this at all on an
-    // idle frame. The port plan calls that "dirty-redraw + audio-active refresh"; it lands with the
-    // oscilloscope, which is the thing that decides when the screen is animating.
+    // ⚠️ ABOVE the C7 skip below, deliberately. INTEGER scaling can absorb a small output change
+    // without moving the dest rect at all (1284→1285 wide still lands 1280 at x=2), so a check placed
+    // after the skip would miss exactly the resize this instrument exists to report.
+    //
+    // Fires on change only: a window resize, a rotation, or the system bars coming and going.
+    int outW = 0, outH = 0;
+    SDL_GetRendererOutputSize(renderer_, &outW, &outH);
+    if (outW != lastOutW_ || outH != lastOutH_) {
+        if (lastOutW_ != 0) describe();   // not at boot; open() has just printed the same thing
+        lastOutW_ = outW;
+        lastOutH_ = outH;
+    }
+
+    // ── C7: DON'T PRESENT A FRAME THAT IS ALREADY ON SCREEN ──────────────────────────────────────
+    //
+    // The pixel-level half of the idle-redraw discipline. `app.cpp` decides when not to DRAW; this
+    // decides when a drawn frame is not worth sending — and it is the safety net under that decision,
+    // because it cannot be fooled by a state field somebody forgot to include in a predicate. If the
+    // pixels, the letterbox colour and the destination rect are all identical, the display is already
+    // showing this exact image and uploading it again changes nothing a user could see.
+    //
+    // ⚠️ ALL THREE, not just the canvas: a theme change repaints the BARS without moving one canvas
+    // pixel, and a resize moves the frame without changing it. Comparing the canvas alone would leave
+    // both stale on screen — the C4 SCALING bug's shape (a value read but never applied), one layer
+    // over.
+    const SDL_Rect want = dest_rect();
+    const size_t   n    = static_cast<size_t>(DESIGN_W) * DESIGN_H;
+    if (haveLast_ && letterboxArgb == lastLetterbox_ && want.x == lastDest_.x &&
+        want.y == lastDest_.y && want.w == lastDest_.w && want.h == lastDest_.h &&
+        std::memcmp(lastFrame_.data(), canvas.pixels(), n * sizeof(uint32_t)) == 0) {
+        pace();          // ⚠️ never skip this — see pace() for why it inverts the feature
+        return false;
+    }
+
+    // The WHOLE frame is uploaded every time, with no dirty-rect tracking. Handing 1.2 MB to the GPU
+    // costs microseconds, and a partial upload would need dirty rectangles that `pt::ui::Canvas` does
+    // not track — the all-or-nothing skip above is where the saving actually is.
     void* dst   = nullptr;
     int   pitch = 0;
-    if (SDL_LockTexture(texture_, nullptr, &dst, &pitch) != 0) return;
+    if (SDL_LockTexture(texture_, nullptr, &dst, &pitch) != 0) return false;
 
     const auto* src = reinterpret_cast<const uint8_t*>(canvas.pixels());
     const int   row = canvas.pitch_bytes();
@@ -200,28 +292,35 @@ void SdlVideo::present(const Canvas& canvas) {
     }
     SDL_UnlockTexture(texture_);
 
-    // ⚠️ **RE-DESCRIBE WHEN THE OUTPUT CHANGES, AND ANDROID IS WHY (C4).** `describe()` used to run
-    // exactly once, at `open()` — which on this platform is the one moment it is guaranteed to be
-    // WRONG. `SdlActivity.hideSystemBars()` has to POST itself (API 30+ wants an attached DecorView),
-    // so the surface is still 1280x904 when the window is created and becomes 1280x960 a few frames
-    // later. The boot line therefore reported a 1x letterboxed window for a session that was actually
-    // running 2x full-screen, and on a handheld with no console that line is the ONLY account of what
-    // the user is looking at. An instrument aimed at the wrong instant is worse than none.
+    // ── The letterbox bars, in the THEME's background colour rather than black ────────────────────
     //
-    // Fires on change only: a window resize, a rotation, or the system bars coming and going.
-    int outW = 0, outH = 0;
-    SDL_GetRendererOutputSize(renderer_, &outW, &outH);
-    if (outW != lastOutW_ || outH != lastOutH_) {
-        if (lastOutW_ != 0) describe();   // not at boot; open() has just printed the same thing
-        lastOutW_ = outW;
-        lastOutH_ = outH;
-    }
-
-    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
+    // The design is 4:3 and almost nothing else is, so on a 16:9 desktop window or a phone the frame
+    // sits in a box with bars either side. Painting those black drew a hard edge around the tracker
+    // and made the app look like a small picture on a large black wall; painting them the same colour
+    // the UI already fills its own background with makes the whole window read as one surface, which
+    // is the "fullscreen experience" this is for.
+    //
+    // ⚠️ It is the LIVE theme, so it tracks the theme editor and any loaded .ptt with no wiring of its
+    // own — the colour arrives as an argument on every present (see the header for why not a setter).
+    //
+    // ⚠️ Phase D composites the touch skin into exactly this space on a phone. That is not a conflict:
+    // the skin's textures are drawn OVER a cleared background, so this stays the correct thing
+    // underneath them, and remains the whole answer on every layout that has no virtual buttons.
+    SDL_SetRenderDrawColor(renderer_, static_cast<Uint8>((letterboxArgb >> 16) & 0xFF),
+                           static_cast<Uint8>((letterboxArgb >> 8) & 0xFF),
+                           static_cast<Uint8>(letterboxArgb & 0xFF), 255);
     SDL_RenderClear(renderer_);  // paints the letterbox bars
-    const SDL_Rect dst_rect = dest_rect();
-    SDL_RenderCopy(renderer_, texture_, nullptr, &dst_rect);
+    SDL_RenderCopy(renderer_, texture_, nullptr, &want);
     SDL_RenderPresent(renderer_);
+
+    // What is now on screen, so the next frame can tell whether it would change anything. Kept AFTER
+    // the present rather than before it: this array's meaning is "the displayed image", and a copy
+    // taken on a frame that then failed to present would make the next comparison lie.
+    if (lastFrame_.size() != n) lastFrame_.resize(n);
+    std::memcpy(lastFrame_.data(), canvas.pixels(), n * sizeof(uint32_t));
+    lastLetterbox_ = letterboxArgb;
+    lastDest_      = want;
+    haveLast_      = true;
 
     // ── Pacing ───────────────────────────────────────────────────────────────────────────────────
     // With vsync, SDL_RenderPresent blocks until the display is ready and the whole app loop rides
@@ -229,10 +328,15 @@ void SdlVideo::present(const Canvas& canvas) {
     // flag) nothing blocks at all, and the loop would spin as fast as the CPU allows: a pegged core,
     // a hot device and a flat battery, on hardware chosen for none of those. So the pacing has to
     // live wherever the vsync decision does, which is here.
+    //
+    // ⚠️ The timestamp is stamped EITHER WAY, and that is C7's doing: with vsync the present itself
+    // paced us and there is nothing to wait for, but `lastPresentMs_` is what the SKIP path measures
+    // against — leave it stale through a run of vsync'd frames and the first skipped frame computes a
+    // huge elapsed, delays nothing, and spins one frame hot before self-correcting.
     if (!vsync_) {
-        const Uint64 now     = SDL_GetTicks64();
-        const Uint64 elapsed = now - lastPresentMs_;
-        if (elapsed < FRAME_MS) SDL_Delay(static_cast<Uint32>(FRAME_MS - elapsed));
+        pace();
+    } else {
         lastPresentMs_ = SDL_GetTicks64();
     }
+    return true;
 }

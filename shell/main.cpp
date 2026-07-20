@@ -205,6 +205,17 @@ int main(int argc, char** argv) {
     // PortMaster log. The banner and the once-a-second status line are the bring-up instrument.
     cfg.console = true;
 
+    // A real window: resizable, sized to the display, and the reason SETTINGS > SCALING has a visible
+    // effect here at all (at exactly 640×480, FIT and INTEGER compute the same rect).
+    //
+    // ⚠️ Set on THIS main only. Android's `android-main.cpp` deliberately leaves it false — the flag
+    // becomes SDL_WINDOW_RESIZABLE, which on that platform also unlocks PORTRAIT rotation. See app.h.
+    //
+    // ⚠️ This binary is also PortMaster's, and that is safe rather than overlooked: the window size is
+    // derived from the panel, so a 640×480 handheld gets 1× — the size that shipped — and KMSDRM has
+    // no window manager for "resizable" to mean anything to.
+    cfg.windowed = true;
+
     // The launcher's kill, as a question the shared loop can ask once a frame. The handler above only
     // ever sets this flag; everything that has to happen because of it happens in the loop.
     cfg.terminate_requested = [] { return g_terminate != 0; };

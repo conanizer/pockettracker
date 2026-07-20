@@ -27,7 +27,7 @@
             android:name=".SdlActivity"
             android:exported="true"
             android:label="PT (SDL)"
-            android:theme="@style/Theme.Pockettracker"
+            android:theme="@style/Theme.Pockettracker.Splash"
             android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout">
             <intent-filter>

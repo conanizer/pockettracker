@@ -11,6 +11,7 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import org.libsdl.app.SDLActivity
 import java.io.File
@@ -125,6 +126,28 @@ class SdlActivity : SDLActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // ── THE SPLASH SCREEN ────────────────────────────────────────────────────────────────────
+        //
+        // The Compose activity has shown one since long before the port (`MainActivity.kt:151`, plus
+        // `Theme.Pockettracker.Splash` on its manifest entry); this activity was given the plain
+        // theme in C3 and so came up on a blank window instead. Reported by the user as "the Android
+        // build misses the splash screen while opening", and it is the same shape as C4's
+        // `hideSystemBars`: knowledge the Compose activity had and the SDL one never inherited.
+        //
+        // ⚠️ BOTH HALVES ARE REQUIRED. The manifest entry supplies the windowBackground the system
+        // draws before any of our code runs (API 31+ builds its splash from the theme alone), and
+        // this call is what hands over to `postSplashScreenTheme` afterwards and back-ports the whole
+        // thing below API 31. Either one alone leaves a visible gap.
+        //
+        // ⚠️ FIRST, and ahead of `setDecorFitsSystemWindows` below, because this is the call that
+        // swaps the activity's theme — doing it after would apply a theme over a window we have
+        // already configured. `MainActivity` has the same call in the same position.
+        //
+        // ⭐ The colours already agree with no work: `splash_bg` is #0A0A0A and `pt::ui::Theme`'s
+        // `background` default is 0xFF0A0A0A, so the splash and the tracker's first frame are the
+        // same colour and the handover has no seam in it.
+        installSplashScreen()
+
         // ⚠️ Without MANAGE_EXTERNAL_STORAGE the C++ `StdFileSystem` cannot see /storage/emulated/0
         // and the file browser comes up EMPTY — which looks exactly like "C5's spike says
         // std::filesystem does not work on Android", the single most important open question phase C

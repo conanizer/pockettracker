@@ -15,6 +15,7 @@
 #include "ui/engine_feed.h"
 #include "ui/input_dispatcher.h"
 #include "ui/layout.h"
+#include "ui/modules/oscilloscope.h"   // WAVEFORM_SIZE — the C7 audible test
 #include "ui/settings_store.h"
 
 #include "sdl-input.h"
@@ -136,6 +137,41 @@ int SDLCALL on_app_event(void* userdata, SDL_Event* e) {
     return 0;  // watchers do not consume; the event still reaches the queue
 }
 
+// ─── C7: IS ANYTHING ON SCREEN ACTUALLY MOVING? ──────────────────────────────────────────────────
+//
+// A DIRECT PORT OF `PixelPerfectRenderer.kt:151-191`, which solved this on Android long before the
+// port existed and whose own comment names unconditional repainting "the dominant battery drain on
+// the handheld". Kotlin gets two redraw sources: Compose recomposes on a real state change (a cursor
+// move, an edit, a new playback row), and an `oscilloscopeTicker` drives ANIMATION — and the loop
+// bumps that ticker only while audio is audible, polling cheaply at 20 Hz when it is not.
+//
+// ⚠️ **THE ONE THING THAT COULD NOT BE COPIED, AND COPYING IT WOULD HAVE ADDED INPUT LAG.** Kotlin's
+// visualizer loop is a separate coroutine, so its idle `delay(50L)` slows nothing but itself. Here
+// input polling, `host.poll()` and drawing are ALL ONE LOOP: dropping it to 20 Hz would put 50 ms of
+// latency on every keypress, on a tracker whose whole point is that a note sounds when you press it.
+// So the LOOP stays at 60 Hz and only the DRAW is skipped — the frame still polls input, still pumps
+// the scheduler, still runs the watcher. That is the shape of the port, not an approximation of it.
+//
+// What counts as audible is Kotlin's test exactly: the transport playing, OR any master-waveform
+// sample above the silence floor (a one-shot preview still ringing after STOP), OR the preview lane
+// active. The threshold and the spectrum release are its constants, not new ones.
+constexpr float SCOPE_SILENCE_THRESHOLD = 0.002f;   // PixelPerfectRenderer.kt:101
+constexpr int   SPECTRUM_RELEASE_FRAMES = 75;       // PixelPerfectRenderer.kt:106
+
+bool audio_is_audible(const ui::AppState& s) {
+    if (s.isPlaying || s.previewLaneActive) return true;
+
+    // ⚠️ Null is SILENCE, not "unknown" — `engine_feed` leaves these null when there is nothing to
+    // show, and `ptshot` draws whole screens with no engine at all. Treating null as audible would
+    // make the idle path unreachable in exactly the configuration that is idle.
+    if (s.waveform) {
+        for (int i = 0; i < ui::WAVEFORM_SIZE; ++i) {
+            if (std::fabs(s.waveform[i]) > SCOPE_SILENCE_THRESHOLD) return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 int run(const AppConfig& cfg) {
@@ -216,7 +252,8 @@ int run(const AppConfig& cfg) {
     std::printf("files:   %s\n", cfg.appRoot.c_str());
 
     SdlVideo video;
-    if (!video.open("PocketTracker", ui::DESIGN_W, ui::DESIGN_H)) {
+    if (!video.open("PocketTracker", ui::DESIGN_W, ui::DESIGN_H, /*fullscreen=*/false,
+                    /*resizable=*/cfg.windowed)) {
         return 1;
     }
 
@@ -276,7 +313,7 @@ int run(const AppConfig& cfg) {
     hooks.suspend_audio = [&audio](bool suspend) { audio.setPaused(suspend); };
     hooks.repaint       = [&]() {
         layout.draw(canvas, state);
-        video.present(canvas);
+        video.present(canvas, state.theme.background);
     };
     dispatch.set_render_hooks(std::move(hooks));
 
@@ -361,6 +398,24 @@ int run(const AppConfig& cfg) {
     bool   running    = true;
     Uint64 lastStatus = 0;
 
+    // ── C7 state ─────────────────────────────────────────────────────────────────────────────────
+    // `sawInput`     — anything happened this frame that could have changed what is on screen.
+    // `audibleEdge`  — audio was audible LAST frame, so the first silent frame is still drawn once
+    //                  (Kotlin's active→idle bump; without it the scope freezes mid-wave).
+    // `drewOnce`     — the first frame always draws, or the window comes up empty until a keypress.
+    bool sawInput    = false;
+    bool audibleEdge = true;
+    bool drewOnce    = false;
+
+    // ⚠️ **THE NUMBERS BESIDE THE VERDICT, AND C7 IS UNVERIFIABLE WITHOUT THEM.** A working idle skip
+    // and a skip that never fires look IDENTICAL on screen — that is the whole point of it, the
+    // picture does not change either way. So the status line carries the frame accounting: `drew` is
+    // frames actually sent to the display, `skip` frames the animation gate dropped, `same` frames
+    // that were drawn and then found byte-identical to what was already there (gate 1 being
+    // conservative, gate 2 catching it). On a still screen `drew` should stop climbing while the
+    // frame counter keeps going; if `skip` stays 0 the feature is not working, whatever it looks like.
+    long long drawn = 0, presented = 0, skipped = 0;
+
     // ⚠️ `terminate_requested` is the launcher's kill, read once per frame. On desktop it reports a FLAG
     // set by a signal handler that does nothing else — so this loop condition is where a SIGTERM actually
     // takes effect, and the flush below the loop is where the work is saved, on the main thread, with a
@@ -384,6 +439,14 @@ int run(const AppConfig& cfg) {
 
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
+            // ⚠️ C7: ANY event counts, not just the ones that map to a button. A window resize, an
+            // expose, a focus change, a rotation and the system bars appearing are all events that
+            // change what should be on screen while producing no ButtonEvent at all — and being
+            // over-inclusive here costs one redrawn frame, while being under-inclusive costs a stale
+            // window. The gate is allowed to be conservative; that is what the pixel compare in
+            // `present` is for.
+            sawInput = true;
+
             if (e.type == SDL_QUIT) {
                 // The OTHER way a kill arrives: a window manager's close button, and — where SDL was
                 // built with HAVE_SIGNAL_H and nobody set SDL_NO_SIGNAL_HANDLERS — SDL's own SIGINT /
@@ -422,6 +485,11 @@ int run(const AppConfig& cfg) {
 
         ui::ButtonEvent be;
         while (input.poll(be)) {
+            // ⚠️ Also here, and it is not redundant with the SDL loop above: KEY REPEAT is generated
+            // by `input.tick()` from the clock, so a held A+UP produces a ButtonEvent — and an edit —
+            // on frames where SDL delivered no event at all. Without this the screen would freeze
+            // while a held button was still changing the document underneath it.
+            sawInput = true;
             ui::handle_button(be, dispatch, mapper, now);
         }
 
@@ -455,8 +523,51 @@ int run(const AppConfig& cfg) {
         // frame — and the texture recreation it does otherwise is why this cannot go in `present`.
         video.set_scaling(state.settings.scalingBilinear ? ScalingMode::FIT : ScalingMode::INTEGER);
 
-        layout.draw(canvas, state);
-        video.present(canvas);
+        // ── C7: THE IDLE FRAME ───────────────────────────────────────────────────────────────────
+        //
+        // The shell used to draw and present unconditionally, 60 times a second, whether or not one
+        // pixel had moved. On a handheld that was a known, accepted cost; on a PHONE it is a straight
+        // regression against the Compose app being replaced, which repaints only on real state
+        // changes precisely to keep from burning battery — users would have felt it as warmth.
+        //
+        // TWO GATES, and they answer different questions:
+        //
+        //   1. ANIMATION (here). While audio is audible the visualizer is genuinely moving, so the
+        //      screen must be redrawn every frame even though no input arrived. When nothing is
+        //      audible nothing animates, and a redraw can only reproduce what is already there —
+        //      EXCEPT after an input, which may have changed something. `audibleEdge` is Kotlin's
+        //      "one final bump on the active→idle edge": the frame where sound stops must still be
+        //      drawn once, or the scope freezes mid-wave instead of settling flat.
+        //   2. PIXELS (`video.present`). The safety net under gate 1 — if the frame is byte-identical
+        //      to what is on screen it is not sent. That is what makes gate 1 safe to be WRONG: a
+        //      state change this loop failed to anticipate still gets drawn, and merely costs a
+        //      comparison. ⚠️ It is also why gate 1 may be conservative and never has to be clever.
+        //
+        // ⚠️ The LOOP does not slow down — only the DRAWING stops. Input, `host.poll()` and the
+        // lifecycle watcher all still run every frame at 60 Hz. Kotlin could afford `delay(50L)` when
+        // idle because its visualizer was a separate coroutine; here that would be 50 ms of input lag.
+        // ⚠️ `has_pending_timed_work()` is the third term and it is NOT covered by the pixel net: the
+        // status line clears itself 5 s after it is set, with no input, and a frame that is never
+        // drawn is never compared. Without it a "PROJECT SAVED" would sit on a still screen forever.
+        const bool audible = audio_is_audible(state);
+        if (audible || audibleEdge || sawInput || !drewOnce || dispatch.has_pending_timed_work()) {
+            layout.draw(canvas, state);
+            ++drawn;
+
+            // ⚠️ The letterbox is painted the LIVE theme's background, so the 4:3 frame on a 16:9
+            // window reads as one surface instead of a picture on a black wall. Passed per present
+            // rather than set once — the theme editor can change it mid-session, and a value that
+            // must be re-pushed on change is a value some future screen forgets to re-push.
+            if (video.present(canvas, state.theme.background)) ++presented;
+            drewOnce = true;
+        } else {
+            ++skipped;
+            // Nothing drawn — but the frame must still take its 16 ms, or the loop spins hot and the
+            // idle path costs MORE than the busy one. See SdlVideo::pace().
+            video.idle_frame();
+        }
+        audibleEdge = audible;   // so the first silent frame is still drawn (the flattened scope)
+        sawInput    = false;
 
         // A status line once a second, kept from the Phase 2 shell and kept for the same reason: on a
         // headless box, over ssh, or during a handheld bring-up where you cannot yet see or hear
@@ -467,11 +578,12 @@ int run(const AppConfig& cfg) {
         if (cfg.console && now - lastStatus >= 1000) {
             lastStatus = now;
             std::printf(
-                "%s  frame %-10lld  song %3d  chain %2d  step %2d   voices %2d   %-10s cursor %X,%d\n",
+                "%s  frame %-10lld  song %3d  chain %2d  step %2d   voices %2d   %-10s cursor %X,%d"
+                "   drew %lld skip %lld same %lld\n",
                 host.is_playing() ? "play" : "stop",
                 static_cast<long long>(engineRef.getCurrentFrame()), pos.songRow, pos.chainRow,
                 pos.phraseStep, engineRef.getActiveVoiceCount(), ui::screen_label(state.currentScreen),
-                state.cursorRow, state.cursorColumn);
+                state.cursorRow, state.cursorColumn, presented, skipped, drawn - presented);
             std::fflush(stdout);  // block-buffered to a pipe otherwise, and then it says nothing
         }
     }

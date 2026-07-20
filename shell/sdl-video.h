@@ -18,6 +18,9 @@
 
 #include <SDL.h>
 
+#include <cstdint>
+#include <vector>
+
 namespace pt::ui {
 class Canvas;
 }
@@ -37,11 +40,39 @@ enum class ScalingMode { INTEGER, FIT };
 
 class SdlVideo {
 public:
-    bool open(const char* title, int windowW, int windowH, bool fullscreen = false);
+    /**
+     * @param resizable  A WINDOWED host: the window gets `SDL_WINDOW_RESIZABLE` and opens at the
+     *                   largest integer multiple of the design that fits the desktop, instead of at
+     *                   `windowW × windowH` exactly.
+     *
+     * ⚠️⚠️ **ANDROID MUST PASS FALSE, AND IT IS NOT ABOUT RESIZING.** SDL feeds this flag straight
+     * to `Android_JNI_SetOrientation` (SDL_androidwindow.c:52), and `SDLActivity.setOrientationBis`
+     * branches on it: with no `SDL_HINT_ORIENTATIONS` set — and this shell sets none — a NON-resizable
+     * window picks its orientation from `w > h`, giving `SCREEN_ORIENTATION_SENSOR_LANDSCAPE` for the
+     * 640×480 design, while a RESIZABLE one becomes `SCREEN_ORIENTATION_FULL_USER` and the activity
+     * is free to rotate into PORTRAIT. That would undo C4's pixel-exact 2× landscape window on a
+     * phone, arriving through a flag whose name says nothing about orientation. Read out of the
+     * vendored source, not remembered.
+     */
+    bool open(const char* title, int windowW, int windowH, bool fullscreen = false,
+              bool resizable = false);
     void close();
 
-    /** Upload the canvas and present it. The whole frame, every time — see the note in the .cpp. */
-    void present(const pt::ui::Canvas& canvas);
+    /**
+     * Upload the canvas and present it — unless the result would be identical to what is already on
+     * screen, in which case this does nothing but pace the frame. Returns true if it really presented.
+     *
+     * @param letterboxArgb  What the bars around the frame are painted (a `pt::ui::Argb`,
+     *                       0xAARRGGBB). A PARAMETER rather than a setter on purpose: it is a pure
+     *                       function of the live theme, so passing it makes a stale value
+     *                       unrepresentable, where a `set_letterbox_colour` would be one more thing
+     *                       every future present site has to remember to keep current.
+     */
+    bool present(const pt::ui::Canvas& canvas, uint32_t letterboxArgb);
+
+    /** Pace a frame that drew nothing — see the .cpp. The app loop calls this when it skips the
+     *  draw entirely, so a still screen costs the same wall-clock as a moving one. */
+    void idle_frame();
 
     /** Recreates the texture: the sampling filter is fixed at creation time in SDL2, and the two
      *  modes want different ones (INTEGER → nearest, FIT → linear). */
@@ -73,6 +104,21 @@ private:
      *  until the first present, which is what suppresses a duplicate line at boot. See the .cpp. */
     int lastOutW_ = 0;
     int lastOutH_ = 0;
+
+    /** Pace a frame without presenting one. Shared by `present`'s skip path and `idle_frame`. */
+    void pace();
+
+    // ── The idle-redraw net (C7) ─────────────────────────────────────────────────────────────────
+    // The last frame actually PUT ON SCREEN, so an identical one can be dropped. This is the C++
+    // stand-in for Compose recomposition: Kotlin asks "did any observed state change?", and this asks
+    // the same question one layer later, of the pixels themselves — which cannot miss a field.
+    // ⚠️ The letterbox colour and the destination rect are part of the comparison, NOT just the
+    // canvas: a theme change repaints the BARS without moving a single canvas pixel, and a window
+    // resize moves the frame without changing it. Comparing the canvas alone would leave both stale.
+    std::vector<uint32_t> lastFrame_;
+    uint32_t              lastLetterbox_ = 0;
+    SDL_Rect              lastDest_      = {0, 0, 0, 0};
+    bool                  haveLast_      = false;
 };
 
 #endif  // POCKETTRACKER_SDL_VIDEO_H

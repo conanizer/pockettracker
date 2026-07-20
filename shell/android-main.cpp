@@ -215,6 +215,17 @@ int main(int argc, char** argv) {
     // which is the only console this platform has.
     cfg.console = true;
 
+    // ⚠️ **`cfg.windowed` IS DELIBERATELY LEFT FALSE, AND IT IS AN ORIENTATION DECISION, NOT A
+    // COSMETIC ONE.** It becomes `SDL_WINDOW_RESIZABLE`, which SDL hands straight to
+    // `SDLActivity.setOrientationBis` (SDL_androidwindow.c:52): a NON-resizable window takes its
+    // orientation from `w > h` and so locks to SENSOR_LANDSCAPE for the 640x480 design, while a
+    // RESIZABLE one becomes SCREEN_ORIENTATION_FULL_USER and is free to rotate into PORTRAIT — which
+    // would undo C4's device-proven, pixel-exact 2x landscape window. The default is the safe answer,
+    // so this file gets it by saying nothing; it is written down because the flag's NAME says nothing
+    // about orientation and the next reader would have no reason to suspect it. Read out of the
+    // vendored SDL source, not remembered. Phase D revisits portrait deliberately, with a touch layout
+    // that has somewhere to put the virtual buttons.
+
     // ⚠️ **NULL, AND C4 IS WHERE THIS GETS ITS ANSWER — NOT HERE.** The desktop polls a SIGTERM flag
     // through this hook once a frame. Android must not: SDL freezes the native thread when the
     // activity pauses (`SDL_HINT_ANDROID_BLOCK_ON_PAUSE`, on by default), which is precisely when the

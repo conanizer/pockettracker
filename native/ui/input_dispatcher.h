@@ -128,6 +128,27 @@ class InputDispatcher {
      */
     void set_now(long long now_ms);
 
+    /**
+     * Is there time-triggered work outstanding that will change what is on SCREEN by itself?
+     *
+     * ⚠️ **C7 NEEDS THIS AND THE PIXEL COMPARISON CANNOT ANSWER IT.** The shell skips drawing on an
+     * idle frame, and the safety net under that decision is a byte-compare of the drawn frame — but a
+     * frame that is never drawn is never compared. So anything that changes the SCREEN on a TIMER,
+     * with no input at all, is invisible to that net: the status line auto-dismisses 5 s after it is
+     * set (`run_due_status_dismiss`), and without this query a "PROJECT SAVED" would sit on a
+     * quiescent screen forever, cleared in the state and stale in the pixels.
+     *
+     * Derived from the DEADLINES themselves rather than from a flag any caller has to set — the same
+     * rule that made the dismissal watch the message field instead of trusting its 22 assignment
+     * sites. ⚠️ A future timer that alters the screen belongs in this expression, and that is one
+     * place, colocated with the deadlines it reads.
+     *
+     * `autosavePending_` is included though it draws nothing itself: it ends in a status message.
+     */
+    bool has_pending_timed_work() const {
+        return statusDismissAtMs_ != 0 || autosavePending_;
+    }
+
     // ═════════════════════════════════════════════════════════════════════════════════════════════
     // THE LIFECYCLE (Phase 3 S10) — the three things the SHELL has to say
     // ═════════════════════════════════════════════════════════════════════════════════════════════
