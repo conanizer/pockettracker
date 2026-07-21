@@ -22,6 +22,7 @@ project("pockettracker-tools" LANGUAGES C CXX)
 #   ptinput  Phase3 S3 the input layer          21687 cases          (units/p3-input.txt)
 #   ptdispatch Ph3 S5  the input DISPATCHER     686 assertions — NO golden; see below and its header
 #   ptmapper   conv C0 the COMBO MATRIX         assertions     — NO golden; the layer above ptdispatch
+#   pttouch    conv D1 the TOUCH LAYOUT sizes   675 golden lines     (units/touch-layout.txt)
 #
 # ⚠️ ptdispatch is NOT a conformance tool, and the line matters. Every tool above it byte-compares
 # against a golden recorded from the Kotlin code it replaces — they encode what Kotlin DOES. ptdispatch
@@ -153,6 +154,17 @@ add_executable(ptmapper ptmapper/main.cpp)
 pt_ieee_exact(ptmapper)   # no float in this TU today; kept so the rule cannot be lost by an edit
 target_include_directories(ptmapper PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../native)
 
+# pttouch — the TOUCH LAYOUT size arithmetic (convergence D1/D3). Like ptmapper it links NOTHING and
+# includes only its one shared header (native/ui/touch_layout.h via a relative path) — the standing
+# proof that the layout maths is as portable as the plan claims: no SDL, no engine, no Canvas.
+#
+# ⚠️ Unlike ptmapper, pt_ieee_exact() is LOAD-BEARING here, not defensive. The golden pins the font
+# sizes and every Portrait2 field as raw binary32 bits; aarch64 clang contracts a*b into an fma by
+# default, which rounds where the JVM did not, and the compare would go red on the arm64 runner while
+# staying green on MSVC. -fno-fast-math -ffp-contract=off is what keeps the bits identical to Kotlin's.
+add_executable(pttouch pttouch/main.cpp)
+pt_ieee_exact(pttouch)
+
 # ptdispatch — the input DISPATCHER (Phase 3 S5). The one tool here that is NOT a conformance tool:
 # it takes no golden, because what it checks is the JOIN between the modules, cursor_move and
 # navigation, and Kotlin's side of that join is AppInputDispatcher — entangled with ~60 Compose state
@@ -183,3 +195,5 @@ add_test(NAME p3-input         COMMAND ptinput     "${PT_TESTDATA}/units/p3-inpu
 add_test(NAME p3-dispatch      COMMAND ptdispatch)
 # Likewise no golden: the combo matrix is uncovered on the Kotlin side too. See ptmapper's header.
 add_test(NAME c0-mapper        COMMAND ptmapper)
+# The touch-layout size golden (B2), re-parsed and byte-compared by the C++ port. See pttouch's header.
+add_test(NAME d-touch-layout   COMMAND pttouch     "${PT_TESTDATA}/units/touch-layout.txt")
