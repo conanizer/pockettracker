@@ -120,6 +120,15 @@ public:
     SDL_Window* window() const { return window_; }
 
     /**
+     * The renderer, for the shell's skin/texture layer (Phase D) to create its textures from and
+     * composite into the letterbox bars — the SAME handle `present`'s `overlay` callback is already
+     * handed, exposed so a `Skin` can own textures with a proper lifetime (created after `open()`,
+     * destroyed before `close()`) instead of loading itself lazily inside a draw callback. Not for the
+     * frame path: pt-ui draws into the canvas, never onto the renderer.
+     */
+    SDL_Renderer* renderer() const { return renderer_; }
+
+    /**
      * The rect the 640×480 frame lands in, in renderer-output pixels — the tracker's on-screen box.
      * Public because Phase D lays the touch panels into the letterbox bars AROUND it, and the shell is
      * the layer that owns that geometry. In landscape the centred frame leaves a side bar on each side,

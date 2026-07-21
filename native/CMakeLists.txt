@@ -426,6 +426,8 @@ if(ANDROID)
             "${PT_SHELL_DIR}/app.cpp"
             "${PT_SHELL_DIR}/android-main.cpp"
             "${PT_SHELL_DIR}/image.cpp"        # PNG decode (convergence D2): the one stb_image impl TU
+            "${PT_SHELL_DIR}/assets.cpp"       # the asset seam (convergence D7): SDL_RWFromFile → APK assets
+            "${PT_SHELL_DIR}/skin.cpp"         # the touch-skin textures (convergence D1)
             "${PT_SHELL_DIR}/sdl-input.cpp"
             "${PT_SHELL_DIR}/sdl-touch.cpp"
             "${PT_SHELL_DIR}/sdl-video.cpp"

@@ -18,6 +18,8 @@
 #include "ui/modules/oscilloscope.h"   // WAVEFORM_SIZE — the C7 audible test
 #include "ui/settings_store.h"
 
+#include "skin.h"
+
 #include "sdl-input.h"
 #include "sdl-touch.h"
 #include "sdl-video.h"
@@ -286,6 +288,20 @@ int run(const AppConfig& cfg) {
     SdlTouch touch;
     touch.set_enabled(cfg.touchCapable && input.controller_count() == 0);
     if (inputTrace && inputTrace[0] == '1') touch.set_trace(true);
+
+    // ── The touch skin's textures — Phase D walking skeleton (D7 asset seam → D2 decode → texture) ──
+    //
+    // Decoded ONCE, here, now that the renderer exists (video.open above), and only where there is a
+    // touchscreen to skin — the same gate as the panels — so desktop and the handhelds decode nothing.
+    // This is the FIRST decode_png consumer on a SHIPPED path: until now the decoder and the asset seam
+    // were proven only by a host tool (ptdecode), never on a device. The `skin:` lines it prints are the
+    // on-device account of whether a real PNG came out of the APK — the log line IS the assertion here,
+    // there being no console test on a phone. ⚠️ `unload()` is called before video.close() below,
+    // because these textures belong to that renderer and outliving it is a use-after-free.
+    // TODO(D-portrait): the theme name is hardcoded to the dark skin; it becomes a settings-driven
+    // choice (theme / overlay_name) when the PORTRAIT2 renderer picks a skin per the caps profile.
+    Skin skin;
+    if (cfg.touchCapable) skin.load(video.renderer(), "amiga-2", cfg.console);
 
     // The UI state points at the host's live project — one document, edited in place. The boot
     // screen is AppState's own default (SONG, as Android): restating it here would be a second
@@ -629,7 +645,22 @@ int run(const AppConfig& cfg) {
             // The touch panels ride the same present: drawn into the bars after the frame, and their
             // fingerprint joins the C7 gate so a press highlight is not skipped as an unchanged canvas.
             // Both are inert when there is no touchscreen — the overlay draws nothing, the sig is 0.
-            const auto overlay = [&touch, &input](SDL_Renderer* r) { touch.draw(r, input); };
+            const auto overlay = [&touch, &input, &skin](SDL_Renderer* r) {
+                touch.draw(r, input);
+
+                // ⚠️ WALKING SKELETON (D7) — TEMPORARY, removed by the PORTRAIT2 renderer. Blit ONE
+                // real APK PNG at native size in the top-left corner, purely to prove the whole new
+                // pipeline reaches the phone's screen: SDL_RWFromFile → decode_png → SDL_Texture →
+                // composite in present(). If the branding art shows up with the right colours, the seam,
+                // the decoder and the ARGB packing are all good BEFORE a single line of the 4-band
+                // geometry exists — so a later "the skin is wrong" bug can't be blamed on any of them.
+                // The corner blit is static, so it does not need to join the C7 overlaySig: the first
+                // present composites it and every idle-skip leaves it on screen.
+                if (const SkinTexture& t = skin.piece(SkinPiece::BrandingPanel)) {
+                    const SDL_Rect dst{8, 8, t.width, t.height};
+                    skin.draw(r, SkinPiece::BrandingPanel, dst);
+                }
+            };
             if (video.present(canvas, state.theme.background, overlay, touch.signature(input)))
                 ++presented;
             drewOnce = true;
@@ -715,6 +746,7 @@ int run(const AppConfig& cfg) {
     engineRef.onResumeRequested = nullptr;
     audio.closeStream();
     input.close_controllers();
+    skin.unload();   // ⚠️ before video.close(): the skin's textures belong to the renderer it destroys
     video.close();
     return 0;
 }

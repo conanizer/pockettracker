@@ -121,6 +121,8 @@ add_executable(pockettracker-sdl
         app.cpp
         main.cpp
         image.cpp          # PNG decode (convergence D2): the one stb_image implementation TU
+        assets.cpp         # the asset seam (convergence D7): SDL_RWFromFile, APK vs beside-the-exe
+        skin.cpp           # the touch-skin textures (convergence D1): decode once, own per renderer
         sdl-audio-engine.cpp
         sdl-input.cpp
         sdl-touch.cpp
