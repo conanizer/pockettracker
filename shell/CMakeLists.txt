@@ -120,6 +120,7 @@ endif()
 add_executable(pockettracker-sdl
         app.cpp
         main.cpp
+        image.cpp          # PNG decode (convergence D2): the one stb_image implementation TU
         sdl-audio-engine.cpp
         sdl-input.cpp
         sdl-touch.cpp

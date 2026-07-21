@@ -7,3 +7,8 @@
 # no EOL conversion, and no attempt to render a WAV or a SoundFont as a text diff.
 golden/*.wav binary
 golden/*.sf2 binary
+
+# The D2 PNG decode fixtures (tools/ptdecode). Same reason: raw bytes with 0x0A inside pixel data
+# that core.autocrlf would rewrite, and nothing to gain from a text diff of a PNG. `* -text` above
+# already blocks the EOL conversion; this adds -diff and states the intent by name.
+images/*.png binary

@@ -24,6 +24,7 @@ project("pockettracker-tools" LANGUAGES C CXX)
 #   ptmapper   conv C0 the COMBO MATRIX         assertions     — NO golden; the layer above ptdispatch
 #   pttouch    conv D1 the TOUCH LAYOUT sizes   675 golden lines     (units/touch-layout.txt)
 #              conv D3 + touch POSITIONS        assertions     — NO golden (--positions); see below
+#   ptdecode   conv D2 the PNG DECODER          decode fixtures — an INDEPENDENT encoder; see below
 #
 # ⚠️ ptdispatch is NOT a conformance tool, and the line matters. Every tool above it byte-compares
 # against a golden recorded from the Kotlin code it replaces — they encode what Kotlin DOES. ptdispatch
@@ -166,6 +167,20 @@ target_include_directories(ptmapper PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../nativ
 add_executable(pttouch pttouch/main.cpp)
 pt_ieee_exact(pttouch)
 
+# ptdecode — the PNG DECODER (convergence D2). It compiles shell/image.cpp — the ONE translation unit
+# that pulls in the vendored stb_image implementation — and, like ptmapper and pttouch, links NOTHING
+# else: no SDL, no pt-ui, no engine. That is an assertion, not an economy. The decoder is a SHELL
+# facility that must depend on stb_image and the standard library and nothing more, so a stray include
+# reaching for SDL or the engine stops THIS target linking and names the file. It exists because a
+# dependency vendored but never called is dead code (the C1 lesson): this proves the decoder actually
+# decodes, against PNG fixtures made by GDI+ — an encoder independent of both stb_image and ptshot's
+# own PNG writer. See ptdecode/main.cpp's header and testdata/images/.
+add_executable(ptdecode ptdecode/main.cpp ../shell/image.cpp)
+pt_ieee_exact(ptdecode)   # 8-bit PNG decode is integer; kept so the -fno-fast-math rule cannot be lost
+target_include_directories(ptdecode PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../shell     # image.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/../native)   # vendor/stb_image/stb_image.h
+
 # ptdispatch — the input DISPATCHER (Phase 3 S5). The one tool here that is NOT a conformance tool:
 # it takes no golden, because what it checks is the JOIN between the modules, cursor_move and
 # navigation, and Kotlin's side of that join is AppInputDispatcher — entangled with ~60 Compose state
@@ -201,3 +216,7 @@ add_test(NAME d-touch-layout   COMMAND pttouch     "${PT_TESTDATA}/units/touch-l
 # The touch button POSITIONS (D3), by a hand-written oracle — NO golden, because Compose's layout pass
 # is unrecordable. Structural assertions + pinned coordinates; the ptmapper/ptdispatch pattern.
 add_test(NAME d-touch-positions COMMAND pttouch    --positions)
+# The PNG decoder (D2), proven on fixtures from an INDEPENDENT encoder (GDI+). A missing fixtures dir
+# is a hard error (exit 2), never a vacuous pass — deleting the fixtures cannot certify a broken
+# decoder. See ptdecode's header and testdata/images/.
+add_test(NAME d-image-decode    COMMAND ptdecode    "${PT_TESTDATA}/images")

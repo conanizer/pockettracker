@@ -26,6 +26,7 @@ See §5.
 | **`native/songcore/note_tables.h`** (100) | 132 note frequencies + 256 detune multipliers, as raw binary32 bits | `S5NoteTableTest` ← `Note.toFrequency()` / `Instrument.detuneMultiplier()` | ⚠️ yes |
 | `renders/*.txt` (2) | `ptrender` audio fingerprints: peak, RMS, per-second RMS in dBFS, tolerance-compared at ±1 dB | `tools/ptrender` (C++) | no |
 | `golden/{kick,pad}.wav`, `test.sf2` | the media the projects play | `golden/make-golden-media.cpp` (C++) | no |
+| `images/*.png` (3) | PNG **decode** fixtures for `tools/ptdecode` (convergence D2): a type-2 RGB, a type-6 RGBA, and a compressed+filtered gradient, every pixel known by formula | GDI+ / `make-image-fixtures.ps1` — an encoder independent of stb_image | no |
 | `device/` | optional device-recorded traces (gitignored) | a real device | n/a |
 
 ⚠️ **`native/songcore/note_tables.h` does not live in this directory** and an inventory scoped to
@@ -146,6 +147,15 @@ year-old Gradle build running again gets harder every month.
   second channel buffer *and* a rate ratio of 2.0), and `test.sf2` is a hand-built minimal SoundFont
   at bank 0 / preset 5. Everything decays to silence and **nothing loops**, so no voice can run a
   render's decay tail out to its 30-second cap.
+- `images/` — **PNG decode fixtures for `tools/ptdecode`** (convergence D2, the vendored stb_image
+  reader). Three tiny PNGs made by GDI+ (`make-image-fixtures.ps1`) — an encoder independent of both
+  stb_image and ptshot's own PNG writer: `rgb_3x2.png` (colour type 2), `rgba_2x2.png` (colour type 6,
+  varied alpha) and `gradient_16x16.png` (real zlib compression + adaptive filters, the inflate/
+  un-filter paths a stored-deflate writer cannot produce). Every pixel is known by construction, so
+  `ptdecode` asserts the decoder against the generator's formulas — hardcoded, not read from a golden,
+  so deleting a fixture is a hard error, never a vacuous pass. Committed binaries, decoded on every
+  platform; the generator is Windows-only and never runs in CI. Unlike the traces these are decoder
+  INPUTS, not recorded outputs — nothing regenerates them but a deliberate re-run of the script.
 - `renders/<project>.<samplerate>.txt` — `tools/ptrender`'s audio fingerprints. **Tolerance-compared
   (±1 dB), not byte-compared** — the DSP uses transcendentals and is built with `-ffast-math` on arm,
   so toolchains legitimately disagree on the last bit of a reverb tail. See `tools/ptrender/README.md`

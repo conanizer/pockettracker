@@ -183,6 +183,22 @@ Copyright (c) 2017 Sean Barrett. The full dual-licence statement is at the end o
 
 ---
 
+## stb_image — public domain **or** MIT (dual, at your option)
+
+Used for: decoding the touch-skin, CRT-overlay and theme PNGs (`native/vendor/stb_image/stb_image.h`,
+v2.30). Copyright (c) 2017 Sean Barrett. The full dual-licence statement is at the end of that file.
+
+⚠️ **Shell-side, not in the engine** — the same footnote the SDL2 section carries. `stb_image` is
+compiled into the SDL *shell* (`shell/image.cpp`), so it ships in the **PortMaster** and **Windows**
+packages and, from convergence C3, in the APK's SDL-app `.so` — but it is **not** linked into the
+`pockettracker` engine library and so is absent from the shipping Compose APK. It is under
+`native/vendor/` only because that is where the licence guard looks; see
+`native/vendor/stb_image/PT-VENDORING.md`. The dual grant carries no reproduce-in-binary obligation
+(the public-domain arm has no conditions at all), but the notice is recorded here regardless — the
+same rule every vendored component follows.
+
+---
+
 ## nlohmann/json — MIT
 
 Used for: parsing `.ptp` / `.pti` project and instrument JSON (`native/vendor/nlohmann/json.hpp`,
