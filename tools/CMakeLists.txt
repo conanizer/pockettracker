@@ -23,6 +23,7 @@ project("pockettracker-tools" LANGUAGES C CXX)
 #   ptdispatch Ph3 S5  the input DISPATCHER     686 assertions — NO golden; see below and its header
 #   ptmapper   conv C0 the COMBO MATRIX         assertions     — NO golden; the layer above ptdispatch
 #   pttouch    conv D1 the TOUCH LAYOUT sizes   675 golden lines     (units/touch-layout.txt)
+#              conv D3 + touch POSITIONS        assertions     — NO golden (--positions); see below
 #
 # ⚠️ ptdispatch is NOT a conformance tool, and the line matters. Every tool above it byte-compares
 # against a golden recorded from the Kotlin code it replaces — they encode what Kotlin DOES. ptdispatch
@@ -197,3 +198,6 @@ add_test(NAME p3-dispatch      COMMAND ptdispatch)
 add_test(NAME c0-mapper        COMMAND ptmapper)
 # The touch-layout size golden (B2), re-parsed and byte-compared by the C++ port. See pttouch's header.
 add_test(NAME d-touch-layout   COMMAND pttouch     "${PT_TESTDATA}/units/touch-layout.txt")
+# The touch button POSITIONS (D3), by a hand-written oracle — NO golden, because Compose's layout pass
+# is unrecordable. Structural assertions + pinned coordinates; the ptmapper/ptdispatch pattern.
+add_test(NAME d-touch-positions COMMAND pttouch    --positions)

@@ -1,53 +1,64 @@
-# pttouch — touch-layout SIZE conformance (convergence D1/D3)
+# pttouch — touch-layout conformance (convergence D1/D3)
 
-A host tool (no device / NDK) that proves the C++ port of the touch-layout **size arithmetic**
-reproduces what Android's `TouchLayoutMetrics` — the maths `VirtualControls.kt`'s four composables
-actually call — computed, bit for bit.
+A host tool (no device / NDK) that checks the C++ port of the touch layout in `native/ui/touch_layout.h`.
+It has **two modes**, because a touch layout is two computations with two different kinds of truth:
+
+| mode | covers | contract |
+|---|---|---|
+| `pttouch <golden>`    | the **SIZES** (D1) | golden-backed, strict conformance |
+| `pttouch --positions` | the **POSITIONS** (D3) | hand-written **oracle**, no golden — the ptmapper/ptdispatch pattern |
 
 ## Why this exists
 
-The touch skin is the one piece of the Android app with **no C++ twin and no golden** (convergence
-plan §6). A touch layout is two computations wearing one coat:
+The touch skin is the one piece of the Android app with **no C++ twin** (convergence plan §6). A touch
+layout is two computations wearing one coat:
 
 - **SIZES** — "each arrow is X px square, spacers are 0.2X" — plain arithmetic over
-  `(availableWidth, availableHeight, density)`.
-- **POSITIONS** — "the UP arrow lands at x=340" — produced on Android by **Compose's** measure/layout
-  pass (`Column`/`Row` + `Arrangement.Center`; Portrait2's `Modifier.weight`). This exists in no
-  Kotlin file, so no JVM test could record it.
+  `(availableWidth, availableHeight, density)`. This *can* be recorded from Kotlin.
+- **POSITIONS** — "the UP arrow lands at x=253, y=305 inside its box" — produced on Android by
+  **Compose's** measure/layout pass (`Column`/`Row` + `Arrangement.Center`). This exists in no Kotlin
+  file, so no JVM test could record it. There is **no golden and there never can be.**
 
-Phase B2 recorded the SIZES — the half that *can* be recorded — from the real Kotlin into
-`testdata/units/touch-layout.txt`, while Kotlin was still there to answer. Phase E deletes that Kotlin;
-after it, this golden is the only surviving statement of what the sizes should be.
+## SIZES — `pttouch <golden>`
 
-## What it checks
+Phase B2 recorded the sizes from the real Kotlin into `testdata/units/touch-layout.txt`, while Kotlin
+was still there to answer. `app/src/test/.../trace/TouchLayoutGoldenTest.kt` drives the real
+`TouchLayoutMetrics` over a matrix that brackets the reachable box sizes and straddles the one branch
+in the file (`boxRatio < patternRatio`, pinned from both sides plus the exact tie), across every real
+Android density; each line records the inputs and Kotlin's outputs (ints decimal, floats as raw
+binary32 bits). pttouch re-parses each line's inputs, recomputes the right-hand side through the C++
+port, and byte-compares. Same contract as `s3-units` / `s5-consumer` / `p3-input`. **It never
+regenerates the golden** — a missing or empty file is a hard error, so deleting it cannot make the
+check certify anything.
 
-`app/src/test/.../trace/TouchLayoutGoldenTest.kt` drives the real `TouchLayoutMetrics` over a matrix
-that brackets the reachable box sizes and straddles the one branch in the file (`boxRatio <
-patternRatio`, pinned from both sides plus the exact tie), across every real Android density. Each
-line records the inputs and Kotlin's outputs — ints decimal, floats as raw binary32 bits.
+## POSITIONS — `pttouch --positions`
 
-pttouch re-parses each line's inputs, recomputes the right-hand side through the C++ port
-(`native/ui/touch_layout.h`), and byte-compares the field string it produces. Same contract as
-`s3-units` / `s5-consumer` / `p3-input`.
+Where each button *lands* is unrecordable, so this is a hand-written **oracle** over
+`touch_layout.h`'s `left_rects`/`right_rects`, exactly like `ptmapper` (the combo matrix) and
+`ptdispatch` (the input join): it encodes what the author believes Compose does, having read
+`VirtualControls.kt`, and asserts the **structure** the arrangement must have —
 
-## ⚠️ What it does NOT claim
+- the LEFT box's D-pad is a **cross** (UP above the LEFT·RIGHT row above DOWN, UP centred over the gap,
+  the cells flush), with L above it and SELECT below;
+- the RIGHT box's A and B are a **diagonal** (A upper-right, B lower-left), R above, START below;
+- the block is **vertically centred**, no two rects **overlap**, and every rect is **inside** its box;
+- **hit-testing** works: a tap in a rect hits that button, a tap in the cross-hole hits nothing;
 
-**SIZES only, not POSITIONS.** A port that matches every line here can still stack the D-pad in the
-wrong order, off-centre, or overlapping the backing image. That hole is known and accepted: a wrong
-*arrangement* is obvious the moment anyone looks at a phone, a wrong *proportion* at a screen size
-nobody in the room owns is invisible until a user reports it. The arrangement is ported and
-eyeball-verified on a device in a later D increment; this tool covers the failure the eye cannot.
+plus a handful of **pinned exact coordinates** at the Xiaomi's 716×1220 landscape panel, so an
+arithmetic drift prints its number. Checked at two sizes, so a regression can't hide at one resolution.
 
-**It never regenerates the golden.** Only the Kotlin recorder does that (missing → generate). Here a
-missing or empty golden is a hard error, so deleting the file cannot make the check certify anything.
+This is a **weaker claim** than the golden mode — it proves what the author believes, not what Kotlin
+did — and the arrangement is *also* eyeball-verified on a device. A wrong *proportion* at an unowned
+screen size is what the golden catches; a wrong *arrangement* is what this oracle and the phone catch.
+⚠️ D3 covers the two LANDSCAPE boxes; PORTRAIT and PORTRAIT2 join when those modes are lit up.
 
 ## Build + run
 
 ```
 cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
 cmake --build tools/build --config Release
-ctest --test-dir tools/build -R d-touch-layout --output-on-failure -C Release
+ctest --test-dir tools/build -R d-touch --output-on-failure -C Release   # both d-touch-* ctests
 ```
 
-Exit 0 = all green, 1 = any mismatch, 2 = a bad or missing golden. Run by CI on every push via the
-`d-touch-layout` ctest (`tools/CMakeLists.txt`).
+Exit 0 = all green, 1 = any mismatch/assertion, 2 = a usage or bad/missing-golden error. Run by CI on
+every push via the `d-touch-layout` and `d-touch-positions` ctests (`tools/CMakeLists.txt`).

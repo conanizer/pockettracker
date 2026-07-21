@@ -5,9 +5,11 @@
 // The C++ twin of `input/TouchLayoutMetrics.kt`: the SIZE maths behind the four on-screen touch
 // layouts (the LEFT box, the RIGHT box, the two-box PORTRAIT split, and the 135-unit PORTRAIT2 grid).
 // Given a control-box size in pixels and the display density, it answers how big each button is and
-// how much space sits between them. Nothing else. No SDL, no Canvas, no window — this header includes
-// `<cstdint>`, `<cmath>` and `<algorithm>` and stops, exactly like `buttons.h`/`button_mapper.h`,
-// which is what lets `tools/pttouch` link it with nothing and byte-compare it against the golden.
+// how much space sits between them — and, since convergence D3, WHERE each button lands inside its
+// box (see the POSITIONS section at the foot of the file). No SDL, no Canvas, no window — this header
+// includes `<cstdint>`, `<cmath>`, `<algorithm>` and the leaf `buttons.h` (for the `Button` the rects
+// map onto) and stops, exactly like `buttons.h`/`button_mapper.h`, which is what lets `tools/pttouch`
+// link it with nothing and check it.
 //
 // ── WHY THIS IS SHARED C++ AND NOT SHELL CODE (convergence D1) ────────────────────────────────────
 //
@@ -18,18 +20,23 @@
 // in the shell (`sdl-video.cpp`). This file is the first, shared half. The canvas keeps its four
 // primitives; nothing image-shaped ever reaches `pt-ui`.
 //
-// ── ⚠️ SIZES, NOT POSITIONS — the same split `TouchLayoutMetrics.kt` states ───────────────────────
+// ── ⚠️ SIZES vs POSITIONS — the same split `TouchLayoutMetrics.kt` states, now both ported ────────
 //
-// A touch layout is two computations wearing one coat and only one of them is here:
+// A touch layout is two computations wearing one coat, and the two are checked by DIFFERENT means:
 //
-//   SIZES     — "each arrow is X px square, spacers are 0.2X" — plain arithmetic. That is everything
-//               below, and it is what `testdata/units/touch-layout.txt` (the B2 golden) pins.
-//   POSITIONS — "the UP arrow lands at x=340, y=210" — produced on Android by COMPOSE's measure/layout
-//               pass (Column/Row + Arrangement.Center; Portrait2's Modifier.weight). It exists in no
-//               Kotlin file, so no JVM test recorded it and this header does not compute it either.
-//               The arrangement is ported and eyeball-verified on a device in a later D increment;
-//               a wrong PROPORTION at an unowned screen size is what the golden catches, a wrong
-//               ARRANGEMENT is what looking at a phone catches.
+//   SIZES     — "each arrow is X px square, spacers are 0.2X" — plain arithmetic. `left`/`right`/
+//               `portrait`/`portrait2` below, and it is what `testdata/units/touch-layout.txt`
+//               (the B2 golden) pins, byte-for-byte, through `tools/pttouch`.
+//   POSITIONS — "the UP arrow lands at x=253, y=305 inside its box" — produced on Android by COMPOSE's
+//               measure/layout pass (Column/Row + Arrangement.Center). It exists in no Kotlin file, so
+//               no JVM test could record it: there is NO golden for it and there never can be. So the
+//               `*_rects` functions in the POSITIONS section port the ARRANGEMENT by reading
+//               `VirtualControls.kt`'s composables directly, and are checked the way the combo matrix
+//               and the dispatcher are — by a HAND-WRITTEN ORACLE (`pttouch --positions`), the
+//               ptmapper/ptdispatch pattern — plus eyes on a device. A wrong PROPORTION at an unowned
+//               screen size is what the golden catches; a wrong ARRANGEMENT is what the oracle and the
+//               phone catch. ⚠️ D3 ports the two LANDSCAPE boxes (LEFT/RIGHT); PORTRAIT's two-box
+//               split and PORTRAIT2's weight grid get their `*_rects` when those modes are lit up.
 //
 // ── ⚠️ IEEE-EXACTNESS IS A CORRECTNESS REQUIREMENT HERE ───────────────────────────────────────────
 //
@@ -47,6 +54,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+
+#include "buttons.h"  // pt::ui::Button — the enum the POSITIONS rects map onto. A leaf (<cstdint>),
+                      // so `tools/pttouch` still links nothing.
 
 namespace pt::ui::touch_layout {
 
@@ -197,6 +207,137 @@ inline Portrait2 portrait2(int available_width, int available_height, float dens
     m.off_y_dp      = x * 4.0f / density;
     m.pressed_dp    = x * 1.0f / density;
     return m;
+}
+
+// ─── POSITIONS — where each button LANDS inside its box (convergence D3) ──────────────────────────
+//
+// ⚠️ NOT golden-backed, and this is the file's most important caveat. The SIZE functions above match
+// bytes Kotlin recorded; there are no such bytes for POSITIONS, because Compose's measure/layout pass
+// produces them and no JVM test could snapshot it. These functions instead PORT the arrangement by
+// reading `VirtualControls.kt`'s composables, and the check for them is a hand-written oracle
+// (`pttouch --positions`) plus a device — the ptmapper/ptdispatch contract, weaker than a golden and
+// honest about it.
+//
+// ── Why there is no `density` argument here, unlike the size functions ────────────────────────────
+//
+// `VirtualControlsLeft/Right` size every child `(px / density).dp`, and Compose measures a `.dp` back
+// to pixels as `dp * density` — so the density cancels and the child is `px` pixels on screen, the
+// same int `left()`/`right()` already computed. The ARRANGEMENT is therefore pure integer-pixel
+// arithmetic over those ints (`button_size`, `small_spacer`, …); density touches only the FONT sp,
+// which positions do not use. So `left_rects`/`right_rects` call `left`/`right` with a throwaway
+// density and read only the int fields.
+//
+// ── The Compose arrangement these reproduce ───────────────────────────────────────────────────────
+//
+//   Column(verticalArrangement = Center, horizontalAlignment = CenterHorizontally): the children are
+//   packed into one block whose height is their sum, and that block is centred in the box height; each
+//   child (a button, or a Row) is centred in the box width. A Row wraps its content (no fillMaxWidth),
+//   so `Arrangement.Center` inside it has no slack and the children are packed left-to-right; a
+//   width-only `Spacer` has zero height, so it shifts its neighbours across without adding a row.
+//
+// Coordinates are BOX-LOCAL: origin at the box's top-left. The shell adds the box's on-screen origin.
+
+/** One laid-out button and where it sits inside its box (box-local pixels). */
+struct ButtonRect {
+    Button button;
+    int    x, y, w, h;
+    int  cx() const { return x + w / 2; }
+    int  cy() const { return y + h / 2; }
+    bool contains(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; }
+};
+
+/** A laid-out box. Fixed storage (LEFT fills 6, RIGHT fills 4) — no allocation, so the "links
+ *  nothing" discipline of the size structs carries over. Iterate `r[0..count)` in draw order. */
+struct BoxRects {
+    ButtonRect r[6];
+    int        count = 0;
+};
+
+/** LEFT box: L on top, the D-pad cross (UP / LEFT·RIGHT / DOWN), SELECT below — 6 rects, in draw
+ *  order. Ported from `VirtualControlsLeft`. */
+inline BoxRects left_rects(int available_width, int available_height) {
+    const Left m = left(available_width, available_height, 1.0f);  // density irrelevant to the int fields
+    const int  W = available_width;
+
+    // The Column's content height (spacers + children), then Arrangement.Center's top offset. Row
+    // heights are the tallest real child: the D-pad row is button_size, the SELECT row select_height.
+    const int content_h =
+        4 * m.small_spacer + m.l_button_height + 3 * m.button_size + m.select_height;
+    int y = (available_height - content_h) / 2;
+
+    BoxRects box;
+    auto push = [&](Button b, int x, int yy, int w, int h) { box.r[box.count++] = {b, x, yy, w, h}; };
+    auto cx   = [&](int w) { return (W - w) / 2; };  // centre a child of width w in the box
+
+    y += m.small_spacer;  // Spacer
+    push(Button::L_SHIFT, cx(m.l_button_width), y, m.l_button_width, m.l_button_height);
+    y += m.l_button_height + m.small_spacer;  // + Spacer
+    push(Button::DPAD_UP, cx(m.button_size), y, m.button_size, m.button_size);
+    y += m.button_size;
+    {  // Row: [small] LEFT [medium] RIGHT [small], centred as a unit
+        const int row_w = 2 * m.small_spacer + 2 * m.button_size + m.medium_spacer_width;
+        const int row_x = (W - row_w) / 2;
+        push(Button::DPAD_LEFT, row_x + m.small_spacer, y, m.button_size, m.button_size);
+        push(Button::DPAD_RIGHT, row_x + m.small_spacer + m.button_size + m.medium_spacer_width, y,
+             m.button_size, m.button_size);
+    }
+    y += m.button_size;
+    push(Button::DPAD_DOWN, cx(m.button_size), y, m.button_size, m.button_size);
+    y += m.button_size + m.small_spacer;  // + Spacer
+    {  // Row: [large] SELECT [small], centred
+        const int row_w = m.large_spacer + m.select_width + m.small_spacer;
+        const int row_x = (W - row_w) / 2;
+        push(Button::SELECT, row_x + m.large_spacer, y, m.select_width, m.select_height);
+    }
+    return box;
+}
+
+/** RIGHT box: R on top, A and B on a diagonal (A upper-right, B lower-left), START below — 4 rects,
+ *  in draw order. Ported from `VirtualControlsRight`; A/B are NOT a mirror pair, see the spacers. */
+inline BoxRects right_rects(int available_width, int available_height) {
+    const Right m = right(available_width, available_height, 1.0f);
+    const int   W = available_width;
+
+    const int content_h = 2 * m.small_spacer + 2 * m.medium_spacer + m.r_button_height +
+                          2 * m.button_size + m.start_height;
+    int y = (available_height - content_h) / 2;
+
+    BoxRects box;
+    auto push = [&](Button b, int x, int yy, int w, int h) { box.r[box.count++] = {b, x, yy, w, h}; };
+
+    y += m.small_spacer;  // Spacer
+    push(Button::R_SHIFT, (W - m.r_button_width) / 2, y, m.r_button_width, m.r_button_height);
+    y += m.r_button_height + m.medium_spacer;  // + Spacer
+    {  // Row: [left] A [right], centred — leftSpacer > rightSpacer, so A sits to the RIGHT
+        const int row_w = m.left_spacer + m.button_size + m.right_spacer;
+        const int row_x = (W - row_w) / 2;
+        push(Button::A, row_x + m.left_spacer, y, m.button_size, m.button_size);
+    }
+    y += m.button_size;
+    {  // Row: [right] B [left], centred — same total width, so B sits to the LEFT of where A was
+        const int row_w = m.right_spacer + m.button_size + m.left_spacer;
+        const int row_x = (W - row_w) / 2;
+        push(Button::B, row_x + m.right_spacer, y, m.button_size, m.button_size);
+    }
+    y += m.button_size + m.medium_spacer;  // + Spacer
+    {  // Row: [small] START [large], centred
+        const int row_w = m.small_spacer + m.start_width + m.large_spacer;
+        const int row_x = (W - row_w) / 2;
+        push(Button::START, row_x + m.small_spacer, y, m.start_width, m.start_height);
+    }
+    return box;
+}
+
+/** Which button in `box` contains the box-local point, if any. Draw order == first hit; the oracle
+ *  asserts the rects never overlap, so first-hit is the only hit. */
+inline bool hit(const BoxRects& box, int px, int py, Button& out) {
+    for (int i = 0; i < box.count; ++i) {
+        if (box.r[i].contains(px, py)) {
+            out = box.r[i].button;
+            return true;
+        }
+    }
+    return false;
 }
 
 }  // namespace pt::ui::touch_layout
