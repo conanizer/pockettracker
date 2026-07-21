@@ -266,7 +266,8 @@ void SdlVideo::invalidate_backbuffer(bool texture_lost) {
     haveLast_ = false;
 }
 
-bool SdlVideo::present(const Canvas& canvas, uint32_t letterboxArgb) {
+bool SdlVideo::present(const Canvas& canvas, uint32_t letterboxArgb,
+                       const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig) {
     // ⚠️ **RE-DESCRIBE WHEN THE OUTPUT CHANGES, AND ANDROID IS WHY (C4).** `describe()` used to run
     // exactly once, at `open()` — which on this platform is the one moment it is guaranteed to be
     // WRONG. `SdlActivity.hideSystemBars()` has to POST itself (API 30+ wants an attached DecorView),
@@ -300,10 +301,17 @@ bool SdlVideo::present(const Canvas& canvas, uint32_t letterboxArgb) {
     // pixel, and a resize moves the frame without changing it. Comparing the canvas alone would leave
     // both stale on screen — the C4 SCALING bug's shape (a value read but never applied), one layer
     // over.
+    // ⚠️ `overlaySig` is part of this compare, and the touch skin is why (Phase D). A virtual-button
+    // press repaints only the PANEL — a highlight OUTSIDE the 640×480 canvas — so the canvas memcmp
+    // alone would find the frame identical and skip it, leaving the button looking un-pressed. That is
+    // the C7 blind-channel shape exactly (a change the comparison cannot see), one panel over from the
+    // sleep-resume case; folding the overlay's fingerprint into the gate closes it. Zero when there is
+    // no overlay, so this is a no-op wherever there are no on-screen controls.
     const SDL_Rect want = dest_rect();
     const size_t   n    = static_cast<size_t>(DESIGN_W) * DESIGN_H;
-    if (haveLast_ && letterboxArgb == lastLetterbox_ && want.x == lastDest_.x &&
-        want.y == lastDest_.y && want.w == lastDest_.w && want.h == lastDest_.h &&
+    if (haveLast_ && letterboxArgb == lastLetterbox_ && overlaySig == lastOverlaySig_ &&
+        want.x == lastDest_.x && want.y == lastDest_.y && want.w == lastDest_.w &&
+        want.h == lastDest_.h &&
         std::memcmp(lastFrame_.data(), canvas.pixels(), n * sizeof(uint32_t)) == 0) {
         pace();          // ⚠️ never skip this — see pace() for why it inverts the feature
         return false;
@@ -349,6 +357,12 @@ bool SdlVideo::present(const Canvas& canvas, uint32_t letterboxArgb) {
                            static_cast<Uint8>(letterboxArgb & 0xFF), 255);
     SDL_RenderClear(renderer_);  // paints the letterbox bars
     SDL_RenderCopy(renderer_, texture_, nullptr, &want);
+
+    // ⚠️ The touch panels go HERE — after the frame, before the flip — drawn OVER the cleared
+    // background and into the bars beside the frame, never onto the 640×480 tracker itself. Empty on
+    // any layout with no on-screen controls, in which case this line does nothing.
+    if (overlay) overlay(renderer_);
+
     SDL_RenderPresent(renderer_);
 
     // What is now on screen, so the next frame can tell whether it would change anything. Kept AFTER
@@ -356,9 +370,10 @@ bool SdlVideo::present(const Canvas& canvas, uint32_t letterboxArgb) {
     // taken on a frame that then failed to present would make the next comparison lie.
     if (lastFrame_.size() != n) lastFrame_.resize(n);
     std::memcpy(lastFrame_.data(), canvas.pixels(), n * sizeof(uint32_t));
-    lastLetterbox_ = letterboxArgb;
-    lastDest_      = want;
-    haveLast_      = true;
+    lastLetterbox_  = letterboxArgb;
+    lastDest_       = want;
+    lastOverlaySig_ = overlaySig;
+    haveLast_       = true;
 
     // ── Pacing ───────────────────────────────────────────────────────────────────────────────────
     // With vsync, SDL_RenderPresent blocks until the display is ready and the whole app loop rides

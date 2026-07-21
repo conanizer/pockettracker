@@ -91,6 +91,22 @@ public:
      *  silently reroutes every later DPAD press into the wrong combo). Kotlin's `InputMapper.reset()`. */
     void reset();
 
+    /**
+     * D4: a virtual (touch) button feeds the SAME press/release machinery as a key or a pad, so it
+     * inherits all three properties without a line of new code for fingers — the `ButtonMods` snapshot
+     * stamped at queue time (P3-S3), the ONE shared key-repeat engine (a held virtual D-pad repeats
+     * like a physical one), and the held-button de-dup (a finger on virtual A and a pad's physical A
+     * collide safely instead of doubling). The hit-test that turns a finger into a `Button` is
+     * `sdl-touch.*`; this is only the seam it pushes through. Kotlin routes its virtual buttons through
+     * the identical `InputMapper.onVirtualButton` for exactly this reason (VirtualControls.kt).
+     */
+    void touch_press(Button b, uint64_t now_ms) { press(b, now_ms); }
+    void touch_release(Button b)                { release(b); }
+
+    /** How many controllers are open. The shell uses it to choose FULL (physical buttons, no on-screen
+     *  controls) vs a touch layout — the SDL analogue of `DeviceAdapter.hasPhysicalGameButtons()`. */
+    size_t controller_count() const { return controllers_.size(); }
+
 private:
     void press(Button b, uint64_t now_ms);
     void release(Button b);

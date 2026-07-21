@@ -426,6 +426,7 @@ if(ANDROID)
             "${PT_SHELL_DIR}/app.cpp"
             "${PT_SHELL_DIR}/android-main.cpp"
             "${PT_SHELL_DIR}/sdl-input.cpp"
+            "${PT_SHELL_DIR}/sdl-touch.cpp"
             "${PT_SHELL_DIR}/sdl-video.cpp"
     )
 

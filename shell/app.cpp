@@ -19,6 +19,7 @@
 #include "ui/settings_store.h"
 
 #include "sdl-input.h"
+#include "sdl-touch.h"
 #include "sdl-video.h"
 
 #include <cstdio>
@@ -274,6 +275,18 @@ int run(const AppConfig& cfg) {
 
     input.open_controllers();
 
+    // ── The on-screen gamepad (Phase D) ────────────────────────────────────────────────────────────
+    //
+    // Drawn only where the hardware is a touchscreen AND no physical controller is attached — the SDL
+    // reading of DeviceAdapter's "does this device have game buttons?". A phone with no pad gets the
+    // panels; a handheld (a pad, built-in or plugged) gets FULL and full-bleed, exactly as the Kotlin
+    // app decides. `touch.layout()` in the loop below then draws them only if the letterbox bars are
+    // actually wide enough (`active()`), so a narrow window shows none regardless. The trace shares the
+    // input trace's env var — it is the same P4b blind channel, one input source over.
+    SdlTouch touch;
+    touch.set_enabled(cfg.touchCapable && input.controller_count() == 0);
+    if (inputTrace && inputTrace[0] == '1') touch.set_trace(true);
+
     // The UI state points at the host's live project — one document, edited in place. The boot
     // screen is AppState's own default (SONG, as Android): restating it here would be a second
     // place for it to rot, which is exactly how it sat on PHRASE for four phases.
@@ -437,6 +450,15 @@ int run(const AppConfig& cfg) {
         // is a function of time, so it takes the clock rather than reaching for it.
         const Uint64 now = SDL_GetTicks64();
 
+        // Lay the touch panels into the CURRENT letterbox bars before polling, so a finger arriving
+        // this frame hits the geometry that is actually on screen. A rotate or resize is absorbed the
+        // next frame; the call is a handful of int ops and a no-op when there is no touchscreen.
+        {
+            int outW = 0, outH = 0;
+            video.output_size(outW, outH);
+            touch.layout(video.frame_rect(), outW, outH);
+        }
+
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             // ⚠️ C7: ANY event counts, not just the ones that map to a button. A window resize, an
@@ -462,9 +484,23 @@ int run(const AppConfig& cfg) {
                 redrawReason = "device reset - texture recreated";
             } else if (e.type == SDL_RENDER_TARGETS_RESET || e.type == SDL_APP_WILLENTERFOREGROUND ||
                        e.type == SDL_APP_DIDENTERFOREGROUND ||
-                       (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_EXPOSED)) {
+                       (e.type == SDL_WINDOWEVENT &&
+                        (e.window.event == SDL_WINDOWEVENT_EXPOSED ||
+                         e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
+                         e.window.event == SDL_WINDOWEVENT_RESIZED))) {
+                // ⚠️ **A ROTATION IS A SURFACE SWAP, AND ON A PORTRAIT-NATIVE PHONE THE FIRST ONE
+                // HAPPENS AT BOOT.** The window opens in the device's portrait, then SDL requests
+                // SENSOR_LANDSCAPE (windowed=false) and Android rotates — replacing the SurfaceView's
+                // buffer with a landscape one. The frames drawn before that settle are presented to the
+                // old surface, and once the app goes idle the C7 pixel gate skips re-presenting the
+                // NEW (blank) one because the canvas has not changed: a black screen until the first
+                // input redraws it. The landscape-native AYANEO never rotated, so it never showed this
+                // — the assumption "the surface we drew to is the one on screen", true there, broken
+                // here. A SIZE_CHANGED/RESIZED is exactly that swap announcing itself, so it forces the
+                // next present the same way a re-expose does. The texture is 640×480 regardless of
+                // window size, so it is not lost — only the "already on screen" assumption is.
                 video.invalidate_backbuffer(/*texture_lost=*/false);
-                redrawReason = "foreground / re-expose / targets reset";
+                redrawReason = "foreground / re-expose / resize / targets reset";
             }
             if (redrawReason && cfg.console) {
                 std::printf("video:   backbuffer no longer ours (%s) - forcing a redraw\n", redrawReason);
@@ -497,6 +533,13 @@ int run(const AppConfig& cfg) {
                 // there is unsaved work, and its YES is the app's ONE clean death — the only path that
                 // deletes the autosave rather than writing one.
                 running = false;
+            } else if (e.type == SDL_FINGERDOWN || e.type == SDL_FINGERUP ||
+                       e.type == SDL_FINGERMOTION) {
+                // A virtual-button touch feeds SdlInput's OWN press/release, so downstream it is
+                // indistinguishable from a key or a pad — combos, key-repeat and held-de-dup all apply
+                // with nothing rewritten for fingers. A finger outside a button (on the frame, in a
+                // gap) is ignored.
+                touch.handle_finger(e, input, now);
             } else {
                 input.handle_event(e, now);
             }
@@ -582,7 +625,13 @@ int run(const AppConfig& cfg) {
             // window reads as one surface instead of a picture on a black wall. Passed per present
             // rather than set once — the theme editor can change it mid-session, and a value that
             // must be re-pushed on change is a value some future screen forgets to re-push.
-            if (video.present(canvas, state.theme.background)) ++presented;
+            //
+            // The touch panels ride the same present: drawn into the bars after the frame, and their
+            // fingerprint joins the C7 gate so a press highlight is not skipped as an unchanged canvas.
+            // Both are inert when there is no touchscreen — the overlay draws nothing, the sig is 0.
+            const auto overlay = [&touch, &input](SDL_Renderer* r) { touch.draw(r, input); };
+            if (video.present(canvas, state.theme.background, overlay, touch.signature(input)))
+                ++presented;
             drewOnce = true;
         } else {
             ++skipped;

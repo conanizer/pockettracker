@@ -128,6 +128,16 @@ struct AppConfig {
     bool windowed = false;
 
     /**
+     * This platform has a touchscreen, so the shell draws the virtual gamepad (Phase D) when there is
+     * no physical one and room for it. A phone sets it; desktop and the handhelds leave it false (a
+     * handheld has real buttons, and drawing panels over a full-bleed frame would only shrink it).
+     * ⚠️ NOT the same as `PlatformCaps::touchLayouts`, which is the SETTINGS row that lets the user
+     * PICK a layout — that stays off until PORTRAIT and the skin exist to be picked. This just says the
+     * hardware can be touched.
+     */
+    bool touchCapable = false;
+
+    /**
      * Polled once a frame; true ends the session as an UNCLEAN exit, so the autosave is kept.
      *
      * Desktop hands its SIGTERM/SIGINT flag through here. ⚠️ May be null, and Android's will be —

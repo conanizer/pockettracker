@@ -122,6 +122,7 @@ add_executable(pockettracker-sdl
         main.cpp
         sdl-audio-engine.cpp
         sdl-input.cpp
+        sdl-touch.cpp
         sdl-video.cpp
         ${PT_WIN_RESOURCES}
 )

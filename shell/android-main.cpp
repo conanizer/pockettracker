@@ -215,6 +215,14 @@ int main(int argc, char** argv) {
     // which is the only console this platform has.
     cfg.console = true;
 
+    // ⚠️ **PHASE D: this is a phone, so draw the on-screen gamepad** — when no physical controller is
+    // plugged and the letterbox bars have room (the shell decides both). This is NOT the same as
+    // flipping `PlatformCaps::touchLayouts`: that is the SETTINGS row that lets the user PICK a layout,
+    // and it stays off until PORTRAIT and the skinned grid exist to be picked, so the picker never
+    // offers a mode that does nothing (platform_caps.h's own rule). Desktop and the handhelds leave
+    // this false — main.cpp says nothing, so the default (false) is the safe answer there.
+    cfg.touchCapable = true;
+
     // ⚠️ **`cfg.windowed` IS DELIBERATELY LEFT FALSE, AND IT IS AN ORIENTATION DECISION, NOT A
     // COSMETIC ONE.** It becomes `SDL_WINDOW_RESIZABLE`, which SDL hands straight to
     // `SDLActivity.setOrientationBis` (SDL_androidwindow.c:52): a NON-resizable window takes its

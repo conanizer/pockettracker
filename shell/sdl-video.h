@@ -21,6 +21,7 @@
 #include <SDL.h>
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace pt::ui {
@@ -76,8 +77,18 @@ public:
      *                       function of the live theme, so passing it makes a stale value
      *                       unrepresentable, where a `set_letterbox_colour` would be one more thing
      *                       every future present site has to remember to keep current.
+     * @param overlay        Drawn on the renderer AFTER the frame and BEFORE the flip — the Phase D
+     *                       touch panels, composited into the letterbox bars around the frame (the
+     *                       space this function's own comment reserved for them). Empty on every layout
+     *                       with no on-screen controls (desktop, a handheld with a pad), and then this
+     *                       is byte-for-byte the pre-D present.
+     * @param overlaySig     A cheap fingerprint of what `overlay` would draw (its geometry + which
+     *                       buttons are held). It joins the C7 pixel gate below: without it a virtual
+     *                       button's press highlight — a change OUTSIDE the 640×480 canvas the gate
+     *                       compares — would be skipped, the C7 blind-channel shape one panel over.
      */
-    bool present(const pt::ui::Canvas& canvas, uint32_t letterboxArgb);
+    bool present(const pt::ui::Canvas& canvas, uint32_t letterboxArgb,
+                 const std::function<void(SDL_Renderer*)>& overlay = {}, uint64_t overlaySig = 0);
 
     /** Pace a frame that drew nothing — see the .cpp. The app loop calls this when it skips the
      *  draw entirely, so a still screen costs the same wall-clock as a moving one. */
@@ -107,6 +118,19 @@ public:
     ScalingMode scaling() const { return scaling_; }
 
     SDL_Window* window() const { return window_; }
+
+    /**
+     * The rect the 640×480 frame lands in, in renderer-output pixels — the tracker's on-screen box.
+     * Public because Phase D lays the touch panels into the letterbox bars AROUND it, and the shell is
+     * the layer that owns that geometry. In landscape the centred frame leaves a side bar on each side,
+     * and those bars ARE the LEFT/RIGHT control panels — so this needs no change for the touch skin to
+     * have somewhere to go.
+     */
+    SDL_Rect frame_rect() const { return dest_rect(); }
+
+    /** The renderer's output size in pixels — the coordinate space `frame_rect()` and the touch layer
+     *  both work in (SDL finger events are normalised to it). */
+    void output_size(int& w, int& h) const { SDL_GetRendererOutputSize(renderer_, &w, &h); }
 
     /** False when the renderer gave us no vsync — `present` then paces the frame itself. */
     bool vsync() const { return vsync_; }
@@ -146,6 +170,11 @@ private:
     uint32_t              lastLetterbox_ = 0;
     SDL_Rect              lastDest_      = {0, 0, 0, 0};
     bool                  haveLast_      = false;
+
+    // The overlay fingerprint last presented — part of the gate above, so a touch highlight that
+    // changes nothing in the canvas still forces the frame through. Zero when there is no overlay,
+    // which is what makes the whole net a no-op on the platforms without one.
+    uint64_t              lastOverlaySig_ = 0;
 };
 
 #endif  // POCKETTRACKER_SDL_VIDEO_H
