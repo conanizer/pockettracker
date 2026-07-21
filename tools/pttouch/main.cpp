@@ -35,8 +35,11 @@
 // tap in the cross-hole hits nothing) plus a handful of exact pinned coordinates so an arithmetic
 // drift prints its number. It is a weaker claim than the golden modes make — the eyes on a device are
 // the other half — and the header of `touch_layout.h` marks the seam. ⚠️ Covers the two LANDSCAPE
-// boxes (D3) and the PORTRAIT2 skinned grid (its columns come from Compose's WEIGHT split, so the
-// oracle asserts the grid tiles and pins a clean size AND a remainder-carrying one); PORTRAIT's
+// boxes (D3), the PORTRAIT2 skinned grid (its columns come from Compose's WEIGHT split, so the
+// oracle asserts the grid tiles and pins a clean size AND a remainder-carrying one), and the PORTRAIT2
+// device-SKIN band geometry (the four chrome bands + the frame-in-bezel — asserts the bands stack, the
+// branding spans the whole device, and the 640x480 frame is integer-scaled in the BEZEL, not centred in
+// the window; pinned exactly on a whole-X case, structurally across all three aspect cases). PORTRAIT's
 // two-box split joins when that mode is lit up.
 //
 // Build + run via the tools/ CMake project — the `d-touch-layout` and `d-touch-positions` ctests, run
@@ -299,6 +302,60 @@ void check_portrait2_structure(const touch_layout::BoxRects& box, int W, int H) 
     check(!touch_layout::hit(box, W / 2, ls->y / 2, got), "P2 top padding hits nothing");
 }
 
+// PORTRAIT2's OUTER skin: four chrome bands stacked on the whole device screen, with the 640×480 frame
+// living in the BEZEL band (band 2), NOT centred in the window. Ported from
+// `PortraitLayout2WithVirtualButtons` (ScreenLayouts.kt); read against it. The invariants that must
+// hold for ANY device size in ANY of the three aspect cases, plus the link to `portrait2_rects` — the
+// cluster this outer geometry hands the buttons — so a bug that moves the whole skin cannot hide behind
+// the button grid being internally consistent.
+void check_portrait2_skin_structure(const touch_layout::Portrait2Skin& s, int deviceW, int deviceH,
+                                    const char* tag) {
+    using touch_layout::ButtonRect;
+    using touch_layout::LayoutRect;
+    auto T = [&](const char* w) { return std::string(tag) + " " + w; };
+
+    // ── The four bands stack contiguously from the top — no gaps, no overlaps (Arrangement.Top). ──
+    check(s.topPanel.y == 0, T("topPanel at y=0"));                  // absent → default {0,0,0,0}, y still 0
+    check(s.bezel.y == s.topPanel.h, T("bezel below the top panel"));
+    check(s.branding.y == s.bezel.y + s.bezel.h, T("branding below the bezel"));
+    check(s.buttons.y == s.branding.y + s.branding.h, T("cluster below the branding"));
+    check(s.buttons.y + s.buttons.h <= deviceH, T("the skin fits the screen height"));
+    check(s.bezel.h > 0 && s.branding.h > 0 && s.buttons.h > 0, T("the chrome bands are non-empty"));
+
+    // ── Horizontal: the skinned bands are centred at content width; branding spans the whole DEVICE. ──
+    const int contentW = s.bezel.w;
+    const int contentX = (deviceW - contentW) / 2;
+    check(contentW > 0 && contentW <= deviceW, T("content width within the device"));
+    check(s.bezel.x == contentX, T("bezel centred horizontally"));
+    check(s.buttons.x == contentX && s.buttons.w == contentW, T("cluster shares the content column"));
+    if (!s.topPanel.empty())
+        check(s.topPanel.x == contentX && s.topPanel.w == contentW, T("top panel shares the content column"));
+    check(s.branding.x == 0 && s.branding.w == deviceW, T("branding spans the full device width"));
+
+    // ── The frame sits in the BEZEL (band 2), integer-scaled, and is NOT centred in the window. ──
+    auto inside = [](const LayoutRect& in, const LayoutRect& out) {
+        return in.x >= out.x && in.y >= out.y && in.x + in.w <= out.x + out.w && in.y + in.h <= out.y + out.h;
+    };
+    check(inside(s.innerBezel, s.bezel), T("inner bezel inside the bezel band"));
+    check(inside(s.frame, s.innerBezel), T("frame inside the inner bezel area"));
+    check(s.frame.w > 0 && s.frame.w % 640 == 0 && s.frame.h % 480 == 0 && s.frame.w / 640 == s.frame.h / 480,
+          T("frame is an integer 640x480 multiple"));
+    // Centred in the bezel BAND — the whole point: its centre tracks band 2, not the window's centre.
+    check(std::abs((s.frame.x + s.frame.w / 2) - (s.bezel.x + s.bezel.w / 2)) <= 2, T("frame centred in the bezel (x)"));
+    check(std::abs((s.frame.y + s.frame.h / 2) - (s.bezel.y + s.bezel.h / 2)) <= 2, T("frame centred in the bezel (y)"));
+    check((s.frame.y + s.frame.h / 2) < deviceH / 2, T("frame ABOVE the window centre (cluster fills the bottom)"));
+
+    // ── The cluster is exactly what portrait2_rects fills: ten buttons, all on-screen in the column. ──
+    const touch_layout::BoxRects G = touch_layout::portrait2_rects(s.buttons.w, std::max(s.buttons.h, 100));
+    check_eq(G.count, 10, T("cluster holds all ten buttons"));
+    for (int i = 0; i < G.count; ++i) {
+        const ButtonRect& r = G.r[i];
+        check(r.x >= 0 && r.x + r.w <= s.buttons.w, T("button within the cluster width"));
+        check(s.buttons.x + r.x >= contentX && s.buttons.x + r.x + r.w <= contentX + contentW,
+              T("button on-screen within the content column"));
+    }
+}
+
 int run_positions() {
     using namespace touch_layout;
 
@@ -425,6 +482,80 @@ int run_positions() {
             if (ls) { check_eq(ls->x, 11, "pin P2/messy LSHIFT.x (pad)"); }
             if (up) { check_eq(up->x, 255, "pin P2/messy UP.x"); check_eq(up->w, 244, "pin P2/messy UP.w"); }
             if (a)  { check_eq(a->x, 744, "pin P2/messy A.x"); check_eq(a->w, 245, "pin P2/messy A.w"); }
+        }
+    }
+
+    // ── PORTRAIT2 the SKIN: the four device-skin bands + the frame-in-bezel (convergence D) ───────────
+    // `portrait2_rects` (above) sits INSIDE this. amiga/amiga-2 both use a bezel PNG (thicknessX = 3f,
+    // DeviceTheme.AMIGA); the DARK theme a solid-colour bezel (thicknessDp = 9f). Structure across the
+    // three aspect cases + a real phone, then EXACT pins on a clean case whose X is a whole number —
+    // hand-traceable, so the pins are independent of the port's own float arithmetic (not the code
+    // compared to itself), exactly as the 1350×1420 grid pins are above.
+    {
+        const float TX = 3.0f;  // amiga skin bezel thickness in X-units (DeviceTheme.AMIGA.screenBezelThicknessX)
+
+        // Case A (full skin, 20:9), Case B (top panel shrunk), Case C (height-constrained, skin < device),
+        // a real portrait phone (Xiaomi 12T Pro — the device this lights up on), and the solid-colour
+        // bezel branch (thicknessX = 0 → thicknessDp * density). Each must be well-formed.
+        check_portrait2_skin_structure(portrait2_skin(1350, 3000, 1.0f, 9.0f, TX), 1350, 3000, "P2skin/A");
+        check_portrait2_skin_structure(portrait2_skin(1350, 2800, 1.0f, 9.0f, TX), 1350, 2800, "P2skin/B");
+        check_portrait2_skin_structure(portrait2_skin(1350, 2000, 1.0f, 9.0f, TX), 1350, 2000, "P2skin/C");
+        check_portrait2_skin_structure(portrait2_skin(1220, 2712, 3.0f, 9.0f, TX), 1220, 2712, "P2skin/xiaomi");
+        check_portrait2_skin_structure(portrait2_skin(1350, 3000, 2.0f, 9.0f, 0.0f), 1350, 3000, "P2skin/dp");
+
+        // CLEAN Case A pins: 1350×3000 is EXACTLY 20:9, so X = 1350/135 = 10 exactly. Every band is a
+        // whole multiple of X and hand-derivable; bezelThickPx = 10·3 = 30, so the frame is 2× centred in
+        // a 1290×967 inner area at (30,360) → (35,363).
+        {
+            const Portrait2Skin s = portrait2_skin(1350, 3000, 1.0f, 9.0f, TX);
+            check_eq(s.topPanel.h, 330, "pin P2skin topPanel.h (10*33)");
+            check_eq(s.bezel.y, 330, "pin P2skin bezel.y");
+            check_eq(s.bezel.h, 1027, "pin P2skin bezel.h (floor 10*102.75)");
+            check_eq(s.branding.y, 1357, "pin P2skin branding.y");
+            check_eq(s.branding.w, 1350, "pin P2skin branding.w (full width)");
+            check_eq(s.branding.h, 225, "pin P2skin branding.h (10*22.5)");
+            check_eq(s.buttons.y, 1582, "pin P2skin cluster.y");
+            check_eq(s.buttons.h, 1417, "pin P2skin cluster.h (floor 10*141.75)");
+            check_eq(s.innerBezel.x, 30, "pin P2skin inner.x (bezelThick 30)");
+            check_eq(s.innerBezel.y, 360, "pin P2skin inner.y");
+            check_eq(s.innerBezel.w, 1290, "pin P2skin inner.w (1350-60)");
+            check_eq(s.innerBezel.h, 967, "pin P2skin inner.h (1027-60)");
+            check_eq(s.frame.x, 35, "pin P2skin frame.x (inner 30 + offset 5)");
+            check_eq(s.frame.y, 363, "pin P2skin frame.y (inner 360 + offset 3)");
+            check_eq(s.frame.w, 1280, "pin P2skin frame.w (2x 640)");
+            check_eq(s.frame.h, 960, "pin P2skin frame.h (2x 480)");
+        }
+
+        // The solid-colour bezel (thicknessX=0 → 9·density) shifts the inner area but the frame stays
+        // centred in the SAME bezel band → the SAME (35,363): proof the frame tracks the band, not the pad.
+        {
+            const Portrait2Skin s = portrait2_skin(1350, 3000, 2.0f, 9.0f, 0.0f);
+            check_eq(s.innerBezel.x, 18, "pin P2skin/dp inner.x (bezelThick 9*2=18)");
+            check_eq(s.frame.x, 35, "pin P2skin/dp frame.x (same band centre as X-bezel)");
+            check_eq(s.frame.y, 363, "pin P2skin/dp frame.y (same band centre)");
+        }
+
+        // Case B discriminator: at 1350×2800 the top panel shrinks from 330 (its case-A max) to 130, and
+        // everything below shifts up by 200. Catches a coerceAtLeast/coerceAtMost swap in the X cases.
+        {
+            const Portrait2Skin s = portrait2_skin(1350, 2800, 1.0f, 9.0f, TX);
+            check_eq(s.topPanel.h, 130, "pin P2skin/B topPanel.h shrunk");
+            check_eq(s.bezel.y, 130, "pin P2skin/B bezel.y");
+            check_eq(s.buttons.y, 1382, "pin P2skin/B cluster.y (200 higher than A)");
+        }
+
+        // Case C: at 1350×2000 the skin is HEIGHT-constrained, so X (from height) < xFromWidth, the skin
+        // is narrower than the device (casing fills the sides), and the top panel is gone. The branding
+        // band STILL spans the full device width and its height is xFromWidth-based (= 225, NOT X-based) —
+        // using X there is a real port bug, and this is the ONLY case that can catch it (A/B have X ==
+        // xFromWidth), the same "a clean size is blind to it" shape as the grid's remainder pins.
+        {
+            const Portrait2Skin s = portrait2_skin(1350, 2000, 1.0f, 9.0f, TX);
+            check_eq(s.topPanel.h, 0, "pin P2skin/C no top panel");
+            check(s.bezel.w < 1350, "P2skin/C skin narrower than the device");
+            check(s.bezel.x > 0, "P2skin/C skin inset (casing fills the sides)");
+            check_eq(s.branding.w, 1350, "pin P2skin/C branding still full device width");
+            check_eq(s.branding.h, 225, "pin P2skin/C branding.h xFromWidth-based (10*22.5), not X-based");
         }
     }
 

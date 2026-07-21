@@ -37,7 +37,9 @@
 //               screen size is what the golden catches; a wrong ARRANGEMENT is what the oracle and the
 //               phone catch. ⚠️ D3 ported the two LANDSCAPE boxes (LEFT/RIGHT); the PORTRAIT2 skinned
 //               grid joined them (`portrait2_rects`, whose columns come from Compose's WEIGHT split,
-//               not the size arithmetic). PORTRAIT's two-box split gets its `*_rects` when it lights up.
+//               not the size arithmetic), and then the PORTRAIT2 device-SKIN band geometry
+//               (`portrait2_skin` — the four chrome bands and the frame-in-bezel positioning that the
+//               button cluster hangs off). PORTRAIT's two-box split gets its `*_rects` when it lights up.
 //
 // ── ⚠️ IEEE-EXACTNESS IS A CORRECTNESS REQUIREMENT HERE ───────────────────────────────────────────
 //
@@ -66,6 +68,13 @@ namespace pt::ui::touch_layout {
 inline constexpr float PATTERN_WIDTH  = 3.4f;
 inline constexpr float PATTERN_HEIGHT = 5.1f;
 inline constexpr float GRID_UNITS     = 135.0f;
+
+// The tracker design in pixels — 640×480, mirroring `pt::ui::DESIGN_W`/`DESIGN_H` (canvas.h) and
+// Kotlin's `DESIGN_WIDTH_PX`/`DESIGN_HEIGHT_PX` (PixelPerfectRenderer.kt). Restated locally so the
+// PORTRAIT2 skin geometry below can integer-scale the frame into the bezel without pulling in
+// canvas.h — the "links nothing but buttons.h" discipline the whole header keeps.
+inline constexpr int DESIGN_FRAME_W = 640;
+inline constexpr int DESIGN_FRAME_H = 480;
 
 /**
  * The base unit X for the 3.4×5.1 pattern: the largest whole pixel size at which the pattern still
@@ -399,6 +408,125 @@ inline BoxRects portrait2_rects(int available_width, int available_height) {
     push(Button::SELECT, x4[1], w4[1], 3);
     push(Button::START,  x4[2], w4[2], 3);
     return box;
+}
+
+// ─── PORTRAIT2: the DEVICE-SKIN band geometry (convergence D — the skinned renderer) ──────────────
+//
+// `portrait2_rects` above lays the ten buttons out INSIDE the cluster box. This is the layer OUTSIDE
+// it: where that cluster — and the tracker frame, and the three chrome bands — land on the whole
+// device screen. It ports `PortraitLayout2WithVirtualButtons` (ScreenLayouts.kt), the retro-device
+// skin — a 135X × 300X canvas (20:9) of four bands stacked top-to-bottom:
+//
+//     ┌───────────────┐  band 1  top vent panel   (bg_top_panel.png)      — height varies, may be 0
+//     │               │  band 2  screen bezel      (bg_screen_bezel.png)   — the 640×480 frame sits INSIDE
+//     ├───────────────┤  band 3  branding strip    (bg_branding_panel.png) — FULL device width
+//     └───────────────┘  band 4  button cluster    (bg_button_backing.png) — portrait2_rects fills it
+//
+// ⚠️ **THE HEADLINE: the frame is NOT centred in the window** (as it is in landscape/fullscreen — see
+// `sdl-video.cpp`'s `dest_rect`). It sits in band 2, inside the bezel's padding, integer-scaled and
+// centred THERE — well up in the top half of a tall screen, because the button cluster fills the
+// bottom. That is exactly the positioning the shell's PORTRAIT2 present path needs, and the reason
+// this is a function of its own rather than a tweak to the centred `dest_rect`.
+//
+// Like `portrait2_rects`, this is portable pixel arithmetic — density touches ONLY the solid-colour
+// bezel's thickness fallback — checked by a HAND-WRITTEN ORACLE (`pttouch --positions`) plus eyes on a
+// device: there is no golden for a Compose measure/layout result. The X-derivation's three cases
+// (A: the full skin fits; B: the top panel shrinks to absorb a height deficit; C: height-constrained,
+// so the skin is NARROWER than the device and the casing fills the sides) are ported verbatim — case C
+// is why the branding band spans the DEVICE width, not the skin's, and why `xFromWidth` (not `X`)
+// sizes it.
+
+/** A plain rectangle in device-output pixels — no `Button`, unlike `ButtonRect`. `empty()` (h/w ≤ 0)
+ *  marks a band that is absent, e.g. the top panel in case C. */
+struct LayoutRect {
+    int  x = 0, y = 0, w = 0, h = 0;
+    bool empty() const { return w <= 0 || h <= 0; }
+};
+
+/** The full PORTRAIT2 device skin, laid out on a `deviceW × deviceH` screen. The four `band` rects
+ *  composite their chrome textures; `frame` is where the 640×480 tracker texture blits (band 2, in the
+ *  bezel — NOT centred); `buttons` is the cluster that `portrait2_rects(buttons.w, max(buttons.h,100))`
+ *  fills, its rects offset by `buttons.{x,y}`. Ported from `PortraitLayout2WithVirtualButtons`. */
+struct Portrait2Skin {
+    LayoutRect topPanel;    // band 1 — bg_top_panel.png       (empty in case C)
+    LayoutRect bezel;       // band 2 — bg_screen_bezel.png
+    LayoutRect branding;    // band 3 — bg_branding_panel.png  (FULL device width)
+    LayoutRect buttons;     // band 4 — bg_button_backing.png + the button grid
+    LayoutRect frame;       // the 640×480 tracker frame, integer-scaled, centred in the bezel's inner area
+    LayoutRect innerBezel;  // the bezel's padded inner (black) area — a FIT-mode frame the shell fits here itself
+    float      x = 0.0f;    // the skin unit X (135X == skin width in px)
+};
+
+/**
+ * Lay out the PORTRAIT2 device skin on a `deviceW × deviceH` output. `bezelThicknessX > 0` expresses
+ * the bezel border in skin X-units (a skin with a bezel PNG — amiga/amiga-2 both use 3f); otherwise it
+ * falls back to `bezelThicknessDp * density` (a solid-colour bezel, e.g. the DARK theme). `density`
+ * is used ONLY on that fallback path — the band pixel geometry is otherwise density-free, exactly as
+ * positions are for `portrait2_rects`.
+ */
+inline Portrait2Skin portrait2_skin(int deviceW, int deviceH, float density,
+                                    float bezelThicknessDp, float bezelThicknessX) {
+    // ── X and the top-panel height: the three aspect cases, verbatim from ScreenLayouts.kt ──
+    const float xFromWidth = static_cast<float>(deviceW) / 135.0f;
+    // Branding always spans the full DEVICE width, so its height is proportional to deviceW (via
+    // xFromWidth), NOT to X — in case C, X is smaller, and using it here would shrink a full-width band.
+    const int brandingH = static_cast<int>(xFromWidth * 22.5f);
+
+    float X;
+    int   topPanelH;
+    if (xFromWidth * 300.0f <= static_cast<float>(deviceH)) {          // Case A: full skin fits vertically
+        X         = xFromWidth;
+        topPanelH = std::min(static_cast<int>(deviceH - X * 267.0f), static_cast<int>(X * 33.0f));
+    } else if (xFromWidth * 267.0f <= static_cast<float>(deviceH)) {   // Case B: top panel shrinks to absorb deficit
+        X         = xFromWidth;
+        topPanelH = std::max(static_cast<int>(deviceH - X * 267.0f), 0);
+    } else {                                                           // Case C: height-constrained, skin < device wide
+        topPanelH = 0;
+        X         = static_cast<float>(deviceH - brandingH) / (102.75f + 141.75f);
+    }
+
+    const int contentW    = static_cast<int>(X * 135.0f);
+    const int bezelH      = static_cast<int>(X * 102.75f);
+    const int buttonAreaH = static_cast<int>(X * 141.75f);
+    const int contentX    = (deviceW - contentW) / 2;                 // Column horizontalAlignment = CenterHorizontally
+
+    Portrait2Skin s;
+    s.x = X;
+
+    // ── The four bands, stacked top-to-bottom (Arrangement.Top). Branding is fillMaxWidth ⇒ device-wide. ──
+    int y = 0;
+    if (topPanelH > 0) s.topPanel = {contentX, y, contentW, topPanelH};
+    y += topPanelH;
+    s.bezel    = {contentX, y, contentW, bezelH};
+    y += bezelH;
+    s.branding = {0, y, deviceW, brandingH};
+    y += brandingH;
+    s.buttons  = {contentX, y, contentW, buttonAreaH};
+
+    // ── The bezel's padded inner area, and the 640×480 frame integer-scaled and centred inside it. ──
+    const float bezelThickPx = (bezelThicknessX > 0.0f) ? (X * bezelThicknessX)
+                                                        : (bezelThicknessDp * density);
+    const int   innerX = contentX + static_cast<int>(bezelThickPx);
+    const int   innerY = topPanelH + static_cast<int>(bezelThickPx);
+    const int   innerW = static_cast<int>(static_cast<float>(contentW) - 2.0f * bezelThickPx);
+    const int   innerH = static_cast<int>(static_cast<float>(bezelH)   - 2.0f * bezelThickPx);
+    s.innerBezel = {innerX, innerY, innerW, innerH};
+
+    // PixelPerfectRenderer.kt:274-281 — the tracker picks its OWN integer scale from the box it is
+    // given (here the inner bezel area), the `+1` its rounding fudge, and centres, its black background
+    // hiding the letterbox. Integer centring (as the shell's `dest_rect` uses), not Kotlin's `/2f`: the
+    // ≤1px difference is below the threshold B2 draws — a wrong proportion is what these checks catch;
+    // a 1px bezel inset is what an eye on a device would.
+    const int scaleX  = (innerW + 1) / DESIGN_FRAME_W;
+    const int scaleY  = (innerH + 1) / DESIGN_FRAME_H;
+    const int scale   = std::max(std::min(scaleX, scaleY), 1);
+    const int renderW = DESIGN_FRAME_W * scale;
+    const int renderH = DESIGN_FRAME_H * scale;
+    const int offX    = std::max(0, (innerW - renderW) / 2);
+    const int offY    = std::max(0, (innerH - renderH) / 2);
+    s.frame = {innerX + offX, innerY + offY, renderW, renderH};
+
+    return s;
 }
 
 /** Which button in `box` contains the box-local point, if any. Draw order == first hit; the oracle
