@@ -223,16 +223,23 @@ int main(int argc, char** argv) {
     // this false — main.cpp says nothing, so the default (false) is the safe answer there.
     cfg.touchCapable = true;
 
-    // ⚠️ **`cfg.windowed` IS DELIBERATELY LEFT FALSE, AND IT IS AN ORIENTATION DECISION, NOT A
-    // COSMETIC ONE.** It becomes `SDL_WINDOW_RESIZABLE`, which SDL hands straight to
+    // ⚠️ **`cfg.windowed = true` UNLOCKS PORTRAIT, AND THAT IS AN ORIENTATION DECISION, NOT A COSMETIC
+    // ONE.** It becomes `SDL_WINDOW_RESIZABLE`, which SDL hands straight to
     // `SDLActivity.setOrientationBis` (SDL_androidwindow.c:52): a NON-resizable window takes its
-    // orientation from `w > h` and so locks to SENSOR_LANDSCAPE for the 640x480 design, while a
-    // RESIZABLE one becomes SCREEN_ORIENTATION_FULL_USER and is free to rotate into PORTRAIT — which
-    // would undo C4's device-proven, pixel-exact 2x landscape window. The default is the safe answer,
-    // so this file gets it by saying nothing; it is written down because the flag's NAME says nothing
-    // about orientation and the next reader would have no reason to suspect it. Read out of the
-    // vendored SDL source, not remembered. Phase D revisits portrait deliberately, with a touch layout
-    // that has somewhere to put the virtual buttons.
+    // orientation from `w > h` and locks to SENSOR_LANDSCAPE for the 640x480 design, while a RESIZABLE
+    // one becomes SCREEN_ORIENTATION_FULL_USER, free to follow the sensor into PORTRAIT. Through C4 this
+    // was deliberately FALSE, because a rotation into portrait had no layout to land on and would have
+    // shown a broken letterboxed screen. Phase D's PORTRAIT2 device skin is that layout, so it flips to
+    // true here: held LANDSCAPE the phone still gets C4's pixel-exact 2x window (FULL_USER stays
+    // landscape while the device is), and held PORTRAIT it now gets the skin — app.cpp switches on the
+    // output aspect, with nothing to keep in sync. Read out of the vendored SDL source, not remembered.
+    //
+    // ⚠️ **THIS ALSO MAKES A LANDSCAPE-NATIVE HANDHELD (the AYANEO) ROTATABLE**, where C4 proved its
+    // geometry with the flag false. Landscape is preserved — the 2x integer scale is a function of the
+    // OUTPUT SIZE, not this flag — but a deliberate rotate would now show PORTRAIT2 there too. That is
+    // the one behaviour change this slice makes to a C4-proven config, and it is worth a re-check on
+    // that device.
+    cfg.windowed = true;
 
     // ⚠️ **NULL, AND C4 IS WHERE THIS GETS ITS ANSWER — NOT HERE.** The desktop polls a SIGTERM flag
     // through this hook once a frame. Android must not: SDL freezes the native thread when the

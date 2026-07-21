@@ -276,9 +276,14 @@ bool SdlVideo::present(const Canvas& canvas, uint32_t letterboxArgb,
     // running 2x full-screen, and on a handheld with no console that line is the ONLY account of what
     // the user is looking at. An instrument aimed at the wrong instant is worse than none.
     //
-    // ⚠️ ABOVE the C7 skip below, deliberately. INTEGER scaling can absorb a small output change
-    // without moving the dest rect at all (1284→1285 wide still lands 1280 at x=2), so a check placed
-    // after the skip would miss exactly the resize this instrument exists to report.
+    // ⚠️ ABOVE the C7 skip (in present_impl), deliberately. INTEGER scaling can absorb a small output
+    // change without moving the dest rect at all (1284→1285 wide still lands 1280 at x=2), so a check
+    // placed after the skip would miss exactly the resize this instrument exists to report.
+    //
+    // ⚠️ This is the LANDSCAPE/centred path's describe. The PORTRAIT2 skin (present_skinned) reports its
+    // own geometry from app.cpp, because `describe()` reports the CENTRED `dest_rect()` — which is not
+    // where a skinned frame lands, so calling it there would be a lying instrument (the very failure
+    // this comment block exists to prevent, one mode over).
     //
     // Fires on change only: a window resize, a rotation, or the system bars coming and going.
     int outW = 0, outH = 0;
@@ -289,6 +294,21 @@ bool SdlVideo::present(const Canvas& canvas, uint32_t letterboxArgb,
         lastOutH_ = outH;
     }
 
+    // The centred frame, no underlay — the pre-D present, now expressed through the shared body.
+    return present_impl(canvas, letterboxArgb, dest_rect(), {}, overlay, overlaySig);
+}
+
+bool SdlVideo::present_skinned(const Canvas& canvas, uint32_t clearArgb, const SDL_Rect& frameDest,
+                               const std::function<void(SDL_Renderer*)>& underlay,
+                               const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig) {
+    // No re-describe here: the PORTRAIT2 mode's geometry is logged by app.cpp (see the note in
+    // `present` above). Otherwise identical to the centred path — same upload, same gate, same pacing.
+    return present_impl(canvas, clearArgb, frameDest, underlay, overlay, overlaySig);
+}
+
+bool SdlVideo::present_impl(const Canvas& canvas, uint32_t clearArgb, const SDL_Rect& dest,
+                            const std::function<void(SDL_Renderer*)>& underlay,
+                            const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig) {
     // ── C7: DON'T PRESENT A FRAME THAT IS ALREADY ON SCREEN ──────────────────────────────────────
     //
     // The pixel-level half of the idle-redraw discipline. `app.cpp` decides when not to DRAW; this
@@ -307,11 +327,10 @@ bool SdlVideo::present(const Canvas& canvas, uint32_t letterboxArgb,
     // the C7 blind-channel shape exactly (a change the comparison cannot see), one panel over from the
     // sleep-resume case; folding the overlay's fingerprint into the gate closes it. Zero when there is
     // no overlay, so this is a no-op wherever there are no on-screen controls.
-    const SDL_Rect want = dest_rect();
-    const size_t   n    = static_cast<size_t>(DESIGN_W) * DESIGN_H;
-    if (haveLast_ && letterboxArgb == lastLetterbox_ && overlaySig == lastOverlaySig_ &&
-        want.x == lastDest_.x && want.y == lastDest_.y && want.w == lastDest_.w &&
-        want.h == lastDest_.h &&
+    const size_t n = static_cast<size_t>(DESIGN_W) * DESIGN_H;
+    if (haveLast_ && clearArgb == lastLetterbox_ && overlaySig == lastOverlaySig_ &&
+        dest.x == lastDest_.x && dest.y == lastDest_.y && dest.w == lastDest_.w &&
+        dest.h == lastDest_.h &&
         std::memcmp(lastFrame_.data(), canvas.pixels(), n * sizeof(uint32_t)) == 0) {
         pace();          // ⚠️ never skip this — see pace() for why it inverts the feature
         return false;
@@ -352,15 +371,21 @@ bool SdlVideo::present(const Canvas& canvas, uint32_t letterboxArgb,
     // ⚠️ Phase D composites the touch skin into exactly this space on a phone. That is not a conflict:
     // the skin's textures are drawn OVER a cleared background, so this stays the correct thing
     // underneath them, and remains the whole answer on every layout that has no virtual buttons.
-    SDL_SetRenderDrawColor(renderer_, static_cast<Uint8>((letterboxArgb >> 16) & 0xFF),
-                           static_cast<Uint8>((letterboxArgb >> 8) & 0xFF),
-                           static_cast<Uint8>(letterboxArgb & 0xFF), 255);
-    SDL_RenderClear(renderer_);  // paints the letterbox bars
-    SDL_RenderCopy(renderer_, texture_, nullptr, &want);
+    SDL_SetRenderDrawColor(renderer_, static_cast<Uint8>((clearArgb >> 16) & 0xFF),
+                           static_cast<Uint8>((clearArgb >> 8) & 0xFF),
+                           static_cast<Uint8>(clearArgb & 0xFF), 255);
+    SDL_RenderClear(renderer_);  // paints the letterbox bars (landscape) or the casing (PORTRAIT2)
 
-    // ⚠️ The touch panels go HERE — after the frame, before the flip — drawn OVER the cleared
-    // background and into the bars beside the frame, never onto the 640×480 tracker itself. Empty on
-    // any layout with no on-screen controls, in which case this line does nothing.
+    // ⚠️ The UNDERLAY goes here — after the clear, BEFORE the frame — for the one thing drawn BEHIND the
+    // tracker: PORTRAIT2's chrome bands and the black inner bezel the frame sits on. Empty (and so a
+    // no-op) on the centred landscape/desktop path, where nothing is behind the frame but the clear.
+    if (underlay) underlay(renderer_);
+
+    SDL_RenderCopy(renderer_, texture_, nullptr, &dest);
+
+    // ⚠️ The overlay goes HERE — after the frame, before the flip — drawn OVER it: the landscape touch
+    // panels in the bars beside the frame, or PORTRAIT2's button cluster on its backing. Never onto the
+    // 640×480 tracker itself. Empty on any layout with no on-screen controls, and then this does nothing.
     if (overlay) overlay(renderer_);
 
     SDL_RenderPresent(renderer_);
@@ -370,8 +395,8 @@ bool SdlVideo::present(const Canvas& canvas, uint32_t letterboxArgb,
     // taken on a frame that then failed to present would make the next comparison lie.
     if (lastFrame_.size() != n) lastFrame_.resize(n);
     std::memcpy(lastFrame_.data(), canvas.pixels(), n * sizeof(uint32_t));
-    lastLetterbox_  = letterboxArgb;
-    lastDest_       = want;
+    lastLetterbox_  = clearArgb;
+    lastDest_       = dest;
     lastOverlaySig_ = overlaySig;
     haveLast_       = true;
 

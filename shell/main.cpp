@@ -216,6 +216,18 @@ int main(int argc, char** argv) {
     // no window manager for "resizable" to mean anything to.
     cfg.windowed = true;
 
+    // ⚠️ DEV BRING-UP ONLY: POCKETTRACKER_TOUCH=1 forces the on-screen touch skin on a desktop that has
+    // no touchscreen, so the PORTRAIT2 device skin can be eyeballed on a tall resizable window before it
+    // is flashed to a phone — drag the window taller than it is wide and app.cpp switches into it. The
+    // shipping desktop/handheld leaves it off: it has real buttons and wants no panels over the frame.
+    // ⚠️ The theme PNGs must sit beside the exe for `read_asset` to find them off-device (assets.cpp):
+    // copy `app/src/main/assets/themes/` next to the binary, or the skin logs 0/10 pieces loaded and the
+    // compositor draws only the casing colour and the button labels.
+    if (const char* t = SDL_getenv("POCKETTRACKER_TOUCH"); t && t[0] == '1') {
+        cfg.touchCapable = true;
+        std::printf("input:   TOUCH SKIN forced on (POCKETTRACKER_TOUCH=1) - drag the window tall for PORTRAIT2\n");
+    }
+
     // The launcher's kill, as a question the shared loop can ask once a frame. The handler above only
     // ever sets this flag; everything that has to happen because of it happens in the loop.
     cfg.terminate_requested = [] { return g_terminate != 0; };

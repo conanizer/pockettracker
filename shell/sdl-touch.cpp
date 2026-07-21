@@ -2,14 +2,11 @@
 
 #include "sdl-input.h"
 
-#include "ui/font5x5.h"
+#include "button_glyphs.h"  // label_of / draw_label — shared with the PORTRAIT2 cluster (portrait2.cpp)
 
-#include <algorithm>
 #include <cstdio>
 
 namespace tl = pt::ui::touch_layout;
-using pt::ui::Glyph;
-using pt::ui::glyph_for_codepoint;
 
 namespace {
 
@@ -22,61 +19,11 @@ constexpr int MIN_PANEL_PX = 150;
 constexpr uint32_t BTN_NORMAL  = 0x3D5A80;  // VirtualControls.kt BTN_NORMAL
 constexpr uint32_t BTN_PRESSED = 0x98C1D9;  // VirtualControls.kt BTN_PRESSED
 constexpr uint32_t PANEL_BG    = 0x1A1A1A;  // the Column background
-constexpr uint32_t LABEL       = 0xFFFFFF;  // Color.White
 
 void fill(SDL_Renderer* r, const SDL_Rect& rc, uint32_t rgb) {
     SDL_SetRenderDrawColor(r, static_cast<Uint8>((rgb >> 16) & 0xFF),
                            static_cast<Uint8>((rgb >> 8) & 0xFF), static_cast<Uint8>(rgb & 0xFF), 255);
     SDL_RenderFillRect(r, &rc);
-}
-
-// One button's label as code points — the D-pad gets the arrow glyphs font5x5 already carries (the
-// same '↑' '←' '→' '↓' the Kotlin buttons show); the rest are the Kotlin labels ("SEL", "STA", …).
-struct Label {
-    uint32_t cp[3];
-    int      n;
-};
-Label label_of(Button b) {
-    switch (b) {
-        case Button::DPAD_UP:    return {{pt::ui::CP_ARROW_UP}, 1};
-        case Button::DPAD_DOWN:  return {{pt::ui::CP_ARROW_DOWN}, 1};
-        case Button::DPAD_LEFT:  return {{pt::ui::CP_ARROW_LEFT}, 1};
-        case Button::DPAD_RIGHT: return {{pt::ui::CP_ARROW_RIGHT}, 1};
-        case Button::A:          return {{'A'}, 1};
-        case Button::B:          return {{'B'}, 1};
-        case Button::L_SHIFT:    return {{'L'}, 1};
-        case Button::R_SHIFT:    return {{'R'}, 1};
-        case Button::SELECT:     return {{'S', 'E', 'L'}, 3};
-        case Button::START:      return {{'S', 'T', 'A'}, 3};
-        default:                 return {{'?'}, 1};
-    }
-}
-
-// Draw a label centred in `rc` at the largest 5×5 scale that leaves a margin. One filled rect per lit
-// glyph pixel — a few dozen per label, and only on frames that actually present.
-void draw_label(SDL_Renderer* r, Button b, const SDL_Rect& rc) {
-    const Label lab = label_of(b);
-    // The run is (6n − 1) px wide at scale 1: 5 px per glyph plus a 1 px gap, minus the trailing gap.
-    const int denom = 6 * lab.n - 1;
-    const int scale = std::max(1, std::min((rc.w * 7 / 10) / denom, (rc.h * 6 / 10) / 5));
-    const int runW  = denom * scale;
-    const int runH  = 5 * scale;
-    int       x     = rc.x + (rc.w - runW) / 2;
-    const int y     = rc.y + (rc.h - runH) / 2;
-
-    SDL_SetRenderDrawColor(r, (LABEL >> 16) & 0xFF, (LABEL >> 8) & 0xFF, LABEL & 0xFF, 255);
-    for (int k = 0; k < lab.n; ++k) {
-        const Glyph& g = glyph_for_codepoint(lab.cp[k]);
-        for (int row = 0; row < 5; ++row) {
-            for (int col = 0; col < 5; ++col) {
-                if (g[row] & (1 << (4 - col))) {
-                    SDL_Rect px{x + col * scale, y + row * scale, scale, scale};
-                    SDL_RenderFillRect(r, &px);
-                }
-            }
-        }
-        x += 6 * scale;
-    }
 }
 
 // For the trace only.
@@ -190,7 +137,7 @@ void SdlTouch::draw(SDL_Renderer* r, const SdlInput& input) const {
             const tl::ButtonRect& br = box.r[i];
             const SDL_Rect        rc{br.x + ox, br.y + oy, br.w, br.h};
             fill(r, rc, input.is_held(br.button) ? BTN_PRESSED : BTN_NORMAL);
-            draw_label(r, br.button, rc);
+            ptshell::draw_label(r, br.button, rc);
         }
     };
     draw_box(left_, leftBox_.x, leftBox_.y);

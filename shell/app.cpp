@@ -19,6 +19,7 @@
 #include "ui/settings_store.h"
 
 #include "skin.h"
+#include "portrait2.h"
 
 #include "sdl-input.h"
 #include "sdl-touch.h"
@@ -289,19 +290,30 @@ int run(const AppConfig& cfg) {
     touch.set_enabled(cfg.touchCapable && input.controller_count() == 0);
     if (inputTrace && inputTrace[0] == '1') touch.set_trace(true);
 
-    // ── The touch skin's textures — Phase D walking skeleton (D7 asset seam → D2 decode → texture) ──
+    // ── The touch skin's textures (D7 asset seam → D2 decode → texture), consumed by PORTRAIT2 ─────
     //
     // Decoded ONCE, here, now that the renderer exists (video.open above), and only where there is a
     // touchscreen to skin — the same gate as the panels — so desktop and the handhelds decode nothing.
-    // This is the FIRST decode_png consumer on a SHIPPED path: until now the decoder and the asset seam
-    // were proven only by a host tool (ptdecode), never on a device. The `skin:` lines it prints are the
-    // on-device account of whether a real PNG came out of the APK — the log line IS the assertion here,
-    // there being no console test on a phone. ⚠️ `unload()` is called before video.close() below,
-    // because these textures belong to that renderer and outliving it is a use-after-free.
-    // TODO(D-portrait): the theme name is hardcoded to the dark skin; it becomes a settings-driven
-    // choice (theme / overlay_name) when the PORTRAIT2 renderer picks a skin per the caps profile.
+    // The `skin:` lines it prints are the on-device account of whether a real PNG came out of the APK —
+    // the log line IS the assertion there, there being no console test on a phone. The D7 walking
+    // skeleton blitted one piece in a corner to prove the pipeline reached the screen; the PORTRAIT2
+    // renderer (below, `portrait`) is what that skeleton promised, and it composites the whole set into
+    // the band geometry. ⚠️ `unload()` is called before video.close() below, because these textures
+    // belong to that renderer and outliving it is a use-after-free.
+    // TODO(D-theme): the theme name is hardcoded to the dark skin (matching PortraitSkin's hardcoded
+    // amiga-2 scalars); both become a settings-driven choice (theme / overlay_name) when theme
+    // SELECTION lands and a C++ device-skin table exists to choose between.
     Skin skin;
     if (cfg.touchCapable) skin.load(video.renderer(), "amiga-2", cfg.console);
+
+    // ── The PORTRAIT2 device-skin renderer (convergence D) ───────────────────────────────────────
+    //
+    // Owns no resources — it composites `skin`'s textures into the band geometry each frame — so it
+    // just needs to exist. `portrait.layout()` in the loop decides per frame whether the output is
+    // portrait and this should present the skin instead of the centred landscape frame; `active()` is
+    // that decision, derived from the output aspect, so a live rotation switches modes with nothing to
+    // keep in sync. Inert where there is no skin to draw (desktop/handheld, and any landscape frame).
+    PortraitSkin portrait;
 
     // The UI state points at the host's live project — one document, edited in place. The boot
     // screen is AppState's own default (SONG, as Android): restating it here would be a second
@@ -427,6 +439,11 @@ int run(const AppConfig& cfg) {
     bool   running    = true;
     Uint64 lastStatus = 0;
 
+    // The last output size the PORTRAIT2 log line reported, so it prints once per rotation/resize rather
+    // than every frame — the portrait analogue of sdl-video's describe-on-change (which reports the
+    // centred landscape frame and would misdescribe this mode; see present() in sdl-video.cpp).
+    int lastPortraitW = 0, lastPortraitH = 0;
+
     // ── C7 state ─────────────────────────────────────────────────────────────────────────────────
     // `sawInput`     — anything happened this frame that could have changed what is on screen.
     // `audibleEdge`  — audio was audible LAST frame, so the first silent frame is still drawn once
@@ -473,6 +490,22 @@ int run(const AppConfig& cfg) {
             int outW = 0, outH = 0;
             video.output_size(outW, outH);
             touch.layout(video.frame_rect(), outW, outH);
+            portrait.layout(outW, outH, cfg.touchCapable);
+
+            // A one-line account of the PORTRAIT2 skin when it activates or the output rotates — the
+            // portrait analogue of sdl-video's describe(). On console + on change only, like the status
+            // line: on a phone with no console this reads back out of logcat, and it is how "did it go
+            // into portrait, and where did the frame land?" is answered when the screen is the thing
+            // under test.
+            if (cfg.console && portrait.active() &&
+                (outW != lastPortraitW || outH != lastPortraitH)) {
+                const SDL_Rect fr = portrait.frame_rect();
+                std::printf("portrait2: output=%dx%d  frame=%dx%d at %d,%d  skin composited in the bezel\n",
+                            outW, outH, fr.w, fr.h, fr.x, fr.y);
+                std::fflush(stdout);
+                lastPortraitW = outW;
+                lastPortraitH = outH;
+            }
         }
 
         SDL_Event e;
@@ -637,32 +670,35 @@ int run(const AppConfig& cfg) {
             layout.draw(canvas, state);
             ++drawn;
 
-            // ⚠️ The letterbox is painted the LIVE theme's background, so the 4:3 frame on a 16:9
-            // window reads as one surface instead of a picture on a black wall. Passed per present
-            // rather than set once — the theme editor can change it mid-session, and a value that
-            // must be re-pushed on change is a value some future screen forgets to re-push.
+            // ── The frame, and around it whatever this orientation's skin is ──────────────────────
             //
-            // The touch panels ride the same present: drawn into the bars after the frame, and their
-            // fingerprint joins the C7 gate so a press highlight is not skipped as an unchanged canvas.
-            // Both are inert when there is no touchscreen — the overlay draws nothing, the sig is 0.
-            const auto overlay = [&touch, &input, &skin](SDL_Renderer* r) {
-                touch.draw(r, input);
-
-                // ⚠️ WALKING SKELETON (D7) — TEMPORARY, removed by the PORTRAIT2 renderer. Blit ONE
-                // real APK PNG at native size in the top-left corner, purely to prove the whole new
-                // pipeline reaches the phone's screen: SDL_RWFromFile → decode_png → SDL_Texture →
-                // composite in present(). If the branding art shows up with the right colours, the seam,
-                // the decoder and the ARGB packing are all good BEFORE a single line of the 4-band
-                // geometry exists — so a later "the skin is wrong" bug can't be blamed on any of them.
-                // The corner blit is static, so it does not need to join the C7 overlaySig: the first
-                // present composites it and every idle-skip leaves it on screen.
-                if (const SkinTexture& t = skin.piece(SkinPiece::BrandingPanel)) {
-                    const SDL_Rect dst{8, 8, t.width, t.height};
-                    skin.draw(r, SkinPiece::BrandingPanel, dst);
-                }
-            };
-            if (video.present(canvas, state.theme.background, overlay, touch.signature(input)))
-                ++presented;
+            // ⚠️ The clear colour is passed per present rather than set once — the live theme's
+            // background in landscape (so the 4:3 frame on a 16:9 window reads as one surface, not a
+            // picture on a black wall), the device CASING in PORTRAIT2 — because a value that must be
+            // re-pushed on change is a value some future screen forgets to re-push (the theme editor can
+            // change the first mid-session). The on-screen controls' fingerprint joins the C7 gate so a
+            // press highlight is not skipped as an unchanged canvas.
+            bool didPresent;
+            if (portrait.active()) {
+                // PORTRAIT2 (convergence D): the retro-device skin. The 640×480 frame lands in the
+                // bezel (portrait.frame_rect), NOT window-centred; the casing is the clear, the four
+                // chrome bands are the underlay drawn BEHIND the frame, the button cluster the overlay
+                // in front. ⚠️ The buttons RENDER but are not hit-testable yet — the portrait branch of
+                // sdl-touch is the next increment — so this is deliberately a picture a finger cannot
+                // press, so the pixels can be proven before the input path is wired onto them.
+                const auto chrome = [&portrait, &skin](SDL_Renderer* r) { portrait.draw_chrome(r, skin); };
+                const auto buttons = [&portrait, &skin, &input](SDL_Renderer* r) {
+                    portrait.draw_buttons(r, skin, input);
+                };
+                didPresent = video.present_skinned(canvas, portrait.casing_argb(), portrait.frame_rect(),
+                                                   chrome, buttons, portrait.signature(input));
+            } else {
+                // Landscape / desktop: the centred frame, the LEFT/RIGHT touch panels in the bars beside
+                // it — inert (drawing nothing, signature 0) when there is no touchscreen.
+                const auto overlay = [&touch, &input](SDL_Renderer* r) { touch.draw(r, input); };
+                didPresent = video.present(canvas, state.theme.background, overlay, touch.signature(input));
+            }
+            if (didPresent) ++presented;
             drewOnce = true;
         } else {
             ++skipped;

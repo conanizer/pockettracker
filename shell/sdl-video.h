@@ -90,6 +90,29 @@ public:
     bool present(const pt::ui::Canvas& canvas, uint32_t letterboxArgb,
                  const std::function<void(SDL_Renderer*)>& overlay = {}, uint64_t overlaySig = 0);
 
+    /**
+     * Present the frame into an EXPLICIT rect, with a skin composited around it — the PORTRAIT2 device
+     * skin (convergence D). The one thing `present` cannot express: there the 640×480 frame always
+     * lands at the centred `dest_rect()`, and here it lands wherever the caller says (band 2's inner
+     * bezel, well up a tall screen), with chrome drawn behind it and buttons in front.
+     *
+     * @param clearArgb  What the whole output is cleared to first — the device CASING colour, not the
+     *                   tracker's letterbox. The bands composite on top; it shows at the sides and any
+     *                   bottom gap. Part of the C7 gate, exactly as `letterboxArgb` is for `present`.
+     * @param frameDest  Where the 640×480 texture blits. NOT `dest_rect()` — see `PortraitSkin`.
+     * @param underlay   Drawn after the clear and BEFORE the frame: the chrome bands + the black inner
+     *                   bezel the frame sits on. (present's overlay had no "before the frame" hook,
+     *                   because a centred landscape frame has nothing behind it but the letterbox.)
+     * @param overlay    Drawn AFTER the frame: the button cluster. Its held-button highlights ride the
+     *                   C7 gate through `overlaySig`, the same channel the landscape panels use.
+     *
+     * Shares `present`'s texture upload, C7 pixel gate and pacing verbatim (one private `present_impl`),
+     * so an idle PORTRAIT2 screen skips the upload the same way an idle landscape one does.
+     */
+    bool present_skinned(const pt::ui::Canvas& canvas, uint32_t clearArgb, const SDL_Rect& frameDest,
+                         const std::function<void(SDL_Renderer*)>& underlay,
+                         const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig);
+
     /** Pace a frame that drew nothing — see the .cpp. The app loop calls this when it skips the
      *  draw entirely, so a still screen costs the same wall-clock as a moving one. */
     void idle_frame();
@@ -147,6 +170,13 @@ public:
 private:
     bool     create_texture();
     SDL_Rect dest_rect() const;
+
+    /** The shared body of `present` and `present_skinned`: the C7 pixel gate, the streaming-texture
+     *  upload, clear → underlay → frame → overlay → flip, and the pacing. The two public entries differ
+     *  only in where the frame lands (`dest`) and whether anything draws behind it (`underlay`). */
+    bool present_impl(const pt::ui::Canvas& canvas, uint32_t clearArgb, const SDL_Rect& dest,
+                      const std::function<void(SDL_Renderer*)>& underlay,
+                      const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig);
 
     /** One line naming the driver, the panel, the output size and the letterbox. See the .cpp. */
     void describe() const;
