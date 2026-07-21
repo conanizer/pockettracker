@@ -35,8 +35,9 @@
 //               and the dispatcher are — by a HAND-WRITTEN ORACLE (`pttouch --positions`), the
 //               ptmapper/ptdispatch pattern — plus eyes on a device. A wrong PROPORTION at an unowned
 //               screen size is what the golden catches; a wrong ARRANGEMENT is what the oracle and the
-//               phone catch. ⚠️ D3 ports the two LANDSCAPE boxes (LEFT/RIGHT); PORTRAIT's two-box
-//               split and PORTRAIT2's weight grid get their `*_rects` when those modes are lit up.
+//               phone catch. ⚠️ D3 ported the two LANDSCAPE boxes (LEFT/RIGHT); the PORTRAIT2 skinned
+//               grid joined them (`portrait2_rects`, whose columns come from Compose's WEIGHT split,
+//               not the size arithmetic). PORTRAIT's two-box split gets its `*_rects` when it lights up.
 //
 // ── ⚠️ IEEE-EXACTNESS IS A CORRECTNESS REQUIREMENT HERE ───────────────────────────────────────────
 //
@@ -246,10 +247,11 @@ struct ButtonRect {
     bool contains(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; }
 };
 
-/** A laid-out box. Fixed storage (LEFT fills 6, RIGHT fills 4) — no allocation, so the "links
- *  nothing" discipline of the size structs carries over. Iterate `r[0..count)` in draw order. */
+/** A laid-out box. Fixed storage — LEFT fills 6, RIGHT fills 4, PORTRAIT2's grid fills all 10 — no
+ *  allocation, so the "links nothing" discipline of the size structs carries over. Iterate
+ *  `r[0..count)` in draw order. */
 struct BoxRects {
-    ButtonRect r[6];
+    ButtonRect r[10];
     int        count = 0;
 };
 
@@ -325,6 +327,77 @@ inline BoxRects right_rects(int available_width, int available_height) {
         const int row_x = (W - row_w) / 2;
         push(Button::START, row_x + m.small_spacer, y, m.start_width, m.start_height);
     }
+    return box;
+}
+
+// ─── PORTRAIT2: the skinned 4-row grid (convergence D — the skinned grid) ─────────────────────────
+//
+// Unlike LEFT/RIGHT (a Column of fixed-size children packed by Arrangement.Center), PORTRAIT2 is a
+// grid whose column widths come from Compose's WEIGHT distribution, not from the size arithmetic
+// above. The cluster box (available_width × available_height) holds a Column, inset by
+// `pad = round(1.5X)` on every side, of four `Row`s each `round(33X)` tall (the `cellDp` height). Every
+// child in a row is `weight(1f)`, so Compose splits the row's content width (available_width − 2·pad)
+// into equal slots — two in row 0 (the wide L/R shift), four in rows 1–3 — handing the leftover pixels
+// out one per child, left to right. Some slots are empty `Spacer`s (the grid's holes). Ported from
+// `VirtualControlsPortrait2`; density cancels for positions, exactly as it does for LEFT/RIGHT.
+//
+//   Row 0:  [ L Shift ][ R Shift ]     (2 wide slots)
+//   Row 1:  [    ][ ↑ ][ B ][ A ]      (4 slots; slot 0 empty)
+//   Row 2:  [ ← ][ ↓ ][ → ][    ]      (4 slots; slot 3 empty)
+//   Row 3:  [    ][Sel][Sta][    ]     (4 slots; slots 0 and 3 empty)
+
+/**
+ * Split an integer width `W` into `n` equal-weight slots the way a Compose `Row` does: each slot gets
+ * `round(W/n)`, then the leftover `W − n·round(W/n)` pixels (which may be negative) are distributed one
+ * per slot, in order, until spent — `RowColumnImpl`'s remainder loop verbatim (`remainderUnit =
+ * remainder.sign` each pass). Fills `xs`/`ws` with each slot's left edge and width; the widths sum to
+ * exactly `W` (no gap, no overflow), so the columns tile the row. `round` is Kotlin's `roundToInt`,
+ * `floor(v + 0.5)`, matched here in binary32 so a half lands the way the JVM's did.
+ */
+inline void weight_split(int W, int n, int xs[], int ws[]) {
+    const float unit = static_cast<float>(W) / static_cast<float>(n);  // weightUnitSpace, each weight = 1
+    const int   base = static_cast<int>(std::floor(unit + 0.5f));      // round(W/n)
+    int remainder = W - n * base;
+    int x = 0;
+    for (int k = 0; k < n; ++k) {
+        const int unit_adj = (remainder > 0) ? 1 : (remainder < 0 ? -1 : 0);  // remainder.sign
+        remainder -= unit_adj;
+        ws[k] = base + unit_adj;
+        xs[k] = x;
+        x += ws[k];
+    }
+}
+
+/** PORTRAIT2 grid: all ten buttons, box-local, in row-major draw order. Ported from
+ *  `VirtualControlsPortrait2`. The empty grid slots hold `Spacer`s and so get no rect — a tap there
+ *  hits nothing, which is what `pttouch --positions` asserts. */
+inline BoxRects portrait2_rects(int available_width, int available_height) {
+    const Portrait2 m = portrait2(available_width, available_height, 1.0f);  // density irrelevant to positions
+    const int pad    = static_cast<int>(std::floor(m.x * 1.5f + 0.5f));   // round(1.5X) — the .padding()
+    const int cell_h = static_cast<int>(std::floor(m.x * 33.0f + 0.5f));  // round(33X)  — each Row's .height(cellDp)
+
+    const int content_w = available_width - 2 * pad;  // the fillMaxWidth() Rows all share this
+    int x2[2], w2[2];  weight_split(content_w, 2, x2, w2);  // row 0: two wide slots
+    int x4[4], w4[4];  weight_split(content_w, 4, x4, w4);  // rows 1–3: four square slots
+
+    BoxRects box;
+    auto push = [&](Button b, int col_x, int col_w, int row) {
+        box.r[box.count++] = {b, pad + col_x, pad + row * cell_h, col_w, cell_h};
+    };
+    // Row 0: L Shift | R Shift
+    push(Button::L_SHIFT, x2[0], w2[0], 0);
+    push(Button::R_SHIFT, x2[1], w2[1], 0);
+    // Row 1: [empty] ↑ B A
+    push(Button::DPAD_UP, x4[1], w4[1], 1);
+    push(Button::B,       x4[2], w4[2], 1);
+    push(Button::A,       x4[3], w4[3], 1);
+    // Row 2: ← ↓ → [empty]
+    push(Button::DPAD_LEFT,  x4[0], w4[0], 2);
+    push(Button::DPAD_DOWN,  x4[1], w4[1], 2);
+    push(Button::DPAD_RIGHT, x4[2], w4[2], 2);
+    // Row 3: [empty] Sel Sta [empty]
+    push(Button::SELECT, x4[1], w4[1], 3);
+    push(Button::START,  x4[2], w4[2], 3);
     return box;
 }
 

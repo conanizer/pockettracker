@@ -34,8 +34,10 @@
 // A/B are a diagonal, the block is centred, nothing overlaps, a tap in a rect hits that button and a
 // tap in the cross-hole hits nothing) plus a handful of exact pinned coordinates so an arithmetic
 // drift prints its number. It is a weaker claim than the golden modes make — the eyes on a device are
-// the other half — and the header of `touch_layout.h` marks the seam. ⚠️ D3 covers the two LANDSCAPE
-// boxes; PORTRAIT/PORTRAIT2 join when those modes are lit up.
+// the other half — and the header of `touch_layout.h` marks the seam. ⚠️ Covers the two LANDSCAPE
+// boxes (D3) and the PORTRAIT2 skinned grid (its columns come from Compose's WEIGHT split, so the
+// oracle asserts the grid tiles and pins a clean size AND a remainder-carrying one); PORTRAIT's
+// two-box split joins when that mode is lit up.
 //
 // Build + run via the tools/ CMake project — the `d-touch-layout` and `d-touch-positions` ctests, run
 // by CI on every push (see tools/CMakeLists.txt and tools/pttouch/README.md):
@@ -212,6 +214,91 @@ void check_box_structure(const touch_layout::BoxRects& box, int W, int H, const 
     check(std::abs((minTop + maxBot) - H) <= 2, std::string(tag) + " block vertically centred");
 }
 
+// PORTRAIT2 is a grid, not a centred Column, so it gets its own structure oracle: all ten buttons
+// present, four equal-height rows top-anchored under the padding (NOT vertically centred — the leftover
+// sits at the bottom), the D-pad/face columns aligned, and the empty grid slots and padding hitting
+// nothing. Reuses the generic within/disjoint/hit-centre logic; adds the grid invariants. Read against
+// `VirtualControlsPortrait2` (Row 0 = wide L/R shift; rows 1–3 = a 4-column weight grid).
+void check_portrait2_structure(const touch_layout::BoxRects& box, int W, int H) {
+    using touch_layout::ButtonRect;
+    const char* tag = "P2";
+
+    check_eq(box.count, 10, "P2 button count");
+
+    // Every rect inside its box, and no two overlapping.
+    for (int i = 0; i < box.count; ++i) {
+        const ButtonRect& r = box.r[i];
+        check(r.x >= 0 && r.y >= 0 && r.x + r.w <= W && r.y + r.h <= H,
+              std::string(tag) + " " + bname(r.button) + " within box");
+        for (int j = i + 1; j < box.count; ++j)
+            check(!overlaps(r, box.r[j]),
+                  std::string(tag) + " " + bname(r.button) + "/" + bname(box.r[j].button) + " disjoint");
+    }
+
+    // Each rect's centre hits exactly that button.
+    for (int i = 0; i < box.count; ++i) {
+        const ButtonRect& r = box.r[i];
+        Button got{};
+        check(touch_layout::hit(box, r.cx(), r.cy(), got) && got == r.button,
+              std::string(tag) + " hit(centre of " + bname(r.button) + ")");
+    }
+
+    // All ten buttons present, exactly once — PORTRAIT2 shows the whole set, unlike the split boxes.
+    int seen[static_cast<int>(Button::COUNT)] = {0};
+    for (int i = 0; i < box.count; ++i) ++seen[static_cast<int>(box.r[i].button)];
+    for (int i = 0; i < static_cast<int>(Button::COUNT); ++i)
+        check_eq(seen[i], 1, std::string("P2 exactly one ") + bname(static_cast<Button>(i)));
+
+    const ButtonRect* ls = find(box, Button::L_SHIFT);
+    const ButtonRect* rs = find(box, Button::R_SHIFT);
+    const ButtonRect* up = find(box, Button::DPAD_UP);
+    const ButtonRect* dn = find(box, Button::DPAD_DOWN);
+    const ButtonRect* lf = find(box, Button::DPAD_LEFT);
+    const ButtonRect* rt = find(box, Button::DPAD_RIGHT);
+    const ButtonRect* a  = find(box, Button::A);
+    const ButtonRect* b  = find(box, Button::B);
+    const ButtonRect* se = find(box, Button::SELECT);
+    const ButtonRect* st = find(box, Button::START);
+    check(ls && rs && up && dn && lf && rt && a && b && se && st, "P2 all rects present");
+    if (!(ls && rs && up && dn && lf && rt && a && b && se && st)) return;
+
+    // Four rows, each one cell tall, strictly descending and evenly spaced (the four .height(cellDp)).
+    check(ls->y == rs->y, "P2 row0: L/R shift share a row");
+    check(up->y == b->y && b->y == a->y, "P2 row1: UP/B/A share a row");
+    check(lf->y == dn->y && dn->y == rt->y, "P2 row2: LEFT/DOWN/RIGHT share a row");
+    check(se->y == st->y, "P2 row3: SEL/START share a row");
+    check(ls->y < up->y && up->y < lf->y && lf->y < se->y, "P2 rows run top to bottom");
+    const int cell = up->h;
+    check(up->y - ls->y == cell && lf->y - up->y == cell && se->y - lf->y == cell,
+          "P2 rows evenly spaced by one cell height");
+    check(ls->h == cell && rs->h == cell, "P2 wide buttons are one cell tall");
+
+    // Top-anchored, NOT centred (the LEFT/RIGHT invariant that must NOT hold here): the block sits under
+    // its top padding with the larger gap at the bottom.
+    check(ls->y > 0 && se->y + se->h < H, "P2 grid within box vertically");
+    check(ls->y < H - (se->y + se->h), "P2 grid top-anchored (bottom leftover > top padding)");
+
+    // Columns line up down the grid: UP/DOWN/SEL share the second quarter-column, B/RIGHT/START the third.
+    check(up->x == dn->x && dn->x == se->x && up->w == dn->w && dn->w == se->w, "P2 col1 aligned (UP/DOWN/SEL)");
+    check(b->x == rt->x && rt->x == st->x && b->w == rt->w && rt->w == st->w, "P2 col2 aligned (B/RIGHT/START)");
+    check(lf->x == ls->x, "P2 LEFT and L-shift share the left edge");
+
+    // Face row reads B then A left→right; the D-pad row is LEFT < DOWN < RIGHT; A is the rightmost column.
+    check(b->x < a->x, "P2 face row: B left of A");
+    check(lf->x < dn->x && dn->x < rt->x, "P2 dpad row: LEFT < DOWN < RIGHT");
+    check(a->x + a->w >= b->x + b->w && a->x + a->w >= rt->x + rt->w, "P2 A is the rightmost column");
+
+    // Wide top buttons: L-shift left of R-shift, R-shift starts where L-shift ends, each wider than a cell.
+    check(ls->x < rs->x, "P2 L-shift left of R-shift");
+    check(rs->x >= ls->x + ls->w - 2, "P2 R-shift starts where L-shift ends");
+    check(ls->w > up->w && rs->w > up->w, "P2 shift buttons wider than a square cell");
+
+    // The grid's holes: row 1 slot 0 (left of UP, above LEFT) is a Spacer, and the top padding is empty.
+    Button got{};
+    check(!touch_layout::hit(box, lf->x + lf->w / 2, up->cy(), got), "P2 empty slot (row1 col0) hits nothing");
+    check(!touch_layout::hit(box, W / 2, ls->y / 2, got), "P2 top padding hits nothing");
+}
+
 int run_positions() {
     using namespace touch_layout;
 
@@ -297,6 +384,48 @@ int run_positions() {
         if (a) { check_eq(a->x, 358, "pin RIGHT A.x"); check_eq(a->y, 410, "pin RIGHT A.y"); }
         if (b) { check_eq(b->x, 148, "pin RIGHT B.x"); check_eq(b->y, 620, "pin RIGHT B.y"); }
         if (st) { check_eq(st->x, 43, "pin RIGHT START.x"); check_eq(st->y, 977, "pin RIGHT START.y"); }
+    }
+
+    // ── PORTRAIT2: the skinned 4-row weight grid (convergence D) ──────────────────────────────────
+    // A grid, not a centred Column, so its own structure. Two sizes: one where X is a whole number so
+    // every column is exact (no weight remainder), and one where it is not (the remainder loop runs).
+    {
+        struct P2 { int w, h; } p2sizes[] = {{1350, 1420}, {1000, 1100}};
+        for (P2 s : p2sizes) check_portrait2_structure(portrait2_rects(s.w, s.h), s.w, s.h);
+
+        // Clean pins at 1350×1420: X = 1350/135 = 10 exactly, so pad = 15, cell = 330 and every slot is
+        // a round 330 with NO weight remainder — fully hand-traceable, so the pin is independent of the
+        // port's own arithmetic (not "the code compared to itself").
+        {
+            const BoxRects G = portrait2_rects(1350, 1420);
+            const ButtonRect* ls = find(G, Button::L_SHIFT);
+            const ButtonRect* rs = find(G, Button::R_SHIFT);
+            const ButtonRect* up = find(G, Button::DPAD_UP);
+            const ButtonRect* a  = find(G, Button::A);
+            const ButtonRect* lf = find(G, Button::DPAD_LEFT);
+            const ButtonRect* se = find(G, Button::SELECT);
+            if (ls) { check_eq(ls->x, 15, "pin P2 LSHIFT.x"); check_eq(ls->y, 15, "pin P2 LSHIFT.y");
+                      check_eq(ls->w, 660, "pin P2 LSHIFT.w"); check_eq(ls->h, 330, "pin P2 LSHIFT.h"); }
+            if (rs) { check_eq(rs->x, 675, "pin P2 RSHIFT.x"); check_eq(rs->w, 660, "pin P2 RSHIFT.w"); }
+            if (up) { check_eq(up->x, 345, "pin P2 UP.x"); check_eq(up->y, 345, "pin P2 UP.y");
+                      check_eq(up->w, 330, "pin P2 UP.w"); }
+            if (a)  { check_eq(a->x, 1005, "pin P2 A.x"); check_eq(a->y, 345, "pin P2 A.y"); }
+            if (lf) { check_eq(lf->x, 15, "pin P2 LEFT.x"); check_eq(lf->y, 675, "pin P2 LEFT.y"); }
+            if (se) { check_eq(se->x, 345, "pin P2 SELECT.x"); check_eq(se->y, 1005, "pin P2 SELECT.y"); }
+        }
+
+        // Messy pins at 1000×1100: X = 7.407…, so pad = 11, cell = 244, content = 978, and the 4-split
+        // leaves 978 − 4·245 = −2 px that the FIRST two columns absorb → widths {244,244,245,245}. This
+        // is what the clean size cannot exercise: a wrong remainder direction swaps UP.w and A.w.
+        {
+            const BoxRects G = portrait2_rects(1000, 1100);
+            const ButtonRect* ls = find(G, Button::L_SHIFT);
+            const ButtonRect* up = find(G, Button::DPAD_UP);
+            const ButtonRect* a  = find(G, Button::A);
+            if (ls) { check_eq(ls->x, 11, "pin P2/messy LSHIFT.x (pad)"); }
+            if (up) { check_eq(up->x, 255, "pin P2/messy UP.x"); check_eq(up->w, 244, "pin P2/messy UP.w"); }
+            if (a)  { check_eq(a->x, 744, "pin P2/messy A.x"); check_eq(a->w, 245, "pin P2/messy A.w"); }
+        }
     }
 
     std::cout << "checked " << g_checks << " position assertion(s)\n";

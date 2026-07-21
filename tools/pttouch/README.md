@@ -41,16 +41,21 @@ Where each button *lands* is unrecordable, so this is a hand-written **oracle** 
 - the LEFT box's D-pad is a **cross** (UP above the LEFT·RIGHT row above DOWN, UP centred over the gap,
   the cells flush), with L above it and SELECT below;
 - the RIGHT box's A and B are a **diagonal** (A upper-right, B lower-left), R above, START below;
-- the block is **vertically centred**, no two rects **overlap**, and every rect is **inside** its box;
-- **hit-testing** works: a tap in a rect hits that button, a tap in the cross-hole hits nothing;
+- the LANDSCAPE block is **vertically centred**; the **PORTRAIT2** grid is instead **top-anchored** (it
+  sits under its padding, the leftover at the bottom) — four equal-height rows, all ten buttons, the
+  D-pad and face columns aligned, the empty grid slots and padding hitting nothing;
+- no two rects **overlap**, every rect is **inside** its box, and **hit-testing** works: a tap in a
+  rect hits that button, a tap in a cross-hole / empty grid slot hits nothing;
 
-plus a handful of **pinned exact coordinates** at the Xiaomi's 716×1220 landscape panel, so an
-arithmetic drift prints its number. Checked at two sizes, so a regression can't hide at one resolution.
+plus **pinned exact coordinates**: the Xiaomi's 716×1220 landscape panel, and — for PORTRAIT2 — a
+**clean** cluster size (X a whole number, so every weight column is exact) *and* a **remainder-carrying**
+one (the `Row` weight split hands out leftover pixels), so an arithmetic drift prints its number.
 
 This is a **weaker claim** than the golden mode — it proves what the author believes, not what Kotlin
 did — and the arrangement is *also* eyeball-verified on a device. A wrong *proportion* at an unowned
 screen size is what the golden catches; a wrong *arrangement* is what this oracle and the phone catch.
-⚠️ D3 covers the two LANDSCAPE boxes; PORTRAIT and PORTRAIT2 join when those modes are lit up.
+⚠️ Covers the two LANDSCAPE boxes (D3) and the PORTRAIT2 skinned grid; PORTRAIT's two-box split joins
+when that mode is lit up.
 
 ## Build + run
 
