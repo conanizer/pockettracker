@@ -49,6 +49,14 @@ struct SettingsValues {
     int  layoutCount       = 1;
     int  skinIndex         = 0;
     int  skinCount         = 0;   // 0 = this layout is not skinned → no second column on LAYOUT
+
+    // ⚠️ The PERSISTED skin selection is the STABLE ID STRING, not `skinIndex`. settings_store.h's rule:
+    // an index is meaningless without the list it indexes, so store the NAME and let the platform resolve
+    // it to an index against a list that now exists (Phase D). The shell resolves this to `skinIndex` at
+    // boot (device_skin.h) and writes it back from whichever skin is chosen. Serialized as
+    // `portrait_skin`, matching Android's SharedPreferences key so the C6 prefs import lands here.
+    std::string portraitSkin = "amiga-2";
+
     int  overlayIndex      = 0;   // 0 = "OFF"; 1.. = a file
     int  overlayCount      = 1;   // "OFF" + however many files
     int  overlayStrength   = 128;

@@ -76,14 +76,17 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     // gone — silently, between the import that rescued them and the phase that finally shows them.
     // A key that is written by one component and dropped by another is worse than a key nobody writes.
     //
-    // ⚠️ LAYOUT, SKIN and OVERLAY (the row's *selection*) are deliberately NOT here. Those three are
-    // INDICES into lists that do not exist yet — the layouts, the skinned D-pads and the overlay PNGs
-    // all arrive in Phase D — and an index is meaningless without the list it indexes. Android stores
-    // them as stable strings (`layout_mode`, `portrait_skin`, `overlay_name`) and they stay in
-    // SharedPreferences, which the OS keeps regardless of what this repo deletes, until Phase D can
-    // resolve a name to an index. That is what `SETTINGS_IMPORT_VERSION` exists to make safe: the
-    // migration is versioned, so Phase D runs a second pass rather than needing this one to have been
-    // clairvoyant.
+    // ⚠️ SKIN is now persisted, as a STABLE STRING — this is the "Phase D second pass" the deferral
+    // below anticipated. `portrait_skin` (matching Android's SharedPreferences key) survives the shell's
+    // skin list being reordered; the shell resolves the name to an index at boot (device_skin.h). An
+    // absent key keeps the default, which is what an upgrading user's file has until they touch it.
+    //
+    // ⚠️ LAYOUT and OVERLAY (the row's *selection*) are STILL deliberately not here. Their lists are not
+    // yet fixed on the shell — the layout MODE override is unimplemented (the shell auto-selects by
+    // orientation + controller presence), and the overlay PNG list is D6. Android keeps `layout_mode`
+    // and `overlay_name` in SharedPreferences until those land; `SETTINGS_IMPORT_VERSION` makes that
+    // versioned second pass safe, so this need not have been clairvoyant.
+    values.portraitSkin       = get_string(j, "portrait_skin", values.portraitSkin);
     values.buttonSoundEnabled = get_bool(j, "buttonSound",  values.buttonSoundEnabled);
     values.buttonVibroEnabled = get_bool(j, "buttonVibro",  values.buttonVibroEnabled);
     values.buttonSoundVolume  = clamp(get_int(j, "buttonSoundVolume", values.buttonSoundVolume), 0, 255);
@@ -144,7 +147,9 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
 
     // The Android device rows — see the matching block in load_settings for why these are written on
     // every platform a full phase before any of them is displayed. On the shell they are simply their
-    // defaults; on Android they are what the C6 import rescued out of SharedPreferences.
+    // defaults; on Android they are what the C6 import rescued out of SharedPreferences. `portrait_skin`
+    // is the one selection now LIVE on the shell (Phase D), written as a stable id string.
+    j["portrait_skin"]      = values.portraitSkin;
     j["buttonSound"]        = values.buttonSoundEnabled;
     j["buttonSoundVolume"]  = values.buttonSoundVolume;
     j["buttonVibro"]        = values.buttonVibroEnabled;

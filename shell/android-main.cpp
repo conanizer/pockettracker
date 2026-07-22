@@ -211,6 +211,17 @@ int main(int argc, char** argv) {
     cfg.caps = ui::PlatformCaps::sdl(/*debug_build=*/true);
 #endif
 
+    // ⚠️ **PHASE D-theme: the LAYOUT row is REAL now, so turn it on — but ONLY the layouts cap.** The
+    // PORTRAIT2 skin exists and ships two themes (NORM/DARK), so `SETTINGS > LAYOUT` finally configures
+    // something: its skin column switches the device skin (device_skin.h), persisted as `portrait_skin`.
+    // `skinOverlay` (D6) and `buttonFeedback` (the sound/haptic subsystem) stay OFF until THEIR features
+    // exist — platform_caps.h's rule that a row configuring nothing is a lie told in the user's own UI.
+    // This is a slice of C6's converged profile, taken the session its one true row arrived; not `sdl()`
+    // edited (that would light the row on desktop/handheld, which have no touch layouts) and not
+    // `android()` (that also turns on the deferred rows). ⚠️ ptinput's goldens are unaffected — they
+    // compare against `PlatformCaps::android()`, which already had this true.
+    cfg.caps.touchLayouts = true;
+
     // On by default and worth it: with the pump above, the banner and the status line land in logcat,
     // which is the only console this platform has.
     cfg.console = true;

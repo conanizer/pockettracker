@@ -1,0 +1,5 @@
+# Font binaries: stored and checked out VERBATIM. This repo has core.autocrlf=true, which would
+# otherwise rewrite 0x0A bytes inside the font tables on some checkouts and corrupt the file (the C1
+# SDL-vendoring lesson, one asset over). `binary` = `-text -diff`, so no EOL conversion ever applies.
+*.ttf binary
+*.otf binary

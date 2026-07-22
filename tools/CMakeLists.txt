@@ -181,6 +181,18 @@ target_include_directories(ptdecode PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../shell     # image.h
         ${CMAKE_CURRENT_SOURCE_DIR}/../native)   # vendor/stb_image/stb_image.h
 
+# ptfont — the button-font RASTERIZER (convergence D). Like ptdecode it compiles ONE shell TU —
+# shell/font_raster.cpp, the only includer of the vendored stb_truetype implementation — and links
+# NOTHING else: no SDL, no pt-ui, no engine. The rasterizer is a shell facility that must need
+# stb_truetype and the standard library and nothing more; a stray include reaching for SDL stops THIS
+# target linking and names the file. It exists because the button font is CFF/OTTO OpenType, the
+# stb_truetype path most likely to regress silently on a bump — see ptfont/main.cpp's header.
+add_executable(ptfont ptfont/main.cpp ../shell/font_raster.cpp)
+pt_ieee_exact(ptfont)   # glyph coverage is integer; kept so the -fno-fast-math rule cannot be lost
+target_include_directories(ptfont PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../shell     # font_raster.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/../native)   # vendor/stb_truetype/stb_truetype.h
+
 # ptdispatch — the input DISPATCHER (Phase 3 S5). The one tool here that is NOT a conformance tool:
 # it takes no golden, because what it checks is the JOIN between the modules, cursor_move and
 # navigation, and Kotlin's side of that join is AppInputDispatcher — entangled with ~60 Compose state
@@ -220,3 +232,12 @@ add_test(NAME d-touch-positions COMMAND pttouch    --positions)
 # is a hard error (exit 2), never a vacuous pass — deleting the fixtures cannot certify a broken
 # decoder. See ptdecode's header and testdata/images/.
 add_test(NAME d-image-decode    COMMAND ptdecode    "${PT_TESTDATA}/images")
+# The button-font rasterizer (D), proven on the exact CFF/OTTO helvetica_regular.otf the APK ships. An
+# absolute path to the shipped asset, so a deleted/renamed font is a hard read failure (exit 2), never a
+# vacuous pass — the ptdecode discipline. See ptfont's header for the CFF-regression it guards.
+add_test(NAME d-font-raster     COMMAND ptfont "${CMAKE_CURRENT_SOURCE_DIR}/../app/src/main/assets/fonts/helvetica_regular.otf")
+# The D-pad ARROW font (D-theme): LinBiolinum_Rah.ttf (Linux Biolinum, SIL OFL), bundled for the four
+# arrow glyphs Helvetica lacks. The Roboto/OpenSans builds available were Latin subsets with NO arrows;
+# Biolinum ships real directional arrows (↑↓ tall, ←→ wide). `arrows` mode gates on U+2190–2193 inking,
+# on the exact shipped asset — a deleted/wrong arrow font fails here, not silently on a phone.
+add_test(NAME d-font-arrows     COMMAND ptfont "${CMAKE_CURRENT_SOURCE_DIR}/../app/src/main/assets/fonts/LinBiolinum_Rah.ttf" arrows)

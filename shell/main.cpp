@@ -225,6 +225,9 @@ int main(int argc, char** argv) {
     // compositor draws only the casing colour and the button labels.
     if (const char* t = SDL_getenv("POCKETTRACKER_TOUCH"); t && t[0] == '1') {
         cfg.touchCapable = true;
+        // Also light the LAYOUT row so the NORM/DARK skin switch is reachable on the eyeball build — the
+        // same one line android-main.cpp adds, and for the same reason: the row now configures something.
+        cfg.caps.touchLayouts = true;
         std::printf("input:   TOUCH SKIN forced on (POCKETTRACKER_TOUCH=1) - drag the window tall for PORTRAIT2\n");
     }
 

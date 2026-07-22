@@ -331,3 +331,28 @@ freely, subject to the following restrictions:
    misrepresented as being the original software.
 3. This notice may not be removed or altered from any source distribution.
 ```
+
+---
+
+## Linux Biolinum — SIL Open Font License 1.1
+
+Used for: the D-pad ARROW glyphs (↑↓←→) on the PORTRAIT2 touch skin's virtual buttons
+(`app/src/main/assets/fonts/LinBiolinum_Rah.ttf`). Helvetica, the button-label font, ships no arrow
+glyphs, so this font supplies exactly those four.
+
+⚠️ **This is a bundled FONT ASSET, not an engine-compiled component** — unlike everything above it, it
+is not statically linked. It ships wherever the app's `assets/` travel: the **APK** for certain, and
+any desktop/handheld build that bundles `assets/fonts/`. Documented here (the single source of truth
+for shipped notices) rather than in `CREDITS.md`, because the OFL requires its licence to accompany
+the font in binary distributions — the full licence text is `licenses/OFL-1.1-LinuxBiolinum.txt`.
+
+Linux Biolinum is dual-licensed GPL-2.0-or-later (with a font exception) **and** SIL OFL 1.1;
+PocketTracker uses it under the OFL.
+
+```
+Copyright (c) 2003–2012, Philipp H. Poll (www.linuxlibertine.org | gillian at linuxlibertine.org),
+with Reserved Font Name "Linux Libertine" and "Biolinum".
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+Full text: licenses/OFL-1.1-LinuxBiolinum.txt (and http://scripts.sil.org/OFL).
+```

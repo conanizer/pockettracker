@@ -124,6 +124,8 @@ add_executable(pockettracker-sdl
         assets.cpp         # the asset seam (convergence D7): SDL_RWFromFile, APK vs beside-the-exe
         skin.cpp           # the touch-skin textures (convergence D1): decode once, own per renderer
         portrait2.cpp      # the PORTRAIT2 device-skin renderer (convergence D): composite the bands
+        font_raster.cpp    # glyph rasterization (convergence D): the one stb_truetype implementation TU
+        font.cpp           # the button-label font (convergence D): Helvetica glyphs + D-pad triangles → textures
         sdl-audio-engine.cpp
         sdl-input.cpp
         sdl-touch.cpp

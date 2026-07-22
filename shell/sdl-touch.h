@@ -15,10 +15,12 @@
 //     `InputMapper.onVirtualButton`;
 //   • draws the boxes, the buttons and their labels with the shared 5×5 font, highlighting a held one.
 //
-// ⚠️ LANDSCAPE ONLY, for now. `touch_layout.h` has `left_rects`/`right_rects`; PORTRAIT's two-box split
-// and PORTRAIT2's skinned grid get their rects — and this file their rendering — when those modes are
-// lit up. The SETTINGS LAYOUT row (PlatformCaps::touchLayouts) stays OFF until then, because a picker
-// offering two modes that do nothing is the "setting which configures nothing" platform_caps.h refuses.
+// ⚠️ LANDSCAPE panels + PORTRAIT2 hit-test. `layout()` draws AND hit-tests the two landscape bars;
+// `layout_portrait2()` hit-tests the PORTRAIT2 skinned grid (which `PortraitSkin` draws — this file only
+// maps the finger). Still missing: PORTRAIT's two-box split (`touch_layout.h` has `left_rects`/
+// `right_rects` for the bars; the portrait split reuses them). The SETTINGS LAYOUT row
+// (PlatformCaps::touchLayouts) stays OFF until every mode exists, because a picker offering modes that
+// do nothing is the "setting which configures nothing" platform_caps.h refuses.
 
 #ifndef POCKETTRACKER_SDL_TOUCH_H
 #define POCKETTRACKER_SDL_TOUCH_H
@@ -59,6 +61,18 @@ public:
      */
     void layout(const SDL_Rect& frame, int outW, int outH);
 
+    /**
+     * The PORTRAIT branch of `layout` — hit-test the PORTRAIT2 button cluster instead of the landscape
+     * letterbox bars. `PortraitSkin` has already computed this exact geometry to DRAW it (band 4's rect
+     * + the ten box-local `portrait2_rects`), so the shell hands it in here rather than recomputing:
+     * ONE source of truth, so a press can never disagree with what is on screen. This object turns
+     * fingers into presses only — the DRAWING stays PortraitSkin's. Called INSTEAD of `layout()` on a
+     * portrait frame (see app.cpp), and it shares `handle_finger` / the finger map / slide-off with the
+     * landscape path unchanged: only which rects get hit-tested differs.
+     */
+    void layout_portrait2(const SDL_Rect& cluster, const pt::ui::touch_layout::BoxRects& rects,
+                          int outW, int outH);
+
     /** Feed one SDL_FINGER{DOWN,MOTION,UP}. Down that hits a button presses it; up releases it; a slide
      *  off the button it went down on releases it (Kotlin's per-button gesture cancels the same way). */
     void handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_ms);
@@ -87,6 +101,13 @@ private:
     SDL_Rect rightBox_{0, 0, 0, 0};  // the right bar
     pt::ui::touch_layout::BoxRects left_;   // box-local rects (add the box origin to place them)
     pt::ui::touch_layout::BoxRects right_;
+
+    // PORTRAIT2 (layout_portrait2): the skinned cluster's rect in window pixels, and the ten button
+    // rects LOCAL to it. While `portrait_` is set, `hit_window` tests these instead of the two bars and
+    // `draw` no-ops (PortraitSkin owns the cluster's pixels). One frame's geometry, handed from there.
+    bool                           portrait_ = false;
+    SDL_Rect                       portraitCluster_{0, 0, 0, 0};
+    pt::ui::touch_layout::BoxRects portrait_rects_;
 
     // Which finger is holding which button, so an UP releases the right one and multi-touch holds (L+A)
     // work. A finger stays bound until it lifts or slides off.

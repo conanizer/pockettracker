@@ -49,6 +49,7 @@ const char* bname(Button b) {
 void SdlTouch::layout(const SDL_Rect& frame, int outW, int outH) {
     outW_ = outW;
     outH_ = outH;
+    portrait_ = false;   // landscape path: hit-test the letterbox bars, not the PORTRAIT2 cluster
 
     // The two letterbox bars either side of the centred frame. In landscape they are what the touch
     // boxes live in; in a layout with no side bars (a frame that fills the width) they are zero-wide
@@ -70,7 +71,23 @@ void SdlTouch::layout(const SDL_Rect& frame, int outW, int outH) {
     right_    = tl::right_rects(rightW, outH);
 }
 
+void SdlTouch::layout_portrait2(const SDL_Rect& cluster, const tl::BoxRects& rects, int outW, int outH) {
+    outW_            = outW;
+    outH_            = outH;
+    portrait_        = true;
+    portraitCluster_ = cluster;
+    portrait_rects_  = rects;
+    // Active whenever there is a cluster to press — the same `enabled_` gate the landscape bars use (a
+    // touchscreen with no physical pad). PortraitSkin only fills rects when the output is truly portrait,
+    // so a count of 0 means there is nothing to press and handle_finger stays a no-op.
+    active_ = enabled_ && rects.count > 0;
+}
+
 bool SdlTouch::hit_window(int px, int py, Button& out) const {
+    // PORTRAIT2: one skinned cluster; its rects are local to the band origin — no left/right bar split.
+    if (portrait_) {
+        return tl::hit(portrait_rects_, px - portraitCluster_.x, py - portraitCluster_.y, out);
+    }
     if (px >= leftBox_.x && px < leftBox_.x + leftBox_.w) {
         return tl::hit(left_, px - leftBox_.x, py - leftBox_.y, out);
     }
@@ -127,7 +144,7 @@ void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_m
 }
 
 void SdlTouch::draw(SDL_Renderer* r, const SdlInput& input) const {
-    if (!active_) return;
+    if (!active_ || portrait_) return;   // PORTRAIT2's cluster is drawn by PortraitSkin, not here
 
     fill(r, leftBox_, PANEL_BG);
     fill(r, rightBox_, PANEL_BG);

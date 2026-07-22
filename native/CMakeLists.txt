@@ -429,6 +429,8 @@ if(ANDROID)
             "${PT_SHELL_DIR}/assets.cpp"       # the asset seam (convergence D7): SDL_RWFromFile → APK assets
             "${PT_SHELL_DIR}/skin.cpp"         # the touch-skin textures (convergence D1)
             "${PT_SHELL_DIR}/portrait2.cpp"    # the PORTRAIT2 device-skin renderer (convergence D)
+            "${PT_SHELL_DIR}/font_raster.cpp"  # glyph rasterization (convergence D): the one stb_truetype impl TU
+            "${PT_SHELL_DIR}/font.cpp"         # the button-label font (convergence D): Helvetica + D-pad triangles
             "${PT_SHELL_DIR}/sdl-input.cpp"
             "${PT_SHELL_DIR}/sdl-touch.cpp"
             "${PT_SHELL_DIR}/sdl-video.cpp"

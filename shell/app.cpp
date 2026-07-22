@@ -18,7 +18,9 @@
 #include "ui/modules/oscilloscope.h"   // WAVEFORM_SIZE — the C7 audible test
 #include "ui/settings_store.h"
 
+#include "device_skin.h"
 #include "skin.h"
+#include "font.h"
 #include "portrait2.h"
 
 #include "sdl-input.h"
@@ -286,25 +288,44 @@ int run(const AppConfig& cfg) {
     // app decides. `touch.layout()` in the loop below then draws them only if the letterbox bars are
     // actually wide enough (`active()`), so a narrow window shows none regardless. The trace shares the
     // input trace's env var — it is the same P4b blind channel, one input source over.
+    //
+    // ⚠️ `set_enabled` is NOT called here: the gate is recomputed EACH FRAME in the loop (see `useTouch`)
+    // so a controller plugged or unplugged mid-session moves the app between the on-screen gamepad and a
+    // bare fullscreen frame. Setting it once at boot is what let a controller connected AFTER launch (or
+    // the portrait skin, which used to read `cfg.touchCapable` alone) disagree with this gate.
     SdlTouch touch;
-    touch.set_enabled(cfg.touchCapable && input.controller_count() == 0);
     if (inputTrace && inputTrace[0] == '1') touch.set_trace(true);
 
     // ── The touch skin's textures (D7 asset seam → D2 decode → texture), consumed by PORTRAIT2 ─────
     //
-    // Decoded ONCE, here, now that the renderer exists (video.open above), and only where there is a
-    // touchscreen to skin — the same gate as the panels — so desktop and the handhelds decode nothing.
-    // The `skin:` lines it prints are the on-device account of whether a real PNG came out of the APK —
-    // the log line IS the assertion there, there being no console test on a phone. The D7 walking
-    // skeleton blitted one piece in a corner to prove the pipeline reached the screen; the PORTRAIT2
-    // renderer (below, `portrait`) is what that skeleton promised, and it composites the whole set into
-    // the band geometry. ⚠️ `unload()` is called before video.close() below, because these textures
-    // belong to that renderer and outliving it is a use-after-free.
-    // TODO(D-theme): the theme name is hardcoded to the dark skin (matching PortraitSkin's hardcoded
-    // amiga-2 scalars); both become a settings-driven choice (theme / overlay_name) when theme
-    // SELECTION lands and a C++ device-skin table exists to choose between.
+    // Decoded only where there is a touchscreen to skin — the same gate as the panels — so desktop and
+    // the handhelds decode nothing. The `skin:` lines it prints are the on-device account of whether a
+    // real PNG came out of the APK — the log line IS the assertion there, there being no console test on
+    // a phone. The D7 walking skeleton blitted one piece in a corner to prove the pipeline reached the
+    // screen; the PORTRAIT2 renderer (below, `portrait`) composites the whole set into the band geometry.
+    // ⚠️ `unload()` is called before video.close() below, because these textures belong to that renderer
+    // and outliving it is a use-after-free.
+    //
+    // ⚠️ The theme is no longer hardcoded: `SETTINGS > LAYOUT`'s skin column (NORM/DARK) picks it, the
+    // choice persists as `portrait_skin` and resolves through `device_skin.h`. The actual `skin.load` /
+    // `portrait.set_skin` happens in the loop below (the `loadedSkinIdx` sync), so a live switch reloads
+    // the PNGs once, on the deliberate user action, rather than every frame.
     Skin skin;
-    if (cfg.touchCapable) skin.load(video.renderer(), "amiga-2", cfg.console);
+
+    // The button-label font (convergence D): Helvetica, decoded once, owned by the renderer like the
+    // skin, loaded on the same touchscreen gate — so desktop and the handhelds parse nothing. A load
+    // failure is NOT fatal: PortraitSkin::draw_buttons falls back to the shared 5×5 font, so a missing
+    // asset degrades to blocky labels, not none. ⚠️ `unload()` before video.close() below, with skin's.
+    Font helvFont;
+    if (cfg.touchCapable) helvFont.load(video.renderer(), "fonts/helvetica_regular.otf", cfg.console);
+
+    // The D-pad ARROW font (convergence D-theme): Linux Biolinum (SIL OFL), bundled for the four arrow
+    // glyphs (↑↓←→) Helvetica lacks — on Android those came from the system-font fallback, which one
+    // .otf has no equivalent of. `PortraitSkin::draw_buttons` blits its real glyphs; a load failure is
+    // NOT fatal — it falls back to the shell-drawn line arrow — so a missing asset degrades, not breaks.
+    // Same touchscreen gate and renderer-owned lifetime as helvFont; `unload()` before video.close().
+    Font arrowFont;
+    if (cfg.touchCapable) arrowFont.load(video.renderer(), "fonts/LinBiolinum_Rah.ttf", cfg.console);
 
     // ── The PORTRAIT2 device-skin renderer (convergence D) ───────────────────────────────────────
     //
@@ -330,6 +351,12 @@ int run(const AppConfig& cfg) {
     // error and gets no complaint.
     if (ui::load_settings(filesystem, state.settings, state.theme))
         std::printf("settings: %s\n", filesystem.settings_path().c_str());
+
+    // Resolve the PERSISTED skin id (a stable string, `portrait_skin`) to the runtime index the SETTINGS
+    // skin column edits. device_skin.h falls back to DARK for an unknown id, so a missing/mangled key
+    // keeps the shell's shipped look. The loop's `loadedSkinIdx` sync turns this index into the loaded
+    // textures + PortraitSkin's scalars on the first frame, and again whenever the user changes it.
+    state.settings.skinIndex = device_skin_index(state.settings.portraitSkin);
 
     ui::Canvas        canvas;
     ui::TrackerLayout layout;
@@ -444,6 +471,11 @@ int run(const AppConfig& cfg) {
     // centred landscape frame and would misdescribe this mode; see present() in sdl-video.cpp).
     int lastPortraitW = 0, lastPortraitH = 0;
 
+    // The device skin currently decoded into `skin` + adopted by `portrait`. -1 = none loaded yet, so
+    // the first touch frame decodes the persisted choice; thereafter it reloads only when the SETTINGS
+    // skin column moves `skinIndex`. Decoding ~10 PNGs is a deliberate-action cost, never a per-frame one.
+    int loadedSkinIdx = -1;
+
     // ── C7 state ─────────────────────────────────────────────────────────────────────────────────
     // `sawInput`     — anything happened this frame that could have changed what is on screen.
     // `audibleEdge`  — audio was audible LAST frame, so the first silent frame is still drawn once
@@ -461,6 +493,19 @@ int run(const AppConfig& cfg) {
     // conservative, gate 2 catching it). On a still screen `drew` should stop climbing while the
     // frame counter keeps going; if `skip` stays 0 the feature is not working, whatever it looks like.
     long long drawn = 0, presented = 0, skipped = 0;
+
+    // ── ROTATION / RESIZE SETTLING (C7's blind spot on Android) ──────────────────────────────────
+    //
+    // A rotation on Android resizes the SurfaceView over SEVERAL frames, and SDL does not send a
+    // WINDOWEVENT for every intermediate size — so the event-driven redraw (SDL_WINDOWEVENT_SIZE_CHANGED
+    // above) forces ONE frame, which may land on a half-transitioned surface, and then the C7 idle-skip
+    // freezes THAT half-drawn frame until the next input. That is the reported bug: rotate and the screen
+    // is half casing / half bezel-background (or half a stale landscape frame), and it only corrects when
+    // a virtual button is touched. The fix is to POLL the output size every frame and force a full redraw
+    // for a few frames after it LAST changed — so the settled geometry always gets a clean repaint with
+    // no input. `lastOutW/H` start at -1 so the very first frame is not counted as a resize.
+    constexpr int RESIZE_SETTLE_FRAMES = 4;
+    int lastOutW = -1, lastOutH = -1, resizeSettle = 0;
 
     // ⚠️ `terminate_requested` is the launcher's kill, read once per frame. On desktop it reports a FLAG
     // set by a signal handler that does nothing else — so this loop condition is where a SIGTERM actually
@@ -489,8 +534,70 @@ int run(const AppConfig& cfg) {
         {
             int outW = 0, outH = 0;
             video.output_size(outW, outH);
-            touch.layout(video.frame_rect(), outW, outH);
-            portrait.layout(outW, outH, cfg.touchCapable);
+
+            // A change in the polled output size (a rotation, a resize, the system bars appearing) arms a
+            // short run of forced full redraws — see RESIZE_SETTLE_FRAMES. Re-armed every frame the size
+            // is still moving, so the countdown only starts once it has SETTLED, which is when the final
+            // geometry gets its clean repaint even though no input arrived.
+            if (outW != lastOutW || outH != lastOutH) {
+                resizeSettle = RESIZE_SETTLE_FRAMES;
+                lastOutW = outW;
+                lastOutH = outH;
+            }
+
+            // ── THE LAYOUT SELECTOR, recomputed each frame (DeviceAdapter.hasPhysicalGameButtons) ────
+            //
+            // ONE gate, read by BOTH `touch` and `portrait`, so they can never disagree about whether
+            // this is a touch device. A touchscreen with NO controller gets the virtual buttons (the
+            // PORTRAIT2 skin held portrait, the landscape panels held landscape); a device WITH a
+            // controller (built-in or plugged) gets FULL/fullscreen with no skin, in either orientation
+            // — exactly as Kotlin's hasPhysicalGameButtons()→FULL decides. Recomputed per frame because
+            // `controller_count()` tracks hot-plug: plug a pad and the skin disappears next frame.
+            // ⚠️ This is what fixed the split gate — the portrait skin used to read `cfg.touchCapable`
+            // alone and would activate on a controller-equipped phone whose buttons then did nothing.
+            const bool useTouch = cfg.touchCapable && input.controller_count() == 0;
+            touch.set_enabled(useTouch);
+
+            // ── The device skin: which theme paints the chrome, and the SETTINGS row that picks it ────
+            //
+            // The skin column (NORM/DARK) is the real control on this UI's LAYOUT row; the mode column is
+            // a single "PORTRAIT" (matching release Kotlin's touch-only layout list, which has one entry
+            // — the shell already auto-selects portrait/landscape by aspect and fullscreen by controller
+            // presence, so there is no mode for the user to override). `skinCount > 0` is what makes the
+            // editor draw the second column at all; the display strings are the platform's to supply.
+            if (useTouch) {
+                if (state.settings.skinIndex < 0 || state.settings.skinIndex >= kDeviceSkinCount)
+                    state.settings.skinIndex = device_skin_index(state.settings.portraitSkin);
+                state.settings.skinCount   = kDeviceSkinCount;
+                state.settings.layoutCount = 1;
+                state.settings.layoutIndex = 0;
+                const DeviceSkinDef& d = kDeviceSkins[state.settings.skinIndex];
+                state.layoutText            = "PORTRAIT";
+                state.skinText              = d.displayName;
+                state.settings.portraitSkin = d.id;   // keep the persisted id in step with the choice
+
+                // Reload the PNGs + adopt the scalars only when the choice actually changed (or on the
+                // first frame). This is where the D7 asset seam is finally driven by a setting.
+                if (state.settings.skinIndex != loadedSkinIdx) {
+                    skin.load(video.renderer(), d.id, cfg.console);
+                    portrait.set_skin(d.casingFillArgb, d.labelRgb, d.bezelThicknessX);
+                    loadedSkinIdx = state.settings.skinIndex;
+                }
+            } else {
+                state.settings.skinCount = 0;   // no skin column on a fullscreen (controller) layout
+            }
+
+            // PORTRAIT2 first — its active() decides whether `touch` hit-tests the skinned cluster
+            // (portrait) or the landscape letterbox bars. Both are a handful of int ops and a no-op with
+            // no touchscreen. The cluster geometry is PortraitSkin's, handed straight to `touch` so the
+            // hit-test and the draw share ONE source of truth: a press can never highlight a cell the
+            // finger is not over, because both read the same rects. `scalingBilinear` picks INTEGER vs
+            // FIT for where the frame lands in the bezel (see PortraitSkin::layout).
+            portrait.layout(outW, outH, useTouch, state.settings.scalingBilinear);
+            if (portrait.active())
+                touch.layout_portrait2(portrait.cluster_rect(), portrait.button_rects(), outW, outH);
+            else
+                touch.layout(video.frame_rect(), outW, outH);
 
             // A one-line account of the PORTRAIT2 skin when it activates or the output rotates — the
             // portrait analogue of sdl-video's describe(). On console + on change only, like the status
@@ -665,8 +772,20 @@ int run(const AppConfig& cfg) {
         // ⚠️ `has_pending_timed_work()` is the third term and it is NOT covered by the pixel net: the
         // status line clears itself 5 s after it is set, with no input, and a frame that is never
         // drawn is never compared. Without it a "PROJECT SAVED" would sit on a still screen forever.
+        //
+        // ⚠️ `resizeSettle` is the FOURTH, and it is a rotation/resize term the pixel net cannot cover
+        // either: a settling surface must be repainted at its NEW geometry with no input, or the C7 skip
+        // freezes a half-transitioned frame (the reported "rotate → half black / half theme bg, fixed
+        // only by touching a button"). While it counts down we both DRAW and clear the pixel-skip
+        // (invalidate_backbuffer), so each settle frame is genuinely re-uploaded at the current size.
         const bool audible = audio_is_audible(state);
-        if (audible || audibleEdge || sawInput || !drewOnce || dispatch.has_pending_timed_work()) {
+        const bool settling = resizeSettle > 0;
+        if (settling) {
+            video.invalidate_backbuffer(/*texture_lost=*/false);   // the settled frame must not be skipped
+            --resizeSettle;
+        }
+        if (audible || audibleEdge || sawInput || !drewOnce || settling ||
+            dispatch.has_pending_timed_work()) {
             layout.draw(canvas, state);
             ++drawn;
 
@@ -683,12 +802,14 @@ int run(const AppConfig& cfg) {
                 // PORTRAIT2 (convergence D): the retro-device skin. The 640×480 frame lands in the
                 // bezel (portrait.frame_rect), NOT window-centred; the casing is the clear, the four
                 // chrome bands are the underlay drawn BEHIND the frame, the button cluster the overlay
-                // in front. ⚠️ The buttons RENDER but are not hit-testable yet — the portrait branch of
-                // sdl-touch is the next increment — so this is deliberately a picture a finger cannot
-                // press, so the pixels can be proven before the input path is wired onto them.
-                const auto chrome = [&portrait, &skin](SDL_Renderer* r) { portrait.draw_chrome(r, skin); };
-                const auto buttons = [&portrait, &skin, &input](SDL_Renderer* r) {
-                    portrait.draw_buttons(r, skin, input);
+                // in front. The buttons are pressable: `touch.layout_portrait2` above hit-tests this same
+                // cluster, so a finger down feeds `SdlInput` and `draw_buttons` reads it back as pressed.
+                const uint32_t bg = state.theme.background;   // the tracker's own bg fills the bezel gap
+                const auto chrome = [&portrait, &skin, bg](SDL_Renderer* r) {
+                    portrait.draw_chrome(r, skin, bg);
+                };
+                const auto buttons = [&portrait, &skin, &helvFont, &arrowFont, &input](SDL_Renderer* r) {
+                    portrait.draw_buttons(r, skin, helvFont, arrowFont, input);
                 };
                 didPresent = video.present_skinned(canvas, portrait.casing_argb(), portrait.frame_rect(),
                                                    chrome, buttons, portrait.signature(input));
@@ -782,6 +903,8 @@ int run(const AppConfig& cfg) {
     engineRef.onResumeRequested = nullptr;
     audio.closeStream();
     input.close_controllers();
+    arrowFont.unload();  // ⚠️ same reason as skin/helvFont: glyph textures belong to the renderer
+    helvFont.unload();  // ⚠️ same reason as skin: its glyph textures belong to the renderer being destroyed
     skin.unload();   // ⚠️ before video.close(): the skin's textures belong to the renderer it destroys
     video.close();
     return 0;
