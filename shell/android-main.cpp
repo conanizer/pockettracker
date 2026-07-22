@@ -32,8 +32,10 @@
 #include "ui/std_filesystem.h"
 
 #include "app.h"
+#include "button_feedback.h"
 
 #include <android/log.h>
+#include <jni.h>
 #include <pthread.h>
 #include <unistd.h>
 
@@ -95,6 +97,64 @@ void* log_pump(void* arg) {
     }
     return nullptr;
 }
+
+// ─── button feedback → the surviving thin Kotlin managers (convergence D) ───────────────────────────
+//
+// The ONE outward JNI hook the Phase-E plan names: the shared touch layer decides WHEN a virtual
+// button clicks (sdl-touch.cpp), and this shim carries that decision across to Java, where the
+// SoundPool and the Vibrator live. It calls a single method on the running `SdlActivity` — `pt-ui` and
+// the shared shell never learn the word `jni`; only this file, which is already the platform residue.
+//
+// ⚠️ Runs on the SDL thread (the frame loop), NOT the Java UI thread. `SDL_AndroidGetJNIEnv` attaches
+// this thread to the JVM and hands back its env; the Kotlin side is what marshals the haptic to the UI
+// thread where it needs to be (SoundPool is thread-safe and stays put for lowest latency). The method
+// is looked up by NAME, so it does not exist at C++ compile time and a mismatch degrades to silence
+// with one log line rather than a crash — hence the null-and-exception handling on every JNI call.
+class AndroidButtonFeedback : public ptshell::ButtonFeedback {
+public:
+    void play(pt::ui::Button button, bool down, const ptshell::ButtonFeedbackSettings& s) override {
+        // Nothing enabled → nothing worth a JNI round trip. The Kotlin side re-checks too; this is just
+        // the cheap early-out for the common "both off" case.
+        if (!s.soundEnabled && !s.vibroEnabled) return;
+
+        JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+        if (!env) return;
+        jobject activity = static_cast<jobject>(SDL_AndroidGetActivity());  // a LOCAL ref — delete below
+        if (!activity) return;
+
+        jmethodID mid = method_id(env, activity);
+        if (mid) {
+            env->CallVoidMethod(activity, mid, static_cast<jint>(button),
+                                static_cast<jboolean>(down),
+                                static_cast<jboolean>(s.soundEnabled), static_cast<jint>(s.soundVolume),
+                                static_cast<jboolean>(s.vibroEnabled), static_cast<jint>(s.vibroPower));
+            if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+        }
+        env->DeleteLocalRef(activity);
+    }
+
+private:
+    // The method id, resolved once. Method ids stay valid for the class's lifetime and the activity's
+    // class is never unloaded, so the lookup is a one-time cost; `looked_up_` also stops a missing
+    // method from re-logging on every tap.
+    jmethodID method_id(JNIEnv* env, jobject activity) {
+        if (looked_up_) return mid_;
+        looked_up_ = true;
+        jclass cls = env->GetObjectClass(activity);
+        mid_ = env->GetMethodID(cls, "onButtonFeedback", "(IZZIZI)V");
+        if (env->ExceptionCheck()) { env->ExceptionClear(); mid_ = nullptr; }
+        if (!mid_) {
+            __android_log_print(ANDROID_LOG_WARN, kLogTag,
+                                "onButtonFeedback(IZZIZI)V not found on the activity - "
+                                "button feedback disabled");
+        }
+        env->DeleteLocalRef(cls);
+        return mid_;
+    }
+
+    bool      looked_up_ = false;
+    jmethodID mid_       = nullptr;
+};
 
 void redirect_stdio_to_logcat() {
     // Unbuffered for the same reason main.cpp is: a buffer that dies with the process takes the only
@@ -222,6 +282,16 @@ int main(int argc, char** argv) {
     // compare against `PlatformCaps::android()`, which already had this true.
     cfg.caps.touchLayouts = true;
 
+    // ⚠️ **PHASE D: BTN SOUND + BTN VIBRO are REAL now, so turn the cap on.** The click and the haptic
+    // a virtual button gives back finally exist here (the `AndroidButtonFeedback` shim below drives the
+    // surviving thin Kotlin managers), so the two SETTINGS rows that configure them are no longer "a
+    // setting which configures nothing" — platform_caps.h's rule that kept them off through C3–D. This
+    // is another slice of C6's converged profile, taken the session its feature arrived; the scalars it
+    // shows were already imported (C6 v1) and are already persisted (settings_store). `skinOverlay`
+    // (D6) is the last row still OFF, waiting on the CRT overlay. ⚠️ ptinput's goldens are unaffected —
+    // they compare against `PlatformCaps::android()`, which already had this true.
+    cfg.caps.buttonFeedback = true;
+
     // On by default and worth it: with the pump above, the banner and the status line land in logcat,
     // which is the only console this platform has.
     cfg.console = true;
@@ -261,6 +331,12 @@ int main(int argc, char** argv) {
     // touch this loop at all. Leaving it null is the honest state: nothing asks this app to
     // terminate yet.
     cfg.terminate_requested = nullptr;
+
+    // The button-feedback sink (convergence D). Constructed HERE so it outlives `run()`, and only on
+    // Android — desktop's `main.cpp` leaves `cfg.buttonFeedback` null and the shared touch path treats
+    // that as "no feedback". See button_feedback.h and AndroidButtonFeedback above.
+    AndroidButtonFeedback buttonFeedback;
+    cfg.buttonFeedback = &buttonFeedback;
 
     const int rc = ptshell::run(cfg);
 

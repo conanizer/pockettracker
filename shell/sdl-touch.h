@@ -29,6 +29,8 @@
 
 #include <SDL.h>
 
+#include "button_feedback.h"
+
 #include "ui/buttons.h"
 #include "ui/touch_layout.h"
 
@@ -44,6 +46,14 @@ public:
     /** Whether this platform has a touchscreen worth drawing a gamepad on. Set once at boot — a phone
      *  yes, a desktop no; the SDL analogue of DeviceAdapter choosing a touch layout at all. */
     void set_enabled(bool on) { enabled_ = on; }
+
+    /** The click + haptic sink (convergence D). Null (the default, desktop/handheld) = no feedback;
+     *  Android hands in a JNI shim. Set once at boot — see AppConfig::buttonFeedback. */
+    void set_feedback(ptshell::ButtonFeedback* fb) { feedback_ = fb; }
+
+    /** The user's live BTN SOUND / BTN VIBRO scalars, pushed each frame from `SettingsValues` so the
+     *  next tap plays with whatever the SETTINGS screen currently shows. A no-op cost with no sink. */
+    void set_feedback_settings(const ptshell::ButtonFeedbackSettings& s) { fbSettings_ = s; }
 
     /** Same env var as the input trace (POCKETTRACKER_INPUT_TRACE): print one line per finger, and what
      *  it mapped to (or that it hit no button). The touch half of P4b's "no tool covers the layer
@@ -92,6 +102,11 @@ private:
     /** Window-pixel point → the Button whose rect contains it, if any (searches both boxes). */
     bool hit_window(int px, int py, Button& out) const;
 
+    /** Fire the click/haptic for one press or release, if a sink is installed. */
+    void emit_feedback(Button b, bool down) const {
+        if (feedback_) feedback_->play(b, down, fbSettings_);
+    }
+
     bool enabled_ = false;
     bool active_  = false;
     bool trace_   = false;
@@ -112,6 +127,11 @@ private:
     // Which finger is holding which button, so an UP releases the right one and multi-touch holds (L+A)
     // work. A finger stays bound until it lifts or slides off.
     std::unordered_map<SDL_FingerID, Button> finger_;
+
+    // The click/haptic sink and the user's current settings for it (convergence D). Null sink =
+    // desktop/handheld = no feedback; Android hands in a JNI shim. See button_feedback.h.
+    ptshell::ButtonFeedback*         feedback_ = nullptr;
+    ptshell::ButtonFeedbackSettings  fbSettings_;
 };
 
 #endif  // POCKETTRACKER_SDL_TOUCH_H

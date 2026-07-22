@@ -296,6 +296,11 @@ int run(const AppConfig& cfg) {
     SdlTouch touch;
     if (inputTrace && inputTrace[0] == '1') touch.set_trace(true);
 
+    // The click/haptic sink (convergence D). Null on desktop/handheld (no feedback); Android hands in
+    // a JNI shim. Installed once — the per-frame `set_feedback_settings` below is what tracks the live
+    // BTN SOUND / BTN VIBRO rows. See button_feedback.h.
+    touch.set_feedback(cfg.buttonFeedback);
+
     // ── The touch skin's textures (D7 asset seam → D2 decode → texture), consumed by PORTRAIT2 ─────
     //
     // Decoded only where there is a touchscreen to skin — the same gate as the panels — so desktop and
@@ -557,6 +562,14 @@ int run(const AppConfig& cfg) {
             // alone and would activate on a controller-equipped phone whose buttons then did nothing.
             const bool useTouch = cfg.touchCapable && input.controller_count() == 0;
             touch.set_enabled(useTouch);
+
+            // Push the user's live BTN SOUND / BTN VIBRO scalars so the next tap plays with whatever
+            // SETTINGS currently shows — read here, in the loop, because they can change live. A no-op
+            // where there is no feedback sink (button_feedback.h).
+            touch.set_feedback_settings({state.settings.buttonSoundEnabled,
+                                         state.settings.buttonSoundVolume,
+                                         state.settings.buttonVibroEnabled,
+                                         state.settings.vibroPower});
 
             // ── The device skin: which theme paints the chrome, and the SETTINGS row that picks it ────
             //

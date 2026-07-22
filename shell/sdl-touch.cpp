@@ -110,6 +110,7 @@ void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_m
         Button b{};
         if (hit_window(px, py, b)) {
             input.touch_press(b, now_ms);
+            emit_feedback(b, /*down=*/true);
             finger_[t.fingerId] = b;
             if (trace_) std::printf("input:   TOUCH DOWN  %4d,%-4d       -> %s\n", px, py, bname(b));
         } else if (trace_) {
@@ -121,6 +122,7 @@ void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_m
         auto it = finger_.find(t.fingerId);
         if (it != finger_.end()) {
             input.touch_release(it->second);
+            emit_feedback(it->second, /*down=*/false);
             if (trace_) std::printf("input:   TOUCH UP                    -> %s\n", bname(it->second));
             finger_.erase(it);
         }
@@ -134,6 +136,7 @@ void SdlTouch::handle_finger(const SDL_Event& e, SdlInput& input, uint64_t now_m
             const bool still = hit_window(px, py, b) && b == it->second;
             if (!still) {
                 input.touch_release(it->second);
+                emit_feedback(it->second, /*down=*/false);
                 if (trace_)
                     std::printf("input:   TOUCH SLIDE-OFF             -> %s released\n",
                                 bname(it->second));

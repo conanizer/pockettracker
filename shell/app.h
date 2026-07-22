@@ -55,6 +55,8 @@ class AudioEngine;
 
 namespace ptshell {
 
+class ButtonFeedback;
+
 /**
  * Everything the shared shell is GIVEN rather than decides. Every field is filled by the platform's
  * `main` before `run()` is called; nothing here is read after it returns.
@@ -136,6 +138,17 @@ struct AppConfig {
      * hardware can be touched.
      */
     bool touchCapable = false;
+
+    /**
+     * The click + haptic a VIRTUAL button gives back (convergence D). BORROWED and NULLABLE: the
+     * platform's `main` owns it, and only Android constructs one — a JNI shim into the surviving thin
+     * Kotlin managers, which is the "one outward JNI hook" the Phase-E plan names. Desktop and the
+     * handhelds leave it null, and `SdlTouch` treats null as "no feedback", so nothing in the shared
+     * touch path learns the word `jni`. Paired with `caps.buttonFeedback`, which is what makes the
+     * BTN SOUND / BTN VIBRO rows appear in SETTINGS: the pointer plays the feedback, the cap shows the
+     * rows that configure it.
+     */
+    ButtonFeedback* buttonFeedback = nullptr;
 
     /**
      * Polled once a frame; true ends the session as an UNCLEAN exit, so the autosave is kept.

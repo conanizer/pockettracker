@@ -11,8 +11,12 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import androidx.annotation.Keep
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
+import com.conanizer.pockettracker.input.VirtualButton
+import com.conanizer.pockettracker.platform.android.ButtonHapticManager
+import com.conanizer.pockettracker.platform.android.ButtonSoundManager
 import org.json.JSONObject
 import org.libsdl.app.SDLActivity
 import java.io.File
@@ -41,6 +45,15 @@ import java.io.File
  * and the key is mapped in `shell/sdl-input.cpp`. Nothing about the lifecycle needs Kotlin.
  */
 class SdlActivity : SDLActivity() {
+
+    // ── Button feedback (convergence D) ────────────────────────────────────────────────────────────
+    //
+    // The surviving thin Kotlin the plan keeps: SoundPool clicks and Vibrator pulses are Android system
+    // services with no C++ twin, so they stay here and the shared shell reaches them through ONE JNI
+    // call (`onButtonFeedback` below). Created in `onCreate`, before `super.onCreate()` starts the SDL
+    // thread, so the SoundPool has begun loading its samples before the first tap can arrive.
+    private var buttonSound:  ButtonSoundManager?  = null
+    private var buttonHaptic: ButtonHapticManager? = null
 
     /**
      * ⚠️ ORDER MATTERS AND THE LAST ONE IS SPECIAL. `SDLActivity.getMainSharedObject()` takes the
@@ -194,8 +207,62 @@ class SdlActivity : SDLActivity() {
         // that point is a file the app has already read past.
         importLegacySettings()
 
+        // The feedback managers, before super.onCreate() starts the SDL thread that calls back into
+        // onButtonFeedback. Constructing the SoundPool early lets it load the click samples off the
+        // critical path, so the first tap is not silent while they decode.
+        buttonSound  = ButtonSoundManager(this)
+        buttonHaptic = ButtonHapticManager(this)
+
         super.onCreate(savedInstanceState)
         hideSystemBars()
+    }
+
+    override fun onDestroy() {
+        buttonSound?.release()
+        buttonSound  = null
+        buttonHaptic = null
+        super.onDestroy()
+    }
+
+    /**
+     * **Called from native (`shell/android-main.cpp`, on the SDL thread) on every virtual-button press
+     * and release** — the one outward JNI hook the convergence plan's Phase-E table names. The shared
+     * touch layer (`sdl-touch.cpp`) owns the DECISION to fire and passes the live BTN SOUND / BTN VIBRO
+     * scalars across; this only routes them to the two managers, which are unchanged from the Compose
+     * app. Kept resolvable by name across R8 with `@Keep` (belt-and-braces: this class is debug-only
+     * today, and R8 does not run on debug, but Phase E moves it to `src/main`).
+     *
+     * @param button ordinal of the virtual button — matches `VirtualButton`'s order exactly, which is
+     *               `pt::ui::Button`'s order (native/ui/buttons.h), so it passes straight through.
+     * @param down   true = press feel, false = release (a lift or a slide-off).
+     *
+     * ⚠️ The haptic is posted to the UI thread; the sound is not. `SoundPool.play` is thread-safe and
+     * lowest-latency called straight from here, but `ButtonHapticManager`'s bottom fallback reaches a
+     * `View.performHapticFeedback`, which wants the UI thread — and the post costs nothing perceptible
+     * on a pulse. The Vibrator itself is thread-safe; posting the whole call is simply the safe default.
+     */
+    @Keep
+    fun onButtonFeedback(
+        button: Int, down: Boolean,
+        soundOn: Boolean, soundVolume: Int,
+        vibroOn: Boolean, vibroPower: Int
+    ) {
+        val vb = VirtualButton.values().getOrNull(button) ?: return
+
+        buttonSound?.let { s ->
+            s.enabled = soundOn
+            s.volume  = (soundVolume.coerceIn(0, 255)) / 255f
+            if (down) s.onPress(vb) else s.onRelease(vb)
+        }
+
+        buttonHaptic?.let { h ->
+            h.enabled = vibroOn
+            h.power   = vibroPower.coerceIn(1, 255)
+            if (h.enabled) {
+                val view = window.decorView
+                runOnUiThread { if (down) h.onPress(view) else h.onRelease(view) }
+            }
+        }
     }
 
     /**
