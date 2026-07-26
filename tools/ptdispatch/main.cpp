@@ -1758,6 +1758,98 @@ int main() {
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // ── 23b. RESAMPLE — the SONG-selection render (needs a REAL engine, like §23) ────────────────
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // ⚠️ RESAMPLE was the port's canonical DEAD SEAM (convergence-plan.md §9): the keyboard context, the
+    // on_a_a arm and `resampled_directory()` were each half-built and CALLED FROM NOWHERE, so a
+    // dead-seam grep re-found it while every conformance tool stayed green. This section is what turns
+    // that green into a claim — it drives the whole gesture end to end on a real engine: select on SONG,
+    // A,A, name it, APPLY, and check the WAV lands in Resampled/ AND becomes a fresh SAMPLER instrument.
+    // Without it the feature is exactly as unproven as the day the plan flagged it.
+    {
+        auto engine = std::make_unique<AudioEngine>();   // ⚠️ HEAP — see §23
+        engine->setDeviceSampleRate(44100);
+
+        songcore::SongcoreHost rhost(engine.get(), 44100);
+
+        AppState rstate;
+        rstate.project = &rhost.edit_project();
+        rstate.caps    = PlatformCaps::sdl(true);
+
+        InputDispatcher rdispatch(rstate, rhost, fs_impl);
+
+        // The §23 fixture: a C4 every fourth step on tracks 0 and 1 — audible, and two tracks so the
+        // selection's track filter has something to include and something to leave out.
+        songcore::Project& p = rhost.edit_project();
+        p = songcore::make_default_project();
+        p.name = "RESAMPLE TEST";
+        for (int track = 0; track < 2; ++track) {
+            p.tracks[track].chainRefs.assign(256, -1);
+            p.tracks[track].chainRefs[0]  = track;
+            p.chains[track].phraseRefs[0] = track;
+            for (int step = 0; step < 4; ++step) {
+                songcore::PhraseStep& s = p.phrases[track].steps[static_cast<size_t>(step * 4)];
+                s.note       = songcore::Note::C4();
+                s.instrument = 0;
+            }
+        }
+        rhost.push_params();
+
+        // A SONG selection over row 0, tracks 0 and 1 — the REAL gesture: L+B anchors a CELL at the
+        // cursor, the D-pad drags its edge one column right.
+        rstate.currentScreen = ScreenType::SONG;
+        rstate.cursorRow = 0; rstate.cursorColumn = 1;
+        rdispatch.set_now(1000);
+        rdispatch.on_l_b();          // CELL selection at (0,1)
+        rdispatch.on_dpad_right();   // widen to columns 1..2 = tracks 0,1
+        ok(rstate.selection.active, "RESAMPLE: L+B on SONG starts a selection");
+        eq(rstate.selection.bounds().topLeftColumn, 1,     "RESAMPLE: …anchored at track 0 (column 1)");
+        eq(rstate.selection.bounds().bottomRightColumn, 2, "RESAMPLE: …the D-pad widened it to track 1");
+
+        // A,A on a SONG selection opens the RESAMPLE keyboard — NOT the insert-a-chain path a bare A,A
+        // takes without a selection (the arm that runs BEFORE the double-tap-position gate).
+        rdispatch.on_a_a();
+        ok(rstate.qwerty.isOpen, "RESAMPLE: A,A on a SONG selection opens the keyboard");
+        ok(rstate.qwerty.context == QwertyContext::RESAMPLE, "RESAMPLE: …with the RESAMPLE context");
+        eqs(rstate.qwerty.fieldLabel, "SAMPLE NAME:", "RESAMPLE: …labelled SAMPLE NAME");
+
+        // Name it and APPLY (START). A typed name is used verbatim, so the file is deterministic.
+        rstate.qwerty.text = "MYRESAMPLE"; rstate.qwerty.textCursor = 10;
+        rdispatch.on_start();
+
+        ok(!rstate.isRendering, "RESAMPLE: the render flag is down again afterwards");
+        eqs(rstate.statusMessage, "RESAMPLED -> INST 00",
+            "RESAMPLE: the sample lands in the first FREE slot (00) and says so");
+        ok(rstate.statusSuccess, "RESAMPLE: …reported as success (green)");
+
+        const fs::path wav = fs::path(fs_impl.resampled_directory()) / "MYRESAMPLE.wav";
+        ok(fs::exists(wav), "RESAMPLE: the WAV is Resampled/MYRESAMPLE.wav (the typed name, verbatim)");
+        ok(fs::exists(wav) && fs::file_size(wav) > 44 * 100,
+           "RESAMPLE: …with real audio in it, not just a 44-byte header");
+
+        // The slot is now a playable SAMPLER pointing at that WAV — Kotlin's createResampledInstrument.
+        const songcore::Instrument& ins = p.instruments[0];
+        ok(ins.instrumentType == songcore::InstrumentType::SAMPLER, "RESAMPLE: slot 00 is a SAMPLER");
+        ok(ins.sampleFilePath.has_value() && fs::path(*ins.sampleFilePath) == wav,
+           "RESAMPLE: …whose source IS the resampled WAV");
+        ok(ins.root == songcore::Note::C4(), "RESAMPLE: …rooted at C-4");
+
+        // The AUTO-NAME path: the selection is still live (APPLY never exits it), so A,A re-opens the
+        // keyboard; clearing the field falls back to Resample_0001, de-duplicated. Slot 00 is taken now,
+        // so this one claims the next free slot.
+        rdispatch.on_a_a();
+        ok(rstate.qwerty.isOpen && rstate.qwerty.context == QwertyContext::RESAMPLE,
+           "RESAMPLE: the selection survives APPLY, so A,A opens the keyboard again");
+        rstate.qwerty.text = ""; rstate.qwerty.textCursor = 0;
+        rdispatch.on_start();
+        ok(fs::exists(fs::path(fs_impl.resampled_directory()) / "Resample_0001.wav"),
+           "RESAMPLE: an empty name auto-generates Resample_0001.wav");
+        eqs(rstate.statusMessage, "RESAMPLED -> INST 01",
+            "RESAMPLE: …into the NEXT free slot (00 is now the first resample)");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
     // ── 24. THE EQ EDITOR (S8) — the overlay, and everything ptinput is blind to ─────────────────
     // ═════════════════════════════════════════════════════════════════════════════════════════════
     //

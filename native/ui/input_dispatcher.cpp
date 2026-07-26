@@ -1136,6 +1136,17 @@ void InputDispatcher::on_a_a() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
     if (qwerty_open() || on_browser() || eq_open() || theme_open()) return;
 
+    // ⚠️ RESAMPLE is checked BEFORE the double-tap-position gate below, and it must be — Kotlin's
+    // handleAA opens with the identical arm ahead of its InsertPosition logic. Under a SONG selection
+    // the FIRST A press COPIED the selection rather than inserting an item, so `hasInsertPos_` was
+    // never armed; the position gate would `return` and this arm would never run. Opening the RESAMPLE
+    // keyboard here is the double-tap's whole meaning on a SONG selection.
+    if (s_.currentScreen == ScreenType::SONG && s_.selection.active) {
+        open_qwerty(QwertyContext::RESAMPLE, resample_base_name(fs_), "SAMPLE NAME:", "",
+                    /*max_length=*/20, /*clear_on_first_b=*/true);
+        return;
+    }
+
     // A double-tap is only a double-tap if the cursor has not moved between the presses. Anything
     // else is two separate A presses, and each of those already did something (they inserted the
     // LAST-EDITED item — see on_button_a).
@@ -1860,6 +1871,65 @@ void InputDispatcher::export_song(bool stems) {
     s_.renderProgress = 0.0f;
     s_.statusMessage  = r.message;
     s_.statusSuccess  = r.ok;
+
+    if (render_.suspend_audio) render_.suspend_audio(false);
+}
+
+void InputDispatcher::resample_selection(const std::string& customBaseName) {
+    if (s_.isRendering) return;         // a render is already running — a second APPLY is a mis-press
+    if (!s_.selection.active) return;   // the selection lapsed between opening the keyboard and APPLY
+
+    // The selected TRACKS: SONG columns are 1-indexed (col 1 = track 0), so column − 1 is the track id,
+    // clamped to the eight that exist. Kotlin: `(topLeftColumn-1..bottomRightColumn-1).filter { 0..7 }`.
+    const SelectionBounds b = s_.selection.bounds();
+    std::set<int> tracks;
+    for (int c = b.topLeftColumn - 1; c <= b.bottomRightColumn - 1; ++c)
+        if (c >= 0 && c <= 7) tracks.insert(c);
+    if (tracks.empty()) return;
+
+    // The same synchronous shape as export_song: stop the session, hand the device to the render, and
+    // put the "RESAMPLING..." line on screen before we block.
+    host_.stop();
+    if (render_.suspend_audio) render_.suspend_audio(true);
+
+    s_.isRendering    = true;
+    s_.renderProgress = 0.0f;
+    s_.statusMessage  = "RESAMPLING...";
+    s_.statusSuccess  = true;
+    if (render_.repaint) render_.repaint();
+
+    const auto progress = [this](float p) {
+        s_.renderProgress = p;
+        if (render_.repaint) render_.repaint();
+    };
+
+    std::string        outPath;
+    const ActionResult r = render_resample(host_, fs_, b.topLeftRow, b.bottomRightRow, tracks,
+                                           customBaseName, outPath, progress);
+
+    s_.isRendering    = false;
+    s_.renderProgress = 0.0f;
+
+    if (r.ok) {
+        const int instId = create_resampled_instrument(host_, outPath);
+        if (instId >= 0) {
+            char msg[40];
+            // Kotlin: "RESAMPLED → INST 05". ASCII arrow, because the status line's 5×5 font has no
+            // U+2192 — a → would draw as tofu on the very screen this is meant to reassure.
+            std::snprintf(msg, sizeof(msg), "RESAMPLED -> INST %02X", instId);
+            s_.statusMessage = msg;
+            s_.statusSuccess = true;
+            mark_modified();   // Kotlin's projectVersion++ — a new instrument is unsaved work
+        } else {
+            // The WAV rendered but no slot could take it (pool full, or the fresh file will not reload).
+            // Kotlin sets its own text inside createResampledInstrument; one line is enough here.
+            s_.statusMessage = "NO FREE INSTRUMENT";
+            s_.statusSuccess = false;
+        }
+    } else {
+        s_.statusMessage = r.message;   // "RESAMPLE FAILED"
+        s_.statusSuccess = false;
+    }
 
     if (render_.suspend_audio) render_.suspend_audio(false);
 }
@@ -2849,6 +2919,13 @@ void InputDispatcher::qwerty_apply() {
             save_sample_to(path, /*adopt_name=*/true);
             break;
         }
+
+        case QwertyContext::RESAMPLE:
+            // An empty field (the user cleared the pre-filled suggestion) auto-names Resample_NNNN;
+            // anything typed is used as the base name. The selection is still live — opening the
+            // keyboard never touched it — so resample_selection reads s_.selection itself.
+            resample_selection(text);
+            break;
     }
 }
 

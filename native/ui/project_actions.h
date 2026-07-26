@@ -15,6 +15,7 @@
 // and counts the files).
 
 #include <functional>
+#include <set>
 #include <string>
 
 #include "songcore/host.h"
@@ -58,6 +59,42 @@ ActionResult render_mix(songcore::SongcoreHost& host, FileSystem& fs, AppState& 
  */
 ActionResult render_stems(songcore::SongcoreHost& host, FileSystem& fs, AppState& s,
                           const std::function<void(float)>& progress);
+
+// ─── SONG selection → RESAMPLE ─────────────────────────────────────────────────────────────────
+//
+// The twin of Kotlin's RenderController.renderSelectionToWav + generateResampledBaseName +
+// InstrumentController.createResampledInstrument. A SONG selection is rendered — the chosen row range,
+// only the chosen tracks, WITH the master bus (like the mix, not like a stem) — to a WAV in Resampled/,
+// and that WAV is loaded into the first free instrument slot as a clean SAMPLER. Zone C on Android; the
+// C++ copy is the measured one (ptdispatch renders a real selection and checks what lands).
+
+/**
+ * The suggested base name the RESAMPLE keyboard opens on — `Resample_NNNN`, the first free in
+ * Resampled/ (no directory, no extension). Kotlin's `generateResampledBaseName`.
+ */
+std::string resample_base_name(FileSystem& fs);
+
+/**
+ * Render rows [startRow,endRow] of `trackFilter` (0-indexed track ids) to a WAV in Resampled/, WITH the
+ * master bus, and hand the path back in `outPath`. SYNCHRONOUS — the caller silences the audio device
+ * first, exactly as render_mix does. `customBaseName` empty ⇒ auto `Resample_NNNN` (de-duplicated); a
+ * non-empty name is sanitized and used verbatim, OVERWRITING — Kotlin's `generateResampledFilename`
+ * only de-duplicates the auto path. On any failure returns {false,"RESAMPLE FAILED"} and leaves
+ * `outPath` untouched. Mirrors renderSelectionToWav: prepare → schedule(range,filter) → render →
+ * finish, with finish ALWAYS run.
+ */
+ActionResult render_resample(songcore::SongcoreHost& host, FileSystem& fs,
+                             int startRow, int endRow, const std::set<int>& trackFilter,
+                             const std::string& customBaseName, std::string& outPath,
+                             const std::function<void(float)>& progress);
+
+/**
+ * A resampled WAV → the first genuinely FREE instrument slot, as a clean SAMPLER rooted at C-4. Returns
+ * the slot id, or -1 if there is no free slot or the load failed. `instrument_is_free`, NOT
+ * `sampleFilePath == null`: a configured SoundFont slot also has a null sample path, and claiming one
+ * would leave a broken SOUNDFONT instrument with a sample behind it. Kotlin's createResampledInstrument.
+ */
+int create_resampled_instrument(songcore::SongcoreHost& host, const std::string& wavPath);
 
 /** SETTINGS → TEMPLATE → SAVE. The current project becomes what the app boots into. */
 ActionResult save_template(songcore::SongcoreHost& host, FileSystem& fs);

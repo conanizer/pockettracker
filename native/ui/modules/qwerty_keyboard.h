@@ -37,10 +37,16 @@ namespace pt::ui {
  * What APPLY does with the text. The keyboard itself knows none of this — it collects a string and
  * hands it back, and the dispatcher acts on the purpose it opened the keyboard WITH.
  *
- * ⚠️ SCOPE: the five S6a can honour. Kotlin has ten. The other five belong to screens the port has not
- * reached (PROJECT_NAME → the PROJECT screen; SAMPLE_NAME / SAMPLE_SAVE → the sample editor, S6b;
- * THEME_SAVE → the theme editor; RESAMPLE → the render path) and land WITH them. VIDEO_EXTRACT lands
- * never: the port plan's 2026-07-11 amendment deletes the video→WAV converter from both platforms.
+ * ⚠️ SCOPE: NINE of Kotlin's ten. RESAMPLE is the ninth, and it lands here with the SONG-selection
+ * render path (the render itself is project_actions::render_resample). The eight before it arrived with
+ * their screens (PROJECT_NAME → the PROJECT screen; SAMPLE_NAME / SAMPLE_SAVE → the sample editor, S6b;
+ * THEME_SAVE → the theme editor). VIDEO_EXTRACT lands never: the port plan's 2026-07-11 amendment
+ * deletes the video→WAV converter from both platforms — the mp4-as-in-place-sample model replaces it,
+ * and that model does not type a name, so it never opens this keyboard.
+ *
+ * ⚠️ The ORDER here is NOT Kotlin's (Kotlin opens with PROJECT_NAME). Nothing serializes a
+ * QwertyContext ordinal across the boundary — the two enums have always disagreed — so RESAMPLE is
+ * appended rather than slotted in, keeping every existing value stable.
  */
 enum class QwertyContext {
     FILE_RENAME,      // rename `contextExtra` (an absolute path), keeping its extension
@@ -50,7 +56,8 @@ enum class QwertyContext {
     SAMPLE_NAME,      // the sample editor's NAME row — renames the editor's sample AND its instrument
     SAMPLE_SAVE,      // SAVE-AS: write the edited sample to `contextExtra`/<text>.wav, de-duplicating
     PROJECT_NAME,     // the project's name (PROJECT row 2) — plain text, no file touched
-    THEME_SAVE        // write the live theme to `contextExtra`/<text>.ptt, and name it <text> (S9)
+    THEME_SAVE,       // write the live theme to `contextExtra`/<text>.ptt, and name it <text> (S9)
+    RESAMPLE          // render the SONG selection to `<Resampled>/<text>.wav`, then auto-instrument it
 };
 
 /** 3 key rows of 10, then the space bar. The action row (ABORT / APPLY) is virtual — see below. */

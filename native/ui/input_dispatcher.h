@@ -685,6 +685,15 @@ class InputDispatcher {
     /** EXPORT. Renders SYNCHRONOUSLY; `on_render_progress_` repaints the frame from inside it. */
     void export_song(bool stems);
 
+    /**
+     * SONG-selection RESAMPLE — the APPLY of the RESAMPLE keyboard. Renders the live selection to a WAV
+     * in Resampled/ and loads it into a fresh instrument. SYNCHRONOUS, exactly like export_song: it
+     * stops the transport, suspends the audio device, repaints from the render's progress, and restores
+     * the device after. `customBaseName` empty ⇒ auto `Resample_NNNN`. A no-op if a render is already
+     * running or the selection has gone.
+     */
+    void resample_selection(const std::string& customBaseName);
+
     // ── The FILE BROWSER ────────────────────────────────────────────────────────────────────────
     /** Leave the browser for the screen it was opened from, dropping the audition on the way out. */
     void close_file_browser();

@@ -170,6 +170,82 @@ ActionResult render_stems(songcore::SongcoreHost& host, FileSystem& fs, AppState
     return ActionResult{true, "STEMS EXPORTED!"};
 }
 
+// ─── SONG selection → RESAMPLE ─────────────────────────────────────────────────────────────────
+
+std::string resample_base_name(FileSystem& fs) {
+    const std::string dir = fs.resampled_directory();
+    for (int index = 1; index < 10000; ++index) {
+        const std::string base = "Resample_" + pad4(index);
+        if (!fs.file_exists(dir + "/" + base + ".wav")) return base;
+    }
+    // Ten thousand resamples with none freed. Kotlin gives up the same way, returning the last name.
+    return "Resample_9999";
+}
+
+ActionResult render_resample(songcore::SongcoreHost& host, FileSystem& fs,
+                             int startRow, int endRow, const std::set<int>& trackFilter,
+                             const std::string& customBaseName, std::string& outPath,
+                             const std::function<void(float)>& progress) {
+    const std::string dir = fs.resampled_directory();
+
+    // A typed name is used verbatim (and OVERWRITES); an empty field auto-names and de-duplicates. This
+    // is Kotlin's generateResampledFilename exactly: only the auto branch loops on file_exists. In
+    // practice the keyboard is pre-filled with resample_base_name() — already the first free slot — so
+    // the common path writes `Resample_NNNN.wav` that nothing else holds.
+    const std::string path = customBaseName.empty()
+                                 ? unique_render_path(fs, dir, "Resample")
+                                 : dir + "/" + songcore::safe_project_name(customBaseName) + ".wav";
+
+    // prepare → schedule(range, filter) → render → finish, mirroring renderSelectionToWav. finish_render
+    // MUST run even when nothing scheduled (Kotlin's try/finally): prepare_render silenced the live
+    // stream and reset the chains, so bailing without finish would leave the engine torn down.
+    host.prepare_render(startRow, endRow);
+    const int64_t songFrames = host.schedule_song_range(startRow, endRow, &trackFilter);
+    if (songFrames <= 0) {
+        host.finish_render();
+        return ActionResult{false, "RESAMPLE FAILED"};
+    }
+
+    // stemsMode 0 + master bus ON — a resample is a MIX of the selected tracks, not a dry stem.
+    const songcore::RenderStats stats =
+        host.render_to_wav(path, songFrames, /*stemsMode=*/0, /*applyMasterBus=*/true, progress);
+    host.finish_render();
+
+    if (!stats.ok || stats.totalFrames <= 0) return ActionResult{false, "RESAMPLE FAILED"};
+
+    outPath = path;
+    return ActionResult{true, ""};   // the caller builds "RESAMPLED -> INST xx" once the slot lands
+}
+
+int create_resampled_instrument(songcore::SongcoreHost& host, const std::string& wavPath) {
+    songcore::Project& p = host.edit_project();
+
+    int slot = -1;
+    for (int i = 0; i < static_cast<int>(p.instruments.size()); ++i) {
+        if (songcore::instrument_is_free(p.instruments[static_cast<size_t>(i)])) { slot = i; break; }
+    }
+    if (slot < 0) return -1;
+
+    // load_sample decodes the WAV into the slot, learns its rate ratio, and pushes the slot's playback
+    // params. A failure here (a WAV that will not open) leaves the slot untouched and free.
+    if (!host.load_sample(slot, wavPath)) return -1;
+
+    // instrument_is_free already guaranteed a clean SAMPLER slot at defaults, but set type/SF/root/vol/
+    // pan defensively so the claimed slot can never be a hybrid — then re-push, as Kotlin re-runs
+    // updateInstrumentPlaybackParams after the field writes.
+    songcore::Instrument& ins = p.instruments[static_cast<size_t>(slot)];
+    ins.instrumentType = songcore::InstrumentType::SAMPLER;
+    ins.soundfontPath.reset();
+    ins.sampleFilePath = wavPath;
+    ins.sampleId       = slot;
+    ins.root           = songcore::Note::C4();
+    ins.volume         = 0xFF;
+    ins.pan            = 0x80;
+    host.push_instrument(slot);
+
+    return slot;
+}
+
 // ─── The song TEMPLATE ───────────────────────────────────────────────────────────────────────────
 
 ActionResult save_template(songcore::SongcoreHost& host, FileSystem& fs) {
