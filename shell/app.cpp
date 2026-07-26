@@ -503,6 +503,21 @@ int run(const AppConfig& cfg) {
     // cost, never per frame.
     int loadedOverlayIdx = -1;
 
+    // ── IS THERE A PHYSICAL PAD? (the touch vs FULL gate) ──────────────────────────────────────────
+    //
+    // `physicalGamepadPresent` is the platform's answer when it has one — Android's, because SDL's joystick
+    // count is not the truth there (it opens the emulator's keyboard as a controller; see app.h). Desktop
+    // and the handhelds leave it null and fall back to `controller_count()`, which IS the truth on those.
+    // Cached, not asked every frame: on Android that call is a JNI round trip, so it is refreshed only when
+    // SDL reports a controller add/remove (`padDirty`, set in the event loop) — which is exactly when the
+    // answer can change, so hot-plug still moves the app between the on-screen gamepad and a bare frame.
+    auto compute_has_pad = [&]() -> bool {
+        return cfg.physicalGamepadPresent ? cfg.physicalGamepadPresent()
+                                          : (input.controller_count() > 0);
+    };
+    bool physicalPad = compute_has_pad();
+    bool padDirty    = false;
+
     // ── C7 state ─────────────────────────────────────────────────────────────────────────────────
     // `sawInput`     — anything happened this frame that could have changed what is on screen.
     // `audibleEdge`  — audio was audible LAST frame, so the first silent frame is still drawn once
@@ -582,8 +597,26 @@ int run(const AppConfig& cfg) {
             // `controller_count()` tracks hot-plug: plug a pad and the skin disappears next frame.
             // ⚠️ This is what fixed the split gate — the portrait skin used to read `cfg.touchCapable`
             // alone and would activate on a controller-equipped phone whose buttons then did nothing.
-            const bool useTouch = cfg.touchCapable && input.controller_count() == 0;
+            //
+            // ⚠️ **NOT `controller_count()` DIRECTLY — see `physicalPad` above.** On Android SDL opens the
+            // emulator's keyboard as a game controller, so the raw count is wrong; the platform hook answers
+            // instead. `padDirty` is armed by a controller add/remove in the event loop below, so the JNI
+            // answer is refreshed the frame after the hardware changes, never every frame.
+            if (padDirty) { physicalPad = compute_has_pad(); padDirty = false; }
+            const bool useTouch = cfg.touchCapable && !physicalPad;
             touch.set_enabled(useTouch);
+
+            // ⚠️ **THE SETTINGS > LAYOUT ROW FOLLOWS THE TOUCH GATE, NOT JUST THE STATIC CAP.**
+            // `caps.touchLayouts` is true on every Android build, but on a device WITH physical buttons —
+            // a handheld like the AYANEO, which auto-selects FULL — there is no touch layout to configure,
+            // so the row would draw a header with no options under it. Gate the row's very EXISTENCE on
+            // `useTouch` (a touchscreen AND no pad), ANDed with the platform's static cap so desktop and
+            // the Linux handhelds (cap already false) are untouched. `settings_row_visible`,
+            // `settings_row_offset_y`, the cursor wrap and the cursor context all read this one flag, so
+            // hiding it here removes the row everywhere consistently — platform_caps.h's "a setting that
+            // configures nothing is a lie", applied at runtime because the fact it rests on (a controller)
+            // is a runtime one. Recomputed with `useTouch`, so unplugging a pad brings the row back.
+            state.caps.touchLayouts = cfg.caps.touchLayouts && useTouch;
 
             // Push the user's live BTN SOUND / BTN VIBRO scalars so the next tap plays with whatever
             // SETTINGS currently shows — read here, in the loop, because they can change live. A no-op
@@ -680,6 +713,13 @@ int run(const AppConfig& cfg) {
             // window. The gate is allowed to be conservative; that is what the pixel compare in
             // `present` is for.
             sawInput = true;
+
+            // A controller plugged or unplugged changes the answer to "is there a physical pad?", so
+            // re-ask it next frame (see physicalPad). Cheap here — just a flag; the recompute is gated on
+            // it. Covers both the game-controller and raw-joystick add/remove SDL emits.
+            if (e.type == SDL_CONTROLLERDEVICEADDED || e.type == SDL_CONTROLLERDEVICEREMOVED ||
+                e.type == SDL_JOYDEVICEADDED || e.type == SDL_JOYDEVICEREMOVED)
+                padDirty = true;
 
             // ⚠️ **THE BLACK-SCREEN-ON-RESUME FIX.** `sawInput` above makes this frame DRAW, but C7's
             // pixel gate in `present` still SKIPS the upload when the drawn frame is byte-identical to

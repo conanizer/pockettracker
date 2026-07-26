@@ -156,6 +156,37 @@ private:
     jmethodID mid_       = nullptr;
 };
 
+// ─── does a physical game controller exist? → SdlActivity (convergence D) ────────────────────────────
+//
+// The shared layout gate (app.cpp `useTouch`) must answer "is there a real pad?" the way the Compose app
+// did — and on Android SDL cannot, because `isDeviceSDLJoystick` counts the emulator's keyboard as a
+// controller (see app.h `physicalGamepadPresent`). Only `InputDevice.getSources()` tells them apart, and
+// it is Java-only, so this JNIs into `SdlActivity.hasPhysicalGameButtons()`, which runs Kotlin's exact
+// SOURCE_GAMEPAD/SOURCE_JOYSTICK test. Resolved by name each call — null/exception-safe, degrading to
+// "no pad" (the touch UI) rather than a crash, exactly like AndroidButtonFeedback above. Cheap: the frame
+// loop only asks at boot and when SDL reports a controller add/remove.
+bool android_has_physical_gamepad() {
+    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+    if (!env) return false;
+    jobject activity = static_cast<jobject>(SDL_AndroidGetActivity());  // LOCAL ref — deleted below
+    if (!activity) return false;
+
+    bool      result = false;
+    jclass    cls    = env->GetObjectClass(activity);
+    jmethodID mid    = env->GetMethodID(cls, "hasPhysicalGameButtons", "()Z");
+    if (env->ExceptionCheck()) { env->ExceptionClear(); mid = nullptr; }
+    if (mid) {
+        result = env->CallBooleanMethod(activity, mid) == JNI_TRUE;
+        if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); result = false; }
+    } else {
+        __android_log_print(ANDROID_LOG_WARN, kLogTag,
+                            "hasPhysicalGameButtons()Z not found - assuming no pad (touch UI)");
+    }
+    env->DeleteLocalRef(cls);
+    env->DeleteLocalRef(activity);
+    return result;
+}
+
 void redirect_stdio_to_logcat() {
     // Unbuffered for the same reason main.cpp is: a buffer that dies with the process takes the only
     // record of the boot with it.
@@ -311,6 +342,14 @@ int main(int argc, char** argv) {
     // offers a mode that does nothing (platform_caps.h's own rule). Desktop and the handhelds leave
     // this false — main.cpp says nothing, so the default (false) is the safe answer there.
     cfg.touchCapable = true;
+
+    // ⚠️ **HOW "IS THERE A REAL PAD?" IS ANSWERED ON ANDROID — NOT by SDL's joystick count.** SDL opens
+    // the emulator's keyboard (`qwerty2`, a DPAD source with a BUTTON_A keylayout) as a game controller, so
+    // `SdlInput::controller_count()` reads 1 with no pad attached and the shell would drop the touch UI to
+    // a bare fullscreen frame with an empty LAYOUT row. Only Android's InputDevice source flags tell the
+    // keyboard from a pad, so the gate asks Java. Desktop/handheld leave this null and fall back to the SDL
+    // count, which IS the truth there. See app.h physicalGamepadPresent and android_has_physical_gamepad.
+    cfg.physicalGamepadPresent = android_has_physical_gamepad;
 
     // ⚠️ **`cfg.windowed = true` UNLOCKS PORTRAIT, AND THAT IS AN ORIENTATION DECISION, NOT A COSMETIC
     // ONE.** It becomes `SDL_WINDOW_RESIZABLE`, which SDL hands straight to

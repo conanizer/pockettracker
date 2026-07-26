@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import android.util.Log
+import android.view.InputDevice
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -263,6 +264,56 @@ class SdlActivity : SDLActivity() {
                 runOnUiThread { if (down) h.onPress(view) else h.onRelease(view) }
             }
         }
+    }
+
+    /**
+     * **Called from native (`shell/android-main.cpp`) to decide the touch vs FULL layout** — the SDL
+     * analogue of `DeviceAdapter.hasPhysicalGameButtons()`, and a straight copy of its logic so the two
+     * activities answer identically. Returns true iff a REAL game controller is attached; the shared shell
+     * then draws the on-screen gamepad + PORTRAIT2 skin only when this is false and the hardware is a
+     * touchscreen.
+     *
+     * ⚠️ **THIS EXISTS BECAUSE SDL AND ANDROID DISAGREE ABOUT WHAT A CONTROLLER IS.** SDL's
+     * `isDeviceSDLJoystick` opens any device with a GAMEPAD *or a bare DPAD* source, so the Android
+     * emulator's built-in keyboard (`qwerty2`, sources `KEYBOARD | DPAD`, keylayout mapping `BUTTON_A`)
+     * registers as a full game controller — `SdlInput::controller_count()` reads 1 and the app wrongly
+     * drops the touch UI (fullscreen frame, empty LAYOUT row). Android's `SOURCE_GAMEPAD`/`SOURCE_JOYSTICK`
+     * flag is the only thing that tells the keyboard from a pad, and it is a Java-only API. Called by name
+     * over JNI, so `@Keep` guards it against R8 (belt-and-braces: debug-only today, but Phase E moves this
+     * class to `src/main`).
+     */
+    @Keep
+    fun hasPhysicalGameButtons(): Boolean {
+        for (deviceId in InputDevice.getDeviceIds()) {
+            val device = InputDevice.getDevice(deviceId) ?: continue
+
+            // The emulator UI pseudo-device — not a real controller. DeviceAdapter skips it by name too.
+            if (device.name == "Virtual") continue
+
+            val sources = device.sources
+
+            // A real pad advertises GAMEPAD (face buttons) or JOYSTICK (axes). A bare DPAD/KEYBOARD does
+            // NOT count — which is exactly what excludes the emulator's qwerty2.
+            val hasGamepad  = (sources and InputDevice.SOURCE_GAMEPAD)  == InputDevice.SOURCE_GAMEPAD
+            val hasJoystick = (sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
+            if (hasGamepad || hasJoystick) {
+                Log.i(TAG, "physical game buttons: '${device.name}' (gamepad/joystick source)")
+                return true
+            }
+
+            // A keyboard-classed device whose NAME says it is a controller (some Xbox pads report as
+            // keyboards) — the same name rescue DeviceAdapter applies.
+            val isKeyboard = (sources and InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD
+            if (isKeyboard) {
+                val lowerName = device.name.lowercase()
+                if (lowerName.contains("xbox") || lowerName.contains("controller") ||
+                    lowerName.contains("gamepad")) {
+                    Log.i(TAG, "physical game buttons: '${device.name}' (keyboard-named controller)")
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     /**

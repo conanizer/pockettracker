@@ -151,6 +151,26 @@ struct AppConfig {
     ButtonFeedback* buttonFeedback = nullptr;
 
     /**
+     * Is a PHYSICAL game controller present right now? NULLABLE and Android-only. The shared layout gate
+     * (see app.cpp `useTouch`) asks "is there a real pad?" to choose the on-screen gamepad + PORTRAIT2
+     * skin vs a full-bleed frame — the SDL analogue of `DeviceAdapter.hasPhysicalGameButtons()`.
+     * Desktop and the handhelds leave this NULL and the gate falls back to `SdlInput::controller_count()`,
+     * which is the device truth there: SDL's joystick list is exactly the set of real pads.
+     *
+     * ⚠️ **ANDROID NEEDS THE OVERRIDE BECAUSE SDL's JOYSTICK LIST IS NOT THAT TRUTH ON A PHONE.** SDL's
+     * `isDeviceSDLJoystick` (SDLControllerManager.java) opens any device with a GAMEPAD *or a bare DPAD*
+     * source, and the Android emulator's built-in keyboard — `qwerty2`, `Sources: KEYBOARD | DPAD`, whose
+     * keylayout maps `BUTTON_A` and 14 other pad buttons — registers as a full game controller. So
+     * `controller_count()` reads 1 on a device with no pad, `useTouch` goes false, and the app wrongly
+     * shows the bare fullscreen frame with an empty LAYOUT row. Kotlin never had the bug: it counts only
+     * `SOURCE_GAMEPAD`/`SOURCE_JOYSTICK`, which `qwerty2` lacks. That flag is Android-only and SDL's C API
+     * does not expose it, so `android-main.cpp` JNIs into `SdlActivity.hasPhysicalGameButtons()`, which
+     * applies that exact source test. Hot-plug still works: the gate re-asks when SDL reports a
+     * controller add/remove.
+     */
+    std::function<bool()> physicalGamepadPresent;
+
+    /**
      * Polled once a frame; true ends the session as an UNCLEAN exit, so the autosave is kept.
      *
      * Desktop hands its SIGTERM/SIGINT flag through here. ⚠️ May be null, and Android's will be —
