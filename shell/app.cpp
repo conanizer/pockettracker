@@ -398,11 +398,73 @@ int run(const AppConfig& cfg) {
     // ⚠️ So the device is PAUSED, not merely stopped. Kotlin stops PLAYBACK and leaves its Oboe stream
     // open and idle, which is a race it happens to win (an idle callback reads a silent engine). A
     // paused device is a guarantee instead of a coincidence, and it costs one call.
+    // ── The present branch, shared by the frame loop and the synchronous repaint hook ─────────────
+    //
+    // Composites whatever THIS orientation's skin is around the just-drawn 640x480 `canvas`: the
+    // PORTRAIT2 device skin (present_skinned — chrome behind the frame, button cluster in front) or the
+    // landscape LEFT/RIGHT touch panels (present), plus the CRT screen overlay (D6) over the frame in
+    // either. Returns whether a frame actually reached the screen — the C7 pixel gate skips one identical
+    // to the last, and the loop counts the rest.
+    //
+    // ⚠️ It lives in ONE place for a reason. When this was inline in the loop only, the dispatcher's
+    // `repaint` hook — the path a BLOCKING render uses to push its "RESAMPLING... 43%" readout on screen
+    // while the loop runs no frames — did a bare fullscreen `video.present`, flashing the PORTRAIT2 skin
+    // away for the whole length of a resample/export and snapping it back when the loop resumed. Both
+    // callers now go through here, so that divergence cannot reopen. Assumes layout.draw() already
+    // refreshed `canvas`.
+    const auto present_current = [&]() -> bool {
+        // The CRT overlay: a translucent PNG over the tracker's on-screen box at STR/255 alpha, on the
+        // FRAME rect (portrait.frame_rect() in the bezel, video.frame_rect() centred in landscape),
+        // drawn AFTER the frame and BEFORE the buttons so it filters the screen but not the gamepad.
+        // Off (index 0 / STR 0 / nothing decoded — every non-Android build) draws nothing.
+        const int  ovStr = state.settings.overlayStrength;
+        const bool ovOn  = state.settings.overlayIndex > 0 && ovStr > 0 && screenOverlay.loaded();
+
+        // A CRT change (selection OR strength) must force one repaint even on an otherwise-still screen —
+        // the canvas need not change when only the overlay does. Bits 48-60 are disjoint from the
+        // touch/portrait signatures (buttons low, geometry 16-47, active markers 62/63), so an XOR into
+        // either cannot collide. Zero when off, leaving those signatures untouched.
+        const uint64_t crtSig = ovOn
+            ? ((1ull << 60) | (static_cast<uint64_t>(state.settings.overlayIndex & 0xF) << 56) |
+               (static_cast<uint64_t>(ovStr & 0xFF) << 48))
+            : 0;
+
+        if (portrait.active()) {
+            // PORTRAIT2 (convergence D): the retro-device skin. The 640x480 frame lands in the bezel
+            // (portrait.frame_rect), NOT window-centred; the casing is the clear, the chrome bands the
+            // underlay behind the frame, the button cluster the overlay in front. The buttons are
+            // pressable: touch.layout_portrait2 (in the loop) hit-tests this same cluster.
+            const uint32_t bg = state.theme.background;   // the tracker's own bg fills the bezel gap
+            const auto chrome = [&portrait, &skin, bg](SDL_Renderer* r) {
+                portrait.draw_chrome(r, skin, bg);
+            };
+            const auto buttons = [&portrait, &skin, &helvFont, &arrowFont, &input,
+                                  &screenOverlay, ovOn, ovStr](SDL_Renderer* r) {
+                if (ovOn) screenOverlay.draw(r, portrait.frame_rect(), ovStr);
+                portrait.draw_buttons(r, skin, helvFont, arrowFont, input);
+            };
+            return video.present_skinned(canvas, portrait.casing_argb(), portrait.frame_rect(),
+                                         chrome, buttons, portrait.signature(input) ^ crtSig);
+        }
+        // Landscape / desktop: the centred frame, the LEFT/RIGHT touch panels in the bars beside it —
+        // inert (drawing nothing, signature 0) when there is no touchscreen.
+        const auto overlay = [&touch, &input, &screenOverlay, ovOn, ovStr,
+                              fr = video.frame_rect()](SDL_Renderer* r) {
+            if (ovOn) screenOverlay.draw(r, fr, ovStr);
+            touch.draw(r, input);
+        };
+        return video.present(canvas, state.theme.background, overlay, touch.signature(input) ^ crtSig);
+    };
+
     ui::InputDispatcher::RenderHooks hooks;
     hooks.suspend_audio = [&audio](bool suspend) { audio.setPaused(suspend); };
+    // A SYNCHRONOUS repaint — the "RENDERING... 43%" / "RESAMPLING..." readout the dispatcher pushes on
+    // screen from INSIDE a blocking render (the frame loop runs no frames for its duration). It presents
+    // through present_current, the SAME branch the loop uses, so it keeps the PORTRAIT2 skin instead of
+    // flashing the bare frame fullscreen for the render's duration. See present_current above.
     hooks.repaint       = [&]() {
         layout.draw(canvas, state);
-        video.present(canvas, state.theme.background);
+        present_current();
     };
     dispatch.set_render_hooks(std::move(hooks));
 
@@ -892,57 +954,10 @@ int run(const AppConfig& cfg) {
             // picture on a black wall), the device CASING in PORTRAIT2 — because a value that must be
             // re-pushed on change is a value some future screen forgets to re-push (the theme editor can
             // change the first mid-session). The on-screen controls' fingerprint joins the C7 gate so a
-            // press highlight is not skipped as an unchanged canvas.
-            // ── The screen overlay (D6): the CRT filter drawn OVER the frame, both orientations ────
-            //
-            // A translucent PNG over the tracker's on-screen box, at STR/255 alpha — the shell twin of
-            // Kotlin drawing `overlayBitmap` over `PixelPerfectTracker`. It lands on the FRAME rect
-            // (`video.frame_rect()` in landscape, `portrait.frame_rect()` in the bezel), drawn AFTER the
-            // frame and BEFORE the on-screen buttons, so it filters the screen but not the gamepad.
-            // Off (index 0 / STR 0 / nothing decoded — the case on every non-Android build) draws nothing.
-            const int  ovStr = state.settings.overlayStrength;
-            const bool ovOn  = state.settings.overlayIndex > 0 && ovStr > 0 && screenOverlay.loaded();
-
-            // A CRT change (selection OR strength) must force one repaint even on an otherwise-still
-            // screen — the canvas need not change when only the overlay does. Bits 48–60 are disjoint
-            // from the touch/portrait signatures (buttons low, geometry 16–47, active markers 62/63), so
-            // an XOR into either cannot collide. Zero when off, leaving those signatures untouched.
-            const uint64_t crtSig = ovOn
-                ? ((1ull << 60) | (static_cast<uint64_t>(state.settings.overlayIndex & 0xF) << 56) |
-                   (static_cast<uint64_t>(ovStr & 0xFF) << 48))
-                : 0;
-
-            bool didPresent;
-            if (portrait.active()) {
-                // PORTRAIT2 (convergence D): the retro-device skin. The 640×480 frame lands in the
-                // bezel (portrait.frame_rect), NOT window-centred; the casing is the clear, the four
-                // chrome bands are the underlay drawn BEHIND the frame, the button cluster the overlay
-                // in front. The buttons are pressable: `touch.layout_portrait2` above hit-tests this same
-                // cluster, so a finger down feeds `SdlInput` and `draw_buttons` reads it back as pressed.
-                const uint32_t bg = state.theme.background;   // the tracker's own bg fills the bezel gap
-                const auto chrome = [&portrait, &skin, bg](SDL_Renderer* r) {
-                    portrait.draw_chrome(r, skin, bg);
-                };
-                const auto buttons = [&portrait, &skin, &helvFont, &arrowFont, &input,
-                                      &screenOverlay, ovOn, ovStr](SDL_Renderer* r) {
-                    if (ovOn) screenOverlay.draw(r, portrait.frame_rect(), ovStr);
-                    portrait.draw_buttons(r, skin, helvFont, arrowFont, input);
-                };
-                didPresent = video.present_skinned(canvas, portrait.casing_argb(), portrait.frame_rect(),
-                                                   chrome, buttons,
-                                                   portrait.signature(input) ^ crtSig);
-            } else {
-                // Landscape / desktop: the centred frame, the LEFT/RIGHT touch panels in the bars beside
-                // it — inert (drawing nothing, signature 0) when there is no touchscreen.
-                const auto overlay = [&touch, &input, &screenOverlay, ovOn, ovStr,
-                                      fr = video.frame_rect()](SDL_Renderer* r) {
-                    if (ovOn) screenOverlay.draw(r, fr, ovStr);
-                    touch.draw(r, input);
-                };
-                didPresent = video.present(canvas, state.theme.background, overlay,
-                                           touch.signature(input) ^ crtSig);
-            }
-            if (didPresent) ++presented;
+            // press highlight is not skipped as an unchanged canvas. The portrait/landscape branch, the
+            // CRT overlay (D6) and the C7 signatures all live in `present_current` (declared above the
+            // render hooks), so the dispatcher's synchronous repaint takes the identical path.
+            if (present_current()) ++presented;
             drewOnce = true;
         } else {
             ++skipped;
