@@ -60,6 +60,14 @@ struct SettingsValues {
     int  overlayIndex      = 0;   // 0 = "OFF"; 1.. = a file
     int  overlayCount      = 1;   // "OFF" + however many files
     int  overlayStrength   = 128;
+
+    // ⚠️ The PERSISTED overlay selection is the STABLE ID STRING, not `overlayIndex` — same rule and
+    // same reason as `portraitSkin` above (an index is meaningless without the list it indexes). The
+    // shell resolves this to `overlayIndex` at boot (shell/overlay.h) and writes it back from whichever
+    // overlay is chosen. Serialized as `overlay_name`, matching Android's SharedPreferences key so the
+    // C6 v2 prefs import lands here. "OFF" is the no-overlay choice.
+    std::string overlayName = "OFF";
+
     bool buttonSoundEnabled = false;
     int  buttonSoundVolume  = 255;
     bool buttonVibroEnabled = false;

@@ -81,12 +81,18 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     // skin list being reordered; the shell resolves the name to an index at boot (device_skin.h). An
     // absent key keeps the default, which is what an upgrading user's file has until they touch it.
     //
-    // ⚠️ LAYOUT and OVERLAY (the row's *selection*) are STILL deliberately not here. Their lists are not
-    // yet fixed on the shell — the layout MODE override is unimplemented (the shell auto-selects by
-    // orientation + controller presence), and the overlay PNG list is D6. Android keeps `layout_mode`
-    // and `overlay_name` in SharedPreferences until those land; `SETTINGS_IMPORT_VERSION` makes that
-    // versioned second pass safe, so this need not have been clairvoyant.
+    // ⚠️ OVERLAY is now persisted too, as a STABLE STRING — the "Phase D second pass" the note below
+    // anticipated, landing with D6's CRT overlay. `overlay_name` (matching Android's SharedPreferences
+    // key) survives the shell's overlay list being reordered; the shell resolves the name to an index at
+    // boot (shell/overlay.h), and "OFF" is the no-overlay choice. An absent key keeps the default (OFF),
+    // which is what an upgrading user's file has until they touch it.
+    //
+    // ⚠️ LAYOUT (the row's *mode selection*) is STILL deliberately not here. There is no shell-side layout
+    // MODE override to resolve a name against — the shell auto-selects portrait/landscape by orientation
+    // and fullscreen by controller presence — so Android keeps `layout_mode` in SharedPreferences with no
+    // consumer on this UI. `SETTINGS_IMPORT_VERSION` keeps that versioned and safe.
     values.portraitSkin       = get_string(j, "portrait_skin", values.portraitSkin);
+    values.overlayName        = get_string(j, "overlay_name",  values.overlayName);
     values.buttonSoundEnabled = get_bool(j, "buttonSound",  values.buttonSoundEnabled);
     values.buttonVibroEnabled = get_bool(j, "buttonVibro",  values.buttonVibroEnabled);
     values.buttonSoundVolume  = clamp(get_int(j, "buttonSoundVolume", values.buttonSoundVolume), 0, 255);
@@ -150,6 +156,7 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
     // defaults; on Android they are what the C6 import rescued out of SharedPreferences. `portrait_skin`
     // is the one selection now LIVE on the shell (Phase D), written as a stable id string.
     j["portrait_skin"]      = values.portraitSkin;
+    j["overlay_name"]       = values.overlayName;   // D6 — the overlay SELECTION, a stable id string
     j["buttonSound"]        = values.buttonSoundEnabled;
     j["buttonSoundVolume"]  = values.buttonSoundVolume;
     j["buttonVibro"]        = values.buttonVibroEnabled;

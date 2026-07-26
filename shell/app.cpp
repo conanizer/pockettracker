@@ -20,6 +20,7 @@
 
 #include "device_skin.h"
 #include "skin.h"
+#include "overlay.h"
 #include "font.h"
 #include "portrait2.h"
 
@@ -332,6 +333,15 @@ int run(const AppConfig& cfg) {
     Font arrowFont;
     if (cfg.touchCapable) arrowFont.load(video.renderer(), "fonts/LinBiolinum_Rah.ttf", cfg.console);
 
+    // ── The screen overlay (convergence D6): the CRT filter drawn OVER the frame ─────────────────
+    //
+    // One texture, decoded through the same D7 asset seam / D2 decoder as the skin, owned by the
+    // renderer (unload() before video.close()). It is NOT gated on a touchscreen like the skin — it is
+    // a screen filter, so it applies wherever the OVERLAY row exists (caps.skinOverlay, Android/debug).
+    // The actual `screenOverlay.load` happens in the loop below (the `loadedOverlayIdx` sync), so a live
+    // selection change decodes the PNG once, on the deliberate user action, not every frame.
+    ScreenOverlay screenOverlay;
+
     // ── The PORTRAIT2 device-skin renderer (convergence D) ───────────────────────────────────────
     //
     // Owns no resources — it composites `skin`'s textures into the band geometry each frame — so it
@@ -362,6 +372,12 @@ int run(const AppConfig& cfg) {
     // keeps the shell's shipped look. The loop's `loadedSkinIdx` sync turns this index into the loaded
     // textures + PortraitSkin's scalars on the first frame, and again whenever the user changes it.
     state.settings.skinIndex = device_skin_index(state.settings.portraitSkin);
+
+    // And the persisted OVERLAY selection (`overlay_name`, "OFF" or a stable id) to its cycle index —
+    // 0 = OFF, 1.. = a shipped overlay. Same "stable string, not an index" contract as the skin above
+    // (shell/overlay.h). The loop's `loadedOverlayIdx` sync turns this into the decoded texture on the
+    // first frame the OVERLAY row is live, and again whenever the user cycles it.
+    state.settings.overlayIndex = screen_overlay_index(state.settings.overlayName);
 
     ui::Canvas        canvas;
     ui::TrackerLayout layout;
@@ -481,6 +497,12 @@ int run(const AppConfig& cfg) {
     // skin column moves `skinIndex`. Decoding ~10 PNGs is a deliberate-action cost, never a per-frame one.
     int loadedSkinIdx = -1;
 
+    // The screen overlay currently decoded into `screenOverlay`. -1 = nothing decoded yet, so the first
+    // frame the OVERLAY row is live loads the persisted choice (or nothing, for OFF); thereafter it
+    // reloads only when the SETTINGS OVERLAY column moves `overlayIndex`. One PNG, a deliberate-action
+    // cost, never per frame.
+    int loadedOverlayIdx = -1;
+
     // ── C7 state ─────────────────────────────────────────────────────────────────────────────────
     // `sawInput`     — anything happened this frame that could have changed what is on screen.
     // `audibleEdge`  — audio was audible LAST frame, so the first silent frame is still drawn once
@@ -598,6 +620,27 @@ int run(const AppConfig& cfg) {
                 }
             } else {
                 state.settings.skinCount = 0;   // no skin column on a fullscreen (controller) layout
+            }
+
+            // ── The screen overlay (D6): the CRT filter's SETTINGS row + its texture ──────────────
+            //
+            // Independent of the touch skin — it is a screen filter, gated on `caps.skinOverlay` (the
+            // OVERLAY row, Android/debug) rather than a touchscreen. The row edits `overlayIndex`; here
+            // the shell fills in what only it knows — the choice COUNT and the display TEXT — and keeps
+            // the persisted `overlayName` in step with the index, exactly as the skin block does with
+            // `portraitSkin`. The PNG is (re)decoded only when the choice actually changes.
+            if (cfg.caps.skinOverlay) {
+                state.settings.overlayCount = screen_overlay_choice_count();
+                if (state.settings.overlayIndex < 0 ||
+                    state.settings.overlayIndex >= state.settings.overlayCount)
+                    state.settings.overlayIndex = screen_overlay_index(state.settings.overlayName);
+                state.settings.overlayName = screen_overlay_id(state.settings.overlayIndex);
+                state.overlayText          = screen_overlay_text(state.settings.overlayIndex);
+
+                if (state.settings.overlayIndex != loadedOverlayIdx) {
+                    screenOverlay.load(video.renderer(), state.settings.overlayIndex, cfg.console);
+                    loadedOverlayIdx = state.settings.overlayIndex;
+                }
             }
 
             // PORTRAIT2 first — its active() decides whether `touch` hit-tests the skinned cluster
@@ -810,6 +853,25 @@ int run(const AppConfig& cfg) {
             // re-pushed on change is a value some future screen forgets to re-push (the theme editor can
             // change the first mid-session). The on-screen controls' fingerprint joins the C7 gate so a
             // press highlight is not skipped as an unchanged canvas.
+            // ── The screen overlay (D6): the CRT filter drawn OVER the frame, both orientations ────
+            //
+            // A translucent PNG over the tracker's on-screen box, at STR/255 alpha — the shell twin of
+            // Kotlin drawing `overlayBitmap` over `PixelPerfectTracker`. It lands on the FRAME rect
+            // (`video.frame_rect()` in landscape, `portrait.frame_rect()` in the bezel), drawn AFTER the
+            // frame and BEFORE the on-screen buttons, so it filters the screen but not the gamepad.
+            // Off (index 0 / STR 0 / nothing decoded — the case on every non-Android build) draws nothing.
+            const int  ovStr = state.settings.overlayStrength;
+            const bool ovOn  = state.settings.overlayIndex > 0 && ovStr > 0 && screenOverlay.loaded();
+
+            // A CRT change (selection OR strength) must force one repaint even on an otherwise-still
+            // screen — the canvas need not change when only the overlay does. Bits 48–60 are disjoint
+            // from the touch/portrait signatures (buttons low, geometry 16–47, active markers 62/63), so
+            // an XOR into either cannot collide. Zero when off, leaving those signatures untouched.
+            const uint64_t crtSig = ovOn
+                ? ((1ull << 60) | (static_cast<uint64_t>(state.settings.overlayIndex & 0xF) << 56) |
+                   (static_cast<uint64_t>(ovStr & 0xFF) << 48))
+                : 0;
+
             bool didPresent;
             if (portrait.active()) {
                 // PORTRAIT2 (convergence D): the retro-device skin. The 640×480 frame lands in the
@@ -821,16 +883,24 @@ int run(const AppConfig& cfg) {
                 const auto chrome = [&portrait, &skin, bg](SDL_Renderer* r) {
                     portrait.draw_chrome(r, skin, bg);
                 };
-                const auto buttons = [&portrait, &skin, &helvFont, &arrowFont, &input](SDL_Renderer* r) {
+                const auto buttons = [&portrait, &skin, &helvFont, &arrowFont, &input,
+                                      &screenOverlay, ovOn, ovStr](SDL_Renderer* r) {
+                    if (ovOn) screenOverlay.draw(r, portrait.frame_rect(), ovStr);
                     portrait.draw_buttons(r, skin, helvFont, arrowFont, input);
                 };
                 didPresent = video.present_skinned(canvas, portrait.casing_argb(), portrait.frame_rect(),
-                                                   chrome, buttons, portrait.signature(input));
+                                                   chrome, buttons,
+                                                   portrait.signature(input) ^ crtSig);
             } else {
                 // Landscape / desktop: the centred frame, the LEFT/RIGHT touch panels in the bars beside
                 // it — inert (drawing nothing, signature 0) when there is no touchscreen.
-                const auto overlay = [&touch, &input](SDL_Renderer* r) { touch.draw(r, input); };
-                didPresent = video.present(canvas, state.theme.background, overlay, touch.signature(input));
+                const auto overlay = [&touch, &input, &screenOverlay, ovOn, ovStr,
+                                      fr = video.frame_rect()](SDL_Renderer* r) {
+                    if (ovOn) screenOverlay.draw(r, fr, ovStr);
+                    touch.draw(r, input);
+                };
+                didPresent = video.present(canvas, state.theme.background, overlay,
+                                           touch.signature(input) ^ crtSig);
             }
             if (didPresent) ++presented;
             drewOnce = true;
@@ -919,6 +989,7 @@ int run(const AppConfig& cfg) {
     arrowFont.unload();  // ⚠️ same reason as skin/helvFont: glyph textures belong to the renderer
     helvFont.unload();  // ⚠️ same reason as skin: its glyph textures belong to the renderer being destroyed
     skin.unload();   // ⚠️ before video.close(): the skin's textures belong to the renderer it destroys
+    screenOverlay.unload();  // ⚠️ same reason: the CRT overlay's texture belongs to that renderer
     video.close();
     return 0;
 }

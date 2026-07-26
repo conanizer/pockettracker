@@ -279,10 +279,14 @@ class SdlActivity : SDLActivity() {
      * ⚠️⚠️ **VERSIONED, NOT KEYED OFF "settings.json IS ABSENT" — and that distinction is the whole
      * design.** The obvious guard is *"no settings.json + prefs exist → import"*, and it gets exactly
      * ONE chance: the moment the SDL app runs once, settings.json exists forever after and no later
-     * migration can ever fire. Phase D adds LAYOUT, SKIN and OVERLAY (all three are INDICES into lists
-     * that do not exist yet — see the note in `settings_store.cpp`), so a second pass is already known
-     * to be coming, and the "absent file" guard would have made it unreachable before it was written.
-     * A version counter costs one integer and makes Phase D a `if (version < 2)` arm.
+     * migration can ever fire. Phase D adds SKIN and OVERLAY selections (indices into lists that did not
+     * exist at v1 — see the note in `settings_store.cpp`), so a second pass was always coming, and the
+     * "absent file" guard would have made it unreachable before it was written. The version counter is
+     * what keeps that honest: v2 folds the two new stable-string keys into the SAME fresh-install write
+     * (the real upgrade path — a user who only ever ran Compose has no settings.json yet), and stamps v2
+     * so it never re-runs. An existing settings.json still WINS (below): a population that already ran
+     * the debug SDL activity has SDL-chosen values there, and re-importing older prefs over them would be
+     * a regression dressed as a migration.
      *
      * ⚠️ **The defaults below are ANDROID's, not `SettingsValues`'s, and they disagree on purpose.**
      * `button_sound` and `button_vibro` default TRUE in the Compose app while the C++ struct defaults
@@ -353,12 +357,22 @@ class SdlActivity : SDLActivity() {
             // choice must be abandoned rather than honoured (see order-of-work.md).
 
             // ── The device rows that are plain scalars ───────────────────────────────────────────
-            // LAYOUT / SKIN / OVERLAY are absent by design — they are indices into Phase D's lists.
             json.put("buttonSound",       prefs.getBoolean("button_sound", true))
             json.put("buttonSoundVolume", prefs.getInt("button_sound_volume", 0x80))
             json.put("buttonVibro",       prefs.getBoolean("button_vibro", true))
             json.put("vibroPower",        prefs.getInt("vibro_power", 255))
             json.put("overlayStrength",   prefs.getInt("overlay_strength", 128))
+
+            // ── The device-row SELECTIONS, as STABLE STRINGS (v2) ────────────────────────────────
+            // SKIN and OVERLAY are now indices into lists the shell HAS — `device_skin.h` resolves the
+            // skin and `shell/overlay.h` the overlay — so their persisted names finally have a consumer
+            // and move across with the rest. Written as the ids the Compose app stored (matching
+            // `settings_store.cpp`'s `portrait_skin` / `overlay_name` keys). ⚠️ LAYOUT (`layout_mode`)
+            // is still absent by design: there is no shell-side layout-mode override to resolve a name
+            // against (the shell auto-selects by orientation + controller), so its stored value is
+            // unanswerable here, exactly like `trace`/`engine_cpp_v2` above.
+            json.put("portrait_skin", prefs.getString("portrait_skin", DEFAULT_SKIN_ID))
+            json.put("overlay_name",  prefs.getString("overlay_name", "OFF"))
 
             // ── The theme ────────────────────────────────────────────────────────────────────────
             // The palette the user dialled in is the single most visible thing in this migration, and
@@ -444,10 +458,16 @@ class SdlActivity : SDLActivity() {
          *
          * **v1 (C6)** — the rows that exist today: the four every-platform ones, RESUME, the four
          * button-feedback scalars, overlay STRENGTH, and the theme.
-         * **v2 (Phase D, expected)** — LAYOUT, SKIN and OVERLAY selection, once the lists those
-         * indices point into exist and a stored name can be resolved to one.
+         * **v2 (Phase D6)** — the SKIN and OVERLAY *selections* (`portrait_skin` / `overlay_name`),
+         * now that `device_skin.h` and `shell/overlay.h` give their stored names a list to resolve
+         * against. LAYOUT (`layout_mode`) stays out — the shell has no layout-mode override, so there is
+         * still nothing to resolve it against.
          */
-        const val SETTINGS_IMPORT_VERSION = 1
+        const val SETTINGS_IMPORT_VERSION = 2
         const val IMPORT_VERSION_KEY = "settings_import_version"
+
+        /** The Compose default for the skin pref (`DeviceSkin.AMIGA_DARK.id`), read when the user never
+         *  chose one — the shell's own fallback for an unknown id is the same skin (device_skin.h). */
+        const val DEFAULT_SKIN_ID = "amiga-2"
     }
 }

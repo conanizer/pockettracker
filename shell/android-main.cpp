@@ -287,10 +287,18 @@ int main(int argc, char** argv) {
     // surviving thin Kotlin managers), so the two SETTINGS rows that configure them are no longer "a
     // setting which configures nothing" — platform_caps.h's rule that kept them off through C3–D. This
     // is another slice of C6's converged profile, taken the session its feature arrived; the scalars it
-    // shows were already imported (C6 v1) and are already persisted (settings_store). `skinOverlay`
-    // (D6) is the last row still OFF, waiting on the CRT overlay. ⚠️ ptinput's goldens are unaffected —
-    // they compare against `PlatformCaps::android()`, which already had this true.
+    // shows were already imported (C6 v1) and are already persisted (settings_store). ⚠️ ptinput's
+    // goldens are unaffected — they compare against `PlatformCaps::android()`, which already had this true.
     cfg.caps.buttonFeedback = true;
+
+    // ⚠️ **PHASE D6: the CRT SCREEN OVERLAY is REAL now, so turn the LAST deferred cap on.** The overlay
+    // PNG composites over the frame at STR/255 (shell/overlay.{h,cpp}), and its selection persists as
+    // `overlay_name` (settings_store) with the C6 v2 prefs import moving the Compose choice across, so the
+    // OVERLAY row (debug-gated on top of this cap) is no longer "a setting which configures nothing" —
+    // platform_caps.h's rule that kept it off through C3–D. This completes C6's converged profile: the
+    // three deferred rows (touch/feedback/overlay) are all on. ⚠️ ptinput's goldens are unaffected — they
+    // compare against `PlatformCaps::android()`, which already had this true.
+    cfg.caps.skinOverlay = true;
 
     // On by default and worth it: with the pump above, the banner and the status line land in logcat,
     // which is the only console this platform has.

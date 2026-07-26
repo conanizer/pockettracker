@@ -428,6 +428,7 @@ if(ANDROID)
             "${PT_SHELL_DIR}/image.cpp"        # PNG decode (convergence D2): the one stb_image impl TU
             "${PT_SHELL_DIR}/assets.cpp"       # the asset seam (convergence D7): SDL_RWFromFile → APK assets
             "${PT_SHELL_DIR}/skin.cpp"         # the touch-skin textures (convergence D1)
+            "${PT_SHELL_DIR}/overlay.cpp"      # the CRT screen overlay (convergence D6)
             "${PT_SHELL_DIR}/portrait2.cpp"    # the PORTRAIT2 device-skin renderer (convergence D)
             "${PT_SHELL_DIR}/font_raster.cpp"  # glyph rasterization (convergence D): the one stb_truetype impl TU
             "${PT_SHELL_DIR}/font.cpp"         # the button-label font (convergence D): Helvetica + D-pad triangles
