@@ -199,6 +199,23 @@ same rule every vendored component follows.
 
 ---
 
+## stb_truetype — public domain **or** MIT (dual, at your option)
+
+Used for: rasterizing the PORTRAIT2 device skin's button-label glyphs from the app's Helvetica
+(`native/vendor/stb_truetype/stb_truetype.h`, v1.26). Copyright (c) 2017 Sean Barrett. The full
+dual-licence statement is at the end of that file.
+
+⚠️ **Shell-side, not in the engine** — the same footnote stb_image carries. `stb_truetype` is
+compiled into the SDL *shell* (`shell/font_raster.cpp`), so it ships in the **PortMaster** and
+**Windows** packages and, from convergence C3, in the APK's SDL-app `.so` — but it is **not** linked
+into the `pockettracker` engine library and so is absent from the shipping Compose APK. It is under
+`native/vendor/` only because that is where the licence guard looks; see
+`native/vendor/stb_truetype/PT-VENDORING.md`. The dual grant carries no reproduce-in-binary
+obligation (the public-domain arm has no conditions at all), but the notice is recorded here
+regardless — the same rule every vendored component follows.
+
+---
+
 ## nlohmann/json — MIT
 
 Used for: parsing `.ptp` / `.pti` project and instrument JSON (`native/vendor/nlohmann/json.hpp`,
