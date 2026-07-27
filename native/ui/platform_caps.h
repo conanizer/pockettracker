@@ -107,6 +107,41 @@ struct PlatformCaps {
         c.appExit        = true;
         return c;
     }
+
+    /**
+     * The CONVERGED Android app: the SDL shell WITH the device rows Android's touch UI brings.
+     *
+     * ⚠️ This is what the Android SDL build actually RUNS (from `android-main.cpp`), and it is
+     * deliberately neither `sdl()` nor `android()`:
+     *   • not `sdl()` edited in place — that profile is what the DESKTOP/handheld shell runs, and
+     *     turning these three rows on there would light SETTINGS rows on a device with no touch
+     *     screen (platform_caps.h's own "a row that configures nothing is a lie" rule);
+     *   • not `android()` — that reproduces KOTLIN's row map for the ptinput golden, so it also
+     *     carries `engineToggle` (the KT/C++ sequencer switch), which is meaningless once there is
+     *     no Kotlin sequencer left in the process to switch TO.
+     *
+     * So it is `sdl()` — physical-out `appExit` (decided ON for the converged app, C6), the RESUME
+     * row, `engineToggle` off — PLUS exactly the three device rows whose FEATURES now exist in the
+     * shell, each landed in the phase named beside it:
+     *   • `touchLayouts`   — the LAYOUT row (the PORTRAIT2 skin picker, NORM/DARK)      [Phase D]
+     *   • `buttonFeedback` — BTN SOUND + BTN VIBRO, the click and buzz a virtual button gives back [Phase D]
+     *   • `skinOverlay`    — the CRT SCREEN OVERLAY composited over the frame           [Phase D6]
+     *
+     * Building it as `sdl()` + three flips (rather than a fresh field list) keeps it provably equal
+     * to what `android-main.cpp` assembled by hand through Phases D–D6, so this is a rename of an
+     * already-device-proven value, not a new profile.
+     *
+     * ⚠️ The LAYOUT row's *existence* is still gated at RUNTIME on there being a touch screen and no
+     * physical pad (`app.cpp`'s `useTouch`) — a handheld with buttons has this cap true but no touch
+     * layout to configure. This cap is the STATIC half of that AND; the runtime half is the pad.
+     */
+    static PlatformCaps converged(bool debug_build) {
+        PlatformCaps c   = sdl(debug_build);
+        c.touchLayouts   = true;   // Phase D  — the LAYOUT / skin-picker row
+        c.buttonFeedback = true;   // Phase D  — BTN SOUND + BTN VIBRO
+        c.skinOverlay    = true;   // Phase D6 — the CRT screen overlay
+        return c;
+    }
 };
 
 }  // namespace pt::ui

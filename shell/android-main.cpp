@@ -287,49 +287,19 @@ int main(int argc, char** argv) {
     // process's cwd, and the app root is where Samples/ actually lives.
     cfg.mediaBaseDir = appRoot;
 
-    // ⚠️ **`sdl()`, NOT `android()`, AND THAT IS DELIBERATE FOR C3.** The converged profile is C6's
-    // to decide and the plan already sketches it (touch/feedback/overlay on, engineToggle off). But
-    // none of those three rows configures anything that exists yet: touch is Phase D, the overlay
-    // system is D6, and the haptics trigger moves in Phase E. Turning them on now would put rows in
-    // SETTINGS that do nothing — which S7 refused to do on exactly these grounds, in this struct's
-    // own comments: "a setting which configures nothing is a lie told in the user's own UI". So the
-    // caps say what this build can actually do, and C6 changes them in the session that makes them
-    // true. ⚠️ ptinput's goldens keep comparing against `PlatformCaps::android()` regardless — they
-    // record Kotlin's row map, not this choice.
+    // ⚠️ **`converged()`, NOT `sdl()` OR `android()` — the profile the converged Android app RUNS.**
+    // Its three device rows (touch layouts, BTN SOUND/VIBRO, the CRT overlay) are all on because
+    // their FEATURES now exist in the shell (Phases D–D6); it keeps `sdl()`'s `appExit` and RESUME
+    // row and leaves `engineToggle` off (no Kotlin sequencer left to switch to). See
+    // `platform_caps.h::converged` for why it is neither of the other two profiles. This replaces the
+    // three hand-flipped `cfg.caps.X = true` overrides those phases added one at a time — the value
+    // is byte-identical, now named. ⚠️ ptinput's goldens are unaffected: they compare against
+    // `PlatformCaps::android()`, Kotlin's row map, not this runtime choice.
 #ifdef NDEBUG
-    cfg.caps = ui::PlatformCaps::sdl(/*debug_build=*/false);
+    cfg.caps = ui::PlatformCaps::converged(/*debug_build=*/false);
 #else
-    cfg.caps = ui::PlatformCaps::sdl(/*debug_build=*/true);
+    cfg.caps = ui::PlatformCaps::converged(/*debug_build=*/true);
 #endif
-
-    // ⚠️ **PHASE D-theme: the LAYOUT row is REAL now, so turn it on — but ONLY the layouts cap.** The
-    // PORTRAIT2 skin exists and ships two themes (NORM/DARK), so `SETTINGS > LAYOUT` finally configures
-    // something: its skin column switches the device skin (device_skin.h), persisted as `portrait_skin`.
-    // `skinOverlay` (D6) and `buttonFeedback` (the sound/haptic subsystem) stay OFF until THEIR features
-    // exist — platform_caps.h's rule that a row configuring nothing is a lie told in the user's own UI.
-    // This is a slice of C6's converged profile, taken the session its one true row arrived; not `sdl()`
-    // edited (that would light the row on desktop/handheld, which have no touch layouts) and not
-    // `android()` (that also turns on the deferred rows). ⚠️ ptinput's goldens are unaffected — they
-    // compare against `PlatformCaps::android()`, which already had this true.
-    cfg.caps.touchLayouts = true;
-
-    // ⚠️ **PHASE D: BTN SOUND + BTN VIBRO are REAL now, so turn the cap on.** The click and the haptic
-    // a virtual button gives back finally exist here (the `AndroidButtonFeedback` shim below drives the
-    // surviving thin Kotlin managers), so the two SETTINGS rows that configure them are no longer "a
-    // setting which configures nothing" — platform_caps.h's rule that kept them off through C3–D. This
-    // is another slice of C6's converged profile, taken the session its feature arrived; the scalars it
-    // shows were already imported (C6 v1) and are already persisted (settings_store). ⚠️ ptinput's
-    // goldens are unaffected — they compare against `PlatformCaps::android()`, which already had this true.
-    cfg.caps.buttonFeedback = true;
-
-    // ⚠️ **PHASE D6: the CRT SCREEN OVERLAY is REAL now, so turn the LAST deferred cap on.** The overlay
-    // PNG composites over the frame at STR/255 (shell/overlay.{h,cpp}), and its selection persists as
-    // `overlay_name` (settings_store) with the C6 v2 prefs import moving the Compose choice across, so the
-    // OVERLAY row (debug-gated on top of this cap) is no longer "a setting which configures nothing" —
-    // platform_caps.h's rule that kept it off through C3–D. This completes C6's converged profile: the
-    // three deferred rows (touch/feedback/overlay) are all on. ⚠️ ptinput's goldens are unaffected — they
-    // compare against `PlatformCaps::android()`, which already had this true.
-    cfg.caps.skinOverlay = true;
 
     // On by default and worth it: with the pump above, the banner and the status line land in logcat,
     // which is the only console this platform has.
