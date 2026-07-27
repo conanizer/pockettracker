@@ -319,10 +319,12 @@ inline std::string path_extension_lower(const std::string& path) {
 }
 
 // AudioFormats.NATIVE_EXTENSIONS — the formats the bundled decoders handle (dr_mp3 / dr_flac /
-// stb_vorbis / libopus). m4a/aac is the one format with no good native decoder; on Android it goes
-// through MediaCodec, and there is no host equivalent.
+// stb_vorbis / libopus, plus minimp4+FAAD2 for the ISO-BMFF/AAC containers). The container formats
+// (m4a/mp4/m4b/mov/3gp) are all the same box format decoded by decodeMp4File; this is the native,
+// in-place replacement for Android's MediaCodec path — no format is MediaCodec-only any more.
 inline bool is_native_compressed(const std::string& ext) {
-    return ext == "mp3" || ext == "flac" || ext == "ogg" || ext == "opus";
+    return ext == "mp3" || ext == "flac" || ext == "ogg" || ext == "opus" ||
+           ext == "m4a" || ext == "mp4"  || ext == "m4b" || ext == "mov"  || ext == "3gp";
 }
 
 // A WAV's cue points as the model wants them: `Instrument::sliceMarkers` is int64 (Kotlin's
@@ -339,7 +341,7 @@ int load_sample_file(Engine& engine, int instrumentId, const std::string& path) 
     const std::string ext = path_extension_lower(path);
     if (ext == "wav") return engine.loadSampleFromWavFile(instrumentId, path.c_str());
     if (is_native_compressed(ext)) return engine.loadSampleFromCompressed(instrumentId, path.c_str());
-    return 0;   // m4a/aac (MediaCodec-only) or an unknown extension
+    return 0;   // an unknown / unsupported extension (raw .aac ADTS, video-only container, etc.)
 }
 
 // AppInputDispatcher.reloadProjectSamples, without Android: load every instrument's media into the

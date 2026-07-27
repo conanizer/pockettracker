@@ -49,27 +49,30 @@ inline constexpr Argb COLOR_VIDEO  = 0xFFFFBB55;  // amber — a container we ca
 inline constexpr Argb COLOR_PARENT = 0xFFFFAA88;  // orange — ".."
 
 /**
- * True video containers. Listed so the browser can COLOUR them, not so it can load them: audio is
- * extracted from these through Android's MediaCodec, and there is no host equivalent (the port plan's
- * 2026-07-11 amendment deletes the video→WAV converter from both platforms anyway). They are never in
- * a filter set here, so they only ever appear when the browser is showing everything.
+ * Containers the browser can COLOUR but NOT load — audio-in, but no decoder for them. Since the
+ * media-unification step the ISO-BMFF containers (mp4/m4a/m4b/mov/3gp) DO load, as in-place samples via
+ * minimp4 + FAAD2, so they moved to `sample_extensions()`. What is left is Matroska/WebM, which are
+ * EBML, not ISO-BMFF — the vendored decoder cannot demux them (a slim EBML reader is a deferred, lower-
+ * priority item; see `linux-port-plan.md` §4.6). They are never in a filter set here, so they only ever
+ * appear when the browser is showing everything, tinted so the user sees "shown, but not loadable".
  */
 inline const std::vector<std::string>& video_extensions() {
-    static const std::vector<std::string> v = {"mp4", "mkv", "webm", "3gp", "mov"};
+    static const std::vector<std::string> v = {"mkv", "webm"};
     return v;
 }
 
 /**
  * The sample formats the browser offers for a SAMPLER instrument.
  *
- * ⚠️ **m4a is deliberately absent, where `AudioFormats.SAMPLE_EXTENSIONS` has it.** It is the one
- * compressed format with no native decoder — Android routes it through MediaCodec, and
- * `songcore::is_native_compressed` says so in as many words. Listing it here would offer the user a
- * load that always fails. The day a native AAC decoder lands, this list and that predicate change
- * together.
+ * Kept in lockstep with `songcore::is_native_compressed` and `AudioEngine::loadSampleFromCompressed`'s
+ * dispatch — the list, the predicate and the decoder change together, as the old comment here promised
+ * they would "the day a native AAC decoder lands". That day was the media-unification step: `m4a` and
+ * the ISO-BMFF container extensions now load in place via minimp4 + FAAD2, exactly like mp3/ogg. Raw
+ * `.aac` (ADTS) stays out — it is a bare stream, not a container the demuxer can open.
  */
 inline const std::vector<std::string>& sample_extensions() {
-    static const std::vector<std::string> v = {"wav", "mp3", "flac", "ogg", "opus"};
+    static const std::vector<std::string> v = {"wav", "mp3", "flac", "ogg", "opus",
+                                               "m4a", "mp4", "m4b", "mov", "3gp"};
     return v;
 }
 

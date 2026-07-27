@@ -193,6 +193,17 @@ target_include_directories(ptfont PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../shell     # font_raster.h
         ${CMAKE_CURRENT_SOURCE_DIR}/../native)   # vendor/stb_truetype/stb_truetype.h
 
+# ptaac — the mp4/AAC DECODER (convergence media-unification). Links the engine static lib, because
+# decodeMp4File lives in audio-decoders.cpp (which pulls in faad2 + minimp4), exactly as ptrender links
+# it. It exists because a decoder vendored but never called is dead code (the C1 lesson): this proves
+# decodeMp4File actually decodes, against .m4a fixtures encoded by ffmpeg — an encoder independent of
+# FAAD2 — from pure sine tones of known frequency. AAC is lossy, so the invariant is the TONE, not a
+# byte-golden: the check is energy-at-the-right-frequency-in-the-right-channel. A missing fixture is a
+# hard error (exit 2). See ptaac/main.cpp's header and testdata/audio/.
+add_executable(ptaac ptaac/main.cpp)
+pt_ieee_exact(ptaac)   # tolerance-based (not a bit-golden); kept so the -fno-fast-math rule cannot be lost
+target_link_libraries(ptaac PRIVATE pockettracker)
+
 # ptdispatch — the input DISPATCHER (Phase 3 S5). The one tool here that is NOT a conformance tool:
 # it takes no golden, because what it checks is the JOIN between the modules, cursor_move and
 # navigation, and Kotlin's side of that join is AppInputDispatcher — entangled with ~60 Compose state
@@ -241,3 +252,7 @@ add_test(NAME d-font-raster     COMMAND ptfont "${CMAKE_CURRENT_SOURCE_DIR}/../a
 # Biolinum ships real directional arrows (↑↓ tall, ←→ wide). `arrows` mode gates on U+2190–2193 inking,
 # on the exact shipped asset — a deleted/wrong arrow font fails here, not silently on a phone.
 add_test(NAME d-font-arrows     COMMAND ptfont "${CMAKE_CURRENT_SOURCE_DIR}/../app/src/main/assets/fonts/LinBiolinum_Rah.ttf" arrows)
+# The mp4/AAC decoder (media-unification), proven on .m4a fixtures from an INDEPENDENT encoder (ffmpeg)
+# of known sine tones. A missing fixtures dir is a hard error (exit 2), never a vacuous pass. AAC is
+# lossy: the invariant is the tone frequency per channel, not a byte-golden. See ptaac's header.
+add_test(NAME media-aac         COMMAND ptaac "${PT_TESTDATA}/audio")

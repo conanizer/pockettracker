@@ -18,6 +18,15 @@ extern "C" {
 // opusfile.h carries its own extern "C" guards, so it's included directly (no manual wrapper).
 #include <opusfile.h>
 
+// minimp4 (ISO-BMFF demux, declarations only — the implementation is vendor/minimp4/minimp4_impl.c)
+// and FAAD2 (AAC decode). Both carry their own extern "C" guards.
+#include "vendor/minimp4/minimp4.h"
+#include <neaacdec.h>
+
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+
 namespace ptdec {
 
 namespace {
@@ -29,6 +38,17 @@ inline void appendBlock(const float* interleaved, int frames, int channels,
         L.push_back(interleaved[(size_t)i * channels]);
         if (channels >= 2) R.push_back(interleaved[(size_t)i * channels + 1]);
     }
+}
+
+// minimp4 reads the container sequentially through this callback. We hand it the whole file already in
+// memory (a sample is a few MB), so the "read" is a bounds-checked memcpy. Return 0 on success, non-zero
+// on failure — the convention minimp4 checks (`if (read_callback(...)) error`).
+struct Mp4Buf { const uint8_t* data; size_t size; };
+int mp4ReadCb(int64_t offset, void* buffer, size_t size, void* token) {
+    const Mp4Buf* b = static_cast<const Mp4Buf*>(token);
+    if (offset < 0 || (uint64_t)offset + size > b->size) return -1;
+    std::memcpy(buffer, b->data + offset, size);
+    return 0;
 }
 }  // namespace
 
@@ -121,6 +141,110 @@ bool decodeOpusFile(const char* path, std::vector<float>& outL, std::vector<floa
     op_free(of);
     LOGD("decodeOpusFile: ch=%d rate=48000 frames=%zu", channels, outL.size());
     return !outL.empty();
+}
+
+bool decodeMp4File(const char* path, std::vector<float>& outL, std::vector<float>& outR, int& sampleRate) {
+    // Read the whole file into RAM. minimp4 reads sequentially and the index may sit at the end of the
+    // stream, so buffering the file up front is both simplest and what its read callback wants; a
+    // container sample is a few MB. (The convergence plan's OOM guard is a UI-level length warning on
+    // the LOAD path, not this decoder's job — a container that fits in a sample is small.)
+    FILE* f = std::fopen(path, "rb");
+    if (!f) { LOGE("decodeMp4File: fopen failed: %s", path); return false; }
+    std::fseek(f, 0, SEEK_END);
+    long fsize = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    if (fsize <= 0) { std::fclose(f); LOGE("decodeMp4File: empty/unseekable file: %s", path); return false; }
+    std::vector<uint8_t> buf((size_t)fsize);
+    size_t rd = std::fread(buf.data(), 1, (size_t)fsize, f);
+    std::fclose(f);
+    if (rd != (size_t)fsize) { LOGE("decodeMp4File: short read (%zu/%ld): %s", rd, fsize, path); return false; }
+
+    Mp4Buf token{ buf.data(), buf.size() };
+    MP4D_demux_t mp4;
+    // MP4D_open memset()s mp4 to zero even on its early arg-check failure, so `track` is NULL and there
+    // is nothing to close on the failure path below.
+    if (!MP4D_open(&mp4, mp4ReadCb, &token, (int64_t)fsize) || mp4.track_count == 0) {
+        LOGE("decodeMp4File: MP4D_open failed or no tracks: %s", path);
+        return false;
+    }
+
+    // First AAC audio track. handler_type 'soun' + object type 0x40 (MPEG-4 AAC). A container whose
+    // audio is some other codec (e.g. ALAC, AC-3) is not ours to decode — fail cleanly, do not guess.
+    int atrack = -1;
+    for (unsigned t = 0; t < mp4.track_count; t++) {
+        if (mp4.track[t].handler_type == MP4D_HANDLER_TYPE_SOUN &&
+            mp4.track[t].object_type_indication == MP4_OBJECT_TYPE_AUDIO_ISO_IEC_14496_3) {
+            atrack = (int)t;
+            break;
+        }
+    }
+    if (atrack < 0) { LOGE("decodeMp4File: no AAC audio track: %s", path); MP4D_close(&mp4); return false; }
+    MP4D_track_t* tr = &mp4.track[atrack];
+    if (!tr->dsi || tr->dsi_bytes == 0) {
+        LOGE("decodeMp4File: AAC track has no AudioSpecificConfig: %s", path);
+        MP4D_close(&mp4);
+        return false;
+    }
+
+    NeAACDecHandle dec = NeAACDecOpen();
+    if (!dec) { LOGE("decodeMp4File: NeAACDecOpen failed"); MP4D_close(&mp4); return false; }
+    NeAACDecConfigurationPtr cfg = NeAACDecGetCurrentConfiguration(dec);
+    cfg->outputFormat = FAAD_FMT_FLOAT;  // FAAD2's float output is FLOAT_SCALE (1/32768) — already [-1,1]
+    cfg->downMatrix   = 0;               // keep source channels; appendBlock does the >2ch → L/R downmix
+    NeAACDecSetConfiguration(dec, cfg);
+
+    unsigned long initRate = 0;
+    unsigned char initCh = 0;
+    if (NeAACDecInit2(dec, tr->dsi, tr->dsi_bytes, &initRate, &initCh) < 0) {
+        LOGE("decodeMp4File: NeAACDecInit2 failed: %s", path);
+        NeAACDecClose(dec);
+        MP4D_close(&mp4);
+        return false;
+    }
+
+    // ⚠️ FAAD2 UPMIXES mono AAC to two identical channels (measured: a mono .m4a decodes with
+    // fi.channels == 2 and L == R exactly). The CONTAINER's channel count is the truth — it is what the
+    // old MediaCodec path read from KEY_CHANNEL_COUNT — so it, not FAAD2's per-frame count, decides mono
+    // vs stereo. A mono container collapses FAAD2's duplicate to one channel (empty R, the engine's mono
+    // convention); a source with no declared count falls back to FAAD2's. The interleave STRIDE is always
+    // FAAD2's actual output channel count, whatever we then keep.
+    const unsigned containerCh = tr->SampleDescription.audio.channelcount;
+
+    sampleRate = 0;
+    for (unsigned s = 0; s < tr->sample_count; s++) {
+        unsigned fbytes = 0, ts = 0, dur = 0;
+        MP4D_file_offset_t ofs = MP4D_frame_offset(&mp4, (unsigned)atrack, s, &fbytes, &ts, &dur);
+        if (fbytes == 0 || ofs < 0 || (uint64_t)ofs + fbytes > (uint64_t)fsize) continue;
+
+        NeAACDecFrameInfo fi;
+        void* pcm = NeAACDecDecode(dec, &fi, buf.data() + ofs, fbytes);
+        if (fi.error != 0) {
+            // A first-frame error is fatal; a mid-stream glitch keeps whatever decoded (as the Opus path
+            // does), so one bad packet late in a long sample does not throw the whole load away.
+            LOGE("decodeMp4File: NeAACDecDecode error %d (%s) at sample %u/%u",
+                 fi.error, NeAACDecGetErrorMessage(fi.error), s, tr->sample_count);
+            if (outL.empty()) { NeAACDecClose(dec); MP4D_close(&mp4); return false; }
+            break;
+        }
+        if (!pcm || fi.samples == 0 || fi.channels < 1) continue;
+        if (sampleRate == 0) sampleRate = (int)fi.samplerate;  // actual output rate (post-SBR for HE-AAC)
+
+        const int   stride     = (int)fi.channels;                                  // FAAD2's real layout
+        const int   declaredCh = containerCh >= 1 ? (int)containerCh : stride;       // container wins
+        const bool  keepStereo = declaredCh >= 2 && stride >= 2;
+        const int   frames     = (int)(fi.samples / (unsigned)stride);
+        const float* p         = (const float*)pcm;
+        for (int i = 0; i < frames; i++) {
+            outL.push_back(p[(size_t)i * stride]);            // ch0 → L (a mono duplicate's ch0 == ch1)
+            if (keepStereo) outR.push_back(p[(size_t)i * stride + 1]);  // ch1 → R only for real stereo
+        }
+    }
+
+    NeAACDecClose(dec);
+    MP4D_close(&mp4);
+    LOGD("decodeMp4File: %s rate=%d frames=%zu (%s)",
+         outR.empty() ? "mono" : "stereo", sampleRate, outL.size(), path);
+    return !outL.empty() && sampleRate > 0;
 }
 
 }  // namespace ptdec

@@ -27,6 +27,7 @@ See §5.
 | `renders/*.txt` (2) | `ptrender` audio fingerprints: peak, RMS, per-second RMS in dBFS, tolerance-compared at ±1 dB | `tools/ptrender` (C++) | no |
 | `golden/{kick,pad}.wav`, `test.sf2` | the media the projects play | `golden/make-golden-media.cpp` (C++) | no |
 | `images/*.png` (3) | PNG **decode** fixtures for `tools/ptdecode` (convergence D2): a type-2 RGB, a type-6 RGBA, and a compressed+filtered gradient, every pixel known by formula | GDI+ / `make-image-fixtures.ps1` — an encoder independent of stb_image | no |
+| `audio/*.m4a` (2) | AAC **decode** fixtures for `tools/ptaac` (media-unification): a stereo (L=440 R=660) and a mono 440 Hz tone, the frequency per channel known by construction | ffmpeg / `make-audio-fixtures.sh` — an encoder independent of FAAD2 | no |
 | `device/` | optional device-recorded traces (gitignored) | a real device | n/a |
 
 ⚠️ **`native/songcore/note_tables.h` does not live in this directory** and an inventory scoped to
@@ -156,6 +157,16 @@ year-old Gradle build running again gets harder every month.
   so deleting a fixture is a hard error, never a vacuous pass. Committed binaries, decoded on every
   platform; the generator is Windows-only and never runs in CI. Unlike the traces these are decoder
   INPUTS, not recorded outputs — nothing regenerates them but a deliberate re-run of the script.
+- `audio/` — **AAC decode fixtures for `tools/ptaac`** (media-unification, the vendored minimp4 +
+  FAAD2 decoder). Two `.m4a` files made by ffmpeg (`make-audio-fixtures.sh`) — an encoder independent
+  of FAAD2 — from pure sine tones: `tone_stereo.m4a` (L=440 Hz, R=660 Hz, 44100 Hz, AAC-LC) and
+  `tone_mono.m4a` (440 Hz, mono). AAC is **lossy**, so there is no byte-golden and the invariant is the
+  TONE: `ptaac` asserts the decoded energy sits at the frequency the tone was born with, in the channel
+  it was born in — hardcoded frequencies, not read from a golden, so a broken decoder cannot regenerate
+  its way to green and deleting a fixture is a hard error (exit 2), never a vacuous pass. This catches
+  the failures that matter — silence (dead decoder), crossed channels (swap), a shifted pitch (wrong
+  rate), out-of-range samples (bad normalization). Committed binaries, decoded on every platform; the
+  generator needs ffmpeg and never runs in CI. Like `images/`, decoder INPUTS, not recorded outputs.
 - `renders/<project>.<samplerate>.txt` — `tools/ptrender`'s audio fingerprints. **Tolerance-compared
   (±1 dB), not byte-compared** — the DSP uses transcendentals and is built with `-ffast-math` on arm,
   so toolchains legitimately disagree on the last bit of a reverb tail. See `tools/ptrender/README.md`

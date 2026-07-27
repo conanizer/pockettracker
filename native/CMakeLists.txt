@@ -56,6 +56,42 @@ target_include_directories(opusfile
 )
 target_link_libraries(opusfile PUBLIC opus ogg)
 
+# ─── Vendored FAAD2 (AAC decode) ───────────────────────────────────────────────────────────────
+# minimp4 demuxes the ISO-BMFF container (.m4a/.mp4/.m4b/.mov/.3gp); FAAD2 decodes the AAC inside.
+# Together they replace Android's MediaCodec for container samples (audio-decoders.cpp decodeMp4File),
+# so the media layer is one C++ implementation with no platform branch. FAAD2 is built as an explicit
+# static-lib target — exactly as opusfile is — NOT through its own CMakeLists, so there is no
+# autotools/config.h generation step (F-Droid builds from source, and a generated build step is what
+# stalls that review). common.h guards its config.h include behind HAVE_CONFIG_H, which we never
+# define; the library uses its built-in defaults (floating-point, not FIXED_POINT — which is why
+# FAAD_FMT_FLOAT output is normalized [-1,1]). See native/vendor/faad2/PT-VENDORING.md.
+#
+# CONFIGURE_DEPENDS re-globs each build, so a revendor that adds/removes a .c is picked up without a
+# manual edit here — the file set is otherwise stable because the tree is version-pinned.
+file(GLOB FAAD2_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/vendor/faad2/libfaad/*.c)
+add_library(faad2 STATIC ${FAAD2_SOURCES})
+target_include_directories(faad2
+        PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/faad2/include
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/faad2/libfaad
+)
+# decoder.c #errors without it (used as the libfaad name string). FAAD2's own CMake injects it from
+# properties.json; we pin it to the vendored version — keep in sync with vendor/faad2/PT-VENDORING.md.
+#
+# ⚠️ HAVE_STDINT_H is load-bearing, not cosmetic. Without it common.h skips <stdint.h> and defines its
+# OWN `typedef unsigned long uint32_t` — which the NDK's sysroot (where <stdint.h> is pulled in anyway)
+# rejects as a redefinition of `unsigned int uint32_t`. MSVC happened not to include <stdint.h> in that
+# TU and so compiled without it, which is exactly why the NDK build is the one that catches this: the
+# platform nobody test-built is the one that is already broken. <stdint.h> is standard C99 and correct
+# on every toolchain we target, so define it unconditionally.
+target_compile_definitions(faad2 PRIVATE "PACKAGE_VERSION=\"2.11.2\"" HAVE_STDINT_H=1)
+# Vendored third-party C — silence its warnings (not ours to fix). As a separate target it does not
+# inherit the engine's -ffast-math; FAAD2 does its own float scaling and wants precise rounding.
+if(MSVC)
+    target_compile_options(faad2 PRIVATE /w)
+else()
+    target_compile_options(faad2 PRIVATE -w)
+endif()
+
 # ─── Vendored SDL2 — the ANDROID build only (convergence plan C1) ──────────────────────────────
 #
 # Android is the one target that has to carry SDL in-tree, and it is F-Droid that decides that: their
@@ -158,9 +194,12 @@ set(ENGINE_CORE_SOURCES
         audio-engine.cpp
         transient-detector.cpp
         # Native compressed-audio decoders. dr_mp3/dr_flac impl live inside audio-decoders.cpp;
-        # stb_vorbis ships as a .c that must be its own translation unit (compiled as C).
+        # stb_vorbis and minimp4 each ship as a .c that must be its own translation unit (compiled as
+        # C) — minimp4's implementation defines short macros (ERROR/MALLOC/FREE) kept out of the
+        # shared audio-decoders.cpp TU. FAAD2 (the AAC decoder) is the separate faad2 target above.
         audio-decoders.cpp
         vendor/stb_vorbis/stb_vorbis.c
+        vendor/minimp4/minimp4_impl.c
         kissfft/kiss_fft.c
         kissfft/kiss_fftr.c
         effects/primitives/daisysp/svf.cpp
@@ -226,6 +265,7 @@ else()
     set_source_files_properties(
             audio-decoders.cpp
             vendor/stb_vorbis/stb_vorbis.c
+            vendor/minimp4/minimp4_impl.c
             PROPERTIES COMPILE_OPTIONS "-fno-fast-math"
     )
 
@@ -264,7 +304,7 @@ target_include_directories(pockettracker PUBLIC
 # opusfile.h include path. Oboe/android/log are Android-shell dependencies only — the core never
 # touches them. libm is required by tsf for math functions on Unix-likes; on Windows the CRT already
 # carries it and there is no `m.lib` to find, so asking for it fails the link.
-target_link_libraries(pockettracker opusfile)
+target_link_libraries(pockettracker opusfile faad2)
 if(NOT WIN32)
     target_link_libraries(pockettracker m)
 endif()

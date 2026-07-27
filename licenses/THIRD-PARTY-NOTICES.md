@@ -183,6 +183,36 @@ Copyright (c) 2017 Sean Barrett. The full dual-licence statement is at the end o
 
 ---
 
+## FAAD2 (libfaad) — GPL-2.0-or-later
+
+Used for: native AAC decoding of ISO-BMFF container samples — `.m4a` / `.mp4` / `.m4b` / `.mov` /
+`.3gp` (`native/vendor/faad2/`, upstream https://github.com/knik0/faad2, version 2.11.2; see
+`native/vendor/faad2/PT-VENDORING.md`). Copyright © the FAAD2 authors (see
+`native/vendor/faad2/AUTHORS` upstream); the governing text is `native/vendor/faad2/COPYING`.
+
+**GPL-2.0-or-later**, and that is a deliberate choice, not an accident: it is **why FAAD2 was picked
+over fdk-aac**, whose licence the FSF considers GPL-incompatible. GPL-2.0-**or-later** may be used
+under GPL-3.0, so it is compatible with PocketTracker's own GPL-3.0 licence (`LICENSE`). FAAD2 is
+**statically linked into the `pockettracker` engine library**, so it ships in **every** artifact — the
+Compose APK, the SDL APK `.so`, the PortMaster zip and the Windows zip alike. As with all of
+PocketTracker, complete corresponding source is available under the project's GPL-3.0 terms.
+`COPYING` additionally states that non-GPL use requires a separate commercial licence from the
+authors; PocketTracker's use is GPL, so that clause does not apply here.
+
+---
+
+## minimp4 — CC0-1.0 / public domain
+
+Used for: demuxing the ISO-BMFF container (the box parsing that feeds FAAD2 above) —
+`native/vendor/minimp4/minimp4.h`, a single-header library by lieff (upstream
+https://github.com/lieff/minimp4; see `native/vendor/minimp4/PT-VENDORING.md`). Dedicated to the
+public domain under CC0-1.0; the full dedication is in the header comment. Only the demuxer is used
+(the muxer half is dropped by the linker). Statically linked into the `pockettracker` engine library,
+so it ships in every artifact; CC0 carries no reproduce-in-binary obligation, but the notice is
+recorded here regardless — the same rule every vendored component follows.
+
+---
+
 ## stb_image — public domain **or** MIT (dual, at your option)
 
 Used for: decoding the touch-skin, CRT-overlay and theme PNGs (`native/vendor/stb_image/stb_image.h`,

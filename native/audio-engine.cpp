@@ -431,6 +431,13 @@ int AudioEngine::loadSampleFromCompressed(int id, const char* path) {
         if (!ok) { L.clear(); R.clear(); ok = ptdec::decodeOpusFile(path, L, R, sr); }
     }
     else if (std::strcmp(ext, "opus") == 0) ok = ptdec::decodeOpusFile(path, L, R, sr);
+    // ISO-BMFF containers holding AAC (minimp4 demux + FAAD2). One decoder covers them all — .m4a and
+    // the container extensions are the same box format. Raw .aac (ADTS) is deliberately NOT here: it is
+    // a bare stream, not a container, and is not a sample format the app offers.
+    else if (std::strcmp(ext, "m4a") == 0 || std::strcmp(ext, "mp4") == 0 ||
+             std::strcmp(ext, "m4b") == 0 || std::strcmp(ext, "mov") == 0 ||
+             std::strcmp(ext, "3gp") == 0)
+        ok = ptdec::decodeMp4File(path, L, R, sr);
     else { LOGE("loadSampleFromCompressed: unsupported extension '%s'", ext); return 0; }
 
     if (!ok || L.empty() || sr <= 0) {
