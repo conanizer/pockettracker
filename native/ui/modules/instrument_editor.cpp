@@ -20,9 +20,12 @@ constexpr int TRIPLE_V2 = 305;
 constexpr int TRIPLE_N3 = 368;  // third label  (TIC / PAN)
 constexpr int TRIPLE_V3 = 438;
 
-// The source section's buttons. LOAD lines up with the DRIVE/CRUSH/DWNSMPL value column.
-constexpr int SRC_LOAD = 150;
-constexpr int SRC_EDIT = 335;
+// The TYPE row (0) and the INST PRESET row (5) each carry a label plus two buttons. Their two button
+// columns are SHARED so the buttons line up vertically — TYPE's LOAD / EDIT sit directly above PRESET's
+// SAVE / LOAD. TYPE's value is pulled left onto the ROOT/VOL column (TRIPLE_V1) to clear room for them.
+constexpr int TYPE_VALUE = TRIPLE_V1;  // the TYPE value, under the ROOT/VOL column
+constexpr int BTN_COL2   = 300;        // cursor column 2: TYPE-row LOAD, PRESET-row SAVE
+constexpr int BTN_COL3   = 400;        // cursor column 3: TYPE-row EDIT, PRESET-row LOAD
 
 int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
@@ -82,10 +85,11 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
     draw_section_source_row(c, x, rowY, nameX, s.cursorRow, s.cursorColumn, currentRow, sf, t);
     rowY += ROW_HEIGHT; currentRow++;
 
-    // ── 6 (SF only): PRESET ──────────────────────────────────────────────────────────────────────
+    // ── 6 (SF only): PATCH ───────────────────────────────────────────────────────────────────────
     if (sf) {
-        // "3/128 Acoustic Grand" — the 1-based position in the SF2's list, then its name. "--" when
-        // the file has no presets (or none is loaded), which is also what an empty SF slot shows.
+        // "3/128 Acoustic Grand" — the 1-based position in the SF2's patch list, then its name. "--"
+        // when the file has no patches (or none is loaded), which is also what an empty SF slot shows.
+        // Labelled PATCH, not PRESET, so it is not confused with the INST PRESET (.pti) row above.
         const std::string num = (s.sfPresetCount > 0)
                                     ? std::to_string(s.sfPresetIndex + 1) + "/" +
                                           std::to_string(s.sfPresetCount)
@@ -94,7 +98,7 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
 
         const bool onRow = (s.cursorRow == currentRow);
         if (onRow) draw_row_bg(c, x, rowY, t);
-        c.draw_text("PRESET", nameX, rowY + TEXT_PADDING, onRow ? t.textCursor : t.textParam,
+        c.draw_text("PATCH", nameX, rowY + TEXT_PADDING, onRow ? t.textCursor : t.textParam,
                     CHAR_SPACING, FONT_SCALE);
         c.draw_text(value, valueX, rowY + TEXT_PADDING, onRow ? t.textCursor : t.textValue,
                     CHAR_SPACING, FONT_SCALE);
@@ -224,26 +228,31 @@ void InstrumentEditorModule::draw_type_load_row(Canvas& c, int x, int y, int nam
                                                 const Instrument& ins, int cursor_row,
                                                 int cursor_column, int this_row,
                                                 const Theme& t) const {
+    (void)value_x;   // the TYPE row aligns to the TRIPLE grid, not the two-column grid
     const int  textY = y + TEXT_PADDING;
     const bool onRow = (cursor_row == this_row);
     if (onRow) draw_row_bg(c, x, y, t);
 
-    const int loadX = name_x + 325;
-    const int saveX = value_x + 270;
+    const bool sf = (ins.instrumentType == InstrumentType::SOUNDFONT);
 
     const bool c1 = onRow && cursor_column == 1;
     const bool c2 = onRow && cursor_column == 2;
     const bool c3 = onRow && cursor_column == 3;
 
-    const char* typeText =
-        (ins.instrumentType == InstrumentType::SOUNDFONT) ? "soundfont" : "sampler";
+    const char* typeText = sf ? "soundfont" : "sampler";
 
-    c.draw_text("TYPE",  name_x,  textY, c1 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text(typeText, value_x, textY, c1 ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
-    // LOAD and SAVE are BUTTONS — they are `textValue` even unselected, because a dim label would read
-    // as a parameter name rather than as something you can press.
-    c.draw_text("LOAD",  loadX,   textY, c2 ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("SAVE",  saveX,   textY, c3 ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+    // TYPE's value sits under the ROOT/VOL column; the source LOAD and EDIT are the two buttons to its
+    // right. LOAD and EDIT are BUTTONS — `textValue` even unselected, because a dim label would read as
+    // a parameter name rather than as something you can press.
+    c.draw_text("TYPE",   name_x,          textY, c1 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.draw_text(typeText, x + TYPE_VALUE,  textY, c1 ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+    c.draw_text("LOAD",   x + BTN_COL2,    textY, c2 ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
+    // No EDIT on a SoundFont: there is no single waveform to edit, so the cursor caps at LOAD (2) and
+    // the button is not drawn. Matches draw_section_source_row's old rule, moved up onto this row.
+    if (!sf) {
+        c.draw_text("EDIT >", x + BTN_COL3, textY, c3 ? t.textCursor : t.textValue, CHAR_SPACING,
+                    FONT_SCALE);
+    }
 }
 
 void InstrumentEditorModule::draw_name_row(Canvas& c, int x, int y, int name_x, int value_x,
@@ -267,22 +276,19 @@ void InstrumentEditorModule::draw_name_row(Canvas& c, int x, int y, int name_x, 
 void InstrumentEditorModule::draw_section_source_row(Canvas& c, int x, int y, int name_x,
                                                      int cursor_row, int cursor_column, int this_row,
                                                      bool is_soundfont, const Theme& t) const {
+    (void)is_soundfont;   // a preset saves/loads either instrument type — both buttons always drawn
     const int  textY = y + TEXT_PADDING;
     const bool onRow = (cursor_row == this_row);
     if (onRow) draw_row_bg(c, x, y, t);
 
-    // The loaded file's name lives on the NAME row, not here — this row is only its buttons.
-    c.draw_text(is_soundfont ? "SF" : "SMPL", name_x, textY, t.textParam, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("LOAD", x + SRC_LOAD, textY,
+    // The INSTRUMENT PRESET row: SAVE (col 2) and LOAD (col 3) a .pti. Named "INST PRESET" so it is not
+    // confused with the source LOAD on the TYPE row above, nor the SoundFont PATCH selector below it.
+    // SAVE and LOAD line up under the TYPE row's LOAD and EDIT (BTN_COL2 / BTN_COL3).
+    c.draw_text("INST PRESET", name_x, textY, t.textParam, CHAR_SPACING, FONT_SCALE);
+    c.draw_text("SAVE", x + BTN_COL2, textY,
                 (onRow && cursor_column == 2) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
-
-    // No EDIT for a SoundFont: there is no waveform to edit. The cursor is capped at column 2 there
-    // for the same reason (ui/cursor_move.h).
-    if (!is_soundfont) {
-        c.draw_text("EDIT >", x + SRC_EDIT, textY,
-                    (onRow && cursor_column == 3) ? t.textCursor : t.textValue, CHAR_SPACING,
-                    FONT_SCALE);
-    }
+    c.draw_text("LOAD", x + BTN_COL3, textY,
+                (onRow && cursor_column == 3) ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
 }
 
 void InstrumentEditorModule::draw_eq_row(Canvas& c, int x, int y, int name_x, int value_x, int eq_slot,
@@ -343,9 +349,9 @@ CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState
     }
 
     if (row == 4) return cc::none();       // spacer
-    if (row == 5) return cc::read_only();  // the LOAD / EDIT buttons — the dispatcher's, not a value
+    if (row == 5) return cc::read_only();  // the INST PRESET SAVE / LOAD buttons — the dispatcher's, not a value
 
-    if (sf && row == 6) {  // PRESET
+    if (sf && row == 6) {  // PATCH
         // The index range is the SF2's own list length. With no SoundFont the count is 0, so `maxIdx`
         // is 0 and stepping goes nowhere — correct, and the reason this row is drawable before a file
         // is ever opened.
@@ -458,8 +464,8 @@ InstrumentInputResult InstrumentEditorModule::handle_input(Instrument& ins, int 
     const auto b255 = [&](int& field) { if (isSet) field = clamp(v, 0, 255); };
     const auto b15  = [&](int& field) { if (isSet) field = clamp(v, 0, 15); };
 
-    // Rows 0/1 (TYPE, NAME) and 4/5 (spacer, source buttons) are handled by the dispatcher, exactly as
-    // Kotlin leaves them to MainActivity: nothing here writes them.
+    // Rows 0/1 (TYPE, NAME) and 4/5 (spacer, INST PRESET buttons) are handled by the dispatcher: the
+    // TYPE row's source LOAD/EDIT and the preset row's SAVE/LOAD are host verbs, not field writes.
 
     if (row == 2) {
         if (isSet && col == 1) ins.root = songcore::note_from_midi(v);
@@ -475,7 +481,7 @@ InstrumentInputResult InstrumentEditorModule::handle_input(Instrument& ins, int 
         } else if (col == 5 && !sf) b255(ins.pan);
 
     } else if (sf && row == 6) {
-        // PRESET — the module cannot resolve this itself: the bank+preset behind index `v` live in the
+        // PATCH — the module cannot resolve this itself: the bank+preset behind index `v` live in the
         // SF2's list, which only the engine has read. Hand it back to the dispatcher.
         if (isSet && col == 1) {
             r.presetIndexChanged = true;

@@ -858,11 +858,11 @@ int main() {
         state.currentScreen = ScreenType::INSTRUMENT;
         state.currentInstrument = 5;
 
-        // Row 5 col 2 — the SOURCE row's LOAD. A sampler browses samples; a SoundFont browses .sf2.
-        state.instrumentCursorRow = 5; state.instrumentCursorColumn = 2;
+        // Row 0 col 2 — the TYPE row's source LOAD. A sampler browses samples; a SoundFont browses .sf2.
+        state.instrumentCursorRow = 0; state.instrumentCursorColumn = 2;
         dispatch.on_button_a();
         eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::FILE_BROWSER),
-           "INSTRUMENT: A on the SOURCE row's LOAD opens the browser");
+           "INSTRUMENT: A on the TYPE row's LOAD opens the browser");
         eq(static_cast<int>(state.browserPurpose),
            static_cast<int>(AppState::BrowserPurpose::LOAD_SOURCE), "INSTRUMENT: …for a SOURCE");
         eqs(state.fileBrowser.currentDirectory, fs_impl.samples_directory(),
@@ -870,26 +870,28 @@ int main() {
         dispatch.on_button_b();
 
         host.edit_project().instruments[5].instrumentType = songcore::InstrumentType::SOUNDFONT;
-        state.instrumentCursorRow = 5; state.instrumentCursorColumn = 2;
+        state.instrumentCursorRow = 0; state.instrumentCursorColumn = 2;
         dispatch.on_button_a();
         eqs(state.fileBrowser.currentDirectory, fs_impl.soundfonts_directory(),
             "⚠️ INSTRUMENT: a SOUNDFONT slot browses SOUNDFONTS instead — same cell, different folder");
         dispatch.on_button_b();
         host.edit_project().instruments[5].instrumentType = songcore::InstrumentType::SAMPLER;
 
-        // Row 0 col 2 — LOAD PRESET (.pti), which is a different directory AND a different purpose.
-        state.instrumentCursorRow = 0; state.instrumentCursorColumn = 2;
+        // Row 5 col 3 — the INST PRESET row's LOAD (.pti): a different directory AND a different purpose
+        // from the source LOAD on row 0. Two LOADs that used to sit on one row, now clearly separated.
+        state.instrumentCursorRow = 5; state.instrumentCursorColumn = 3;
         dispatch.on_button_a();
         eq(static_cast<int>(state.browserPurpose),
-           static_cast<int>(AppState::BrowserPurpose::LOAD_PRESET), "INSTRUMENT: row 0 LOAD is a PRESET");
+           static_cast<int>(AppState::BrowserPurpose::LOAD_PRESET),
+           "INSTRUMENT: the INST PRESET row's LOAD is a PRESET");
         eqs(state.fileBrowser.currentDirectory, fs_impl.instruments_directory(),
             "INSTRUMENT: …in the INSTRUMENTS directory");
         dispatch.on_button_b();
 
-        // Row 0 col 3 — SAVE PRESET, which opens the keyboard rather than the browser.
-        state.instrumentCursorRow = 0; state.instrumentCursorColumn = 3;
+        // Row 5 col 2 — SAVE PRESET, which opens the keyboard rather than the browser.
+        state.instrumentCursorRow = 5; state.instrumentCursorColumn = 2;
         dispatch.on_button_a();
-        ok(state.qwerty.isOpen, "INSTRUMENT: row 0 SAVE opens the KEYBOARD, not the browser");
+        ok(state.qwerty.isOpen, "INSTRUMENT: the INST PRESET row's SAVE opens the KEYBOARD, not the browser");
         eqs(state.qwerty.fieldLabel, "SAVE PRESET:", "INSTRUMENT: …labelled SAVE PRESET");
         dispatch.on_start();
         ok(fs_impl.file_exists(fs_impl.instruments_directory() + "/INST05.pti"),
@@ -901,7 +903,7 @@ int main() {
            "⚠️ INSTRUMENT: the NAME row DEFERS its A to release (so A+B can reset the cell instead)");
         state.instrumentCursorRow = 5; state.instrumentCursorColumn = 2;
         ok(!dispatch.defer_a_to_release(),
-           "INSTRUMENT: …and the LOAD button does NOT — it is a read-only cell with no A-combo to protect");
+           "INSTRUMENT: …and the SAVE button does NOT — it is a read-only cell with no A-combo to protect");
 
         state.instrumentCursorRow = 1; state.instrumentCursorColumn = 1;
         dispatch.on_button_a();
@@ -970,7 +972,7 @@ int main() {
         state.currentInstrument = 7;
         host.edit_project().instruments[7].instrumentType = songcore::InstrumentType::SAMPLER;
 
-        state.instrumentCursorRow = 5; state.instrumentCursorColumn = 3;   // the EDIT cell
+        state.instrumentCursorRow = 0; state.instrumentCursorColumn = 3;   // the EDIT cell (TYPE row)
         dispatch.on_button_a();
         eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::SAMPLE_EDITOR),
            "SE: A on INSTRUMENT's EDIT opens the sample editor");
@@ -983,10 +985,11 @@ int main() {
         eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::INSTRUMENT),
            "SE: B on an UNMODIFIED sample leaves at once (no confirm)");
 
-        // ⚠️ A SoundFont has no single waveform to cut — it is a bank of them. The press is CONSUMED
-        // (the row is shared, so the button is drawn on both) but it opens nothing.
+        // ⚠️ A SoundFont has no single waveform to cut — it is a bank of them. The EDIT button is not
+        // drawn on SF (the cursor caps at LOAD), but forced onto the cell the press is still CONSUMED
+        // rather than falling through — it opens nothing.
         host.edit_project().instruments[7].instrumentType = songcore::InstrumentType::SOUNDFONT;
-        state.instrumentCursorRow = 5; state.instrumentCursorColumn = 3;
+        state.instrumentCursorRow = 0; state.instrumentCursorColumn = 3;
         dispatch.on_button_a();
         eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::INSTRUMENT),
            "⚠️ SE: EDIT on a SOUNDFONT slot opens NOTHING — there is no one waveform to edit");
@@ -1006,7 +1009,7 @@ int main() {
     {
         state.currentScreen = ScreenType::INSTRUMENT;
         state.currentInstrument = 9;
-        state.instrumentCursorRow = 5; state.instrumentCursorColumn = 3;
+        state.instrumentCursorRow = 0; state.instrumentCursorColumn = 3;
         dispatch.on_button_a();          // into the editor, on a slot with no sample at all
 
         eq(state.sampleEditor.totalFrames, 0, "SE: the empty slot really is empty (no engine, no audio)");
@@ -1041,7 +1044,7 @@ int main() {
     {
         state.currentScreen = ScreenType::INSTRUMENT;
         state.currentInstrument = 7;
-        state.instrumentCursorRow = 5; state.instrumentCursorColumn = 3;
+        state.instrumentCursorRow = 0; state.instrumentCursorColumn = 3;
         dispatch.on_button_a();
 
         SampleEditorState& se = state.sampleEditor;
@@ -1122,7 +1125,7 @@ int main() {
     // ── 6. START auditions, SELECT names, and neither is the transport ──────────────────────────
     {
         state.currentScreen = ScreenType::INSTRUMENT;
-        state.instrumentCursorRow = 5; state.instrumentCursorColumn = 3;
+        state.instrumentCursorRow = 0; state.instrumentCursorColumn = 3;
         dispatch.on_button_a();
 
         dispatch.set_now(5000);

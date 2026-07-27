@@ -12,12 +12,14 @@
 //
 // The column shape of each kind, which is what the movement code actually reads:
 //
-//   NAME   — columns 1..3, LEFT/RIGHT step by 1 (the value, then two buttons).
+//   NAME   — columns 1..3, LEFT/RIGHT step by 1 (a value, then two buttons: TYPE + LOAD + EDIT). On a
+//            SoundFont the EDIT button is not drawn — there is no single waveform to edit — so the
+//            cursor caps at column 2 there, and column 3 would sit on a cell that is not drawn.
 //   TRIPLE — columns 1 / 3 / 5, LEFT/RIGHT step by 2.
 //   DUAL   — columns 1 / 3, LEFT/RIGHT jump straight between them.
-//   SOURCE — LOAD (2) / EDIT (3); the cursor SNAPS to 2 on entry. A SoundFont caps at 2 — it has no
-//            editable waveform, so there is no EDIT button, and a cursor allowed onto column 3 there
-//            would sit on a cell that is not drawn.
+//   SOURCE — two buttons, columns 2 / 3 (SAVE + LOAD the .pti preset); the cursor SNAPS to 2 on entry.
+//            Present on BOTH instrument types — a preset saves and loads either kind, so unlike the NAME
+//            row above there is no per-type cap here.
 //   SINGLE — column 1 only.
 //   SPACER — not selectable; vertical movement steps straight over it.
 
@@ -29,12 +31,12 @@ enum class InstrumentRowKind { NAME, TRIPLE, DUAL, SOURCE, SINGLE, SPACER };
 
 /** Sampler: 16 rows. */
 inline constexpr InstrumentRowKind INSTRUMENT_ROWS_SAMPLER[] = {
-    InstrumentRowKind::NAME,    //  0  TYPE + LOAD + SAVE
+    InstrumentRowKind::NAME,    //  0  TYPE + source LOAD + EDIT
     InstrumentRowKind::SINGLE,  //  1  NAME
     InstrumentRowKind::TRIPLE,  //  2  ROOT + DETUNE + TIC
     InstrumentRowKind::TRIPLE,  //  3  VOL + SLICE + PAN
     InstrumentRowKind::SPACER,  //  4
-    InstrumentRowKind::SOURCE,  //  5  sample LOAD / EDIT
+    InstrumentRowKind::SOURCE,  //  5  INST PRESET: SAVE / LOAD (.pti)
     InstrumentRowKind::SPACER,  //  6
     InstrumentRowKind::DUAL,    //  7  DRIVE + FILTER
     InstrumentRowKind::DUAL,    //  8  CRUSH + FREQ
@@ -47,15 +49,15 @@ inline constexpr InstrumentRowKind INSTRUMENT_ROWS_SAMPLER[] = {
     InstrumentRowKind::DUAL,    // 15  LOOP END + REVERSE
 };
 
-/** SoundFont: 15 rows. It gains PRESET and loses the four sample-window rows. */
+/** SoundFont: 15 rows. It gains PATCH and loses the four sample-window rows. */
 inline constexpr InstrumentRowKind INSTRUMENT_ROWS_SOUNDFONT[] = {
-    InstrumentRowKind::NAME,    //  0  TYPE + LOAD + SAVE
+    InstrumentRowKind::NAME,    //  0  TYPE + source LOAD (no EDIT on SF)
     InstrumentRowKind::SINGLE,  //  1  NAME
     InstrumentRowKind::TRIPLE,  //  2  ROOT + DETUNE + TIC
     InstrumentRowKind::DUAL,    //  3  VOL + PAN
     InstrumentRowKind::SPACER,  //  4
-    InstrumentRowKind::SOURCE,  //  5  SF2 LOAD (no EDIT)
-    InstrumentRowKind::SINGLE,  //  6  PRESET
+    InstrumentRowKind::SOURCE,  //  5  INST PRESET: SAVE / LOAD (.pti)
+    InstrumentRowKind::SINGLE,  //  6  PATCH (the SF2's internal patch selector)
     InstrumentRowKind::SPACER,  //  7
     InstrumentRowKind::DUAL,    //  8  DRIVE + FILTER
     InstrumentRowKind::DUAL,    //  9  CRUSH + FREQ
@@ -85,14 +87,14 @@ inline InstrumentRowKind instrument_row_kind(bool is_soundfont, int row) {
 }
 
 /**
- * The SoundFont layout inserts PRESET at row 6, so every row below it shifts down by one. Kotlin
+ * The SoundFont layout inserts PATCH at row 6, so every row below it shifts down by one. Kotlin
  * spells this `sfOffset` and adds it to a literal row number at each site; the same name is kept here
  * so the two read alike.
  */
 inline int instrument_sf_offset(bool is_soundfont) { return is_soundfont ? 1 : 0; }
 
 /**
- * The EQ row — 12 on a sampler, 14 on a SoundFont (the two extra rows above it are PRESET and the four
+ * The EQ row — 12 on a sampler, 14 on a SoundFont (the two extra rows above it are PATCH and the four
  * sample-window rows the SF layout drops, netting +2). Its column 1 is the cell that raises the EQ
  * EDITOR (S8).
  *

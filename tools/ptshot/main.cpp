@@ -370,7 +370,7 @@ int main(int argc, char** argv) {
                      "  --demo         synthesise the visualizer, the note monitor and the MIXER's\n"
                      "                 meters, which are otherwise empty (ptshot has no engine).\n"
                      "                 A fixture for geometry, not data.\n"
-                     "  --sf-presets   likewise for the INSTRUMENT screen's PRESET row: only an engine\n"
+                     "  --sf-presets   likewise for the INSTRUMENT screen's PATCH row: only an engine\n"
                      "                 that has opened the .sf2 can answer it.\n"
                      "  --mod-cursor   MODS has no columns — its cursor is (pair, side, row).\n"
                      "  --cursor       on MIXER this is (masterRow, column): rows 2 and 3 exist only\n"
@@ -588,8 +588,8 @@ int main(int argc, char** argv) {
         state.sampleEditor.sliceIndex = clamp(std::atoi(v), 255);
     state.sampleEditor.showConfirmClose = flag(argc, argv, "--se-confirm");
 
-    // --sf-presets=COUNT,INDEX: the SF2's preset list, which only an ENGINE can answer for — and ptshot
-    // has none, by design. Supplying it here is what lets the INSTRUMENT screen's PRESET row be drawn
+    // --sf-presets=COUNT,INDEX: the SF2's patch list, which only an ENGINE can answer for — and ptshot
+    // has none, by design. Supplying it here is what lets the INSTRUMENT screen's PATCH row be drawn
     // and eyeballed without opening a SoundFont. Same reasoning as --demo: a fixture, not a golden.
     if (const char* v = opt(argc, argv, "--sf-presets")) {
         int count = 0, index = 0;

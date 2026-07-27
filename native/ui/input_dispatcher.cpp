@@ -2988,33 +2988,35 @@ bool InputDispatcher::instrument_open_at_cursor() {
     const int         row  = s_.instrumentCursorRow;
     const int         col  = s_.instrumentCursorColumn;
 
-    // Row 0 — TYPE (col 1) + the PRESET buttons. A .pti carries the whole instrument: its params, its
-    // mod slots, its table, and the path to its source.
+    // Row 0 — TYPE (col 1) + the SOURCE buttons. LOAD (col 2) browses for a sample / SoundFont; EDIT
+    // (col 3) opens the sample editor. (The instrument PRESET save/load lives on row 5 now.)
     if (row == 0 && col == 2) {
-        open_file_browser(AppState::BrowserPurpose::LOAD_PRESET, fs_.instruments_directory(), {"pti"});
+        open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE,
+                          isSF ? fs_.soundfonts_directory() : fs_.samples_directory(),
+                          isSF ? soundfont_extensions() : sample_extensions());
         return true;
     }
+    // ⚠️ Samplers only, and the refusal is silent: a SoundFont has no single waveform to cut — it is a
+    // bank of them, each mapped to a key range — so there is nothing for the editor to draw. The EDIT
+    // button is not drawn on SF (the cursor caps at LOAD), so this arm is reached on samplers only; the
+    // isSF guard stays as a belt-and-braces consume.
     if (row == 0 && col == 3) {
+        if (isSF) return true;   // handled: the press is CONSUMED, it just opens nothing
+        open_sample_editor();
+        return true;
+    }
+
+    // Row 5 — the INSTRUMENT PRESET row. A .pti carries the whole instrument: its params, its mod slots,
+    // its table, and the path to its source. SAVE (col 2) names and writes it; LOAD (col 3) browses.
+    if (row == 5 && col == 2) {
         const std::string dir  = fs_.instruments_directory();
         const std::string name = ins.name.empty() ? songcore::default_instrument_name(ins.id) : ins.name;
         open_qwerty(QwertyContext::INSTRUMENT_SAVE, name, "SAVE PRESET:", dir, /*max_length=*/20,
                     /*clear_on_first_b=*/true);
         return true;
     }
-
-    // Row 5 — the SOURCE row. LOAD (col 2) browses for a file; EDIT (col 3) opens the sample editor.
-    if (row == 5 && col == 2) {
-        open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE,
-                          isSF ? fs_.soundfonts_directory() : fs_.samples_directory(),
-                          isSF ? soundfont_extensions() : sample_extensions());
-        return true;
-    }
-    // ⚠️ Samplers only, and the refusal is silent on Android too: a SoundFont has no single waveform to
-    // cut — it is a bank of them, each mapped to a key range — so there is nothing for the editor to
-    // draw. The button is drawn on both, because the row is shared; only one of them answers.
     if (row == 5 && col == 3) {
-        if (isSF) return true;   // handled: the press is CONSUMED, it just opens nothing
-        open_sample_editor();
+        open_file_browser(AppState::BrowserPurpose::LOAD_PRESET, fs_.instruments_directory(), {"pti"});
         return true;
     }
 

@@ -97,8 +97,11 @@ inline int instrument_column_for(bool is_sf, int new_row, int old_row, int old_c
             return 1;
 
         case InstrumentRowKind::DUAL:
-        case InstrumentRowKind::NAME:
             return (has_right(old) && old_column >= 3) ? 3 : 1;
+
+        case InstrumentRowKind::NAME:
+            // Row 0's EDIT (column 3) is drawn on samplers only, so a SoundFont must not land on it.
+            return (has_right(old) && old_column >= 3 && !is_sf) ? 3 : 1;
 
         default:
             return 1;   // SINGLE / SPACER
@@ -119,13 +122,18 @@ inline int instrument_left_column(bool is_sf, int row, int column) {
 /** The rightmost. getInstrumentCursorRightColumn. */
 inline int instrument_right_column(bool is_sf, int row, int column) {
     switch (instrument_row_kind(is_sf, row)) {
-        case InstrumentRowKind::NAME:   return column + 1 > 3 ? 3 : column + 1;  // 1→2→3
-        case InstrumentRowKind::SOURCE: {
-            // A SoundFont caps at LOAD: it has no editable waveform, so no EDIT button is drawn — and
-            // a cursor allowed onto column 3 there would simply VANISH (no cell matches it).
+        case InstrumentRowKind::NAME: {
+            // Row 0's EDIT (column 3) is drawn on samplers only — a SoundFont has no waveform to edit —
+            // so the cursor caps at LOAD (2) there; a cursor on column 3 would sit on a cell not drawn.
             const int cap = is_sf ? 2 : 3;
             const int c   = column + 1;
             return c > cap ? cap : c;
+        }
+        case InstrumentRowKind::SOURCE: {
+            // The INST PRESET row: SAVE (2) and LOAD (3) are both drawn for EITHER instrument type — a
+            // preset round-trips a sampler or a SoundFont alike — so there is no per-type cap here.
+            const int c = column + 1;
+            return c > 3 ? 3 : c;
         }
         case InstrumentRowKind::TRIPLE: return column + 2 > 5 ? 5 : column + 2;  // 1→3→5
         case InstrumentRowKind::DUAL:   return 3;                                // 1→3, in one jump
