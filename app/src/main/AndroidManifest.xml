@@ -25,11 +25,15 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Pockettracker">
+        <!-- MainActivity is now an SDLActivity subclass (convergence Phase E). launchMode=singleTask
+             is SDL's recommendation: it stops a relaunch from spawning a second native SDL instance,
+             and configChanges keeps a rotation from restarting the native thread mid-session. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.Pockettracker.Splash"
+            android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

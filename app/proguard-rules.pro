@@ -1,29 +1,21 @@
-# Keep JNI-accessible native methods (required when minification is enabled)
--keep class com.conanizer.pockettracker.platform.android.OboeAudioBackend {
-    native <methods>;
-}
-
-# The one place C++ calls back INTO Kotlin, and the only by-name JNI lookup in the codebase:
-# songcore's render loop reports progress through this interface, resolving the method with
-#     GetMethodID(cls, "onProgress", "(F)V")     (native/songcore-jni.cpp)
-# so the NAME is part of the ABI and R8 must not touch it.
+# ─── The by-name JNI callbacks from native into Kotlin (convergence Phase E) ──────────────────
 #
-# The default proguard-android-optimize.txt rule
-#     -keepclasseswithmembernames,includedescriptorclasses class * { native <methods>; }
-# is a trap here: `includedescriptorclasses` keeps the *class names* appearing in a native
-# method's signature — AndroidSongcore, native_renderToWav and this interface all kept theirs —
-# but it does NOT keep those classes' MEMBERS. So `onProgress` was renamed on the SAM lambda
-# RenderController.progressSlice builds, and every render in a release build died with
-#     NoSuchMethodError: no non-static method "Lh1/o1;.onProgress(F)V"
-# Debug builds don't run R8, which is why only a release APK ever showed it.
+# The shared C++ shell calls exactly two Kotlin methods on MainActivity by name, resolving each with
+# GetMethodID (shell/android-main.cpp):
+#     onButtonFeedback(IZZIZI)V     — routes a virtual-button press to the sound/haptic managers
+#     hasPhysicalGameButtons()Z     — the SOURCE_GAMEPAD check SDL's looser C joystick API cannot make
+# so both NAMES are part of the ABI and R8 must not rename or strip them. They carry @Keep as well, but
+# an explicit rule is this project's standing requirement for a native-by-name callback: @Keep alone
+# once let a renamed SAM member (onProgress, the old songcore render-progress hook — since deleted with
+# the JNI facade) kill every render in a release APK. MainActivity now runs R8 in release, having left
+# src/debug in Phase E, so this is load-bearing, not belt-and-braces. Debug never runs R8, which is why
+# a slip here is invisible until a release build.
 #
-# Keeping the interface method pins the name for every implementation of it (R8 names virtual
-# methods per override group); the second rule states that for the implementors outright.
--keep interface com.conanizer.pockettracker.core.audio.ISongcore$RenderProgress {
-    void onProgress(float);
-}
--keepclassmembers class * implements com.conanizer.pockettracker.core.audio.ISongcore$RenderProgress {
-    void onProgress(float);
+# The class itself is a keep root already (it is the launcher activity in the manifest); only its
+# members need pinning, hence -keepclassmembers.
+-keepclassmembers class com.conanizer.pockettracker.MainActivity {
+    void onButtonFeedback(int, boolean, boolean, int, boolean, int);
+    boolean hasPhysicalGameButtons();
 }
 
 # ─── SDL2's Java glue (convergence plan C1) ───────────────────────────────────────────────────
@@ -58,33 +50,9 @@
     public static int i(...);
 }
 
-# kotlinx.serialization — keep generated serializers for @Serializable model classes
-# (project save/load, instrument presets, themes). kotlinx-serialization-json 1.6.0 ships its own
-# consumer R8 rules, but keep these explicitly since save/load correctness is critical.
--keepattributes RuntimeVisibleAnnotations,AnnotationDefault
-
-# Keep `Companion` object fields of serializable classes.
--if @kotlinx.serialization.Serializable class **
--keepclassmembers class <1> {
-    static <1>$Companion Companion;
-}
-
-# Keep `serializer()` on companion objects (both default and named) of serializable classes.
--if @kotlinx.serialization.Serializable class ** {
-    static **$* *;
-}
--keepclassmembers class <2>$<3> {
-    kotlinx.serialization.KSerializer serializer(...);
-}
-
-# Keep `INSTANCE.serializer()` of serializable objects.
--if @kotlinx.serialization.Serializable class ** {
-    public static ** INSTANCE;
-}
--keepclassmembers class <1> {
-    public static <1> INSTANCE;
-    kotlinx.serialization.KSerializer serializer(...);
-}
+# kotlinx.serialization's keep rules left with Phase E: the @Serializable models (project save/load,
+# instrument presets, themes) are all C++ now (native/songcore/project_io, native/ui/theme_io), so
+# there is no generated serializer left in the APK to protect.
 
 # Google AutoService (a build-time annotation processor) references javax.annotation.processing.* —
 # classes that exist only at compile time, never in the Android runtime. The code is never reached

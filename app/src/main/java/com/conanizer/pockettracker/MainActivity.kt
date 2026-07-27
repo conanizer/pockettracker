@@ -1,126 +1,121 @@
-﻿package com.conanizer.pockettracker
+package com.conanizer.pockettracker
 
-import android.Manifest
 import android.content.Intent
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
-import android.content.pm.ActivityInfo
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import android.util.Log
-import android.view.Window
-import android.view.WindowManager
+import android.view.InputDevice
+import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
-import android.view.View
-import androidx.activity.ComponentActivity
+import android.view.WindowManager
+import androidx.annotation.Keep
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
-import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.compose.setContent
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.sp
-import android.content.res.Configuration
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
-import androidx.core.content.ContextCompat
-import com.conanizer.pockettracker.ui.theme.PockettrackerTheme
-import androidx.compose.ui.focus.FocusRequester
-import com.conanizer.pockettracker.core.logic.InstrumentController
-import com.conanizer.pockettracker.core.logic.PlaybackController
-import com.conanizer.pockettracker.core.logic.FileController
-import com.conanizer.pockettracker.core.audio.AudioEngine
-import com.conanizer.pockettracker.core.data.InstrumentType
-import com.conanizer.pockettracker.core.data.ScreenType
-import com.conanizer.pockettracker.core.logic.RenderController
-import com.conanizer.pockettracker.platform.android.AndroidSongcore
-import com.conanizer.pockettracker.platform.android.OboeAudioBackend
-import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import com.conanizer.pockettracker.platform.android.AndroidResourceLoader
-import com.conanizer.pockettracker.platform.android.AndroidFileSystem
-import com.conanizer.pockettracker.platform.android.ThemeLoader
-import com.conanizer.pockettracker.platform.android.AndroidVideoAudioExtractor
-import com.conanizer.pockettracker.platform.android.ButtonSoundManager
+import com.conanizer.pockettracker.input.VirtualButton
 import com.conanizer.pockettracker.platform.android.ButtonHapticManager
-import com.conanizer.pockettracker.core.storage.FileInfo
-import androidx.compose.ui.graphics.asImageBitmap
-import com.conanizer.pockettracker.input.AppControllers
-import com.conanizer.pockettracker.input.AppInputDispatcher
-import com.conanizer.pockettracker.input.AppStateRefs
-import com.conanizer.pockettracker.input.InputMapper
-import com.conanizer.pockettracker.input.InsertPosition
-import com.conanizer.pockettracker.input.LocalButtonEventCallback
-import com.conanizer.pockettracker.platform.android.DeviceAdapter
-import com.conanizer.pockettracker.ui.FullScreenLayout
-import com.conanizer.pockettracker.ui.LandscapeLayoutWithVirtualButtons
-import com.conanizer.pockettracker.ui.LocalAppTheme
-import com.conanizer.pockettracker.ui.LocalLayoutMode
-import com.conanizer.pockettracker.ui.PortraitLayout2WithVirtualButtons
-import com.conanizer.pockettracker.ui.PortraitLayoutWithVirtualButtons
-import com.conanizer.pockettracker.ui.TrackerScreenParams
-import com.conanizer.pockettracker.ui.modules.ChainEditorModule
-import com.conanizer.pockettracker.ui.modules.EffectModule
-import com.conanizer.pockettracker.ui.modules.EqModule
-import com.conanizer.pockettracker.ui.modules.FileBrowserModule
-import com.conanizer.pockettracker.ui.modules.GrooveModule
-import com.conanizer.pockettracker.ui.modules.InstrumentModule
-import com.conanizer.pockettracker.ui.modules.InstrumentPoolModule
-import com.conanizer.pockettracker.ui.modules.MixerModule
-import com.conanizer.pockettracker.ui.modules.ModulationModule
-import com.conanizer.pockettracker.ui.modules.PhraseEditorModule
-import com.conanizer.pockettracker.ui.modules.ProjectModule
-import com.conanizer.pockettracker.ui.modules.SampleEditorModule
-import com.conanizer.pockettracker.ui.modules.SampleEditorState
-import com.conanizer.pockettracker.ui.modules.SettingsModule
-import com.conanizer.pockettracker.ui.modules.SongEditorModule
-import com.conanizer.pockettracker.ui.modules.TableModule
-import com.conanizer.pockettracker.ui.modules.ThemeEditorState
-import com.conanizer.pockettracker.ui.overlays.EqCallerContext
-import com.conanizer.pockettracker.ui.overlays.EqEditorState
-import com.conanizer.pockettracker.ui.overlays.FxHelperState
-import com.conanizer.pockettracker.ui.overlays.QwertyKeyboardState
-import com.conanizer.pockettracker.ui.theme.AppTheme
-import com.conanizer.pockettracker.ui.theme.DeviceSkin
-import com.conanizer.pockettracker.ui.theme.DeviceTheme
+import com.conanizer.pockettracker.platform.android.ButtonSoundManager
+import org.json.JSONObject
+import org.libsdl.app.SDLActivity
 import java.io.File
 
-fun File.toFileInfo(): FileInfo = FileInfo(
-    path = absolutePath,
-    name = name,
-    extension = extension,
-    isDirectory = isDirectory,
-    size = if (isFile) length() else 0L,
-    lastModified = lastModified()
-)
+/**
+ * PocketTracker's Android entry point: an `SDLActivity` subclass. Convergence Phase E.
+ *
+ * This is the whole of the Android-only surface now. The ~15,000-line Compose UI, the input
+ * dispatcher and the JNI audio facade are gone, replaced by the shared C++ SDL shell (`shell/`,
+ * `native/ui/`) that already drives Windows and the Linux handhelds. All this class still does is the
+ * handful of jobs that are genuinely Java's: point SDL at the native libraries and the app root, own
+ * the splash screen and the immersive / edge-to-edge window, ask for storage permission, run the
+ * one-shot settings import (C6), and route button feedback (sound/haptics) back from the shell over
+ * one JNI hook.
+ *
+ * ⚠️ It began life as `SdlActivity` in `src/debug/` — the second, debug-only activity the app carried
+ * beside Compose through phases C and D, so touch could be developed without breaking the shipped UI
+ * (see docs/internal/convergence-plan.md §5–7 and the git history at tag `kotlin-ui-final`). Phase E
+ * deleted the Compose `MainActivity` and moved this class into `src/main/` under that name. Inline
+ * comments below that cite `MainActivity.kt:<line>` refer to that now-deleted Compose activity as the
+ * prior art each behaviour was learned from.
+ *
+ * ⚠️ **C4 added the three things C3 deliberately left out**, and two of them are not here at all —
+ * which is the point. The permission request and the system bars are Java's, so they are below. The
+ * lifecycle is NOT: the autosave/settings flush is a `SDL_AddEventWatch` watcher in `shell/app.cpp`,
+ * shared with every other platform, because `SDL_APP_WILLENTERBACKGROUND` fires on the NATIVE thread
+ * inside the frame loop's own `SDL_PollEvent` — not on this thread. The back button is likewise
+ * split: the hint is armed in `shell/android-main.cpp` and the key is mapped in `shell/sdl-input.cpp`.
+ * Nothing about the lifecycle needs Kotlin.
+ */
+class MainActivity : SDLActivity() {
 
-class MainActivity : ComponentActivity() {
+    // ── Button feedback (convergence D) ────────────────────────────────────────────────────────────
+    //
+    // The surviving thin Kotlin the plan keeps: SoundPool clicks and Vibrator pulses are Android system
+    // services with no C++ twin, so they stay here and the shared shell reaches them through ONE JNI
+    // call (`onButtonFeedback` below). Created in `onCreate`, before `super.onCreate()` starts the SDL
+    // thread, so the SoundPool has begun loading its samples before the first tap can arrive.
+    private var buttonSound:  ButtonSoundManager?  = null
+    private var buttonHaptic: ButtonHapticManager? = null
 
-    /** Hide status bar + navigation bar (immersive sticky). Called on create and focus regain.
-     *  Must be called AFTER setContent so the DecorView is attached (API 30+ requirement). */
+    /**
+     * ⚠️ ORDER MATTERS AND THE LAST ONE IS SPECIAL. `SDLActivity.getMainSharedObject()` takes the
+     * LAST entry and `dlsym`s `SDL_main` out of `lib<that>.so` — so `pockettracker-sdl` must be
+     * last, and it is the library `shell/android-main.cpp` compiles into.
+     *
+     * `libpockettracker.so` (the engine) is deliberately absent: it is a NEEDED dependency of
+     * `libpockettracker-sdl.so`, so the dynamic linker loads it from the same directory without
+     * being told. Listing it here as well would load it twice by two different mechanisms for no
+     * benefit.
+     */
+    override fun getLibraries(): Array<String> = arrayOf(
+        "SDL2",
+        "pockettracker-sdl"
+    )
+
+    /**
+     * The app root, resolved HERE because only Java can resolve it.
+     *
+     * ⚠️ `ui::default_app_root()` on the C++ side walks `POCKETTRACKER_HOME` → `XDG_DATA_HOME` →
+     * `HOME` and every one of them misses on Android — it would fall through to a RELATIVE path and
+     * put the user's songs beside whatever the process's cwd happens to be. That is exactly the A1
+     * bug, which was found on Windows for the same reason. `Environment` is the only thing that
+     * knows the real answer on this device and this OS version, so it answers, and
+     * `android-main.cpp` takes it as argv[1].
+     *
+     * The path matches what `AndroidFileSystem.kt` has always used, which is what makes this activity
+     * open the SAME projects the Compose app does rather than a parallel empty world.
+     */
+    override fun getArguments(): Array<String> = arrayOf(appRoot())
+
+    private fun appRoot(): String =
+        File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+            "PocketTracker"
+        ).absolutePath
+
+    /**
+     * Hide the status and navigation bars (immersive sticky) — **C4, and NOT cosmetic.**
+     *
+     * ⚠️⚠️ **THE STATUS BAR COSTS A WHOLE SCALING FACTOR.** With it visible the SDL window is
+     * **1280×904**, not 1280×960, because the bar keeps 56 px — and 2× of the 640×480 design needs
+     * exactly 960. So `SdlVideo::dest_rect`'s INTEGER scale computes `min(1280/640, 904/480)` =
+     * `min(2, 1)` = **1×**, and the tracker draws at a quarter of the area it should with 320 px
+     * letterbox bars either side. Nothing is wrong with the scaler; it is doing the right thing with
+     * the wrong window. Hidden, the panel is 1280×960 and 2× is pixel-exact and full-screen.
+     *
+     * ⚠️ This is a lesson this app already paid for once: `MainActivity.kt:158` says in its own
+     * comment that reserving inset padding "can drop scale from 2× to 1×". The Compose activity has
+     * always hidden the bars; `SdlActivity` simply never inherited the knowledge.
+     *
+     * Nothing on the C++ side has to be told: `dest_rect()` asks `SDL_GetRendererOutputSize` every
+     * frame, so the resize is picked up on the next present with no resize handler at all.
+     *
+     * ⚠️ `decorView.post` because API 30+ requires the DecorView to be ATTACHED before
+     * `insetsController` is non-null — the same reason MainActivity posts it.
+     */
     private fun hideSystemBars() {
-        // API 30+ path: insetsController requires DecorView to be attached
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             window.decorView.post {
                 window.insetsController?.apply {
@@ -141,1119 +136,394 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Re-apply immersive mode whenever the window regains focus (e.g. after a dialog). */
+    /** Re-apply immersive mode whenever the window regains focus — a swipe-down or the permission
+     *  screen returning otherwise leaves the bars up, and with them the 1× window. */
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) hideSystemBars()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // ── THE SPLASH SCREEN ────────────────────────────────────────────────────────────────────
+        //
+        // The Compose activity has shown one since long before the port (`MainActivity.kt:151`, plus
+        // `Theme.Pockettracker.Splash` on its manifest entry); this activity was given the plain
+        // theme in C3 and so came up on a blank window instead. Reported by the user as "the Android
+        // build misses the splash screen while opening", and it is the same shape as C4's
+        // `hideSystemBars`: knowledge the Compose activity had and the SDL one never inherited.
+        //
+        // ⚠️ BOTH HALVES ARE REQUIRED. The manifest entry supplies the windowBackground the system
+        // draws before any of our code runs (API 31+ builds its splash from the theme alone), and
+        // this call is what hands over to `postSplashScreenTheme` afterwards and back-ports the whole
+        // thing below API 31. Either one alone leaves a visible gap.
+        //
+        // ⚠️ FIRST, and ahead of `setDecorFitsSystemWindows` below, because this is the call that
+        // swaps the activity's theme — doing it after would apply a theme over a window we have
+        // already configured. `MainActivity` has the same call in the same position.
+        //
+        // ⭐ The colours already agree with no work: `splash_bg` is #0A0A0A and `pt::ui::Theme`'s
+        // `background` default is 0xFF0A0A0A, so the splash and the tracker's first frame are the
+        // same colour and the handover has no seam in it.
         installSplashScreen()
-        super.onCreate(savedInstanceState)
 
-        requestWindowFeature(Window.FEATURE_NO_TITLE)
+        // ⚠️ Without MANAGE_EXTERNAL_STORAGE the C++ `StdFileSystem` cannot see /storage/emulated/0
+        // and the file browser comes up EMPTY — which looks exactly like "C5's spike says
+        // std::filesystem does not work on Android", the single most important open question phase C
+        // answered. A wrong answer there would have been recorded as an architectural fact and cost
+        // `AndroidFileSystem.kt` its deletion in Phase E. So the state is still LOGGED beside the
+        // result, which is this project's standing rule for instruments — read this line before
+        // believing an empty browser.
+        //
+        // C3 logged it and left the granting to the Compose activity. C4 asks.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val granted = Environment.isExternalStorageManager()
+            Log.i(TAG, "MANAGE_EXTERNAL_STORAGE granted=$granted  appRoot=${appRoot()}")
+            if (!granted) requestAllFilesAccess()
+        }
 
-        // Edge-to-edge: let Compose fill the entire display, behind system bars.
-        // Without this, Android reserves inset padding for nav/status bars and the
-        // Canvas only sees the reduced area — which can drop scale from 2× to 1× in
-        // landscape on phones with a non-gesture navigation bar (e.g. Realme UI 6).
+        // ⚠️⚠️ **EDGE-TO-EDGE, AND `hideSystemBars()` ALONE DOES NOT DO IT — MEASURED, NOT ASSUMED.**
+        // The first C4 build hid the bars and the window STAYED 1280x904: `dumpsys` reported
+        // `statusBars visible=false` while SDL's renderer output was still 904 px tall, so INTEGER
+        // scaling was still falling back to 1x. Hiding a bar and letting the content DRAW WHERE IT WAS
+        // are two different requests — without this line Android keeps reserving inset padding for a
+        // bar that is no longer on screen, and the SurfaceView is laid out inside the reduced area.
+        //
+        // `MainActivity.kt:156` has carried this call, and a comment naming this exact symptom ("can
+        // drop scale from 2x to 1x"), since long before the port. The SDL activity had to learn it the
+        // expensive way.
+        //
+        // ⚠️ BEFORE `super.onCreate()`, which is where SDLActivity builds its layout and surface: set
+        // afterwards, the surface is created at the inset size and then resized, and every consumer
+        // (including the boot `video:` line) sees the wrong number first. Set here, the FIRST surface
+        // is already 1280x960. `getWindow()` is valid from `attach()`, well before onCreate.
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
-        // Allow content to extend into display-cutout areas (punch-hole camera, notch).
-        // In landscape, the camera hole is on a short edge; SHORT_EDGES lets us draw
-        // behind it so the Canvas gets the full 1080px height rather than a reduced area.
+        // Draw behind a punch-hole/notch too. In landscape the cutout is on a short edge, so without
+        // this the panel gives back less height than it has — the same 2x-becomes-1x arithmetic,
+        // arriving through a different subtraction. Harmless on a device with no cutout, like this one.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             window.attributes.layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
 
-        val deviceAdapter = DeviceAdapter(this)
-        val layout = deviceAdapter.calculateLayout()
+        // ⚠️ BEFORE `super.onCreate()` for a harder reason than the two above: that call starts the
+        // SDL thread, which runs `SDL_main`, which calls `load_settings()`. Anything this writes after
+        // that point is a file the app has already read past.
+        importLegacySettings()
 
-        Log.d("DeviceAdapter", "=== DEVICE DETECTION ===")
-        Log.d("DeviceAdapter", deviceAdapter.getConfigDescription(layout))
-        Log.d("DeviceAdapter", "======================")
+        // The feedback managers, before super.onCreate() starts the SDL thread that calls back into
+        // onButtonFeedback. Constructing the SoundPool early lets it load the click samples off the
+        // critical path, so the first tap is not silent while they decode.
+        buttonSound  = ButtonSoundManager(this)
+        buttonHaptic = ButtonHapticManager(this)
 
-        setContent {
-            PockettrackerTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = Color.Black
-                ) {
-                    PocketTrackerApp(layoutConfig = layout, deviceAdapter = deviceAdapter)
-                }
-            }
-        }
-
-        // DecorView is now attached — safe to call on all API levels
+        super.onCreate(savedInstanceState)
         hideSystemBars()
     }
-}
 
-// Crash-recovery autosave debounce: write this long after the last edit, so a burst of edits
-// coalesces into a single write.
-private const val AUTOSAVE_DEBOUNCE_MS = 3000L
-
-@Composable
-fun PocketTrackerApp(layoutConfig: DeviceAdapter.LayoutConfig, deviceAdapter: DeviceAdapter) {
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-
-    val permissionsToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        // Android 13+ (API 33+): Use granular media permissions
-        arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
-    } else {
-        // Android 12 and below: Use legacy storage permissions
-        arrayOf(
-            Manifest.permission.READ_EXTERNAL_STORAGE,
-            Manifest.permission.WRITE_EXTERNAL_STORAGE
-        )
-    }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val allGranted = permissions.values.all { it }
-        if (allGranted) {
-            Log.d("Permissions", "✅ Storage permissions granted!")
-        } else {
-            Log.w("Permissions", "❌ Storage permissions denied - some features may not work")
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        val hasPermission = permissionsToRequest.all { permission ->
-            ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
-        }
-
-        if (!hasPermission) {
-            Log.d("Permissions", "Requesting storage permissions...")
-            permissionLauncher.launch(permissionsToRequest)
-        } else {
-            Log.d("Permissions", "✅ Storage permissions already granted")
-        }
-
-        // Android 11+ (API 30+): Request MANAGE_EXTERNAL_STORAGE for full file access
-        // This is needed to see files copied from other devices via USB/file manager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (!Environment.isExternalStorageManager()) {
-                Log.d("Permissions", "Requesting MANAGE_EXTERNAL_STORAGE permission...")
-                try {
-                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                        data = Uri.parse("package:${context.packageName}")
-                    }
-                    context.startActivity(intent)
-                } catch (e: Exception) {
-                    Log.w("Permissions", "App-specific intent failed, trying general intent: ${e.message}")
-                    try {
-                        val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-                        context.startActivity(intent)
-                    } catch (e2: Exception) {
-                        // Some custom ROMs (e.g. /e/OS) may not expose this settings page at all.
-                        // The user will see the "NO STORAGE PERMISSION" message in the file browser instead.
-                        Log.e("Permissions", "All Files Access settings unavailable: ${e2.message}")
-                    }
-                }
-            } else {
-                Log.d("Permissions", "✅ MANAGE_EXTERNAL_STORAGE already granted")
-            }
-        }
-    }
-    val fileSystem = remember { AndroidFileSystem(context) }
-    val videoExtractor = remember { AndroidVideoAudioExtractor() }
-
-    val logger = remember { com.conanizer.pockettracker.platform.android.AndroidLogger() }
-
-    // stateVersion.let { } creates a Compose dependency so reads recompose when controllers mutate state.
-    var stateVersion by remember { mutableIntStateOf(0) }
-    val stateObserver = remember {
-        object : com.conanizer.pockettracker.core.logic.StateObserver {
-            override fun onStateChanged() {
-                stateVersion++  // Trigger Compose recomposition
-            }
-        }
-    }
-
-    val fileController = remember { FileController(fileSystem, logger) }
-    val autosaveManager = remember {
-        com.conanizer.pockettracker.core.logic.AutosaveManager(fileController, logger)
-    }
-
-    val audioBackend = remember { OboeAudioBackend() }
-    val resourceLoader = remember { AndroidResourceLoader(context) }
-    val audioEngine = remember { AudioEngine(audioBackend, resourceLoader, logger) }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            audioEngine.close()
-        }
-    }
-
-    // Open the Oboe audio stream on an IO thread.
-    // On some devices (e.g. Miyoo Flip / GammaCoreOS) opening an AAudio LowLatency/Exclusive
-    // stream triggers Android's C2 codec framework to enumerate ~42 codecs, which can take
-    // up to 35 seconds and completely freezes the main thread if done synchronously.
-    var audioReady by remember { mutableStateOf(false) }
-    // Native-heap baseline for the PROJECT sample-RAM readout. Captured below right
-    // after the engine's fixed DSP is allocated but before any samples load, so the readout can show
-    // (current native heap − baseline) ≈ the PCM of the samples/soundfonts the user has loaded.
-    // −1 = not captured yet.
-    var nativeHeapBaseline by remember { mutableStateOf(-1L) }
-    // The C++ sequencer (songcore). Constructed here, created below — its native runtime reads the
-    // audio engine's frame counter as its transport clock, so it cannot exist before the engine does.
-    val songcore = remember { AndroidSongcore() }
-
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            audioEngine.create()
-            songcore.create()   // after the engine: songcore binds to it for the clock and the queues
-        }
-        // Engine DSP is now allocated and no user samples are loaded yet (the template/recovery sample
-        // loads are keyed on audioReady, set on the next line) → this is the clean "zero samples" baseline.
-        nativeHeapBaseline = android.os.Debug.getNativeHeapAllocatedSize()
-        audioReady = true
-    }
-
-    val instrumentController = remember {
-        InstrumentController(audioEngine, logger, stateObserver, fileController)
-    }
-
-    val effectProcessor = remember {
-        com.conanizer.pockettracker.core.logic.EffectProcessor(logger)
-    }
-
-    val playbackController = remember {
-        // songcore + the serializer that feeds it: the C++ sequencer parses the very bytes
-        // FileController writes to a .ptp, so there is one project format and no second encoder.
-        PlaybackController(
-            audioEngine, effectProcessor, logger, stateObserver,
-            songcore = songcore,
-            serializeProject = { p -> fileController.serializeProject(p) },
-        )
-    }
-    LaunchedEffect(playbackController, instrumentController) {
-        playbackController.instrumentController = instrumentController
-    }
-
-    val clipboardManager = remember {
-        com.conanizer.pockettracker.core.logic.ClipboardManager(logger)
-    }
-
-    val renderController = remember {
-        // songcore owns the render itself now (engine prep, the chunk loop, the decay tail, the WAV
-        // writer — native/songcore/render.h); RenderController only decides what to render and where.
-        RenderController(audioEngine, playbackController, songcore, fileSystem, logger)
-    }
-
-    val _isRendering = remember { mutableStateOf(false) }
-    var isRendering by _isRendering
-    val _isStemsRendering = remember { mutableStateOf(false) }
-    var isStemsRendering by _isStemsRendering
-    val _renderProgress = remember { mutableFloatStateOf(0f) }
-    var renderProgress by _renderProgress
-    // Sample-RAM readout value for the PROJECT screen — native-heap growth since the
-    // startup baseline, refreshed by the poll below while the project screen is visible.
-    val _sampleRamBytes = remember { mutableStateOf(0L) }
-    var sampleRamBytes by _sampleRamBytes
-
-    val _showCleanDialog = remember { mutableStateOf(false) }
-    var showCleanDialog by _showCleanDialog
-    val _cleanDialogTarget = remember { mutableStateOf("") }  // "SEQ" or "INST"
-    var cleanDialogTarget by _cleanDialogTarget
-    val _cleanDialogCursor = remember { mutableIntStateOf(0) }  // 0=YES, 1=NO
-    var cleanDialogCursor by _cleanDialogCursor
-    val _showNewProjectDialog = remember { mutableStateOf(false) }
-    var showNewProjectDialog by _showNewProjectDialog
-    val _showInstrTypeDialog = remember { mutableStateOf(false) }
-    var showInstrTypeDialog by _showInstrTypeDialog
-    val _showRecoveryDialog = remember { mutableStateOf(false) }
-    var showRecoveryDialog by _showRecoveryDialog
-
-    // Tracks where the last single A-press inserted into an empty cell (screen, row, col)
-    // Used by A+A to decide whether to insert next-unused (only allowed on same cell)
-    val _lastAInsertPosition = remember { mutableStateOf<InsertPosition?>(null) }
-    var lastAInsertPosition by _lastAInsertPosition
-
-    val inputController = remember {
-        com.conanizer.pockettracker.core.logic.InputController(logger, stateObserver)
-    }
-
-    val trackerController = remember {
-        com.conanizer.pockettracker.core.logic.TrackerController(
-            fileController = fileController,
-            playbackController = playbackController,
-            instrumentController = instrumentController,
-            effectProcessor = effectProcessor,
-            clipboardManager = clipboardManager,
-            inputController = inputController,
-            stateObserver = stateObserver
-        )
-    }
-
-    // Load saved template project on startup (data only; samples loaded after audio is ready below)
-    val templateLoaded = remember {
-        val result = fileController.loadTemplate()
-        if (result is FileController.LoadResult.Success) {
-            trackerController.project = result.project
-            true
-        } else false
-    }
-
-    // Sync mixer volumes to audio backend once the stream is open.
-    // (setTrackVolume/setMasterVolume are no-ops if native engine is null, so this must
-    // run after audioReady — i.e., after LaunchedEffect(Unit) above finishes create().)
-    LaunchedEffect(audioReady) {
-        if (!audioReady) return@LaunchedEffect
-        for (i in 0 until 8) {
-            val vol = trackerController.project.tracks[i].volume
-            audioBackend.setTrackVolume(i, com.conanizer.pockettracker.core.data.VolumeUtils.hexToFloat(vol))
-        }
-        audioBackend.setMasterVolume(com.conanizer.pockettracker.core.data.VolumeUtils.hexToFloat(trackerController.project.masterVolume))
-        audioBackend.setOttDepth(trackerController.project.ottDepth)
-        audioBackend.setMasterFx(trackerController.project.masterBusFx)
-        audioBackend.setDustDepth(trackerController.project.dustDepth)
-        audioBackend.setLimiterPreGain(trackerController.project.limiterPreGain)
-        Log.d("VolumeSync", "Initial volume sync to audio backend complete")
-    }
-
-    val chainEditorModule = remember { ChainEditorModule() }
-    val phraseEditorModule = remember { PhraseEditorModule() }
-    val songEditorModule = remember { SongEditorModule() }
-    val projectModule = remember { ProjectModule() }
-    val settingsModule = remember { SettingsModule() }
-    val instrumentModule = remember { InstrumentModule() }
-    val instrumentPoolModule = remember { InstrumentPoolModule() }
-    val mixerModule = remember { MixerModule() }
-    val effectModule = remember { EffectModule() }
-    val eqModule     = remember { EqModule() }
-    val tableModule = remember { TableModule() }
-    val grooveModule = remember { GrooveModule() }
-    val modulationModule = remember { ModulationModule() }
-
-    val trackPeakBuffer = remember { FloatArray(16) }
-    val masterPeakBuffer = remember { FloatArray(2) }
-    val sendPeakBuffer = remember { FloatArray(4) }  // [revL, revR, delL, delR]
-
-    val autoLayoutMode = when {
-        !layoutConfig.needsVirtualButtons -> DeviceAdapter.LayoutMode.FULL
-        // Landscape auto-selection only when the landscape layout is enabled (debug builds);
-        // otherwise touch devices always come up in the themed portrait layout.
-        BuildConfig.LANDSCAPE_LAYOUT && layoutConfig.isLandscape ->
-            DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
-        else                              -> DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
-    }
-
-    val prefs = remember { context.getSharedPreferences("pockettracker_ui", android.content.Context.MODE_PRIVATE) }
-
-    val savedLayoutName  = remember { prefs.getString("layout_mode", null) }
-    val savedScalingName = remember { prefs.getString("scaling_mode", null) }
-
-    val initialLayoutMode = remember {
-        // Legacy "TOUCH_PORTRAIT2B" was the amiga-2 skin masquerading as a layout — it is now the
-        // PORTRAIT layout with the DARK theme (skin handled separately below).
-        val savedName = if (savedLayoutName == "TOUCH_PORTRAIT2B") "TOUCH_PORTRAIT2" else savedLayoutName
-        val saved = if (savedName != null) {
-            DeviceAdapter.LayoutMode.entries.firstOrNull { it.name == savedName } ?: autoLayoutMode
-        } else {
-            autoLayoutMode
-        }
-        when {
-            // TOUCH_PORTRAIT is retired from the active cycle — migrate to PORTRAIT
-            saved == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT ->
-                DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
-            // Landscape is hidden in release — migrate any saved landscape state to PORTRAIT
-            !BuildConfig.LANDSCAPE_LAYOUT && saved == DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE ->
-                DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
-            // FULLSCREEN on a touch-only device would trap the user with no virtual buttons
-            saved == DeviceAdapter.LayoutMode.FULL && layoutConfig.needsVirtualButtons ->
-                autoLayoutMode
-            else -> saved
-        }
-    }
-    val initialScalingMode = remember {
-        if (savedScalingName != null) {
-            DeviceAdapter.ScalingMode.entries.firstOrNull { it.name == savedScalingName } ?: DeviceAdapter.ScalingMode.BILINEAR
-        } else {
-            DeviceAdapter.ScalingMode.BILINEAR
-        }
-    }
-
-    val _layoutMode  = remember { mutableStateOf(initialLayoutMode) }
-    var layoutMode   by _layoutMode
-    val _scalingMode = remember { mutableStateOf(initialScalingMode) }
-    var scalingMode  by _scalingMode
-
-    // Selected device skin (theme) for skinned layouts. Persisted independently of the layout so it
-    // is remembered when switching layouts away and back, and across restarts. Legacy installs that
-    // had "AMIGA PORT 2" selected default to the DARK skin.
-    val initialPortraitSkinId = remember {
-        // New installs default to the DARK Amiga skin. A saved skin pref is always respected;
-        // legacy "AMIGA PORT 2" (TOUCH_PORTRAIT2B) also mapped to DARK, so DARK is the fallback.
-        prefs.getString("portrait_skin", null) ?: DeviceSkin.AMIGA_DARK.id
-    }
-    val _portraitSkinId = remember { mutableStateOf(initialPortraitSkinId) }
-    var portraitSkinId  by _portraitSkinId
-
-    LaunchedEffect(layoutMode) {
-        prefs.edit().putString("layout_mode", layoutMode.name).apply()
-        trackerController.settingsLayoutHasThemes =
-            SettingsModule.skinsForLayout(layoutMode).isNotEmpty()
-    }
-    LaunchedEffect(scalingMode) {
-        prefs.edit().putString("scaling_mode", scalingMode.name).apply()
-    }
-    LaunchedEffect(portraitSkinId) {
-        prefs.edit().putString("portrait_skin", portraitSkinId).apply()
-    }
-
-    val _buttonSoundEnabled = remember { mutableStateOf(prefs.getBoolean("button_sound", true)) }
-    var buttonSoundEnabled  by _buttonSoundEnabled
-    val _buttonSoundVolume  = remember { mutableStateOf(prefs.getInt("button_sound_volume", 0x80)) }
-    var buttonSoundVolume   by _buttonSoundVolume
-    val _buttonVibroEnabled = remember { mutableStateOf(prefs.getBoolean("button_vibro", true)) }
-    var buttonVibroEnabled  by _buttonVibroEnabled
-    val _vibroPower         = remember { mutableStateOf(prefs.getInt("vibro_power", 255)) }
-    var vibroPower          by _vibroPower
-
-    val _insertBefore = remember { mutableStateOf(prefs.getBoolean("kb_insert_before", true)) }
-    var insertBefore  by _insertBefore
-
-    // Cursor remember mode: REMEMBER=true keeps cursor position between screen switches,
-    // REFRESH=false resets cursor to default on every screen switch (persisted)
-    val _cursorRemember = remember { mutableStateOf(prefs.getBoolean("cursor_remember", false)) }
-    var cursorRemember  by _cursorRemember
-
-    val _notePreviewEnabled = remember { mutableStateOf(prefs.getBoolean("note_preview", true)) }
-    var notePreviewEnabled  by _notePreviewEnabled
-
-    // Autosave recovery behaviour. ASK (false) shows the RECOVER WORK?
-    // prompt on launch; AUTO (true) silently restores the autosave with no prompt. Per-device
-    // (SharedPreferences, not the project file) so it can differ between handhelds that kill the
-    // app on background (AUTO) and phones that keep it warm (ASK).
-    val _autosaveResumeAuto = remember { mutableStateOf(prefs.getBoolean("autosave_resume_auto", false)) }
-    var autosaveResumeAuto  by _autosaveResumeAuto
-
-    // SETTINGS → ENGINE (debug-only row): which sequencer walks the song.
-    //
-    // S7 flipped the default to C++ songcore in BOTH builds. A release that cannot reach the C++ path
-    // cannot soak it, and the soak is the whole point of shipping it before the Kotlin sequencer is
-    // deleted — so release PINS C++: no toggle (the row is debug-gated), and therefore nothing to
-    // persist. Debug keeps the pref so an A/B session survives an app restart.
-    //
-    // The old `engine_cpp` key is deliberately NOT read. Its value was `BuildConfig.DEBUG && …`, so
-    // every release build wrote `false` into it on every single launch — an upgrading user carries a
-    // stored `false` that was never their choice. Honouring it would leave them silently on the Kotlin
-    // path, and the soak would never happen for anyone who already had the app installed.
-    val _engineCpp = remember {
-        mutableStateOf(if (BuildConfig.DEBUG) prefs.getBoolean("engine_cpp_v2", true) else true)
-    }
-    var engineCpp  by _engineCpp
-
-    // Overlay: list files from assets/overlays/, load + process selected bitmap
-    val overlayFiles: List<String> = remember {
-        try { context.assets.list("overlays")
-                ?.filter { it.endsWith(".png") }
-                ?.map { it.removeSuffix(".png") }
-                ?: emptyList()
-        } catch (_: Exception) { emptyList() }
-    }
-    val _overlayName     = remember { mutableStateOf(prefs.getString("overlay_name", "OFF") ?: "OFF") }
-    var overlayName      by _overlayName
-    val _overlayStrength = remember { mutableStateOf(prefs.getInt("overlay_strength", 128)) }
-    var overlayStrength  by _overlayStrength
-
-    // Load overlay PNG as-is — no processing. The PNG is designed for direct use;
-    // alpha = STR/255f at draw time is the only control needed.
-    val overlayBitmap: androidx.compose.ui.graphics.ImageBitmap? = remember(overlayName) {
-        if (overlayName == "OFF") null
-        else try {
-            android.graphics.BitmapFactory.decodeStream(
-                context.assets.open("overlays/$overlayName.png"))?.asImageBitmap()
-        } catch (_: Exception) { null }
-    }
-
-    val _qwertyKeyboardState = remember { mutableStateOf(QwertyKeyboardState()) }
-    var qwertyKeyboardState  by _qwertyKeyboardState
-    val _fxHelperState = remember { mutableStateOf(FxHelperState()) }
-    var fxHelperState  by _fxHelperState
-    val _eqEditorState      = remember { mutableStateOf(EqEditorState()) }
-    var eqEditorState       by _eqEditorState
-    val _themeEditorState   = remember { mutableStateOf(ThemeEditorState()) }
-    var themeEditorState    by _themeEditorState
-    val _eqSpectrumData = remember { mutableStateOf<FloatArray?>(null) }
-    var eqSpectrumData  by _eqSpectrumData
-
-    val _appTheme = remember {
-        val savedJson = prefs.getString("app_theme", null)
-        val initial = if (savedJson != null) {
-            // coerceInputValues: a removed visualizer name (BARS/PEAKS/MIRROR) from an older build
-            // falls back to the field default (SCOPE) instead of throwing away the whole saved theme.
-            try { Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromString<AppTheme>(savedJson) }
-            catch (_: Exception) { AppTheme.CLASSIC }
-        } else { AppTheme.CLASSIC }
-        mutableStateOf(initial)
-    }
-    var appTheme  by _appTheme
-
-    val buttonSoundManager = remember { ButtonSoundManager(context) }
-    val buttonHapticManager = remember { ButtonHapticManager(context) }
-
-    LaunchedEffect(buttonSoundEnabled) {
-        buttonSoundManager.enabled = buttonSoundEnabled
-        prefs.edit().putBoolean("button_sound", buttonSoundEnabled).apply()
-    }
-    LaunchedEffect(buttonSoundVolume) {
-        buttonSoundManager.volume = buttonSoundVolume / 255f
-        prefs.edit().putInt("button_sound_volume", buttonSoundVolume).apply()
-    }
-    LaunchedEffect(buttonVibroEnabled) {
-        buttonHapticManager.enabled = buttonVibroEnabled
-        prefs.edit().putBoolean("button_vibro", buttonVibroEnabled).apply()
-    }
-    LaunchedEffect(vibroPower) {
-        buttonHapticManager.power = vibroPower
-        prefs.edit().putInt("vibro_power", vibroPower).apply()
-    }
-    LaunchedEffect(insertBefore) {
-        prefs.edit().putBoolean("kb_insert_before", insertBefore).apply()
-    }
-    LaunchedEffect(cursorRemember) {
-        prefs.edit().putBoolean("cursor_remember", cursorRemember).apply()
-    }
-    LaunchedEffect(notePreviewEnabled) {
-        prefs.edit().putBoolean("note_preview", notePreviewEnabled).apply()
-    }
-    LaunchedEffect(autosaveResumeAuto) {
-        prefs.edit().putBoolean("autosave_resume_auto", autosaveResumeAuto).apply()
-    }
-    // Persist the engine choice AND apply it (the setter stops playback on a real change). One effect
-    // for both so the running controller and the stored pref can never disagree.
-    //
-    // Gated on audioReady: songcore's native runtime is created right after the audio engine, and on
-    // some devices opening the stream takes tens of seconds. Handing playback to a songcore that does
-    // not exist yet would play silence; staying on the Kotlin path until it does costs nothing, since
-    // nothing can play before the engine exists either way.
-    LaunchedEffect(engineCpp, audioReady) {
-        if (BuildConfig.DEBUG) prefs.edit().putBoolean("engine_cpp_v2", engineCpp).apply()
-        if (!audioReady) return@LaunchedEffect
-        playbackController.engine =
-            if (engineCpp) PlaybackController.Engine.CPP else PlaybackController.Engine.KT
-    }
-    LaunchedEffect(overlayName) {
-        prefs.edit().putString("overlay_name", overlayName).apply()
-    }
-    LaunchedEffect(overlayStrength) {
-        prefs.edit().putInt("overlay_strength", overlayStrength).apply()
-    }
-    LaunchedEffect(appTheme) {
-        prefs.edit().putString("app_theme", Json { prettyPrint = false }.encodeToString(appTheme)).apply()
-    }
-
-    DisposableEffect(Unit) {
-        onDispose { buttonSoundManager.release() }
-    }
-
-    // Device skin (chrome PNGs/colors). Starts as the AMIGA color fallback (immediate), then loads
-    // the selected skin's PNGs in the background. The skin is chosen by the current layout's theme
-    // list + portraitSkinId; unskinned layouts fall back to AMIGA_NORMAL (never actually shown there).
-    // Reloads when the resolved skin changes.
-    val currentSkin = remember(layoutMode, portraitSkinId) {
-        val skins = SettingsModule.skinsForLayout(layoutMode)
-        skins.firstOrNull { it.id == portraitSkinId } ?: skins.firstOrNull() ?: DeviceSkin.AMIGA_NORMAL
-    }
-    var theme by remember { mutableStateOf<DeviceTheme>(DeviceTheme.AMIGA) }
-    LaunchedEffect(currentSkin.id) {
-        withContext(Dispatchers.IO) {
-            val loaded = ThemeLoader.loadSkin(context, currentSkin)
-            withContext(Dispatchers.Main) { theme = loaded }
-        }
-    }
-
-    // Track orientation so layout recalculates when device flips (Activity survives
-    // rotation thanks to android:configChanges in the manifest, but device dimensions
-    // swap so we need a fresh LayoutConfig).
-    val configuration = LocalConfiguration.current
-
-    val effectiveLayoutConfig = remember(layoutMode, configuration.orientation) {
-        deviceAdapter.calculateLayout(layoutMode)
-    }
-
-    // Lock touch phones to portrait while the portrait skinned layout is the only touch layout
-    // (release): with the device's auto-rotate on, letting the window flip to landscape just
-    // letterboxes the portrait UI. Handhelds (FULL layout) and debug builds (landscape enabled)
-    // stay unlocked so they keep their native / landscape orientation.
-    val activity = remember(context) {
-        var ctx: Context? = context
-        while (ctx is ContextWrapper && ctx !is Activity) ctx = ctx.baseContext
-        ctx as? Activity
-    }
-    LaunchedEffect(effectiveLayoutConfig.needsVirtualButtons, effectiveLayoutConfig.isLandscape) {
-        activity?.requestedOrientation =
-            if (!BuildConfig.LANDSCAPE_LAYOUT &&
-                effectiveLayoutConfig.needsVirtualButtons &&
-                !effectiveLayoutConfig.isLandscape)
-                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            else
-                ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-    }
-
-    // Auto-switch between portrait/landscape virtual-button modes on device flip.
-    // Disabled when the landscape layout is hidden (release) so rotating the phone
-    // never leaves the themed portrait layout.
-    LaunchedEffect(configuration.orientation) {
-        if (BuildConfig.LANDSCAPE_LAYOUT) {
-            when {
-                (layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT ||
-                 layoutMode == DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2) &&
-                        configuration.orientation == Configuration.ORIENTATION_LANDSCAPE ->
-                    layoutMode = DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE
-
-                layoutMode == DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE &&
-                        configuration.orientation == Configuration.ORIENTATION_PORTRAIT ->
-                    layoutMode = DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2
-            }
-        }
-    }
-
-    val project = stateVersion.let { trackerController.project }
-    val currentScreen = stateVersion.let { trackerController.currentScreen }
-    val previousColumn = stateVersion.let { trackerController.previousColumn }
-    val cursorRow = stateVersion.let { trackerController.cursorRow }
-    val cursorColumn = stateVersion.let { trackerController.cursorColumn }
-    val projectCursorRow = stateVersion.let { trackerController.projectCursorRow }
-    val projectCursorColumn = stateVersion.let { trackerController.projectCursorColumn }
-    val currentChain = stateVersion.let { trackerController.currentChain }
-    val currentPhrase = stateVersion.let { trackerController.currentPhrase }
-    val lastEditedPhrase = stateVersion.let { trackerController.lastEditedPhrase }
-    val lastEditedChain = stateVersion.let { trackerController.lastEditedChain }
-    val lastEditedNote = stateVersion.let { trackerController.lastEditedNote }
-    val lastEditedVolume = stateVersion.let { trackerController.lastEditedVolume }
-    val lastEditedTranspose = stateVersion.let { trackerController.lastEditedTranspose }
-    val projectVersion = stateVersion.let { trackerController.projectVersion }
-
-    // Auto-dismiss status messages after 5 seconds
-    LaunchedEffect(trackerController.statusMessage) {
-        if (trackerController.statusMessage.isNotEmpty()) {
-            kotlinx.coroutines.delay(5000)
-            trackerController.clearStatus()
-        }
-    }
-
-    LaunchedEffect(instrumentController.statusMessage) {
-        if (instrumentController.statusMessage.isNotEmpty()) {
-            kotlinx.coroutines.delay(5000)
-            instrumentController.clearStatus()
-        }
-    }
-
-    // Crash-recovery autosave. Every edit bumps projectVersion, which re-keys
-    // this effect: a new edit cancels the pending delay, so a burst of edits coalesces into one write
-    // AUTOSAVE_DEBOUNCE_MS after the user pauses. Only writes when dirty (skips load/new/save, which
-    // already match a clean file). Playback-agnostic by design — autosave() serializes here on the main
-    // thread (tear-free) and writes on IO, and the audio engine is native, so this can't glitch audio.
-    LaunchedEffect(projectVersion) {
-        if (trackerController.isProjectDirty) {
-            kotlinx.coroutines.delay(AUTOSAVE_DEBOUNCE_MS)
-            // Re-check: a save during the debounce window clears dirty + deletes the file, and this
-            // effect isn't re-keyed by a save (it doesn't bump projectVersion), so without this we'd
-            // re-create autosave.ptp after a clean save and trigger a false recovery next launch.
-            if (trackerController.isProjectDirty) {
-                autosaveManager.autosave(trackerController.project)
-            }
-        }
-    }
-
-    val fileBrowserModule = remember { FileBrowserModule() }
-    val _fileBrowserState = remember {
-        mutableStateOf(
-            FileBrowserModule.State(
-                currentDirectory = File(fileController.getProjectsDirectory()),
-                items = emptyList(),
-                fileExtension = "ptp"  // Only show .ptp project files
-            )
-        )
-    }
-    var fileBrowserState by _fileBrowserState
-    val _previousScreen = remember { mutableStateOf(ScreenType.PROJECT) }
-    var previousScreen  by _previousScreen
-    // Tracks what action triggered the file browser from the INSTRUMENT screen
-    // Values: "LOAD_SOURCE", "LOAD_PRESET", "SAVE_PRESET"
-    val _instrumentFileBrowserAction = remember { mutableStateOf("") }
-    var instrumentFileBrowserAction  by _instrumentFileBrowserAction
-
-    val sampleEditorModule = remember { SampleEditorModule() }
-    val _sampleEditorState = remember { mutableStateOf(
-        SampleEditorState(
-            sampleId = 0,
-            instrumentId = 0
-        )
-    ) }
-    var sampleEditorState  by _sampleEditorState
-
-    // Reset note/volume combo when leaving PHRASE screen
-    // (instrument is kept so quick-insert uses the last instrument you worked with)
-    var wasPhraseScreen by remember { mutableStateOf(false) }
-    LaunchedEffect(trackerController.currentScreen) {
-        val isPhrase = trackerController.currentScreen == ScreenType.PHRASE
-        if (wasPhraseScreen && !isPhrase) {
-            trackerController.lastEditedNote = com.conanizer.pockettracker.core.data.Note.fromMidi(60) // C-4
-            trackerController.lastEditedVolume = 0x7F  // max velocity (VOL column is now 0x00-0x7F)
-        }
-        wasPhraseScreen = isPhrase
-    }
-
-    LaunchedEffect(fileBrowserState.currentDirectory, fileBrowserState.sortMode,
-                   fileBrowserState.listRefreshTick) {
-        // Directory listing on IO: the stat-heavy walk of a folder with hundreds of samples
-        // janks the main thread on slow flash. This effect is the single list builder —
-        // navigateToFolder only switches the directory (empty items until this fills them).
-        val dir  = fileBrowserState.currentDirectory
-        val ext  = fileBrowserState.fileExtension
-        val exts = fileBrowserState.fileExtensions
-        val sort = fileBrowserState.sortMode
-        val sorted = withContext(Dispatchers.IO) {
-            fileBrowserModule.sortItems(fileBrowserModule.buildItemList(dir, ext, exts), sort)
-        }
-        fileBrowserState = fileBrowserState.copy(items = sorted)
-    }
-
-    LaunchedEffect(trackerController.currentScreen, sampleEditorState.instrumentId) {
-        if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR) {
-            val instId      = sampleEditorState.instrumentId
-            val totalFrames = audioEngine.getSampleLength(instId)
-            val sampleRate  = audioEngine.getOriginalSampleRate(instId)
-            val hasStereo   = audioEngine.hasStereoData(instId)
-            val channel     = when (sampleEditorState.sourceMode) { 0 -> 0; 1 -> 1; else -> 2 }
-            val waveformData = if (hasStereo) {
-                audioEngine.getSampleWaveformRangeSource(instId, 0, totalFrames, 620, channel)
-            } else {
-                audioEngine.getSampleWaveform(instId, 620)
-            }
-            val inst = trackerController.project.instruments[instId]
-
-            // Use instrument.sliceMarkers as the display source for the editor.
-            // These are already loaded from the WAV cue chunk by loadSampleFromFile,
-            // so no extra file I/O is needed here and there are no race conditions.
-            // instrument.sliceMarkers is only updated when the user saves from the editor.
-            val cuePoints = inst.sliceMarkers.map { it.toInt() }.toIntArray()
-
-            sampleEditorState = sampleEditorState.copy(
-                totalFrames   = totalFrames,
-                waveformData  = waveformData,
-                sampleRate    = sampleRate,
-                hasStereoData = hasStereo,
-                selectionStart   = (inst.sampleStart.toLong() * totalFrames) / 255L,
-                selectionEnd     = (inst.sampleEnd.toLong()   * totalFrames) / 255L,
-                transientMarkers = cuePoints,
-                // sliceMethod intentionally not changed: stays at 2 (OFF) on fresh open,
-                // or preserves the user's current choice on navigate-back.
-                sliceIndex       = 0
-            )
-        }
-    }
-
-    val sampleEditorZoom       = sampleEditorState.zoomLevel
-    val sampleEditorViewStart  = sampleEditorState.viewStart
-    val sampleEditorSourceMode = sampleEditorState.sourceMode
-    LaunchedEffect(sampleEditorZoom, sampleEditorViewStart, sampleEditorSourceMode) {
-        if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR && sampleEditorState.totalFrames > 0) {
-            val instId      = sampleEditorState.instrumentId
-            val totalFrames = sampleEditorState.totalFrames
-            val hasStereo   = sampleEditorState.hasStereoData
-            val channel     = when (sampleEditorSourceMode) { 0 -> 0; 1 -> 1; else -> 2 }
-            // Compute viewEnd from the captured keys to stay consistent
-            val viewStart = sampleEditorViewStart.toInt()
-            val viewEnd   = (if (sampleEditorZoom == 0) totalFrames.toLong()
-                             else (sampleEditorViewStart + (totalFrames.toLong() ushr sampleEditorZoom))
-                                     .coerceAtMost(totalFrames.toLong())).toInt()
-            val waveformData = if (hasStereo) {
-                audioEngine.getSampleWaveformRangeSource(instId, viewStart, viewEnd, 620, channel)
-            } else if (sampleEditorZoom == 0) {
-                audioEngine.getSampleWaveform(instId, 620)
-            } else {
-                audioEngine.getSampleWaveformRange(instId, viewStart, viewEnd, 620)
-            }
-            sampleEditorState = sampleEditorState.copy(waveformData = waveformData)
-        }
-    }
-
-    val seSliceMethod      = sampleEditorState.sliceMethod
-    val seSliceSensitivity = sampleEditorState.sliceSensitivity
-    val seTotalFrames      = sampleEditorState.totalFrames
-    LaunchedEffect(seSliceMethod, seSliceSensitivity, seTotalFrames) {
-        if (seSliceMethod == 0 && seTotalFrames > 0 && sampleEditorState.transientMarkers.isEmpty()) {
-            // Auto-detect when switching to TRANSIENT with no markers yet.
-            // handleInput clears transientMarkers when user switches TO TRANSIENT,
-            // so this fires on that transition and on sensitivity changes.
-            val markers = audioEngine.detectTransients(sampleEditorState.instrumentId, seSliceSensitivity)
-            val firstSliceEnd = markers.firstOrNull()?.toLong() ?: seTotalFrames.toLong()
-            sampleEditorState = sampleEditorState.copy(
-                transientMarkers = markers,
-                sliceIndex       = 0,
-                selectionStart   = 0L,
-                selectionEnd     = firstSliceEnd
-            )
-            // Markers stay in sampleEditorState only until saved — not synced to instrument here.
-        }
-    }
-
-    // Poll playback position for real-time waveform marker (~30fps)
-    LaunchedEffect(Unit) {
-        while (true) {
-            if (trackerController.currentScreen == ScreenType.SAMPLE_EDITOR) {
-                val pollSlot = if (sampleEditorState.hasStereoData && sampleEditorState.sourceMode != 2) 254
-                               else sampleEditorState.sampleId
-                val pos = audioEngine.getSamplePlaybackPosition(pollSlot)
-                if (pos != sampleEditorState.playbackPosition) {
-                    sampleEditorState = sampleEditorState.copy(playbackPosition = pos)
-                }
-            }
-            delay(33)
-        }
-    }
-
-    // Poll spectrum magnitudes for EQ visualizer (~20fps while EQ screen is open).
-    // The source depends on which EQ context is open so the spectrum reflects the actual signal path.
-    LaunchedEffect(eqEditorState.isOpen) {
-        if (eqEditorState.isOpen) {
-            while (true) {
-                val ctx = eqEditorState.callerContext
-                val source = when (ctx) {
-                    is EqCallerContext.DelayInputEq  -> 1
-                    is EqCallerContext.ReverbInputEq -> 2
-                    is EqCallerContext.InstrumentEq  -> 3
-                    else                             -> 0  // MasterEq, SampleEditorFx → master bus
-                }
-                val instrId = if (ctx is EqCallerContext.InstrumentEq) ctx.instrId else -1
-                eqSpectrumData = audioEngine.getSpectrumMagnitudesForSource(source, instrId, 620)
-                delay(50)
-            }
-        } else {
-            eqSpectrumData = null
-        }
-    }
-
-    // Decay peaks manually when not playing — audio callback is not running so peaks freeze on stop.
-    LaunchedEffect(currentScreen) {
-        if (currentScreen == ScreenType.MIXER) {
-            while (true) {
-                if (!trackerController.isPlaying()) {
-                    audioBackend.decayPeaks()
-                    audioBackend.decayWaveform()
-                }
-                audioBackend.getTrackPeaks(trackPeakBuffer)
-                audioBackend.getMasterPeaks(masterPeakBuffer)
-                audioBackend.getSendPeaks(sendPeakBuffer)
-                stateVersion++  // Trigger recomposition
-                kotlinx.coroutines.delay(60)
-            }
-        }
-    }
-
-    // Sample-RAM readout poll for the PROJECT screen. While the project screen is shown,
-    // refresh (current native heap − startup baseline) ≈ loaded sample/soundfont RAM. Android's getter
-    // is cheap; the State only recomposes when the MB value actually changes. coerceAtLeast(0) guards
-    // the brief window before the baseline is captured (and any native shrink below it).
-    LaunchedEffect(currentScreen) {
-        if (currentScreen == ScreenType.PROJECT) {
-            while (true) {
-                val base = if (nativeHeapBaseline >= 0L) nativeHeapBaseline
-                           else android.os.Debug.getNativeHeapAllocatedSize()
-                sampleRamBytes = (android.os.Debug.getNativeHeapAllocatedSize() - base).coerceAtLeast(0L)
-                kotlinx.coroutines.delay(500)
-            }
-        }
-    }
-
-    val appCtrl = remember {
-        AppControllers(
-            trackerController, audioEngine, audioBackend, instrumentController,
-            fileController, renderController, clipboardManager, deviceAdapter,
-            videoExtractor, fileSystem, coroutineScope,
-            chainEditorModule, phraseEditorModule, songEditorModule, projectModule,
-            settingsModule, instrumentModule, instrumentPoolModule, mixerModule, effectModule, eqModule,
-            tableModule, grooveModule, modulationModule, fileBrowserModule, sampleEditorModule
-        )
-    }
-    val appState = remember {
-        AppStateRefs(
-            _fileBrowserState, _sampleEditorState, _qwertyKeyboardState,
-            _fxHelperState, _eqEditorState, _eqSpectrumData,
-            _layoutMode, _portraitSkinId, _scalingMode, _isRendering, _isStemsRendering, _renderProgress,
-            _showCleanDialog, _cleanDialogTarget, _cleanDialogCursor,
-            _lastAInsertPosition, _insertBefore, _instrumentFileBrowserAction,
-            _previousScreen, _buttonSoundEnabled, _buttonSoundVolume,
-            _buttonVibroEnabled, _vibroPower, _cursorRemember, _notePreviewEnabled,
-            _overlayName, _overlayStrength, overlayFiles,
-            trackPeakBuffer, masterPeakBuffer, sendPeakBuffer, _appTheme, _themeEditorState,
-            _showNewProjectDialog, _showInstrTypeDialog, _showRecoveryDialog,
-            _autosaveResumeAuto, _engineCpp
-        )
-    }
-    val dispatcher = remember { AppInputDispatcher(appCtrl, appState) }
-
-    val buttonHandlers = remember { dispatcher.createButtonHandlers() }
-
-    // Load template samples after audio engine is ready
-    LaunchedEffect(audioReady) {
-        if (!audioReady || !templateLoaded) return@LaunchedEffect
-        dispatcher.reloadProjectSamples()
-        dispatcher.syncVolumesToAudioBackend()
-    }
-
-    val inputMapper = remember(buttonHandlers) {
-        InputMapper(buttonHandlers)
-    }
-    val focusRequester = remember { FocusRequester() }
-
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(100)
-        try {
-            focusRequester.requestFocus()
-        } catch (e: Exception) { }
-    }
-
-    // Crash-recovery at launch: an autosave surviving
-    // to launch means the last session didn't exit cleanly (a clean save/load/new deletes it). What we
-    // do with it depends on the per-device RESUME setting:
-    //   • AUTO  → silently restore it, no prompt (for handhelds that kill the app on background, where
-    //             a prompt every return is noise). recoverFromAutosave leaves the project dirty so it
-    //             keeps re-autosaving and survives the next kill; reload samples since the autosave
-    //             stores paths, not PCM. A corrupt autosave is dropped so AUTO can't loop on it.
-    //   • ASK   → the recovery prompt. We request focus as the dialog appears: B is KEYCODE_BACK on the
-    //             Miyoo, and audioReady can flip after a focus-losing recomposition — without focus, A/B
-    //             never reach the app and B falls through to the system (minimizing it) instead of
-    //             dismissing the dialog.
-    LaunchedEffect(audioReady) {
-        if (audioReady && fileController.hasAutosave()) {
-            if (autosaveResumeAuto) {
-                if (trackerController.recoverFromAutosave()) dispatcher.reloadProjectSamples()
-                else fileController.clearAutosave()
-            } else {
-                showRecoveryDialog = true
-                kotlinx.coroutines.delay(50)  // let the surface settle after the audioReady recomposition, as the layout-change re-focus below does
-                try { focusRequester.requestFocus() } catch (e: Exception) { }
-            }
-        }
-    }
-    // Safety net for the above: if focus still isn't on the input view, the system would treat B
-    // (= BACK) as "minimize". While the recovery prompt is up, intercept BACK and make it NO/discard.
-    BackHandler(enabled = showRecoveryDialog) {
-        showRecoveryDialog = false
-        fileController.clearAutosave()
-    }
-
-    // Autosave onStop flush. The 3 s debounce can lose the last edits if Android
-    // kills the backgrounded app (common on the 1 GB Miyoo) before it fires. On ON_STOP, flush
-    // synchronously when dirty: onStop runs on the main thread and the process may be killed right
-    // after, so we can't await a coroutine — and main is the project's sole mutator, so a direct
-    // serialize+write is tear-free.
-    DisposableEffect(Unit) {
-        val activity = context as? ComponentActivity
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP && trackerController.isProjectDirty) {
-                fileController.saveAutosave(trackerController.project)
-            }
-        }
-        activity?.lifecycle?.addObserver(observer)
-        onDispose { activity?.lifecycle?.removeObserver(observer) }
-    }
-
-    // When the layout mode changes, Compose destroys the old layout composable and builds
-    // a new one. Any virtual button that was being held at that moment has its pointerInput
-    // coroutine cancelled without firing the RELEASED callback, leaving modifier flags
-    // (isAPressed, isLPressed, etc.) permanently stuck in InputMapper. Reset them here so
-    // the first input after a layout switch behaves correctly.
-    // Also re-request focus so keyboard/gamepad input works in the new layout composable.
-    LaunchedEffect(layoutMode) {
-        inputMapper.reset()
-        kotlinx.coroutines.delay(50)
-        try { focusRequester.requestFocus() } catch (e: Exception) { }
-    }
-
-    val isPlaying = stateVersion.let { trackerController.isPlaying() }
-    val currentInstrument = stateVersion.let { trackerController.currentInstrument }
-    val instrumentCursorRow = stateVersion.let { trackerController.instrumentCursorRow }
-    val instrumentCursorColumn = stateVersion.let { trackerController.instrumentCursorColumn }
-    // Global status overlay (drawn over the visualizer header on every screen):
-    // InstrumentController messages ("SF LOADED", "SRC MISSING", "Decoding...") take priority;
-    // tracker-level messages (project save/load/export) show otherwise.
-    val statusMessage = stateVersion.let {
-        instrumentController.statusMessage.ifEmpty { trackerController.statusMessage }
-    }
-    val statusSuccess = stateVersion.let {
-        if (instrumentController.statusMessage.isNotEmpty()) instrumentController.statusSuccess
-        else trackerController.statusSuccess
-    }
-    val poolCursorColumn = stateVersion.let { trackerController.poolCursorColumn }
-    val instrumentFromPool = stateVersion.let { trackerController.instrumentFromPool }
-
-    val selectionInfo = stateVersion.let { trackerController.inputController.getSelectionInfo() }
-    val clipboardInfo = stateVersion.let { clipboardManager.getClipboardInfo() }
-    val selectionModeActive = stateVersion.let { trackerController.inputController.selectionMode }
-    // Key the cell-selection lambda on the current selection bounds so its IDENTITY changes when
-    // the selection is expanded. Post-6.1 the screen only redraws when a param to PixelPerfectTracker
-    // changes; in selection mode the cursor is anchored and the scope label ("SEL:CELL") is unchanged,
-    // and isCellSelected was a stable (compiler-memoized) lambda — so a growing selection changed no
-    // param, the composable was skipped, and the highlight looked frozen (copy still worked blind).
-    // remember(selStart, selEnd) hands down a fresh lambda on each expand → recomposition → redraw.
-    val selStart = stateVersion.let { trackerController.inputController.selectionStart }
-    val selEnd = stateVersion.let { trackerController.inputController.selectionEnd }
-    val isCellSelectedFn: (Int, Int) -> Boolean = remember(selStart, selEnd) {
-        { row, col -> trackerController.inputController.isCellSelected(row, col) }
-    }
-
-    // Cache the SoundFont preset name/count/index. The inline versions recomputed on every recomposition
-    // (every cursor move), and getSoundfontCurrentPresetIndex loops all presets over JNI — 200+ calls per
-    // recompose on a GM SF2. Key on the inputs that actually change the result (instrument slot, its SF
-    // path/slot, bank, preset) instead of the per-state-change stateVersion.
-    val sfInst = project.instruments[currentInstrument]
-    val sfPath = sfInst.soundfontPath
-    val sfSlot = if (sfPath != null && sfInst.instrumentType == InstrumentType.SOUNDFONT)
-                     instrumentController.sfSlotMap[sfPath] else null
-    val soundfontPresetName = remember(currentInstrument, sfPath, sfInst.instrumentType, sfInst.sfBank, sfInst.sfPreset, sfSlot) {
-        if (sfSlot != null) audioEngine.backend.getSoundfontPresetName(sfSlot, sfInst.sfBank, sfInst.sfPreset) else "---"
-    }
-    val soundfontPresetCount = remember(currentInstrument, sfPath, sfInst.instrumentType, sfInst.sfBank, sfInst.sfPreset, sfSlot) {
-        instrumentController.getSoundfontPresetCount(sfInst)
-    }
-    val soundfontPresetIndex = remember(currentInstrument, sfPath, sfInst.instrumentType, sfInst.sfBank, sfInst.sfPreset, sfSlot) {
-        instrumentController.getSoundfontCurrentPresetIndex(sfInst)
-    }
-
-    val trackerParams = TrackerScreenParams(
-        currentScreen = currentScreen,
-        project = project,
-        audioEngine = audioEngine,
-        playbackController = playbackController,
-        cursorRow = cursorRow,
-        cursorColumn = cursorColumn,
-        isPlaying = isPlaying,
-        previousColumn = previousColumn,
-        currentChain = currentChain,
-        currentPhrase = currentPhrase,
-        projectCursorRow = projectCursorRow,
-        projectCursorColumn = projectCursorColumn,
-        projectVersion = projectVersion,
-        currentInstrument = currentInstrument,
-        instrumentCursorRow = instrumentCursorRow,
-        instrumentCursorColumn = instrumentCursorColumn,
-        statusMessage = statusMessage,
-        statusSuccess = statusSuccess,
-        poolCursorColumn = poolCursorColumn,
-        instrumentFromPool = instrumentFromPool,
-        fileBrowserState = fileBrowserState,
-        sampleEditorState = sampleEditorState,
-        selectionInfo = selectionInfo,
-        clipboardInfo = clipboardInfo,
-        selectionMode = selectionModeActive,
-        isCellSelected = isCellSelectedFn,
-        mixerCursorColumn = trackerController.mixerCursorColumn,
-        mixerMasterRow = trackerController.mixerMasterRow,
-        trackPeaks = trackPeakBuffer,
-        masterPeaks = masterPeakBuffer,
-        sendPeaks = sendPeakBuffer,
-        currentTable = trackerController.currentTable,
-        tableCursorRow = trackerController.tableCursorRow,
-        tableCursorColumn = trackerController.tableCursorColumn,
-        currentGroove = trackerController.currentGroove,
-        grooveCursorRow = trackerController.grooveCursorRow,
-        modCursorRow = trackerController.modCursorRow,
-        modCursorPair = trackerController.modCursorPair,
-        modCursorSide = trackerController.modCursorSide,
-        effectsCursorRow = trackerController.effectsCursorRow,
-        isRendering = isRendering,
-        renderProgress = renderProgress,
-        sampleRamBytes = sampleRamBytes,
-        showCleanDialog = showCleanDialog,
-        cleanDialogTarget = cleanDialogTarget,
-        cleanDialogCursor = cleanDialogCursor,
-        showNewProjectDialog = showNewProjectDialog,
-        showInstrTypeDialog = showInstrTypeDialog,
-        showRecoveryDialog = showRecoveryDialog,
-        songScrollPosition = stateVersion.let { trackerController.songScrollPosition },
-        scalingMode = scalingMode,
-        buttonSoundEnabled = buttonSoundEnabled,
-        buttonSoundVolume = buttonSoundVolume,
-        buttonVibroEnabled = buttonVibroEnabled,
-        vibroPower = vibroPower,
-        qwertyKeyboardState = qwertyKeyboardState.copy(insertBefore = insertBefore),
-        fxHelperState = fxHelperState,
-        eqEditorState = eqEditorState,
-        eqSpectrumData = eqSpectrumData,
-        themeEditorState = themeEditorState,
-        settingsCursorRow = stateVersion.let { trackerController.settingsCursorRow },
-        settingsCursorColumn = stateVersion.let { trackerController.settingsCursorColumn },
-        cursorRemember = cursorRemember,
-        notePreviewEnabled = notePreviewEnabled,
-        autosaveResumeAuto = autosaveResumeAuto,
-        engineCpp = engineCpp,
-        soundfontPresetName = soundfontPresetName,
-        soundfontPresetCount = soundfontPresetCount,
-        soundfontPresetIndex = soundfontPresetIndex,
-        overlayBitmap = overlayBitmap,
-        overlayStrength = overlayStrength,
-        overlayFiles = overlayFiles,
-        overlayName = overlayName,
-        portraitSkinId = portraitSkinId
-    )
-
-    // The Oboe stream opens on a background IO thread; the UI renders immediately rather than behind a
-    // loading screen. That first open can take many seconds on some devices (e.g. GammaCoreOS / Miyoo
-    // Flip, where AAudio's open triggers C2 codec enumeration), which is exactly why we don't block on
-    // it. Audio-dependent effects key off audioReady, the visualizer poll no-ops until
-    // audioEngine.isReady, and START/playback is gated the same way — so nothing touches the engine
-    // before it exists.
-
-    val hapticView = LocalView.current
-    CompositionLocalProvider(
-        LocalLayoutMode provides layoutMode,
-        LocalAppTheme provides appTheme,
-        LocalButtonEventCallback provides { button, isPress ->
-            if (isPress) {
-                buttonSoundManager.onPress(button)
-                buttonHapticManager.onPress(hapticView)
-            } else {
-                buttonSoundManager.onRelease(button)
-                buttonHapticManager.onRelease(hapticView)
-            }
-        }
+    override fun onDestroy() {
+        buttonSound?.release()
+        buttonSound  = null
+        buttonHaptic = null
+        super.onDestroy()
+    }
+
+    /**
+     * **Called from native (`shell/android-main.cpp`, on the SDL thread) on every virtual-button press
+     * and release** — the one outward JNI hook the convergence plan's Phase-E table names. The shared
+     * touch layer (`sdl-touch.cpp`) owns the DECISION to fire and passes the live BTN SOUND / BTN VIBRO
+     * scalars across; this only routes them to the two managers, which are unchanged from the Compose
+     * app. ⚠️ Resolved by name over JNI, so `@Keep` here is LOAD-BEARING now that this class is in
+     * `src/main` and R8 runs on release — plus an explicit `-keep` in `proguard-rules.pro`, per the
+     * project's standing rule for JNI-by-name callbacks (a renamed member is an `UnsatisfiedLinkError`
+     * at runtime in release only, exactly the v0.9.3 DEX bug class).
+     *
+     * @param button ordinal of the virtual button — matches `VirtualButton`'s order exactly, which is
+     *               `pt::ui::Button`'s order (native/ui/buttons.h), so it passes straight through.
+     * @param down   true = press feel, false = release (a lift or a slide-off).
+     *
+     * ⚠️ The haptic is posted to the UI thread; the sound is not. `SoundPool.play` is thread-safe and
+     * lowest-latency called straight from here, but `ButtonHapticManager`'s bottom fallback reaches a
+     * `View.performHapticFeedback`, which wants the UI thread — and the post costs nothing perceptible
+     * on a pulse. The Vibrator itself is thread-safe; posting the whole call is simply the safe default.
+     */
+    @Keep
+    fun onButtonFeedback(
+        button: Int, down: Boolean,
+        soundOn: Boolean, soundVolume: Int,
+        vibroOn: Boolean, vibroPower: Int
     ) {
-        if (!effectiveLayoutConfig.needsVirtualButtons) {
-            FullScreenLayout(
-                layoutConfig = effectiveLayoutConfig,
-                scalingMode = scalingMode,
-                params = trackerParams,
-                inputMapper = inputMapper,
-                focusRequester = focusRequester
-            )
-        } else when (layoutMode) {
-            DeviceAdapter.LayoutMode.TOUCH_LANDSCAPE ->
-                LandscapeLayoutWithVirtualButtons(
-                    layoutConfig = effectiveLayoutConfig,
-                    scalingMode = scalingMode,
-                    params = trackerParams,
-                    inputMapper = inputMapper,
-                    focusRequester = focusRequester
-                )
-            DeviceAdapter.LayoutMode.TOUCH_PORTRAIT2 ->
-                PortraitLayout2WithVirtualButtons(
-                    layoutConfig = effectiveLayoutConfig,
-                    scalingMode = scalingMode,
-                    params = trackerParams,
-                    inputMapper = inputMapper,
-                    focusRequester = focusRequester,
-                    theme = theme,
-                )
-            else -> // TOUCH_PORTRAIT (and FULL fallback — shouldn't normally reach here)
-                PortraitLayoutWithVirtualButtons(
-                    layoutConfig = effectiveLayoutConfig,
-                    scalingMode = scalingMode,
-                    params = trackerParams,
-                    inputMapper = inputMapper,
-                    focusRequester = focusRequester
-                )
-        }
-    } // CompositionLocalProvider
-}
+        val vb = VirtualButton.values().getOrNull(button) ?: return
 
+        buttonSound?.let { s ->
+            s.enabled = soundOn
+            s.volume  = (soundVolume.coerceIn(0, 255)) / 255f
+            if (down) s.onPress(vb) else s.onRelease(vb)
+        }
+
+        buttonHaptic?.let { h ->
+            h.enabled = vibroOn
+            h.power   = vibroPower.coerceIn(1, 255)
+            if (h.enabled) {
+                val view = window.decorView
+                runOnUiThread { if (down) h.onPress(view) else h.onRelease(view) }
+            }
+        }
+    }
+
+    /**
+     * **Called from native (`shell/android-main.cpp`) to decide the touch vs FULL layout** — the SDL
+     * analogue of `DeviceAdapter.hasPhysicalGameButtons()`, and a straight copy of its logic so the two
+     * activities answer identically. Returns true iff a REAL game controller is attached; the shared shell
+     * then draws the on-screen gamepad + PORTRAIT2 skin only when this is false and the hardware is a
+     * touchscreen.
+     *
+     * ⚠️ **THIS EXISTS BECAUSE SDL AND ANDROID DISAGREE ABOUT WHAT A CONTROLLER IS.** SDL's
+     * `isDeviceSDLJoystick` opens any device with a GAMEPAD *or a bare DPAD* source, so the Android
+     * emulator's built-in keyboard (`qwerty2`, sources `KEYBOARD | DPAD`, keylayout mapping `BUTTON_A`)
+     * registers as a full game controller — `SdlInput::controller_count()` reads 1 and the app wrongly
+     * drops the touch UI (fullscreen frame, empty LAYOUT row). Android's `SOURCE_GAMEPAD`/`SOURCE_JOYSTICK`
+     * flag is the only thing that tells the keyboard from a pad, and it is a Java-only API. ⚠️ Called by
+     * name over JNI, so `@Keep` plus an explicit `proguard-rules.pro` `-keep` guard it against R8, which
+     * now runs on this class in release (`src/main`).
+     */
+    @Keep
+    fun hasPhysicalGameButtons(): Boolean {
+        for (deviceId in InputDevice.getDeviceIds()) {
+            val device = InputDevice.getDevice(deviceId) ?: continue
+
+            // The emulator UI pseudo-device — not a real controller. DeviceAdapter skips it by name too.
+            if (device.name == "Virtual") continue
+
+            val sources = device.sources
+
+            // A real pad advertises GAMEPAD (face buttons) or JOYSTICK (axes). A bare DPAD/KEYBOARD does
+            // NOT count — which is exactly what excludes the emulator's qwerty2.
+            val hasGamepad  = (sources and InputDevice.SOURCE_GAMEPAD)  == InputDevice.SOURCE_GAMEPAD
+            val hasJoystick = (sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
+            if (hasGamepad || hasJoystick) {
+                Log.i(TAG, "physical game buttons: '${device.name}' (gamepad/joystick source)")
+                return true
+            }
+
+            // A keyboard-classed device whose NAME says it is a controller (some Xbox pads report as
+            // keyboards) — the same name rescue DeviceAdapter applies.
+            val isKeyboard = (sources and InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD
+            if (isKeyboard) {
+                val lowerName = device.name.lowercase()
+                if (lowerName.contains("xbox") || lowerName.contains("controller") ||
+                    lowerName.contains("gamepad")) {
+                    Log.i(TAG, "physical game buttons: '${device.name}' (keyboard-named controller)")
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    /**
+     * **C6 — the one-time SharedPreferences → settings.json migration.**
+     *
+     * Android has kept its settings in SharedPreferences since the app existed; `pt-ui` keeps them in
+     * `settings.json`. Without this, every existing user's settings silently reset the day the SDL UI
+     * becomes the shipping one — their theme included, which is the one they would notice.
+     *
+     * It is written HERE rather than in C++ because SharedPreferences is a Java API backed by an XML
+     * file whose format is Android's business, not ours: `getBoolean` with the same default the
+     * Compose app used is a fact, and parsing that XML from C++ would be a guess maintained forever.
+     *
+     * ⚠️⚠️ **VERSIONED, NOT KEYED OFF "settings.json IS ABSENT" — and that distinction is the whole
+     * design.** The obvious guard is *"no settings.json + prefs exist → import"*, and it gets exactly
+     * ONE chance: the moment the SDL app runs once, settings.json exists forever after and no later
+     * migration can ever fire. Phase D adds SKIN and OVERLAY selections (indices into lists that did not
+     * exist at v1 — see the note in `settings_store.cpp`), so a second pass was always coming, and the
+     * "absent file" guard would have made it unreachable before it was written. The version counter is
+     * what keeps that honest: v2 folds the two new stable-string keys into the SAME fresh-install write
+     * (the real upgrade path — a user who only ever ran Compose has no settings.json yet), and stamps v2
+     * so it never re-runs. An existing settings.json still WINS (below): a population that already ran
+     * the debug SDL activity has SDL-chosen values there, and re-importing older prefs over them would be
+     * a regression dressed as a migration.
+     *
+     * ⚠️ **The defaults below are ANDROID's, not `SettingsValues`'s, and they disagree on purpose.**
+     * `button_sound` and `button_vibro` default TRUE in the Compose app while the C++ struct defaults
+     * them FALSE; `button_sound_volume` is 0x80 there and 255 here. What must survive a migration is
+     * what the user actually EXPERIENCED, and for a row they never touched that is the value the
+     * Compose app was using — so the pref's own default is the correct thing to read and write. Taking
+     * the C++ defaults instead would silently switch off button sound for every user who had left it
+     * alone, which is exactly the class of upgrade bug this whole function exists to prevent.
+     *
+     * ⚠️ **`app_theme` is passed through VERBATIM, and that is sound rather than lazy.**
+     * `theme_io.h`'s `serialize_theme` states in its own comment that it emits kotlinx's bytes, and
+     * all 18 colour defaults plus `name` and `visualizerType` were compared field by field against
+     * `AppTheme.kt` — they are identical. Since both sides OMIT fields equal to their default, a
+     * mismatch anywhere would have silently recoloured a theme, which is why it was checked rather
+     * than assumed. Re-serialising it here would add a second format to keep in step for no gain.
+     *
+     * ⚠️ **Debug and release do NOT share SharedPreferences.** `applicationIdSuffix = ".debug"` gives
+     * this build its own data directory, so what this reads today is whatever the *debug* Compose
+     * activity wrote — not the songs-and-settings of the real install. That is a testing note, not a
+     * defect: in Phase E the SDL activity replaces `MainActivity` inside the one real package and the
+     * prefs it reads are the user's own. To exercise it, run "PocketTracker" (debug Compose), change
+     * some settings, delete settings.json, then run "PT (SDL)".
+     */
+    private fun importLegacySettings() {
+        val prefs = getSharedPreferences("pockettracker_ui", MODE_PRIVATE)
+        val done  = prefs.getInt(IMPORT_VERSION_KEY, 0)
+        if (done >= SETTINGS_IMPORT_VERSION) {
+            Log.i(TAG, "settings import: already at v$done, nothing to do")
+            return
+        }
+
+        val target = File(appRoot(), "settings.json")
+
+        // ⚠️ An existing settings.json WINS, and the version is still stamped. During phases C and D
+        // this activity has already been run by hand, so a settings.json is sitting there with values
+        // chosen through the SDL UI itself — clobbering those with older prefs would be a regression
+        // dressed as a migration. Stamping the version regardless is what stops this from re-arming
+        // later and overwriting a settled file the first time a user clears their prefs.
+        if (target.exists()) {
+            prefs.edit().putInt(IMPORT_VERSION_KEY, SETTINGS_IMPORT_VERSION).apply()
+            Log.i(TAG, "settings import: ${target.name} already exists - keeping it, marked v$SETTINGS_IMPORT_VERSION")
+            return
+        }
+
+        // Nothing to migrate FROM is not a failure: it is a fresh install, and the C++ defaults are
+        // the right answer. Stamp it so this never runs again.
+        if (prefs.all.isEmpty()) {
+            prefs.edit().putInt(IMPORT_VERSION_KEY, SETTINGS_IMPORT_VERSION).apply()
+            Log.i(TAG, "settings import: no prefs to migrate (fresh install), marked v$SETTINGS_IMPORT_VERSION")
+            return
+        }
+
+        try {
+            val json = JSONObject()
+
+            // ── The rows every platform has ──────────────────────────────────────────────────────
+            json.put("scalingBilinear",
+                     prefs.getString("scaling_mode", null) == "BILINEAR")
+            json.put("insertBefore",       prefs.getBoolean("kb_insert_before", true))
+            json.put("cursorRemember",     prefs.getBoolean("cursor_remember", false))
+            json.put("notePreview",        prefs.getBoolean("note_preview", true))
+            json.put("autosaveResumeAuto", prefs.getBoolean("autosave_resume_auto", false))
+
+            // ⚠️ `trace` is NOT imported. It is a developer switch, it is off in every shipped build,
+            // and `engine_cpp_v2` is not imported either: the converged app has no Kotlin sequencer to
+            // switch TO, so the value is not merely stale, it is unanswerable. That is the same call
+            // the `engine_cpp` key got in songcore S7 — a stored value that was never the user's
+            // choice must be abandoned rather than honoured (see order-of-work.md).
+
+            // ── The device rows that are plain scalars ───────────────────────────────────────────
+            json.put("buttonSound",       prefs.getBoolean("button_sound", true))
+            json.put("buttonSoundVolume", prefs.getInt("button_sound_volume", 0x80))
+            json.put("buttonVibro",       prefs.getBoolean("button_vibro", true))
+            json.put("vibroPower",        prefs.getInt("vibro_power", 255))
+            json.put("overlayStrength",   prefs.getInt("overlay_strength", 128))
+
+            // ── The device-row SELECTIONS, as STABLE STRINGS (v2) ────────────────────────────────
+            // SKIN and OVERLAY are now indices into lists the shell HAS — `device_skin.h` resolves the
+            // skin and `shell/overlay.h` the overlay — so their persisted names finally have a consumer
+            // and move across with the rest. Written as the ids the Compose app stored (matching
+            // `settings_store.cpp`'s `portrait_skin` / `overlay_name` keys). ⚠️ LAYOUT (`layout_mode`)
+            // is still absent by design: there is no shell-side layout-mode override to resolve a name
+            // against (the shell auto-selects by orientation + controller), so its stored value is
+            // unanswerable here, exactly like `trace`/`engine_cpp_v2` above.
+            json.put("portrait_skin", prefs.getString("portrait_skin", DEFAULT_SKIN_ID))
+            json.put("overlay_name",  prefs.getString("overlay_name", "OFF"))
+
+            // ── The theme ────────────────────────────────────────────────────────────────────────
+            // The palette the user dialled in is the single most visible thing in this migration, and
+            // the one they could not reconstruct. Both `appTheme` (what the C++ reader prefers) and
+            // `theme` (the name, what an older build reads) are written, mirroring what
+            // `serialize_settings` itself emits.
+            val storedTheme = prefs.getString("app_theme", null)
+            if (storedTheme != null) {
+                val parsed = JSONObject(storedTheme)
+                json.put("appTheme", parsed)
+                json.put("theme", parsed.optString("name", "CLASSIC"))
+                // The visualizer is the theme's FIELD but the user's CHOICE — settings.json carries it
+                // as a top-level int, so it is translated out of the theme object here exactly as
+                // `load_settings` expects to find it.
+                json.put("visualizer", visualizerIndex(parsed.optString("visualizerType", "SCOPE")))
+            }
+
+            target.parentFile?.mkdirs()
+            target.writeText(json.toString(2) + "\n")
+            prefs.edit().putInt(IMPORT_VERSION_KEY, SETTINGS_IMPORT_VERSION).apply()
+            Log.i(TAG, "settings import: wrote ${target.absolutePath} " +
+                       "(${json.length()} keys, theme=${json.optString("theme", "-")}), marked v$SETTINGS_IMPORT_VERSION")
+        } catch (e: Exception) {
+            // ⚠️ NOT stamped on failure, so the next launch tries again. And deliberately not fatal:
+            // losing a migration costs the user their settings, and crashing on the way in costs them
+            // the app. The log line is the only thing that says which happened.
+            Log.e(TAG, "settings import FAILED - settings will fall back to defaults: ${e.message}", e)
+        }
+    }
+
+    /** `VisualizerType`'s ordinal, which is what settings.json stores. The order is the enum's, and it
+     *  is the same list in `AppTheme.kt`, `theme.h` and `settings_store.cpp`'s VISUALIZER_COUNT. */
+    private fun visualizerIndex(name: String): Int = when (name) {
+        "SCOPE"          -> 0
+        "FLAT"           -> 1
+        "OCTA"           -> 2
+        "OCTA_FULL"      -> 3
+        "SPECTRUM"       -> 4
+        "SPECTRUM_PEAKS" -> 5
+        else             -> 0
+    }
+
+    /**
+     * Send the user to the All files access settings page.
+     *
+     * ⚠️ There is no runtime-permission dialog for `MANAGE_EXTERNAL_STORAGE` — it is granted only
+     * through Settings, so this is a `startActivity`, not a permission request, and it cannot be
+     * answered inline. `READ_MEDIA_AUDIO` and friends are deliberately NOT requested here: they
+     * govern MediaStore, and nothing in the SDL build goes through MediaStore. The native
+     * `std::filesystem` path this port rests on is governed by All files access alone.
+     *
+     * ⚠️ Both intents, in order, and the fallback is not theoretical — `MainActivity` carries the
+     * same pair because some custom ROMs (/e/OS was the one that bit us) do not expose the
+     * app-specific page at all. If neither resolves, the app still runs; the browser is just empty
+     * and the log above says why.
+     *
+     * ⚠️ Called BEFORE `super.onCreate()`, i.e. before the SDL thread exists. Settings comes up over
+     * us and the activity is immediately paused — which is fine, and is in fact the first real
+     * exercise of C4's background watcher, on a blank document where every step of it is a no-op.
+     */
+    private fun requestAllFilesAccess() {
+        Log.i(TAG, "requesting MANAGE_EXTERNAL_STORAGE - the file browser is empty without it")
+        try {
+            startActivity(
+                Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                    .setData(Uri.parse("package:$packageName"))
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "app-specific All-files-access page unavailable: ${e.message}")
+            try {
+                startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+            } catch (e2: Exception) {
+                Log.e(TAG, "All-files-access settings unavailable entirely: ${e2.message}")
+            }
+        }
+    }
+
+    private companion object {
+        const val TAG = "PocketTrackerSDL"
+
+        /**
+         * Bump this when a later phase has new keys to migrate, and add an arm for them.
+         *
+         * **v1 (C6)** — the rows that exist today: the four every-platform ones, RESUME, the four
+         * button-feedback scalars, overlay STRENGTH, and the theme.
+         * **v2 (Phase D6)** — the SKIN and OVERLAY *selections* (`portrait_skin` / `overlay_name`),
+         * now that `device_skin.h` and `shell/overlay.h` give their stored names a list to resolve
+         * against. LAYOUT (`layout_mode`) stays out — the shell has no layout-mode override, so there is
+         * still nothing to resolve it against.
+         */
+        const val SETTINGS_IMPORT_VERSION = 2
+        const val IMPORT_VERSION_KEY = "settings_import_version"
+
+        /** The Compose default for the skin pref (`DeviceSkin.AMIGA_DARK.id`), read when the user never
+         *  chose one — the shell's own fallback for an unknown id is the same skin (device_skin.h). */
+        const val DEFAULT_SKIN_ID = "amiga-2"
+    }
+}

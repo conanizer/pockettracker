@@ -62,8 +62,9 @@ AudioEngine::AudioEngine() {
 }
 
 AudioEngine::~AudioEngine() {
-    // The platform backend (OboeAudioEngine) owns and closes the output stream; the core just frees
-    // its buffers. jni-bridge destroys the shell first so no callback can run during this teardown.
+    // The platform backend (OboeAudioEngine on Android, SdlAudioEngine on desktop) owns and closes the
+    // output stream; the core just frees its buffers. The owner (android-main's / the shell's `main`)
+    // destroys the backend first, so no callback can run during this teardown.
     for (int i = 0; i < 256; i++) {
         if (samples[i])              delete[] samples[i];
         if (samplesRight[i])         delete[] samplesRight[i];

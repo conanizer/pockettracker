@@ -4,10 +4,9 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.kotlin.compose)
-    // Pinned to the Kotlin version via the catalog (was a hard-coded "1.9.0" that only resolved because
-    // KGP aligns the compiler plugin) so the serialization plugin can't drift from the Kotlin compiler.
-    alias(libs.plugins.kotlin.serialization)
+    // Convergence Phase E deleted the Compose UI and every @Serializable model along with the Kotlin
+    // tracker, so the kotlin.compose and kotlin.serialization compiler plugins are both gone. The
+    // surviving Kotlin (MainActivity + the two feedback managers) is plain Android View/JNI glue.
 }
 
 android {
@@ -39,10 +38,6 @@ android {
         // versionName is bumped by hand per release; tag the matching release in git.
         versionCode = 930
         versionName = "0.9.3"
-
-        // Landscape touch layout is hidden in release (no themed asset for it yet) but kept
-        // in debug builds for testing. Gated in MainActivity / SettingsModule on this flag.
-        buildConfigField("boolean", "LANDSCAPE_LAYOUT", "false")
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
@@ -104,34 +99,21 @@ android {
 
     buildTypes {
         debug {
-            // Landscape layout stays available in debug for testing.
-            buildConfigField("boolean", "LANDSCAPE_LAYOUT", "true")
-
-            // ⚠️ A SEPARATE PACKAGE, SO THE DEV BUILD DOES NOT EVICT THE ONE BEING USED TO MAKE
-            // MUSIC. Convergence C3. Debug and release are signed with different keys, so a debug
-            // APK cannot install over a release install — the only way to test on a device that has
-            // a real install is to UNINSTALL it, which takes the user's SharedPreferences (theme,
-            // layout, RESUME mode) with it. A suffix makes them two apps that coexist.
-            //
-            // This is also what the convergence plan asks for, expressed on the device: phases C
-            // and D require BOTH UIs to be available at once, and that is a poor property if
-            // installing the SDL build means losing the Compose one.
-            //
-            // ⚠️ Songs are NOT package-scoped and never were: they live in
-            // /storage/emulated/0/Documents/PocketTracker, which is public external storage. Both
-            // packages therefore open the SAME projects — which is exactly what makes an SDL build
-            // testable against real songs rather than an empty folder.
-            //
-            // ⚠️ The debug package needs its OWN MANAGE_EXTERNAL_STORAGE grant (permissions are
-            // per-package), or its file browser comes up empty for a reason that has nothing to do
-            // with C5's std::filesystem question.
+            // A SEPARATE PACKAGE (`.debug`) so a dev build coexists with — and does not evict — a
+            // real install being used to make music. Debug and release are signed with different
+            // keys, so a debug APK cannot install over a release one; without the suffix the only way
+            // to test on a device with a real install is to uninstall it, taking its SharedPreferences
+            // with it. Songs are NOT package-scoped (they live in public external storage at
+            // /storage/emulated/0/Documents/PocketTracker), so both packages open the SAME projects.
+            // ⚠️ Each package needs its OWN MANAGE_EXTERNAL_STORAGE grant (permissions are per-package),
+            // or its file browser comes up empty for a reason unrelated to std::filesystem.
             applicationIdSuffix = ".debug"
         }
         release {
             // R8 + resource shrinking. Smaller dex → faster cold start and less code pinned in
-            // RAM on the 1 GB Miyoo. JNI keep rules + kotlinx-serialization keep rules live in
-            // proguard-rules.pro. Overlay PNGs are in assets/ (not res/) so resource shrinking
-            // leaves them alone.
+            // RAM on the 1 GB Miyoo. The JNI keep rules (MainActivity's onButtonFeedback /
+            // hasPhysicalGameButtons, called by name from native) live in proguard-rules.pro.
+            // Overlay PNGs are in assets/ (not res/) so resource shrinking leaves them alone.
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -154,31 +136,19 @@ android {
         jvmTarget = "11"
     }
     buildFeatures {
-        prefab = true
-        compose = true
-        buildConfig = true
+        prefab = true          // Oboe arrives as a Prefab package
+        // compose and buildConfig both gone with Phase E: no Compose UI, and no surviving Kotlin
+        // reads BuildConfig (the debug/release split the C++ side needs comes from NDEBUG, not here).
     }
 }
 
+// Convergence Phase E: the dependency list is now the whole cost of the Kotlin shim. Oboe (the audio
+// backend, via Prefab), core-ktx (WindowCompat), and the splash-screen compat lib are all that the
+// surviving MainActivity + feedback managers use. Compose (BOM, ui, material3, activity-compose),
+// lifecycle-runtime, kotlinx-serialization and the JUnit/Espresso/Compose test stack all left with
+// the ~15k lines of Kotlin they supported — the APK-size win the convergence plan projected.
 dependencies {
     implementation(libs.oboe)
-
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.activity.compose)
-    implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.compose.ui)
-    implementation(libs.androidx.compose.ui.graphics)
-    implementation(libs.androidx.compose.ui.tooling.preview)
-    implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.ui.text)
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(platform(libs.androidx.compose.bom))
-    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
-    debugImplementation(libs.androidx.compose.ui.tooling)
-    debugImplementation(libs.androidx.compose.ui.test.manifest)
-    implementation(libs.kotlinx.serialization.json)
 }

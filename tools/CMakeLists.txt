@@ -77,8 +77,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # contraction of `a + b*c` into an fma, which rounds once where the JVM rounds twice — changes
 # those bits, and the traces stop matching. GCC defaults to -ffp-contract=fast and WILL contract,
 # so without this the Linux CI runner could go red on a tree that is green on the Windows dev box.
-# This is the same guarantee native/CMakeLists.txt gives songcore-jni.cpp; it has to be restated
-# here because these translation units are built by a different project entirely.
+# This is the same guarantee native/CMakeLists.txt gives the SDL shell's songcore TUs (pockettracker-sdl,
+# which #includes songcore/host.h) — it has to be restated here because these translation units are
+# built by a different project entirely. (The Android JNI TU that used to carry it, songcore-jni.cpp,
+# was deleted with the Kotlin facade in convergence Phase E.)
 #
 # PER-TARGET, not add_compile_options(). A directory-scope flag would be inherited by everything
 # under add_subdirectory(../native) — the engine and the whole vendored decoder stack — and quietly

@@ -256,26 +256,35 @@ jobs:
             fi
           done
 
-          # ── 4. Debug-only, verified on the RELEASE manifest ────────────────────────────────────
-          # The plan requires both UIs to ship side by side through phases C and D. src/debug/ is the
-          # whole mechanism; this asserts the mechanism actually holds, because "it is in src/debug so
-          # it cannot be in release" is a belief about AGP until something reads the output.
-          ./gradlew :app:processReleaseManifest --rerun-tasks --no-daemon
+          # ── 4. The Compose→SDL swap shipped, verified on the merged manifests ──────────────────
+          # Through phases C and D the SDL UI rode in a debug-only second activity (SdlActivity,
+          # src/debug), and this step asserted it stayed OUT of release. Phase E deleted the Compose
+          # MainActivity and moved the SDL activity into src/main UNDER that name, so the invariant
+          # inverts: the SDL activity is now the shipping launcher, and the old debug-only one is gone.
+          # Verified on the merged manifests rather than believed from the source layout.
+          ./gradlew :app:processReleaseManifest :app:processDebugManifest --rerun-tasks --no-daemon
           RELMF=$(ls app/build/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml)
-          RN=$(grep -c 'SdlActivity' "$RELMF" || true)
           DBGMF=$(ls app/build/intermediates/merged_manifests/debug/processDebugManifest/AndroidManifest.xml)
+          # The retired debug-only activity must be gone from BOTH manifests.
+          RN=$(grep -c 'SdlActivity' "$RELMF" || true)
           DN=$(grep -c 'SdlActivity' "$DBGMF" || true)
-          if [ "$RN" -eq 0 ] && [ "$DN" -ge 1 ]; then
-            echo "ok    SdlActivity: debug=$DN release=$RN (present where it should be, absent where it must be)"
+          # The shipping launcher must be MainActivity, present in RELEASE.
+          MAIN=$(grep -c 'MainActivity' "$RELMF" || true)
+          if [ "$RN" -eq 0 ] && [ "$DN" -eq 0 ] && [ "$MAIN" -ge 1 ]; then
+            echo "ok    Phase E swap: SdlActivity gone from both manifests, MainActivity is the release launcher ($MAIN)"
           else
-            echo "FAIL  SdlActivity: debug=$DN release=$RN - expected debug>=1 and release==0"
+            echo "FAIL  Phase E swap: SdlActivity refs debug=$DN release=$RN (want 0/0), MainActivity in release=$MAIN (want >=1)"
             FAIL=1
           fi
 
           exit $FAIL
 
-      - name: Run unit tests
-        run: ./gradlew test --no-daemon
+      # The Kotlin unit tests (the JVM golden recorders — P3InputGoldenTest, GoldenTraceTest, and the
+      # S3/S5/S7 suites) were deleted in convergence Phase E along with the Kotlin sequencer and UI they
+      # drove. There is no `./gradlew test` step any more: the committed /testdata goldens are now a
+      # C++ regression net, exercised by the `songcore` job below against tools/pt*. See Phase B in
+      # docs/internal/convergence-plan.md and testdata/README.md for the conformance→regression
+      # reclassification; the recorders themselves are preserved at tag `kotlin-golden-source`.
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -284,10 +293,12 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 7
 
-  # The C++ half of the songcore conformance suite. The `build` job above already runs the JVM
-  # goldens (./gradlew test), which proves the KOTLIN sequencer still matches them — this proves
-  # the C++ one does, by comparing tools/pt{roundtrip,resolve,play,voice,render} against the same
-  # committed goldens in /testdata. No Android SDK and no Gradle.
+  # The C++ conformance suite — and since convergence Phase E deleted the Kotlin sequencer, the SOLE
+  # regression net for the /testdata goldens. It compares tools/pt{roundtrip,resolve,play,voice,render}
+  # against the committed goldens (which the JVM recorders produced, preserved at tag
+  # kotlin-golden-source). The question these goldens answer changed with Phase B: it was "does the C++
+  # match the Kotlin original?" and is now "does today's C++ still do what the recorded C++ did?". No
+  # Android SDK and no Gradle.
   #
   # Since S6b it also BUILDS THE ENGINE. Four of the five tools are header-only consumers of
   # native/songcore, but ptrender renders real audio through the real thing, so this job compiles

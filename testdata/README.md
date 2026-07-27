@@ -194,11 +194,19 @@ regenerated from scratch, and every one came back **byte-identical** to the comm
 across all 50, corroborated by a clean `git status`). So the goldens committed here *are* what this
 tree's Kotlin produces — no stale file is hiding a drift — and the recorders are deterministic.
 
-**The reclassification itself takes effect when convergence Phase E deletes the Kotlin UI, not
-today.** Until then these files are still conformance goldens and still answer "does the C++ match
-the Kotlin original?". Afterwards they answer only "does today's C++ still do what last month's C++
-did?" — which is the weaker claim, and the one that catches a refactor breaking a screen six months
-out. Whoever lands Phase E writes the date here.
+**✅ THE RECLASSIFICATION TOOK EFFECT 2026-07-27, when convergence Phase E deleted the Kotlin UI and
+sequencer** (and with them the JVM recorders — `P3InputGoldenTest`, `GoldenTraceTest`, and the
+S3/S5/S7 suites — that lived in `app/src/test`). From that commit these files are **regression**
+goldens: they no longer answer "does the C++ match the Kotlin original?" (there is no Kotlin original
+left in the tree to match) but only "does today's C++ still do what last month's C++ did?" — the
+weaker claim, and the one that catches a refactor breaking a screen six months out. They are now
+exercised solely by the C++ ladder (`tools/pt*`, the `songcore` CI job); the `./gradlew test` step
+that used to re-derive them from Kotlin is gone.
+
+A second archive tag, **`kotlin-ui-final`, marks the last commit that still contained the Kotlin UI**
+— the deletion's companion to `kotlin-golden-source`. To record a fresh golden from Kotlin now, check
+out `kotlin-golden-source` (it carries the recorders and the recipe); nothing on `sdl-shell` HEAD can
+produce one.
 
 ⚠️ **If any further golden is recorded from Kotlin before Phase E, this tag must MOVE** — a tag that
 does not contain the recorder cannot regenerate its golden. Re-point it and update the file list in

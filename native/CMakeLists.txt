@@ -214,12 +214,12 @@ set(ENGINE_CORE_SOURCES
         effects/soundpipe/pareq.c
 )
 
-# Android shell: the Oboe stream glue + the JNI facade (+ songcore's JNI shell — the Linux port
-# swaps exactly these files and keeps everything above).
+# Android shell: the Oboe stream glue, and only that. Convergence Phase E deleted the JNI facade
+# (jni-bridge.cpp) and songcore's JNI shell (songcore-jni.cpp) along with the Kotlin UI they served —
+# there is no Kotlin left to call them. OboeAudioEngine is now constructed by the shared SDL shell's
+# android-main.cpp (it links this library), exactly as the desktop shell constructs SdlAudioEngine.
 set(ANDROID_PLATFORM_SOURCES
         oboe-audio-engine.cpp
-        jni-bridge.cpp
-        songcore-jni.cpp
 )
 
 if(ANDROID)
@@ -269,18 +269,15 @@ else()
             PROPERTIES COMPILE_OPTIONS "-fno-fast-math"
     )
 
-    # songcore's translation unit is REQUIRED to be IEEE-exact — this is not an optimisation choice.
-    # The sequencer's float params (velGain, volGain, pan, PSL/PBN/vibrato rates) are compared against the
-    # Kotlin sequencer as raw binary32 BITS (event-schema §5/§6), so any reassociation, and above all fma
-    # contraction of `a + b*c` — which aarch64 clang performs BY DEFAULT, -ffast-math or not — changes the
-    # rounding and the conformance trace stops matching. Hence both flags, and hence songcore lives in its
-    # own TU: pulling its headers into any other source would put that source's math under -ffast-math and
-    # silently break the guarantee. (songcore-jni.cpp is Android-only, so this needs no MSVC arm; the host
-    # tools restate the same guarantee for their own TUs in tools/CMakeLists.txt.)
-    set_source_files_properties(
-            songcore-jni.cpp
-            PROPERTIES COMPILE_OPTIONS "-fno-fast-math;-ffp-contract=off"
-    )
+    # songcore's scheduling math is REQUIRED to be IEEE-exact (event-schema §5/§6: its float params are
+    # compared against the recorded goldens as raw binary32 BITS, so any reassociation — above all the fma
+    # contraction of `a + b*c` that aarch64 clang performs BY DEFAULT — changes the rounding and the trace
+    # stops matching). Convergence Phase E deleted songcore-jni.cpp, the TU that used to carry that flag
+    # pair here; no songcore scheduling math is instantiated in THIS library any more (ENGINE_CORE only
+    # includes songcore/schema-check.cpp, which is layout validation, not scheduling). The math now lives
+    # solely in the SDL shell's own TUs (app.cpp includes songcore/host.h), and pockettracker-sdl restates
+    # `-fno-fast-math -ffp-contract=off` for exactly that reason further down this file. The host tools do
+    # the same for their own TUs in tools/CMakeLists.txt.
 
     # 7.3: explicit optimization level. The NDK leaves Debug at -O0, which makes the real-time audio
     # engine too slow to test reliably on the Miyoo (the variant we test most). Force -O2 in Debug so

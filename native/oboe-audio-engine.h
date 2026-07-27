@@ -19,14 +19,13 @@ class AudioEngine;  // portable core — full definition pulled in by the .cpp o
 // derived from SdlAudioEngine's shape and this class already matched three of it; see
 // native/audio-backend.h for why the virtuals cost nothing (they are lifecycle, never the callback).
 //
-// ⚠️ TWO OWNERS DURING PHASES C AND D, DELIBERATELY. `jni-bridge.cpp` still constructs one of these
-// for the Compose app, and `android-main.cpp` constructs a different one for the SDL app. They are
-// separate instances in separate activities and never coexist; Phase E deletes the first when the
-// JNI facade goes. Nothing here is a singleton and nothing here may become one.
+// Constructed by `android-main.cpp`'s `main()` for the SDL app — the one owner since convergence
+// Phase E deleted the JNI facade (`jni-bridge.cpp`) that used to build a separate instance for the
+// Compose app. Nothing here is a singleton and nothing here may become one.
 class OboeAudioEngine : public oboe::AudioStreamDataCallback, public AudioBackend {
 public:
-    // Borrows the core (owned by jni-bridge, or by android-main's `main`); does not take ownership.
-    // Both owners destroy the shell before the core, so no callback can run against a freed core.
+    // Borrows the core (owned by android-main's `main`); does not take ownership. The owner destroys
+    // the shell before the core, so no callback can run against a freed core.
     explicit OboeAudioEngine(AudioEngine* core);
     ~OboeAudioEngine() override;
 
