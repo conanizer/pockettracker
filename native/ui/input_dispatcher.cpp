@@ -2344,6 +2344,37 @@ void InputDispatcher::on_select() {
         mark_modified();
         return;
     }
+
+    // ⚠️ THE CONTEXT-SCREEN BACK-NAV — Kotlin `handleSelect`'s `else` arm (parity: the Kotlin↔C++
+    // handler-surface diff, 2026-07-27; the one arm that diff found missing). A bare SELECT on a
+    // context/popup screen that has no SELECT action of its own pops back to the column's main screen.
+    //
+    // ⚠️ It is deliberately NOT `!is_main_row(currentScreen)`. PROJECT, MIXER, EFFECTS and INST_POOL are
+    // non-main-row screens Kotlin cases as EXPLICIT no-ops (INST_POOL's own comment: "intentionally NOT
+    // the default jump"), and each only early-returns above when the cursor is on an actionable cell —
+    // so a blanket main-row test would wrongly navigate them off a plain cell. Only the four screens
+    // Kotlin's `else` actually reaches — GROOVE, SCALE, MODS, SETTINGS — navigate.
+    //
+    // ⚠️ Kotlin does a BARE `currentScreen =` here (its setter only — no caller cursor save/restore).
+    // The port routes through go_to_screen instead, ON PURPOSE: a bare field write is the
+    // cursor-stranding bug go_to_screen's header documents (SONG/CHAIN/PHRASE share one cursorColumn
+    // across different column counts), and going through it lands SELECT on the same valid cursor R+UP
+    // would — the coherent behaviour once the Kotlin is gone. `column` stays previousColumn, so the
+    // arriving main screen keeps the column this context screen belonged to.
+    switch (s_.currentScreen) {
+        case ScreenType::GROOVE:
+        case ScreenType::SCALE:
+        case ScreenType::MODS:
+        case ScreenType::SETTINGS: {
+            NavResult nav;
+            nav.screen = main_screen_for_column(s_.previousColumn);
+            nav.column = s_.previousColumn;
+            go_to_screen(s_, nav);
+            break;
+        }
+        default:
+            break;
+    }
 }
 
 void InputDispatcher::on_stop_preview() {

@@ -396,6 +396,72 @@ int main() {
         ok(!state.eq.isOpen, "SELECT again CLOSES it");
     }
 
+    // ── 5b. SELECT on a CONTEXT screen pops back to the column's main screen ───────────────────────
+    //
+    // Kotlin `handleSelect`'s `else` arm — the ONE arm the 2026-07-27 handler-surface diff found
+    // missing from the C++ `on_select`. A bare SELECT on GROOVE / SCALE / MODS / SETTINGS (context and
+    // popup screens with no SELECT action of their own) navigates to the main screen of the column they
+    // belong to. Nothing else in the app exercises this — ptinput sits below the dispatcher, and §5
+    // above only ever pressed SELECT on EFFECTS.
+    //
+    // ⚠️ THE NEGATIVE CONTROL IS THE POINT. The arm is deliberately NOT `!is_main_row(currentScreen)`:
+    // PROJECT, MIXER, EFFECTS and INST_POOL are ALSO non-main-row screens, and Kotlin cases them as
+    // explicit no-ops. So SELECT on MIXER (off its master-EQ cell) and on INST_POOL (off its EQ column)
+    // must NOT navigate — a `!is_main_row` implementation would send both to PHRASE, and these two
+    // assertions are what turn red if anyone "simplifies" the switch into that.
+    {
+        state.eq       = EqEditorState{};   // §5 could have left one open on an early failure
+        state.qwerty   = QwertyKeyboardState{};
+        state.selection.exit();
+
+        state.previousColumn = 3;
+        state.currentScreen  = ScreenType::MODS;
+        dispatch.on_select();
+        eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::INSTRUMENT),
+           "SELECT on MODS pops back to INSTRUMENT (its column's main screen)");
+
+        state.previousColumn = 2;
+        state.currentScreen  = ScreenType::GROOVE;
+        dispatch.on_select();
+        eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::PHRASE),
+           "SELECT on GROOVE pops back to PHRASE");
+
+        state.previousColumn = 2;
+        state.currentScreen  = ScreenType::SCALE;
+        dispatch.on_select();
+        eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::PHRASE),
+           "SELECT on SCALE pops back to PHRASE");
+
+        state.previousColumn = 0;
+        state.currentScreen  = ScreenType::SETTINGS;
+        dispatch.on_select();
+        eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::SONG),
+           "SELECT on SETTINGS pops back to the column's main screen (col 0 = SONG)");
+
+        // ⚠️ NEGATIVE CONTROLS — the non-main-row screens Kotlin cases as no-ops must stay put.
+        state.previousColumn  = 2;
+        state.currentScreen   = ScreenType::MIXER;
+        state.mixerMasterRow  = 0;   // NOT the master-EQ cell, so open_sub_screen_at_cursor is false
+        state.mixerCursorColumn = 0;
+        dispatch.on_select();
+        eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::MIXER),
+           "SELECT on MIXER (off the EQ cell) does NOT navigate — the !is_main_row control");
+
+        state.previousColumn  = 3;
+        state.currentScreen   = ScreenType::INST_POOL;
+        state.poolCursorColumn = 0;   // NOT the EQ column (4)
+        dispatch.on_select();
+        eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::INST_POOL),
+           "SELECT on INST_POOL (off the EQ column) does NOT navigate — its own 'not the default jump'");
+
+        // …and a main-row screen is inert too (TABLE is in MAIN_ROW_SCREENS, so Kotlin's else no-ops it).
+        state.previousColumn = 0;
+        state.currentScreen  = ScreenType::TABLE;
+        dispatch.on_select();
+        eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::TABLE),
+           "SELECT on TABLE (a main-row screen) does NOT navigate");
+    }
+
     // ── 6. START is not the transport on every screen — and on these two it plays the SONG ────────
     //
     // The S3 code dropped MIXER/EFFECTS into its `default` arm and played the current PHRASE, while the
