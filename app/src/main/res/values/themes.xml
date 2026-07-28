@@ -6,7 +6,9 @@
     <style name="Theme.Pockettracker.Splash" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_bg</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
-        <item name="windowSplashScreenIconBackgroundColor">@color/splash_bg</item>
+        <!-- No windowSplashScreenIconBackgroundColor: the "branded icon" variant hard-clips the icon to
+             a circle, which slices the isometric logo's corner keys once it fills more of the canvas.
+             Without it, the plain drawable shows unmasked within the 288dp icon slot. -->
         <item name="postSplashScreenTheme">@style/Theme.Pockettracker</item>
     </style>
 

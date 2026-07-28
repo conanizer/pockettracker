@@ -91,8 +91,11 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
 
     dual_row(SettingsRow::BTN_SOUND, "BTN SOUND", on_off(v.buttonSoundEnabled),
              "VOL", hex2(v.buttonSoundVolume));
+    // POW is a LO/HI switch, not a 00-FF value: the target ROMs expose no Composition primitives, so
+    // haptic strength has only two crisp steps (EFFECT_TICK vs EFFECT_CLICK) — a hex knob would imply a
+    // continuous scale the hardware can't deliver. LO stores <128 (→TICK), HI stores ≥128 (→CLICK).
     dual_row(SettingsRow::BTN_VIBRO, "BTN VIBRO", on_off(v.buttonVibroEnabled),
-             "POW", hex2(v.vibroPower));
+             "POW", std::string(v.vibroPower >= 128 ? "HI" : "LO"));
 
     param_row(SettingsRow::KB_INSERT, "KB INSERT", v.insertBefore ? "BEFORE" : "AFTER");
     param_row(SettingsRow::CURSOR,    "CURSOR",    v.cursorRemember ? "REMEMBER" : "REFRESH");
@@ -171,7 +174,7 @@ CursorContext SettingsModule::cursor_context(const SettingsState& s) const {
 
         case SettingsRow::BTN_VIBRO:
             if (s.cursorColumn == 1) return cc::toggle_binary(v.buttonVibroEnabled);
-            return cc::hex_byte(v.vibroPower, 0, 255);
+            return cc::toggle_binary(v.vibroPower >= 128);  // LO / HI, not a 0..255 knob
 
         case SettingsRow::KB_INSERT:  return cc::toggle_binary(v.insertBefore);
         case SettingsRow::CURSOR:     return cc::toggle_binary(v.cursorRemember);
@@ -250,7 +253,8 @@ SettingsInputResult SettingsModule::handle_input(SettingsValues& v, Theme& theme
         case SettingsRow::BTN_VIBRO:
             if (set) {
                 if (cursor_column == 1)      v.buttonVibroEnabled = action.value > 0;
-                else if (cursor_column == 2) v.vibroPower         = clamp(action.value, 0, 255);
+                // LO/HI switch: store 64 (→EFFECT_TICK) or 255 (→EFFECT_CLICK). See the draw note.
+                else if (cursor_column == 2) v.vibroPower         = (action.value > 0) ? 255 : 64;
             }
             break;
 

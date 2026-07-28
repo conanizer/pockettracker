@@ -356,6 +356,21 @@ class InputDispatcher {
     /** See set_media_base_dir. Empty means "relative paths stay relative" (resolve_media_path). */
     std::string mediaBaseDir_{};
 
+    // ── The qwerty text cursor's HOLD ACCELERATION (v0.9.4 C2) ───────────────────────────────────
+    //
+    // The shell repeats a held R+LEFT/RIGHT at a flat 100 ms, but R+dpad is context-blind there — it
+    // is ALSO screen navigation and (C3) sample-editor zoom — so the acceleration cannot live in the
+    // shell without speeding those up too. It lives HERE, in the qwerty branch of on_r_left/on_r_right,
+    // where the meaning is known. It is derived from the CADENCE of the calls: a sustained hold arrives
+    // ~100 ms apart and builds a streak; a fresh press or a pause (the 400 ms initial-delay gap, or a
+    // deliberate tap) is > 250 ms apart and resets it. No shell change, no ButtonEvent change, and it
+    // touches nothing but the text cursor.
+    long long lastTextCursorMoveMs_ = 0;
+    int       textCursorRepeatStreak_ = 0;
+
+    /** 1, then 2, then 4 characters per repeat, by how long R+LEFT/RIGHT has been held. */
+    int text_cursor_repeat_step();
+
     // ── The autosave's DEBOUNCE (S10) ────────────────────────────────────────────────────────────
     //
     // Kotlin's is a `LaunchedEffect(projectVersion)` that DELAYS 3 s and is re-keyed — and therefore

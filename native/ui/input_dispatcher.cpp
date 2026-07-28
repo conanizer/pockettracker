@@ -1314,6 +1314,14 @@ void InputDispatcher::on_r_up() {
     if (qwerty_open()) { s_.qwerty.layout = 0; clamp_col(s_.qwerty); return; }
     if (eq_open() || theme_open()) return;
     if (on_browser()) { browser_cycle_sort(+1); return; }
+    // Sample-editor ZOOM IN (v0.9.4 C3): R+UP/R+DOWN drive `zoomLevel` (0=1×…4=16×) without hopping to
+    // the ZOOM row. The per-frame feed re-bins the waveform off `view_start`/`view_end`, so mutating the
+    // level is the whole job. (SAMPLE_EDITOR is a popup — navigate_* would only sit still here anyway.)
+    if (on_sample_editor()) {
+        if (s_.sampleEditor.showConfirmClose) return;   // the ARE YOU SURE? dialog owns the buttons
+        s_.sampleEditor.zoomLevel = std::min(s_.sampleEditor.zoomLevel + 1, 4);
+        return;
+    }
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_up(ns));
     s_.selection.exit();   // a selection belongs to the screen it was made on
@@ -1324,6 +1332,11 @@ void InputDispatcher::on_r_down() {
     if (qwerty_open()) { s_.qwerty.layout = 1; clamp_col(s_.qwerty); return; }
     if (eq_open() || theme_open()) return;
     if (on_browser()) { browser_cycle_sort(-1); return; }
+    if (on_sample_editor()) {   // ZOOM OUT — see on_r_up
+        if (s_.sampleEditor.showConfirmClose) return;
+        s_.sampleEditor.zoomLevel = std::max(s_.sampleEditor.zoomLevel - 1, 0);
+        return;
+    }
     const NavState ns = nav_state_of(s_);
     go_to_screen(s_, navigate_down(ns));
     s_.selection.exit();
@@ -1416,9 +1429,22 @@ void InputDispatcher::sync_last_edited_on_screen_switch(ScreenType from, ScreenT
     }
 }
 
+int InputDispatcher::text_cursor_repeat_step() {
+    const long long dt = now_ms_ - lastTextCursorMoveMs_;
+    lastTextCursorMoveMs_ = now_ms_;
+    if (dt > 250) { textCursorRepeatStreak_ = 0; return 1; }   // fresh gesture / the 400 ms initial gap
+    ++textCursorRepeatStreak_;
+    if (textCursorRepeatStreak_ < 4) return 1;                 // settle in at 1 char/repeat
+    if (textCursorRepeatStreak_ < 9) return 2;                 // then 2×
+    return 4;                                                  // then 4× — ~40 chars/s at the 100 ms cadence
+}
+
 void InputDispatcher::on_r_left() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open()) { move_text_cursor_left(s_.qwerty); return; }
+    if (qwerty_open()) {
+        for (int n = text_cursor_repeat_step(); n > 0; --n) move_text_cursor_left(s_.qwerty);
+        return;
+    }
     if (eq_open() || theme_open()) return;
     if (on_browser())  { navigate_to_parent(s_.fileBrowser, fs_); return; }
     const NavState ns = nav_state_of(s_);
@@ -1430,7 +1456,10 @@ void InputDispatcher::on_r_left() {
 
 void InputDispatcher::on_r_right() {
     if (confirm_open()) return;   // THE MODAL RULE - a confirm owns every button but A and B
-    if (qwerty_open()) { move_text_cursor_right(s_.qwerty); return; }
+    if (qwerty_open()) {
+        for (int n = text_cursor_repeat_step(); n > 0; --n) move_text_cursor_right(s_.qwerty);
+        return;
+    }
     if (eq_open() || theme_open()) return;
     if (on_browser())  return;   // no "down a directory" — that is what A on a folder is for
     const NavState ns = nav_state_of(s_);
@@ -1567,7 +1596,28 @@ void InputDispatcher::on_l_r() {
         s_.fileBrowser.selectionAnchor = -1;
         return;
     }
-    s_.selection.exit();
+
+    // Two-state rule (v0.9.4 C4), and the gate is `selection.active`, nothing else:
+    //   • SELECTING → leave selection mode, but the copy buffer MUST SURVIVE — you might re-enter a
+    //     selection by accident and must not lose what you copied. `selection.exit()` does not touch
+    //     `clip_`, so the buffer is untouched.
+    //   • NOT selecting → CLEAR the buffer. It is the only way to dismiss the top-strip clipboard
+    //     readout (`Clipboard::info()`) short of a restart. Only the four grid screens have a
+    //     clipboard, so the clear is scoped to them.
+    if (s_.selection.active) {
+        s_.selection.exit();   // buffer untouched
+        return;
+    }
+    switch (s_.currentScreen) {
+        case ScreenType::PHRASE:
+        case ScreenType::CHAIN:
+        case ScreenType::SONG:
+        case ScreenType::TABLE:
+            clip_.clear();
+            break;
+        default:
+            break;
+    }
 }
 
 // ─── L+B+A: clone ────────────────────────────────────────────────────────────────────────────────
