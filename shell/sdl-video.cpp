@@ -307,7 +307,8 @@ void SdlVideo::invalidate_backbuffer(bool texture_lost) {
 }
 
 bool SdlVideo::present(const Canvas& canvas, uint32_t letterboxArgb,
-                       const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig) {
+                       const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig,
+                       uint32_t modalScrimArgb) {
     // ⚠️ **RE-DESCRIBE WHEN THE OUTPUT CHANGES, AND ANDROID IS WHY (C4).** `describe()` used to run
     // exactly once, at `open()` — which on this platform is the one moment it is guaranteed to be
     // WRONG. `SdlActivity.hideSystemBars()` has to POST itself (API 30+ wants an attached DecorView),
@@ -334,21 +335,28 @@ bool SdlVideo::present(const Canvas& canvas, uint32_t letterboxArgb,
         lastOutH_ = outH;
     }
 
-    // The centred frame, no underlay — the pre-D present, now expressed through the shared body.
-    return present_impl(canvas, letterboxArgb, dest_rect(), {}, overlay, overlaySig);
+    // The centred frame, no underlay — the pre-D present, now expressed through the shared body. The
+    // modal scrim (when any) dims the whole output around the frame: the landscape letterbox bars.
+    return present_impl(canvas, letterboxArgb, dest_rect(), {}, overlay, overlaySig, modalScrimArgb,
+                        SDL_Rect{0, 0, outW, outH});
 }
 
 bool SdlVideo::present_skinned(const Canvas& canvas, uint32_t clearArgb, const SDL_Rect& frameDest,
                                const std::function<void(SDL_Renderer*)>& underlay,
-                               const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig) {
+                               const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig,
+                               uint32_t modalScrimArgb, const SDL_Rect& scrimBounds) {
     // No re-describe here: the PORTRAIT2 mode's geometry is logged by app.cpp (see the note in
     // `present` above). Otherwise identical to the centred path — same upload, same gate, same pacing.
-    return present_impl(canvas, clearArgb, frameDest, underlay, overlay, overlaySig);
+    // The modal scrim (when any) is bounded to `scrimBounds` — the bezel's inner glass, NOT the whole
+    // output — so it dims the gap around the frame without touching the casing or the button cluster (B4).
+    return present_impl(canvas, clearArgb, frameDest, underlay, overlay, overlaySig, modalScrimArgb,
+                        scrimBounds);
 }
 
 bool SdlVideo::present_impl(const Canvas& canvas, uint32_t clearArgb, const SDL_Rect& dest,
                             const std::function<void(SDL_Renderer*)>& underlay,
-                            const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig) {
+                            const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig,
+                            uint32_t modalScrimArgb, const SDL_Rect& scrimBounds) {
     // ── C7: DON'T PRESENT A FRAME THAT IS ALREADY ON SCREEN ──────────────────────────────────────
     //
     // The pixel-level half of the idle-redraw discipline. `app.cpp` decides when not to DRAW; this
@@ -369,6 +377,7 @@ bool SdlVideo::present_impl(const Canvas& canvas, uint32_t clearArgb, const SDL_
     // no overlay, so this is a no-op wherever there are no on-screen controls.
     const size_t n = static_cast<size_t>(DESIGN_W) * DESIGN_H;
     if (haveLast_ && clearArgb == lastLetterbox_ && overlaySig == lastOverlaySig_ &&
+        modalScrimArgb == lastModalScrim_ &&
         dest.x == lastDest_.x && dest.y == lastDest_.y && dest.w == lastDest_.w &&
         dest.h == lastDest_.h &&
         std::memcmp(lastFrame_.data(), canvas.pixels(), n * sizeof(uint32_t)) == 0) {
@@ -421,6 +430,41 @@ bool SdlVideo::present_impl(const Canvas& canvas, uint32_t clearArgb, const SDL_
     // no-op) on the centred landscape/desktop path, where nothing is behind the frame but the clear.
     if (underlay) underlay(renderer_);
 
+    // ── B4: the modal scrim, so the dim reaches AROUND the frame ──────────────────────────────────
+    // When a full-canvas modal (qwerty / confirm) is up, the tracker inside the 640×480 frame is already
+    // dimmed by the module's own MODAL_BACKDROP — but whatever the shell paints AROUND it stays bright, so
+    // the scrim used to stop at the 4:3 edge. Fill ONLY the four regions around `dest`, bounded to
+    // `scrimBounds`, with the SAME colour — never the frame itself. The bounds are what keep this correct
+    // on both present paths: LANDSCAPE passes the whole output, so the scrim reaches the letterbox bars;
+    // PORTRAIT2 passes the bezel's inner GLASS (present_skinned), so with INTEGER scaling — where the frame
+    // is a whole multiple SMALLER than the glass — the bright gap around it dims too, while the device
+    // casing and the button cluster OUTSIDE the glass stay bright (dimming those reads as a bug, not a
+    // modal). An earlier draft filled the whole output and let the frame copy reclaim the 4:3 area, but the
+    // copy did not overpaint the blended scrim as assumed and the tracker went black; painting only the
+    // regions around `dest` cannot touch the frame at all.
+    if (modalScrimArgb != 0) {
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer_, static_cast<Uint8>((modalScrimArgb >> 16) & 0xFF),
+                               static_cast<Uint8>((modalScrimArgb >> 8) & 0xFF),
+                               static_cast<Uint8>(modalScrimArgb & 0xFF),
+                               static_cast<Uint8>((modalScrimArgb >> 24) & 0xFF));
+        // The frame edges, clamped INTO the bounds, so a frame poking outside can never make a bar with a
+        // negative dimension (and a frame that fills the bounds leaves four zero-size, no-op bars).
+        const int bx = scrimBounds.x, by = scrimBounds.y;
+        const int br = scrimBounds.x + scrimBounds.w, bb = scrimBounds.y + scrimBounds.h;
+        const int fx = std::max(bx, std::min(br, dest.x));
+        const int fy = std::max(by, std::min(bb, dest.y));
+        const int fr = std::max(bx, std::min(br, dest.x + dest.w));
+        const int fb = std::max(by, std::min(bb, dest.y + dest.h));
+        const SDL_Rect bars[4] = {
+            {bx, by, br - bx, fy - by},   // above the frame
+            {bx, fb, br - bx, bb - fb},   // below the frame
+            {bx, fy, fx - bx, fb - fy},   // left of the frame
+            {fr, fy, br - fr, fb - fy},   // right of the frame
+        };
+        SDL_RenderFillRects(renderer_, bars, 4);
+    }
+
     SDL_RenderCopy(renderer_, texture_, nullptr, &dest);
 
     // ⚠️ The overlay goes HERE — after the frame, before the flip — drawn OVER it: the landscape touch
@@ -438,6 +482,7 @@ bool SdlVideo::present_impl(const Canvas& canvas, uint32_t clearArgb, const SDL_
     lastLetterbox_  = clearArgb;
     lastDest_       = dest;
     lastOverlaySig_ = overlaySig;
+    lastModalScrim_ = modalScrimArgb;
     haveLast_       = true;
 
     // ── Pacing ───────────────────────────────────────────────────────────────────────────────────

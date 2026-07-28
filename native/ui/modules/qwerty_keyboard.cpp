@@ -116,6 +116,58 @@ void move_text_cursor_right(QwertyKeyboardState& s) {
     if (s.textCursor < static_cast<int>(s.text.size())) s.textCursor += 1;
 }
 
+QwertyTextWindow qwerty_text_window(int textLen, int textCursor, int windowCols) {
+    if (windowCols < 1) windowCols = 1;
+    if (textLen < 0) textLen = 0;
+    textCursor = std::min(std::max(textCursor, 0), textLen);
+
+    QwertyTextWindow w;
+    // The phantom end-cursor slot (one past the last char) is content too, so the tail stays reachable.
+    const int content = textLen + 1;
+    if (content <= windowCols) {
+        w.cols = content;  // everything fits: no scroll, no markers
+        return w;
+    }
+
+    // Place the window so the cursor sits at the centre, clamped to the ends.
+    auto place = [&](int cols) {
+        const int maxFirst = content - cols;
+        int       f        = textCursor - cols / 2;
+        if (f < 0) f = 0;
+        if (f > maxFirst) f = maxFirst;
+        return f;
+    };
+    constexpr int MARK = 1;  // the ellipsis marker (…) is ONE column wide (C1: was ".." = two)
+
+    // Iterate to a FIXED POINT: the marker columns RESERVED must equal the markers the final placement
+    // actually needs. ONE refinement pass is NOT enough — reserving a marker shrinks the content window,
+    // which shifts the cursor-centred placement toward the far end and can REVEAL a clip on the near side
+    // the marker-free placement did not have. The exact case is `content == windowCols + 1` with the
+    // cursor centred: pass 1 sees a single clip and reserves one column, but the re-placement then needs
+    // TWO markers — so the old two-pass code drew a right "…" it had not reserved a column for, and it
+    // poked one column past the box (the reported bug). Re-placing until the flags stop changing keeps the
+    // reserved columns and the drawn markers in lock-step. Markers only ever grow (0→1→2) as the window
+    // shrinks, so this settles in a step or two; the loop bound is a hard guard, not the real terminator.
+    int  cols = windowCols;
+    int  f    = place(cols);
+    bool cl   = f > 0;
+    bool cr   = f + cols < content;
+    for (int guard = 0; guard < windowCols; ++guard) {
+        const int next = std::max(1, windowCols - (cl ? MARK : 0) - (cr ? MARK : 0));
+        if (next == cols) break;   // reserved columns already match the markers: stable
+        cols = next;
+        f    = place(cols);
+        cl   = f > 0;
+        cr   = f + cols < content;
+    }
+
+    w.first     = f;
+    w.cols      = cols;
+    w.clipLeft  = cl;
+    w.clipRight = cr;
+    return w;
+}
+
 std::string trimmed_text(const QwertyKeyboardState& s) {
     size_t end = s.text.size();
     while (end > 0 && (s.text[end - 1] == ' ' || s.text[end - 1] == '\t')) --end;
@@ -143,8 +195,9 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
     constexpr int INNERX = BOXX + 5;
     constexpr int INNERW = BOXW - 10;
 
-    // The backdrop dims everything behind it — this is a modal, and it should look like one.
-    c.fill_rect(0, 0, DESIGN_W, DESIGN_H, 0xCC000000);
+    // The backdrop dims everything behind it — this is a modal, and it should look like one. The shell
+    // paints the SAME MODAL_BACKDROP in the letterbox bars (B4) so the dim does not stop at the 4:3 edge.
+    c.fill_rect(0, 0, DESIGN_W, DESIGN_H, MODAL_BACKDROP);
 
     c.fill_rect(BOXX, BOXY, BOXW, BOXH, t.meterBackground);
     c.stroke_rect(BOXX, BOXY, BOXW, BOXH, t.textTitle);
@@ -153,22 +206,41 @@ void QwertyKeyboardOverlay::draw(Canvas& c, const QwertyKeyboardState& s, const 
     const int labelW = static_cast<int>(s.fieldLabel.size()) * CHARW;
     c.draw_text(s.fieldLabel, BOXX + (BOXW - labelW) / 2, BOXY + 5 + 3, t.textParam, CS, FS);
 
-    // ── The text row, centred on the box's midpoint ─────────────────────────────────────────────
-    // It re-centres as you type, so the cursor stays near the middle of the screen instead of the
-    // text marching off toward one edge.
-    const int textRowY = BOXY + 35;
-    const int textLen  = static_cast<int>(s.text.size());
-    const int startX   = std::max(BOXX + BOXW / 2 - (textLen * CHARW) / 2, INNERX);
+    // ── The text row: a scroll window that keeps the cursor visible (C1) ─────────────────────────
+    // Short text is centred on the box midpoint (as it always was). Once it overflows the box, the
+    // window left-aligns and scrolls under the cursor — the cursor walks to the centre, then the text
+    // slides beneath it — with a single "…" marker on whichever side is hiding characters.
+    const std::string      ELLIPSIS   = "\xE2\x80\xA6";   // U+2026, one column (font5x5 GLYPH_ELLIPSIS)
+    const int              textRowY   = BOXY + 35;
+    const int              textLen    = static_cast<int>(s.text.size());
+    const int              windowCols = INNERW / CHARW;   // whole character columns the box holds
+    const QwertyTextWindow win        = qwerty_text_window(textLen, s.textCursor, windowCols);
 
-    for (int i = 0; i <= textLen; ++i) {   // <=, so the phantom cursor position past the last char draws
-        const int  px       = startX + i * CHARW;
-        const bool isCursor = (i == s.textCursor);
+    const bool fits    = (win.cols == textLen + 1);   // only the fit branch returns the full content
+    const int  leftPad = win.clipLeft ? 1 : 0;        // the "…" marker eats ONE column on a clipped side
+    // Centre only when the text fits; then clamp so the phantom end-cursor never pokes past the box edge
+    // (the reported "cursor goes out of the box" — centring accounted for the text but not the cursor).
+    const int  contentRight = textLen * CHARW + 5 * FS;   // right edge of the phantom cursor from startX
+    int        startX       = fits ? BOXX + BOXW / 2 - (textLen * CHARW) / 2 : INNERX;
+    if (startX + contentRight > INNERX + INNERW) startX = INNERX + INNERW - contentRight;
+    if (startX < INNERX) startX = INNERX;
+    const int  textX   = startX + leftPad * CHARW;
+
+    const Argb markerColor = darken(t.textValue, 0.5f);
+    if (win.clipLeft) c.draw_text(ELLIPSIS, startX, textRowY + 3, markerColor, CS, FS);
+
+    for (int k = 0; k < win.cols; ++k) {
+        const int  idx      = win.first + k;
+        const int  px       = textX + k * CHARW;
+        const bool isCursor = (idx == s.textCursor);   // idx can be textLen: the phantom end position
         if (isCursor) c.fill_rect(px, textRowY, 5 * FS, CELLH, darken(t.textCursor, 0.27f));
-        if (i < textLen) {
-            c.draw_text(std::string(1, s.text[static_cast<size_t>(i)]), px, textRowY + 3,
+        if (idx < textLen) {
+            c.draw_text(std::string(1, s.text[static_cast<size_t>(idx)]), px, textRowY + 3,
                         isCursor ? t.textCursor : t.textValue, CS, FS);
         }
     }
+
+    if (win.clipRight) c.draw_text(ELLIPSIS, textX + win.cols * CHARW, textRowY + 3, markerColor, CS, FS);
 
     // ── The key rows ────────────────────────────────────────────────────────────────────────────
     const auto& rows     = qwerty_rows(s.layout);

@@ -49,6 +49,11 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     values.insertBefore       = get_bool(j, "insertBefore",       values.insertBefore);
     values.cursorRemember     = get_bool(j, "cursorRemember",     values.cursorRemember);
     values.notePreviewEnabled = get_bool(j, "notePreview",        values.notePreviewEnabled);
+
+    // FOLDER = REMEMBER / REFRESH (D2a). Only the TOGGLE persists; `lastSampleFolder` is deliberately
+    // SESSION-ONLY — it resets to the default folder on every launch, exactly like CURSOR remembering.
+    // So the choice survives a restart but the remembered path does not (the user's call).
+    values.rememberFolder     = get_bool(j, "rememberFolder", values.rememberFolder);
     values.traceEnabled       = get_bool(j, "trace",              values.traceEnabled);
 
     // ⚠️ RESUME (S10). New here because the shell only GAINED the row in S10 — and the session that
@@ -147,6 +152,8 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
     j["insertBefore"]       = values.insertBefore;
     j["cursorRemember"]     = values.cursorRemember;
     j["notePreview"]        = values.notePreviewEnabled;
+    j["rememberFolder"]     = values.rememberFolder;      // D2a — FOLDER row (the toggle only; the
+                                                          // remembered PATH is session-only, not saved)
     j["trace"]              = values.traceEnabled;
     j["autosaveResumeAuto"] = values.autosaveResumeAuto;   // S10 — the RESUME row
     j["visualizer"]         = static_cast<int>(theme.visualizerType);

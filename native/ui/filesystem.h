@@ -121,6 +121,9 @@ class FileSystem {
     /** Where the shell keeps `settings.json`. On Android the answer is SharedPreferences, not a path. */
     virtual std::string settings_path() = 0;
 
+    /** The user's hand-edited `config.json` (v0.9.4 D2b) — default browse folders, read on debug boot. */
+    virtual std::string config_path() = 0;
+
     /**
      * The CRASH-RECOVERY autosave (S10).
      *

@@ -49,6 +49,7 @@ namespace pt::ui {
  * 10 TEMPLATE    SAVE / CLEAR
  * 11 RESUME      ASK / AUTO                          (what to do with a crash autosave)
  * 12 TRACE       ON / OFF, + ENG: KT / C++          (debug)
+ * 13 FOLDER      REMEMBER / REFRESH                 (v0.9.4 D2a — remember the last sample folder)
  */
 enum class SettingsRow {
     LAYOUT     = 0,
@@ -64,9 +65,39 @@ enum class SettingsRow {
     TEMPLATE   = 10,
     RESUME     = 11,
     TRACE      = 12,
+    // ⚠️ APPENDED — a row's VALUE is its stable identity (the settings.json cursor, every
+    // `SettingsRow::X` in ptdispatch, the numeric-row tests), so FOLDER keeps the next free ordinal 13
+    // and is never renumbered. Its VALUE and its POSITION are now two different things: it DRAWS and
+    // NAVIGATES between CURSOR and NOTE PREV, with the other app toggles (user's call, v0.9.4 D2a) — see
+    // SETTINGS_DISPLAY_ORDER below, which is the order the panel walks, decoupled from these values.
+    FOLDER     = 13,
 };
 
-inline constexpr int SETTINGS_ROW_COUNT = 13;
+inline constexpr int SETTINGS_ROW_COUNT = 14;
+
+// ─── Display / navigation order ──────────────────────────────────────────────────────────────────
+//
+// The order the rows are DRAWN down the panel and the D-pad walks — DECOUPLED from the enum VALUE above,
+// which stays each row's identity. The only divergence from ascending value is FOLDER (value 13): it
+// lives here between CURSOR and NOTE PREV so a session toggle sits with the other app toggles, while its
+// identity stays 13 everywhere a row is named or persisted. `offset_y`, `next_visible_row` and
+// `first_visible_row` all walk THIS array; the cursor still stores the row's VALUE, not its position.
+//
+// ⚠️ Every SettingsRow appears exactly once and the length is SETTINGS_ROW_COUNT — the walkers assume it.
+inline constexpr SettingsRow SETTINGS_DISPLAY_ORDER[SETTINGS_ROW_COUNT] = {
+    SettingsRow::LAYOUT,   SettingsRow::SCALING,   SettingsRow::OVERLAY,
+    SettingsRow::BTN_SOUND, SettingsRow::BTN_VIBRO,
+    SettingsRow::KB_INSERT, SettingsRow::CURSOR,    SettingsRow::FOLDER, SettingsRow::NOTE_PREV,
+    SettingsRow::VISUALIZER, SettingsRow::THEME,    SettingsRow::TEMPLATE,
+    SettingsRow::RESUME,    SettingsRow::TRACE,
+};
+
+/** Where `row` sits in the display/navigation order (0-based). */
+inline int settings_display_index(SettingsRow row) {
+    for (int i = 0; i < SETTINGS_ROW_COUNT; ++i)
+        if (SETTINGS_DISPLAY_ORDER[i] == row) return i;
+    return 0;
+}
 
 /** Is this row followed by a group gap (an extra ROW_HEIGHT of air)? Kotlin's `rowY += ROW_HEIGHT * 2`. */
 inline bool settings_row_gap_after(SettingsRow row) {
@@ -75,6 +106,8 @@ inline bool settings_row_gap_after(SettingsRow row) {
         case SettingsRow::BTN_VIBRO:  // …before KB INSERT
         case SettingsRow::NOTE_PREV:  // …before VISUALIZER
         case SettingsRow::THEME:      // …before TEMPLATE
+            // FOLDER (D2a) sits mid-group between CURSOR and NOTE PREV (SETTINGS_DISPLAY_ORDER), so it
+            // takes NO gap of its own — it joins the KB INSERT / CURSOR / NOTE PREV app-toggle group.
             return true;
         default:
             return false;
@@ -98,24 +131,29 @@ inline bool settings_row_visible(SettingsRow row, const PlatformCaps& caps) {
 }
 
 /**
- * The next VISIBLE row in direction `delta` (+1 = down, −1 = up), wrapping — the loop Kotlin's
- * one-level substitution stands in for. Returns `from` unchanged if nothing else is visible.
+ * The next VISIBLE row's VALUE in direction `delta` (+1 = down, −1 = up), wrapping — the loop Kotlin's
+ * one-level substitution stands in for. Walks SETTINGS_DISPLAY_ORDER (so FOLDER is reached between CURSOR
+ * and NOTE PREV, not after RESUME), and returns the landed row's VALUE — which is what the cursor stores.
+ * Returns `from` unchanged if nothing else is visible.
  */
 inline int settings_next_visible_row(int from, int delta, const PlatformCaps& caps) {
-    int row = from;
+    int idx = settings_display_index(static_cast<SettingsRow>(from));
     for (int guard = 0; guard < SETTINGS_ROW_COUNT; ++guard) {
-        row += delta;
-        if (row < 0)                    row = SETTINGS_ROW_COUNT - 1;
-        if (row >= SETTINGS_ROW_COUNT)  row = 0;
-        if (settings_row_visible(static_cast<SettingsRow>(row), caps)) return row;
+        idx += delta;
+        if (idx < 0)                    idx = SETTINGS_ROW_COUNT - 1;
+        if (idx >= SETTINGS_ROW_COUNT)  idx = 0;
+        const SettingsRow row = SETTINGS_DISPLAY_ORDER[idx];
+        if (settings_row_visible(row, caps)) return static_cast<int>(row);
     }
     return from;
 }
 
-/** The first visible row — where the cursor lands on entry, and the fallback for a stale one. */
+/** The first visible row's VALUE (top of the display order) — where the cursor lands on entry, and the
+ *  fallback for a stale one. */
 inline int settings_first_visible_row(const PlatformCaps& caps) {
-    for (int row = 0; row < SETTINGS_ROW_COUNT; ++row)
-        if (settings_row_visible(static_cast<SettingsRow>(row), caps)) return row;
+    for (int i = 0; i < SETTINGS_ROW_COUNT; ++i)
+        if (settings_row_visible(SETTINGS_DISPLAY_ORDER[i], caps))
+            return static_cast<int>(SETTINGS_DISPLAY_ORDER[i]);
     return 0;
 }
 
@@ -158,11 +196,31 @@ inline bool settings_row_has_second_column(SettingsRow row, const PlatformCaps& 
  * INSERT, so the groups stay legible instead of collapsing into one slab.
  */
 inline int settings_row_offset_y(SettingsRow target, const PlatformCaps& caps, int rowHeight) {
+    const int targetIdx = settings_display_index(target);
+    int       y         = 0;
+    for (int i = 0; i < targetIdx; ++i) {   // walk the DISPLAY order, not the ascending value
+        const SettingsRow row     = SETTINGS_DISPLAY_ORDER[i];
+        const bool        visible = settings_row_visible(row, caps);
+        const bool        gap     = settings_row_gap_after(row);
+        if (visible) y += rowHeight * (gap ? 2 : 1);
+        else         y += rowHeight * (gap ? 1 : 0);
+    }
+    return y;
+}
+
+/**
+ * The total height of all rows on this platform, in pixels — the sum every display row contributes to
+ * `offset_y` (a visible row its height + any gap; a hidden one only its gap). The settings panel SCROLLS
+ * when this exceeds the visible rows area (v0.9.4 D2a), so the last rows (RESUME/TRACE in the dense debug
+ * caps, where the 14 rows overflow the 392px panel) stay reachable — the module clamps the scroll to
+ * `content_height − viewport`. When it fits, the clamp is zero and nothing scrolls (every release build).
+ */
+inline int settings_content_height(const PlatformCaps& caps, int rowHeight) {
     int y = 0;
-    for (int i = 0; i < static_cast<int>(target); ++i) {
-        const SettingsRow row = static_cast<SettingsRow>(i);
-        const bool visible = settings_row_visible(row, caps);
-        const bool gap     = settings_row_gap_after(row);
+    for (int i = 0; i < SETTINGS_ROW_COUNT; ++i) {
+        const SettingsRow row     = SETTINGS_DISPLAY_ORDER[i];
+        const bool        visible = settings_row_visible(row, caps);
+        const bool        gap     = settings_row_gap_after(row);
         if (visible) y += rowHeight * (gap ? 2 : 1);
         else         y += rowHeight * (gap ? 1 : 0);
     }

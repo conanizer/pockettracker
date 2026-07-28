@@ -666,6 +666,160 @@ int main() {
            "browser: …and lands in the parent directory");
     }
 
+    // ── 7b. FOLDER = REMEMBER seeds a SAMPLE load at the last folder (v0.9.4 D2a) ─────────────────
+    //
+    // Tests the CONSUMER, not just the store (§21 round-trips the setting): does open_file_browser
+    // actually START at lastSampleFolder? Keyed off the requested dir being the samples dir, gated on
+    // rememberFolder, with an is_directory fallback so a deleted folder does not strand the browser.
+    {
+        const std::string samples = fs_impl.samples_directory();
+        const std::string kicks   = (tree.root / "Samples" / "Kicks").generic_string();
+
+        // (a) REMEMBER on + a real remembered folder → the browser opens THERE, not at the samples root.
+        state.settings.rememberFolder   = true;
+        state.settings.lastSampleFolder = kicks;
+        dispatch.open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE, samples, sample_extensions());
+        eqs(state.fileBrowser.currentDirectory, kicks,
+            "D2a: REMEMBER opens a sample load at the remembered folder");
+
+        // (b) the SAMPLE-EDITOR load is the other sample purpose — it must honour it too.
+        dispatch.open_file_browser(AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR, samples, {"wav"});
+        eqs(state.fileBrowser.currentDirectory, kicks,
+            "D2a: …and so does the sample-editor LOAD");
+
+        // (c) a stale (deleted) remembered folder falls back to the samples root, not an empty listing.
+        state.settings.lastSampleFolder = (tree.root / "Samples" / "Gone").generic_string();
+        dispatch.open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE, samples, sample_extensions());
+        eqs(state.fileBrowser.currentDirectory, samples,
+            "D2a: a vanished remembered folder falls back to the samples dir");
+
+        // (d) REMEMBER off → the setting is inert even with a valid path.
+        state.settings.rememberFolder   = false;
+        state.settings.lastSampleFolder = kicks;
+        dispatch.open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE, samples, sample_extensions());
+        eqs(state.fileBrowser.currentDirectory, samples,
+            "D2a: REFRESH (remember off) ignores the remembered folder");
+
+        // (e) it is keyed off the SAMPLES dir specifically — a preset/soundfont load is NOT seeded,
+        //     even with REMEMBER on, so those keep their own directories.
+        state.settings.rememberFolder = true;
+        dispatch.open_file_browser(AppState::BrowserPurpose::LOAD_PRESET, fs_impl.instruments_directory(),
+                                   {"pti"});
+        eqs(state.fileBrowser.currentDirectory, fs_impl.instruments_directory(),
+            "D2a: a PRESET load is not seeded from the sample folder");
+        state.settings.rememberFolder   = false;   // leave the state as the blocks below found it
+        state.settings.lastSampleFolder.clear();
+    }
+
+    // ── 7c. config.json redirects a LOAD browse — DEBUG only (v0.9.4 D2b) ─────────────────────────
+    //
+    // The user's hand-edited config.json sets where a load browse STARTS per category. Debug-gated (like
+    // OVERLAY/TRACE), applied only where the folder exists. Tests the parse AND the consumer (browser_dir
+    // + open_file_browser), not just the read.
+    {
+        const std::string samples = fs_impl.samples_directory();
+        const std::string kicks   = (tree.root / "Samples" / "Kicks").generic_string();
+
+        // Hand-write a config.json at the PocketTracker root: samples → Kicks, projects → a dead path.
+        {
+            std::ofstream f(tree.root / "config.json");
+            f << "{ \"folders\": { \"samples\": \"" << kicks << "\", \"projects\": \"/no/such/dir\" } }";
+        }
+
+        FolderConfig cfg{};
+        ok(load_folder_config(fs_impl, cfg), "D2b: config.json parses");
+        ok(cfg.samples.has_value() && *cfg.samples == kicks, "D2b: the samples override is read");
+        ok(!cfg.soundfonts.has_value(), "D2b: an absent key stays unset (→ default)");
+        state.folderConfig = cfg;
+
+        // DEBUG build: the override wins where it is a real directory, and flows through the browser.
+        state.caps = PlatformCaps::sdl(true);   // debug = true
+        eqs(dispatch.browser_dir(InputDispatcher::BrowserDir::SAMPLES), kicks,
+            "D2b: on a debug build, browser_dir(SAMPLES) is the config override");
+        dispatch.open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE,
+                                   dispatch.browser_dir(InputDispatcher::BrowserDir::SAMPLES),
+                                   sample_extensions());
+        eqs(state.fileBrowser.currentDirectory, kicks,
+            "D2b: a sample LOAD opens at the config override");
+
+        // An override that is not a real directory falls back — a typo costs nothing.
+        eqs(dispatch.browser_dir(InputDispatcher::BrowserDir::PROJECTS), fs_impl.projects_directory(),
+            "D2b: a dead-path override falls back to the default directory");
+
+        // A category with no key keeps its default.
+        eqs(dispatch.browser_dir(InputDispatcher::BrowserDir::SOUNDFONTS), fs_impl.soundfonts_directory(),
+            "D2b: an unset category keeps its built-in default");
+
+        // RELEASE build: the whole feature is gated off.
+        state.caps = PlatformCaps::sdl(false);  // debug = false
+        eqs(dispatch.browser_dir(InputDispatcher::BrowserDir::SAMPLES), samples,
+            "D2b: on a release build the override is ignored (debug-gated)");
+
+        // Restore the shared state so the blocks below are unaffected.
+        state.folderConfig = FolderConfig{};
+        state.caps         = PlatformCaps::sdl(true);
+        std::error_code ec;
+        fs::remove(tree.root / "config.json", ec);
+    }
+
+    // ── 7d. config.json is SEEDED when absent, so the feature is discoverable (v0.9.4 D2b) ─────────
+    //
+    // The app never used to create config.json, so a user had nothing to find or edit (the reported "can't
+    // see the folders settings"). seed_folder_config_template writes a starter — every category at its
+    // default path — ONCE, and never rewrites an existing (user-owned) file.
+    {
+        std::error_code ec;
+        fs::remove(tree.root / "config.json", ec);   // start from no file
+
+        ok(seed_folder_config_template(fs_impl), "D2b: seeds a template when config.json is absent");
+        ok(fs_impl.file_exists(fs_impl.config_path()), "D2b: …and the file now exists on disk");
+
+        // It parses back, and every category is present and pointed at its current default directory.
+        FolderConfig seeded{};
+        ok(load_folder_config(fs_impl, seeded), "D2b: the seeded template parses");
+        ok(seeded.samples.has_value()     && *seeded.samples     == fs_impl.samples_directory(),
+           "D2b: samples pre-filled with the default dir");
+        ok(seeded.projects.has_value()    && *seeded.projects    == fs_impl.projects_directory(),
+           "D2b: projects pre-filled with the default dir");
+        ok(seeded.themes.has_value()      && *seeded.themes      == fs_impl.themes_directory(),
+           "D2b: themes pre-filled with the default dir");
+
+        // Second call is a NO-OP — never clobbers the user's file. Prove it by editing the file and
+        // checking the edit survives a re-seed.
+        {
+            std::ofstream f(tree.root / "config.json", std::ios::trunc);
+            f << "{ \"folders\": { \"samples\": \"/my/edited/path\" } }";
+        }
+        ok(!seed_folder_config_template(fs_impl), "D2b: a second seed does nothing (file present)");
+        FolderConfig afterEdit{};
+        load_folder_config(fs_impl, afterEdit);
+        ok(afterEdit.samples.has_value() && *afterEdit.samples == "/my/edited/path",
+           "D2b: …the user's hand-edit survives — the app never rewrites config.json");
+
+        fs::remove(tree.root / "config.json", ec);
+    }
+
+    // ── 7e. modal_backdrop_active counts EVERY full-canvas modal (B4) ─────────────────────────────
+    //
+    // The shell extends the modal dim into the letterbox bars / the PORTRAIT2 bezel gap for exactly the
+    // modals this predicate names. A full-canvas modal left OUT of it dims INSIDE the 4:3 frame but not
+    // around it — the reported FX-overlay seam. Derived from state, so this pins that each such modal is
+    // counted and a future one added to `draw_*` without a predicate line goes red here.
+    {
+        state.qwerty.isOpen   = false;
+        state.fxHelper.isOpen = false;
+        ok(!modal_backdrop_active(state), "B4: no full-canvas modal → no window scrim");
+
+        state.fxHelper.isOpen = true;   // the phrase-screen FX picker — draw_fx_helper paints MODAL_BACKDROP
+        ok(modal_backdrop_active(state),
+           "B4: the FX-helper overlay extends the dim to the bars/bezel (the round-2 fix)");
+        state.fxHelper.isOpen = false;
+
+        state.qwerty.isOpen = true;
+        ok(modal_backdrop_active(state), "B4: …and so does the qwerty overlay (unchanged)");
+        state.qwerty.isOpen = false;
+    }
+
     // ── 8. B leaves; the DELETE confirm needs TWO presses ───────────────────────────────────────
     {
         state.currentScreen = ScreenType::INSTRUMENT;
@@ -1248,7 +1402,24 @@ int main() {
                std::string("SETTINGS[") + who + "]: UP reaches every visible row (and wraps)");
         }
 
-        // The shell has NINE of the thirteen; Android has all thirteen (in a debug build).
+        // FOLDER (D2a) navigates between CURSOR and NOTE PREV — its VALUE is still 13, but its POSITION
+        // is with the app toggles (SETTINGS_DISPLAY_ORDER), so the D-pad reaches it there, not after
+        // RESUME. This is the reposition the user asked for, pinned so it cannot silently drift back.
+        state.caps                 = PlatformCaps::android(true);
+        state.settingsCursorRow    = static_cast<int>(SettingsRow::CURSOR);
+        state.settingsCursorColumn = 1;
+        dispatch.on_dpad_down();
+        eq(state.settingsCursorRow, static_cast<int>(SettingsRow::FOLDER),
+           "SETTINGS: DOWN from CURSOR lands on FOLDER (D2a: repositioned between CURSOR and NOTE PREV)");
+        dispatch.on_dpad_down();
+        eq(state.settingsCursorRow, static_cast<int>(SettingsRow::NOTE_PREV),
+           "SETTINGS: …and DOWN from FOLDER lands on NOTE PREV");
+        dispatch.on_dpad_up();
+        eq(state.settingsCursorRow, static_cast<int>(SettingsRow::FOLDER),
+           "SETTINGS: UP from NOTE PREV returns to FOLDER");
+
+        // The shell has TEN of the fourteen; Android has all fourteen (in a debug build). FOLDER (row
+        // 13, v0.9.4 D2a) is an app row visible on every platform, so it adds one to each count below.
         //
         // ⚠️ **EIGHT until S10, and this assertion is what noticed.** RESUME (row 11) was caps-gated OFF
         // while there was no autosave for it to configure; S10 built one, `PlatformCaps::sdl().autosave`
@@ -1259,8 +1430,8 @@ int main() {
         int shellRows = 0;
         for (int r = 0; r < SETTINGS_ROW_COUNT; ++r)
             if (settings_row_visible(static_cast<SettingsRow>(r), state.caps)) ++shellRows;
-        eq(shellRows, 9,
-           "SETTINGS[sdl]: nine rows — SCALING, KB, CURSOR, PREV, VIZ, THEME, TPL, RESUME (S10), TRACE");
+        eq(shellRows, 10,
+           "SETTINGS[sdl]: ten rows — SCALING, KB, CURSOR, PREV, VIZ, THEME, TPL, RESUME (S10), TRACE, FOLDER (D2a)");
         ok(settings_row_visible(SettingsRow::RESUME, state.caps),
            "SETTINGS[sdl]: …and RESUME is one of them — the row is BACK, because the autosave exists");
 
@@ -1268,13 +1439,13 @@ int main() {
         int androidRows = 0;
         for (int r = 0; r < SETTINGS_ROW_COUNT; ++r)
             if (settings_row_visible(static_cast<SettingsRow>(r), state.caps)) ++androidRows;
-        eq(androidRows, 13, "SETTINGS[android+debug]: all thirteen — this is what ptinput compares against");
+        eq(androidRows, 14, "SETTINGS[android+debug]: all fourteen (13 + FOLDER, D2a)");
 
         state.caps = PlatformCaps::android(false);
         int androidRel = 0;
         for (int r = 0; r < SETTINGS_ROW_COUNT; ++r)
             if (settings_row_visible(static_cast<SettingsRow>(r), state.caps)) ++androidRel;
-        eq(androidRel, 11, "SETTINGS[android+release]: OVERLAY and TRACE drop out (BuildConfig.DEBUG)");
+        eq(androidRel, 12, "SETTINGS[android+release]: OVERLAY and TRACE drop out (BuildConfig.DEBUG); FOLDER stays");
     }
 
     // ── 12b. B LEAVES SETTINGS — and lands on the screen it was entered FROM ─────────────────────
@@ -1683,6 +1854,8 @@ int main() {
         state.settings.insertBefore      = false;
         state.settings.notePreviewEnabled = false;
         state.settings.scalingBilinear   = true;
+        state.settings.rememberFolder    = true;                        // D2a — the FOLDER toggle
+        state.settings.lastSampleFolder  = "/sdcard/PocketTracker/Samples/Kicks";  // SESSION-ONLY path
         state.theme = theme_amber();
         state.theme.visualizerType = VisualizerType::SPECTRUM_PEAKS;
         ok(save_settings(fs_impl, state.settings, state.theme), "settings.json: written");
@@ -1694,6 +1867,11 @@ int main() {
         ok(!back.insertBefore, "settings.json: insertBefore round-trips");
         ok(!back.notePreviewEnabled, "settings.json: notePreview round-trips");
         ok(back.scalingBilinear, "settings.json: scaling round-trips");
+        // D2a — the TOGGLE persists, but the remembered PATH is SESSION-ONLY: it must NOT round-trip, so
+        // the browser opens at the default folder after a restart (the user's call — like CURSOR).
+        ok(back.rememberFolder, "settings.json: rememberFolder (the toggle) round-trips");
+        eqs(back.lastSampleFolder, "",
+            "settings.json: lastSampleFolder is SESSION-ONLY — it does NOT persist (resets to default)");
         eqs(backTheme.name, "AMBER", "settings.json: the theme round-trips BY NAME");
         eq(static_cast<int>(backTheme.visualizerType), static_cast<int>(VisualizerType::SPECTRUM_PEAKS),
            "⚠️ settings.json: …and the VISUALIZER rides across the theme swap, as Android carries it");
@@ -3755,6 +3933,49 @@ int main() {
         dispatch.set_now(2015016);
         eqs(state.statusMessage, "",
             "STATUS: an identical re-set does NOT extend the window (LaunchedEffect key semantics)");
+    }
+
+    // ── 35. A,A on a PHRASE note cell advances to the next FREE instrument (v0.9.4 D1) ────────────
+    //
+    // Mirrors chain/song A,A ("insert the next unused ref"): the first A lays the last-used note +
+    // instrument, a second A on the SAME cell keeps the note and re-points it at the next free slot.
+    // "Free" is instrument_is_free — the resample-safe predicate — so an occupied sample slot is
+    // skipped and a configured SoundFont would be too (not a bare sampleFilePath==null).
+    {
+        songcore::Project& p = host.edit_project();
+
+        // Reset every overlay so on_a_a is not swallowed by a modal gate.
+        state.confirm.close();
+        state.eq          = EqEditorState{};
+        state.themeEditor = ThemeEditorState{};
+        state.qwerty      = QwertyKeyboardState{};
+        state.selection   = {};
+        state.settings.notePreviewEnabled = false;
+
+        // Occupy instruments 6 and 7 so the next free slot after 5 is 8, not 6.
+        p.instruments[6].sampleFilePath = "kick.wav";
+        p.instruments[7].sampleFilePath = "snare.wav";
+        ok(!songcore::instrument_is_free(p.instruments[6]), "D1: (setup) instrument 6 is occupied");
+
+        state.currentScreen = ScreenType::PHRASE;
+        state.currentPhrase = 0x20;
+        state.cursorRow     = 4;
+        state.cursorColumn  = 1;   // the NOTE column
+        state.lastEditedNote       = songcore::note_from_midi(62);   // D-4, distinct from the default
+        state.lastEditedInstrument = 5;
+        state.lastEditedVolume     = 0x40;
+
+        songcore::PhraseStep& step = p.phrases[0x20].steps[4];
+        ok(step.note == songcore::Note::EMPTY(), "D1: (setup) the target note cell starts empty");
+
+        dispatch.on_button_a();   // first A: lay the last-used note + instrument, arm A,A
+        eq(step.instrument, 5, "D1: the first A inserts the last-used instrument (5)");
+        ok(step.note == songcore::note_from_midi(62), "D1: ...and the last-used note (D-4)");
+
+        dispatch.on_a_a();        // second A on the same cell: advance the instrument
+        eq(step.instrument, 8, "D1: A,A advances to the next FREE instrument, skipping 6 and 7");
+        ok(step.note == songcore::note_from_midi(62), "D1: ...and keeps the note the first A laid down");
+        eq(state.lastEditedInstrument, 8, "D1: ...and lastEditedInstrument follows, as chain/song A,A do");
     }
 
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);

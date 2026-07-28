@@ -68,6 +68,18 @@ public:
      *  THERE (not window-centred). Handed to `SdlVideo::present_skinned` as the frame dest. */
     SDL_Rect frame_rect() const { return frame_; }
 
+    /** The bezel's inner SCREEN area (the "glass") — the padded region `draw_chrome` fills with the
+     *  tracker background and inside which `frame_rect()` sits. Handed to `present_skinned` as the modal
+     *  SCRIM bounds (B4): with INTEGER scaling the frame is a whole multiple smaller than this glass, and
+     *  a modal must dim the bright gap AROUND the frame too — but only the glass, never the casing or the
+     *  button cluster. Empty theme (no inner bezel) → the frame rect, so the scrim then dims nothing. */
+    SDL_Rect screen_rect() const {
+        return geom_.innerBezel.empty()
+                   ? frame_
+                   : SDL_Rect{geom_.innerBezel.x, geom_.innerBezel.y, geom_.innerBezel.w,
+                              geom_.innerBezel.h};
+    }
+
     /** The button-cluster band (band 4) in output pixels, and the ten button rects box-LOCAL to it
      *  (offset by the cluster origin to place them) — the SAME geometry `draw_buttons` uses. Handed to
      *  `SdlTouch::layout_portrait2` so the portrait hit-test shares ONE source of truth with the draw,

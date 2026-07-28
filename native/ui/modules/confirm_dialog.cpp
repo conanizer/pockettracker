@@ -12,7 +12,7 @@ constexpr int BOX_H = 55;
 constexpr int BOX_X = (DESIGN_W - BOX_W) / 2;   // 190
 constexpr int BOX_Y = (DESIGN_H - BOX_H) / 2;   // 212
 
-constexpr Argb BACKDROP = 0xCC000000;  // translucent — the canvas blends it
+constexpr Argb BACKDROP = MODAL_BACKDROP;  // the ONE backdrop constant (canvas.h) — shell matches it in the bars
 
 // The dialog draws at a bigger font than the editors: fontScale 3, spacing 2.
 constexpr int DLG_FONT_SCALE   = 3;

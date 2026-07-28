@@ -768,7 +768,8 @@ void InputDispatcher::theme_row_action() {
             // standing on top of a screen it was never raised from, swallowing the browser's own D-pad.
             // `browser_confirm` re-opens the editor when a theme lands.
             close_theme_editor();
-            open_file_browser(AppState::BrowserPurpose::LOAD_THEME, fs_.themes_directory(), {"ptt"});
+            open_file_browser(AppState::BrowserPurpose::LOAD_THEME, browser_dir(BrowserDir::THEMES),
+                              {"ptt"});
             break;
         }
         default:    // column 0 is the NAME, and a bare A on it does nothing. Kotlin's `when` has no arm.
@@ -1183,6 +1184,24 @@ void InputDispatcher::on_a_a() {
         chain.phraseRefs[static_cast<size_t>(s_.cursorRow)]      = next;
         chain.transposeValues[static_cast<size_t>(s_.cursorRow)] = s_.lastEditedTranspose;
         s_.lastEditedPhrase                                      = next;
+        mark_modified();
+
+    } else if (s_.currentScreen == ScreenType::PHRASE) {
+        // D1: advance the NOTE cell's instrument to the next FREE slot, keeping the note the first A
+        // laid down. `instrument_is_free` (not a bare sampleFilePath==null) is the resample-safe
+        // predicate — it skips configured SoundFonts, which also have a null sampleFilePath.
+        if (s_.cursorColumn != 1) return;   // the NOTE column only
+        Phrase&               ph   = p.phrases[static_cast<size_t>(s_.currentPhrase)];
+        songcore::PhraseStep& step = ph.steps[static_cast<size_t>(s_.cursorRow)];
+
+        const int count = static_cast<int>(p.instruments.size());
+        const int next  = first_from_wrapping(s_.lastEditedInstrument + 1, count, [&](int i) {
+            return songcore::instrument_is_free(p.instruments[static_cast<size_t>(i)]);
+        });
+        if (next < 0) return;
+
+        step.instrument         = next;
+        s_.lastEditedInstrument = next;
         mark_modified();
     }
 }
@@ -2003,7 +2022,7 @@ void InputDispatcher::project_action() {
                 }
                 case 2:     // LOAD
                     open_file_browser(AppState::BrowserPurpose::LOAD_PROJECT,
-                                      fs_.projects_directory(), {"ptp"});
+                                      browser_dir(BrowserDir::PROJECTS), {"ptp"});
                     break;
                 case 3:     // NEW
                     // ⚠️ Only ASK if there is something to lose. A clean project has nothing to
@@ -2173,6 +2192,14 @@ void InputDispatcher::on_button_a() {
             step.instrument = s_.lastEditedInstrument;
             step.volume     = s_.lastEditedVolume;
             mark_modified();
+
+            // Arm A,A (D1): a second press on this same note cell keeps the note the first A just laid
+            // down and re-points it at the next FREE instrument — mirroring chain/song A,A, which
+            // advance the chain/phrase ref. Only the NOTE column (col 1) arms.
+            hasInsertPos_ = true;
+            insertScreen_ = ScreenType::PHRASE;
+            insertRow_    = s_.cursorRow;
+            insertCol_    = s_.cursorColumn;
 
             if (s_.settings.notePreviewEnabled && step.note != Note::EMPTY()) {
                 // A WHOLE PHRASE long, not one step: this gesture lays a note down to listen to, and
@@ -2591,6 +2618,23 @@ void InputDispatcher::on_start() {
 
 // ─── Opening and closing the browser ─────────────────────────────────────────────────────────────
 
+std::string InputDispatcher::browser_dir(BrowserDir cat) {
+    // D2b: a debug-only config.json override per category, else the built-in default. The FileSystem
+    // getters create-on-first-use, so `def` is always a real directory; the override is used only when
+    // it, too, exists on disk (a typo or a deleted folder falls back rather than opening on nothing).
+    const std::optional<std::string>* ov = nullptr;
+    std::string                       def;
+    switch (cat) {
+        case BrowserDir::SAMPLES:     ov = &s_.folderConfig.samples;     def = fs_.samples_directory();     break;
+        case BrowserDir::SOUNDFONTS:  ov = &s_.folderConfig.soundfonts;  def = fs_.soundfonts_directory();  break;
+        case BrowserDir::INSTRUMENTS: ov = &s_.folderConfig.instruments; def = fs_.instruments_directory(); break;
+        case BrowserDir::PROJECTS:    ov = &s_.folderConfig.projects;    def = fs_.projects_directory();    break;
+        case BrowserDir::THEMES:      ov = &s_.folderConfig.themes;      def = fs_.themes_directory();      break;
+    }
+    if (s_.caps.debug && ov && ov->has_value() && fs_.is_directory(**ov)) return **ov;
+    return def;
+}
+
 void InputDispatcher::open_file_browser(AppState::BrowserPurpose purpose, const std::string& directory,
                                         const std::vector<std::string>& extensions) {
     s_.previousScreen = s_.currentScreen;
@@ -2598,7 +2642,18 @@ void InputDispatcher::open_file_browser(AppState::BrowserPurpose purpose, const 
 
     s_.fileBrowser.fileExtensions = extensions;
     s_.fileBrowser.mode           = BrowserMode::NORMAL;
-    navigate_to_folder(s_.fileBrowser, fs_, directory);
+
+    // D2a: for a SAMPLE load with FOLDER = REMEMBER, start at the folder the last sample came from.
+    // Keyed off the requested start being the samples dir — which is EXACTLY the two sample-load
+    // purposes (LOAD_SOURCE on a sampler, LOAD_SAMPLE_EDITOR) and nothing else, so soundfonts, presets,
+    // projects and themes keep their own directories. Falls back to `directory` if the remembered path
+    // is empty or gone (a deleted folder must not strand the browser on an empty listing).
+    std::string start = directory;
+    if (s_.settings.rememberFolder && directory == browser_dir(BrowserDir::SAMPLES) &&
+        !s_.settings.lastSampleFolder.empty() && fs_.is_directory(s_.settings.lastSampleFolder)) {
+        start = s_.settings.lastSampleFolder;
+    }
+    navigate_to_folder(s_.fileBrowser, fs_, start);
 
     s_.currentScreen = ScreenType::FILE_BROWSER;
 }
@@ -2761,6 +2816,16 @@ void InputDispatcher::browser_confirm() {
     }
 
     mark_modified();
+
+    // D2a: remember the folder a SAMPLE was loaded from — `b.currentDirectory` IS that folder (the file
+    // just loaded is an item in it). Only for the two sample-load purposes, and not for a SoundFont
+    // (.sf2/.sf3) picked out of a sampler slot — the row is about SAMPLE folders. Persisted on exit by
+    // save_settings_if_changed (no dirty flag), so nothing here has to write the file.
+    if ((s_.browserPurpose == AppState::BrowserPurpose::LOAD_SOURCE ||
+         s_.browserPurpose == AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR) &&
+        ext != "sf2" && ext != "sf3") {
+        s_.settings.lastSampleFolder = b.currentDirectory;
+    }
 
     if (s_.browserPurpose == AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR) {
         // Re-enter the EDITOR on the new audio — not `previousScreen`, which is still the INSTRUMENT
@@ -3026,7 +3091,7 @@ bool InputDispatcher::instrument_open_at_cursor() {
         if (isSF ? ins.soundfontPath.has_value() : !songcore::instrument_is_free(ins)) return false;
 
         open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE,
-                          isSF ? fs_.soundfonts_directory() : fs_.samples_directory(),
+                          isSF ? browser_dir(BrowserDir::SOUNDFONTS) : browser_dir(BrowserDir::SAMPLES),
                           isSF ? soundfont_extensions() : sample_extensions());
         return true;
     }
@@ -3042,7 +3107,7 @@ bool InputDispatcher::instrument_open_at_cursor() {
     // (col 3) opens the sample editor. (The instrument PRESET save/load lives on row 5 now.)
     if (row == 0 && col == 2) {
         open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE,
-                          isSF ? fs_.soundfonts_directory() : fs_.samples_directory(),
+                          isSF ? browser_dir(BrowserDir::SOUNDFONTS) : browser_dir(BrowserDir::SAMPLES),
                           isSF ? soundfont_extensions() : sample_extensions());
         return true;
     }
@@ -3066,7 +3131,8 @@ bool InputDispatcher::instrument_open_at_cursor() {
         return true;
     }
     if (row == 5 && col == 3) {
-        open_file_browser(AppState::BrowserPurpose::LOAD_PRESET, fs_.instruments_directory(), {"pti"});
+        open_file_browser(AppState::BrowserPurpose::LOAD_PRESET, browser_dir(BrowserDir::INSTRUMENTS),
+                          {"pti"});
         return true;
     }
 
@@ -3434,7 +3500,7 @@ void InputDispatcher::sample_editor_confirm() {
                     // assigns it here for the same reason.
                     const ScreenType keep = s_.previousScreen;
                     open_file_browser(AppState::BrowserPurpose::LOAD_SAMPLE_EDITOR,
-                                      fs_.samples_directory(), {"wav"});
+                                      browser_dir(BrowserDir::SAMPLES), {"wav"});
                     s_.previousScreen = keep;
                     break;
                 }

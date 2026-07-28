@@ -18,6 +18,7 @@
 #include "screen.h"
 #include "songcore/model.h"
 #include "theme.h"
+#include "ui/folder_config.h"
 #include "ui/fx_helper.h"
 #include "ui/modules/confirm_dialog.h"
 #include "ui/modules/eq_editor.h"
@@ -419,6 +420,25 @@ struct AppState {
 
     // ── Theme ────────────────────────────────────────────────────────────────────────────────────
     Theme theme = theme_classic();
+
+    // ── config.json — hand-edited default browse folders (D2b) ─────────────────────────────────────
+    // Read ONCE at boot, and only on a debug build (the read is gated on caps.debug in the shell). Empty
+    // on release and on any box without a config.json, so every category falls back to its built-in dir.
+    FolderConfig folderConfig{};
 };
+
+/**
+ * Is a modal that paints the full-canvas MODAL_BACKDROP up? (B4) — the shell asks this to extend the
+ * dim into the letterbox bars so the scrim does not stop at the 4:3 edge.
+ *
+ * ⚠️ EXACTLY the modals that fill the whole 640×480 with MODAL_BACKDROP: qwerty, the confirm dialog and
+ * the FX-helper overlay (draw_fx_helper — the phrase screen's FX picker). The EQ and theme editors are
+ * NOT here: they REPLACE the module in place and leave the rest of the frame bright, so scrimming the
+ * bars for them would invert the seam (dim bars, bright tracker). Derived from the state, never from each
+ * call site remembering — the modal-predicate rule.
+ */
+inline bool modal_backdrop_active(const AppState& s) {
+    return s.qwerty.isOpen || s.confirm.is_open() || s.fxHelper.isOpen;
+}
 
 }  // namespace pt::ui

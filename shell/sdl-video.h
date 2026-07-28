@@ -88,7 +88,8 @@ public:
      *                       compares — would be skipped, the C7 blind-channel shape one panel over.
      */
     bool present(const pt::ui::Canvas& canvas, uint32_t letterboxArgb,
-                 const std::function<void(SDL_Renderer*)>& overlay = {}, uint64_t overlaySig = 0);
+                 const std::function<void(SDL_Renderer*)>& overlay = {}, uint64_t overlaySig = 0,
+                 uint32_t modalScrimArgb = 0);
 
     /**
      * Present the frame into an EXPLICIT rect, with a skin composited around it — the PORTRAIT2 device
@@ -111,7 +112,8 @@ public:
      */
     bool present_skinned(const pt::ui::Canvas& canvas, uint32_t clearArgb, const SDL_Rect& frameDest,
                          const std::function<void(SDL_Renderer*)>& underlay,
-                         const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig);
+                         const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig,
+                         uint32_t modalScrimArgb = 0, const SDL_Rect& scrimBounds = {0, 0, 0, 0});
 
     /** Pace a frame that drew nothing — see the .cpp. The app loop calls this when it skips the
      *  draw entirely, so a still screen costs the same wall-clock as a moving one. */
@@ -176,7 +178,8 @@ private:
      *  only in where the frame lands (`dest`) and whether anything draws behind it (`underlay`). */
     bool present_impl(const pt::ui::Canvas& canvas, uint32_t clearArgb, const SDL_Rect& dest,
                       const std::function<void(SDL_Renderer*)>& underlay,
-                      const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig);
+                      const std::function<void(SDL_Renderer*)>& overlay, uint64_t overlaySig,
+                      uint32_t modalScrimArgb, const SDL_Rect& scrimBounds);
 
     /** One line naming the driver, the panel, the output size and the letterbox. See the .cpp. */
     void describe() const;
@@ -214,6 +217,12 @@ private:
     // changes nothing in the canvas still forces the frame through. Zero when there is no overlay,
     // which is what makes the whole net a no-op on the platforms without one.
     uint64_t              lastOverlaySig_ = 0;
+
+    // The modal-scrim colour last presented — part of the same gate (B4). A modal always repaints the
+    // 640×480 canvas when it opens or closes, so this never changes independently of the canvas memcmp;
+    // it rides the gate anyway, on the overlaySig precedent, because the scrim it controls is drawn in
+    // the BARS — a change outside the compared canvas, the exact C7 blind-channel shape.
+    uint32_t              lastModalScrim_ = 0;
 };
 
 #endif  // POCKETTRACKER_SDL_VIDEO_H

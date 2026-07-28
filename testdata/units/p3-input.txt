@@ -22194,6 +22194,27 @@ KBD ib=0 cb=1 init=KICK g=1,R,R,A,0,A => text=KICK3E tc=6 kr=0 kc=2 lay=0 key=E 
 KBD ib=0 cb=1 init=KICK g=1,R,R,R,R,R,R,R,R,R,0,A => text=KICKP tc=5 kr=0 kc=9 lay=0 key=P cb=1
 KBD ib=0 cb=1 init=KICK g=A,A,A,A,A,A,A,A,A,A,A,A => text=KICKQQQQ tc=8 kr=0 kc=0 lay=0 key=Q cb=1
 
+# KBDWIN — the qwerty text-scroll window (v0.9.4 C1). len/tc/wc in, (first, cols, clipLeft,
+# clipRight) out. Every RHS below is DERIVED BY HAND from the C1 spec (pin-left near the start,
+# cursor-centred while both sides overflow, pin-right near the end; ".." on a clipped side), so
+# this is a spec check, not a recording of the code. wc=20 is the real 460px/23px box; the wc=6
+# rows exercise the "cursor walks to centre, then the text scrolls" band with a small window.
+KBDWIN len=0 tc=0 wc=20 => first=0 cols=1 cl=0 cr=0
+KBDWIN len=5 tc=5 wc=20 => first=0 cols=6 cl=0 cr=0
+KBDWIN len=19 tc=19 wc=20 => first=0 cols=20 cl=0 cr=0
+KBDWIN len=20 tc=20 wc=20 => first=2 cols=19 cl=1 cr=0
+KBDWIN len=22 tc=0 wc=20 => first=0 cols=19 cl=0 cr=1
+KBDWIN len=22 tc=11 wc=20 => first=2 cols=18 cl=1 cr=1
+KBDWIN len=22 tc=22 wc=20 => first=4 cols=19 cl=1 cr=0
+# The FLIP boundary (content == windowCols+1, cursor centred): a marker-free placement clips ONE side,
+# but once a marker column is reserved the re-placement clips BOTH — the old two-pass code drew a right
+# "…" it never reserved, poking one column past the box. The fixed-point placement reserves two here.
+KBDWIN len=20 tc=10 wc=20 => first=1 cols=18 cl=1 cr=1
+KBDWIN len=6 tc=3 wc=6 => first=1 cols=4 cl=1 cr=1
+KBDWIN len=10 tc=1 wc=6 => first=0 cols=5 cl=0 cr=1
+KBDWIN len=10 tc=5 wc=6 => first=3 cols=4 cl=1 cr=1
+KBDWIN len=10 tc=10 wc=6 => first=6 cols=5 cl=1 cr=0
+
 # THEME — the colour nudge. row 0 is the THEME header (no colour); rows 1..17 are the
 # COLOR_ROWS. channels 0/1/2 = R/G/B. deltas are what A+UP/DOWN (±1) and A+RIGHT/LEFT
 # (±0x10) send. Rows 18 and channel 3 are OUT OF RANGE and must be no-ops.

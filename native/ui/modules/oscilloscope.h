@@ -76,6 +76,15 @@ public:
 
     static constexpr int OCTA_TRACK_GAP = 10;
 
+    // SCOPE / OCTA / OCTA_FULL "chunky" look (v0.9.4 A1). Two independent knobs in draw_wave_dots:
+    //   N — pixel-block size: draw one N×N block per N horizontal pixels, snapped to an N-px grid
+    //       (coarser than the old one fill per column), so the trace reads as blocks not a hairline.
+    //   Z — time zoom: render only the centred WAVEFORM_SIZE/Z samples, stretched to fill the strip,
+    //       so the waveform reads as motion rather than a thin wiggle.
+    // SPECTRUM / SPECTRUM_PEAKS are a different draw path (draw_bar_amps) and are deliberately untouched.
+    static constexpr int SCOPE_PIXEL_BLOCK = 2;  // N
+    static constexpr int SCOPE_TIME_ZOOM   = 2;  // Z
+
     /** Non-const: the peak-hold and bar-decay state advance one frame per call. */
     void draw(Canvas& c, int x, int y, const OscilloscopeState& s);
 

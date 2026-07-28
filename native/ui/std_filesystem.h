@@ -52,6 +52,7 @@ class StdFileSystem : public FileSystem {
     // here on purpose". See FileSystem::autosave_file_path.
     std::string template_project_path() override { return root_ + "/template.ptp"; }
     std::string settings_path() override         { return root_ + "/settings.json"; }
+    std::string config_path() override           { return root_ + "/config.json"; }
     std::string autosave_file_path() override    { return root_ + "/autosave.ptp"; }
 
     // ── Reading ─────────────────────────────────────────────────────────────────────────────────

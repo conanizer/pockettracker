@@ -362,6 +362,7 @@ add_library(pt-ui STATIC
         ui/lifecycle.cpp
         ui/std_filesystem.cpp
         ui/settings_store.cpp
+        ui/folder_config.cpp
         ui/project_actions.cpp
         ui/modules/chain_editor.cpp
         ui/modules/confirm_dialog.cpp

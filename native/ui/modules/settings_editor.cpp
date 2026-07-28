@@ -40,8 +40,23 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     c.draw_text("SETTINGS", labelX, y + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
 
     const int firstRowY = y + TEXT_PADDING + ROW_HEIGHT + 14;
+
+    // ── Scroll (v0.9.4 D2a) ───────────────────────────────────────────────────────────────────────
+    // The rows below the title form a scrollable viewport. When the rows OVERFLOW it — the dense debug
+    // caps put 14 rows in a 392px panel — it scrolls to keep the cursor row visible, so the bottom rows
+    // (RESUME/TRACE) stay reachable exactly like the file browser / SONG list. When they fit (every
+    // release build, where the debug rows are hidden) `maxScroll` is 0 and this is a no-op. The scroll is
+    // DERIVED from the cursor row each frame — no stored scroll state — centring the cursor in the
+    // viewport, pinned at the top and bottom by the clamp.
+    const int viewportH = HEIGHT - (firstRowY - y);
+    const int contentH  = settings_content_height(s.caps, ROW_HEIGHT);
+    const int maxScroll = std::max(0, contentH - viewportH);
+    const int cursorTop =
+        settings_row_offset_y(static_cast<SettingsRow>(s.cursorRow), s.caps, ROW_HEIGHT);
+    const int scrollY = clamp(cursorTop + ROW_HEIGHT / 2 - viewportH / 2, 0, maxScroll);
+
     const auto rowY = [&](SettingsRow row) {
-        return firstRowY + settings_row_offset_y(row, s.caps, ROW_HEIGHT);
+        return firstRowY + settings_row_offset_y(row, s.caps, ROW_HEIGHT) - scrollY;
     };
     const auto on_row  = [&](SettingsRow row) { return s.cursorRow == static_cast<int>(row); };
     const auto on_cell = [&](SettingsRow row, int column) {
@@ -77,6 +92,10 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     };
 
     const auto on_off = [](bool b) { return std::string(b ? "ON" : "OFF"); };
+
+    // Every row below is drawn through `rowY` (which subtracts `scrollY`); clip them to the viewport so a
+    // scrolled row cannot overdraw the title above or spill past the panel edge. RAII, restored at return.
+    const Canvas::ClipScope rowsClip(c, x, firstRowY, WIDTH, viewportH);
 
     // ── LAYOUT — and its skin column, when the layout is a skinned one ───────────────────────────
     if (v.skinCount > 0) {
@@ -140,6 +159,10 @@ void SettingsModule::draw(Canvas& c, int x, int y, const SettingsState& s) const
     } else {
         param_row(SettingsRow::TRACE, "TRACE", on_off(v.traceEnabled));
     }
+
+    // FOLDER = REMEMBER / REFRESH (D2a). Same REMEMBER/REFRESH shape as CURSOR; it positions itself by
+    // its own offset_y, so drawing it last here is only source order, not screen order.
+    param_row(SettingsRow::FOLDER, "FOLDER", v.rememberFolder ? "REMEMBER" : "REFRESH");
 }
 
 // ─── Cursor ──────────────────────────────────────────────────────────────────────────────────────
@@ -179,6 +202,7 @@ CursorContext SettingsModule::cursor_context(const SettingsState& s) const {
         case SettingsRow::KB_INSERT:  return cc::toggle_binary(v.insertBefore);
         case SettingsRow::CURSOR:     return cc::toggle_binary(v.cursorRemember);
         case SettingsRow::NOTE_PREV:  return cc::toggle_binary(v.notePreviewEnabled);
+        case SettingsRow::FOLDER:     return cc::toggle_binary(v.rememberFolder);
 
         case SettingsRow::VISUALIZER:
             return cc::enum_cycle(static_cast<int>(s.theme.visualizerType),
@@ -261,6 +285,7 @@ SettingsInputResult SettingsModule::handle_input(SettingsValues& v, Theme& theme
         case SettingsRow::KB_INSERT: if (set) v.insertBefore       = action.value > 0; break;
         case SettingsRow::CURSOR:    if (set) v.cursorRemember     = action.value > 0; break;
         case SettingsRow::NOTE_PREV: if (set) v.notePreviewEnabled = action.value > 0; break;
+        case SettingsRow::FOLDER:    if (set) v.rememberFolder     = action.value > 0; break;
 
         case SettingsRow::VISUALIZER:
             if (set) {

@@ -132,6 +132,30 @@ void delete_char(QwertyKeyboardState& s);
 void move_text_cursor_left(QwertyKeyboardState& s);
 void move_text_cursor_right(QwertyKeyboardState& s);
 
+/**
+ * A horizontal scroll window over `text` that keeps `textCursor` visible (v0.9.4 C1), so a long name
+ * (`screen-YYYYMMDD-HHMMSS`) no longer spills out of the box. Unlike the PATH row (clips the head only)
+ * or a filename (clips the tail only), BOTH ends can be clipped with a single "…" marker on the side.
+ *
+ * `windowCols` is how many character columns fit in the text box. Behaviour (matches the plan):
+ *   • text fits            → show it all, cursor wherever it is, no markers.
+ *   • cursor near the end  → pin right: show the tail, "…" on the left.
+ *   • cursor near the start→ pin left: show the head, "…" on the right.
+ *   • cursor in the middle → the cursor sits at the box centre and the text scrolls under it, "…" both
+ *                            sides.
+ * The "…" marker eats ONE column, so when a side clips the text region shrinks by one there; `first`
+ * and `cols` describe the CHARACTER region only (the markers live in the reserved column beside it).
+ *
+ * Pure over three ints so `tools/ptinput` can golden it without pixels.
+ */
+struct QwertyTextWindow {
+    int  first     = 0;      // first visible character index
+    int  cols      = 0;      // character columns available (chars + the phantom end-cursor slot)
+    bool clipLeft  = false;  // hidden characters before `first` — draw a leading "…"
+    bool clipRight = false;  // hidden characters at/after the window — draw a trailing "…"
+};
+QwertyTextWindow qwerty_text_window(int textLen, int textCursor, int windowCols);
+
 /** Kotlin's `text.trimEnd()` — what APPLY hands back. */
 std::string trimmed_text(const QwertyKeyboardState& s);
 

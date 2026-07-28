@@ -1477,6 +1477,26 @@ static std::string recompute_kbd(const std::vector<std::string>& toks, std::stri
            " cb=" + std::to_string(s.clearOnFirstB ? 1 : 0);
 }
 
+// ─── KBDWIN — the qwerty text-scroll window (v0.9.4 C1) ──────────────────────────────────────────
+//
+// The window-offset is a free function over (textLen, textCursor, windowCols), so it goldens without
+// pixels. The expected RHS in the golden is DERIVED BY HAND from the C1 spec (pin-left near the start,
+// centre while overflowing both sides, pin-right near the end, ".." on a clipped side) — NOT recorded
+// from this code — so the check is spec-vs-implementation, not a self-certified recording.
+
+static std::string recompute_kbdwin(const std::vector<std::string>& toks, std::string& err) {
+    const int len = from_dec(field(toks, "len"));
+    const int tc  = from_dec(field(toks, "tc"));
+    const int wc  = from_dec(field(toks, "wc"));
+    if (len < 0 || wc < 1) {
+        err = "bad len/wc";
+        return "";
+    }
+    const QwertyTextWindow w = qwerty_text_window(len, tc, wc);
+    return "first=" + std::to_string(w.first) + " cols=" + std::to_string(w.cols) +
+           " cl=" + std::to_string(w.clipLeft ? 1 : 0) + " cr=" + std::to_string(w.clipRight ? 1 : 0);
+}
+
 // ─── main ────────────────────────────────────────────────────────────────────────────────────────
 
 int main(int argc, char** argv) {
@@ -1532,6 +1552,7 @@ int main(int argc, char** argv) {
         else if (kind == "FXH")  rhsCpp = recompute_fxh(toks, err);
         else if (kind == "SORT") rhsCpp = recompute_sort(toks, err);
         else if (kind == "KBD")  rhsCpp = recompute_kbd(toks, err);
+        else if (kind == "KBDWIN") rhsCpp = recompute_kbdwin(toks, err);
         else if (kind == "SEROW")  rhsCpp = recompute_serow(toks, err);
         else if (kind == "SEVIEW") rhsCpp = recompute_seview(toks, err);
         else if (kind == "THEME")      rhsCpp = recompute_theme(toks, err);

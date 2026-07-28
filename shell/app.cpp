@@ -367,6 +367,23 @@ int run(const AppConfig& cfg) {
     if (ui::load_settings(filesystem, state.settings, state.theme))
         std::printf("settings: %s\n", filesystem.settings_path().c_str());
 
+    // ── config.json — hand-edited default browse folders (D2b), DEBUG builds only ──────────────────
+    // Read once, gated on the debug cap so it is inert on release exactly like the OVERLAY/TRACE rows.
+    // No file is the common case and no error; a present one is announced, and its overrides only take
+    // effect where the folder actually exists (input_dispatcher::browser_dir checks is_directory).
+    //
+    // Seed a starter template FIRST (only when the file is absent — it never clobbers the user's), so the
+    // feature is discoverable: the app used to never create the file, so there was nothing to find or
+    // edit. The freshly-seeded template lists every category at its default path, ready to be pointed
+    // elsewhere; the load right after picks it up (its overrides equal the defaults, so no behaviour
+    // changes until the user edits it).
+    if (state.caps.debug) {
+        if (ui::seed_folder_config_template(filesystem))
+            std::printf("config:   seeded template %s\n", filesystem.config_path().c_str());
+        if (ui::load_folder_config(filesystem, state.folderConfig))
+            std::printf("config:   %s\n", filesystem.config_path().c_str());
+    }
+
     // Resolve the PERSISTED skin id (a stable string, `portrait_skin`) to the runtime index the SETTINGS
     // skin column edits. device_skin.h falls back to DARK for an unknown id, so a missing/mangled key
     // keeps the shell's shipped look. The loop's `loadedSkinIdx` sync turns this index into the loaded
@@ -443,8 +460,16 @@ int run(const AppConfig& cfg) {
                 if (ovOn) screenOverlay.draw(r, portrait.frame_rect(), ovStr);
                 portrait.draw_buttons(r, skin, helvFont, arrowFont, input);
             };
+            // ⚠️ B4 scrims ONLY the bezel's inner GLASS on PORTRAIT2, never the casing or the button
+            // cluster: dimming those would make the whole skin go dark around a bright cluster, which
+            // reads as a bug, not a modal. The modal's own MODAL_BACKDROP dims the tracker inside the
+            // frame; this extends the SAME dim to the bright gap AROUND the frame when INTEGER scaling
+            // leaves the frame smaller than the glass (screen_rect()). FIT fills the glass, so the gap —
+            // and therefore this scrim — is empty there. Off entirely when no full-canvas modal is up.
+            const uint32_t scrim = ui::modal_backdrop_active(state) ? ui::MODAL_BACKDROP : 0;
             return video.present_skinned(canvas, portrait.casing_argb(), portrait.frame_rect(),
-                                         chrome, buttons, portrait.signature(input) ^ crtSig);
+                                         chrome, buttons, portrait.signature(input) ^ crtSig, scrim,
+                                         portrait.screen_rect());
         }
         // Landscape / desktop: the centred frame, the LEFT/RIGHT touch panels in the bars beside it —
         // inert (drawing nothing, signature 0) when there is no touchscreen.
@@ -453,7 +478,8 @@ int run(const AppConfig& cfg) {
             if (ovOn) screenOverlay.draw(r, fr, ovStr);
             touch.draw(r, input);
         };
-        return video.present(canvas, state.theme.background, overlay, touch.signature(input) ^ crtSig);
+        return video.present(canvas, state.theme.background, overlay, touch.signature(input) ^ crtSig,
+                             ui::modal_backdrop_active(state) ? ui::MODAL_BACKDROP : 0);
     };
 
     ui::InputDispatcher::RenderHooks hooks;

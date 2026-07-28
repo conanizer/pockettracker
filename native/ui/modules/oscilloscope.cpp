@@ -51,15 +51,25 @@ void OscilloscopeModule::draw_scope(Canvas& c, int x, int y, const float* wave,
 
 void OscilloscopeModule::draw_wave_dots(Canvas& c, int scope_x, int scope_w, const float* wave,
                                         int center_y, int max_amplitude, Argb color) const {
-    for (int i = 0; i < scope_w; ++i) {
-        // A null buffer is silence — every dot lands on the centre line, which is exactly what the
-        // Android app draws when nothing is playing.
-        const float sample =
-            wave ? clampf(wave[(static_cast<long long>(i) * WAVEFORM_SIZE) / scope_w] * WAVEFORM_GAIN,
-                          -1.0f, 1.0f)
-                 : 0.0f;
-        const int dotY = center_y + static_cast<int>(sample * static_cast<float>(max_amplitude));
-        c.fill_rect(scope_x + i, dotY, 1, 1, color);
+    // Time zoom: sample only the centred WAVEFORM_SIZE/Z slice, stretched across the strip width.
+    constexpr int N          = SCOPE_PIXEL_BLOCK;
+    const int     windowSize = WAVEFORM_SIZE / SCOPE_TIME_ZOOM;
+    const int     windowBase = (WAVEFORM_SIZE - windowSize) / 2;
+
+    // Coarser pixels: one N-wide column-block, snapped to an N-px grid, one dot per block.
+    for (int bx = 0; bx < scope_w; bx += N) {
+        const int blockW = (bx + N <= scope_w) ? N : (scope_w - bx);
+        // Sample the centre of this pixel block, mapped into the zoomed sub-window.
+        const int col    = bx + blockW / 2;
+        const int srcIdx = windowBase + static_cast<int>((static_cast<long long>(col) * windowSize) /
+                                                         scope_w);
+        // A null buffer is silence — every block lands on the centre line, which is exactly what the
+        // app draws when nothing is playing.
+        const float sample = wave ? clampf(wave[srcIdx] * WAVEFORM_GAIN, -1.0f, 1.0f) : 0.0f;
+        int         dotY   = center_y + static_cast<int>(sample * static_cast<float>(max_amplitude));
+        // Coarser amplitude: snap the block to an N-px vertical grid aligned on the centre line.
+        dotY = center_y + ((dotY - center_y) / N) * N;
+        c.fill_rect(scope_x + bx, dotY, blockW, N, color);
     }
 }
 

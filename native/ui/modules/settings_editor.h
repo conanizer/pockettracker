@@ -80,6 +80,15 @@ struct SettingsValues {
     bool cursorRemember     = false;
     bool notePreviewEnabled = true;
 
+    // FOLDER = REMEMBER / REFRESH (v0.9.4 D2a). When REMEMBER, the file browser opens a SAMPLE load at
+    // the folder the last sample was loaded from, carried in `lastSampleFolder`.
+    // ⚠️ Only `rememberFolder` PERSISTS. `lastSampleFolder` is SESSION-ONLY (never serialized) — it
+    // resets to the default folder on every launch, like CURSOR remembering: the choice survives a
+    // restart, the remembered path does not. `rememberFolder` is a new settings.json key; absent in an
+    // older file it defaults OFF, so no import-version bump is needed (it was never a prefs key).
+    bool        rememberFolder   = false;
+    std::string lastSampleFolder;   // runtime only — see settings_store.cpp (not saved)
+
     // ⚠️ VISUALIZER is NOT here. It lives on the THEME (`Theme::visualizerType`), which is where
     // Kotlin keeps it too — and not by accident: the oscilloscope reads it off the theme it is already
     // being handed, so it needs no second channel. Note that Android deliberately CARRIES IT ACROSS a

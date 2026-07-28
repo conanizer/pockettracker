@@ -322,6 +322,20 @@ class InputDispatcher {
     void open_file_browser(AppState::BrowserPurpose purpose, const std::string& directory,
                            const std::vector<std::string>& extensions);
 
+    /** The load-browse categories a config.json override can redirect (D2b). */
+    enum class BrowserDir { SAMPLES, SOUNDFONTS, INSTRUMENTS, PROJECTS, THEMES };
+
+    /**
+     * The directory a LOAD browser should START in for `cat` (D2b): the user's config.json override when
+     * this is a DEBUG build, config.json set that category, and the override is a real directory —
+     * otherwise the built-in FileSystem default. Public so `ptdispatch` can drive it directly.
+     *
+     * ⚠️ The single resolution point, so D2a (remember-last-folder) and D2b compose: open_file_browser
+     * compares the requested dir against `browser_dir(SAMPLES)`, so a D2b override still reads as "a
+     * sample load" for the remember-folder seed.
+     */
+    std::string browser_dir(BrowserDir cat);
+
     /**
      * The two things a render needs that only the SHELL can do (S7).
      *

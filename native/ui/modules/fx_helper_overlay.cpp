@@ -15,7 +15,9 @@ constexpr int BOX_Y = (DESIGN_H - BOX_H) / 2;   // 118
 constexpr int INNER_X = BOX_X + 10;             // 40
 constexpr int CELL_W  = 80;
 
-constexpr Argb BACKDROP = 0xCC000000;  // translucent — the canvas blends it (canvas.cpp)
+// The ONE backdrop constant (canvas.h) — the shell matches it in the letterbox bars / bezel gap (B4),
+// so this must be the shared value, not a hand-copied 0xCC000000 that could drift and reveal a seam.
+constexpr Argb BACKDROP = MODAL_BACKDROP;
 
 /**
  * ⚠️ The advance of an N-character run, Kotlin's way: `length * charW`, INCLUDING the trailing

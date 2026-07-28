@@ -37,6 +37,12 @@ namespace pt::ui {
 inline constexpr int DESIGN_W = 640;
 inline constexpr int DESIGN_H = 480;
 
+// The dim scrim every modal (confirm dialog, qwerty, EQ/theme editors) paints over the whole 640×480
+// canvas. The SINGLE source of it: the modules blend it over their background, and the shell blends the
+// SAME value over the letterbox bars (B4) so the dim is seamless across the 4:3 edge — match this
+// exactly or a lighter/darker bar reveals the seam.
+inline constexpr Argb MODAL_BACKDROP = 0xCC000000;
+
 class Canvas {
 public:
     Canvas() : px_(static_cast<size_t>(DESIGN_W) * DESIGN_H, 0xFF000000) { reset_clip(); }
