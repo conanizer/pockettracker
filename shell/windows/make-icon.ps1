@@ -1,4 +1,4 @@
-# Regenerate PocketTracker.ico from docs/images/logo-plain.png.
+# Regenerate PocketTracker.ico from docs/images/logo-app.png.
 #
 #     powershell -ExecutionPolicy Bypass -File shell/windows/make-icon.ps1
 #
@@ -7,11 +7,14 @@
 # the tree, which is the same reason `licenses/THIRD-PARTY-NOTICES.md` is the source of truth for
 # the notices instead of a folder of files.
 #
-# Why logo-plain.png and not the other three: an icon is judged at 16x16 in a taskbar, and that is
-# the only one of them that survives it. logo-iso-transp is thin grey strokes on transparent with a
-# wide margin (invisible on a light background, illegible when small); logo-dark is the device shot
-# with "pocket TRACKER" set in type that turns to mush below ~48px; logo-plain is the PT mark in
-# solid white blocks, full-bleed, on near-black. Chunky and high-contrast is what scales down.
+# The source is logo-app.png — the full-bleed device-shot mark (the rainbow grille + "pocket
+# TRACKER") that is PocketTracker's icon across every platform. Cross-platform consistency is the
+# reason it is used here rather than logo-plain.png: the app should show ONE icon whether it is on a
+# phone's launcher, a handheld's game list, or a Windows taskbar. An earlier version of this script
+# preferred logo-plain (the chunky PT blocks) on the argument that a detailed device shot turns to
+# mush at 16px — that tradeoff is real and is accepted here in favour of the single recognisable
+# mark. logo-app.png is a 256×256 export of the master icon (docs/internal/images/logo-500.ico,
+# frame 0), extracted lossless; keep them in step if the master ever changes.
 #
 # ⚠️ No ImageMagick, no Pillow, no conversion site. Python on this box needs elevation and a build
 # asset should not depend on a tool the next person has to install, so the ICO container is written
@@ -21,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$src  = Join-Path $repo 'docs\images\logo-plain.png'
+$src  = Join-Path $repo 'docs\images\logo-app.png'
 $out  = Join-Path $PSScriptRoot 'PocketTracker.ico'
 
 # 16..128 are written as DIBs and 256 as an embedded PNG. That split is the convention every icon
@@ -34,49 +37,11 @@ $sizes = @(16, 24, 32, 48, 64, 128, 256)
 $source = New-Object System.Drawing.Bitmap($src)
 Write-Output ("source: {0}  {1}x{2}  {3}" -f (Split-Path -Leaf $src), $source.Width, $source.Height, $source.PixelFormat)
 
-# ─── Crop the dead margin before scaling ────────────────────────────────────────────────────────
-# logo-plain.png is the PT mark centred in ~17% of empty background on every side. Downscaling the
-# whole 1000px canvas to 16px spends a quarter of the icon's width on nothing and blurs the mark
-# into a grey smear — this was looked at, at 8x magnification, not assumed: the 32px frame read
-# fine and the 16px one did not. Cropping to the mark first buys back roughly a third of the linear
-# resolution at every size, which is the difference between blocks and mush at 16px.
-#
-# The bounding box is found by LUMINANCE, not alpha: this source has an opaque near-black
-# background (Format24bppRgb), so there is no alpha to test. Anything above the threshold is mark.
-$minX = $source.Width; $minY = $source.Height; $maxX = -1; $maxY = -1
-$rect = New-Object System.Drawing.Rectangle(0, 0, $source.Width, $source.Height)
-$d    = $source.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly,
-                         [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-$row  = New-Object byte[] ($source.Width * 4)
-for ($y = 0; $y -lt $source.Height; $y++) {
-    [System.Runtime.InteropServices.Marshal]::Copy([IntPtr]::Add($d.Scan0, $y * $d.Stride), $row, 0, $row.Length)
-    for ($x = 0; $x -lt $source.Width; $x++) {
-        # BGRA; the mark is white (~255) and the background near-black (~13), so any mid threshold
-        # separates them and the exact value does not matter.
-        if ($row[$x * 4 + 1] -gt 60) {
-            if ($x -lt $minX) { $minX = $x }
-            if ($x -gt $maxX) { $maxX = $x }
-            if ($y -lt $minY) { $minY = $y }
-            if ($y -gt $maxY) { $maxY = $y }
-        }
-    }
-}
-$source.UnlockBits($d)
-if ($maxX -lt 0) { throw "found no mark in $src - every pixel is below the luminance threshold" }
-
-# Square it off around the centre of the mark, then add a little padding back so the icon is not
-# wall-to-wall — Windows' own icons sit in a small margin and one without looks oversized beside
-# them.
-$cx   = ($minX + $maxX) / 2.0
-$cy   = ($minY + $maxY) / 2.0
-$side = [Math]::Max($maxX - $minX, $maxY - $minY) * 1.16
-$crop = New-Object System.Drawing.Rectangle(
-            [int][Math]::Round($cx - $side / 2), [int][Math]::Round($cy - $side / 2),
-            [int][Math]::Round($side), [int][Math]::Round($side))
-Write-Output ("mark:   {0},{1} to {2},{3}   cropping to {4},{5} {6}x{7}" -f
-              $minX, $minY, $maxX, $maxY, $crop.X, $crop.Y, $crop.Width, $crop.Height)
-
-# ─── Render the cropped region once per size ────────────────────────────────────────────────────
+# ─── Render the whole source once per size ──────────────────────────────────────────────────────
+# No crop: logo-app.png is a full-bleed square — the device fills the frame edge to edge, so there
+# is no dead margin to reclaim the way logo-plain (the PT mark floating in background) had. Scaling
+# the entire image into each n×n frame is the whole job. HighQualityBicubic is what keeps the small
+# sizes as legible as this detailed source allows.
 $frames = @{}
 foreach ($n in $sizes) {
     $bmp = New-Object System.Drawing.Bitmap($n, $n, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
@@ -85,8 +50,8 @@ foreach ($n in $sizes) {
     $g.PixelOffsetMode    = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
     $g.SmoothingMode      = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
     $g.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
-    $g.DrawImage($source, (New-Object System.Drawing.Rectangle(0, 0, $n, $n)), $crop.X, $crop.Y,
-                 $crop.Width, $crop.Height, [System.Drawing.GraphicsUnit]::Pixel)
+    $g.DrawImage($source, (New-Object System.Drawing.Rectangle(0, 0, $n, $n)),
+                 0, 0, $source.Width, $source.Height, [System.Drawing.GraphicsUnit]::Pixel)
     $g.Dispose()
     $frames[$n] = $bmp
 }

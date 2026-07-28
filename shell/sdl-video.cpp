@@ -6,6 +6,18 @@
 
 #include "ui/canvas.h"
 
+// ── The window icon, EMBEDDED — the Linux mirror of the Windows .rc (see below) ────────────────────
+// Only the platforms that have a window manager but do NOT take the icon from the executable need
+// this. Windows reads the icon straight out of the .exe's resources (shell/windows/pockettracker.rc,
+// which is why "there is no SDL_SetWindowIcon call" is stated there as intentional), and Android has
+// no window chrome and its own launcher icon — so both are compiled out, and with them the ~27 KB of
+// embedded PNG. What is left is desktop Linux (and PortMaster, where it is a harmless fullscreen
+// no-op): a bare ELF with no companion asset file, so the bytes have to ride inside the binary.
+#if !defined(_WIN32) && !defined(__ANDROID__)
+#include "image.h"
+#include "window_icon.h"
+#endif
+
 using pt::ui::Canvas;
 using pt::ui::DESIGN_H;
 using pt::ui::DESIGN_W;
@@ -58,6 +70,34 @@ bool SdlVideo::open(const char* title, int windowW, int windowH, bool fullscreen
         std::fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
         return false;
     }
+
+#if !defined(_WIN32) && !defined(__ANDROID__)
+    // ── The window / taskbar icon (desktop Linux) ─────────────────────────────────────────────────
+    // Decode the embedded PNG (window_icon.h, generated from docs/images/logo-app.png) and hand it to
+    // SDL. SDL_SetWindowIcon COPIES the surface, so the decoded pixels and the surface can both go out
+    // of scope the moment the call returns — nothing here has to outlive this block.
+    //
+    // ⚠️ image.h decodes into 0xAARRGGBB, which is exactly SDL_PIXELFORMAT_ARGB8888 on the
+    // little-endian targets here — the same packing the streaming texture uses (create_texture) — so
+    // the surface wraps the decoded buffer with no channel shuffle. A failure to decode is non-fatal:
+    // the window simply keeps SDL's default icon, which is the pre-icon behaviour, not a crash.
+    if (ptshell::Image icon = ptshell::decode_png(kWindowIconPng, kWindowIconPngLen); icon.ok()) {
+        SDL_Surface* surf = SDL_CreateRGBSurfaceWithFormatFrom(
+            icon.pixels.data(), icon.width, icon.height, 32, icon.width * 4, SDL_PIXELFORMAT_ARGB8888);
+        if (surf) {
+            SDL_SetWindowIcon(window_, surf);
+            SDL_FreeSurface(surf);
+            // One unconditional line: on a handheld with no console this is the only account of it, and
+            // a window icon that failed to set looks exactly like one that was never attempted.
+            std::printf("video:   window icon set (%dx%d embedded)\n", icon.width, icon.height);
+        } else {
+            std::printf("video:   window icon: SDL_CreateRGBSurfaceWithFormatFrom failed: %s\n",
+                        SDL_GetError());
+        }
+    } else {
+        std::printf("video:   window icon: embedded PNG did not decode — keeping SDL's default\n");
+    }
+#endif
 
     // ⚠️ SDL_RENDERER_ACCELERATED does NOT mean "prefer accelerated" — it means "REQUIRE accelerated",
     // and SDL_CreateRenderer FAILS outright if no driver offers it. That is the opposite of what a
