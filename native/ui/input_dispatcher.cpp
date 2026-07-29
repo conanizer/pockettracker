@@ -908,31 +908,41 @@ void InputDispatcher::apply_fx_type_change(int effect_code) {
  * Android, never destructive, and explicitly parked until there was a dialog to ask with. There is
  * one now (S7), so the divergence closes: the question gets asked, and the answer is honoured.
  */
-void InputDispatcher::request_instrument_type_toggle() {
+void InputDispatcher::request_instrument_type_toggle(int delta) {
     const Instrument& ins =
         host_.project().instruments[static_cast<size_t>(s_.currentInstrument)];
 
     if (ins.sampleFilePath.has_value() || ins.soundfontPath.has_value()) {
-        s_.confirm.open(ConfirmDialogState::Kind::CHANGE_TYPE);
+        s_.confirm.open(ConfirmDialogState::Kind::CHANGE_TYPE, delta);
         return;
     }
-    toggle_instrument_type();   // an empty slot has nothing to lose — switch it outright
+    toggle_instrument_type(delta);   // an empty slot has nothing to lose — switch it outright
 }
 
-void InputDispatcher::toggle_instrument_type() {
+/**
+ * Step the TYPE cell by `delta`, wrapping through all three types.
+ *
+ * ⚠️ It was a two-way toggle that ignored its direction, which was right while there were two types
+ * and wrong the moment EXTERNAL arrived: with three, A+UP and A+DOWN have to disagree or the cell can
+ * only ever be walked forwards. The cycle runs on `INSTRUMENT_TYPE_COUNT` rather than on a chain of
+ * ternaries, so a fourth type joins it by existing.
+ */
+void InputDispatcher::toggle_instrument_type(int delta) {
     Project&    p   = host_.edit_project();
     Instrument& ins = p.instruments[static_cast<size_t>(s_.currentInstrument)];
 
-    const songcore::InstrumentType next =
-        (ins.instrumentType == songcore::InstrumentType::SOUNDFONT)
-            ? songcore::InstrumentType::SAMPLER
-            : songcore::InstrumentType::SOUNDFONT;
+    const int count = songcore::INSTRUMENT_TYPE_COUNT;
+    const int cur   = static_cast<int>(ins.instrumentType);
+    const int step  = delta < 0 ? -1 : +1;
+    const auto next = static_cast<songcore::InstrumentType>(((cur + step) % count + count) % count);
     host_.set_instrument_type(s_.currentInstrument, next);
 
-    // The row map just changed under the cursor (a SoundFont gains PRESET and loses the loop rows), and
-    // the cursor is sitting on row 0 — which exists in both. Nothing to clamp, but the SF preset
-    // readback must be re-taken, and the feed does that from the path+type on the next frame.
-    s_.statusMessage = (next == songcore::InstrumentType::SOUNDFONT) ? "TYPE: SOUNDFONT" : "TYPE: SAMPLER";
+    // The row map just changed under the cursor — the three layouts have 16, 15 and 11 rows — and the
+    // cursor is sitting on row 0, which exists in all three. Its COLUMN may not: row 0 caps at 3 on a
+    // sampler, 2 on a SoundFont and 1 on EXTERNAL, and the cursor is on column 1 (the TYPE cell) to
+    // have reached this code at all. Nothing to clamp, then; but the SF preset readback must be
+    // re-taken, and the feed does that from the path+type on the next frame.
+    s_.statusMessage = std::string("TYPE: ") + songcore::instrument_type_name(next);
     s_.statusSuccess = true;
 }
 
@@ -997,7 +1007,7 @@ void InputDispatcher::on_a_up() {
     if (s_.fxHelper.isOpen) { fx_move_up(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_fine_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) { s_.fxHelper = fx_helper_opened_at(current_fx_type_index()); return; }
-    if (on_instrument_type_cell()) { request_instrument_type_toggle(); return; }
+    if (on_instrument_type_cell()) { request_instrument_type_toggle(+1); return; }
     selection_or_single(pt::ui::on_a);
 }
 
@@ -1014,7 +1024,7 @@ void InputDispatcher::on_a_down() {
     if (s_.fxHelper.isOpen) { fx_move_down(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_fine_step(s_.sampleEditor)); return; }
     if (on_fx_type_column()) { s_.fxHelper = fx_helper_opened_at(current_fx_type_index()); return; }
-    if (on_instrument_type_cell()) { request_instrument_type_toggle(); return; }
+    if (on_instrument_type_cell()) { request_instrument_type_toggle(-1); return; }
     selection_or_single(pt::ui::on_b);   // A+DOWN DECREMENTS — `on_b` is the generic "step down"
 }
 
@@ -1757,6 +1767,10 @@ void InputDispatcher::on_l_b_a() {
 
 void InputDispatcher::confirm_accept() {
     const ConfirmDialogState::Kind kind = s_.confirm.kind;
+    // ⚠️ `arg` is read out HERE, beside the kind, because `close()` resets it — and it is the direction
+    // the CHANGE_TYPE arm below needs. Reading it after the close would have silently turned every
+    // confirmed A+DOWN into an A+UP, which is a wrong answer that still looks like the cell working.
+    const int argv = s_.confirm.arg;
     s_.confirm.close();   // FIRST — every arm below can re-open a dialog, and none should be stacked
 
     switch (kind) {
@@ -1787,7 +1801,11 @@ void InputDispatcher::confirm_accept() {
             // because switching a sampler to a SoundFont frees its sample and there was no dialog to
             // ask first. This is that dialog. `toggle_instrument_type` is unchanged; what changed is
             // that it can now be reached destructively, having asked.
-            toggle_instrument_type();
+            //
+            // ⚠️ The DIRECTION comes back out of the dialog (`arg`), not from a default: A+DOWN on a
+            // loaded slot must still step backwards after the user says yes, and with three types
+            // that is a different answer from A+UP's.
+            toggle_instrument_type(argv);
             break;
 
         case ConfirmDialogState::Kind::EXIT:
@@ -3088,6 +3106,10 @@ bool InputDispatcher::instrument_open_at_cursor() {
         if (s_.poolCursorColumn != 0) return false;
         const Instrument& ins  = p.instruments[static_cast<size_t>(s_.currentInstrument)];
         const bool        isSF = ins.instrumentType == songcore::InstrumentType::SOUNDFONT;
+        // ⚠️ An EXTERNAL slot has NO source of any kind, so there is nothing to browse for. Without
+        // this it would fall to the sampler arm and open the SAMPLES browser — and a file loaded there
+        // would flip the slot's type back out from under the user. The pool draws no EDIT for it.
+        if (!instrument_has_source_row(ins.instrumentType)) return false;
         if (isSF ? ins.soundfontPath.has_value() : !songcore::instrument_is_free(ins)) return false;
 
         open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE,
@@ -3105,6 +3127,12 @@ bool InputDispatcher::instrument_open_at_cursor() {
 
     // Row 0 — TYPE (col 1) + the SOURCE buttons. LOAD (col 2) browses for a sample / SoundFont; EDIT
     // (col 3) opens the sample editor. (The instrument PRESET save/load lives on row 5 now.)
+    //
+    // ⚠️ Neither button exists on EXTERNAL — it draws neither and the cursor caps at column 1 — so
+    // this is the same belt-and-braces consume the SF's EDIT arm below is: unreachable by the D-pad,
+    // and refusing here rather than opening a browser for a source that does not exist.
+    if (row == 0 && col >= 2 && !instrument_has_source_row(ins.instrumentType)) return true;
+
     if (row == 0 && col == 2) {
         open_file_browser(AppState::BrowserPurpose::LOAD_SOURCE,
                           isSF ? browser_dir(BrowserDir::SOUNDFONTS) : browser_dir(BrowserDir::SAMPLES),
@@ -3739,8 +3767,7 @@ bool InputDispatcher::open_sub_screen_at_cursor(bool peek) {
             break;
 
         case ScreenType::INSTRUMENT: {
-            const Instrument& ins  = p.instruments[static_cast<size_t>(s_.currentInstrument)];
-            const bool        isSF = ins.instrumentType == songcore::InstrumentType::SOUNDFONT;
+            const Instrument& ins = p.instruments[static_cast<size_t>(s_.currentInstrument)];
 
             if (s_.instrumentCursorRow == 1) {
                 if (!peek) {
@@ -3752,7 +3779,10 @@ bool InputDispatcher::open_sub_screen_at_cursor(bool peek) {
                 }
                 return true;
             }
-            if (s_.instrumentCursorRow == instrument_eq_row(isSF) && s_.instrumentCursorColumn == 1) {
+            // EXTERNAL has no EQ row, and `instrument_eq_row` answers −1 there — a row number no cursor
+            // can hold — so this test goes false without a type check of its own to forget here.
+            if (s_.instrumentCursorRow == instrument_eq_row(ins.instrumentType) &&
+                s_.instrumentCursorColumn == 1) {
                 // ⚠️ `max(0, …)`: an UNASSIGNED EQ is −1 in the project, and −1 is the engine's bypass
                 // value — but it is not a SLOT, and the editor has to open ON one. Kotlin's
                 // `coerceAtLeast(0)` says the same thing: opening an unassigned EQ starts you on slot 0.

@@ -3978,6 +3978,224 @@ int main() {
         eq(state.lastEditedInstrument, 8, "D1: ...and lastEditedInstrument follows, as chain/song A,A do");
     }
 
+    // ══ B4 ══ THE INSTRUMENT SCREEN'S ROW GEOMETRY, AND THE EXTERNAL LAYOUT ══════════════════════
+    //
+    // ⚠️ **THIS BLOCK EXISTS BECAUSE A NEGATIVE CONTROL DID NOT FIRE.** Before it, changing the
+    // SAMPLER row table's row 3 from TRIPLE to DUAL — which moves where the cursor lands walking down
+    // onto VOL/SLICE/PAN, and how far LEFT/RIGHT step there — left ALL SEVENTEEN ctest suites green.
+    // ptinput byte-compares this screen's contexts and writes but is handed a row and column; it never
+    // asks whether the cursor could REACH them. ptdispatch drove INSTRUMENT's buttons and its EQ row
+    // and nothing else. So `ui/instrument_row_layout.h` — the one table the whole screen derives from,
+    // and the file whose own comment says a wrong entry "strands the cursor on a spacer" — had no test
+    // at all, on any type. That gap predates EXTERNAL; adding a third layout is what found it.
+    //
+    // Two claims, then: the two ORIGINAL layouts still step exactly as they did (the sampler's 16 rows
+    // and the SoundFont's 15, spacers skipped, columns snapped), and EXTERNAL's 11 behave.
+    {
+        songcore::Project& p = host.edit_project();
+        state.currentScreen     = ScreenType::INSTRUMENT;
+        state.currentInstrument = 9;
+        songcore::Instrument& ins = p.instruments[9];
+
+        // Walk the whole map with the D-pad and collect the rows it stops on. A spacer in the list, a
+        // row missing from it, or a wrong count all show up as one comparable token.
+        const auto walk_rows = [&](songcore::InstrumentType type) {
+            ins.instrumentType         = type;
+            state.instrumentCursorRow    = 0;
+            state.instrumentCursorColumn = 1;
+            std::string out = "0";
+            for (int i = 0; i < 20; ++i) {
+                dispatch.on_dpad_down();
+                if (state.instrumentCursorRow == 0) break;   // wrapped: one full lap
+                out += "," + std::to_string(state.instrumentCursorRow);
+            }
+            return out;
+        };
+
+        eqs(walk_rows(songcore::InstrumentType::SAMPLER), "0,1,2,3,5,7,8,9,11,12,13,14,15",
+            "INSTRUMENT rows, SAMPLER: 16 rows, spacers 4/6/10 stepped over, wraps at 15");
+        eqs(walk_rows(songcore::InstrumentType::SOUNDFONT), "0,1,2,3,5,6,8,9,10,12,13,14",
+            "INSTRUMENT rows, SOUNDFONT: 15 rows — PATCH at 6 is LIVE, spacers 4/7/11 are not");
+        eqs(walk_rows(songcore::InstrumentType::EXTERNAL), "0,1,2,3,5,7,8,9,10,11",
+            "INSTRUMENT rows, EXTERNAL: 12 rows — the patch, the preset row, then VOL/PAN and 4 CCs");
+
+        // The COLUMN the cursor lands in after a vertical move, and how far LEFT/RIGHT reach. Walking
+        // down the right-hand column must stay in it; a TRIPLE's third column (5) exists only on a
+        // TRIPLE. This is the half the failed control was aimed at.
+        const auto column_after = [&](songcore::InstrumentType type, int fromRow, int fromCol) {
+            ins.instrumentType           = type;
+            state.instrumentCursorRow    = fromRow;
+            state.instrumentCursorColumn = fromCol;
+            dispatch.on_dpad_down();
+            return state.instrumentCursorColumn;
+        };
+        eq(column_after(songcore::InstrumentType::SAMPLER, 2, 5), 5,
+           "INSTRUMENT columns, SAMPLER: TIC (row 2, col 5) steps down onto PAN (row 3, col 5)");
+        eq(column_after(songcore::InstrumentType::SOUNDFONT, 2, 5), 3,
+           "⚠️ INSTRUMENT columns, SOUNDFONT: row 3 is a DUAL — col 5 does not exist there, so a "
+           "cursor coming down the right-hand side lands on the rightmost cell that DOES (3 = PAN)");
+        eq(column_after(songcore::InstrumentType::SAMPLER, 7, 3), 3,
+           "INSTRUMENT columns, SAMPLER: FILTER (7,3) steps down onto FREQ (8,3), right column kept");
+        eq(column_after(songcore::InstrumentType::EXTERNAL, 2, 3), 3,
+           "INSTRUMENT columns, EXTERNAL: BANK (2,3) steps down onto LEN (3,3) — both DUAL");
+        eq(column_after(songcore::InstrumentType::EXTERNAL, 3, 3), 2,
+           "INSTRUMENT columns, EXTERNAL: …and on down to the preset row, which SNAPS to LOAD (2)");
+
+        // Row 0's cap is the number of BUTTONS drawn beside TYPE, and it differs on all three types.
+        // A cursor past the cap sits on a cell that is not drawn — the exact bug the table prevents.
+        const auto right_cap = [&](songcore::InstrumentType type) {
+            ins.instrumentType           = type;
+            state.instrumentCursorRow    = 0;
+            state.instrumentCursorColumn = 1;
+            for (int i = 0; i < 5; ++i) dispatch.on_dpad_right();
+            return state.instrumentCursorColumn;
+        };
+        eq(right_cap(songcore::InstrumentType::SAMPLER), 3,
+           "INSTRUMENT row 0, SAMPLER: RIGHT reaches EDIT (3) and stops");
+        eq(right_cap(songcore::InstrumentType::SOUNDFONT), 2,
+           "INSTRUMENT row 0, SOUNDFONT: …caps at LOAD (2) — no waveform to EDIT");
+        eq(right_cap(songcore::InstrumentType::EXTERNAL), 1,
+           "⚠️ INSTRUMENT row 0, EXTERNAL: …caps at TYPE (1) — no source to LOAD and none to EDIT");
+
+        // ── The TYPE cell now CYCLES THREE WAYS, and A+UP and A+DOWN disagree ────────────────────
+        //
+        // ⚠️ The direction is the whole point of the change. As a two-way toggle both buttons meant
+        // the same thing and the code ignored which had been pressed; with three types, a cell that
+        // only walks forwards takes two presses to undo one.
+        const auto type_of = [&] { return static_cast<int>(ins.instrumentType); };
+        ins.instrumentType = songcore::InstrumentType::SAMPLER;
+        ins.sampleFilePath.reset();
+        ins.soundfontPath.reset();
+        state.instrumentCursorRow = 0; state.instrumentCursorColumn = 1;
+
+        dispatch.on_a_up();
+        eq(type_of(), static_cast<int>(songcore::InstrumentType::SOUNDFONT),
+           "TYPE cell: A+UP steps SAMPLER → SOUNDFONT");
+        dispatch.on_a_up();
+        eq(type_of(), static_cast<int>(songcore::InstrumentType::EXTERNAL),
+           "⚠️ TYPE cell: …and on to EXTERNAL — the third type is REACHABLE, which is the whole of B4.1");
+        dispatch.on_a_up();
+        eq(type_of(), static_cast<int>(songcore::InstrumentType::SAMPLER),
+           "TYPE cell: …and wraps back to SAMPLER");
+        dispatch.on_a_down();
+        eq(type_of(), static_cast<int>(songcore::InstrumentType::EXTERNAL),
+           "⚠️ TYPE cell: A+DOWN steps the OTHER WAY (SAMPLER → EXTERNAL), not the same way as A+UP");
+
+        // ── …and the direction survives the confirm dialog ───────────────────────────────────────
+        //
+        // ⚠️ A slot with a source loaded ASKS first (S7), and the answer arrives on a later frame with
+        // the pressed button long gone. `confirm_accept` closes the box BEFORE running the arm, and
+        // `close()` resets `arg` — so reading the direction after the close would silently turn every
+        // confirmed A+DOWN into an A+UP. That is a wrong answer that still looks like the cell working,
+        // which is why it is pinned here rather than trusted.
+        ins.instrumentType  = songcore::InstrumentType::SAMPLER;
+        ins.sampleFilePath  = std::string("kick.wav");
+        state.instrumentCursorRow = 0; state.instrumentCursorColumn = 1;
+
+        dispatch.on_a_down();
+        eq(type_of(), static_cast<int>(songcore::InstrumentType::SAMPLER),
+           "TYPE cell: A+DOWN on a LOADED slot changes nothing yet — it asks");
+        ok(state.confirm.is_open() && state.confirm.kind == ConfirmDialogState::Kind::CHANGE_TYPE,
+           "TYPE cell: …the CHANGE TYPE? dialog is up");
+        dispatch.on_button_a();   // YES
+        eq(type_of(), static_cast<int>(songcore::InstrumentType::EXTERNAL),
+           "⚠️ TYPE cell: …and YES honours the DOWN it was asked about (→ EXTERNAL, not → SOUNDFONT)");
+        ok(!ins.sampleFilePath.has_value(),
+           "TYPE cell: …and the sample the question was about is freed");
+
+        // ── EXTERNAL has no source, so neither of row 0's buttons does anything ──────────────────
+        //
+        // The cursor cannot reach columns 2 or 3 there (capped at 1, pinned above), so this is the
+        // belt-and-braces half: put it there by hand and press A. A browser opening here would offer
+        // to load a sample into a slot that has no sampler — and the load would flip the type back.
+        state.instrumentCursorRow = 0; state.instrumentCursorColumn = 2;
+        dispatch.on_button_a();
+        eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::INSTRUMENT),
+           "⚠️ EXTERNAL: A on row 0 col 2 opens NO browser — there is no source to load");
+
+        // ── The EXTERNAL cells, through the generic five-button vocabulary ───────────────────────
+        //
+        // ⚠️ A VALUE CELL IS DIALLED WITH A+DPAD, NOT WITH A BARE A. `on_button_a` falls through to
+        // `default: break;` on this screen — a plain A is for the BUTTONS (LOAD, SAVE, EDIT) and for
+        // inserting on the sequencer screens. The first draft of this block pressed `on_button_a` on
+        // every cell below and watched all nine assertions fail against an untouched instrument, which
+        // is the harness being wrong about the gesture rather than the code being wrong about the cell.
+        //
+        // Every one of these is a byte that leaves over the cable (songcore/midi_out.h), so they are
+        // asserted as the wire numbers, not as what the screen prints.
+        ins.instrumentType = songcore::InstrumentType::EXTERNAL;
+        ins.midiChannel = 0; ins.midiBank = -1; ins.midiProgram = -1; ins.midiLen = 0;
+        ins.pan = 0x80;
+        ins.midiCC[0] = songcore::MidiCcSlot{};
+
+        state.instrumentCursorRow = 2; state.instrumentCursorColumn = 1;   // CHAN
+        dispatch.on_a_up();
+        eq(ins.midiChannel, 1, "EXTERNAL CHAN: A+UP steps 0 → 1 (stored 0-15; the screen shows 1-16)");
+        dispatch.on_a_down();
+        dispatch.on_a_down();
+        eq(ins.midiChannel, 15, "⚠️ EXTERNAL CHAN: …and A+DOWN below 0 WRAPS to 15, not to 255");
+
+        state.instrumentCursorRow = 3; state.instrumentCursorColumn = 1;   // PROG
+        eq(ins.midiProgram, -1, "EXTERNAL PROG: (setup) starts at −1 = send nothing");
+        dispatch.on_a_up();
+        eq(ins.midiProgram, 0,
+           "⚠️ EXTERNAL PROG: A+UP on an OFF cell INSERTS program 0 — 0 is a real program, −1 is silence");
+        dispatch.on_a_up();
+        eq(ins.midiProgram, 1, "EXTERNAL PROG: …and steps from there");
+        dispatch.on_a_b();
+        eq(ins.midiProgram, -1, "EXTERNAL PROG: A+B clears it back to OFF");
+
+        state.instrumentCursorRow = 2; state.instrumentCursorColumn = 3;   // BANK, the 14-bit one
+        dispatch.on_a_up();
+        dispatch.on_a_right();
+        eq(ins.midiBank, 128,
+           "⚠️ EXTERNAL BANK: A+RIGHT steps a whole MSB (128), not 16 — the range is 14-bit");
+        dispatch.on_a_right();
+        dispatch.on_a_right();
+        dispatch.on_a_right();
+        dispatch.on_a_right();
+        dispatch.on_a_right();
+        dispatch.on_a_right();
+        dispatch.on_a_right();
+        eq(ins.midiBank, 1024,
+           "⚠️ EXTERNAL BANK: …and it REACHES four digits — the first render drew 1024 as `00`, "
+           "because a 2-hex-digit cell had silently masked a 14-bit number");
+
+        state.instrumentCursorRow = 3; state.instrumentCursorColumn = 3;   // LEN
+        dispatch.on_a_up();
+        eq(ins.midiLen, 1, "EXTERNAL LEN: A+UP steps the gate length in ticks");
+        dispatch.on_a_b();
+        eq(ins.midiLen, 0,
+           "⚠️ EXTERNAL LEN: A+B resets to 00, which is gate-to-next — a MODE, not an empty cell");
+
+        state.instrumentCursorRow = 7; state.instrumentCursorColumn = 3;   // PAN
+        dispatch.on_a_up();
+        eq(ins.pan, 0x81, "EXTERNAL PAN: steps like any byte — it leaves as CC 10");
+
+        state.instrumentCursorRow = INSTRUMENT_EXTERNAL_CC_ROW; state.instrumentCursorColumn = 1;
+        dispatch.on_a_up();
+        eq(ins.midiCC[0].cc, 0, "EXTERNAL CC A: A+UP on the OFF number cell inserts CC 0");
+        state.instrumentCursorColumn = 3;
+        dispatch.on_a_up();
+        dispatch.on_a_right();
+        eq(ins.midiCC[0].value, 16, "EXTERNAL CC A: …and its VALUE steps and fast-steps beside it");
+        state.instrumentCursorRow = INSTRUMENT_EXTERNAL_CC_ROW + 3; state.instrumentCursorColumn = 1;
+        dispatch.on_a_up();
+        eq(ins.midiCC[3].cc, 0, "EXTERNAL CC D: the fourth slot is reachable — the block is 4 rows");
+        eq(ins.midiCC[1].cc, -1, "EXTERNAL CC: …and the rows in between wrote their OWN slots");
+
+        // EXTERNAL has no EQ row, and `instrument_eq_row` says so with −1 rather than a type test at
+        // each call site. Row 12 does not exist on an 11-row map; nothing should open.
+        state.instrumentCursorRow = 12; state.instrumentCursorColumn = 1;
+        dispatch.on_button_a();   // a bare A, because the EQ cell is one that OPENS a sub-screen
+        ok(!state.eq.isOpen, "⚠️ EXTERNAL: no EQ row — the sampler's row 12 opens nothing here");
+
+        ins.instrumentType = songcore::InstrumentType::SAMPLER;
+        ins.midiChannel = 0; ins.midiBank = -1; ins.midiProgram = -1; ins.midiLen = 0;
+        ins.pan = 0x80;
+        ins.midiCC = std::vector<songcore::MidiCcSlot>(songcore::MIDI_CC_SLOTS);
+    }
+
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);
     std::printf("%s\n", failures == 0 ? "ALL GREEN" : "RED");
     return failures == 0 ? 0 : 1;

@@ -22,19 +22,19 @@
 //
 // ── ROWS ─────────────────────────────────────────────────────────────────────────────────────────
 //
-//   SAMPLER (16)                          SOUNDFONT (15)
-//    0  TYPE + LOAD + EDIT                 0  TYPE + LOAD
-//    1  NAME                               1  NAME
-//    2  ROOT + DETUNE + TIC                2  ROOT + DETUNE + TIC
-//    3  VOL + SLICE + PAN                  3  VOL + PAN
-//    4  ·spacer·                           4  ·spacer·
-//    5  INST PRESET: SAVE | LOAD           5  INST PRESET: SAVE | LOAD
-//    6  ·spacer·                           6  PATCH
-//    7  DRIVE + FILTER                     7  ·spacer·
-//    8  CRUSH + FREQ                       8  DRIVE + FILTER
-//    9  DWNSMPL + RES                      9  CRUSH + FREQ
-//   10  ·spacer·                          10  DWNSMPL + RES
-//   11  REV + DEL                         11  ·spacer·
+//   SAMPLER (16)                          SOUNDFONT (15)               EXTERNAL (12)
+//    0  TYPE + LOAD + EDIT                 0  TYPE + LOAD               0  TYPE
+//    1  NAME                               1  NAME                      1  NAME
+//    2  ROOT + DETUNE + TIC                2  ROOT + DETUNE + TIC       2  CHAN + BANK
+//    3  VOL + SLICE + PAN                  3  VOL + PAN                 3  PROG + LEN
+//    4  ·spacer·                           4  ·spacer·                  4  ·spacer·
+//    5  INST PRESET: SAVE | LOAD           5  INST PRESET: SAVE | LOAD  5  INST PRESET: SAVE | LOAD
+//    6  ·spacer·                           6  PATCH                     6  ·spacer·
+//    7  DRIVE + FILTER                     7  ·spacer·                  7  VOL + PAN
+//    8  CRUSH + FREQ                       8  DRIVE + FILTER            8  CC A + value
+//    9  DWNSMPL + RES                      9  CRUSH + FREQ              9  CC B + value
+//   10  ·spacer·                          10  DWNSMPL + RES            10  CC C + value
+//   11  REV + DEL                         11  ·spacer·                 11  CC D + value
 //   12  EQ                                12  REV
 //   13  LOOP + START                      13  DEL
 //   14  LOOP ST + END                     14  EQ
@@ -43,6 +43,21 @@
 // The TYPE row's LOAD/EDIT load and edit the SOURCE (sample or SF2); the INST PRESET row's SAVE/LOAD
 // write and read the whole instrument as a .pti — the two used to share row 0 as one confusing pair of
 // LOADs. The SF's PATCH row selects a patch inside the loaded SoundFont, a different thing again.
+//
+// ── EXTERNAL ─────────────────────────────────────────────────────────────────────────────────────
+//
+// EXTERNAL owns NO source and no voice: its events leave over a cable (songcore/midi_out.h) and no
+// voice is raised for them, so none of the sampler's DSP applies — there is no signal of ours to
+// drive, filter, crush or equalise. Every cell on it is a byte the device is actually sent:
+//
+//   CHAN  1-16, shown 1-based and stored 0-based (`midiChannel`) — the MIDI convention, both ways.
+//   BANK  "----" = send nothing; else the 14-bit bank sent as CC0/CC32 ahead of the program. FOUR
+//         hex digits, which is why it sits on a DUAL row rather than sharing a TRIPLE with PROG.
+//   PROG  "--" = send nothing; else the program change sent with the patch's first note-on.
+//   VOL   scales note-on VELOCITY (there is no gain stage on our side of the cable — LGPT does this).
+//   PAN   is sent as CC 10, de-duplicated per channel.
+//   LEN   gate length in TICKS, 00 = gate-to-next (LGPT's LEN). See midi_out.h's `end_note`.
+//   CC A-D   number + default value, both "--" when unused; the defaults ride every note-on.
 //
 // Columns: 0 = the label, 1 = the first value, 2 = a button (LOAD / SAVE), 3 = the second value or
 // button (EDIT / LOAD), and on the two TRIPLE rows additionally 5 = the third value.
@@ -84,8 +99,13 @@ struct InstrumentEditorState {
 
     Theme theme = theme_classic();
 
+    songcore::InstrumentType type() const { return instrument.instrumentType; }
+
     bool is_soundfont() const {
         return instrument.instrumentType == songcore::InstrumentType::SOUNDFONT;
+    }
+    bool is_external() const {
+        return instrument.instrumentType == songcore::InstrumentType::EXTERNAL;
     }
 };
 
@@ -111,7 +131,7 @@ public:
 
     CursorContext cursor_context(const InstrumentEditorState& s) const;
 
-    /** Apply a resolved action to the instrument. `is_soundfont` selects the row map. */
+    /** Apply a resolved action to the instrument. Its own `instrumentType` selects the row map. */
     InstrumentInputResult handle_input(songcore::Instrument& ins, int cursor_row, int cursor_column,
                                        const InputAction& action) const;
 
@@ -142,8 +162,17 @@ private:
                        const InstrumentEditorState& s, int this_row, const Theme& t) const;
 
     void draw_section_source_row(Canvas& c, int x, int y, int name_x, int cursor_row,
-                                 int cursor_column, int this_row, bool is_soundfont,
-                                 const Theme& t) const;
+                                 int cursor_column, int this_row, const Theme& t) const;
+
+    /**
+     * The whole EXTERNAL screen, drawn as its own pass rather than as branches inside the sampler's.
+     *
+     * It shares only the TYPE, NAME and INST PRESET rows with the other two, and every row below them
+     * is a different parameter — so weaving it through `draw` would have put a third arm on nine `if
+     * (sf)` tests and moved the two ORIGINAL layouts' code, for no shared logic. Separate pass, and
+     * the two shipped types keep the exact path they had.
+     */
+    void draw_external(Canvas& c, int x, int y, const InstrumentEditorState& s) const;
 
     void draw_eq_row(Canvas& c, int x, int y, int name_x, int value_x, int eq_slot, int cursor_row,
                      int cursor_column, int this_row, const Theme& t) const;

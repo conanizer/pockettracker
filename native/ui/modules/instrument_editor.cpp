@@ -1,5 +1,7 @@
 #include "ui/modules/instrument_editor.h"
 
+#include <algorithm>
+
 #include "ui/helpers.h"
 #include "ui/instrument_row_layout.h"
 
@@ -29,11 +31,22 @@ constexpr int BTN_COL3   = 400;        // cursor column 3: TYPE-row EDIT, PRESET
 
 int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
+/**
+ * "--" for an unset MIDI byte, the hex pair otherwise — BANK, PROG and both halves of a CC slot.
+ *
+ * −1 is the project's ONE "empty" convention (model.h), and it has to LOOK different from 00 on this
+ * screen in particular: `midiProgram = 0` is a real program change and `-1` means send nothing at all,
+ * so a cell that drew them alike would hide which of the two the user had dialled in.
+ */
+std::string midi_opt(int v) { return v < 0 ? "--" : hex2(v); }
+
 }  // namespace
 
 // ─── Draw ────────────────────────────────────────────────────────────────────────────────────────
 
 void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEditorState& s) const {
+    if (s.is_external()) { draw_external(c, x, y, s); return; }
+
     const Theme&      t   = s.theme;
     const Instrument& ins = s.instrument;
     const bool        sf  = s.is_soundfont();
@@ -82,7 +95,7 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
     rowY += ROW_HEIGHT; currentRow++;
 
     // ── 5: the source section ────────────────────────────────────────────────────────────────────
-    draw_section_source_row(c, x, rowY, nameX, s.cursorRow, s.cursorColumn, currentRow, sf, t);
+    draw_section_source_row(c, x, rowY, nameX, s.cursorRow, s.cursorColumn, currentRow, t);
     rowY += ROW_HEIGHT; currentRow++;
 
     // ── 6 (SF only): PATCH ───────────────────────────────────────────────────────────────────────
@@ -162,6 +175,75 @@ void InstrumentEditorModule::draw(Canvas& c, int x, int y, const InstrumentEdito
     // header — not inside this module. Same split as the Kotlin.
 }
 
+void InstrumentEditorModule::draw_external(Canvas& c, int x, int y,
+                                           const InstrumentEditorState& s) const {
+    const Theme&      t   = s.theme;
+    const Instrument& ins = s.instrument;
+
+    c.fill_rect(x, y, WIDTH, HEIGHT, t.background);
+
+    const int nameX  = x + 10;
+    const int valueX = x + 150;
+
+    int rowY       = y + TEXT_PADDING;
+    int currentRow = 0;
+
+    c.draw_text("INSTRUMENT " + hex2(ins.id), nameX, rowY, t.textTitle, CHAR_SPACING, FONT_SCALE);
+    rowY += ROW_HEIGHT + 14;
+
+    // ── 0: TYPE (no LOAD, no EDIT — there is no source) ──────────────────────────────────────────
+    draw_type_load_row(c, x, rowY, nameX, valueX, ins, s.cursorRow, s.cursorColumn, currentRow, t);
+    rowY += ROW_HEIGHT; currentRow++;
+
+    // ── 1: NAME ──────────────────────────────────────────────────────────────────────────────────
+    draw_name_row(c, x, rowY, nameX, valueX, s, currentRow, t);
+    rowY += ROW_HEIGHT; currentRow++;
+
+    // ── 2: CHAN + BANK ───────────────────────────────────────────────────────────────────────────
+    // CHAN is shown 1-16 and stored 0-15 — the MIDI convention. The +1 lives here and the −1 lives in
+    // handle_input; nothing between them ever sees the display number. BANK is FOUR hex digits: it is
+    // 14-bit, and it shares this row with one cell rather than two so the number has room to print.
+    draw_dual_row(c, x, rowY, nameX, valueX,
+                  "CHAN", dec2(clamp(ins.midiChannel, 0, 15) + 1),
+                  "BANK", ins.midiBank < 0 ? "----" : hex4(ins.midiBank),
+                  s.cursorRow, s.cursorColumn, currentRow, t);
+    rowY += ROW_HEIGHT; currentRow++;
+
+    // ── 3: PROG + LEN ────────────────────────────────────────────────────────────────────────────
+    draw_dual_row(c, x, rowY, nameX, valueX, "PROG", midi_opt(ins.midiProgram), "LEN",
+                  hex2(ins.midiLen), s.cursorRow, s.cursorColumn, currentRow, t);
+    rowY += ROW_HEIGHT; currentRow++;
+
+    // ── 4: spacer ────────────────────────────────────────────────────────────────────────────────
+    rowY += ROW_HEIGHT; currentRow++;
+
+    // ── 5: INST PRESET ───────────────────────────────────────────────────────────────────────────
+    // A .pti round-trips an EXTERNAL patch as readily as a sampler's: the preset carries the whole
+    // Instrument through the same emit/parse, so the MIDI fields came along for free with B1.
+    draw_section_source_row(c, x, rowY, nameX, s.cursorRow, s.cursorColumn, currentRow, t);
+    rowY += ROW_HEIGHT; currentRow++;
+
+    // ── 6: spacer ────────────────────────────────────────────────────────────────────────────────
+    rowY += ROW_HEIGHT; currentRow++;
+
+    // ── 7: VOL + PAN ─────────────────────────────────────────────────────────────────────────────
+    // The two that survive the cable: VOL scales the note-on velocity (there is no gain stage on our
+    // side of it) and PAN leaves as CC 10. Everything else in the sampler's DSP block has no meaning.
+    draw_dual_row(c, x, rowY, nameX, valueX, "VOL", hex2(ins.volume), "PAN", hex2(ins.pan),
+                  s.cursorRow, s.cursorColumn, currentRow, t);
+    rowY += ROW_HEIGHT; currentRow++;
+
+    // ── 8-11: the four CC slots, number then default value ───────────────────────────────────────
+    static const char* const CC_LABELS[] = {"CC A", "CC B", "CC C", "CC D"};
+    const int ccRows = std::min(songcore::MIDI_CC_SLOTS, static_cast<int>(ins.midiCC.size()));
+    for (int i = 0; i < ccRows; ++i) {
+        const songcore::MidiCcSlot& slot = ins.midiCC[static_cast<size_t>(i)];
+        draw_dual_row(c, x, rowY, nameX, valueX, CC_LABELS[i], midi_opt(slot.cc), "VAL",
+                      midi_opt(slot.value), s.cursorRow, s.cursorColumn, currentRow, t);
+        rowY += ROW_HEIGHT; currentRow++;
+    }
+}
+
 // ─── Draw helpers ────────────────────────────────────────────────────────────────────────────────
 
 void InstrumentEditorModule::draw_row_bg(Canvas& c, int x, int y, const Theme& t) const {
@@ -233,23 +315,36 @@ void InstrumentEditorModule::draw_type_load_row(Canvas& c, int x, int y, int nam
     const bool onRow = (cursor_row == this_row);
     if (onRow) draw_row_bg(c, x, y, t);
 
-    const bool sf = (ins.instrumentType == InstrumentType::SOUNDFONT);
+    const InstrumentType type = ins.instrumentType;
 
     const bool c1 = onRow && cursor_column == 1;
     const bool c2 = onRow && cursor_column == 2;
     const bool c3 = onRow && cursor_column == 3;
 
-    const char* typeText = sf ? "soundfont" : "sampler";
+    // Lowercase, as the other cycling cells on this screen are (filter, loop, slice).
+    const char* typeText = "sampler";
+    switch (type) {
+        case InstrumentType::SOUNDFONT: typeText = "soundfont"; break;
+        case InstrumentType::EXTERNAL:  typeText = "external";  break;
+        case InstrumentType::SAMPLER:   break;
+    }
 
     // TYPE's value sits under the ROOT/VOL column; the source LOAD and EDIT are the two buttons to its
     // right. LOAD and EDIT are BUTTONS — `textValue` even unselected, because a dim label would read as
     // a parameter name rather than as something you can press.
     c.draw_text("TYPE",   name_x,          textY, c1 ? t.textCursor : t.textParam, CHAR_SPACING, FONT_SCALE);
     c.draw_text(typeText, x + TYPE_VALUE,  textY, c1 ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
-    c.draw_text("LOAD",   x + BTN_COL2,    textY, c2 ? t.textCursor : t.textValue, CHAR_SPACING, FONT_SCALE);
-    // No EDIT on a SoundFont: there is no single waveform to edit, so the cursor caps at LOAD (2) and
-    // the button is not drawn. Matches draw_section_source_row's old rule, moved up onto this row.
-    if (!sf) {
+
+    // ⚠️ Both buttons are drawn only where they DO something, and `instrument_row_layout.h` caps the
+    // cursor at the same numbers — one table, so a button that is not drawn is also not reachable.
+    // No LOAD on EXTERNAL: it has no source file of any kind, only a channel and a patch number.
+    // No EDIT on a SoundFont: there is no single waveform to edit.
+    const int maxCol = instrument_name_row_max_column(type);
+    if (maxCol >= 2) {
+        c.draw_text("LOAD", x + BTN_COL2, textY, c2 ? t.textCursor : t.textValue, CHAR_SPACING,
+                    FONT_SCALE);
+    }
+    if (maxCol >= 3) {
         c.draw_text("EDIT >", x + BTN_COL3, textY, c3 ? t.textCursor : t.textValue, CHAR_SPACING,
                     FONT_SCALE);
     }
@@ -275,8 +370,10 @@ void InstrumentEditorModule::draw_name_row(Canvas& c, int x, int y, int name_x, 
 
 void InstrumentEditorModule::draw_section_source_row(Canvas& c, int x, int y, int name_x,
                                                      int cursor_row, int cursor_column, int this_row,
-                                                     bool is_soundfont, const Theme& t) const {
-    (void)is_soundfont;   // a preset saves/loads either instrument type — both buttons always drawn
+                                                     const Theme& t) const {
+    // It took an `is_soundfont` it never read: a .pti saves and loads ANY instrument type, EXTERNAL
+    // included, so both buttons are always drawn. The dead parameter is gone rather than gaining a
+    // third value nothing would look at.
     const int  textY = y + TEXT_PADDING;
     const bool onRow = (cursor_row == this_row);
     if (onRow) draw_row_bg(c, x, y, t);
@@ -306,15 +403,77 @@ void InstrumentEditorModule::draw_eq_row(Canvas& c, int x, int y, int name_x, in
 
 // ─── Cursor context ──────────────────────────────────────────────────────────────────────────────
 
+/**
+ * A MIDI byte that can be OFF — BANK, PROG and the two halves of a CC slot.
+ *
+ * −1 is "send nothing", and the cell's five buttons follow from that with no new machinery: A on an
+ * empty cell INSERTs (landing on 0), A+B DELETEs back to −1, and stepping is disabled while empty
+ * because `hex_byte` reads `current == empty_value` as empty. Exactly the shape the phrase's chain
+ * and instrument reference cells already have.
+ */
+static CursorContext midi_opt_context(int current, int max) {
+    return cc::hex_byte(current, /*min=*/0, /*max=*/max, /*empty_value=*/-1,
+                        /*can_delete=*/current >= 0, /*can_insert=*/current < 0);
+}
+
 CursorContext InstrumentEditorModule::cursor_context(const InstrumentEditorState& s) const {
     const Instrument& ins = s.instrument;
-    const bool        sf  = s.is_soundfont();
-    const int         off = sf ? 1 : 0;   // the SoundFont's PRESET row pushes everything below it down
-    const int         row = s.cursorRow;
-    const int         col = s.cursorColumn;
+
+    if (s.is_external()) {
+        const int row = s.cursorRow;
+        const int col = s.cursorColumn;
+
+        // Rows 0/1 (TYPE, NAME) and 5 (the .pti buttons) are the dispatcher's on every layout.
+        if (row == 0 || row == 1) return cc::read_only();
+        if (row == 5) return cc::read_only();
+
+        if (row == 2) {  // CHAN + BANK
+            // CHAN is stored 0-15 and shown 1-16. The CONTEXT carries the stored number, so stepping
+            // wraps 15→0 the way the wire numbers it; only the drawing adds the 1.
+            if (col == 1) return cc::hex_byte(clamp(ins.midiChannel, 0, 15), 0, 15, -1, false, false,
+                                              false, /*def=*/0);
+            // BANK is 14-bit (CC0 MSB + CC32 LSB, midi_out.h), so its large step is a whole MSB — 16
+            // would take 1024 presses to cross the range.
+            if (col == 3) {
+                CursorContext c = midi_opt_context(ins.midiBank, 16383);
+                c.largeStep     = 128;
+                return c;
+            }
+            return cc::none();
+        }
+
+        if (row == 3) {  // PROG + LEN
+            if (col == 1) return midi_opt_context(ins.midiProgram, 127);
+            // LEN 00 is not "empty" — it is gate-to-next, a MODE (midi_out.h), so the cell steps
+            // through it like any other value and A+B resets to it rather than deleting.
+            if (col == 3) return cc::hex_byte(ins.midiLen, 0, 255, -1, false, false, false, /*def=*/0x00);
+            return cc::none();
+        }
+
+        if (row == 4 || row == 6) return cc::none();  // spacers
+
+        if (row == 7) {  // VOL + PAN
+            if (col == 1) return cc::hex_byte(ins.volume, 0, 255, -1, false, false, false, /*def=*/0xFF);
+            if (col == 3) return cc::hex_byte(ins.pan, 0, 255, -1, false, false, false, /*def=*/0x80);
+            return cc::none();
+        }
+
+        const int ccIndex = row - INSTRUMENT_EXTERNAL_CC_ROW;
+        if (ccIndex >= 0 && ccIndex < static_cast<int>(ins.midiCC.size())) {
+            const songcore::MidiCcSlot& slot = ins.midiCC[static_cast<size_t>(ccIndex)];
+            if (col == 1) return midi_opt_context(slot.cc, 127);
+            if (col == 3) return midi_opt_context(slot.value, 127);
+        }
+        return cc::none();
+    }
+
+    const bool sf  = s.is_soundfont();
+    const int  off = sf ? 1 : 0;   // the SoundFont's PRESET row pushes everything below it down
+    const int  row = s.cursorRow;
+    const int  col = s.cursorColumn;
 
     // Rows 0 and 1 are the TYPE and NAME rows. They are READ_ONLY *to the generic handlers* — A+UP on
-    // TYPE toggles SAMPLER↔SOUNDFONT and A on NAME opens the name editor, and both are dispatcher
+    // TYPE cycles the three types and A on NAME opens the name editor, and both are dispatcher
     // business (a type change frees a sample; a name is text, not a number). Read-only here means "the
     // five generic handlers must not touch this", not "nothing happens".
     if (row == 0 || row == 1) return cc::read_only();
@@ -463,6 +622,40 @@ InstrumentInputResult InstrumentEditorModule::handle_input(Instrument& ins, int 
 
     const auto b255 = [&](int& field) { if (isSet) field = clamp(v, 0, 255); };
     const auto b15  = [&](int& field) { if (isSet) field = clamp(v, 0, 15); };
+
+    if (ins.instrumentType == InstrumentType::EXTERNAL) {
+        // The three-state MIDI byte: SET writes it, DELETE clears to −1 ("send nothing"), INSERT lands
+        // on 0. One lambda, because BANK, PROG and both halves of all four CC slots behave alike.
+        const auto midiOpt = [&](int& field, int max) {
+            if (isSet)                                          field = clamp(v, 0, max);
+            else if (action.type == ActionType::DELETE)         field = -1;
+            else if (action.type == ActionType::INSERT_DEFAULT) field = 0;
+        };
+
+        if (row == 2) {
+            if (col == 1) { if (isSet) ins.midiChannel = clamp(v, 0, 15); }   // stored 0-15, shown 1-16
+            else if (col == 3) midiOpt(ins.midiBank, 16383);
+
+        } else if (row == 3) {
+            if (col == 1)      midiOpt(ins.midiProgram, 127);
+            else if (col == 3) b255(ins.midiLen);
+
+        } else if (row == 7) {
+            if (col == 1)      b255(ins.volume);
+            else if (col == 3) b255(ins.pan);
+
+        } else {
+            const int ccIndex = row - INSTRUMENT_EXTERNAL_CC_ROW;
+            if (ccIndex >= 0 && ccIndex < static_cast<int>(ins.midiCC.size())) {
+                songcore::MidiCcSlot& slot = ins.midiCC[static_cast<size_t>(ccIndex)];
+                if (col == 1)      midiOpt(slot.cc, 127);
+                else if (col == 3) midiOpt(slot.value, 127);
+            }
+        }
+
+        r.modified = (action.type != ActionType::NONE);
+        return r;
+    }
 
     // Rows 0/1 (TYPE, NAME) and 4/5 (spacer, INST PRESET buttons) are handled by the dispatcher: the
     // TYPE row's source LOAD/EDIT and the preset row's SAVE/LOAD are host verbs, not field writes.

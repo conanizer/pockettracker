@@ -55,20 +55,20 @@ namespace pt::ui {
 
 namespace detail {
 
-inline bool instrument_is_sf(const AppState& s) {
-    return s.project->instruments[static_cast<size_t>(s.currentInstrument)].instrumentType ==
-           songcore::InstrumentType::SOUNDFONT;
+/** The layout selector: which of the three row tables the cursor is walking. */
+inline songcore::InstrumentType instrument_type_of(const AppState& s) {
+    return s.project->instruments[static_cast<size_t>(s.currentInstrument)].instrumentType;
 }
 
 /** Step ±1 rows with wrap, stepping straight OVER the spacers. `TrackerController.instrumentRowStep`. */
-inline int instrument_row_step(bool is_sf, int from, int delta) {
-    const int count = instrument_row_count(is_sf);
+inline int instrument_row_step(songcore::InstrumentType type, int from, int delta) {
+    const int count = instrument_row_count(type);
     int       r     = from;
     do {
         r += delta;
         if (r < 0) r = count - 1;
         if (r >= count) r = 0;
-    } while (instrument_row_kind(is_sf, r) == InstrumentRowKind::SPACER);
+    } while (instrument_row_kind(type, r) == InstrumentRowKind::SPACER);
     return r;
 }
 
@@ -80,14 +80,15 @@ inline int instrument_row_step(bool is_sf, int from, int delta) {
  * row that has no such column falls back to 1 rather than leaving the cursor on a cell that is not
  * drawn. SOURCE always snaps to LOAD, whichever column you came from.
  */
-inline int instrument_column_for(bool is_sf, int new_row, int old_row, int old_column) {
+inline int instrument_column_for(songcore::InstrumentType type, int new_row, int old_row,
+                                 int old_column) {
     const auto has_right = [](InstrumentRowKind k) {
         return k == InstrumentRowKind::DUAL || k == InstrumentRowKind::NAME ||
                k == InstrumentRowKind::TRIPLE;
     };
-    const InstrumentRowKind old = instrument_row_kind(is_sf, old_row);
+    const InstrumentRowKind old = instrument_row_kind(type, old_row);
 
-    switch (instrument_row_kind(is_sf, new_row)) {
+    switch (instrument_row_kind(type, new_row)) {
         case InstrumentRowKind::SOURCE:
             return 2;   // LOAD
 
@@ -100,8 +101,13 @@ inline int instrument_column_for(bool is_sf, int new_row, int old_row, int old_c
             return (has_right(old) && old_column >= 3) ? 3 : 1;
 
         case InstrumentRowKind::NAME:
-            // Row 0's EDIT (column 3) is drawn on samplers only, so a SoundFont must not land on it.
-            return (has_right(old) && old_column >= 3 && !is_sf) ? 3 : 1;
+            // Row 0's EDIT (column 3) is drawn on samplers only, so a SoundFont must not land on it —
+            // nor may EXTERNAL, which draws neither button. The cap is the row's own, read off the
+            // table, so the three types cannot disagree with what is drawn.
+            return (has_right(old) && old_column >= 3 &&
+                    instrument_name_row_max_column(type) >= 3)
+                       ? 3
+                       : 1;
 
         default:
             return 1;   // SINGLE / SPACER
@@ -109,8 +115,8 @@ inline int instrument_column_for(bool is_sf, int new_row, int old_row, int old_c
 }
 
 /** The leftmost column reachable from `column` on this row. getInstrumentCursorLeftColumn. */
-inline int instrument_left_column(bool is_sf, int row, int column) {
-    switch (instrument_row_kind(is_sf, row)) {
+inline int instrument_left_column(songcore::InstrumentType type, int row, int column) {
+    switch (instrument_row_kind(type, row)) {
         case InstrumentRowKind::NAME:   return column - 1 < 1 ? 1 : column - 1;  // 3→2→1
         case InstrumentRowKind::SOURCE: return column - 1 < 2 ? 2 : column - 1;  // 3→2, never below LOAD
         case InstrumentRowKind::TRIPLE: return column - 2 < 1 ? 1 : column - 2;  // 5→3→1
@@ -120,12 +126,13 @@ inline int instrument_left_column(bool is_sf, int row, int column) {
 }
 
 /** The rightmost. getInstrumentCursorRightColumn. */
-inline int instrument_right_column(bool is_sf, int row, int column) {
-    switch (instrument_row_kind(is_sf, row)) {
+inline int instrument_right_column(songcore::InstrumentType type, int row, int column) {
+    switch (instrument_row_kind(type, row)) {
         case InstrumentRowKind::NAME: {
-            // Row 0's EDIT (column 3) is drawn on samplers only — a SoundFont has no waveform to edit —
-            // so the cursor caps at LOAD (2) there; a cursor on column 3 would sit on a cell not drawn.
-            const int cap = is_sf ? 2 : 3;
+            // Row 0's EDIT (column 3) is drawn on samplers only — a SoundFont has no waveform to edit,
+            // and EXTERNAL has no source at all — so the cursor caps at LOAD (2) or at TYPE (1); a
+            // cursor past the cap would sit on a cell that is not drawn.
+            const int cap = instrument_name_row_max_column(type);
             const int c   = column + 1;
             return c > cap ? cap : c;
         }
@@ -224,12 +231,12 @@ inline void move_cursor_up(AppState& s) {
             break;
 
         case ScreenType::INSTRUMENT: {
-            const bool sf        = detail::instrument_is_sf(s);
+            const songcore::InstrumentType ty = detail::instrument_type_of(s);
             const int  oldRow    = s.instrumentCursorRow;
             const int  oldColumn = s.instrumentCursorColumn;
-            s.instrumentCursorRow    = detail::instrument_row_step(sf, oldRow, -1);
+            s.instrumentCursorRow    = detail::instrument_row_step(ty, oldRow, -1);
             s.instrumentCursorColumn =
-                detail::instrument_column_for(sf, s.instrumentCursorRow, oldRow, oldColumn);
+                detail::instrument_column_for(ty, s.instrumentCursorRow, oldRow, oldColumn);
             break;
         }
 
@@ -308,12 +315,12 @@ inline void move_cursor_down(AppState& s) {
             break;
 
         case ScreenType::INSTRUMENT: {
-            const bool sf        = detail::instrument_is_sf(s);
+            const songcore::InstrumentType ty = detail::instrument_type_of(s);
             const int  oldRow    = s.instrumentCursorRow;
             const int  oldColumn = s.instrumentCursorColumn;
-            s.instrumentCursorRow    = detail::instrument_row_step(sf, oldRow, +1);
+            s.instrumentCursorRow    = detail::instrument_row_step(ty, oldRow, +1);
             s.instrumentCursorColumn =
-                detail::instrument_column_for(sf, s.instrumentCursorRow, oldRow, oldColumn);
+                detail::instrument_column_for(ty, s.instrumentCursorRow, oldRow, oldColumn);
             break;
         }
 
@@ -399,7 +406,7 @@ inline void move_cursor_left(AppState& s) {
 
         case ScreenType::INSTRUMENT: {
             const int minColumn = detail::instrument_left_column(
-                detail::instrument_is_sf(s), s.instrumentCursorRow, s.instrumentCursorColumn);
+                detail::instrument_type_of(s), s.instrumentCursorRow, s.instrumentCursorColumn);
             if (s.instrumentCursorColumn > minColumn) s.instrumentCursorColumn = minColumn;
             return;
         }
@@ -474,7 +481,7 @@ inline void move_cursor_right(AppState& s) {
 
         case ScreenType::INSTRUMENT: {
             const int maxColumn = detail::instrument_right_column(
-                detail::instrument_is_sf(s), s.instrumentCursorRow, s.instrumentCursorColumn);
+                detail::instrument_type_of(s), s.instrumentCursorRow, s.instrumentCursorColumn);
             if (s.instrumentCursorColumn < maxColumn) s.instrumentCursorColumn = maxColumn;
             return;
         }

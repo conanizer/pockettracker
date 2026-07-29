@@ -540,9 +540,13 @@ class InputDispatcher {
      * pool) and it toggles. That is stricter than Android, never destructive, and it lands its proper
      * confirm dialog with the rest of the modal system.
      */
-    /** A+UP/DOWN on the TYPE cell: switch outright if the slot is empty, else ASK (S7's dialog). */
-    void request_instrument_type_toggle();
-    void toggle_instrument_type();
+    /**
+     * A+UP/DOWN on the TYPE cell: switch outright if the slot is empty, else ASK (S7's dialog).
+     * `delta` is the direction — +1 for A+UP, −1 for A+DOWN — and it rides through the dialog in
+     * `ConfirmDialogState::arg`, because with three types the two buttons no longer mean the same.
+     */
+    void request_instrument_type_toggle(int delta);
+    void toggle_instrument_type(int delta);
 
     /** True when the cursor is on INSTRUMENT's TYPE cell — where A+UP/DOWN toggles rather than steps. */
     bool on_instrument_type_cell() const;

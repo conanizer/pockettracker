@@ -638,11 +638,12 @@ int main(int argc, char** argv) {
                     // type, and the reachable columns depend on the row's kind. Clamp through the same
                     // functions the D-pad uses rather than re-deriving the bounds here.
                     // (Fully qualified: `songcore::detail` and `pt::ui::detail` are both in scope here.)
-                    const bool sf = state.project->instruments[static_cast<size_t>(state.currentInstrument)]
-                                        .instrumentType == InstrumentType::SOUNDFONT;
-                    state.instrumentCursorRow = clamp(row, instrument_row_count(sf) - 1);
-                    const int lo = pt::ui::detail::instrument_left_column(sf, state.instrumentCursorRow, col);
-                    const int hi = pt::ui::detail::instrument_right_column(sf, state.instrumentCursorRow, col);
+                    const InstrumentType ty =
+                        state.project->instruments[static_cast<size_t>(state.currentInstrument)]
+                            .instrumentType;
+                    state.instrumentCursorRow = clamp(row, instrument_row_count(ty) - 1);
+                    const int lo = pt::ui::detail::instrument_left_column(ty, state.instrumentCursorRow, col);
+                    const int hi = pt::ui::detail::instrument_right_column(ty, state.instrumentCursorRow, col);
                     state.instrumentCursorColumn = col < lo ? lo : (col > hi ? hi : col);
                     break;
                 }

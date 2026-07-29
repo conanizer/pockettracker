@@ -64,6 +64,33 @@ inline std::string hex1(int v) {
     return std::string(1, H[v & 0x0F]);
 }
 
+/**
+ * 4-digit uppercase hex — the EXTERNAL instrument's BANK, and nothing else.
+ *
+ * A bank select is 14 bits (CC0 MSB + CC32 LSB), so 0..16383, and `hex2` would have MASKED it: a bank
+ * of 1024 drew as `00` in the first render of that screen. Pads but never truncates, as hex8 does.
+ */
+inline std::string hex4(int v) {
+    static const char* H = "0123456789ABCDEF";
+    if (v == 0) return "0000";
+    std::string s;
+    for (unsigned u = static_cast<unsigned>(v); u != 0; u >>= 4) s.insert(s.begin(), H[u & 0xF]);
+    while (s.size() < 4) s.insert(s.begin(), '0');
+    return s;
+}
+
+/**
+ * 2-digit zero-padded DECIMAL — the MIDI channel on the EXTERNAL instrument, and nothing else.
+ *
+ * Every other number on these screens is hex, and that is deliberate: they are bytes. A MIDI channel
+ * is not a byte the user thinks in — every device, cable and manual in the world calls it 1 to 16 —
+ * so it is the one cell shown in the base its own world uses. Pads but never truncates.
+ */
+inline std::string dec2(int v) {
+    std::string s = std::to_string(v);
+    return s.size() >= 2 ? s : "0" + s;
+}
+
 /** Multiply the RGB channels by `factor` (0..1 darker, >1 brighter); alpha preserved. Int.darken(). */
 inline Argb darken(Argb c, float factor) {
     auto ch = [&](int shift) {

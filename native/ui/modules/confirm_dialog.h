@@ -58,9 +58,21 @@ struct ConfirmDialogState {
 
     Kind kind = Kind::NONE;
 
-    bool is_open() const { return kind != Kind::NONE; }
-    void open(Kind k)    { kind = k; }
-    void close()         { kind = Kind::NONE; }
+    /**
+     * What the pending answer needs to know that its Kind does not — today, only CHANGE_TYPE's
+     * DIRECTION (+1 for A+UP, −1 for A+DOWN).
+     *
+     * ⚠️ It exists because the TYPE cell stopped being a two-way toggle. With two types the question
+     * "change it to what?" had one answer and the dialog could forget which button raised it; with
+     * three it does not, and the direction has to survive the round trip through the box or A+DOWN
+     * silently becomes A+UP the moment the slot has a source loaded. Nothing else reads it, and it
+     * resets on `close()` so a stale value cannot reach the next dialog.
+     */
+    int arg = 0;
+
+    bool is_open() const     { return kind != Kind::NONE; }
+    void open(Kind k, int a = 0) { kind = k; arg = a; }
+    void close()             { kind = Kind::NONE; arg = 0; }
 };
 
 /** "CLEAN SEQ?" / "NEW PROJECT?" / … — the question the box asks. */
