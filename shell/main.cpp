@@ -34,6 +34,7 @@
 #include "ui/std_filesystem.h"
 
 #include "app.h"
+#include "midi-out-winmm.h"   // compiles to nothing off Windows
 #include "sdl-audio-engine.h"
 
 #include <csignal>
@@ -230,6 +231,35 @@ int main(int argc, char** argv) {
         cfg.caps.touchLayouts = true;
         std::printf("input:   TOUCH SKIN forced on (POCKETTRACKER_TOUCH=1) - drag the window tall for PORTRAIT2\n");
     }
+
+    // ── EXTERNAL MIDI out (MIDI plan phase B2) ───────────────────────────────────────────────────
+    //
+    // An ENV VAR and not an argv slot, because argv here is positional (project, baseDir, appRoot) and
+    // a fourth position would be unreadable — POCKETTRACKER_TOUCH above set the precedent.
+    //
+    //   POCKETTRACKER_MIDI_OUT=<index | name fragment>   open that port
+    //   POCKETTRACKER_MIDI_OUT=list                      print the devices and open nothing
+    //   POCKETTRACKER_MIDI_OFFSET_MS=<-999..999>         MIDI later (+) or earlier (-) than the audio
+    //
+    // ⚠️ TEMPORARY, and named so in the plan: the device pick belongs in settings.json and the MIDI
+    // screen (§8.1, phase B4). Until that screen exists, this is the only way to reach the feature —
+    // and a feature that cannot be reached cannot be tested on a real device.
+#ifdef _WIN32
+    ptshell::WinmmMidiOut midiOut;
+    {
+        if (const char* tr = SDL_getenv("POCKETTRACKER_MIDI_TRACE"); tr && tr[0] == '1')
+            midiOut.set_trace(true);
+        const char* spec = SDL_getenv("POCKETTRACKER_MIDI_OUT");
+        if (midiOut.open_by_spec(spec ? spec : "")) cfg.midiOut = &midiOut;
+        if (const char* off = SDL_getenv("POCKETTRACKER_MIDI_OFFSET_MS")) {
+            cfg.midiOffsetMs = std::atoi(off);
+            std::printf("midi:    OFFSET %+d ms\n", cfg.midiOffsetMs);
+        }
+        // POCKETTRACKER_MIDI_TEST=1 — the §8.1 TEST row, before the screen that will carry it exists.
+        if (const char* t = SDL_getenv("POCKETTRACKER_MIDI_TEST"); t && t[0] == '1')
+            midiOut.test_note(600);
+    }
+#endif
 
     // The launcher's kill, as a question the shared loop can ask once a frame. The handler above only
     // ever sets this flag; everything that has to happen because of it happens in the loop.

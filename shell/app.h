@@ -53,6 +53,8 @@
 class AudioBackend;
 class AudioEngine;
 
+namespace songcore { struct IMidiOut; }
+
 namespace ptshell {
 
 class ButtonFeedback;
@@ -149,6 +151,22 @@ struct AppConfig {
      * rows that configure it.
      */
     ButtonFeedback* buttonFeedback = nullptr;
+
+    /**
+     * The EXTERNAL MIDI port (MIDI plan phase B). BORROWED and NULLABLE — the platform's `main` owns
+     * it, because opening a port is the one part of MIDI that is per-platform (winmm here, ALSA
+     * rawmidi on a handheld, `MidiManager` over JNI on Android). Everything above it — the serializer,
+     * the note lifecycle, the release queue — is `native/songcore/midi_out.h` and is shared.
+     *
+     * ⚠️ NULL is not "MIDI off". `SongcoreHost` attaches its `ExternalConsumer` either way, so an
+     * EXTERNAL instrument is silent on BOTH sides with no port attached — it raises no engine voice
+     * and puts no byte anywhere. Which is the correct reading of "this instrument is not this engine".
+     *
+     * `midiOffsetMs` is the user's alignment between what the speakers play and what the cable
+     * carries; positive sends MIDI later. It gets a SETTINGS row with the MIDI screen (B4).
+     */
+    songcore::IMidiOut* midiOut = nullptr;
+    int                 midiOffsetMs = 0;
 
     /**
      * Is a PHYSICAL game controller present right now? NULLABLE and Android-only. The shared layout gate

@@ -66,6 +66,44 @@ struct IMidiConsumer {
     virtual void on_stop() = 0;
 };
 
+// ─── Which instrument is a track's events for? ───────────────────────────────────────────────────
+//
+// ⚠️ ONLY NoteOn CARRIES AN INSTRUMENT. NoteOff, CC and every EXT event are TRACK-SCOPED and ride
+// `INSTRUMENT_NONE` (event.h) — they act on whatever is sounding on the track. That is fine for a
+// consumer which owns every track, and it is exactly what breaks the moment there are TWO consumers
+// and the routing decision is per-instrument: "is this note-off mine?" has no answer in the record.
+//
+// So the answer is derived, once, in one place: the last NoteOn on a track names the instrument every
+// following track-scoped event belongs to. Both consumers keep one of these and both therefore reach
+// the SAME verdict for the same event — which is the property that matters, because a disagreement
+// means a note is either played twice or by nobody.
+//
+// ⚠️ It assumes events arrive per track in non-decreasing frame order, which the scheduler guarantees
+// (it schedules forward, and retrig/arp notes are emitted inside the step that spawns them).
+struct TrackInstruments {
+    // 0-7 sequencer + TRACK_PREVIEW (8). TRACK_GLOBAL never resolves to an instrument.
+    static constexpr int LANES = TRACK_PREVIEW + 1;
+
+    void reset() { for (int i = 0; i < LANES; ++i) lane_[i] = INSTRUMENT_NONE; }
+
+    /** The instrument the track's events are currently for, WITHOUT consuming an event. */
+    int16_t current(uint8_t track) const {
+        return track < LANES ? lane_[track] : INSTRUMENT_NONE;
+    }
+
+    /** Learn from `ev` (a NoteOn re-points the track) and return the instrument it belongs to. */
+    int16_t observe(const Event& ev) {
+        if (ev.track >= LANES) return INSTRUMENT_NONE;          // TRACK_GLOBAL — EQM and friends
+        if (ev.type == EV_NOTE_ON) lane_[ev.track] = ev.instrument;
+        return lane_[ev.track];
+    }
+
+  private:
+    int16_t lane_[LANES] = {INSTRUMENT_NONE, INSTRUMENT_NONE, INSTRUMENT_NONE, INSTRUMENT_NONE,
+                            INSTRUMENT_NONE, INSTRUMENT_NONE, INSTRUMENT_NONE, INSTRUMENT_NONE,
+                            INSTRUMENT_NONE};
+};
+
 // ─── The router ─────────────────────────────────────────────────────────────────────────────────
 // Fans one record out to every attached consumer (MIDI plan §3: "sources → router → consumers"). In
 // the app that is the engine consumer plus, when tracing, the trace writer — they see the identical

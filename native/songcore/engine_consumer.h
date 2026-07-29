@@ -35,9 +35,11 @@ class EngineConsumer : public IMidiConsumer {
     EngineConsumer(AudioEngine* engine, const Project* project, const Routing* routing)
         : engine_(engine), project_(project), routing_(routing) {}
 
-    // Transport is not an engine event — the host owns queue clearing and the master-EQ restore.
-    void on_play(const std::string&, const std::string&, int64_t, int, int) override {}
-    void on_stop() override {}
+    // Transport is not an engine event — the host owns queue clearing and the master-EQ restore. The
+    // one thing that IS ours: the track→instrument map is per-session, and a stale one would route the
+    // first track-scoped event of a new take at the last take's instrument.
+    void on_play(const std::string&, const std::string&, int64_t, int, int) override { tracks_.reset(); }
+    void on_stop() override { tracks_.reset(); }
 
     // A push may have changed the tables, so the "already sent to the engine" cache must not survive
     // it. Kotlin's `loadedTables` is the same lazy cache, invalidated by its own edit hooks.
@@ -53,6 +55,28 @@ class EngineConsumer : public IMidiConsumer {
 
     void consume(const Event& ev) override {
         if (!engine_ || !project_) return;
+
+        // ── The routing gate (MIDI plan §1) ──────────────────────────────────────────────────────
+        //
+        // An instrument names its consumer. Everything routed EXTERNAL belongs to ExternalConsumer
+        // (midi_out.h) and must not raise a voice here — INCLUDING when no cable is attached, because
+        // EXTERNAL means "not this engine", not "this engine unless something better exists".
+        //
+        // ⚠️ The verdict comes from `instrument_routes_external` (model.h) and `TrackInstruments`
+        // (router.h), which the other consumer also uses: an event both consumers claim is played
+        // twice, and one neither claims is silence.
+        const int16_t prev  = tracks_.current(ev.track);
+        const int16_t instr = tracks_.observe(ev);
+        if (is_external(instr)) {
+            // ⚠️ A track that FLIPS from an internal instrument to an external one leaves a voice
+            // sounding with nothing left to stop it: no later event on that track resolves to this
+            // consumer, so the note-off that would have cut it is routed away. The note-on that
+            // caused the flip is where that voice ends.
+            if (ev.type == EV_NOTE_ON && prev >= 0 && !is_external(prev))
+                engine_->scheduleKill(ev.frame, ev.track);
+            return;
+        }
+
         switch (ev.type) {
             case EV_NOTE_ON:
                 note_on(ev);
@@ -109,6 +133,11 @@ class EngineConsumer : public IMidiConsumer {
     }
 
   private:
+    bool is_external(int16_t instrument) const {
+        if (instrument < 0 || static_cast<size_t>(instrument) >= project_->instruments.size()) return false;
+        return instrument_routes_external(project_->instruments[static_cast<size_t>(instrument)]);
+    }
+
     void note_on(const Event& ev) {
         // `ev.track <= 7` alone: the field is a uint8_t, so the `>= 0` half of Kotlin's guard is a
         // tautology here (gcc says so). The bound that does the work is the upper one — TRACK_PREVIEW
@@ -120,6 +149,7 @@ class EngineConsumer : public IMidiConsumer {
     AudioEngine*   engine_  = nullptr;
     const Project* project_ = nullptr;
     const Routing* routing_ = nullptr;
+    TrackInstruments tracks_;
     bool tableLoaded_[POOL_TABLES] = {false};
     int  trackMask_ = 0;
 };

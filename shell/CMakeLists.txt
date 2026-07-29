@@ -127,6 +127,7 @@ add_executable(pockettracker-sdl
         portrait2.cpp      # the PORTRAIT2 device-skin renderer (convergence D): composite the bands
         font_raster.cpp    # glyph rasterization (convergence D): the one stb_truetype implementation TU
         font.cpp           # the button-label font (convergence D): Helvetica glyphs + D-pad triangles → textures
+        midi-out-winmm.cpp # the WINDOWS songcore::IMidiOut (MIDI plan B2); empty TU elsewhere
         sdl-audio-engine.cpp
         sdl-input.cpp
         sdl-touch.cpp
@@ -153,6 +154,13 @@ add_executable(pockettracker-sdl
 # PER-TARGET, never add_compile_options(): a directory-scope flag would be inherited by everything
 # under add_subdirectory(../native) — the engine and the whole vendored decoder stack — and would
 # countermand the ENGINE's own -ffast-math policy, which it is entitled to make for itself.
+# winmm — `midiOutShortMsg` and friends (midi-out-winmm.cpp). In every Windows install; no package,
+# no COM, no manifest capability. The other backends bring their own (libasound on Linux; Android's
+# is a JNI up-call and links nothing).
+if(WIN32)
+    target_link_libraries(pockettracker-sdl PRIVATE winmm)
+endif()
+
 if(MSVC)
     target_compile_options(pockettracker-sdl PRIVATE /fp:precise)
     # ⚠️ The manifest embedded by the .rc above is the ONLY one. MSVC's linker synthesises its own

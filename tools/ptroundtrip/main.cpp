@@ -153,6 +153,78 @@ int main(int argc, char** argv) {
         }
     }
 
+    // ── EXTERNAL / MIDI fields carry their VALUES through a full round trip ──────────────────────
+    //
+    // ⚠️ Deliberately NOT another idempotence check, and that is the whole point of writing it out.
+    // A field that is dropped on parse AND never emitted is perfectly idempotent — write→read→write
+    // is stable because both writes emit nothing. The check that catches a half-wired field is a
+    // VALUE check: set it, serialise, parse, and read it back. The eight goldens above prove the new
+    // fields cost no bytes when unused; this proves they exist when used.
+    std::cout << "\n== EXTERNAL instrument + project MIDI fields (value round trip) ==\n";
+    {
+        Project p = songcore::make_default_project();
+        songcore::Instrument& ins = p.instruments.at(3);
+        ins.instrumentType = songcore::InstrumentType::EXTERNAL;
+        ins.midiChannel = 9;
+        ins.midiBank    = 2;
+        ins.midiProgram = 41;
+        ins.midiLen     = 6;
+        ins.midiCC[0] = songcore::MidiCcSlot{74, 100};
+        ins.midiCC[2] = songcore::MidiCcSlot{7, 0};
+        p.midiSyncOut = 3;
+        p.midiSendProgramChange = false;
+        p.midiInputChannels[0] = 1;
+        p.midiInputChannels[7] = 15;
+
+        const std::string blob = songcore::serialize_project(p);
+        Project q = songcore::parse_project(songcore::json::parse(blob));
+        songcore::normalize_and_migrate(q);
+        const songcore::Instrument& r = q.instruments.at(3);
+
+        struct Case { const char* what; long long got, want; };
+        const Case cases[] = {
+            {"instrumentType == EXTERNAL", (long long)(r.instrumentType == songcore::InstrumentType::EXTERNAL), 1},
+            {"midiChannel",  r.midiChannel,  9},
+            {"midiBank",     r.midiBank,     2},
+            {"midiProgram",  r.midiProgram,  41},
+            {"midiLen",      r.midiLen,      6},
+            {"midiCC[0].cc",    r.midiCC.at(0).cc,    74},
+            {"midiCC[0].value", r.midiCC.at(0).value, 100},
+            {"midiCC[1].cc",    r.midiCC.at(1).cc,    -1},   // untouched slot stays empty
+            {"midiCC[2].cc",    r.midiCC.at(2).cc,    7},
+            {"midiCC[2].value", r.midiCC.at(2).value, 0},    // 0 is a VALUE, not "unused"
+            {"midiSyncOut",  q.midiSyncOut,  3},
+            {"midiSendProgramChange", (long long)q.midiSendProgramChange, 0},
+            {"midiInputChannels[0]", q.midiInputChannels.at(0), 1},
+            {"midiInputChannels[3]", q.midiInputChannels.at(3), -1},
+            {"midiInputChannels[7]", q.midiInputChannels.at(7), 15},
+        };
+        for (const Case& c : cases) {
+            // The NUMBER beside the verdict, always: a bare PASS/FAIL cannot tell a working check
+            // from one comparing two things that are both wrong.
+            if (c.got == c.want) {
+                std::cout << "[PASS] " << c.what << " = " << c.got << "\n";
+            } else {
+                std::cerr << "[FAIL] " << c.what << " = " << c.got << ", expected " << c.want << "\n";
+                ++failures;
+            }
+        }
+        // …and the same instrument through the .pti path, which shares emit_instrument.
+        InstrumentPreset ip;
+        ip.instrument = ins;
+        const songcore::InstrumentPreset back =
+            songcore::parse_instrument_preset(songcore::json::parse(songcore::serialize_instrument_preset(ip)));
+        if (back.instrument.midiChannel == 9 && back.instrument.midiCC.at(0).cc == 74 &&
+            back.instrument.instrumentType == songcore::InstrumentType::EXTERNAL) {
+            std::cout << "[PASS] .pti carries the EXTERNAL fields (chan=" << back.instrument.midiChannel
+                      << " ccA=" << back.instrument.midiCC.at(0).cc << ")\n";
+        } else {
+            std::cerr << "[FAIL] .pti lost the EXTERNAL fields (chan=" << back.instrument.midiChannel
+                      << " ccA=" << back.instrument.midiCC.at(0).cc << ")\n";
+            ++failures;
+        }
+    }
+
     std::cout << "\n" << (failures == 0 ? "ALL GREEN" : "FAILURES: " + std::to_string(failures)) << "\n";
     return failures == 0 ? 0 : 1;
 }

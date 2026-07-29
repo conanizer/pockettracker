@@ -234,6 +234,21 @@ inline Instrument parse_instrument(const json& j, int index) {
     { auto it = j.find("sliceMarkers");
       if (it != j.end() && it->is_array())
           for (const auto& e : *it) i.sliceMarkers.push_back(e.is_number() ? e.get<int64_t>() : 0); }
+    i.midiChannel = get_int(j, "midiChannel", i.midiChannel);
+    i.midiBank    = get_int(j, "midiBank", i.midiBank);
+    i.midiProgram = get_int(j, "midiProgram", i.midiProgram);
+    i.midiLen     = get_int(j, "midiLen", i.midiLen);
+    { auto it = j.find("midiCC");
+      if (it != j.end() && it->is_array()) {
+          // Re-sized, never appended to: the slot COUNT is a UI constant, and a file written by a
+          // future build with more slots must not hand this one a vector the screen cannot draw.
+          for (size_t s = 0; s < i.midiCC.size() && s < it->size(); ++s) {
+              const json& e = (*it)[s];
+              if (!e.is_object()) continue;
+              i.midiCC[s].cc    = get_int(e, "cc", i.midiCC[s].cc);
+              i.midiCC[s].value = get_int(e, "value", i.midiCC[s].value);
+          }
+      } }
     return i;
 }
 
@@ -282,6 +297,12 @@ inline Project parse_project(const json& j) {
     p.instruments = parse_pool<Instrument>(j, "instruments", parse_instrument);
     p.tables      = parse_pool<Table>(j, "tables", parse_table);
     p.grooves     = parse_pool<Groove>(j, "grooves", parse_groove);
+    p.midiSyncOut           = get_int(j, "midiSyncOut", p.midiSyncOut);
+    p.midiSendProgramChange = get_bool(j, "midiSendProgramChange", p.midiSendProgramChange);
+    { auto it = j.find("midiInputChannels");
+      if (it != j.end() && it->is_array())
+          for (size_t t = 0; t < p.midiInputChannels.size() && t < it->size(); ++t)
+              if ((*it)[t].is_number()) p.midiInputChannels[t] = (*it)[t].get<int>(); }
     return p;
 }
 
@@ -586,6 +607,27 @@ inline void emit_instrument(JsonWriter& w, const Instrument& i) {
         for (int64_t v : i.sliceMarkers) { w.element(); w.value_int(v); }
         w.end_array();
     }
+    // ── EXTERNAL (MIDI plan §7) — appended at the tail, every field default-guarded ───────────────
+    // ⚠️ Guarded, and that is what keeps the eight ptroundtrip goldens byte-identical: an instrument
+    // that is not EXTERNAL holds every default here and so emits not one new byte. `midiCC` is emitted
+    // whole-or-not-at-all (unlike modSlots, which always emits) for the same reason — four "{}"s in
+    // every instrument of every project would move ~4 KB of bytes in files nothing has changed.
+    if (i.midiChannel != 0)  w.field_int("midiChannel", i.midiChannel);
+    if (i.midiBank != -1)    w.field_int("midiBank", i.midiBank);
+    if (i.midiProgram != -1) w.field_int("midiProgram", i.midiProgram);
+    if (i.midiLen != 0)      w.field_int("midiLen", i.midiLen);
+    if (i.midiCC != std::vector<MidiCcSlot>(MIDI_CC_SLOTS)) {
+        w.key("midiCC");
+        w.begin_array();
+        for (const auto& s : i.midiCC) {
+            w.element();
+            w.begin_object();
+            if (s.cc != -1)    w.field_int("cc", s.cc);
+            if (s.value != -1) w.field_int("value", s.value);
+            w.end_object();
+        }
+        w.end_array();
+    }
     w.end_object();
 }
 
@@ -631,6 +673,16 @@ inline std::string serialize_project(const Project& p) {
     emit_pool(w, "instruments", p.instruments, emit_instrument);
     emit_pool(w, "tables",      p.tables,      emit_table);
     emit_pool(w, "grooves",     p.grooves,     emit_groove);
+    // MIDI, the project's half (plan §7). ⚠️ `midiSendProgramChange` defaults to TRUE, so its guard is
+    // the inverted one — the field appears only when the user has turned it OFF.
+    if (p.midiSyncOut != 0)          w.field_int("midiSyncOut", p.midiSyncOut);
+    if (!p.midiSendProgramChange)    w.field_bool("midiSendProgramChange", p.midiSendProgramChange);
+    if (p.midiInputChannels != std::vector<int>(8, -1)) {
+        w.key("midiInputChannels");
+        w.begin_array();
+        for (int c : p.midiInputChannels) { w.element(); w.value_int(c); }
+        w.end_array();
+    }
     w.end_object();
     return std::move(w.out);
 }

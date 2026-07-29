@@ -36,6 +36,7 @@
 #include "../audio-engine.h"
 #include "engine_consumer.h"
 #include "engine_setup.h"
+#include "midi_out.h"
 #include "model.h"
 #include "project_io.h"
 #include "project_ops.h"
@@ -57,10 +58,16 @@ class SongcoreHost {
         : engine_(engine),
           sampleRate_(sampleRate),
           seq_(router_, project_, sampleRate),
-          consumer_(engine, &project_, &routing_) {
+          consumer_(engine, &project_, &routing_),
+          external_(&project_) {
         // The engine consumer is the bus's permanent subscriber: events become audio. The trace
         // writer joins it only while tracing (set_trace), and sees the identical records.
         if (engine_) router_.add_consumer(&consumer_);
+        // ⚠️ The EXTERNAL consumer is attached UNCONDITIONALLY, with or without a port — it is not an
+        // optional feature bolted on when a cable appears. Half of its job is bookkeeping (which track
+        // owns which note, what a channel was last told), and a consumer that only starts listening
+        // when a device is picked would attach mid-song with no idea what is already sounding.
+        router_.add_consumer(&external_);
     }
 
     ~SongcoreHost() { set_trace(false, ""); }
@@ -68,6 +75,13 @@ class SongcoreHost {
     MidiRouter& router() { return router_; }
     Sequencer&  sequencer() { return seq_; }
     const Project& project() const { return project_; }
+
+    // ── ↕ EXTERNAL MIDI out (MIDI plan §4.3) ─────────────────────────────────────────────────────
+    // The port itself is the platform's (ALSA rawmidi / winmm / MidiManager); everything above it is
+    // in midi_out.h and shared. The shell picks a device and hands the open port in here.
+    ExternalConsumer& midi_out() { return external_; }
+    void set_midi_out(IMidiOut* out) { external_.set_out(out); }
+    void set_midi_offset_ms(int ms) { external_.set_offset_ms(ms); }
 
     // ── ↓ data ───────────────────────────────────────────────────────────────────────────────────
     // The blob is the .ptp JSON verbatim — the bytes FileController.serializeProject() produces, which
@@ -148,6 +162,9 @@ class SongcoreHost {
         }
         sync_clock();
         seq_.stop();
+        // The transport ends: every note the cable is holding, ended NOW (not queued — the queue is
+        // dropped). `seq_.stop()` does not reach the router, so this cannot ride an event.
+        external_.panic();
         if (engine_) {
             engine_->clearScheduledNotes();   // the lookahead: notes, kills AND param updates
             engine_->stopAll();               // …and the voices already sounding (instant — no fade)
@@ -165,6 +182,10 @@ class SongcoreHost {
     void poll() {
         sync_clock();
         seq_.updatePlaybackBuffer();
+        // ⚠️ The MIDI queue is released HERE, from the poll that already read the frame clock — and
+        // it must be released even when nothing is playing, because a LEN gate and a panic's note-offs
+        // are things we OWE after the last note was scheduled. `pump` is idempotent on an empty queue.
+        external_.pump(seq_.clock());
         flush_trace();
     }
 
@@ -185,6 +206,14 @@ class SongcoreHost {
     // A caller with no other sequencer (tools/ptrender, the SDL shell) uses render_song_range_to_wav.
     void prepare_render(int startRow, int endRow) {
         if (!engine_) return;
+        // ⚠️ **A RENDER IS NOT A PERFORMANCE — the cable is detached for its duration.** A render
+        // schedules the entire song into the bus in one go and never polls, so an attached
+        // ExternalConsumer would (a) accumulate the whole song's messages with nothing releasing them
+        // and (b) fire them at the wall clock afterwards, playing the song at the hardware once the
+        // render was over. §9 already says an EXTERNAL instrument cannot be rendered to a WAV; this is
+        // what makes it render as silence rather than as chaos.
+        external_.panic();
+        router_.remove_consumer(&external_);
         songcore::prepare_render(*engine_, project_, startRow, endRow);
         consumer_.clear_track_mask();   // Kotlin clears phraseTrackMask in clearScheduledNotes()
         sync_clock();                   // the frame counter is back at 0 — re-read it
@@ -204,6 +233,7 @@ class SongcoreHost {
         if (!engine_) return;
         songcore::finish_render(*engine_, project_);
         consumer_.clear_track_mask();
+        router_.add_consumer(&external_);   // the cable is live again (add_consumer is idempotent)
     }
 
     // prepare → schedule → render → finish, with songcore's own sequencer in the middle.
@@ -896,9 +926,10 @@ class SongcoreHost {
      */
     RateCache rateCache_;
 
-    MidiRouter     router_;
-    Sequencer      seq_;
-    EngineConsumer consumer_;
+    MidiRouter       router_;
+    Sequencer        seq_;
+    EngineConsumer   consumer_;
+    ExternalConsumer external_;
 
     TraceWriter   writer_;
     std::string   traceBuf_;

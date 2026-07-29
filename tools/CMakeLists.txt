@@ -22,6 +22,8 @@ project("pockettracker-tools" LANGUAGES C CXX)
 #   ptinput  Phase3 S3 the input layer          21687 cases          (units/p3-input.txt)
 #   ptdispatch Ph3 S5  the input DISPATCHER     686 assertions — NO golden; see below and its header
 #   ptmapper   conv C0 the COMBO MATRIX         assertions     — NO golden; the layer above ptdispatch
+#   ptmidi     MIDI B  the EXTERNAL MIDI BYTES  assertions     — NO golden, and none POSSIBLE: MIDI
+#                      out never existed in Kotlin. The only tool that sees a byte on the wire.
 #   pttouch    conv D1 the TOUCH LAYOUT sizes   675 golden lines     (units/touch-layout.txt)
 #              conv D3 + touch POSITIONS        assertions     — NO golden (--positions); see below
 #   ptdecode   conv D2 the PNG DECODER          decode fixtures — an INDEPENDENT encoder; see below
@@ -216,6 +218,15 @@ add_executable(ptdispatch ptdispatch/main.cpp)
 pt_ieee_exact(ptdispatch)
 target_link_libraries(ptdispatch PRIVATE pt-ui)
 
+# ptmidi — the EXTERNAL MIDI-out byte stream (MIDI plan phase B). Also NOT a conformance tool, and for
+# a stronger reason than ptdispatch's: MIDI out never existed in Kotlin, so there is no golden to be
+# had at all. It is the only thing in the tree that can see a MIDI byte — ptplay stops at the bus
+# record, ptvoice at the engine call, ptrender at the audio — and it is where the note LIFECYCLE
+# (gate-to-next, LEN, panic) and the two-sided routing gate are checked. See its header.
+add_executable(ptmidi ptmidi/main.cpp)
+pt_ieee_exact(ptmidi)
+target_link_libraries(ptmidi PRIVATE pockettracker)
+
 # ptrender writes WAVs, and the fingerprint goldens live beside the projects they describe.
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/render-out")
 
@@ -236,6 +247,8 @@ add_test(NAME p3-input         COMMAND ptinput     "${PT_TESTDATA}/units/p3-inpu
 add_test(NAME p3-dispatch      COMMAND ptdispatch)
 # Likewise no golden: the combo matrix is uncovered on the Kotlin side too. See ptmapper's header.
 add_test(NAME c0-mapper        COMMAND ptmapper)
+# No golden either, and no Kotlin original to record one from — MIDI out is new. See ptmidi's header.
+add_test(NAME b1-midi-out      COMMAND ptmidi)
 # The touch-layout size golden (B2), re-parsed and byte-compared by the C++ port. See pttouch's header.
 add_test(NAME d-touch-layout   COMMAND pttouch     "${PT_TESTDATA}/units/touch-layout.txt")
 # The touch button POSITIONS (D3), by a hand-written oracle — NO golden, because Compose's layout pass

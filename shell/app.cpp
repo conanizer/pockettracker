@@ -199,6 +199,11 @@ int run(const AppConfig& cfg) {
     // re-rooted onto ours. See set_app_root.
     host.set_app_root(cfg.appRoot);
 
+    // The EXTERNAL MIDI port, if the platform opened one (MIDI plan phase B). Set BEFORE the project
+    // loads, so an EXTERNAL instrument in a boot project is routed from its very first note.
+    host.set_midi_out(cfg.midiOut);
+    host.set_midi_offset_ms(cfg.midiOffsetMs);
+
     // A REQUESTED project is one with a path; its bytes are already in `projectBlob`, read by the
     // platform before any window existed to hide a bad path behind.
     const bool hasProject = !cfg.projectPath.empty();

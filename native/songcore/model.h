@@ -55,7 +55,10 @@ enum class ModDest {
     NONE, VOLUME, PAN, PITCH, FINE_PITCH, FILTER_CUTOFF, FILTER_RES,
     SAMPLE_START, MOD_AMT, MOD_RATE, MOD_BOTH
 };
-enum class InstrumentType { SAMPLER, SOUNDFONT };
+// The instrument's ROUTING DESTINATION — which sound module consumes its event stream (MIDI plan §1),
+// not "what kind of instrument it is". SAMPLER and SOUNDFONT are consumed by EngineConsumer; EXTERNAL
+// leaves the process as MIDI bytes (ExternalConsumer, midi_out.h). Future synth modules append here.
+enum class InstrumentType { SAMPLER, SOUNDFONT, EXTERNAL };
 
 inline const char* mod_type_name(ModType t) {
     switch (t) {
@@ -112,13 +115,21 @@ inline bool mod_dest_from_name(const std::string& s, ModDest& out) {
     return false;
 }
 inline const char* instrument_type_name(InstrumentType t) {
-    return t == InstrumentType::SOUNDFONT ? "SOUNDFONT" : "SAMPLER";
+    switch (t) {
+        case InstrumentType::SOUNDFONT: return "SOUNDFONT";
+        case InstrumentType::EXTERNAL:  return "EXTERNAL";
+        case InstrumentType::SAMPLER:   break;
+    }
+    return "SAMPLER";
 }
 inline bool instrument_type_from_name(const std::string& s, InstrumentType& out) {
     if (s == "SAMPLER")   { out = InstrumentType::SAMPLER;   return true; }
     if (s == "SOUNDFONT") { out = InstrumentType::SOUNDFONT; return true; }
+    if (s == "EXTERNAL")  { out = InstrumentType::EXTERNAL;  return true; }
     return false;
 }
+/** How many entries InstrumentType has — the INSTRUMENT screen's TYPE cell cycles on it. */
+inline constexpr int INSTRUMENT_TYPE_COUNT = 3;
 
 // ─── display names (ModType.displayName / ModDest.displayName) ──────────────────────────────────
 //
@@ -310,6 +321,21 @@ struct SFOverrides {
     bool operator!=(const SFOverrides& o) const { return !(*this == o); }
 };
 
+/**
+ * One of an EXTERNAL instrument's four CC slots (M8's CCA–CCJ, cut to four — MIDI plan §7).
+ *
+ * `cc` is the controller NUMBER the slot owns and `value` the default sent WITH each note-on; −1 in
+ * either means "unused", which is the project-wide empty convention and not a magic 0xFF.
+ */
+struct MidiCcSlot {
+    int cc    = -1;   // -1 = slot unused | 0-127
+    int value = -1;   // -1 = send nothing on note-on | 0-127
+    bool operator==(const MidiCcSlot& o) const { return cc == o.cc && value == o.value; }
+    bool operator!=(const MidiCcSlot& o) const { return !(*this == o); }
+};
+
+constexpr int MIDI_CC_SLOTS = 4;
+
 struct Instrument {
     int id = 0;
     std::string name = default_instrument_name(0);
@@ -336,6 +362,28 @@ struct Instrument {
     int eqSlot = -1;
     int slicingMode = 0;
     std::vector<int64_t> sliceMarkers;           // emptyList()
+
+    // ── EXTERNAL (instrumentType == EXTERNAL) — MIDI plan §7 ─────────────────────────────────────
+    // Every one of these is ignored by the other two types, and every one has a default, so an
+    // instrument that is not EXTERNAL serialises exactly the bytes it always did.
+    //
+    // `volume` and `pan` are REUSED rather than duplicated: volume scales the note-on velocity
+    // (LGPT-style) and pan becomes CC 10. An external instrument therefore mixes with the same two
+    // cells as every other instrument, which is the point of one protocol.
+    int midiChannel = 0;    // 0-15, shown 1-16
+    int midiBank    = -1;   // -1 = send nothing; else the bank sent (CC0/CC32) before the program
+    int midiProgram = -1;   // -1 = send nothing; else the program sent with the first note-on
+    /**
+     * Gate length in TICKS (LGPT's LEN), 0 = gate-to-next.
+     *
+     * ⚠️ Non-zero and gate-to-next are different mechanisms, not one with a special case: a LEN gate
+     * schedules its own note-off at emit time, while 0 leaves the note sounding until the NEXT note-on
+     * or KIL lands on the track — which is exactly what the sampler's cut behaviour does, and is why an
+     * external synth follows a phrase's rests the way the internal one does.
+     */
+    int midiLen = 0;
+    std::vector<MidiCcSlot> midiCC = std::vector<MidiCcSlot>(MIDI_CC_SLOTS);
+
     Instrument() = default;
     explicit Instrument(int id_) : id(id_), name(default_instrument_name(id_)) {}
 };
@@ -365,6 +413,17 @@ inline bool instrument_is_free(const Instrument& ins) {
            ins.instrumentType == InstrumentType::SAMPLER;
 }
 
+/**
+ * Does this instrument's event stream leave the process (MIDI plan §4.3)?
+ *
+ * The ONE routing question the bus asks, and it is deliberately a model predicate rather than a
+ * consumer's private test: BOTH consumers ask it, and they must agree on every event or a note is
+ * either played twice or dropped. See midi_out.h.
+ */
+inline bool instrument_routes_external(const Instrument& ins) {
+    return ins.instrumentType == InstrumentType::EXTERNAL;
+}
+
 struct Project {
     int version = 0;
     std::string name = "UNTITLED";
@@ -384,6 +443,14 @@ struct Project {
     std::vector<Instrument> instruments;          // Array(128){ Instrument(id=i, sampleId=i) }
     std::vector<Table>      tables;               // Array(128){Table(it)}
     std::vector<Groove>     grooves;              // Array(128){Groove(it)}
+
+    // ── MIDI, the parts that are MUSICAL INTENT and so travel with the song (MIDI plan §7) ───────
+    // The device PICKS do not live here — they are settings.json (settings_store.h), because a project
+    // carried to another machine keeps its routing and its sync intent and re-picks its cables.
+    int  midiSyncOut = 0;               // 0 OFF | 1 CLOCK | 2 TRANSPORT | 3 CLOCK+TRANSPORT (phase C)
+    bool midiSendProgramChange = true;
+    // 8 = POOL_TRACKS, spelled as a literal only because that constant is declared below this struct.
+    std::vector<int> midiInputChannels = std::vector<int>(8, -1);   // per-track input channel, phase E
 };
 
 struct InstrumentPreset {

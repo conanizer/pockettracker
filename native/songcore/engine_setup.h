@@ -504,11 +504,16 @@ void set_instrument_type(Engine* engine, Project& project, int id, InstrumentTyp
     Instrument& ins = project.instruments[id];
     ins.instrumentType = newType;
 
-    if (newType == InstrumentType::SOUNDFONT) {
+    // ⚠️ Two INDEPENDENT tests, not an if/else on "is it a SoundFont" — that shape was correct only
+    // while there were exactly two types, and EXTERNAL (MIDI plan §7) owns NEITHER source, so it must
+    // free BOTH. Written this way the two original types take byte-for-byte the same branches they
+    // always did, and a fourth type gets the right answer by construction.
+    if (newType != InstrumentType::SAMPLER) {
         ins.sampleFilePath.reset();
         if (engine) engine->clearSample(id);
         routing.sampleRateRatio[id] = 1.0f;
-    } else {
+    }
+    if (newType != InstrumentType::SOUNDFONT) {
         const std::optional<std::string> sfPath = ins.soundfontPath;
         ins.soundfontPath.reset();
         if (sfPath.has_value()) {
