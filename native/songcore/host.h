@@ -786,6 +786,16 @@ class SongcoreHost {
     // no FX, no transpose, velocity −1, the instrument's own volume and pan, and `tableId = -1`,
     // which derive_sampler_note resolves to the instrument's own table — exactly what Kotlin passes.
     //
+    // ⚠️ **AND IT GOES TO THE CABLE (MIDI plan B5), which `plan_note_on` alone cannot do.** An
+    // EXTERNAL instrument has no voice to raise, so an audition that only ever called the engine was
+    // silent by construction — the one screen where you pick the instrument type was the one place
+    // you could not hear the choice. The event is handed to `external_` DIRECTLY rather than through
+    // `router_`, and that is deliberate: the router also feeds the trace writer, whose 36 goldens have
+    // never contained a preview, and the engine consumer, which cannot carry this event's
+    // `rootAudition` flag or its fresh table cache (voice_derive.h says so — a preview is not a bus
+    // event and the ratified schema has no field for either). The routing VERDICT is still the one
+    // model predicate both consumers ask, so the three cannot disagree about who owns a note.
+    //
     // `durationFrames <= 0` means NO TIMED KILL — the voice rings out on its own (endlessly, for a
     // sustaining SoundFont preset) until stop_preview(). That is the instrument audition's contract,
     // not an edge case: an audition of a pad that dies after a 16th note tells you nothing about it.
@@ -800,6 +810,7 @@ class SongcoreHost {
                                              // cell that inserts nothing must not thump the lane
         if (instrumentId < 0 || instrumentId >= static_cast<int>(project_.instruments.size())) return;
         const Instrument& ins = project_.instruments[instrumentId];
+        const bool external = instrument_routes_external(ins);
 
         engine_->requestResume();
         const int64_t frame = engine_->getCurrentFrame() + 100;  // Kotlin's +100-frame lead-in
@@ -812,13 +823,40 @@ class SongcoreHost {
 
         NoteOnPayload& n = ev.noteOn;
         n.note        = static_cast<uint8_t>(note_to_midi(note));
-        n.velocity    = -1;                                        // no V column behind a preview
-        n.velGainBits = f32_bits(hex_to_float(ins.volume));        // seam arg `volume`
-        n.volGainBits = f32_bits(1.0f);                            // seam arg `phraseVol`
+        // ⚠️ **The three velocity fields are wired DIFFERENTLY per destination, and the difference is
+        // a fix rather than a shortcut.** The engine's wiring is Kotlin's historically-crossed one
+        // (scheduler.h says so): the instrument's own VOL arrives as the velocity-curve gain
+        // `velGain`, with `phraseVol` at 1.0. `midi_velocity` (midi_out.h) is written against the
+        // SCHEDULER's meaning of the same fields — it reads `velocity == -1` as "derive from velGain,
+        // which the scheduler built as (V/127)²" and takes the square root. Handed a raw VOL that
+        // comes out sqrt-BOOSTED: VOL 0x80 previewed at velocity 90, where the very same instrument
+        // SEQUENCED at V=7F sends 64. So the wire's copy states what it means — a preview has no V
+        // column, hence full velocity, scaled by VOL in the field that scales by VOL.
+        n.velocity    = external ? 127 : -1;
+        n.velGainBits = f32_bits(external ? 1.0f : hex_to_float(ins.volume));   // seam arg `volume`
+        n.volGainBits = f32_bits(external ? hex_to_float(ins.volume) : 1.0f);   // seam arg `phraseVol`
         n.panBits     = f32_bits(hex_to_float(ins.pan));
         n.start = -1; n.slice = -1; n.tableId = tableIdOverride; n.tableRow = -1;
         n.transpose = 0; n.pit = 0; n.arp = 0;
         n.pslOffBits = n.pslDurBits = n.pbnRateBits = n.vibSpdBits = n.vibDepBits = f32_bits(0.0f);
+
+        // ⚠️ UNCONDITIONALLY, whichever way this instrument routes — and that is the whole of the
+        // preview lane's note lifecycle. `ExternalConsumer::consume` answers the gate itself, and its
+        // INTERNAL arm is the one that matters here: a note-on for a non-external instrument on a lane
+        // that was last EXTERNAL ends the note the cable is still holding. Without it, auditioning an
+        // external instrument and then a sampler one — two STARTs, and START is exempt from
+        // `on_stop_preview` (button_mapper.h) — leaves a note sounding on the gear with nothing left
+        // in the app that resolves to it. On a lane that was never external this costs one lookup.
+        external_.consume(ev);
+
+        if (external) {
+            // A timed audition owes the cable its own note-off; the engine's half of the same thing is
+            // the `scheduleKill` below. `end_note` takes the MIN of this frame and the instrument's
+            // LEN gate, so a LEN shorter than the preview still wins. `durationFrames <= 0` is the
+            // ring-out contract — an instrument audition — and `stop_preview()` is what ends that.
+            if (durationFrames > 0) preview_note_off(frame + durationFrames);
+            return;   // …and NO voice, cable or no cable: EXTERNAL means "not this engine"
+        }
 
         // A fresh cache every preview, so an edit to the instrument's table is heard immediately —
         // Kotlin calls forceReloadTable here for the same reason.
@@ -845,10 +883,20 @@ class SongcoreHost {
                      /*rootAudition=*/true, tableIdOverride);
     }
 
-    /** Silence the audition lane. Backs the "press any button to stop the preview" gesture. */
+    /**
+     * Silence the audition lane. Backs the "press any button to stop the preview" gesture.
+     *
+     * ⚠️ Both halves, and the second one is not symmetry for its own sake: an EXTERNAL audition with
+     * `midiLen == 0` is gate-to-next and there is no next note, so THIS is the only thing that ends
+     * it. An external synth has no voice allocator to save us — a note-on we fail to answer sounds
+     * until the gear is power-cycled. On a lane holding no external note the consumer's `active_` flag
+     * says so and it costs a branch.
+     */
     void stop_preview() {
         if (!engine_) return;
-        engine_->scheduleKill(engine_->getCurrentFrame(), AudioEngine::PREVIEW_LANE);
+        const int64_t now = engine_->getCurrentFrame();
+        engine_->scheduleKill(now, AudioEngine::PREVIEW_LANE);
+        preview_note_off(now);
     }
 
     // ── ↑ feedback ───────────────────────────────────────────────────────────────────────────────
@@ -900,6 +948,25 @@ class SongcoreHost {
     int64_t after_play() {
         flush_trace();
         return seq_.playback_start_frame();
+    }
+
+    /**
+     * The preview lane's note-off on the CABLE (MIDI plan B5) — the timed audition's end, and what
+     * `stop_preview` sends.
+     *
+     * It is a bus record rather than a call into the consumer's internals on purpose: `consume` is the
+     * one door, so the note-off answers the SAME routing gate the note-on did, resolves the lane's
+     * instrument through the SAME `TrackInstruments`, and honours the LEN gate through the same `min`.
+     * A private back door would be a second opinion about who owns the note.
+     */
+    void preview_note_off(int64_t frame) {
+        Event off{};
+        off.type         = EV_NOTE_OFF;
+        off.frame        = frame;
+        off.track        = AudioEngine::PREVIEW_LANE;
+        off.instrument   = INSTRUMENT_NONE;   // track-scoped, like every note-off on the bus
+        off.noteOff.mode = NOTE_OFF_CUT;
+        external_.consume(off);
     }
 
     // Drain the writer's buffer to disk after each verb: a long session can't grow unbounded in RAM,

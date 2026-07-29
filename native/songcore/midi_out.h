@@ -137,12 +137,28 @@ class ExternalConsumer : public IMidiConsumer {
 
     // ── IMidiConsumer ────────────────────────────────────────────────────────────────────────────
 
+    /**
+     * ⚠️ **`on_play` IS the transport starting — unlike `on_stop` below, and the asymmetry is real.**
+     * `t_play` is emitted once, by `playSong`/`playChain`/`playPhrase` (and by the render pass, which
+     * never reaches this consumer — the host detaches the cable for a render). `t_stop` is emitted at
+     * the end of every scheduling pass. Verified in scheduler.h, not assumed from the pair of names.
+     *
+     * ⚠️ **The `panic()` is what makes `tracks_.reset()` safe, and it was NOT safe before B5.**
+     * Resetting the lane→instrument map while `active_` still holds notes strands them: no later event
+     * on that lane resolves to an external instrument any more, so `consume` returns at the gate and
+     * the note-off we owe can never be delivered. On tracks 0-7 the next take's first note-on hid it
+     * (`note_on` ends the track's previous note first); the PREVIEW lane has no next note-on, so an
+     * audition ringing when the transport started would have hung. Panicking here is also just what a
+     * transport start means: nothing may be sounding from before it, and the queue holds messages for
+     * a take that no longer exists.
+     */
     void on_play(const std::string&, const std::string&, int64_t, int tempo, int sample_rate) override {
         if (tempo > 0) tempo_ = tempo;
         if (sample_rate > 0) sampleRate_ = sample_rate;
         // A fresh transport is a fresh device state: the bank/program/pan we believe each channel is
         // on was true of the last take, and the user may have turned knobs on the gear since.
-        forget_channel_state();
+        // (`panic()` ends every sounding note, drops the queue and calls forget_channel_state().)
+        panic();
         tracks_.reset();
     }
 

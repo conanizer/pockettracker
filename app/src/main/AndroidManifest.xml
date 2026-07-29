@@ -15,6 +15,16 @@
         tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!--
+        EXTERNAL MIDI out (MIDI plan phase B2b). No PERMISSION is needed: USB and virtual (app-to-app)
+        MIDI through MidiManager are unguarded — only BLE MIDI would want BLUETOOTH_SCAN, and the plan
+        defers BLE (§9). ⚠️ required="false" is load-bearing: `true` would hide the app on the Play
+        Store from every device without a MIDI stack, which is most phones, to gate one optional
+        instrument type. `MidiOutManager` already answers "0 devices" when the service is absent, and
+        the MIDI screen's OUTPUT row already draws that as `OFF  NO PORTS`.
+    -->
+    <uses-feature android:name="android.software.midi" android:required="false" />
+
     <application
         android:allowBackup="true"
         android:largeHeap="true"

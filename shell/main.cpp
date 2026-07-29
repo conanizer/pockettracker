@@ -34,7 +34,7 @@
 #include "ui/std_filesystem.h"
 
 #include "app.h"
-#include "midi-out-winmm.h"   // compiles to nothing off Windows
+#include "midi-out.h"         // picks the platform's IMidiOut; the block below has no #ifdef of its own
 #include "sdl-audio-engine.h"
 
 #include <csignal>
@@ -255,8 +255,13 @@ int main(int argc, char** argv) {
     // `open_by_spec` is still what does the resolving, and still prints the device list unconditionally:
     // on a machine where nothing sounds, "there were 0 devices" and "there were 3 and none matched" are
     // different problems and the console is where that is cheapest to answer.
-#ifdef _WIN32
-    ptshell::WinmmMidiOut midiOut;
+    //
+    // ⚠️ THE BLOCK BELOW IS PLATFORM-FREE, and that is B2b's whole shape: `PlatformMidiOut` is winmm
+    // on Windows and ALSA rawmidi on Linux (midi-out.h), both deriving from `MidiOutBase`, so the
+    // console the Windows bring-up was debugged with is the *same* console on a handheld. A backend
+    // that only ever ran under its own bespoke wiring is one nobody can compare to the one that works.
+#ifdef PT_HAS_PLATFORM_MIDI_OUT
+    ptshell::PlatformMidiOut midiOut;
     {
         if (const char* tr = SDL_getenv("POCKETTRACKER_MIDI_TRACE"); tr && tr[0] == '1')
             midiOut.set_trace(true);

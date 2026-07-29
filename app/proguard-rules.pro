@@ -1,10 +1,15 @@
 # ─── The by-name JNI callbacks from native into Kotlin (convergence Phase E) ──────────────────
 #
-# The shared C++ shell calls exactly two Kotlin methods on MainActivity by name, resolving each with
-# GetMethodID (shell/android-main.cpp):
+# The shared C++ shell calls exactly seven Kotlin methods on MainActivity by name, resolving each with
+# GetMethodID (shell/android-main.cpp, shell/midi-out-android.cpp):
 #     onButtonFeedback(IZZIZI)V     — routes a virtual-button press to the sound/haptic managers
 #     hasPhysicalGameButtons()Z     — the SOURCE_GAMEPAD check SDL's looser C joystick API cannot make
-# so both NAMES are part of the ABI and R8 must not rename or strip them. They carry @Keep as well, but
+#     midiDeviceCount()I            — ┐ the EXTERNAL MIDI out port (MIDI plan B2b). MidiManager is a
+#     midiDeviceName(I)L…/String;   — │ Java-only API and the ONLY route to USB/virtual/BLE MIDI on
+#     midiOpenDevice(I)Z            — │ Android, so these five are the whole platform seam. See
+#     midiCloseDevice()V            — │ MidiOutManager.kt for why AMidi does not remove the Java half.
+#     midiSend(IIII)Z               — ┘
+# so all seven NAMES are part of the ABI and R8 must not rename or strip them. They carry @Keep as well, but
 # an explicit rule is this project's standing requirement for a native-by-name callback: @Keep alone
 # once let a renamed SAM member (onProgress, the old songcore render-progress hook — since deleted with
 # the JNI facade) kill every render in a release APK. MainActivity now runs R8 in release, having left
@@ -16,6 +21,11 @@
 -keepclassmembers class com.conanizer.pockettracker.MainActivity {
     void onButtonFeedback(int, boolean, boolean, int, boolean, int);
     boolean hasPhysicalGameButtons();
+    int midiDeviceCount();
+    java.lang.String midiDeviceName(int);
+    boolean midiOpenDevice(int);
+    void midiCloseDevice();
+    boolean midiSend(int, int, int, int);
 }
 
 # ─── SDL2's Java glue (convergence plan C1) ───────────────────────────────────────────────────

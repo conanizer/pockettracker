@@ -227,6 +227,33 @@ add_executable(ptmidi ptmidi/main.cpp)
 pt_ieee_exact(ptmidi)
 target_link_libraries(ptmidi PRIVATE pockettracker)
 
+# ptalsa — does shell/midi-out-alsa.h's hand-copied libasound ABI match the real headers? (B2b)
+#
+# ⚠️ THE ONE TOOL HERE WITH A BUILD-TIME DEPENDENCY, and therefore the one that can be silently
+# absent. The Linux MIDI backend dlopen()s libasound, so its sixteen prototypes are hand-copied and
+# nothing in a normal build checks them; ptalsa includes ALSA's own headers and compares. It needs
+# libasound2-dev, which the Windows dev box and the PortMaster container do not have — so it is added
+# only when the header is there, and says out loud when it is not. A skipped check that says nothing
+# is a check nobody knows they are missing.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    include(CheckIncludeFileCXX)
+    check_include_file_cxx("alsa/asoundlib.h" PT_HAVE_ALSA_HEADERS)
+    if(PT_HAVE_ALSA_HEADERS)
+        add_executable(ptalsa ptalsa/main.cpp)
+        # For the include roots only — songcore/midi_out.h is what midi-out-base.h reaches for. It
+        # does NOT link libasound: this is a compile-time conformance check, safe on a box with no
+        # sound card, and linking would give it the runtime dependency the backend exists to avoid.
+        target_link_libraries(ptalsa PRIVATE pockettracker)
+        add_test(NAME b2b-alsa-abi COMMAND ptalsa)
+        message(STATUS "ptalsa: alsa/asoundlib.h found - the libasound ABI check is IN this build")
+    else()
+        message(STATUS "ptalsa: alsa/asoundlib.h NOT found - the libasound ABI check is SKIPPED "
+                       "(apt-get install libasound2-dev to enable it)")
+    endif()
+elseif(NOT WIN32)
+    message(STATUS "ptalsa: not Linux - the libasound ABI check does not apply")
+endif()
+
 # ptrender writes WAVs, and the fingerprint goldens live beside the projects they describe.
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/render-out")
 

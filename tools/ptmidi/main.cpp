@@ -142,6 +142,26 @@ static std::string at(const RecordingMidiOut& out, size_t i) {
     return i < out.log.size() ? out.log[i] : std::string("<none>");
 }
 
+// ── The engine-side witness for the PREVIEW lane ────────────────────────────────────────────────
+//
+// ⚠️ `track_mask` cannot do this job here: EngineConsumer sets that bit only for tracks 0-7 (the
+// preview lane is 8, deliberately outside an eight-bit mask), and the preview never goes through that
+// consumer anyway. `noteQueue` is private. What IS public is `onResumeRequested`, and
+// `plan_note_on`'s sampler arm calls `engine.requestResume()` on the line before `scheduleNote` —
+// AFTER the empty-slot check, so it is reached only when a voice is genuinely about to be raised.
+//
+// Stated plainly because it matters: this counts the last call BEFORE the schedule, not the schedule.
+// `preview_note` makes one such call of its own before it branches, so the reading is
+//   1 = the routing gate held (nothing entered the note path) · 2 = a voice was raised.
+// That two-valued signal is what makes both controls fire, which a bare "did anything happen" could
+// not: instrument 1 carries a sampleFilePath below precisely so that dropping the gate would show up
+// as a 2 instead of quietly staying at 1 for want of a sample.
+struct ResumeCounter {
+    int n = 0;
+    explicit ResumeCounter(AudioEngine& e) { e.onResumeRequested = [this]() { ++n; }; }
+    int take() { const int v = n; n = 0; return v; }
+};
+
 int main() {
     std::printf("== ptmidi — EXTERNAL MIDI out (MIDI plan phase B) ==\n\n");
 
@@ -293,6 +313,175 @@ int main() {
         eq_int("engine saw track 1", (host.track_mask() >> 1) & 1, 1);
         host.stop();
         eq_int("stop sent nothing (no channel ever used)", static_cast<long long>(out.log.size()), 0);
+    }
+
+    // ── 5. B5 — the live preview, on the cable and off the engine ────────────────────────────────
+    //
+    // ⚠️ **The claim phase B could not make until B5.** An audition of an EXTERNAL instrument reaches
+    // the CABLE and raises NO voice; an audition of an internal one does the exact opposite. Neither
+    // half is visible to anything above: the preview deliberately does NOT go through the router
+    // (host.h says why — the schema carries neither `rootAudition` nor a per-preview table cache, and
+    // no golden trace has ever contained a preview), so ptplay and ptvoice never see this path.
+    //
+    // ⚠️ BOTH instruments are given a `sampleFilePath` here and nowhere else in this tool. Instrument
+    // 0 needs one because `plan_note_on` drops a note on an empty slot (voice_derive.h's
+    // `sampleFilePath == null` convention) and a control that cannot fire certifies anything —
+    // and instrument 1, the EXTERNAL one, needs one for the SAME reason on the other side: an
+    // EXTERNAL instrument with no sample would raise no voice even with the gate removed, so the gate
+    // check would pass by construction. A SAMPLER flipped to EXTERNAL keeps its sample; that is the
+    // case being measured.
+    std::printf("\n-- B5: the preview reaches the cable, and only the cable --\n");
+    {
+        auto engine = std::make_unique<AudioEngine>();
+        ResumeCounter resumes(*engine);
+        SongcoreHost host(engine.get(), 44100);
+        RecordingMidiOut out;
+        host.set_midi_out(&out);
+        Project p = build_project(/*midiLen=*/0);
+        p.instruments[0].sampleFilePath = std::string("preview.wav");
+        p.instruments[1].sampleFilePath = std::string("flipped.wav");
+        p.instruments[1].volume = 0x80;   // the velocity claim below rides on this
+        host.edit_project() = p;
+        (void)resumes.take();
+
+        host.preview_note(1, Note{0, 4}, /*durationFrames=*/0);   // the EXTERNAL instrument
+        host.midi_out().pump(INT64_MAX / 4);
+        dump(out, "EXTERNAL audition");
+
+        // The patch states itself first, exactly as a sequenced note's does — that is the whole point
+        // of previewing through the same consumer rather than a shortcut beside it.
+        ok(at(out, 0) == "C3 29",    "preview: program change", at(out, 0), "C3 29");
+        ok(at(out, 1) == "B3 4A 64", "preview: CC A default",   at(out, 1), "B3 4A 64");
+        ok(at(out, 2) == "B3 0A 40", "preview: CC 10 pan",      at(out, 2), "B3 0A 40");
+        // ⚠️ **0x40, not 0x5A.** VOL 0x80 = 0.502, and the wire gets full velocity SCALED by VOL —
+        // which is byte-for-byte what the sequencer sends for this instrument at V=7F. Letting VOL
+        // arrive in the engine path's crossed `velGain` slot would take it through `midi_velocity`'s
+        // `velocity == -1` branch, which SQUARE-ROOTS it: 90 (0x5A), a preview audibly louder than
+        // the note being previewed.
+        ok(at(out, 3) == "93 3C 40", "preview: note-on, velocity = VOL", at(out, 3), "93 3C 40");
+        eq_int("preview: nothing else on the wire", static_cast<long long>(out.log.size()), 4);
+        eq_int("preview: the routing gate held, no voice raised (1 = gate)", resumes.take(), 1);
+
+        // ── the control, and the lane hand-off, on the same gesture ──────────────────────────────
+        // Auditioning an INTERNAL instrument next is the START-after-START case (START is exempt from
+        // on_stop_preview, button_mapper.h). It must do two things: reach the engine, and end the note
+        // the cable is still holding on the lane — the last thing in the app that resolves to it.
+        const size_t afterExt = out.log.size();
+        host.preview_note(0, Note{0, 4}, /*durationFrames=*/0);
+        host.midi_out().pump(INT64_MAX / 4);
+        ok(at(out, afterExt) == "83 3C 00", "internal audition ENDS the ringing external note",
+           at(out, afterExt), "83 3C 00");
+        eq_int("internal audition: and puts nothing of its own on the wire",
+               static_cast<long long>(out.log.size() - afterExt), 1);
+        eq_int("internal audition: a voice WAS raised (2 = the note path)", resumes.take(), 2);
+        host.stop();
+    }
+
+    // ── 5b. The timed audition's note-off lands on its own frame ─────────────────────────────────
+    //
+    // ⚠️ Same trap as the LEN gate in case 3b: an off is an off is an off, three identical bytes
+    // whether it arrived on time, early or at the end of the world. Only the FRAME separates them, so
+    // the clock has to be moved by hand.
+    std::printf("\n-- B5: the timed audition ends on its own frame --\n");
+    {
+        auto engine = std::make_unique<AudioEngine>();
+        SongcoreHost host(engine.get(), 44100);
+        RecordingMidiOut out;
+        host.set_midi_out(&out);
+        host.edit_project() = build_project(/*midiLen=*/0);
+
+        const int64_t base = engine->getCurrentFrame() + 100;   // preview_note's lead-in
+        const int64_t dur  = 4000;
+        host.preview_note(1, Note{0, 4}, dur);
+
+        host.midi_out().pump(base);
+        eq_int("at the note's frame: patch + note-on", static_cast<long long>(out.log.size()), 4);
+        host.midi_out().pump(base + dur - 1);
+        eq_int("one frame before the end: still nothing", static_cast<long long>(out.log.size()), 4);
+        host.midi_out().pump(base + dur);
+        eq_int("at the end: the off arrives", static_cast<long long>(out.log.size()), 5);
+        ok(at(out, 4) == "83 3C 00", "…and it is the note-off", at(out, 4), "83 3C 00");
+        host.stop();
+    }
+
+    // ── 5c. …and a LEN gate SHORTER than the audition still wins ─────────────────────────────────
+    // `end_note` takes the min of the two, and this is the only place the preview's own duration and
+    // an instrument's LEN can disagree. `min` cuts short, never extends.
+    std::printf("\n-- B5: a LEN gate shorter than the audition wins --\n");
+    {
+        auto engine = std::make_unique<AudioEngine>();
+        SongcoreHost host(engine.get(), 44100);
+        RecordingMidiOut out;
+        host.set_midi_out(&out);
+        host.edit_project() = build_project(/*midiLen=*/6);
+
+        const int64_t base = engine->getCurrentFrame() + 100;
+        const int64_t gate = 6 * songcore::frames_per_tic(songcore::frames_per_step(128, 44100));
+        eq_int("the gate is shorter than the audition", gate < 4000 ? 1 : 0, 1);
+        host.preview_note(1, Note{0, 4}, /*durationFrames=*/4000);
+
+        host.midi_out().pump(base + gate - 1);
+        eq_int("one frame before the LEN gate: still ringing", static_cast<long long>(out.log.size()), 4);
+        host.midi_out().pump(base + gate);
+        eq_int("at the LEN gate: the off arrives early", static_cast<long long>(out.log.size()), 5);
+        ok(at(out, 4) == "83 3C 00", "…and it is the note-off", at(out, 4), "83 3C 00");
+        host.stop();
+    }
+
+    // ── 5d. The ring-out audition: nothing but stop_preview ends it ──────────────────────────────
+    //
+    // ⚠️ Half of this is a "pass = nothing happened" check, which on its own cannot tell a working
+    // gate-to-next from a preview that never sounded. The two halves run on the SAME audition: it must
+    // survive the end of time, and then die on one call.
+    std::printf("\n-- B5: the ring-out audition, and stop_preview --\n");
+    {
+        auto engine = std::make_unique<AudioEngine>();
+        SongcoreHost host(engine.get(), 44100);
+        RecordingMidiOut out;
+        host.set_midi_out(&out);
+        host.edit_project() = build_project(/*midiLen=*/0);
+
+        host.preview_instrument(1);   // START on INSTRUMENT: the instrument's own root, no timed kill
+        host.midi_out().pump(INT64_MAX / 4);
+        eq_int("audition: patch + note-on", static_cast<long long>(out.log.size()), 4);
+        ok(at(out, 3) == "93 3C 7F", "audition: note-on at the instrument's ROOT", at(out, 3), "93 3C 7F");
+
+        host.midi_out().pump(INT64_MAX / 4);
+        eq_int("past the end of time: still ringing", static_cast<long long>(out.log.size()), 4);
+
+        host.stop_preview();
+        host.midi_out().pump(INT64_MAX / 4);
+        eq_int("stop_preview: the off arrives", static_cast<long long>(out.log.size()), 5);
+        ok(at(out, 4) == "83 3C 00", "…and it is the note-off", at(out, 4), "83 3C 00");
+        host.stop();
+    }
+
+    // ── 5e. A transport start does not strand a ringing audition ─────────────────────────────────
+    //
+    // ⚠️ START is exempt from `on_stop_preview` (button_mapper.h), so an audition IS still ringing
+    // when the transport begins. `on_play` resets the lane→instrument map; before B5 that stranded the
+    // note — no later event on the preview lane would ever resolve to an external instrument again, so
+    // `consume` returned at the gate and the off we owed could not be delivered by anything.
+    std::printf("\n-- B5: a transport start ends a ringing audition --\n");
+    {
+        auto engine = std::make_unique<AudioEngine>();
+        SongcoreHost host(engine.get(), 44100);
+        RecordingMidiOut out;
+        host.set_midi_out(&out);
+        host.edit_project() = build_project(/*midiLen=*/0);
+
+        host.preview_instrument(1);
+        host.midi_out().pump(INT64_MAX / 4);
+        eq_int("audition sounding", static_cast<long long>(out.log.size()), 4);
+
+        const size_t before = out.log.size();
+        host.schedule_song_range(0, 0, nullptr);   // emits t_play → on_play
+        ok(at(out, before) == "83 3C 00",     "transport start: the audition's note-off",
+           at(out, before), "83 3C 00");
+        ok(at(out, before + 1) == "B3 7B 00", "transport start: the CC 123 backstop",
+           at(out, before + 1), "B3 7B 00");
+        eq_int("transport start: exactly those two", static_cast<long long>(out.log.size() - before), 2);
+        host.stop();
     }
 
     std::printf("\n%s\n", failures == 0 ? "ALL GREEN" : ("FAILURES: " + std::to_string(failures)).c_str());

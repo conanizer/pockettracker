@@ -127,7 +127,9 @@ add_executable(pockettracker-sdl
         portrait2.cpp      # the PORTRAIT2 device-skin renderer (convergence D): composite the bands
         font_raster.cpp    # glyph rasterization (convergence D): the one stb_truetype implementation TU
         font.cpp           # the button-label font (convergence D): Helvetica glyphs + D-pad triangles → textures
-        midi-out-winmm.cpp # the WINDOWS songcore::IMidiOut (MIDI plan B2); empty TU elsewhere
+        midi-out-base.cpp  # the platform-FREE half of a MIDI backend (MIDI plan B2b): list, TEST, trace
+        midi-out-winmm.cpp # the WINDOWS songcore::IMidiOut (MIDI plan B2);  empty TU elsewhere
+        midi-out-alsa.cpp  # the LINUX   songcore::IMidiOut (MIDI plan B2b); empty TU elsewhere
         sdl-audio-engine.cpp
         sdl-input.cpp
         sdl-touch.cpp
@@ -155,10 +157,19 @@ add_executable(pockettracker-sdl
 # under add_subdirectory(../native) — the engine and the whole vendored decoder stack — and would
 # countermand the ENGINE's own -ffast-math policy, which it is entitled to make for itself.
 # winmm — `midiOutShortMsg` and friends (midi-out-winmm.cpp). In every Windows install; no package,
-# no COM, no manifest capability. The other backends bring their own (libasound on Linux; Android's
-# is a JNI up-call and links nothing).
+# no COM, no manifest capability.
 if(WIN32)
     target_link_libraries(pockettracker-sdl PRIVATE winmm)
+endif()
+
+# ⚠️ The Linux MIDI backend links NO libasound — it dlopen()s it (midi-out-alsa.cpp explains why: the
+# PortMaster container has no libasound-dev, and a link-time dependency turns a CFW without the
+# library into an app that will not start). So the only thing needed here is the dynamic loader, and
+# that is `${CMAKE_DL_LIBS}` rather than a bare -ldl: dlopen moved into libc proper at glibc 2.34, and
+# this port's floor is 2.31 (ubuntu:20.04, see Dockerfile.portmaster), where it is still a separate
+# library. CMake resolves it to `dl` or to nothing, whichever the toolchain wants.
+if(UNIX AND NOT APPLE AND NOT ANDROID)
+    target_link_libraries(pockettracker-sdl PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
 if(MSVC)

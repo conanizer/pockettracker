@@ -3,8 +3,11 @@
 
 // The Windows songcore::IMidiOut. See midi-out-winmm.cpp for why winmm and why this backend first.
 // Compiles to nothing off Windows, so main.cpp can name the header unconditionally.
+//
+// Only the platform half is here: the device list, the spec resolver, the TEST note, the trace and
+// the counters are `MidiOutBase` and are shared with every other backend.
 
-#include "songcore/midi_out.h"
+#include "midi-out-base.h"
 
 #ifdef _WIN32
 
@@ -24,7 +27,7 @@
 
 namespace ptshell {
 
-class WinmmMidiOut : public songcore::IMidiOut {
+class WinmmMidiOut : public MidiOutBase {
   public:
     ~WinmmMidiOut() override;
 
@@ -35,38 +38,8 @@ class WinmmMidiOut : public songcore::IMidiOut {
     bool        is_open() const override { return handle_ != nullptr; }
     void        send(const uint8_t* data, int len) override;
 
-    /** Print the device list and open the one `spec` names (index, name fragment, or nothing). */
-    bool open_by_spec(const std::string& spec);
-
-    /**
-     * ⚠️ How many `midiOutShortMsg` calls the DRIVER REJECTED.
-     *
-     * `send` cannot report failure — `IMidiOut::send` returns void, because nothing above it could do
-     * anything useful with the news mid-phrase. But a send path that fails silently is
-     * indistinguishable from one that works, which is the whole family of bug this project keeps
-     * paying for. So the failures are counted, and the console prints the count beside the verdict.
-     */
-    int error_count() const { return errors_; }
-    int sent_count() const { return sent_; }
-
-    /**
-     * The plan's §8.1 TEST row, reachable before the screen that will carry it exists: one C-4 on
-     * channel 1, held, then released. It is the smallest thing that answers "is the cable alive?" —
-     * and it deliberately does NOT go through the bus, so a failure here means the PORT, not songcore.
-     */
-    void test_note(int holdMs);
-
-    /** Print every message as it leaves (POCKETTRACKER_MIDI_TRACE=1). */
-    void set_trace(bool on) { trace_ = on; }
-
-    int open_index() const { return openIndex_; }
-
   private:
     HMIDIOUT handle_ = nullptr;
-    int      openIndex_ = -1;
-    int      sent_ = 0;
-    int      errors_ = 0;
-    bool     trace_ = false;
 };
 
 }  // namespace ptshell

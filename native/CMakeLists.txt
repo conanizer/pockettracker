@@ -471,6 +471,8 @@ if(ANDROID)
             "${PT_SHELL_DIR}/portrait2.cpp"    # the PORTRAIT2 device-skin renderer (convergence D)
             "${PT_SHELL_DIR}/font_raster.cpp"  # glyph rasterization (convergence D): the one stb_truetype impl TU
             "${PT_SHELL_DIR}/font.cpp"         # the button-label font (convergence D): Helvetica + D-pad triangles
+            "${PT_SHELL_DIR}/midi-out-base.cpp"    # the platform-FREE half of a MIDI backend (MIDI plan B2b)
+            "${PT_SHELL_DIR}/midi-out-android.cpp" # the ANDROID songcore::IMidiOut: five JNI up-calls (B2b)
             "${PT_SHELL_DIR}/sdl-input.cpp"
             "${PT_SHELL_DIR}/sdl-touch.cpp"
             "${PT_SHELL_DIR}/sdl-video.cpp"

@@ -18,6 +18,7 @@ import androidx.core.view.WindowCompat
 import com.conanizer.pockettracker.input.VirtualButton
 import com.conanizer.pockettracker.platform.android.ButtonHapticManager
 import com.conanizer.pockettracker.platform.android.ButtonSoundManager
+import com.conanizer.pockettracker.platform.android.MidiOutManager
 import org.json.JSONObject
 import org.libsdl.app.SDLActivity
 import java.io.File
@@ -217,6 +218,11 @@ class MainActivity : SDLActivity() {
         buttonSound  = ButtonSoundManager(this)
         buttonHaptic = ButtonHapticManager(this)
 
+        // The MIDI port, for the same reason and in the same place: the SDL thread `super.onCreate()`
+        // starts calls `boot_midi_port()` during its boot, which re-opens the saved device. Nothing
+        // here touches hardware — it only takes the system service — so it costs the splash nothing.
+        midiOut = MidiOutManager(this)
+
         super.onCreate(savedInstanceState)
         hideSystemBars()
     }
@@ -225,6 +231,12 @@ class MainActivity : SDLActivity() {
         buttonSound?.release()
         buttonSound  = null
         buttonHaptic = null
+        // ⚠️ The BACKSTOP, not the normal path. The shell's teardown panics and closes the port
+        // through `midiCloseDevice()` while the SDL thread is still alive; this catches the death it
+        // does not reach — a kill, a config change, a crash — where an open port would otherwise hold
+        // the last note on the hardware until the user power-cycles it. `close()` is idempotent.
+        midiOut?.close()
+        midiOut      = null
         super.onDestroy()
     }
 
@@ -320,6 +332,48 @@ class MainActivity : SDLActivity() {
         }
         return false
     }
+
+    // ── EXTERNAL MIDI out (MIDI plan phase B2b) ────────────────────────────────────────────────────
+    //
+    // Five more by-name JNI hooks, and the same shape as `onButtonFeedback` above: an Android system
+    // service with no C++ twin, reached through the narrowest surface that works. `MidiOutManager`
+    // holds the whole of it; these five only forward. See that file for why MidiManager is
+    // unavoidable (AMidi does not remove the Java half) and for the direction gotcha — to SEND you
+    // open the device's INPUT port.
+    //
+    // ⚠️ All five are `@Keep` AND listed in `proguard-rules.pro`, per the project's standing rule for
+    // JNI-by-name callbacks. A renamed member here is silent in debug and kills MIDI in release only —
+    // the v0.9.3 DEX bug class. `shell/midi-out-android.cpp` logs one line at resolve time saying
+    // whether it found them, so the failure is visible in logcat instead of looking like "no devices".
+
+    private var midiOut: MidiOutManager? = null
+
+    /** How many devices this phone can send MIDI to right now. Re-enumerates — MIDI is hot-pluggable. */
+    @Keep
+    fun midiDeviceCount(): Int = midiOut?.deviceCount() ?: 0
+
+    /** Display name of device [index], from the snapshot [midiDeviceCount] just took. */
+    @Keep
+    fun midiDeviceName(index: Int): String = midiOut?.deviceName(index).orEmpty()
+
+    /**
+     * Open device [index] for sending. ⚠️ BLOCKS the calling (SDL) thread for up to ~3 s while
+     * `MidiManager.openDevice` completes — see `MidiOutManager.open` for why waiting is the right
+     * answer and an optimistic `true` is not.
+     */
+    @Keep
+    fun midiOpenDevice(index: Int): Boolean = midiOut?.open(index) ?: false
+
+    /** ⚠️ The native side sends all-notes-off on all 16 channels immediately BEFORE calling this. */
+    @Keep
+    fun midiCloseDevice() {
+        midiOut?.close()
+    }
+
+    /** One serialized MIDI message, 1–3 bytes. False = it did not go out (counted natively). */
+    @Keep
+    fun midiSend(b0: Int, b1: Int, b2: Int, len: Int): Boolean =
+        midiOut?.send(b0, b1, b2, len) ?: false
 
     /**
      * **C6 — the one-time SharedPreferences → settings.json migration.**

@@ -33,6 +33,7 @@
 
 #include "app.h"
 #include "button_feedback.h"
+#include "midi-out-android.h"   // the EXTERNAL MIDI port (MIDI plan B2b); compiles to nothing elsewhere
 
 #include <android/log.h>
 #include <jni.h>
@@ -354,6 +355,21 @@ int main(int argc, char** argv) {
     // that as "no feedback". See button_feedback.h and AndroidButtonFeedback above.
     AndroidButtonFeedback buttonFeedback;
     cfg.buttonFeedback = &buttonFeedback;
+
+    // ── EXTERNAL MIDI out (MIDI plan phase B2b) ──────────────────────────────────────────────────
+    //
+    // Attached UNCONDITIONALLY, and — read app.h — null is NOT "MIDI off". `SongcoreHost` attaches its
+    // `ExternalConsumer` either way; what this pointer decides is whether the bytes have anywhere to
+    // go. The MIDI screen needs the ENUMERATOR even on a phone with nothing plugged in, or its OUTPUT
+    // row cannot tell "no devices" from "no backend" — which is the state the whole row exists to make
+    // visible. Constructed HERE so it outlives `run()`, like the feedback sink above.
+    //
+    // ⚠️ NO ENV-VAR BLOCK, unlike shell/main.cpp. `POCKETTRACKER_MIDI_OUT` and friends are a desktop
+    // bring-up console; on Android there is no shell to set them from, and the device pick comes from
+    // settings.json through `InputDispatcher::boot_midi_port()` — which `ptshell::run` calls below,
+    // and which is the same path the OUTPUT row uses. One owner of "which port is open".
+    ptshell::AndroidMidiOut midiOut;
+    cfg.midiOut = &midiOut;
 
     const int rc = ptshell::run(cfg);
 
