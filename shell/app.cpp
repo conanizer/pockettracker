@@ -401,6 +401,19 @@ int run(const AppConfig& cfg) {
     // first frame the OVERLAY row is live, and again whenever the user cycles it.
     state.settings.overlayIndex = screen_overlay_index(state.settings.overlayName);
 
+    // ── The MIDI port (plan §8.1, B4.3) ──────────────────────────────────────────────────────────
+    //
+    // The backend goes into AppState so the MIDI screen can ENUMERATE — the one option list in the app
+    // that comes from the operating system and changes while the app is running. It stays a borrowed,
+    // nullable pointer: a build with no backend (Linux and Android until B2b) simply has none, and
+    // every use of it is guarded.
+    //
+    // The two env-var overrides land here, over whatever settings.json said, BEFORE anything opens —
+    // see app.h for why they become settings rather than a second, invisible source of truth.
+    state.midiOut = cfg.midiOut;
+    if (!cfg.midiOutDevice.empty()) state.settings.midiOutDevice = cfg.midiOutDevice;
+    if (cfg.midiOffsetMs != 0)      state.settings.midiOffsetMs  = cfg.midiOffsetMs;
+
     ui::Canvas        canvas;
     ui::TrackerLayout layout;
     ui::EngineFeed    feed;
@@ -409,6 +422,17 @@ int run(const AppConfig& cfg) {
     // Sequencer is reading — so an edit is live the instant it is made.
     ui::InputDispatcher dispatch(state, host, filesystem);
     ui::MapperState     mapper;
+
+    // Open the port the settings name — and push the OFFSET, which the consumer needs whether or not a
+    // port ever opens. Deliberately the DISPATCHER's call and not six lines of resolve-and-open here:
+    // the MIDI screen's OUTPUT row runs the same two functions, so boot and UI cannot drift apart about
+    // which device is open. See InputDispatcher::boot_midi_port.
+    dispatch.boot_midi_port();
+    if (cfg.midiOut) {
+        std::printf("midi:    OUT %s (offset %+d ms)\n",
+                    cfg.midiOut->is_open() ? state.settings.midiOutDevice.c_str() : "OFF",
+                    state.settings.midiOffsetMs);
+    }
 
     // ── What a RENDER needs from the shell (S7) ──────────────────────────────────────────────────
     //

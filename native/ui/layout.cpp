@@ -270,6 +270,22 @@ void TrackerLayout::draw(Canvas& c, const AppState& s) {
                 break;
             }
 
+            case ScreenType::MIDI: {
+                MidiState ms{p, s.settings};
+                ms.cursorRow    = s.midiCursorRow;
+                ms.cursorColumn = s.midiCursorColumn;
+                // The port list, exactly as the dispatcher enumerated it on the way in — the same
+                // "text the module paints but does not own" arrangement the DEVICE rows above use, and
+                // for the same reason: only the platform can name what an index means.
+                ms.deviceNames  = s.midiDeviceNames;
+                ms.deviceIndex  = s.midiDeviceIndex;
+                ms.statusText   = s.midiStatusText;
+                ms.caps         = s.caps;
+                ms.theme        = t;
+                midi_.draw(c, moduleX, EDITOR_Y, ms);
+                break;
+            }
+
             default:
                 draw_placeholder(c, moduleX, EDITOR_Y, s.currentScreen, t);
                 break;

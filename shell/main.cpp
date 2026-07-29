@@ -241,21 +241,41 @@ int main(int argc, char** argv) {
     //   POCKETTRACKER_MIDI_OUT=list                      print the devices and open nothing
     //   POCKETTRACKER_MIDI_OFFSET_MS=<-999..999>         MIDI later (+) or earlier (-) than the audio
     //
-    // ⚠️ TEMPORARY, and named so in the plan: the device pick belongs in settings.json and the MIDI
-    // screen (§8.1, phase B4). Until that screen exists, this is the only way to reach the feature —
-    // and a feature that cannot be reached cannot be tested on a real device.
+    // ⚠️ NO LONGER THE ONLY WAY IN. B4.3 built the MIDI screen (PROJECT > MIDI), so the device pick now
+    // lives in settings.json where the plan always said it belonged, and these four are a DEV OVERRIDE
+    // and a bring-up console rather than the feature's front door.
+    //
+    // ⚠️⚠️ AND THE OVERRIDE NO LONGER OPENS THE PORT BEHIND THE APP'S BACK. It resolves the spec to a
+    // device NAME and hands that over as a setting; `InputDispatcher::boot_midi_port()` does the
+    // opening, by the same two calls the screen's OUTPUT row uses. The alternative — main.cpp opening a
+    // port the settings know nothing about — gives the OUTPUT row a way to draw one device while
+    // another is sounding, which is precisely the class of bug this project keeps paying for. One
+    // owner of "which port is open".
+    //
+    // `open_by_spec` is still what does the resolving, and still prints the device list unconditionally:
+    // on a machine where nothing sounds, "there were 0 devices" and "there were 3 and none matched" are
+    // different problems and the console is where that is cheapest to answer.
 #ifdef _WIN32
     ptshell::WinmmMidiOut midiOut;
     {
         if (const char* tr = SDL_getenv("POCKETTRACKER_MIDI_TRACE"); tr && tr[0] == '1')
             midiOut.set_trace(true);
+
+        // Attached whether or not anything opens — the MIDI screen needs the ENUMERATOR (see app.h).
+        cfg.midiOut = &midiOut;
+
         const char* spec = SDL_getenv("POCKETTRACKER_MIDI_OUT");
-        if (midiOut.open_by_spec(spec ? spec : "")) cfg.midiOut = &midiOut;
+        if (midiOut.open_by_spec(spec ? spec : "")) {
+            cfg.midiOutDevice = midiOut.device_name(midiOut.open_index());
+            std::printf("midi:    OUT override -> settings device '%s'\n", cfg.midiOutDevice.c_str());
+        }
         if (const char* off = SDL_getenv("POCKETTRACKER_MIDI_OFFSET_MS")) {
             cfg.midiOffsetMs = std::atoi(off);
             std::printf("midi:    OFFSET %+d ms\n", cfg.midiOffsetMs);
         }
-        // POCKETTRACKER_MIDI_TEST=1 — the §8.1 TEST row, before the screen that will carry it exists.
+        // POCKETTRACKER_MIDI_TEST=1 — the same one-shot the screen's TEST row now offers, kept because
+        // it fires BEFORE any frame is drawn: it answers "is the cable alive" on a machine where the app
+        // may not even be reaching its window yet.
         if (const char* t = SDL_getenv("POCKETTRACKER_MIDI_TEST"); t && t[0] == '1')
             midiOut.test_note(600);
     }

@@ -29,7 +29,13 @@ enum class ScreenType {
     // Popup screens — replace the main view temporarily
     FILE_BROWSER,
     SETTINGS,
-    SAMPLE_EDITOR
+    SAMPLE_EDITOR,
+
+    // ⚠️ MIDI is APPENDED, not slotted in beside SETTINGS where it belongs by kind. This enum has no
+    // counterpart in ScreenType.kt any more (Phase E deleted it), but `screen_column()` and the nav
+    // grid read these by name while `ptdispatch`/`ptshot` name them in TEXT — so the ordering is free
+    // and the append is merely the habit that keeps it free.
+    MIDI        // reached from PROJECT > MIDI; not on the R+DPAD grid (plan §8.1)
 };
 
 inline const char* screen_label(ScreenType s) {
@@ -49,6 +55,7 @@ inline const char* screen_label(ScreenType s) {
         case ScreenType::FILE_BROWSER:  return "FILE BROWSER";
         case ScreenType::SETTINGS:      return "SETTINGS";
         case ScreenType::SAMPLE_EDITOR: return "SAMPLE EDITOR";
+        case ScreenType::MIDI:          return "MIDI";
     }
     return "";
 }
@@ -77,6 +84,7 @@ inline const char* screen_short_label(ScreenType s) {
         case ScreenType::FILE_BROWSER:  return "FB";
         case ScreenType::SETTINGS:      return "SE";
         case ScreenType::SAMPLE_EDITOR: return "SE";
+        case ScreenType::MIDI:          return "MI";
     }
     return "";
 }

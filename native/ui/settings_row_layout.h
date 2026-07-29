@@ -240,14 +240,24 @@ enum class ProjectRow {
     EXPORT    = 4,   // MIX | STEMS
     COMPACT   = 5,   // SEQ | INST
     SYSTEM    = 6,   // SETTINGS >
-    EXIT      = 7,   // the shell only — Android apps never exit
+    MIDI      = 7,   // MIDI >     (plan §8.1)
+    EXIT      = 8,   // the shell only — Android apps never exit
 };
 
-inline int project_row_count(const PlatformCaps& caps) { return caps.appExit ? 8 : 7; }
+// ⚠️ MIDI IS APPENDED AFTER SYSTEM, NOT INSERTED BEFORE IT, AND THAT IS THE WHOLE REASON `p3-input`
+// SURVIVED. The plan called this the "PROJECT-row landmine": the golden carries 4410 PROJECT cases and
+// renumbering a row it records rewrites all of them. It records rows 0–6 ONLY — EXIT is never in it,
+// because the corpus was recorded from Android and Android has no EXIT row. So SYSTEM keeping the
+// number 6 is what makes this a pure append: every recorded case still names the row it was recorded
+// against, and the only row that renumbers is the one nothing has ever tested.
+//
+// It also happens to be the placement §8.1 asked for ("PROJECT row 7") and the one that reads right:
+// SYSTEM and MIDI are both doors to a sub-screen, so they sit together, above the way out.
+inline int project_row_count(const PlatformCaps& caps) { return caps.appExit ? 9 : 8; }
 
-/** The last PROJECT row on this platform — SYSTEM, or EXIT where there is one. */
+/** The last PROJECT row on this platform — MIDI, or EXIT where there is one. */
 inline ProjectRow project_last_row(const PlatformCaps& caps) {
-    return caps.appExit ? ProjectRow::EXIT : ProjectRow::SYSTEM;
+    return caps.appExit ? ProjectRow::EXIT : ProjectRow::MIDI;
 }
 
 /**
@@ -277,6 +287,38 @@ inline int project_row_offset_y(ProjectRow target, int rowHeight) {
         const ProjectRow row = static_cast<ProjectRow>(i);
         y += rowHeight * (project_row_gap_after(row) ? 2 : 1);
     }
+    return y;
+}
+
+// ─── MIDI (plan §8.1, phase B4.3) ────────────────────────────────────────────────────────────────
+//
+// The same shape as PROJECT: a short single-column form whose last rows are BUTTONS. Every row is on
+// every platform — a MIDI cable is not a device capability the way a touchscreen is, and a phone with
+// no port simply enumerates none, which OUTPUT already has a word for.
+//
+// ⚠️ **SYNC OUT IS DELIBERATELY ABSENT, THOUGH `Project::midiSyncOut` EXISTS AND ROUND-TRIPS.**
+// Nothing sends a clock until phase C, and a row that stores a choice nobody reads is the exact trap
+// the guardrails name: a setting that round-trips is not a setting that is applied. It gets its row in
+// the same increment that gets its clock. `INPUT` / `SYNC IN` are phase E and absent for the same
+// reason. §8.1's two-column sketch collapses to one column here because half of it is those rows.
+enum class MidiRow {
+    OUTPUT   = 0,   // <device name> | OFF   — the cable
+    OFFSET   = 1,   // -99..+99 MS           — the cable
+    PROG_CHG = 2,   // ON | OFF              — the project (Instrument BANK/PROG on note-on)
+    PANIC    = 3,   // A: ALL NOTES OFF
+    TEST     = 4,   // A: C-4 CH 1
+};
+
+constexpr int MIDI_ROW_COUNT = 5;
+
+/** Group gap: after PROG CHG — the values end and the two actions begin. */
+inline bool midi_row_gap_after(MidiRow row) { return row == MidiRow::PROG_CHG; }
+
+/** How far down the panel a MIDI row is drawn, in pixels from the first row's top. */
+inline int midi_row_offset_y(MidiRow target, int rowHeight) {
+    int y = 0;
+    for (int i = 0; i < static_cast<int>(target); ++i)
+        y += rowHeight * (midi_row_gap_after(static_cast<MidiRow>(i)) ? 2 : 1);
     return y;
 }
 

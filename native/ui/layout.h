@@ -34,6 +34,7 @@
 #include "ui/modules/groove_editor.h"
 #include "ui/modules/instrument_editor.h"
 #include "ui/modules/instrument_pool.h"
+#include "ui/modules/midi_settings.h"
 #include "ui/modules/mixer.h"
 #include "ui/modules/modulation.h"
 #include "ui/modules/navigation_map.h"
@@ -103,6 +104,7 @@ private:
     EffectModule          effects_;
     ProjectModule         project_;
     SettingsModule        settings_;
+    MidiModule            midi_;
     NavigationMapModule   navigationMap_;
     FileBrowserModule     fileBrowser_;   // full-screen: draw() returns before the furniture
     SampleEditorModule    sampleEditor_;  // full-screen too — a waveform wants the width

@@ -89,6 +89,25 @@ struct SettingsValues {
     bool        rememberFolder   = false;
     std::string lastSampleFolder;   // runtime only — see settings_store.cpp (not saved)
 
+    // ── MIDI (plan §8.1, phase B4.3) ─────────────────────────────────────────────────────────────
+    //
+    // ⚠️ THESE TWO ARE NOT ON THE SETTINGS SCREEN — they belong to the MIDI screen and merely LIVE in
+    // this struct, because this struct is what settings.json round-trips. The plan puts them here on
+    // purpose (§7): the device pick and the latency alignment describe THIS MACHINE'S CABLE, not the
+    // song, so a project carried to another device keeps its routing intent and re-picks its port.
+    // Everything the SONG means by MIDI — channel, bank, program, LEN, CC slots, PROG CHG — is in
+    // `songcore::Project`/`Instrument` and travels with the .ptp.
+    //
+    // ⚠️ THE DEVICE IS THE NAME STRING, NEVER AN INDEX — the same rule `portraitSkin` and `overlayName`
+    // above already follow, and MIDI is the case that rule was WRITTEN for: a port list is rebuilt from
+    // the OS on every enumeration and reorders itself whenever anything is plugged or unplugged, so an
+    // index saved on Tuesday names a different synth on Wednesday. "OFF" is the no-device choice.
+    std::string midiOutDevice = "OFF";
+
+    // Signed milliseconds; positive = MIDI leaves LATER than the audio. Our own output has tens of ms
+    // of latency that the cable does not, so the user nudges the two into line by ear (plan §4.3).
+    int         midiOffsetMs  = 0;
+
     // ⚠️ VISUALIZER is NOT here. It lives on the THEME (`Theme::visualizerType`), which is where
     // Kotlin keeps it too — and not by accident: the oscilloscope reads it off the theme it is already
     // being handed, so it needs no second channel. Note that Android deliberately CARRIES IT ACROSS a

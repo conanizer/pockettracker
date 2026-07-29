@@ -175,7 +175,7 @@ bool screen_from_name(const std::string& n, ScreenType& out) {
         {"MODS", ScreenType::MODS},           {"INST_POOL", ScreenType::INST_POOL},
         {"MIXER", ScreenType::MIXER},         {"EFFECTS", ScreenType::EFFECTS},
         {"FILE_BROWSER", ScreenType::FILE_BROWSER}, {"SETTINGS", ScreenType::SETTINGS},
-        {"SAMPLE_EDITOR", ScreenType::SAMPLE_EDITOR},
+        {"SAMPLE_EDITOR", ScreenType::SAMPLE_EDITOR}, {"MIDI", ScreenType::MIDI},
     };
     for (const auto& [name, s] : NAMES) {
         if (n == name) {
@@ -674,6 +674,17 @@ int main(int argc, char** argv) {
                         col < 1 ? 1
                                 : clamp(col, project_row_max_column(
                                                  static_cast<ProjectRow>(state.projectCursorRow)));
+                    break;
+
+                case ScreenType::MIDI:
+                    // ⚠️ ptshot has NO PORT — `AppState::midiOut` stays null here, which is exactly the
+                    // configuration a phone with nothing plugged in is in. So the device list is the
+                    // bare `{"OFF"}` AppState ships with, and the shot answers the one question a
+                    // headless renderer CAN answer about this screen: does it draw at all, and does the
+                    // OUTPUT row degrade to OFF rather than to an empty cell or a crash. A shot WITH
+                    // devices would need a fake enumerator, which is ptdispatch's job (block B4.3).
+                    state.midiCursorRow    = clamp(row, MIDI_ROW_COUNT - 1);
+                    state.midiCursorColumn = 1;   // one column
                     break;
 
                 case ScreenType::SETTINGS: {

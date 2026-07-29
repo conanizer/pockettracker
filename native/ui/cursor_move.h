@@ -289,6 +289,12 @@ inline void move_cursor_up(AppState& s) {
             s.settingsCursorColumn = 1;
             break;
 
+        // MIDI wraps over a fixed five — no caps filter, because every row is on every platform.
+        case ScreenType::MIDI:
+            s.midiCursorRow = (s.midiCursorRow > 0) ? s.midiCursorRow - 1 : MIDI_ROW_COUNT - 1;
+            s.midiCursorColumn = 1;
+            break;
+
         default:
             s.cursorRow = (s.cursorRow > 0) ? s.cursorRow - 1 : 15;
             break;
@@ -366,6 +372,11 @@ inline void move_cursor_down(AppState& s) {
         case ScreenType::SETTINGS:
             s.settingsCursorRow    = settings_next_visible_row(s.settingsCursorRow, +1, s.caps);
             s.settingsCursorColumn = 1;
+            break;
+
+        case ScreenType::MIDI:
+            s.midiCursorRow = (s.midiCursorRow < MIDI_ROW_COUNT - 1) ? s.midiCursorRow + 1 : 0;
+            s.midiCursorColumn = 1;
             break;
 
         default:
@@ -454,6 +465,14 @@ inline void move_cursor_left(AppState& s) {
             s.settingsCursorColumn = 1;
             return;
 
+        // ⚠️ MIDI IS ONE COLUMN WIDE AND SAYS SO OUT LOUD, rather than falling into the `default` and
+        // reaching the same answer by accident. It would: min == max == 0 there. But the accident it
+        // would rely on is EFFECTS' documented bug two comments down — LEFT walking the SHARED
+        // `cursorColumn` on a screen that never reads it — and a screen that is correct only because
+        // another screen's bug is harmless is one row away from not being.
+        case ScreenType::MIDI:
+            return;
+
         default:
             break;
     }
@@ -528,6 +547,11 @@ inline void move_cursor_right(AppState& s) {
                 s.settingsCursorColumn = 2;
             return;
         }
+
+        // One column — see the matching arm in move_cursor_left for why it is stated rather than left
+        // to the fall-through.
+        case ScreenType::MIDI:
+            return;
 
         default:
             break;

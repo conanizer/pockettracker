@@ -162,11 +162,21 @@ struct AppConfig {
      * EXTERNAL instrument is silent on BOTH sides with no port attached — it raises no engine voice
      * and puts no byte anywhere. Which is the correct reading of "this instrument is not this engine".
      *
-     * `midiOffsetMs` is the user's alignment between what the speakers play and what the cable
-     * carries; positive sends MIDI later. It gets a SETTINGS row with the MIDI screen (B4).
+     * ⚠️ SINCE B4.3 IT IS ATTACHED WHETHER OR NOT A PORT IS OPEN, where before it was handed over only
+     * on a successful open. The MIDI screen needs the ENUMERATOR, not a port: a user who has never
+     * picked a device must still be able to see the list, and `ExternalConsumer` already checks
+     * `is_open()` before every byte, so a closed backend costs nothing.
+     *
+     * `midiOffsetMs` and `midiOutDevice` are the two ENV-VAR OVERRIDES, and both are now handled the
+     * same way: `app.cpp` copies a non-empty one over the value `settings.json` supplied and then
+     * forgets where it came from, so there is exactly ONE answer to "which port is open" rather than a
+     * boot answer and a UI answer free to disagree. ⚠️ A consequence worth stating: an override
+     * therefore PERSISTS on quit, like any other setting. That is the price of the single owner, and it
+     * is the right way round — a dev who names a port means to use it.
      */
     songcore::IMidiOut* midiOut = nullptr;
     int                 midiOffsetMs = 0;
+    std::string         midiOutDevice;   // empty = no override; else the resolved device NAME
 
     /**
      * Is a PHYSICAL game controller present right now? NULLABLE and Android-only. The shared layout gate

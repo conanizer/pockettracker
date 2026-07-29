@@ -148,6 +148,11 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
 
     param_row(ProjectRow::SYSTEM, "SYSTEM", "SETTINGS >");
 
+    // ── MIDI — the door to the MIDI screen (plan §8.1, B4.3) ─────────────────────────────────────
+    // Every platform, unconditionally: a MIDI port is not a device capability the way a touchscreen is,
+    // and a machine with none simply enumerates none — which the OUTPUT row already has a word for.
+    param_row(ProjectRow::MIDI, "MIDI", "MIDI >");
+
     // ── EXIT — the shell only ────────────────────────────────────────────────────────────────────
     // Android apps never exit; a handheld launcher needs the process back (port plan §5). Drawn like
     // SYSTEM because it is the same kind of thing: a row whose whole content is what A does on it.
@@ -209,6 +214,7 @@ CursorContext ProjectModule::cursor_context(const ProjectState& s) const {
         case ProjectRow::EXPORT:
         case ProjectRow::COMPACT:
         case ProjectRow::SYSTEM:
+        case ProjectRow::MIDI:
             return cc::read_only();
 
         case ProjectRow::EXIT:

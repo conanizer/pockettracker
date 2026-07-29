@@ -30,8 +30,11 @@
 #include "ui/platform_caps.h"
 #include "ui/selection.h"
 
+#include "songcore/midi_out.h"   // IMidiOut — the port the MIDI screen picks (B4.3)
+
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace pt::ui {
 
@@ -116,10 +119,14 @@ struct AppState {
     int chainCursorRow = 0,  chainCursorColumn = 1;
     int phraseCursorRow = 0, phraseCursorColumn = 1;
 
-    // PROJECT. Rows 0..6 (0..7 on the shell, which has an EXIT row); column 0 is the label and is
+    // PROJECT. Rows 0..7 (0..8 on the shell, which has an EXIT row); column 0 is the label and is
     // unreachable, so the cursor starts on 1 — see ui/settings_row_layout.h.
     int projectCursorRow    = 0;
     int projectCursorColumn = 1;
+
+    // MIDI (B4.3). Five rows, one column — ui/modules/midi_settings.h.
+    int midiCursorRow    = 0;
+    int midiCursorColumn = 1;
 
     // SETTINGS. `settingsCursorRow` is a SettingsRow — the row's NUMBER, which is its identity on
     // BOTH platforms, not its position in this platform's filtered list.
@@ -258,6 +265,35 @@ struct AppState {
      * all, and the port matches it rather than improving on it — R+DPAD's way back out is R+DPAD.
      */
     ScreenType settingsReturnScreen = ScreenType::PROJECT;
+
+    /** Where B goes from MIDI. Same two-questions-two-answers argument as the field above. */
+    ScreenType midiReturnScreen = ScreenType::PROJECT;
+
+    // ── MIDI (plan §8.1, phase B4.3) ────────────────────────────────────────────────────────────
+    //
+    // ⚠️ THE PORT ITSELF, AND IT IS THE ONLY PLATFORM OBJECT IN THIS STRUCT — but not the only one in
+    // pt-ui (`FileSystem` is the other, and is a reference the dispatcher is constructed with). It is a
+    // POINTER and it is allowed to be null: a build with no MIDI backend (Linux and Android until B2b)
+    // leaves it so, and every use below is guarded. The interface is songcore's, not the shell's, which
+    // is what keeps this header free of SDL — `songcore/midi_out.h` is five virtual methods and no OS.
+    //
+    // Why the UI layer holds it at all: OUTPUT is the one row in the app whose OPTION LIST comes from
+    // the operating system and changes while the app is running. Every other list here is a fact about
+    // the project or a compile-time constant.
+    songcore::IMidiOut* midiOut = nullptr;
+
+    /**
+     * The enumerated port list with "OFF" prepended, and the index into it that is currently OPEN.
+     *
+     * ⚠️ REBUILT ON EVERY ENTRY TO THE SCREEN, not once at boot — `refresh_midi_devices()`. MIDI is
+     * hot-pluggable and a device list is stale the moment a cable moves; the screen that exists to pick
+     * one is the exact place where a stale list is a bug the user cannot explain.
+     */
+    std::vector<std::string> midiDeviceNames{"OFF"};
+    int                      midiDeviceIndex = 0;
+
+    /** The MIDI screen's one-shot readout — "PANIC SENT", "TEST SENT", "NO PORT". */
+    std::string midiStatusText;
 
     // ── The QWERTY keyboard ─────────────────────────────────────────────────────────────────────
     // The app's first true modal: while it is open it owns every button, and `isOpen` is checked

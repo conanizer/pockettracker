@@ -56,6 +56,17 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     values.rememberFolder     = get_bool(j, "rememberFolder", values.rememberFolder);
     values.traceEnabled       = get_bool(j, "trace",              values.traceEnabled);
 
+    // ── MIDI (B4.3) — the CABLE's half. The song's half is in the .ptp. ──────────────────────────
+    //
+    // ⚠️ THE DEVICE IS A NAME AND NOT AN INDEX, and MIDI is the case that rule exists for: a port list
+    // is re-enumerated from the OS and reorders on every replug, so an index saved yesterday opens a
+    // different synth today. The shell resolves the name against the live list at boot; a name that is
+    // not there resolves to OFF, which is the truth rather than a wrong guess (settings_editor.h).
+    //
+    // Absent from an older settings.json → OFF / 0 ms, which is what every existing file has.
+    values.midiOutDevice      = get_string(j, "midi_out_device", values.midiOutDevice);
+    values.midiOffsetMs       = clamp(get_int(j, "midi_offset_ms", values.midiOffsetMs), -99, 99);
+
     // ⚠️ RESUME (S10). New here because the shell only GAINED the row in S10 — and the session that
     // flips the cap on is the session that must add the key, or the setting resets to ASK on every
     // launch and nothing anywhere says so. See the header: this is S9's theme-by-name bug's shape, and
@@ -157,6 +168,11 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
     j["trace"]              = values.traceEnabled;
     j["autosaveResumeAuto"] = values.autosaveResumeAuto;   // S10 — the RESUME row
     j["visualizer"]         = static_cast<int>(theme.visualizerType);
+
+    // B4.3 — the MIDI screen's two cable settings. `midi_out_device` is a stable NAME string, for the
+    // same reason `portrait_skin` and `overlay_name` below are (see load_settings).
+    j["midi_out_device"]    = values.midiOutDevice;
+    j["midi_offset_ms"]     = values.midiOffsetMs;
 
     // The Android device rows — see the matching block in load_settings for why these are written on
     // every platform a full phase before any of them is displayed. On the shell they are simply their

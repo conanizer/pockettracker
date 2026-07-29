@@ -1555,13 +1555,27 @@ int main() {
         state.projectCursorRow   = 0;
         state.projectCursorColumn = 1;
 
+        // ⚠️ THESE TWO NUMBERS MOVED IN B4.3 (7→8, 6→7), and that is the change being asserted rather
+        // than a golden being repaired: the MIDI row was appended after SYSTEM, so the LAST row on each
+        // platform is one further down. They are written as literals on purpose — deriving them from
+        // `project_last_row()` would make the check agree with the map by construction and stop being a
+        // check at all. Both are stated against the ROW NAME so the next reader can see which is which.
         dispatch.on_dpad_up();
-        eq(state.projectCursorRow, 7, "PROJECT[sdl]: UP from row 0 WRAPS to EXIT (row 7)");
+        eq(state.projectCursorRow, 8, "PROJECT[sdl]: UP from row 0 WRAPS to EXIT (row 8, after MIDI)");
 
         state.caps = PlatformCaps::android(true);
         state.projectCursorRow = 0;
         dispatch.on_dpad_up();
-        eq(state.projectCursorRow, 6, "PROJECT[android]: …wraps to SYSTEM (row 6) — there is no EXIT");
+        eq(state.projectCursorRow, 7, "PROJECT[android]: …wraps to MIDI (row 7) — there is no EXIT");
+
+        // …and the row it displaced still sits where every caller expects it. SYSTEM keeping the number
+        // 6 is the whole reason `p3-input`'s 4410 recorded PROJECT cases survived this increment.
+        state.caps = PlatformCaps::sdl(true);
+        state.projectCursorRow = static_cast<int>(ProjectRow::COMPACT);
+        dispatch.on_dpad_down();
+        eq(state.projectCursorRow, 6, "PROJECT: DOWN off COMPACT still lands on SYSTEM (row 6)");
+        dispatch.on_dpad_down();
+        eq(state.projectCursorRow, 7, "PROJECT: …and MIDI is the row below it");
 
         // The NAME row is 20 columns wide; every other row is 1, 2 or 3. Carry a column across and it
         // would land nowhere — which is why the row change resets it.
@@ -4194,6 +4208,289 @@ int main() {
         ins.midiChannel = 0; ins.midiBank = -1; ins.midiProgram = -1; ins.midiLen = 0;
         ins.pan = 0x80;
         ins.midiCC = std::vector<songcore::MidiCcSlot>(songcore::MIDI_CC_SLOTS);
+    }
+
+    // ══ B4.3 ══ THE MIDI SCREEN — THE ROW THAT MAKES THE CABLE REACHABLE ════════════════════════
+    //
+    // ⚠️ **THIS BLOCK IS THE ONLY TEST THE SCREEN CAN HAVE, AND IT NEEDS A FAKE PORT TO EXIST AT ALL.**
+    // MIDI out never existed in Kotlin, so there is no golden and none is possible; and the two rows
+    // that matter most — OUTPUT and TEST — are the two whose real behaviour is "an OS call happened".
+    // A stub `IMidiOut` is what turns those from unobservable into countable: how many opens, how many
+    // closes, which bytes, in which order.
+    //
+    // ⭐ The claim it is really pointed at is the one the guardrails keep re-finding: **a setting that
+    // round-trips is not a setting that is applied.** So every check below asks what the PORT did, not
+    // what the struct holds — except the two that deliberately ask both, to show they agree.
+    {
+        struct FakeMidiOut : songcore::IMidiOut {
+            std::vector<std::string> devices;
+            std::vector<std::string> sent;      // each message as hex, in the order it left
+            int  openIndex = -1;
+            int  opens = 0, closes = 0;
+            bool refuse = false;                // the "port is in use" case
+
+            int         device_count() override { return static_cast<int>(devices.size()); }
+            std::string device_name(int i) override { return devices[static_cast<size_t>(i)]; }
+            bool        is_open() const override { return openIndex >= 0; }
+            void        close() override { ++closes; openIndex = -1; }
+            bool open(int i) override {
+                ++opens;
+                if (refuse || i < 0 || i >= static_cast<int>(devices.size())) return false;
+                openIndex = i;
+                return true;
+            }
+            void send(const uint8_t* d, int n) override {
+                char        b[8];
+                std::string s;
+                for (int i = 0; i < n; ++i) {
+                    std::snprintf(b, sizeof(b), "%02X", static_cast<unsigned>(d[i]));
+                    s += b;
+                }
+                sent.push_back(s);
+            }
+        };
+
+        FakeMidiOut port;
+        port.devices = {"loopMIDI Port", "Microsoft GS Wavetable Synth"};
+
+        state.caps          = PlatformCaps::sdl(true);
+        state.confirm.close();
+        state.eq            = EqEditorState{};
+        state.themeEditor   = ThemeEditorState{};
+        state.qwerty        = QwertyKeyboardState{};
+        state.midiOut       = &port;
+        state.settings.midiOutDevice = "OFF";
+        state.settings.midiOffsetMs  = 0;
+        // A CLEAN dirty flag to measure against: this AppState is shared with every block above, and
+        // several of them left the song modified. Without this, "picking a cable does not dirty the
+        // song" is a check that cannot fail — and one that cannot fail is not a check.
+        state.projectVersion = state.savedProjectVersion = 100;
+
+        songcore::Project& p = host.edit_project();
+
+        // The gesture the user makes to reach this screen, as one call — and it MUST go through
+        // PROJECT every time. Pressing A while already standing on MIDI is a different gesture
+        // entirely (it is PANIC, or TEST, or nothing), so a "re-enter" that forgets to set the screen
+        // back re-enumerates nothing and quietly tests the wrong thing.
+        const auto enter_midi = [&] {
+            state.currentScreen       = ScreenType::PROJECT;
+            state.projectCursorRow    = static_cast<int>(ProjectRow::MIDI);
+            state.projectCursorColumn = 1;
+            dispatch.on_button_a();
+        };
+
+        // ── (a) The door: PROJECT > MIDI, and the enumeration that rides in with it ───────────────
+        enter_midi();
+        eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::MIDI),
+           "MIDI: A on the PROJECT MIDI row opens the screen");
+        eq(static_cast<int>(state.midiDeviceNames.size()), 3,
+           "⚠️ MIDI: …and ENUMERATES on the way in — OFF plus the two ports (a list built at boot "
+           "would be a list of the cables that were in at boot)");
+        eqs(state.midiDeviceNames[0], "OFF", "MIDI: index 0 of the list is always OFF");
+        eq(state.midiDeviceIndex, 0, "MIDI: nothing picked yet, so the row reads OFF");
+
+        // ── (b) The cursor reaches every row, wraps, and never leaves column 1 ────────────────────
+        state.midiCursorRow = 0;
+        std::string walk = "0";
+        for (int i = 0; i < 12; ++i) {
+            dispatch.on_dpad_down();
+            if (state.midiCursorRow == 0) break;
+            walk += "," + std::to_string(state.midiCursorRow);
+        }
+        eqs(walk, "0,1,2,3,4", "MIDI rows: all five are reachable and the fifth wraps to the first");
+
+        state.midiCursorRow = static_cast<int>(MidiRow::OUTPUT);
+        dispatch.on_dpad_right();
+        dispatch.on_dpad_right();
+        eq(state.midiCursorColumn, 1, "MIDI: the screen is ONE column — RIGHT does not move");
+        dispatch.on_dpad_left();
+        eq(state.midiCursorColumn, 1, "MIDI: …nor LEFT");
+
+        // ── (c) OUTPUT: A+UP picks a port, and the PORT is what changes ──────────────────────────
+        const int opensBefore = port.opens;
+        dispatch.on_a_up();
+        eq(state.midiDeviceIndex, 1, "MIDI OUTPUT: A+UP steps onto the first device");
+        eqs(state.settings.midiOutDevice, "loopMIDI Port",
+            "⚠️ MIDI OUTPUT: …and the SETTING stores the device NAME, never the index");
+        eq(port.opens, opensBefore + 1, "⭐ MIDI OUTPUT: …and the PORT was actually OPENED");
+        eq(port.openIndex, 0,
+           "⚠️ MIDI OUTPUT: …at device index 0, not 1 — list index 1 is the FIRST device, because "
+           "index 0 of the list is OFF and is not a device at all");
+        ok(!state.project_dirty(),
+           "MIDI OUTPUT: picking a cable does NOT dirty the SONG — it is settings.json's, not the .ptp's");
+
+        // ── (d) ⭐ THE REPLUG, and the whole reason the setting is a NAME ─────────────────────────
+        //
+        // Reorder the port list the way an OS does when anything is plugged or unplugged, re-enter the
+        // screen, and the SAME synth must still be selected — at a different index. Store an index
+        // instead and this check is what goes red: it would silently name whatever took slot 1.
+        port.devices = {"USB MIDI Interface", "loopMIDI Port", "Microsoft GS Wavetable Synth"};
+        enter_midi();                                 // re-enter → re-enumerate
+        eq(state.midiDeviceIndex, 2,
+           "⭐ MIDI OUTPUT: after a REPLUG reorders the list, the same device is still selected — at "
+           "its new index (this is what an index-based setting cannot do)");
+        eqs(state.midiDeviceNames[static_cast<size_t>(state.midiDeviceIndex)], "loopMIDI Port",
+            "MIDI OUTPUT: …and it is still the port the user chose");
+
+        // A saved device that is simply GONE resolves to OFF, rather than to whoever took its place.
+        port.devices = {"Microsoft GS Wavetable Synth"};
+        enter_midi();
+        eq(state.midiDeviceIndex, 0,
+           "⚠️ MIDI OUTPUT: a saved device that is UNPLUGGED reads OFF — the row shows what is OPEN, "
+           "never what was once wanted");
+        eqs(state.settings.midiOutDevice, "loopMIDI Port",
+            "MIDI OUTPUT: …and the CHOICE is kept, so plugging it back in restores it");
+
+        // ── (e) The PANIC on a device swap — the note-offs the old cable is owed ─────────────────
+        port.devices = {"loopMIDI Port", "Microsoft GS Wavetable Synth"};
+        enter_midi();                                 // re-enter: the saved port is back at index 1
+        // ⚠️ Re-entry ENUMERATES; it does not re-open. `refresh_midi_devices` is deliberately a pure
+        // read — a screen entry that reopened the port would drop every sounding note every time the
+        // user glanced at this page. So the open is asked for explicitly here, exactly as the shell's
+        // boot does it.
+        state.midiCursorRow = static_cast<int>(MidiRow::OUTPUT);
+        dispatch.on_a_up();     // loopMIDI Port → Microsoft GS Wavetable Synth
+        dispatch.on_a_down();   // …and back to the remembered choice, which OPENS it
+        eq(port.openIndex, 0, "MIDI OUTPUT: (setup) the remembered port is open again");
+
+        state.midiCursorRow = static_cast<int>(MidiRow::OUTPUT);
+        const int closesBefore = port.closes;
+        dispatch.on_a_up();                           // → "Microsoft GS Wavetable Synth"
+        eq(port.closes, closesBefore + 1,
+           "⚠️ MIDI OUTPUT: swapping the device CLOSES the old port first — `set_out` panics on a "
+           "POINTER change and the pointer never changes here, so this file has to");
+        eq(port.openIndex, 1, "MIDI OUTPUT: …and the new one is open");
+
+        // ── (f) OFFSET, and the −1 that must not read as EMPTY ────────────────────────────────────
+        state.midiCursorRow = static_cast<int>(MidiRow::OFFSET);
+        dispatch.on_a_up();
+        eq(state.settings.midiOffsetMs, 1, "MIDI OFFSET: A+UP steps it a millisecond");
+        dispatch.on_a_right();
+        eq(state.settings.midiOffsetMs, 11, "MIDI OFFSET: A+RIGHT jumps by ten, like TEMPO");
+
+        // ⭐ THE NEGATIVE-CONTROL-SHAPED ONE. `cc::hex_byte`'s default empty_value is −1, and −1 is a
+        // perfectly ordinary offset. Leave the default in and the context reports `isEmpty` at exactly
+        // that value, A+DPAD goes dead, and the cell becomes one you can dial PAST but never away from.
+        // Walking down through it is the only gesture that can tell the two apart.
+        for (int i = 0; i < 13; ++i) dispatch.on_a_down();
+        eq(state.settings.midiOffsetMs, -2,
+           "⭐ MIDI OFFSET: A+DOWN walks THROUGH −1 to −2 — −1 is a value here, not an empty cell");
+        for (int i = 0; i < 97; ++i) dispatch.on_a_down();
+        eq(state.settings.midiOffsetMs, -99, "MIDI OFFSET: A+DOWN reaches the bottom of the range");
+        dispatch.on_a_down();
+        eq(state.settings.midiOffsetMs, 99,
+           "⚠️ MIDI OFFSET: …and WRAPS to +99 rather than clamping — every hex_byte cell in the app "
+           "wraps (TEMPO does too), and a range that is signed does not change that");
+        state.settings.midiOffsetMs = 0;
+        ok(!state.project_dirty(), "MIDI OFFSET: still not a change to the SONG");
+
+        // ── (g) PROG CHG — the one row here that IS the song's ───────────────────────────────────
+        state.projectVersion = state.savedProjectVersion = 7;
+        state.midiCursorRow  = static_cast<int>(MidiRow::PROG_CHG);
+        ok(p.midiSendProgramChange, "MIDI PROG CHG: (setup) it defaults ON");
+        dispatch.on_a_up();
+        ok(!p.midiSendProgramChange, "MIDI PROG CHG: A+UP toggles it");
+        ok(state.project_dirty(),
+           "⚠️ MIDI PROG CHG: …and this one DOES dirty the song — it is a Project field and emits into "
+           "the .ptp, unlike the two rows above it");
+        dispatch.on_a_up();
+        ok(p.midiSendProgramChange, "MIDI PROG CHG: …and back");
+
+        // ── (h) TEST and PANIC — the two rows whose correct behaviour is otherwise SILENCE ────────
+        port.sent.clear();
+        state.midiCursorRow = static_cast<int>(MidiRow::TEST);
+        dispatch.on_button_a();
+        eq(static_cast<int>(port.sent.size()), 2, "MIDI TEST: A sends exactly two messages");
+        // ⚠️ Read through a bounds-safe accessor, not `sent[0]`. A harness that SEGFAULTS on the very
+        // failure it is checking for reports nothing at all — the count assertion above would have been
+        // printed and then thrown away with the process. (It was: this is what the first run did.)
+        const auto msg = [&](size_t i) { return i < port.sent.size() ? port.sent[i] : std::string("-"); };
+        eqs(msg(0), "903C64", "MIDI TEST: …a note-on, C-4 (60) on channel 1 at velocity 100");
+        eqs(msg(1), "803C00",
+            "⚠️ MIDI TEST: …and its note-off in the same breath — a sustained TEST would be the one "
+            "note in the app with no transport to stop it");
+        eqs(state.midiStatusText, "TEST SENT",
+            "⭐ MIDI TEST: …and it SAYS so — a handler whose success is silence cannot be told from one "
+            "that never ran");
+
+        // The negative control, and it is the point of the readout: with no port the SAME press must
+        // reach the SAME row and report differently, not merely do nothing.
+        port.close();
+        port.sent.clear();
+        dispatch.on_button_a();
+        eq(static_cast<int>(port.sent.size()), 0, "MIDI TEST: with no port open, nothing is sent");
+        eqs(state.midiStatusText, "NO PORT",
+            "⭐ MIDI TEST: …and the screen distinguishes 'no cable' from 'it worked'");
+
+        state.midiCursorRow = static_cast<int>(MidiRow::PANIC);
+        dispatch.on_button_a();
+        eqs(state.midiStatusText, "NO PORT", "MIDI PANIC: same distinction, same row shape");
+
+        // ── (i) A port that refuses to open keeps the user's choice ──────────────────────────────
+        // From a KNOWN cell, not from wherever the last section left the cursor: OUTPUT is a WRAPPING
+        // cycle, so "step up from the current index" lands on OFF when the current index happens to be
+        // the last device — and a check that reads OFF is measuring the wrap, not the refusal.
+        port.refuse = true;
+        state.settings.midiOutDevice = "OFF";
+        enter_midi();
+        eq(state.midiDeviceIndex, 0, "MIDI OUTPUT: (setup) starting from OFF");
+        state.midiCursorRow = static_cast<int>(MidiRow::OUTPUT);
+        dispatch.on_a_up();          // → the first real device, which will refuse
+        ok(!port.is_open(), "MIDI OUTPUT: (setup) the port refused — another app holds it");
+        eqs(state.midiStatusText, "PORT BUSY", "MIDI OUTPUT: a refused open says so");
+        ok(state.settings.midiOutDevice != "OFF",
+           "⚠️ MIDI OUTPUT: …and the CHOICE survives the failure — a busy port is a transient the user "
+           "can fix and retry, not a reason to throw their pick away");
+        port.refuse = false;
+
+        // ── (j) The QUIT-AND-RELAUNCH channel: both settings must survive a round trip ───────────
+        //
+        // ⚠️ The blind channel S9's theme-by-name bug lived in. Neither the screen nor the dispatcher
+        // can see it: the value is correct in memory, correct on the screen, and gone on the next launch.
+        state.settings.midiOutDevice = "Microsoft GS Wavetable Synth";
+        state.settings.midiOffsetMs  = -37;
+        ok(save_settings(fs_impl, state.settings, state.theme), "MIDI: settings.json written");
+        {
+            SettingsValues back{};
+            Theme          backTheme = theme_classic();
+            ok(load_settings(fs_impl, back, backTheme), "MIDI: settings.json read back");
+            eqs(back.midiOutDevice, "Microsoft GS Wavetable Synth",
+                "⭐ MIDI: the device NAME survives a quit and relaunch");
+            eq(back.midiOffsetMs, -37, "⭐ MIDI: …and so does the OFFSET, sign and all");
+        }
+
+        // ── (k) boot_midi_port — the shell's one call, and the OFFSET it must not forget ─────────
+        {
+            AppState boot;
+            boot.project  = &host.edit_project();
+            boot.caps     = PlatformCaps::sdl(true);
+            boot.midiOut  = &port;
+            boot.settings.midiOutDevice = "Microsoft GS Wavetable Synth";
+            boot.settings.midiOffsetMs  = -37;
+            port.close();
+
+            InputDispatcher bootDispatch(boot, host, fs_impl);
+            bootDispatch.boot_midi_port();
+
+            ok(port.is_open(), "MIDI boot: the port the settings NAME is opened at launch");
+            eq(port.openIndex, 1, "MIDI boot: …and it is the right one");
+            eq(host.midi_out().offset_ms(), -37,
+               "⭐ MIDI boot: …and the OFFSET reached the CONSUMER — a value correct in settings.json, "
+               "correct on the screen and never pushed is the exact bug this asks about");
+        }
+
+        // ── (l) B is the way out ─────────────────────────────────────────────────────────────────
+        state.currentScreen = ScreenType::MIDI;
+        state.midiReturnScreen = ScreenType::SONG;
+        dispatch.on_button_b();
+        eq(static_cast<int>(state.currentScreen), static_cast<int>(ScreenType::SONG),
+           "MIDI: B returns to where the screen was opened from");
+
+        // Leave the harness as it was found — later blocks share this AppState.
+        state.midiOut = nullptr;
+        host.set_midi_offset_ms(0);
+        state.settings.midiOutDevice = "OFF";
+        state.settings.midiOffsetMs  = 0;
     }
 
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);

@@ -78,6 +78,7 @@
 #include "ui/modules/groove_editor.h"
 #include "ui/modules/instrument_editor.h"
 #include "ui/modules/instrument_pool.h"
+#include "ui/modules/midi_settings.h"
 #include "ui/modules/mixer.h"
 #include "ui/modules/modulation.h"
 #include "ui/modules/phrase_editor.h"
@@ -360,6 +361,22 @@ class InputDispatcher {
     };
     void set_render_hooks(RenderHooks hooks) { render_ = std::move(hooks); }
 
+    /**
+     * Open the MIDI port the settings name, once, at boot — call it after `AppState::midiOut` is set
+     * and `settings.json` has been read.
+     *
+     * ⚠️ IT IS THE SAME TWO CALLS THE MIDI SCREEN MAKES, ON PURPOSE. The shell could resolve a name to
+     * an index and call `open()` itself in six lines, and then there would be two answers to "which
+     * port is open and why" — a boot one and a UI one — free to drift the moment either grows a case.
+     * This is the guardrail's derive-it-from-the-data rule applied to a seam with exactly two callers,
+     * which is when it is cheapest to obey.
+     *
+     * A port that is ALREADY open is left alone: that is the `POCKETTRACKER_MIDI_OUT` dev override,
+     * which the shell has already resolved into `settings.midiOutDevice` before calling this — so the
+     * device the screen names and the device that is open are the same one by construction.
+     */
+    void boot_midi_port();
+
   private:
     AppState&               s_;
     songcore::SongcoreHost& host_;
@@ -464,6 +481,7 @@ class InputDispatcher {
     EffectModule           effects_{};
     ProjectModule          project_{};
     SettingsModule         settings_{};
+    MidiModule             midi_{};
     EqModule               eq_{};   // stateful: it caches its response curve — see eq_editor.h
 
     /**
@@ -681,6 +699,17 @@ class InputDispatcher {
     void open_theme_editor()  { s_.themeEditor = ThemeEditorState{}; s_.themeEditor.isOpen = true; }
     void close_theme_editor() { s_.themeEditor = ThemeEditorState{}; }
 
+    /**
+     * Is there an OPEN port right now — the question PANIC and TEST both have to ask before claiming
+     * to have done anything.
+     *
+     * ⚠️ TWO conditions, and the second is the one that matters: a backend can exist and hold no port
+     * (nothing picked, or an open that failed). Answering on `midiOut != nullptr` alone would make the
+     * screen report "TEST SENT" into a closed handle — a vacuous pass on the one control whose entire
+     * purpose is telling the user whether the cable is real.
+     */
+    bool port_open() const { return s_.midiOut != nullptr && s_.midiOut->is_open(); }
+
     /** The D-pad: UP/DOWN walk the 18 rows (WRAPPING), LEFT/RIGHT the 3 channels (WRAPPING). */
     void theme_move_cursor(int d_row, int d_channel);
 
@@ -705,6 +734,34 @@ class InputDispatcher {
     void project_action();
     /** A on SETTINGS: only THEME (row 9) and TEMPLATE (row 10) do anything — the rest are A+DPAD. */
     void settings_action();
+
+    // ── MIDI: the screen, the port and the two buttons (phase B4.3) ─────────────────────────────
+    /** A on MIDI: only PANIC and TEST do anything — OUTPUT / OFFSET / PROG CHG are A+DPAD. */
+    void midi_action();
+
+    /**
+     * Re-enumerate the ports and re-resolve the saved device NAME against the fresh list.
+     *
+     * ⚠️ CALLED ON EVERY ENTRY TO THE SCREEN, not once at boot. MIDI is hot-pluggable: a list built at
+     * launch is a list of the cables that were in at launch, and the screen whose whole job is picking
+     * one is exactly where that is a bug the user cannot diagnose. Cheap — `device_count()` is an OS
+     * call on a handful of ports, once per screen entry, not per frame.
+     *
+     * A saved name that is not in the list resolves to index 0 = OFF, and that is the honest answer:
+     * the row shows what is OPEN, never what was once wanted (see midi_settings.h).
+     */
+    void refresh_midi_devices();
+
+    /**
+     * Make the port match `settings.midiOutDevice` — close whatever is open, open the named one.
+     *
+     * ⚠️ PANICS FIRST, AND ITS OWN PANIC IS NOT REDUNDANT. `ExternalConsumer::set_out` panics when the
+     * POINTER changes, and here it never does: the shell hands over one `IMidiOut` object for the whole
+     * session and this swaps the DEVICE underneath it. So the consumer cannot see the change, and every
+     * note sounding on the old device would be held by hardware that is about to stop being listened
+     * to — the note-offs we owe delivered to a port that is already closed.
+     */
+    void apply_midi_device();
 
     /** NEW, and the engine sync a fresh project needs (SongcoreHost::new_project). */
     void start_new_project();

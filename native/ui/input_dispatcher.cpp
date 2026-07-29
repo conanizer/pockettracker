@@ -343,6 +343,16 @@ CursorContext InputDispatcher::cursor_context() const {
             return settings_.cursor_context(ss);
         }
 
+        case ScreenType::MIDI: {
+            MidiState ms{*s_.project, s_.settings};
+            ms.cursorRow    = s_.midiCursorRow;
+            ms.cursorColumn = s_.midiCursorColumn;
+            ms.deviceNames  = s_.midiDeviceNames;
+            ms.deviceIndex  = s_.midiDeviceIndex;
+            ms.caps         = s_.caps;
+            return midi_.cursor_context(ms);
+        }
+
         case ScreenType::SAMPLE_EDITOR:
             return sample_.cursor_context(s_.sampleEditor);
 
@@ -454,6 +464,20 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
             settings_.handle_input(s_.settings, s_.theme, s_.caps, s_.settingsCursorRow,
                                    s_.settingsCursorColumn, action);
             return false;
+
+        // ⚠️ MIDI IS THE ONE SCREEN THAT EDITS BOTH SUBJECTS, so it is the one arm whose return value
+        // is a QUESTION rather than a constant. PROG CHG is a `Project` field that emits into the .ptp,
+        // so it dirties the song exactly as TEMPO does; OUTPUT and OFFSET are settings.json's and must
+        // not, or picking a cable would put "you have unsaved work" in front of the next NEW.
+        case ScreenType::MIDI: {
+            const MidiInputResult r =
+                midi_.handle_input(p, s_.settings, s_.midiCursorRow, s_.midiCursorColumn,
+                                   s_.midiDeviceNames, action);
+            // The two side effects the module cannot perform itself — it has no port and no OS.
+            if (r.deviceChanged) apply_midi_device();
+            if (r.offsetChanged) host_.set_midi_offset_ms(s_.settings.midiOffsetMs);
+            return r.projectModified;
+        }
 
         case ScreenType::SAMPLE_EDITOR: {
             const SampleEditorInputResult r = sample_.handle_input(s_.sampleEditor, action);
@@ -2080,6 +2104,22 @@ void InputDispatcher::project_action() {
             break;
         }
 
+        case ProjectRow::MIDI: {
+            // The same shortcut shape as SYSTEM above, minus the nav grid — MIDI is NOT one of the
+            // twelve R+DPAD cells, so PROJECT is its only door and B is its only way back.
+            //
+            // ⚠️ THE ENUMERATION HAPPENS HERE, ON THE WAY IN. See refresh_midi_devices(): a port list is
+            // only true at the moment it is read, and this is the moment the user is about to read it.
+            refresh_midi_devices();
+            s_.midiStatusText.clear();   // last visit's "TEST SENT" is not this visit's news
+            s_.midiReturnScreen = s_.currentScreen;
+            NavResult nav;
+            nav.screen = ScreenType::MIDI;
+            nav.column = s_.previousColumn;
+            go_to_screen(s_, nav);
+            break;
+        }
+
         case ProjectRow::EXIT:
             // ⚠️ The shell only — and gated on the same question NEW asks. It still asks, now that S10
             // has built the autosave, and that is deliberate: the dialog is the app's ONE way to
@@ -2118,6 +2158,104 @@ void InputDispatcher::settings_action() {
         // Every other row is a VALUE, and a value changes with A+DPAD. Kotlin says so in a comment at
         // the top of SettingsModule ("Single A is reserved for actions only"), and it is why this
         // switch has exactly two arms.
+        default:
+            break;
+    }
+}
+
+// ─── MIDI (phase B4.3) ───────────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::boot_midi_port() {
+    // The OFFSET first and unconditionally — it is a number the consumer needs whether or not a port
+    // ever opens, and forgetting it is the "a setting that round-trips is not a setting that is
+    // applied" bug in its purest form: the value would sit correct in settings.json, be drawn correctly
+    // on the screen, and change nothing anybody could hear.
+    host_.set_midi_offset_ms(s_.settings.midiOffsetMs);
+
+    refresh_midi_devices();
+    if (port_open()) return;                       // the env override already opened this same device
+    if (s_.midiDeviceIndex != 0) apply_midi_device();
+    s_.midiStatusText.clear();                     // boot news is the console's job, not the screen's
+}
+
+void InputDispatcher::refresh_midi_devices() {
+    s_.midiDeviceNames.assign(1, "OFF");   // index 0, always — the module never handles "no device"
+
+    if (s_.midiOut) {
+        const int n = s_.midiOut->device_count();
+        for (int i = 0; i < n; ++i) s_.midiDeviceNames.push_back(s_.midiOut->device_name(i));
+    }
+
+    // Resolve the SAVED NAME against the list that exists right now. Not found → OFF. That is the
+    // whole reason the setting is a name: an index would silently name whatever port took its place.
+    s_.midiDeviceIndex = 0;
+    for (size_t i = 1; i < s_.midiDeviceNames.size(); ++i) {
+        if (s_.midiDeviceNames[i] == s_.settings.midiOutDevice) {
+            s_.midiDeviceIndex = static_cast<int>(i);
+            break;
+        }
+    }
+}
+
+void InputDispatcher::apply_midi_device() {
+    // Re-resolve first: `settings.midiOutDevice` is the choice, `midiDeviceIndex` is where that choice
+    // sits in the list the screen is drawing, and the module just changed the former.
+    int wanted = 0;
+    for (size_t i = 1; i < s_.midiDeviceNames.size(); ++i) {
+        if (s_.midiDeviceNames[i] == s_.settings.midiOutDevice) { wanted = static_cast<int>(i); break; }
+    }
+    s_.midiDeviceIndex = wanted;
+
+    if (!s_.midiOut) { s_.midiStatusText = "NO MIDI BACKEND"; return; }
+
+    // ⚠️ THE PANIC IS OURS TO SEND — see the header. `set_out` panics on a POINTER change and the
+    // pointer is not changing; only the device behind it is. Skip this and every note sounding on the
+    // port we are about to close is held by that hardware until someone power-cycles it.
+    host_.midi_out().panic();
+    s_.midiOut->close();
+
+    if (wanted == 0) { s_.midiStatusText = "OUTPUT OFF"; return; }
+
+    if (s_.midiOut->open(wanted - 1)) {          // −1: index 0 of the list is OFF, not a device
+        s_.midiStatusText = "PORT OPENED";
+    } else {
+        // ⚠️ SAID OUT LOUD, and the setting is left alone. A port that refuses to open is usually one
+        // another app already holds exclusively — a transient the user can fix and retry — so throwing
+        // their choice away on the first failure would be the wrong repair. The row reads OFF because
+        // `is_open()` is false, which is the truth.
+        s_.midiStatusText = "PORT BUSY";
+    }
+}
+
+void InputDispatcher::midi_action() {
+    switch (static_cast<MidiRow>(s_.midiCursorRow)) {
+        case MidiRow::PANIC:
+            // Every note-off we owe, on every channel we have used, right now. It goes through the
+            // CONSUMER and not the port, because the consumer is what knows which notes are sounding —
+            // and it is the same call `SongcoreHost::stop()` makes, so there is one panic in the app.
+            host_.midi_out().panic();
+            s_.midiStatusText = port_open() ? "PANIC SENT" : "NO PORT";
+            break;
+
+        case MidiRow::TEST: {
+            // ⚠️ THE ONE THING ON THIS SCREEN THAT WRITES TO THE PORT DIRECTLY, bypassing the bus — and
+            // that is the point of it rather than a shortcut taken. TEST answers "is there a cable, and
+            // does this machine's MIDI stack work at all?", and an answer routed through the sequencer,
+            // the router and the instrument's EXTERNAL flag would be answering a much larger question:
+            // a silent TEST would no longer mean "no cable", it would mean "something, somewhere".
+            //
+            // A note-on and its note-off in the same breath. Sustaining it would make the screen the one
+            // place in the app that can leave a note hanging with no transport to stop it.
+            if (!port_open()) { s_.midiStatusText = "NO PORT"; break; }
+            const uint8_t on[3]  = {0x90, 60, 100};   // C-4, channel 1, mf
+            const uint8_t off[3] = {0x80, 60, 0};
+            s_.midiOut->send(on, 3);
+            s_.midiOut->send(off, 3);
+            s_.midiStatusText = "TEST SENT";
+            break;
+        }
+
+        // OUTPUT / OFFSET / PROG CHG are A+DPAD cells — the app-wide rule that single A is for actions.
         default:
             break;
     }
@@ -2264,6 +2402,7 @@ void InputDispatcher::on_button_a() {
         // The two screens whose rows are BUTTONS. Nothing to insert — A *is* the action.
         case ScreenType::PROJECT:  project_action();  break;
         case ScreenType::SETTINGS: settings_action(); break;
+        case ScreenType::MIDI:     midi_action();     break;
 
         default:
             break;
@@ -2331,6 +2470,19 @@ void InputDispatcher::on_button_b() {
         nav.screen = s_.settingsReturnScreen;
         nav.column = s_.previousColumn;   // SETTINGS owns no column — the way out keeps the one it came in with
         go_to_screen(s_, nav);            // …and NOT a bare assignment: the port's cursors are saved/restored here
+        return;
+    }
+
+    // MIDI leaves the same way and for the same reasons — and B is its ONLY way out, since it is not on
+    // the R+DPAD grid. Placed beside SETTINGS so the two stay in the same position relative to the
+    // modals above and the selection arm below; the argument in the comment on that block is verbatim
+    // this one's.
+    if (s_.currentScreen == ScreenType::MIDI) {
+        s_.selection.exit();
+        NavResult nav;
+        nav.screen = s_.midiReturnScreen;
+        nav.column = s_.previousColumn;
+        go_to_screen(s_, nav);
         return;
     }
 
@@ -2623,7 +2775,12 @@ void InputDispatcher::on_start() {
         case ScreenType::MIXER:
         case ScreenType::EFFECTS:
         case ScreenType::PROJECT:
-        case ScreenType::SETTINGS: host_.play_song(0); break;
+        case ScreenType::SETTINGS:
+        // ⭐ MIDI JOINS THE FOUR, AND IT IS THE ONE THAT MOST NEEDS TO. This screen is where the user
+        // picks the cable and sets the OFFSET, and both are dialled BY EAR against a song that is
+        // playing — a MIDI screen you had to leave to start the transport would make its own OFFSET row
+        // untunable.
+        case ScreenType::MIDI: host_.play_song(0); break;
 
         // PHRASE, GROOVE, SCALE… — Kotlin's `togglePlayback()` else-arm.
         default: host_.play_phrase(s_.currentPhrase); break;

@@ -373,6 +373,7 @@ add_library(pt-ui STATIC
         ui/modules/groove_editor.cpp
         ui/modules/instrument_editor.cpp
         ui/modules/instrument_pool.cpp
+        ui/modules/midi_settings.cpp
         ui/modules/mixer.cpp
         ui/modules/modulation.cpp
         ui/modules/navigation_map.cpp
