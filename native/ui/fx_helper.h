@@ -2,27 +2,18 @@
 
 // ─── The FX helper overlay ───────────────────────────────────────────────────────────────────────
 //
-// A 1:1 port of ui/overlays/FxHelperOverlay.kt — the modal grid-picker that opens when A+UP or
-// A+DOWN is pressed while the cursor sits on an FX *type* column (PHRASE cols 4/6/8, TABLE cols
-// 3/5/7). 34 effects in a 6×6 grid, with the effect's own documentation above it.
+// The modal grid-picker that opens when A+UP or A+DOWN is pressed while the cursor sits on an FX
+// *type* column (PHRASE cols 4/6/8, TABLE cols 3/5/7): the effects in a six-column grid, with the
+// highlighted one's documentation above it.
 //
-// It exists because a tracker's FX column is otherwise unusable: A+UP steps blindly through 34
-// three-letter codes with nothing on screen to say what "PVX" or "THO" does. Holding A and reading is
-// how you find an effect; releasing A is how you pick it.
-//
-// ⚠️ It was 6×5 until MIDI phase D added six commands. Everything about the geometry is DERIVED from
-// FX_GRID_ROWS/COLS and EFFECT_TYPE_COUNT — the centred last row, the box height in
-// modules/fx_helper_overlay.cpp — so a row is the only thing that had to change; the static_assert
-// below is what makes the next such addition an error rather than four effects nobody can reach.
+// It exists because a tracker's FX column is otherwise unusable — A+UP steps blindly through dozens
+// of three-letter codes with nothing on screen to say what "PVX" or "THO" does. Holding A and reading
+// is how you find an effect; releasing A is how you pick it.
 //
 //   A + DPAD    move in the grid
 //   release A   commit the highlighted effect and close  (dispatcher's `on_a_released`)
 //
-// ⚠️ THE LAST ROW IS CENTRED, AND ITS EDGE CELLS ARE UNREACHABLE. 28 effects fill four rows of six
-// (24) and leave four over, which are drawn centred in the last row — columns 1..4, with 0 and 5
-// empty. Every navigation function below has a special case for it, and they are not decoration: land
-// the cursor on last-row column 0 and it highlights a cell that holds no effect, so releasing A would
-// commit `EFFECT_TYPES[24 + (0 - 1)]` — index 23, an effect the user never pointed at.
+// How many effects the grid holds depends on the build — see FxGrid below.
 //
 // This header is PURE — no canvas, no theme. The drawing is ui/modules/fx_helper_overlay.h. That
 // split is what lets `ptinput` golden the navigation without linking a renderer.
@@ -35,57 +26,80 @@
 namespace pt::ui {
 
 inline constexpr int FX_GRID_COLS = 6;
-inline constexpr int FX_GRID_ROWS = 6;
 
-// ⚠️ **THE CLAMP IN `fx_last_row_count` IS A SILENT TRUNCATION, SO THIS TURNS IT INTO A BUILD ERROR.**
-// Overflow the grid and the surplus effects simply have no cell: they stay reachable by A+UP in the FX
-// column and are invisible in the picker, which reads as "the helper is missing an effect" long after
-// the commit that caused it. Phase D added six and needed a sixth row; the assert is what will say so
-// next time.
-static_assert(songcore::EFFECT_TYPE_COUNT <= FX_GRID_ROWS * FX_GRID_COLS,
-              "the FX helper grid is too small for EFFECT_TYPES — add a row");
+/**
+ * The grid's shape for a given number of visible effects.
+ *
+ * The COUNT is a parameter because a build with the MIDI surfaces hidden (platform_caps.h `midi`)
+ * shows the first songcore::EFFECT_TYPE_COUNT_NO_MIDI effects and needs one row fewer. Everything
+ * else is derived from it, so the two shapes are the same code with a different number in it:
+ * 34 effects → six rows with four centred in the last, 28 → five rows with four centred.
+ *
+ * ⚠️ THE LAST ROW IS CENTRED AND ITS EDGE CELLS ARE UNREACHABLE. Whatever does not fill a whole row
+ * is drawn centred, so with four left over the columns are 1..4 and 0 and 5 hold nothing. Every
+ * navigation function has a case for it, and they are not decoration: land on last-row column 0 and
+ * the highlight sits on a cell holding no effect, so releasing A would commit the index one below the
+ * row's first — an effect the user never pointed at.
+ */
+struct FxGrid {
+    int count        = songcore::EFFECT_TYPE_COUNT;  // visible effects
+    int rows         = 0;
+    int fullCells    = 0;   // cells in the rows above the last one
+    int lastRow      = 0;
+    int lastRowCount = 0;   // effects in the centred last row
+    int firstCol     = 0;   // its leftmost reachable column
+    int lastCol      = 0;   // its rightmost
 
-/** The first five rows are full: 30 cells. */
-inline constexpr int FX_FULL_CELLS = (FX_GRID_ROWS - 1) * FX_GRID_COLS;
-inline constexpr int FX_LAST_ROW   = FX_GRID_ROWS - 1;
+    static constexpr FxGrid of(int count) {
+        FxGrid g;
+        g.count        = count;
+        g.rows         = (count + FX_GRID_COLS - 1) / FX_GRID_COLS;
+        g.lastRow      = g.rows - 1;
+        g.fullCells    = g.lastRow * FX_GRID_COLS;
+        g.lastRowCount = count - g.fullCells;
+        g.firstCol     = (FX_GRID_COLS - g.lastRowCount) / 2;
+        g.lastCol      = g.firstCol + g.lastRowCount - 1;
+        return g;
+    }
+};
 
-/** What is left over for the centred last row — derived, so adding an effect re-centres it. */
-inline constexpr int fx_last_row_count() {
-    const int n = songcore::EFFECT_TYPE_COUNT - FX_FULL_CELLS;
-    return n < 0 ? 0 : (n > FX_GRID_COLS ? FX_GRID_COLS : n);
-}
-inline constexpr int FX_LAST_ROW_COUNT     = fx_last_row_count();                         // 4
-inline constexpr int FX_LAST_ROW_FIRST_COL = (FX_GRID_COLS - FX_LAST_ROW_COUNT) / 2;      // 1
-inline constexpr int FX_LAST_ROW_LAST_COL  = FX_LAST_ROW_FIRST_COL + FX_LAST_ROW_COUNT - 1;  // 4
+// Every effect, MIDI included — the default, and what a build with the MIDI surfaces on shows. Which
+// grid the app actually uses is decided ONCE, by InputDispatcher::visible_effect_type_count().
+inline constexpr FxGrid FX_GRID_FULL = FxGrid::of(songcore::EFFECT_TYPE_COUNT);
+
+// The box the overlay draws is sized from `rows` (modules/fx_helper_overlay.cpp), and a grid taller
+// than the screen would draw its last row outside its own box. Six rows is the tallest that fits.
+static_assert(FX_GRID_FULL.rows <= 6, "the FX helper box has room for six rows — see fx_helper_overlay.cpp");
 
 struct FxCell {
     int row = 0;
     int col = 0;
 };
 
-/** Linear effect index → its cell. The last row is centred, so its first effect sits at col 1. */
-inline FxCell fx_index_to_cell(int index) {
-    if (index < FX_FULL_CELLS) return FxCell{index / FX_GRID_COLS, index % FX_GRID_COLS};
-    return FxCell{FX_LAST_ROW, FX_LAST_ROW_FIRST_COL + (index - FX_FULL_CELLS)};
+/** Linear effect index → its cell. The last row is centred, so its first effect sits at `firstCol`. */
+inline FxCell fx_index_to_cell(int index, const FxGrid& g = FX_GRID_FULL) {
+    if (index < g.fullCells) return FxCell{index / FX_GRID_COLS, index % FX_GRID_COLS};
+    return FxCell{g.lastRow, g.firstCol + (index - g.fullCells)};
 }
 
 /** Columns reachable on `row` — the last row excludes its empty edge cells. */
-inline int fx_clamp_col_for_row(int row, int col) {
-    if (row != FX_LAST_ROW) return col;
-    if (col < FX_LAST_ROW_FIRST_COL) return FX_LAST_ROW_FIRST_COL;
-    if (col > FX_LAST_ROW_LAST_COL) return FX_LAST_ROW_LAST_COL;
+inline int fx_clamp_col_for_row(int row, int col, const FxGrid& g = FX_GRID_FULL) {
+    if (row != g.lastRow) return col;
+    if (col < g.firstCol) return g.firstCol;
+    if (col > g.lastCol) return g.lastCol;
     return col;
 }
 
 struct FxHelperState {
-    bool isOpen    = false;
-    int  cursorRow = 0;
-    int  cursorCol = 0;
+    bool   isOpen    = false;
+    int    cursorRow = 0;
+    int    cursorCol = 0;
+    FxGrid grid      = FX_GRID_FULL;
 
     /** Linear index into songcore::EFFECT_TYPES for the highlighted cell. */
     int cursor_index() const {
-        if (cursorRow < FX_LAST_ROW) return cursorRow * FX_GRID_COLS + cursorCol;
-        return FX_FULL_CELLS + (cursorCol - FX_LAST_ROW_FIRST_COL);
+        if (cursorRow < grid.lastRow) return cursorRow * FX_GRID_COLS + cursorCol;
+        return grid.fullCells + (cursorCol - grid.firstCol);
     }
 
     /** The effect CODE under the cursor — what a release of A commits. */
@@ -93,13 +107,11 @@ struct FxHelperState {
 };
 
 /** Open with the cursor on the cell holding `effect_index` (the FX column's current value). */
-inline FxHelperState fx_helper_opened_at(int effect_index) {
+inline FxHelperState fx_helper_opened_at(int effect_index, const FxGrid& g = FX_GRID_FULL) {
     const int clamped = effect_index < 0 ? 0
-                        : (effect_index > songcore::EFFECT_TYPE_COUNT - 1
-                               ? songcore::EFFECT_TYPE_COUNT - 1
-                               : effect_index);
-    const FxCell c = fx_index_to_cell(clamped);
-    return FxHelperState{true, c.row, c.col};
+                        : (effect_index > g.count - 1 ? g.count - 1 : effect_index);
+    const FxCell c = fx_index_to_cell(clamped, g);
+    return FxHelperState{true, c.row, c.col, g};
 }
 
 // ─── Navigation ──────────────────────────────────────────────────────────────────────────────────
@@ -110,20 +122,20 @@ inline FxHelperState fx_helper_opened_at(int effect_index) {
 
 inline void fx_move_up(FxHelperState& s) {
     if (s.cursorRow == 0) {  // wrap to the last row, rounding an unreachable column inward
-        s.cursorRow = FX_LAST_ROW;
-        s.cursorCol = fx_clamp_col_for_row(FX_LAST_ROW, s.cursorCol);
-    } else if (s.cursorRow == FX_LAST_ROW) {
-        s.cursorRow = FX_LAST_ROW - 1;  // straight up, same column
+        s.cursorRow = s.grid.lastRow;
+        s.cursorCol = fx_clamp_col_for_row(s.grid.lastRow, s.cursorCol, s.grid);
+    } else if (s.cursorRow == s.grid.lastRow) {
+        s.cursorRow = s.grid.lastRow - 1;  // straight up, same column
     } else {
         s.cursorRow -= 1;
     }
 }
 
 inline void fx_move_down(FxHelperState& s) {
-    if (s.cursorRow == FX_LAST_ROW - 1) {
-        s.cursorRow = FX_LAST_ROW;
-        s.cursorCol = fx_clamp_col_for_row(FX_LAST_ROW, s.cursorCol);
-    } else if (s.cursorRow == FX_LAST_ROW) {
+    if (s.cursorRow == s.grid.lastRow - 1) {
+        s.cursorRow = s.grid.lastRow;
+        s.cursorCol = fx_clamp_col_for_row(s.grid.lastRow, s.cursorCol, s.grid);
+    } else if (s.cursorRow == s.grid.lastRow) {
         s.cursorRow = 0;  // wrap to the top, same column
     } else {
         s.cursorRow += 1;
@@ -131,18 +143,16 @@ inline void fx_move_down(FxHelperState& s) {
 }
 
 inline void fx_move_left(FxHelperState& s) {
-    if (s.cursorRow == FX_LAST_ROW) {
-        s.cursorCol = (s.cursorCol <= FX_LAST_ROW_FIRST_COL) ? FX_LAST_ROW_LAST_COL
-                                                             : s.cursorCol - 1;
+    if (s.cursorRow == s.grid.lastRow) {
+        s.cursorCol = (s.cursorCol <= s.grid.firstCol) ? s.grid.lastCol : s.cursorCol - 1;
     } else {
         s.cursorCol = (s.cursorCol == 0) ? FX_GRID_COLS - 1 : s.cursorCol - 1;
     }
 }
 
 inline void fx_move_right(FxHelperState& s) {
-    if (s.cursorRow == FX_LAST_ROW) {
-        s.cursorCol = (s.cursorCol >= FX_LAST_ROW_LAST_COL) ? FX_LAST_ROW_FIRST_COL
-                                                            : s.cursorCol + 1;
+    if (s.cursorRow == s.grid.lastRow) {
+        s.cursorCol = (s.cursorCol >= s.grid.lastCol) ? s.grid.firstCol : s.cursorCol + 1;
     } else {
         s.cursorCol = (s.cursorCol + 1) % FX_GRID_COLS;
     }

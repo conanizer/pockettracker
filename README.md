@@ -6,7 +6,9 @@
   <img src="docs/images/screenshot.png" alt="PocketTracker screenshot" height="240">
 </p>
 
-PocketTracker is a music tracker for Android-based devices — a retro gaming handheld or a smartphone will work. It carries on the spirit of trackers like LSDJ and LGPT. It's free, open-source, and runs on hardware you've probably already got — the goal is to put a capable music-making tool in anyone's pocket.
+PocketTracker is a music tracker for small screens — a retro gaming handheld, a smartphone, or your desktop. It carries on the spirit of trackers like LSDJ and LGPT. It's free, open-source, and runs on hardware you've probably already got — the goal is to put a capable music-making tool in anyone's pocket.
+
+One codebase and one audio engine across Android, Linux handhelds, Linux desktop and Windows: the same 640×480 design, the same sound, the same project files.
 
 > **Note:** This project was developed with AI assistance. If that bothers you, this project isn't for you.
 
@@ -46,17 +48,26 @@ There are a few options to customize the app interface. The top bar has six visu
 
 ---
 
-## Supported devices
+## Supported platforms
 
-Almost any Android gaming handheld or phone.
+| Platform | Package | Notes |
+|---|---|---|
+| **Android** | `.apk` | Phones and Android gaming handhelds. Touch layout or physical buttons. |
+| **Linux handheld** | PortMaster `.zip` | aarch64 CFW handhelds (ArkOS, muOS, JELOS, Knulli, ROCKNIX…). |
+| **Linux desktop** | `.tar.gz` | x86-64. |
+| **Windows** | `.zip` | x86-64, no installer. |
 
-**Minimum requirements:** Android 8.0 (API 26) · 64-bit (arm64-v8a / x86_64) · ~512 MB RAM · ~50 MB storage · 640×480 screen
+**Android minimum:** Android 8.0 (API 26) · 64-bit (arm64-v8a / x86_64) · ~512 MB RAM · ~50 MB storage · 640×480 screen
 
 Tested on the **Miyoo Flip** (1 GB RAM, GammaOSCore Android 13), **Ayaneo Pocket Air Mini** (3 GB RAM, Android 11), **Fairphone 6** (8 GB RAM, /e/os v3.0.4 Android 15) and **Xiaomi 12T Pro** (8 GB RAM, LineageOS Android 16)
 
 ---
 
 ## Installation
+
+All packages are on the [Releases](https://github.com/conanizer/pockettracker/releases) page.
+
+### Android
 
 **One-click (recommended):** install [Obtainium](https://github.com/ImranR98/Obtainium), then tap the badge below on your device. PocketTracker is added straight from GitHub Releases and Obtainium keeps it up to date automatically.
 
@@ -68,7 +79,51 @@ If the badge doesn't open Obtainium, add this URL as an app source inside Obtain
 https://github.com/conanizer/pockettracker
 ```
 
-**Manual:** download the latest APK from [Releases](https://github.com/conanizer/pockettracker/releases) and open it on your device (allow "install from unknown sources" if asked).
+**Manual:** download `PocketTracker-<version>.apk` and open it on your device (allow "install from unknown sources" if asked).
+
+### Linux handheld (PortMaster)
+
+For aarch64 CFW handhelds. Nothing extra is needed — no BIOS, no runtime, no gptokeyb.
+
+1. Download `PocketTracker-<version>-portmaster-aarch64.zip`.
+2. Unzip it into your device's **`ports`** folder, so you end up with `ports/PocketTracker.sh` and `ports/pockettracker/` beside each other.
+3. Launch **PocketTracker** from the Ports menu.
+
+Your projects, samples and settings live in `ports/pockettracker/data/`, created on first launch — copy samples in there over USB or the network.
+
+The port uses your device's own SDL2, so it follows whatever your firmware already does about the screen and audio.
+
+### Linux desktop
+
+```bash
+tar xzf PocketTracker-<version>-linux-x64.tar.gz
+cd PocketTracker-<version>
+./PocketTracker
+```
+
+SDL2 is the only runtime dependency:
+
+| Distribution | Command |
+|---|---|
+| Debian / Ubuntu | `sudo apt install libsdl2-2.0-0` |
+| Fedora | `sudo dnf install SDL2` |
+| Arch | `sudo pacman -S sdl2` |
+
+Your files live in `$XDG_DATA_HOME/PocketTracker` (usually `~/.local/share/PocketTracker`), in `Projects/`, `Samples/` and `Soundfonts/`. Set `POCKETTRACKER_HOME` to put them somewhere else.
+
+### Windows
+
+1. Download `PocketTracker-<version>-windows-x64.zip`.
+2. Unzip it anywhere — it is a folder, not an installer.
+3. Run **PocketTracker.exe**.
+
+Nothing else to install: SDL2 and the Visual C++ runtime are both linked in. Windows SmartScreen will warn about an unsigned executable the first time — *More info* → *Run anyway*. A console window opens behind the tracker and stays there on purpose: it prints what the audio device and display actually did and whether your samples loaded, which is the most useful thing to attach to a bug report. Closing it closes the app.
+
+Your files live in `Documents\PocketTracker\` — `Projects\`, `Samples\`, `Soundfonts\`.
+
+### Controls on desktop
+
+The desktop builds read a gamepad through SDL, and also map the keyboard. See [`docs/input-system.md`](docs/input-system.md) for the full reference.
 
 ---
 
@@ -86,13 +141,46 @@ https://github.com/conanizer/pockettracker
 
 ## Building from source
 
-A standard Android + NDK project — the native audio engine builds via CMake as part of the normal Gradle build:
+The engine, the sequencer and the whole UI are portable C++17 under `native/`; each platform adds a thin shell around them.
+
+### Android
+
+A standard Android + NDK project — the native side builds via CMake as part of the normal Gradle build:
 
 1. Clone the repo and open it in a recent **Android Studio**.
 2. Let Gradle sync; it provisions the SDK and the pinned **NDK `27.0.12077973`**.
 3. Run the **app** configuration on a device/emulator, or build an APK with `./gradlew assembleDebug`.
 
 Debug builds need no signing setup — release builds fall back to the debug key when `keystore.properties` is absent.
+
+### Linux / Windows desktop
+
+Needs CMake and a C++17 compiler. SDL2 is used from the system if present, and fetched and built if not.
+
+```bash
+cmake -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release
+cmake --build shell/build
+```
+
+The redistributable packages are built by `shell/build-linux.sh` and `shell/build-windows.ps1`, which additionally verify the artifact and read the finished archive back out.
+
+### PortMaster (aarch64 handheld)
+
+Cross-compiled inside a container, which is the glibc floor every Tier-1 CFW is at or above — a host cross compiler produces a binary no handheld can load:
+
+```bash
+docker build -t pockettracker-build -f shell/Dockerfile.portmaster shell/
+docker run --rm -v "$PWD:/src" pockettracker-build bash /src/shell/build-portmaster.sh
+```
+
+### Tests
+
+The conformance tools under `tools/` are one CMake project wired to ctest. They compare the C++ engine, sequencer, input layer and renderer against recorded goldens and hand-written invariants:
+
+```bash
+cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
+ctest --test-dir tools/build --output-on-failure
+```
 
 ---
 

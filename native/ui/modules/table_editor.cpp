@@ -103,11 +103,11 @@ CursorContext TableModule::cursor_context(const TableState& s) const {
                                     /*empty_value=*/-1, /*can_delete=*/row.volume != -1,
                                     /*can_insert=*/true);
 
-        case 3: return cc::effect_type(row.fx1Type, 1);
+        case 3: return cc::effect_type(row.fx1Type, 1, s.effectTypeCount);
         case 4: return cc::hex_byte(row.fx1Value, 0, effect_value_max(row.fx1Type));
-        case 5: return cc::effect_type(row.fx2Type, 2);
+        case 5: return cc::effect_type(row.fx2Type, 2, s.effectTypeCount);
         case 6: return cc::hex_byte(row.fx2Value, 0, effect_value_max(row.fx2Type));
-        case 7: return cc::effect_type(row.fx3Type, 3);
+        case 7: return cc::effect_type(row.fx3Type, 3, s.effectTypeCount);
         case 8: return cc::hex_byte(row.fx3Value, 0, effect_value_max(row.fx3Type));
 
         default: return cc::none();

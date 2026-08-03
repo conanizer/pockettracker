@@ -338,6 +338,17 @@ class InputDispatcher {
     std::string browser_dir(BrowserDir cat);
 
     /**
+     * How many of songcore::EFFECT_TYPES this build lets an FX cell be stepped to — the whole list,
+     * or the list minus its trailing MIDI commands (ui/platform_caps.h `midi`).
+     *
+     * ⚠️ WRITTEN ONCE HERE BECAUSE BOTH WAYS INTO THE FX TYPE COLUMN HAVE TO AGREE: the bound on the
+     * cell's CursorContext (cc::effect_type) and the size of the picker A+UP opens (ui/fx_helper.h).
+     * Two sites deriving it separately is one of them being wrong, and the disagreement would show up
+     * as an effect the picker cannot name. Public so `ptdispatch` can assert both against it.
+     */
+    int visible_effect_type_count() const;
+
+    /**
      * The two things a render needs that only the SHELL can do (S7).
      *
      * ⚠️ THE RENDER IS SYNCHRONOUS. Android hands it to a coroutine because Compose would ANR; a

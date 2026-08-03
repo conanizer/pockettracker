@@ -39,6 +39,9 @@ struct PhraseEditorState {
     bool                    selectionMode = false;
     std::function<bool(int, int)> isCellSelected = [](int, int) { return false; };
     Theme                   theme = theme_classic();
+
+    /** How far up songcore::EFFECT_TYPES an FX-type cell may be stepped — see cc::effect_type. */
+    int effectTypeCount = songcore::EFFECT_TYPE_COUNT;
 };
 
 /** What `handle_input` did — the edits the caller must echo to the engine (note preview, etc.). */

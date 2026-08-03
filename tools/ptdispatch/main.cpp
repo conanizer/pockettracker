@@ -4998,6 +4998,171 @@ int main() {
         host.reset_midi_in();
     }
 
+    // ── 43. THE MIDI SURFACES ARE GATED ON THE BUILD — and the DATA is not ───────────────────────
+    //
+    // A build with `PlatformCaps::midi` off cannot AUTHOR MIDI: no PROJECT > MIDI row (and so no way
+    // to the MIDI screen at all), no EXTERNAL on the instrument TYPE cell, and no MIDI commands in the
+    // FX column. It still DISPLAYS every one of them, because all three are persisted in a .ptp and a
+    // build that drew them as something else would be lying about the file on disk — an EXTERNAL
+    // instrument shown as a sampler is a track the engine correctly refuses to voice, with nothing on
+    // screen to say why.
+    //
+    // ⚠️ EVERY CLAIM IS MADE TWICE, ONCE UNDER EACH CAP. A gate asserted only in the build that has it
+    // off is indistinguishable from a feature that never worked: the `midi` half is the control, and it
+    // is what proves the `no-midi` half is measuring the CAP rather than something that was always
+    // true. The two halves must disagree on every line below or one of them is not running.
+    {
+        state.caps = PlatformCaps::sdl(true);
+        auto& proj = host.edit_project();
+
+        // ── (a) The PROJECT row, and the cursor walk over the hole it leaves ──────────────────────
+        ok(project_row_visible(ProjectRow::MIDI, state.caps),
+           "MIDI GATE [midi]: PROJECT draws the MIDI row");
+        eq(project_row_count(state.caps), 9, "MIDI GATE [midi]: nine PROJECT rows");
+
+        state.caps = PlatformCaps::sdl(false);
+        ok(!project_row_visible(ProjectRow::MIDI, state.caps),
+           "⭐ MIDI GATE [no-midi]: PROJECT does NOT draw the MIDI row");
+        eq(project_row_count(state.caps), 8, "MIDI GATE [no-midi]: eight PROJECT rows");
+
+        // ⚠️ EXIT KEEPS THE NUMBER 8. The row map is not compacted — the cursor, the tools and the
+        // recorded PROJECT cases all speak in these values, so the walk SKIPS row 7 rather than
+        // renumbering what follows it. A build that closed the gap would pass "MIDI is not drawn" and
+        // silently move every row below it.
+        eq(static_cast<int>(project_last_row(state.caps)), 8,
+           "⭐ MIDI GATE [no-midi]: EXIT is still row 8 — the map is skipped, not renumbered");
+
+        state.currentScreen       = ScreenType::PROJECT;
+        state.projectCursorRow    = static_cast<int>(ProjectRow::SYSTEM);
+        state.projectCursorColumn = 1;
+        dispatch.on_dpad_down();
+        eq(state.projectCursorRow, 8,
+           "⭐ MIDI GATE [no-midi]: DOWN off SYSTEM jumps the hidden MIDI row and lands on EXIT");
+        dispatch.on_dpad_up();
+        eq(state.projectCursorRow, 6, "MIDI GATE [no-midi]: …and UP comes back to SYSTEM, not to MIDI");
+
+        state.caps             = PlatformCaps::sdl(true);
+        state.projectCursorRow = static_cast<int>(ProjectRow::SYSTEM);
+        dispatch.on_dpad_down();
+        eq(state.projectCursorRow, 7, "MIDI GATE [midi]: DOWN off SYSTEM lands on MIDI (the control)");
+
+        // ── (b) A on the MIDI row cannot open the screen ──────────────────────────────────────────
+        //
+        // The row is the screen's only door, so this is the gate that matters. Driven with the cursor
+        // parked on row 7 in a build that never draws it — which is exactly the stale-cursor case a
+        // settings file written by a debug build produces.
+        state.caps             = PlatformCaps::sdl(false);
+        state.currentScreen    = ScreenType::PROJECT;
+        state.projectCursorRow = static_cast<int>(ProjectRow::MIDI);
+        dispatch.on_button_a();
+        ok(state.currentScreen == ScreenType::PROJECT,
+           "⭐⭐ MIDI GATE [no-midi]: A on the (undrawn) MIDI row does NOT open the MIDI screen");
+
+        state.caps             = PlatformCaps::sdl(true);
+        state.currentScreen    = ScreenType::PROJECT;
+        state.projectCursorRow = static_cast<int>(ProjectRow::MIDI);
+        dispatch.on_button_a();
+        ok(state.currentScreen == ScreenType::MIDI,
+           "MIDI GATE [midi]: …and with the cap on it DOES (the control — the gate is the cap)");
+        dispatch.on_button_b();   // back to PROJECT
+
+        // ── (c) The instrument TYPE cell stops one type short ─────────────────────────────────────
+        // ⚠️ On an EMPTY slot. `request_instrument_type_toggle` opens a CONFIRM before changing the
+        // type of an instrument that owns a source file — so on a loaded slot A+UP arms a dialog and
+        // every press after it is swallowed by the modal rule, and the walk below would read as "the
+        // type never changes" under BOTH caps. That is a check that cannot fail, which is worse than
+        // one that does: it was the first draft here, and it "passed" the gate for the wrong reason.
+        state.currentScreen           = ScreenType::INSTRUMENT;
+        state.currentInstrument       = 7;
+        state.instrumentCursorRow     = 0;
+        state.instrumentCursorColumn  = 1;
+        host.clear_instrument(7);
+        ok(state.confirm.kind == ConfirmDialogState::Kind::NONE,
+           "MIDI GATE: (setup) an empty slot — no confirm stands in the way");
+        auto type_of = [&] {
+            return host.project().instruments[7].instrumentType;
+        };
+        auto walk_types = [&](int steps) {
+            std::string seen;
+            for (int i = 0; i < steps; ++i) {
+                dispatch.on_a_up();
+                seen += songcore::instrument_type_name(type_of());
+                seen += " ";
+            }
+            return seen;
+        };
+
+        state.caps = PlatformCaps::sdl(false);
+        host.set_instrument_type(7, songcore::InstrumentType::SAMPLER);
+        eqs(walk_types(4), "SOUNDFONT SAMPLER SOUNDFONT SAMPLER ",
+            "⭐⭐ MIDI GATE [no-midi]: A+UP on TYPE cycles SAMPLER↔SOUNDFONT — EXTERNAL is unreachable");
+
+        state.caps = PlatformCaps::sdl(true);
+        host.set_instrument_type(7, songcore::InstrumentType::SAMPLER);
+        eqs(walk_types(4), "SOUNDFONT EXTERNAL SAMPLER SOUNDFONT ",
+            "MIDI GATE [midi]: …and with the cap on the cycle has three stops (the control)");
+
+        // ⭐ DISPLAY IS NOT GATED. An instrument that is ALREADY external — off disk, or from a .pti —
+        // keeps its type and keeps naming itself, and the TYPE gesture still has somewhere to go
+        // rather than sitting on a value the modulo cannot leave.
+        state.caps = PlatformCaps::sdl(false);
+        host.set_instrument_type(7, songcore::InstrumentType::EXTERNAL);
+        eqs(songcore::instrument_type_name(type_of()), "EXTERNAL",
+            "⭐ MIDI GATE [no-midi]: an EXTERNAL instrument on disk KEEPS its type and its name");
+        dispatch.on_a_up();
+        eqs(songcore::instrument_type_name(type_of()), "SAMPLER",
+            "⭐ MIDI GATE [no-midi]: …and A+UP walks it back INTO the reachable set, never stalls");
+
+        // ── (d) The FX type column stops before the MIDI commands ─────────────────────────────────
+        state.currentScreen = ScreenType::PHRASE;
+        state.currentPhrase = 3;
+        state.cursorRow     = 0;
+        state.cursorColumn  = 4;                       // FX1 type
+        proj.phrases[3].steps[0].fx1Type = songcore::FX_NONE;
+
+        state.caps = PlatformCaps::sdl(false);
+        eq(dispatch.visible_effect_type_count(), songcore::EFFECT_TYPE_COUNT_NO_MIDI,
+           "⭐⭐ MIDI GATE [no-midi]: the reachable FX list stops before the MIDI commands");
+        state.caps = PlatformCaps::sdl(true);
+        eq(dispatch.visible_effect_type_count(), songcore::EFFECT_TYPE_COUNT,
+           "MIDI GATE [midi]: …and reaches the last of them (the control)");
+
+        // ⭐ …and a step that already HOLDS one still reads as itself. The bound clamps the CURSOR,
+        // never the CELL: this value came off disk and this build did not author it.
+        state.caps = PlatformCaps::sdl(false);
+        proj.phrases[3].steps[0].fx1Type  = songcore::FX_MPG;
+        proj.phrases[3].steps[0].fx1Value = 0x40;
+        eqs(songcore::effect_name(proj.phrases[3].steps[0].fx1Type), "MPG",
+            "⭐ MIDI GATE [no-midi]: an MPG cell on disk still reads MPG — display is not gated");
+
+        // The picker A+UP opens is bounded by its own grid, and it must agree with the bound above —
+        // two ways into one column, and a build where they disagree has a cell the picker cannot say.
+        state.caps = PlatformCaps::sdl(false);
+        proj.phrases[3].steps[0].fx1Type = songcore::FX_NONE;
+        dispatch.on_a_up();
+        ok(state.fxHelper.isOpen, "MIDI GATE [no-midi]: (setup) A+UP opens the FX picker");
+        eq(state.fxHelper.grid.count, songcore::EFFECT_TYPE_COUNT_NO_MIDI,
+           "⭐⭐ MIDI GATE [no-midi]: the picker holds the same effects the cell can be stepped to");
+        eq(state.fxHelper.grid.rows, 5, "MIDI GATE [no-midi]: …in five rows, not six");
+        state.fxHelper = FxHelperState{};
+
+        state.caps = PlatformCaps::sdl(true);
+        dispatch.on_a_up();
+        eq(state.fxHelper.grid.count, songcore::EFFECT_TYPE_COUNT,
+           "MIDI GATE [midi]: the picker holds every effect (the control)");
+        eq(state.fxHelper.grid.rows, 6, "MIDI GATE [midi]: …in six rows");
+        state.fxHelper = FxHelperState{};
+
+        // Leave the harness as it was found.
+        state.caps                = PlatformCaps::sdl(true);
+        state.currentScreen       = ScreenType::PROJECT;
+        state.projectCursorRow    = 0;
+        state.projectCursorColumn = 1;
+        host.set_instrument_type(7, songcore::InstrumentType::SAMPLER);
+        proj.phrases[3].steps[0].fx1Type  = songcore::FX_NONE;
+        proj.phrases[3].steps[0].fx1Value = 0;
+    }
+
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);
     std::printf("%s\n", failures == 0 ? "ALL GREEN" : "RED");
     return failures == 0 ? 0 : 1;

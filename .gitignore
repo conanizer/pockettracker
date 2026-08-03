@@ -95,6 +95,10 @@ cmake-build-*/
 /tools/build-wsl/
 /tools/build-linux/
 /shell/build-linux/
+# shell/build-linux.sh's own tree. Separate from the hand-driven one above on purpose: a packaging
+# run must not reconfigure the tree a device session is using, and one CMake cache cannot serve two
+# build types anyway.
+/shell/build-release-linux/
 
 # OS-specific files
 # macOS

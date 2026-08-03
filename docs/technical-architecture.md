@@ -10,115 +10,156 @@ How PocketTracker is built. This document describes the system as it currently w
 
 1. [Overview](#overview)
 2. [Source Layout](#source-layout)
-3. [Audio Engine](#audio-engine)
-4. [Adding a New Engine Call](#adding-a-new-engine-call)
-5. [SoundFont (SF2) Engine](#soundfont-sf2-engine)
-6. [Data Model](#data-model)
-7. [Rendering System](#rendering-system)
-8. [Theme System](#theme-system)
-9. [Screen Overlay System](#screen-overlay-system)
-10. [Navigation System](#navigation-system)
-11. [File Management](#file-management)
-12. [Modulation Engine](#modulation-engine)
-13. [Technology Stack](#technology-stack)
+3. [The Seams](#the-seams)
+4. [Audio Engine](#audio-engine)
+5. [Songcore — the platform-free runtime](#songcore--the-platform-free-runtime)
+6. [The Event Bus](#the-event-bus)
+7. [Data Model and File Formats](#data-model-and-file-formats)
+8. [UI Layer](#ui-layer)
+9. [Input Layer](#input-layer)
+10. [Rendering and Export](#rendering-and-export)
+11. [Platform Shells](#platform-shells)
+12. [The Conformance Tools](#the-conformance-tools)
+13. [Build and Test](#build-and-test)
 14. [Coding Conventions](#coding-conventions)
 
 ---
 
 ## Overview
 
-PocketTracker is split into a **platform-agnostic core** and **platform adapters**. The core (data
-model, business logic, the C++ audio/DSP engine) has no Android dependencies; Android-specific code
-(Oboe, scoped storage, Compose UI, input device handling) lives behind interfaces. The Android app is
-one set of adapters over that core; a Linux build would add a second set without touching the core.
+PocketTracker is **one C++17 program with four thin platform shells**. The audio engine, the
+sequencer, the document model, the file formats and the entire user interface are portable C++ with
+no platform dependency at all. A shell provides a window, an audio device, a clock, buttons and a
+filesystem root — and nothing else.
 
-**The Linux port strategy is decided** (see `docs/internal/linux-port-plan.md`): a **native
-C++/SDL2 rewrite** for handhelds via PortMaster, NOT Compose Multiplatform. What carries over is
-the C++ engine (built from `ENGINE_CORE_SOURCES` in CMakeLists — Oboe/JNI are Android-only,
-gated behind `if(ANDROID)`), the file formats, and — after the songcore migration — the C++
-sequencing core. The Kotlin layers stay Android-only; the ~20 screen modules get re-implemented
-against the C++ UI (see `docs/internal/order-of-work.md` for the zone map and sequencing).
+```
+                    ┌─────────────────────────────────────────────┐
+                    │  native/ui   (pt-ui)                        │  the whole UI: screens,
+                    │  no SDL, no POSIX, no window, no engine*    │  cursor, input dispatch
+                    ├─────────────────────────────────────────────┤
+                    │  native/songcore                            │  document, sequencer,
+                    │  header-only, platform-free                 │  event bus, render, I/O
+                    ├─────────────────────────────────────────────┤
+                    │  native/  (the engine)                      │  voices, modulation, DSP
+                    └─────────────────────────────────────────────┘
+                       ▲            ▲             ▲            ▲
+            ┌──────────┴──┐  ┌──────┴──────┐  ┌───┴──────┐  ┌──┴──────────┐
+            │ shell/      │  │ shell/      │  │ shell/   │  │ shell/      │
+            │ Android SDL │  │ PortMaster  │  │ Linux    │  │ Windows     │
+            └─────────────┘  └─────────────┘  └──────────┘  └─────────────┘
+```
 
-The two halves mirror each other by name:
+\* one file in `pt-ui` includes the engine: `ui/engine_feed.h`, the 60 Hz read-back of scope samples
+and meters. Every screen module takes plain pointers, and a null pointer draws silence — which is
+what lets a headless tool render any screen with no engine in the process.
 
-- **Kotlin:** `IAudioBackend` (interface) ← `OboeAudioBackend` (Android impl). `AudioEngine` (core, portable) calls the interface.
-- **C++:** `AudioEngine` (portable core — all voices, scheduling, DSP) ← `OboeAudioEngine` (Android backend, the only Oboe-coupled translation unit).
+**Android has no Kotlin UI.** `app/src/main/java` is a six-file shim: `MainActivity` (an
+`SDLActivity` subclass that owns the splash, permissions and settings import), the virtual button
+skin's sound and haptic managers, and the two MIDI device managers. Everything a user sees is drawn
+by `pt-ui` into a software framebuffer.
 
 ---
 
 ## Source Layout
 
 ```
-core/                              # Platform-agnostic Kotlin — NO Android imports
-├── audio/
-│   ├── IAudioBackend.kt           Audio backend interface
-│   └── AudioEngine.kt             Platform-agnostic coordinator/facade over the backend
-├── data/
-│   └── TrackerData.kt             Pure data classes (Note, PhraseStep, Phrase, Chain, Instrument, Project…)
-├── logic/
-│   ├── TrackerController.kt       Navigation, screen + cursor state
-│   ├── InputController.kt         Increment/decrement, selection system
-│   ├── PlaybackController.kt      Phrase/chain/song scheduling, tics
-│   ├── EffectProcessor.kt         Effect constants + calculations
-│   ├── InstrumentController.kt    Sample management, resampling
-│   ├── FileController.kt          Save/load orchestration, autosave, migration
-│   ├── SongTraversal.kt           Shared song-walk helper
-│   └── ClipboardManager.kt        Copy/paste
-├── resources/
-│   └── IResourceLoader.kt         Sample/asset loading interface
-└── storage/
-    ├── IFileSystem.kt             File I/O interface
-    ├── FileInfo.kt                Platform-agnostic file metadata
-    ├── WavWriter.kt / WavStreamWriter.kt   WAV export
-    └── …
+native/                            The portable program
+├── audio-engine.cpp / .h          The engine: processAudioBlock, voices, modulation, DSP
+├── audio-decoders.cpp / .h        WAV, MP3, FLAC, OGG, Opus, M4A decoding
+├── sampler-voice.h                Per-voice state for sample playback
+├── soundfont-voice.cpp / .h       Per-voice state for SF2 (TinySoundFont)
+├── note-queue.h                   Sample-accurate note + parameter scheduling queues
+├── sample-editor.cpp              Destructive waveform operations
+├── transient-detector.cpp         Slice-point detection
+├── oboe-audio-engine.cpp / .h     Android audio backend (the only Oboe-coupled TU)
+├── mods/                          Modulation: routing, runner, AHD/ADSR/LFO/vibrato/tracking
+├── effects/                       DSP, three layers:
+│   ├── instrument-chain.h           per voice: Crush → Drive → Filter
+│   ├── send-chain.h                 send buses: reverb (DaisySP ReverbSc) + stereo delay
+│   ├── master-chain.h               output bus: masterEq → OTT | DUST → Limiter
+│   ├── primitives/                  biquad, filter, vendored DaisySP
+│   └── modules/                     FilterModule, DriveModule, BitcrushModule, DustChain
+│
+├── songcore/                      Header-only, platform-free. No SDL, no JNI, no POSIX.
+│   ├── model.h                      Project, Chain, Phrase, Table, Groove, Instrument, Note
+│   ├── project_io.h                 .ptp / .pti parse + emit (byte-exact)
+│   ├── project_ops.h                Compact, transitive table walks, slot surgery
+│   ├── timing.h                     frames_per_step / _tic, groove timing, transpose
+│   ├── effects.h                    Effect codes, names, EFFECT_TYPES, resolve_step_params
+│   ├── traversal.h                  Song walks, collect_used_instruments
+│   ├── rng.h                        PCG32, seeded and bounded like kotlin.random
+│   ├── event.h                      The event schema (versioned, frozen)
+│   ├── router.h                     MidiRouter, IMidiConsumer, TrackInstruments
+│   ├── scheduler.h                  The sequencer: phrases, chains, song, transport
+│   ├── engine_consumer.h            Events → engine calls
+│   ├── voice_derive.h               Note → voice parameters
+│   ├── engine_setup.h               Project → engine push (instruments, buses, EQ bank)
+│   ├── host.h                       SongcoreHost — the one runtime object a shell constructs
+│   ├── render.h / wav_writer.h      Offline render, WAV output
+│   ├── midi_out.h / midi_in.h       The MIDI seams, serializer, parser, router
+│   ├── midi_clock.h                 24 PPQN clock, transport, song position
+│   ├── trace_writer.h               Conformance trace serializer
+│   └── note_tables.h                Baked pitch tables (bit-exact across toolchains)
+│
+└── ui/                            pt-ui — the UI, portable C++ with no platform anything
+    ├── canvas.h / .cpp              FOUR primitives: fill rect, stroke rect, text, clip
+    ├── app_state.h                  The one mutable UI state object
+    ├── platform_caps.h              Which features this build has (a VALUE, not an #ifdef)
+    ├── screen.h / navigation.h      Screens and the R+DPAD navigation grid
+    ├── cursor.h / cursor_move.h     CursorContext: what is under the cursor, and how it steps
+    ├── input_dispatcher.cpp / .h    Every button and combo, one place
+    ├── selection.h / clipboard.*    Multi-cell selection and copy/paste
+    ├── layout.cpp / .h              Screen composition, top strip, right bar
+    ├── theme.h / theme_io.h         Palettes and the theme file
+    ├── settings_store.*             settings.json
+    ├── font5x5.h                    The pixel font
+    ├── filesystem.h                 The file I/O interface a shell implements
+    └── modules/                     One module per screen (song, chain, phrase, table, groove,
+                                     instrument, instrument pool, modulation, mixer, effects, eq,
+                                     sample editor, settings, project, midi, file browser,
+                                     qwerty keyboard, oscilloscope, nav map, fx helper, confirm)
 
-input/
-├── AppInputDispatcher.kt          Button-handler logic; wired via AppControllers + AppStateRefs
-├── ButtonHandlers.kt              Input mapping, key combos, key repeat
-└── CursorContext.kt              Value-type system + factory methods
+shell/                             The only SDL in the tree
+├── main.cpp                       Desktop / handheld entry point
+├── android-main.cpp               SDL_main for the Android build
+├── app.cpp / .h                   The shared frame loop, signal handling, config
+├── sdl-video, sdl-audio-engine, sdl-input, sdl-touch    The device
+├── image, font_raster, assets, skin, overlay, portrait2 Presentation
+├── midi-{out,in}-{base,winmm,alsa,android}.*            Two backend families, one #ifdef each
+├── alsa-rawmidi.*                 Runtime libasound loader (dlopen; no link-time dependency)
+├── midi-sender.*                  The MIDI output thread
+├── portmaster/                    Launch script and PortMaster metadata
+└── build-linux.sh, build-windows.ps1, build-portmaster.sh, Dockerfile.portmaster
 
-platform/android/                  # Android imports allowed here
-├── OboeAudioBackend.kt            IAudioBackend impl (JNI to the native engine)
-├── AndroidResourceLoader.kt       Asset loader
-├── AndroidFileSystem.kt           Scoped-storage IFileSystem impl
-└── DeviceAdapter.kt               Android InputDevice API, layout modes
-
-ui/
-├── EditorHelpers.kt               Shared rendering utilities (toHex2, rowBgColor, darken()…)
-├── PixelPerfectRenderer.kt        Compose Canvas rendering + pixel font + glyph atlas
-├── ScreenLayouts.kt               Top-level screen composition, overlay compositing, virtual controls
-└── modules/                       One module per screen (Phrase, Chain, Song, Instrument,
-                                   InstrumentPool, SampleEditor, Table, Groove, Modulation, Mixer,
-                                   Effect, Eq, Settings, Project, FileBrowser, Oscilloscope…)
-
-MainActivity.kt                    Thin coordinator: creates backends/controllers/modules, wires
-                                   AppControllers + AppStateRefs + AppInputDispatcher, renders UI
-
-app/src/main/cpp/                  # C++ audio engine
-├── audio-engine.cpp / .h          PORTABLE core (no Oboe): processAudioBlock, processLiveBlock, renderOffline
-├── oboe-audio-engine.cpp / .h     Android backend: owns the Oboe stream, onAudioReady → core.processLiveBlock
-├── jni-bridge.cpp                 JNI entry points (thin thunks)
-├── native-audio.cpp               Thin stub redirect
-├── sampler-voice.h                Per-voice state for sample-playback voices
-├── soundfont-voice.h / .cpp       Per-voice state for SF2 / TinySoundFont voices
-├── note-queue.h                   Sample-accurate note + param scheduling queues
-├── audio-defs.h                   Constants (MAX_VOICES, DECLICK_SAMPLES, FX_*), logging shim
-├── mods/                          Modulation engine
-│   ├── mod-system.h               Routing (modSourceValues → modDestValues)
-│   ├── mod-runner.h               runModMatrix() orchestration
-│   ├── modules/                   AHD/ADSR/LFO/pitch-slide/vibrato tick functions
-│   └── primitives/                lfo-oscillator.h (shared LFO/vibrato shaping)
-├── vendor/                        Third-party (tsf, dr_mp3, dr_flac, stb_vorbis, opus, opusfile)
-└── effects/                       DSP module system (three-layer)
-    ├── instrument-chain.h         Per-voice chain: Crush → Drive → Filter
-    ├── send-chain.h               Stereo send buses: reverb (DaisySP ReverbSc) + stereo delay
-    ├── master-chain.h             Output bus: masterEq → OttModule | DustChain → LimiterModule
-    ├── primitives/                biquad.h, filter.h (Audio EQ Cookbook), vendored DaisySP
-    └── modules/                   FilterModule (LP/HP/BP via daisysp::Svf), DriveModule, BitcrushModule
+app/                               Android: manifest, resources, and a six-file Kotlin shim
+tools/                             Conformance tools — see below
+testdata/                          Golden projects, traces, unit corpora, synthesized media
 ```
 
-**The hard rule:** `core/**` must contain no Android imports. Platform specifics go behind the
-interfaces in `core/audio`, `core/storage`, `core/resources`, implemented under `platform/android`.
+---
+
+## The Seams
+
+Four interfaces are all a platform has to implement. Everything else is shared code.
+
+| Seam | Header | What a shell provides |
+|---|---|---|
+| **Canvas** | `ui/canvas.h` | Nothing — the canvas is a software framebuffer the UI owns. The shell scales the finished 640×480 frame onto a texture. |
+| **Filesystem** | `ui/filesystem.h` | Directory listing, read, write, and the app root. `ui/std_filesystem.*` is the `std::filesystem` implementation the desktop and handheld shells use. |
+| **Audio** | `audio-backend.h` | A device that calls `processAudioBlock`. Oboe on Android, SDL audio elsewhere. |
+| **MIDI** | `songcore/midi_out.h`, `midi_in.h` | A port that moves bytes. winmm, ALSA and Android backends exist. |
+
+Two design rules make this hold:
+
+**The canvas has exactly four primitives, permanently.** Fill rect, stroke rect, bitmap text, clip.
+That is all the UI has ever used, and keeping it at four is what makes a new platform a rendering
+back end rather than a port. Skinning, scaling and post-processing happen shell-side, on the
+finished frame.
+
+**Platform differences are a VALUE, not an `#ifdef`** (`ui/platform_caps.h`). Which SETTINGS rows
+exist, whether PROJECT has an EXIT row, whether the MIDI surfaces can be authored — all fields on a
+`PlatformCaps` struct. The same compiled code answers every platform's question, which is what lets
+a headless tool drive any platform's UI and compare the results.
 
 ---
 
@@ -126,324 +167,343 @@ interfaces in `core/audio`, `core/storage`, `core/resources`, implemented under 
 
 A sample-accurate queue system in C++.
 
-- Oboe-based real-time output at 44.1 kHz (OpenSL ES preferred, AAudio fallback). The stream-open
-  ladder tries OpenSL ES Exclusive → Shared → None/Shared → AAudio Exclusive.
-- Audio init runs off the main thread (`Dispatchers.IO`) so startup never freezes the UI.
-- Sample-accurate note scheduling driven by a global frame counter: note onsets start at their
-  exact target frame (mid-block triggers render from an intra-block offset). Kills and param
-  updates are applied at block granularity — up to one audio burst early. ~<50 ms latency on
-  tested hardware.
-- 8-voice polyphony with per-track voice stealing.
-- Linear interpolation for pitch-shifting (no aliasing).
-- Per-voice DSP chain: Downsample (pre-interpolation) → Interpolate → Crush → Drive → Filter → Volume.
-- Resonant SVF / biquad filters (LP/HP/BP, Audio EQ Cookbook coefficients).
-- Real-time waveform capture for the oscilloscope and spectrum visualizers.
+- **44.1 kHz stereo.** Android uses Oboe (OpenSL ES Exclusive → Shared → None/Shared → AAudio
+  Exclusive); every other platform uses SDL audio.
+- **The audio device is opened exactly once**, at startup, and never reopened.
+- `AudioEngine` **must be heap-allocated** — its DSP scratch buffers, spectrum rings and 256-slot
+  table pool blow a 1 MB stack instantly.
 
-### Engine / backend split
+### The one processing rule
 
-- **`audio-engine.{h,cpp}` — portable core (`class AudioEngine`):** voices, note scheduling, the
-  sample-accurate queues, and **all** DSP (`processAudioBlock`). No `<oboe/*>` or `<android/*>`; logging
-  goes through the `audio-defs.h` shim. It caches the device rate (`setDeviceSampleRate`) and wakes a
-  paused stream through a `resumeHook` rather than touching a stream object directly.
-- **`oboe-audio-engine.{h,cpp}` — Android backend (`class OboeAudioEngine : oboe::AudioStreamDataCallback`):**
-  the only Oboe-coupled translation unit. Owns the `oboe::AudioStream`, runs the device-specific
-  stream-open ladder, and in `onAudioReady` forwards the buffer to `core->processLiveBlock(...)`.
+**All DSP happens in `processAudioBlock`.** `onAudioReady` (Oboe), the SDL callback and
+`renderOffline` are thin wrappers around it, and none of them contains signal processing. It is also
+the **only** place the note and parameter queues drain. A second drain point is a second timeline.
 
-A different platform adds a sibling backend (e.g. an ALSA/JACK class) that owns its own stream and
-calls the same `processLiveBlock()`; the core compiles unchanged.
-
-### Audio processing chain rule
-
-**All audio processing lives in `processAudioBlock()` in `audio-engine.cpp`.** `onAudioReady()` (live)
-and `renderOffline()` (WAV export) are thin wrappers that call `processAudioBlock()` and add only
-output-specific work on top:
-
-| Step | processAudioBlock | onAudioReady only | renderOffline only |
-|------|:-:|:-:|:-:|
-| Kill / note / param queues | ✅ | | |
-| Table ticks | ✅ | | |
-| Pitch / ADSR / LFO modulation | ✅ | | |
-| Per-voice DSP chain + mix | ✅ | | |
-| Send buses + master bus + limiter | ✅ | | |
-| Waveform / spectrum capture | | ✅ | |
-| Peak-meter tracking | | ✅ | |
-| Offline-silence gate (`isOfflineRendering`) | | ✅ | |
-| Chunked render loop | | | ✅ |
-
-If you add a new audio feature (effect, modulation destination, …), add it to `processAudioBlock()` —
-never to `onAudioReady`/`renderOffline`, or it will be missing from one of the two outputs.
-
-### Bus structure
-
-- **Per voice:** instrument chain (Crush → Drive → Filter) + constant-power pan.
-- **Send buses:** stereo reverb (DaisySP ReverbSc) and stereo delay; delay output can feed the
-  reverb input with no extra latency.
-- **Master bus:** `masterEq` → OTT 3-band compressor **or** DUST lo-fi chain (switchable) → soft
-  peak limiter. The limiter is always on.
-
-The DSP code is organised in three layers: **primitives** (stateless math / coefficient helpers),
-**modules** (one effect each, with state), and **chains** (ordered module pipelines).
-
----
-
-## Adding a New Engine Call
-
-The portability seam is wide: `IAudioBackend` has ~100 methods, `OboeAudioBackend` mirrors each as an
-`external fun`, `jni-bridge.cpp` has a hand-written thunk per call, and many `AudioEngine` methods are
-one-line forwards. Adding one engine feature means touching the same files in lockstep. Because the JNI
-link resolves lazily, a missed step is an `UnsatisfiedLinkError` at runtime, not a compile error.
-
-To add `fooBar(id: Int, gain: Float)`, edit in this order:
-
-1. **C++ engine (`audio-engine.{h,cpp}`)** — implement the behaviour as an `AudioEngine` method. All
-   DSP must live in `processAudioBlock` (see the chain rule); `fooBar` only mutates state the mix loop
-   reads. Guard audio-thread-shared state with the existing mutex discipline.
-2. **JNI thunk (`jni-bridge.cpp`)** — add `Java_com_conanizer_pockettracker_platform_android_OboeAudioBackend_native_1fooBar(...)`
-   that marshals args and calls `engine->fooBar(...)`. The symbol must match the package path; `_` in
-   the Kotlin name becomes `_1`; array args need `Get/ReleaseFloatArrayElements` (see `native_loadSample`).
-3. **Backend impl (`platform/android/OboeAudioBackend.kt`)** — `private external fun native_fooBar(...)`
-   plus the interface override `override fun fooBar(...) = native_fooBar(...)`.
-4. **Interface (`core/audio/IAudioBackend.kt`)** — add `fun fooBar(...)` so core code can call it
-   portably and any future backend must implement it.
-5. **Facade (`core/audio/AudioEngine.kt`)** — the method core/UI actually calls; logic here (no Android
-   imports), or a pure pass-through.
-
-**Verification:** run the app and exercise the call — a clean compile does not prove the thunk name is correct.
-
----
-
-## SoundFont (SF2) Engine
-
-Implemented with **TinySoundFont (TSF)** — a single-header C++ SF2 synthesizer, with a small fork patch
-for per-channel rendering.
-
-- One shared `tsf*` handle per SF2 file slot (up to 8 active SF2 files at once; true-LRU eviction).
-- Each track maps to a MIDI channel on the slot's handle (track 0 → ch 0 … track 7 → ch 7).
-- `tsf_render_float_channel(h, t, buf, frames, 0)` (forked) renders one MIDI channel at a time into a
-  per-track buffer, enabling per-instrument post-processing.
-- Memory ≈ 1× the SF2 file size (one handle per file). Instruments sharing one file are de-duplicated
-  onto the same handle and stay isolated via per-note bank/preset and ADSR overrides.
-- Full modulation parity with the sampler: the same `updateVoiceModulation()` runs for `SoundfontVoice`
-  (AHD/ADSR/LFO/DRUM/TRIG, all destinations), and table effects and pitch slides work identically.
-- Per-instrument effects (filter/drive/bitcrush) are applied to each track's SF buffer post-render.
-- SF preset overrides (ATK/DEC/SUS/REL/filterCut/filterRes) are patched into TSF regions via
-  `applySoundfontEnvelopeOverrides()` at note trigger.
-
----
-
-## Data Model
-
-`core/data/TrackerData.kt` is plain, serializable Kotlin data classes with no Android dependencies —
-it serializes to JSON for `.ptp` project files and could be mirrored as C++ structs for a Linux build.
-
-```kotlin
-@Serializable
-data class Note(val pitch: Int, val octave: Int) { /* toMidi(), toFrequency() */ }
-
-@Serializable
-data class PhraseStep(
-    var note: Note = Note.EMPTY,
-    var instrument: Int = 0x00,
-    var volume: Int = 0xFF,
-    var fx1Type: Int = 0x00, var fx1Value: Int = 0x00,   // + fx2, fx3
-)
-
-@Serializable data class Phrase(val id: Int, val steps: Array<PhraseStep>)
-@Serializable data class Chain(val id: Int, val phraseRefs: IntArray, val transposeValues: IntArray)
-@Serializable data class Instrument(/* sampleId, volume, pan, filters, loop, modSlots… */)
-@Serializable data class Project(
-    var name: String, var tempo: Int,
-    val phrases: Array<Phrase>, val chains: Array<Chain>,
-    val instruments: Array<Instrument>, val tracks: Array<Track>,
-)
-```
-
-*(Illustrative — `TrackerData.kt` is authoritative for exact fields, types, and defaults, and for the
-pool sizes set on `Project`.)* Projects carry a `version` field; `FileController.migrateProject()`
-forward-migrates older files after deserialization.
-
-**Compose note:** state changes must produce new objects (`copy(...)`), never in-place mutation, or
-recomposition won't fire.
-
----
-
-## Rendering System
-
-Pixel-perfect Canvas rendering at a fixed **640×480** design resolution, integer-scaled and
-letterboxed to the device screen. `PixelPerfectRenderer` computes the scale, then draws each screen's
-module.
-
-- **5×5 bitmap font**, scaled 3× = 15×15 px glyphs. A glyph atlas pre-renders the 128 ASCII glyphs once
-  into a single bitmap and stamps each with one tinted `drawImage` (avoids thousands of draw ops/frame).
-- **`TrackerModule`** interface: every screen implements `draw(...)` plus `width`/`height`. Modules read
-  state objects and render independently; drawing logic itself is platform-pure (only `DrawScope`/`Canvas`
-  are Compose-specific).
-- The oscilloscope/visualizer refresh loop only forces redraws while audio is audible; when idle, the
-  Canvas repaints solely on real state changes (cursor move, value edit, playback row), which keeps the
-  handheld from re-rendering 60×/sec on a static screen.
-
-Shared layout constants (`SCREEN_WIDTH`, `FONT_SCALE`, `CHAR_WIDTH`, …) and helpers (`toHex2`,
-`rowBgColor`, `darken`) live in `EditorHelpers.kt`.
-
----
-
-## Theme System
-
-`AppTheme` (`AppTheme.kt`) is a `@Serializable` data class of ARGB `Long` color fields plus a
-`visualizerType`, saved to/from `.ptt` theme files. Built-in palettes: **CLASSIC** (green-on-black),
-**AMBER**, **BLUE**, **MONO**.
-
-It flows top-down via the `LocalAppTheme` CompositionLocal → `drawLayout(appTheme)` → each module
-state's `copy(appTheme = …)`. Inside a draw function: `val t = state.appTheme` → `Color(t.fieldName)`.
-`Long.darken(factor)` scales RGB (preserving alpha) for cursor-shadow backgrounds.
-
----
-
-## Screen Overlay System
-
-PNG overlays (e.g. CRT scanlines) can be layered over the tracker screen at runtime.
-
-- **Assets:** any PNG in `app/src/main/assets/overlays/`; the Settings OVERLAY row lists them
-  automatically via `assets.list("overlays")`. Adding an overlay needs no code change.
-- **Loading (`MainActivity.kt`):** decoded as-is to an `ImageBitmap`; `STR` (00–FF) is the only runtime control.
-- **Compositing (`ScreenLayouts.kt`):** `Modifier.drawWithContent { drawContent(); drawImage(bitmap, alpha = STR/255f) }`
-  shares the same canvas as the tracker draw, so the overlay blends over the already-rendered pixels.
-- `overlayName` / `overlayStrength` live in `AppStateRefs`, are delegated in `AppInputDispatcher`, and
-  persist via SharedPreferences (`overlay_name` / `overlay_strength`).
-
----
-
-## Navigation System
-
-Screens are arranged on a 5×5 grid; **R + D-pad** moves between them and releasing R jumps to the
-selection.
+### Signal path
 
 ```
-Row 0:        —      SCALE   INST_POOL  (INST)*
-Row 1:    PROJECT   GROOVE     MODS     PROJECT
-Row 2:     SONG     CHAIN    PHRASE   INSTRUMENT  TABLE
-Row 3:    MIXER     MIXER    MIXER      MIXER     MIXER
-Row 4:   EFFECTS   EFFECTS  EFFECTS    EFFECTS   EFFECTS
+  voice ─► instrument chain (Crush → Drive → Filter) ─► instrument EQ ─┬─► track
+                                                                       ├─► reverb send bus
+                                                                       └─► delay send bus
+                        track mixer ─► master EQ ─► OTT | DUST ─► Limiter ─► out
 ```
 
-Navigation is pure logic in `TrackerController` / `NavigationMap` (no Android). SETTINGS and
-SAMPLE_EDITOR are popup screens opened contextually, not grid cells.
+Reverb and delay are **send buses**, not inserts: a per-note or per-instrument send amount feeds
+them, and the delay can additionally feed the reverb. Both have their own input EQ. `-1` is the
+documented bypass value for every EQ slot.
 
-**Instrument Pool fast-jump:** `(INST)*` at row 0 / col 4 is a contextual cell shown only on INST_POOL
-(or the instrument reached from it). From INST_POOL: R+RIGHT → INSTRUMENT, R+LEFT → PHRASE, R+DOWN →
-MODS; from that row-0 instrument: R+LEFT → INST_POOL, R+DOWN → MODS. Driven by
-`TrackerController.instrumentFromPool` (set on the R+RIGHT jump, cleared in the `currentScreen` setter
-on leaving INSTRUMENT). The normal row-2 INSTRUMENT keeps its usual navigation.
+### Voices
+
+Two voice types — `SamplerVoice` and `SoundfontVoice` — both driven by the same note path. A
+dedicated **preview lane** (voice 9) carries auditions, so hearing a note you are dialling in never
+steals a voice from the song.
+
+Note-offs are **KIL-only**, plus a live MIDI key release. There is no step-end note-off: an ADSR or
+TRIG voice rings until something explicitly stops it.
 
 ---
 
-## File Management
+## Songcore — the platform-free runtime
 
-File I/O is behind `IFileSystem`; `AndroidFileSystem` implements it over scoped storage.
+`native/songcore/` is header-only and has no platform dependency whatsoever. It is the whole program
+minus the pixels and the device.
 
-```kotlin
-interface IFileSystem {
-    fun getProjectsDirectory(): String
-    fun getSamplesDirectory(): String
-    fun listFiles(path: String): List<FileInfo>
-    fun readFile(path: String): String
-    fun writeFile(path: String, content: String)
-    fun deleteFile(path: String): Boolean
-    fun createDirectory(path: String): Boolean
-    // …
-}
+`SongcoreHost` (`host.h`) is the object a shell constructs. It owns the one `Project` in the process,
+the sequencer, the engine consumer, the external MIDI consumer and the transport. There is exactly
+**one mutable copy of the document** — `AppState` holds a pointer, never a copy, and the UI edits the
+host's project in place. Two mutable copies of a document is a desync waiting to happen.
+
+### The sequencer
+
+`scheduler.h` walks the song. It schedules ahead by a lookahead window, tracks per-track state
+(current chain, phrase, step, table row, groove position), applies effects, resolves chance and
+randomization, and emits **events** rather than engine calls.
+
+Timing is frame-based: `frames_per_step` and `frames_per_tic` derive from the tempo, and grooves
+change a step's length per position. Everything downstream is stamped in frames.
+
+### Determinism
+
+The floats have to be bit-identical across compilers and architectures, because the conformance
+tools compare raw binary32 bits:
+
+- `note_tables.h` bakes all 132 note frequencies and 256 detune values as constants rather than
+  computing `pow()` at runtime.
+- Songcore's translation unit is compiled with `-ffp-contract=off` and without `-ffast-math`. GCC
+  defaults to contracting `a + b*c` into an FMA, which would silently change the last bits.
+
+Random effects (CHA, RND, RNL, random-mode ARP), `oscShape >= 8` RND/DRNK LFOs, and DUST on the
+master bus are clock-seeded and therefore **not** byte-reproducible. `tools/ptnondet` answers
+"can this project be byte-compared at all?" and should be run before any A/B.
+
+---
+
+## The Event Bus
+
+The sequencer does not call the engine. It publishes **events** on a bus, and consumers turn them
+into whatever they are for.
+
+```
+   scheduler ──► MidiRouter ──┬──► EngineConsumer    → voices (the internal sound)
+                              ├──► ExternalConsumer  → MIDI bytes (the cable)
+                              └──► TraceConsumer     → a conformance trace
 ```
 
-- **Projects** save/load as `.ptp` (JSON) via `FileController`, default location
-  `/Documents/PocketTracker/Projects/`.
-- **Instruments** save/load as `.pti` presets (`/Documents/PocketTracker/Instruments/`).
-- **WAV export** writes to `/Documents/PocketTracker/Renders/` (full mix), with per-track stems in a
-  per-project subfolder.
-- **Autosave:** a debounced, app-private `autosave.ptp` is written while there is unsaved work and
-  cleared on a clean save/load/new. Its presence at launch signals an unclean exit and drives the
-  crash-recovery prompt (`AutosaveManager` + `FileController`).
-- **Samples** are loaded by path and decoded natively (no Java-heap copy): WAV directly, and
-  MP3/FLAC/OGG/Opus via the vendored decoders. M4A/AAC uses the OS MediaCodec extractor.
+The event vocabulary is MIDI's: note on, note off, control change, program change, pitch bend. That
+is the payoff of the seam — one command vocabulary reaches an internal sampler voice and an external
+synthesizer without either knowing about the other.
+
+`event.h` holds a **versioned, frozen schema**. Adding a tag, a field, or changing the order requires
+a `SCHEMA_VERSION` bump, regenerated goldens and a doc update, together.
+
+`TrackInstruments` (`router.h`) resolves which instrument a track-scoped event belongs to: the last
+note-on on a track names it. Both consumers use the same resolver, so they cannot disagree.
+
+### MIDI
+
+All three shipping platforms have MIDI in and out (winmm on Windows, ALSA on Linux, the Android MIDI
+API on Android), with a 24 PPQN clock, transport messages and song-position pointer.
+
+**The MIDI authoring surfaces are hidden in release builds** (`PlatformCaps::midi`). A release build
+cannot create MIDI data — no MIDI screen, no EXTERNAL instrument type, no MIDI effect commands — but
+it displays existing data faithfully, because all three are persisted in a `.ptp` and a build that
+drew them as something else would misrepresent the file on disk.
 
 ---
 
-## Modulation Engine
+## Data Model and File Formats
 
-**Files:** `audio-engine.cpp` + `mods/` headers (C++), `AudioEngine.kt`, `IAudioBackend.kt`,
-`TrackerData.kt`.
-
-Each instrument has 4 modulation slots (`modSlots: Array<ModSlot>` on `Instrument`). On `scheduleNote()`
-the Kotlin layer pushes the current mod params to C++ (`pushInstrumentModulation`), which copies them
-onto the triggered voice. The engine updates each slot once per audio callback
-(`updateVoiceModulation`), computing an `envValue` applied to the destination parameter in the mix loop.
-
-### Data model (`TrackerData.kt`)
-
-```kotlin
-data class ModSlot(
-    var type: ModType = ModType.NONE,    // envelope/LFO type
-    var dest: ModDest = ModDest.NONE,    // target parameter
-    var amount: Int = 0xFF,              // modulation depth 0x00–0xFF
-    // Envelope (AHD, ADSR): attack, hold, decay, sustain, release (ticks / level)
-    // LFO: oscShape (TRI/SIN/RMP±/EXP±/SQU±/RND/DRNK), lfoTrigMode, lfoFreq
-)
+```
+Project
+├── name, tempo, transpose
+├── song[256][8]          chain references per row per track   (-1 = empty)
+├── chains[128]           16 phrase slots + a transpose each
+├── phrases[128]          16 steps: note, volume, instrument, 3 × (FX type, FX value)
+├── tables[128]           16 rows: transpose, volume, 3 × (FX type, FX value)
+├── grooves[32]           16 step lengths in tics
+├── instruments[128]      sampler | SoundFont | external
+├── eqPresets[128]        the shared EQ slot bank
+├── mixer, master bus, reverb, delay
+└── midi settings         sync out, program change, per-track input channels
 ```
 
-- **ModType:** NONE=0, AHD=1, ADSR=2, LFO=3, DRUM=4, TRIG=5 (TRACKING / SCALAR not yet implemented).
-- **ModDest:** NONE=0, VOLUME=1, PAN=2, PITCH=3, FINE_PITCH=4, FILTER_CUTOFF=5, FILTER_RES=6,
-  SAMPLE_START=7, MOD_AMT=8, MOD_RATE=9, MOD_BOTH=10.
+**`-1` is the empty value everywhere** — chain references, table volume, every EQ slot. Not `0xFF`.
 
-### C++ runtime
+**An instrument is empty iff `sampleFilePath` is null.** Not `sampleId < 0`, not an empty name. A
+note-on on an empty instrument is still a valid *event*; the consumer is what drops it.
 
-- `InstrumentModSlot[256][4]` is the static store, updated from Kotlin before each note.
-- `VoiceModSlot[4]` on each voice is copied from the store at trigger time and holds runtime state
-  (`stage`, `envValue`, `lfoPhase`, `stageCounter`).
-- **AHD:** Attack → Hold → Decay → done (one-shot). **ADSR:** Attack → Decay → Sustain → Release → done;
-  `PlaybackController.scheduleNoteOff()` soft-kills at step end, and ADSR/TRIG voices auto-stop once the
-  VOL mod reaches the final stage. **DRUM** shares the AHD machine (transient/body/tail framing);
-  **TRIG** shares the ADSR machine.
-- **LFO** runs continuously; phase advances per callback and resets on each new note (retrigger).
-- **Envelope interpolation:** `prevEnvValue` is snapshotted and lerped per-sample on falling
-  transitions, which removes stepping/crackle on short decays.
-- **Destinations:** VOL (per-sample after DSP), PITCH (accumulated per callback, applied via
-  `getModulatedPlaybackRate`), PAN (`basePan` + offset, pan law recomputed per callback), FILTER
-  (cut/res offsets recompute biquad coefficients when active), plus mod-to-mod routing (dest 8/9/10,
-  N→N+1 circular).
-- **Offline render** applies the same modulation per frame so exports match playback.
+### Files
+
+| Extension | Contents |
+|---|---|
+| `.ptp` | A project. JSON, pretty-printed, defaults omitted. |
+| `.pti` | A single instrument preset — any type, including external. |
+| `settings.json` | Device and app settings. Shared shape across platforms. |
+| `config.json` | Optional folder overrides for the file browser. |
+| `.ptt` | A theme. |
+
+`project_io.h` emits **byte-exact** JSON: the field order, the pretty-printing and the
+default-omission rules are all pinned, and eight golden projects round-trip byte-for-byte in CI. Any
+new serialized field must be default-guarded or those goldens break.
 
 ---
 
-## Technology Stack
+## UI Layer
 
-| Layer | Technology | Notes |
-|-------|------------|-------|
-| UI | Jetpack Compose | Android |
-| Language | Kotlin 1.9+ | |
-| Audio | C++ with Oboe (OpenSL ES / AAudio) | Portable core; Oboe only in `OboeAudioEngine` |
-| SF2 synth | TinySoundFont | Single-header, vendored at `vendor/tsf/tsf.h` |
-| Decoders | dr_mp3, dr_flac, stb_vorbis, libopus/opusfile | Vendored native decoders |
-| Build | Gradle 8.x | |
-| Native build | CMake 3.22.1+ | |
-| Serialization | Kotlinx Serialization | JSON `.ptp` / `.pti` / `.ptt` |
-| Min Android | API 26 (Android 8.0) | 64-bit only (arm64-v8a, x86_64) |
+640×480, drawn into a software framebuffer with four primitives. The shell scales the finished frame.
+
+**Sixteen screens**, reached by R+DPAD over a twelve-cell navigation grid plus sub-screens:
+
+| | |
+|---|---|
+| Grid editors | SONG, CHAIN, PHRASE, TABLE, GROOVE |
+| Instruments | INSTRUMENT, INST.POOL, MODS |
+| Mix | MIXER, EFFECTS |
+| Sample | SAMPLE EDITOR |
+| Sub-screens | PROJECT → SETTINGS, PROJECT → MIDI, THEME editor, EQ editor |
+| Overlays | file browser, qwerty keyboard, FX helper, confirm dialog |
+
+Screen geometry lives in **one table per screen** that the cursor walks and the module draws. Where
+rows are conditional (SETTINGS, PROJECT), a row's **number is its identity** — hidden rows are
+skipped, never renumbered, so a stored cursor and a recorded test case keep meaning the same thing.
+
+Two modules are stateful, both because their output is a function of the *previous* frame: the
+oscilloscope (peak-hold dots, falling bars) and the mixer (falling peak markers).
+
+**Modals own the buttons while they are up**, and every new modal has to be added to the predicate
+that says so.
 
 ---
 
-## Coding Conventions
+## Input Layer
 
-**Kotlin** — `PascalCase` classes, `camelCase` functions, `SCREAMING_SNAKE_CASE` constants,
-`camelCase` private members (no prefix).
+`ui/input_dispatcher.cpp` is every button and combo in one place.
 
-**Comments** — explain *why* when it's non-obvious (a hidden constraint, a surprising invariant, a
-bug workaround). Don't restate what well-named code already says. Section separators
-(`// ═══`) are fine to group utilities in long files, not inside individual functions.
+**Modifiers are snapshotted at EVENT time, not at poll time.** SDL delivers a whole frame's events at
+once, so asking "is A held?" while processing a B press describes the *end* of the frame. Roll B and
+A down inside one 16 ms frame and a poll-time reader fires A+B on what was a plain B. Each queued
+event carries its own modifier snapshot.
 
-**Screen modules (`*Module.kt`)** — hex formatting via `.toHex2()`/`.toHex1()`; list-row backgrounds
-via `rowBgColor()`; `getCursorContext()` uses `CursorContextFactory.*` exclusively; `draw()` casts
-state with an early return (`val s = state as? FooState ?: return`).
+**The mapper's check order is the specification**, not style. L+B+A is tested before L+A or a clone
+pastes; A+B before a plain A or a delete inserts; R+A is consumed so holding R to change screens
+cannot also fire an edit underneath.
 
-**C++** — `UPPER_SNAKE_CASE` constants, `PascalCase` classes, `camelCase` functions and members.
-Prefer `std::vector` over raw arrays; guard audio-thread-shared state with the existing mutexes.
+Cursor behaviour is a `CursorContext`: what the cell holds, what it can do (increment, decrement,
+delete, insert), its range and its step sizes. The five generic handlers (`on_a`, `on_b`,
+`on_a_left`, `on_a_right`, `on_a_b`) turn a button into an `InputAction` without ever asking which
+screen is up.
 
-**Portability** — never import Android types into `core/**`. New platform capabilities go behind an
-interface in `core/`, implemented under `platform/android/`.
+---
+
+## Rendering and Export
+
+Offline render (`songcore/render.h`) is **prepare → render → finish**, with scheduling deliberately
+outside those verbs. It pushes the project into the engine, walks the requested song rows, and writes
+a WAV.
+
+- **A render is deterministic**: the same project rendered twice produces a byte-identical file, with
+  a different project rendered in between. Engine state surviving from one render to the next was a
+  real bug; back-to-back renders would be the weaker test.
+- **The tail is appended**: a render whose last note is still ringing continues until the audio
+  decays to zero, rather than stopping dead at full amplitude. A runaway cap bounds it.
+- **Live and render must be identical.** `push_live_params` and `prepare_render` push the same
+  parameters, and a standing test asserts a live-configured engine and a render-configured engine
+  produce byte-identical audio. They did not always: the shell once played a project on the engine's
+  factory defaults while rendering it correctly.
+
+Export modes: full mix, per-track stems, and resampling a song selection into a new sample.
+
+---
+
+## Platform Shells
+
+| | Android | PortMaster | Linux desktop | Windows |
+|---|---|---|---|---|
+| Entry | `android-main.cpp` | `main.cpp` | `main.cpp` | `main.cpp` |
+| Audio | Oboe | SDL2 | SDL2 | SDL2 |
+| SDL2 | vendored, built in | **the device's own** | system | vendored, static |
+| MIDI | Android MIDI (JNI) | ALSA (dlopen) | ALSA (dlopen) | winmm |
+| App root | `Documents/PocketTracker` | the port's `data/` | `$XDG_DATA_HOME/PocketTracker` | `Documents\PocketTracker` |
+| Exit | — (the launcher owns it) | PROJECT → EXIT | PROJECT → EXIT | PROJECT → EXIT |
+
+**PortMaster links the device's libSDL2, deliberately.** The CFW patched that copy for the hardware's
+display (KMSDRM) and audio (ALSA); shipping our own would shadow the one that actually knows the
+screen. The build cross-compiles against a *pinned old* SDL2 as a link-time SDK — a compatibility
+floor, so reaching for a newer SDL API fails loudly on a dev box instead of as `undefined symbol` on
+a stranger's handheld.
+
+**The PortMaster launcher must never run gptokeyb.** The app reads the gamepad itself through SDL's
+GameController API *and* reads the keyboard (the same source builds the desktop binary), so gptokeyb
+delivers every press twice by two paths with conflicting meanings.
+
+**Renderer creation falls back.** `SDL_RENDERER_ACCELERATED` means *require*, not *prefer*, so
+`SDL_CreateRenderer` fails outright on hardware with no accelerated driver. The shell tries
+accelerated+vsync → accelerated → anything, and paces the frame itself when there is no vsync (a spun
+core is a battery bug on a handheld).
+
+**Signal handling: a handler may only set a flag.** "SIGTERM → autosave" read literally is a heap-lock
+deadlock — hundreds of KB of JSON, none of it async-signal-safe — which hangs in exactly the case it
+exists for. The handler writes a `volatile sig_atomic_t`; the frame loop does the work. The handler
+must be installed *before* `SDL_Init`.
+
+---
+
+## The Conformance Tools
+
+`tools/` holds hand-written tools that compare the program against recorded goldens and stated
+invariants. They are the reason this codebase can be refactored: every layer has something pointed
+at it, and each tool sees something the others structurally cannot.
+
+| Tool | What it measures |
+|---|---|
+| `ptroundtrip` | `.ptp` / `.pti` serialization, byte-for-byte |
+| `ptresolve` | Timing, effect resolution, song traversal — unit by unit |
+| `ptplay` | The **event stream**, against 36 golden traces |
+| `ptvoice` | The **engine calls** a note produces — which no trace can see |
+| `ptrender` | Audio: determinism, health, a tolerance fingerprint, and `live == render` |
+| `ptrandom` | Random effects: draw counts and support sets exactly, distributions statistically |
+| `ptnondet` | Whether a project is byte-comparable at all |
+| `ptinput` | What a **button press does**: the cursor context, the action, **and the resulting cell** |
+| `ptdispatch` | The dispatcher wiring — screen changes, modals, files, lifecycle |
+| `ptshot` | **Pixels**: any screen of any project to a PNG, with no window and no engine |
+| `ptmidi`, `ptmidiin` | The MIDI serializer, parser and router |
+| `ptalsa`, `ptalsain` | The ALSA backends, driven through a fake `libasound` (Linux only) |
+| `ptmapper`, `pttouch`, `ptfont`, `ptdecode`, `ptaac` | Input mapping, touch layout, font raster, decoders |
+
+Two things about them are load-bearing:
+
+**Audio cannot be byte-compared across toolchains.** Measured, not argued: gcc/x86-64 differs from
+MSVC/x86-64 in 9.7% of samples by at most 5 LSB of 32767; clang/arm64 with fast-math differs in 17.0%
+by at most 16 LSB. Both are inaudible. So audio goldens are a tolerance fingerprint, and the
+byte-exact claims are made about *events* and *engine calls* instead.
+
+**`ptshot` is the standing proof that `pt-ui` is platform-free.** The day the UI reaches for SDL,
+ptshot stops linking.
+
+---
+
+## Build and Test
+
+### Android
+
+```
+./gradlew :app:assembleDebug        # the APK
+./gradlew :app:buildCMakeDebug      # the native side — assembleDebug does NOT imply this
+./gradlew :app:assembleRelease      # the only build that runs R8
+```
+
+Two native libraries ship: **`libpockettracker-sdl.so` is the app**; `libpockettracker.so` is the
+engine alone and is legitimately older.
+
+⚠️ **Every C++→Kotlin JNI callback resolved by name needs an explicit `-keep` in
+`app/proguard-rules.pro`, and this only bites in release** (debug never runs R8). AGP keeps a native
+method's *class* but not its *members*. Verify in the DEX, not in `mapping.txt`.
+
+### Desktop / handheld
+
+```
+cmake -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release
+cmake --build shell/build
+```
+
+`CMAKE_BUILD_TYPE` explicitly: a Debug engine may not keep up with a real-time audio callback.
+
+### Tests
+
+```
+cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
+ctest --test-dir tools/build --output-on-failure
+```
+
+Twenty tests on Linux, eighteen on Windows — `ptalsa` and `ptalsain` are Linux-only. CI runs them on
+gcc/x86-64, MSVC/x86-64 and clang/arm64, which **is** the test rather than redundancy: the
+floating-point guarantees the whole ladder rests on are only real if the compilers agree.
+
+### Packaging
+
+| Platform | Script | Output |
+|---|---|---|
+| Windows | `shell/build-windows.ps1` | `build/windows/PocketTracker-<v>-windows-x64.zip` |
+| Linux | `shell/build-linux.sh` | `build/linux/PocketTracker-<v>-linux-x64.tar.gz` |
+| PortMaster | `shell/build-portmaster.sh` (in `Dockerfile.portmaster`) | `build/portmaster/pockettracker.zip` |
+
+Each one verifies the *artifact* — that it is newer than every source file, links what it claims to,
+carries the right version — and then reads the finished archive back out. `.github/workflows/release.yml`
+runs all three on a `v*` tag and opens a draft release. The signed APK is built locally, because CI
+has no access to the signing key and an APK signed with a different key cannot install as an update.
+
+---
+
+## Conventions
+
+`snake_case` for functions and variables in songcore and pt-ui; `camelCase` for model fields, which
+mirror the JSON they serialize to.
+
+Screen geometry lives in one table per screen that the cursor walks and the module draws, rather than
+in a chain of branches — see [UI Layer](#ui-layer).
+
+**A row's or an enum member's number is its identity: append, never insert.** An FX cell stores an
+*index* into `EFFECT_TYPES` while the project file stores the effect *code*, so inserting an entry
+renumbers every cell a user has already typed. The same applies to `SettingsRow`, `ProjectRow` and
+`InstrumentType`, all of which are persisted or recorded by number. Where a build hides a member, it
+hides one from the **end** of the list and the walkers skip it — they never close the gap.

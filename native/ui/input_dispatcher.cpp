@@ -270,14 +270,16 @@ CursorContext InputDispatcher::cursor_context() const {
         }
         case ScreenType::PHRASE: {
             PhraseEditorState ps{p.phrases[static_cast<size_t>(s_.currentPhrase)]};
-            ps.cursorRow    = s_.cursorRow;
-            ps.cursorColumn = s_.cursorColumn;
+            ps.cursorRow        = s_.cursorRow;
+            ps.cursorColumn     = s_.cursorColumn;
+            ps.effectTypeCount  = visible_effect_type_count();
             return phrase_.cursor_context(ps);
         }
         case ScreenType::TABLE: {
             TableState ts{p.tables[static_cast<size_t>(s_.currentTable)]};
-            ts.cursorRow    = s_.tableCursorRow;
-            ts.cursorColumn = s_.tableCursorColumn;
+            ts.cursorRow       = s_.tableCursorRow;
+            ts.cursorColumn    = s_.tableCursorColumn;
+            ts.effectTypeCount = visible_effect_type_count();
             return table_.cursor_context(ts);
         }
         case ScreenType::GROOVE: {
@@ -883,6 +885,10 @@ int InputDispatcher::current_fx_type_index() const {
     return songcore::effect_type_index(code);
 }
 
+int InputDispatcher::visible_effect_type_count() const {
+    return s_.caps.midi ? songcore::EFFECT_TYPE_COUNT : songcore::EFFECT_TYPE_COUNT_NO_MIDI;
+}
+
 void InputDispatcher::apply_fx_type_change(int effect_code) {
     Project& p = host_.edit_project();
 
@@ -949,21 +955,30 @@ void InputDispatcher::request_instrument_type_toggle(int delta) {
 }
 
 /**
- * Step the TYPE cell by `delta`, wrapping through all three types.
+ * Step the TYPE cell by `delta`, wrapping through the types this build offers.
  *
- * ⚠️ It was a two-way toggle that ignored its direction, which was right while there were two types
- * and wrong the moment EXTERNAL arrived: with three, A+UP and A+DOWN have to disagree or the cell can
- * only ever be walked forwards. The cycle runs on `INSTRUMENT_TYPE_COUNT` rather than on a chain of
- * ternaries, so a fourth type joins it by existing.
+ * A+UP and A+DOWN have to disagree about direction or a cell with three stops can only ever be walked
+ * forwards. The cycle runs on a COUNT rather than a chain of ternaries, so a fourth type joins it by
+ * existing.
+ *
+ * ⚠️ EXTERNAL is the LAST type, and a build with the MIDI surfaces hidden simply stops one short.
+ * That works for the same reason the FX list can be shortened (songcore/effects.h): the hidden entry
+ * is a tail, so every reachable value keeps its meaning. The cycle is the only way to REACH the type
+ * — an instrument already set to it, from a .ptp or a .pti, keeps it and keeps drawing as EXTERNAL.
  */
 void InputDispatcher::toggle_instrument_type(int delta) {
     Project&    p   = host_.edit_project();
     Instrument& ins = p.instruments[static_cast<size_t>(s_.currentInstrument)];
 
-    const int count = songcore::INSTRUMENT_TYPE_COUNT;
+    const int count = s_.caps.midi ? songcore::INSTRUMENT_TYPE_COUNT
+                                   : songcore::INSTRUMENT_TYPE_COUNT - 1;
     const int cur   = static_cast<int>(ins.instrumentType);
     const int step  = delta < 0 ? -1 : +1;
-    const auto next = static_cast<songcore::InstrumentType>(((cur + step) % count + count) % count);
+    // An instrument that is ALREADY external in a build that hides the type is outside the cycle:
+    // `cur` is `count`, and the modulo would land it back on itself. Step from the last reachable
+    // type instead, so the gesture still has somewhere to go.
+    const int from  = (cur >= count) ? count - 1 : cur;
+    const auto next = static_cast<songcore::InstrumentType>(((from + step) % count + count) % count);
     host_.set_instrument_type(s_.currentInstrument, next);
 
     // The row map just changed under the cursor — the three layouts have 16, 15 and 11 rows — and the
@@ -1035,7 +1050,11 @@ void InputDispatcher::on_a_up() {
     if (eq_open()) { generic_input(pt::ui::on_a); return; }
     if (s_.fxHelper.isOpen) { fx_move_up(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(+sample_fine_step(s_.sampleEditor)); return; }
-    if (on_fx_type_column()) { s_.fxHelper = fx_helper_opened_at(current_fx_type_index()); return; }
+    if (on_fx_type_column()) {
+        s_.fxHelper = fx_helper_opened_at(current_fx_type_index(),
+                                          FxGrid::of(visible_effect_type_count()));
+        return;
+    }
     if (on_instrument_type_cell()) { request_instrument_type_toggle(+1); return; }
     selection_or_single(pt::ui::on_a);
 }
@@ -1052,7 +1071,11 @@ void InputDispatcher::on_a_down() {
     if (eq_open()) { generic_input(pt::ui::on_b); return; }
     if (s_.fxHelper.isOpen) { fx_move_down(s_.fxHelper); return; }
     if (on_sample_selection_row()) { nudge_selection_edge(-sample_fine_step(s_.sampleEditor)); return; }
-    if (on_fx_type_column()) { s_.fxHelper = fx_helper_opened_at(current_fx_type_index()); return; }
+    if (on_fx_type_column()) {
+        s_.fxHelper = fx_helper_opened_at(current_fx_type_index(),
+                                          FxGrid::of(visible_effect_type_count()));
+        return;
+    }
     if (on_instrument_type_cell()) { request_instrument_type_toggle(-1); return; }
     selection_or_single(pt::ui::on_b);   // A+DOWN DECREMENTS — `on_b` is the generic "step down"
 }
@@ -2110,8 +2133,13 @@ void InputDispatcher::project_action() {
         }
 
         case ProjectRow::MIDI: {
-            // The same shortcut shape as SYSTEM above, minus the nav grid — MIDI is NOT one of the
-            // twelve R+DPAD cells, so PROJECT is its only door and B is its only way back.
+            // ⚠️ The row is not drawn where the build hides the MIDI surfaces, and this guard is what
+            // makes that a real gate rather than a cosmetic one: PROJECT is the MIDI screen's ONLY
+            // door (it is not one of the twelve R+DPAD cells), so anything that reaches this case with
+            // the cap off — a stale cursor, a future caller — must be turned back here.
+            if (!s_.caps.midi) break;
+
+            // The same shortcut shape as SYSTEM above, minus the nav grid. B is the only way back.
             //
             // ⚠️ THE ENUMERATION HAPPENS HERE, ON THE WAY IN. See refresh_midi_devices(): a port list is
             // only true at the moment it is read, and this is the moment the user is about to read it.

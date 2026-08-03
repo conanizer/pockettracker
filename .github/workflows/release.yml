@@ -1,0 +1,135 @@
+name: Release
+
+# Builds the three NON-Android packages for a tag and attaches them to a DRAFT GitHub release.
+#
+# ⚠️ THE APK IS NOT BUILT HERE, AND THAT IS DELIBERATE. The signing key lives on the maintainer's
+# machine and is not a repository secret, so a release APK produced by CI would either be unsigned or
+# signed with the debug key — and an APK signed with a different key CANNOT be installed as an update
+# over an existing one. It would look like a release and brick every upgrade path. The signed APK is
+# built and device-tested locally (docs/internal/release-process.md steps 3–4) and attached to the
+# same draft this workflow opens.
+#
+# ⚠️ DRAFT, never published. The release is a draft so that the APK can be added and the whole set
+# checked before anyone can download half a release. Publishing is a human step.
+#
+# The tag format is load-bearing beyond this file: F-Droid's update check watches `^v[0-9.]+$`.
+
+on:
+  push:
+    tags: [ 'v*' ]
+  # So the packaging can be exercised without cutting a release. The draft step is skipped for these
+  # runs — see its `if`. A packaging script that is only ever run by a tag is a script whose first
+  # real execution is the release.
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  windows:
+    name: Windows desktop (x86-64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S shell -B shell/build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build shell/build --config Release
+
+      # ⚠️ `powershell` explicitly, NOT the runner's default. This is Windows PowerShell 5.1, which
+      # the script was written against; pwsh 7 cannot load some of the assemblies it uses.
+      - name: Package
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File shell/build-windows.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-windows
+          path: build/windows/*.zip
+          if-no-files-found: error
+
+  linux:
+    name: Linux desktop (x86-64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SDL2
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+
+      # The script builds, checks the artifact, stages, tars and reads the tarball back out.
+      - name: Build and package
+        run: bash shell/build-linux.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-linux
+          path: build/linux/*.tar.gz
+          if-no-files-found: error
+
+  portmaster:
+    name: PortMaster handheld (aarch64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ⚠️ IN THE CONTAINER, NOT ON THE RUNNER. The image is the glibc floor every Tier-1 handheld
+      # CFW is at or above; the runner's own aarch64 cross compiler would produce a perfectly good
+      # ELF that no handheld can load, and nothing about the build would say so.
+      - name: Build the cross-compilation container
+        run: docker build -t pockettracker-build -f shell/Dockerfile.portmaster shell/
+
+      - name: Build and package
+        run: docker run --rm -v "$PWD:/src" pockettracker-build bash /src/shell/build-portmaster.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-portmaster
+          path: build/portmaster/pockettracker.zip
+          if-no-files-found: error
+
+  draft:
+    name: Draft the release
+    needs: [ windows, linux, portmaster ]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+
+      # Named per platform on the way in. `pockettracker.zip` is the name PortMaster itself requires
+      # inside its own index, but as a release asset beside two other zips it says nothing about
+      # which device it is for — so it is renamed here and PortMaster's copy is unaffected.
+      - name: Lay the assets out
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          VERSION="${GITHUB_REF_NAME#v}"
+          cp packages/package-windows/*.zip     out/
+          cp packages/package-linux/*.tar.gz    out/
+          cp packages/package-portmaster/pockettracker.zip \
+             "out/PocketTracker-$VERSION-portmaster-aarch64.zip"
+          ls -lh out
+          # Three assets, always. A missing one would otherwise reach the draft as a quiet omission.
+          COUNT=$(ls out | wc -l)
+          echo "assets = $COUNT"
+          if [ "$COUNT" -ne 3 ]; then
+              echo "FAIL: expected 3 assets, found $COUNT"
+              exit 1
+          fi
+
+      - name: Draft the release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: out/*
+          body: |
+            <!-- Attach the signed APK, then write the notes and publish. -->
+
+            **The signed Android APK is not attached yet** — it is built locally
+            (`docs/internal/release-process.md`) because CI has no access to the signing key.

@@ -50,16 +50,10 @@ struct PlatformCaps {
     /**
      * RESUME (ASK / AUTO): what to do with a crash-recovery autosave found at launch.
      *
-     * ⚠️ S7 gated this OFF on the shell, on the honest grounds that a setting which configures
-     * nothing is a lie told in the user's own UI. S10 built the thing it configures, so it is on for
-     * BOTH platforms now — and it is the only row in the map whose visibility has ever changed after
-     * the fact, which is the argument for the row map being DATA rather than a filtered list: the row
-     * kept its NUMBER (11) the whole time, so nothing the golden says about it had to be re-recorded.
-     *
-     * ⚠️ And it earns its keep more on a handheld than on a phone. ASK is right where the app is left
-     * running and the OS keeps it warm; AUTO is right on a device whose launcher kills the port every
-     * time the user opens a menu, where a prompt on every single return is noise rather than a
-     * safeguard. Same setting, opposite correct answer — which is exactly why it is a setting.
+     * ⚠️ The two answers are both right, on different hardware, which is why this is a setting rather
+     * than a policy. ASK suits a device the app is left running on and the OS keeps warm; AUTO suits
+     * one whose launcher kills the process every time the user opens a menu, where a prompt on every
+     * return is noise rather than a safeguard.
      */
     bool autosave = false;
 
@@ -75,6 +69,25 @@ struct PlatformCaps {
      */
     bool appExit = false;
 
+    /**
+     * The MIDI AUTHORING surfaces: the PROJECT > MIDI row (and so the MIDI screen behind it),
+     * EXTERNAL in the instrument TYPE cycle, and the six MIDI commands at the end of
+     * songcore::EFFECT_TYPES (in the FX picker and in the FX column's coarse step).
+     *
+     * ⚠️ IT GATES AUTHORING ONLY — DISPLAY IS UNCONDITIONAL, AND THE DIFFERENCE IS THE WHOLE POINT.
+     * Unlike OVERLAY or TRACE, which hide a row and nothing else, MIDI has state that PERSISTS: a
+     * .ptp carries `InstrumentType::EXTERNAL`, per-instrument channel/bank/program/CC, and MIDI
+     * effect codes in phrase and table cells. A build that also hid the DISPLAY would open such a
+     * project and draw an EXTERNAL instrument as a sampler and an `MPG` cell as `---`, while
+     * engine_consumer's routing gate still raised no voice for it — a silently dead track with
+     * nothing on screen to explain it. So a build with this off cannot CREATE MIDI data, and renders
+     * whatever it finds truthfully.
+     *
+     * Kept separate from `debug` (rather than read off it at each site) so that the release the
+     * feature ships in flips one line here, without also un-hiding the developer rows.
+     */
+    bool midi = false;
+
     /** Kotlin's world: every device row, no exit. */
     static PlatformCaps android(bool debug_build) {
         PlatformCaps c;
@@ -85,6 +98,7 @@ struct PlatformCaps {
         c.autosave       = true;
         c.engineToggle   = true;
         c.appExit        = false;
+        c.midi           = debug_build;
         return c;
     }
 
@@ -102,38 +116,30 @@ struct PlatformCaps {
         c.touchLayouts   = false;
         c.skinOverlay    = false;
         c.buttonFeedback = false;
-        c.autosave       = true;    // S10 — the RESUME row comes back, because there is now an autosave
+        c.autosave       = true;
         c.engineToggle   = false;
         c.appExit        = true;
+        c.midi           = debug_build;
         return c;
     }
 
     /**
-     * The CONVERGED Android app: the SDL shell WITH the device rows Android's touch UI brings.
+     * What the Android app RUNS (`android-main.cpp`): the shell profile plus the three device rows a
+     * touch UI brings.
      *
-     * ⚠️ This is what the Android SDL build actually RUNS (from `android-main.cpp`), and it is
-     * deliberately neither `sdl()` nor `android()`:
-     *   • not `sdl()` edited in place — that profile is what the DESKTOP/handheld shell runs, and
-     *     turning these three rows on there would light SETTINGS rows on a device with no touch
-     *     screen (platform_caps.h's own "a row that configures nothing is a lie" rule);
-     *   • not `android()` — that reproduces KOTLIN's row map for the ptinput golden, so it also
-     *     carries `engineToggle` (the KT/C++ sequencer switch), which is meaningless once there is
-     *     no Kotlin sequencer left in the process to switch TO.
+     * It is deliberately neither of the two above:
+     *   • not `sdl()` edited in place — that is what the desktop and handheld shells run, and turning
+     *     these rows on there would light SETTINGS rows on a device with no touch screen, which is
+     *     the "a row that configures nothing is a lie" rule this file opens with;
+     *   • not `android()` — that one reproduces the recorded golden's row map, so it carries
+     *     `engineToggle`, and there is no second sequencer in this process to switch to.
      *
-     * So it is `sdl()` — physical-out `appExit` (decided ON for the converged app, C6), the RESUME
-     * row, `engineToggle` off — PLUS exactly the three device rows whose FEATURES now exist in the
-     * shell, each landed in the phase named beside it:
-     *   • `touchLayouts`   — the LAYOUT row (the PORTRAIT2 skin picker, NORM/DARK)      [Phase D]
-     *   • `buttonFeedback` — BTN SOUND + BTN VIBRO, the click and buzz a virtual button gives back [Phase D]
-     *   • `skinOverlay`    — the CRT SCREEN OVERLAY composited over the frame           [Phase D6]
+     * Written as `sdl()` plus three flips rather than a fresh field list, so the two profiles cannot
+     * drift apart in the fields they are supposed to share.
      *
-     * Building it as `sdl()` + three flips (rather than a fresh field list) keeps it provably equal
-     * to what `android-main.cpp` assembled by hand through Phases D–D6, so this is a rename of an
-     * already-device-proven value, not a new profile.
-     *
-     * ⚠️ The LAYOUT row's *existence* is still gated at RUNTIME on there being a touch screen and no
-     * physical pad (`app.cpp`'s `useTouch`) — a handheld with buttons has this cap true but no touch
-     * layout to configure. This cap is the STATIC half of that AND; the runtime half is the pad.
+     * ⚠️ The LAYOUT row's *existence* is additionally gated at RUNTIME on there being a touch screen
+     * and no physical pad (`app.cpp`'s `useTouch`) — a handheld with buttons has this cap true and no
+     * touch layout to configure. This cap is the STATIC half of that AND; the pad is the other half.
      */
     static PlatformCaps converged(bool debug_build) {
         PlatformCaps c   = sdl(debug_build);

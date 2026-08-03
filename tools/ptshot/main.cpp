@@ -669,7 +669,10 @@ int main(int argc, char** argv) {
                     break;
 
                 case ScreenType::PROJECT:
-                    state.projectCursorRow = clamp(row, project_row_count(state.caps) - 1);
+                    // ⚠️ Not `clamp(row, count - 1)`: PROJECT's rows are not contiguous where one is
+                    // hidden, so a count is not a row bound. `project_clamp_row` answers with a row
+                    // this build actually draws.
+                    state.projectCursorRow = project_clamp_row(row, state.caps);
                     state.projectCursorColumn =
                         col < 1 ? 1
                                 : clamp(col, project_row_max_column(
@@ -745,11 +748,18 @@ int main(int argc, char** argv) {
         }
     }
 
-    // --fx-helper=N: open the effect picker on effect index N (0..27). The overlay is modal and paints
-    // over the finished frame, so this composes with every other option — it is drawn on top of
-    // whatever screen and cursor the flags below asked for.
+    // --fx-helper=N: open the effect picker on effect index N. The overlay is modal and paints over
+    // the finished frame, so this composes with every other option — it is drawn on top of whatever
+    // screen and cursor the flags below asked for.
+    //
+    // ⚠️ THE GRID FOLLOWS `--caps`, not the full effect list. A release build's picker is a row
+    // shorter with a differently-centred last row, and ptshot is the only tool here that looks at
+    // PIXELS — hard-coding the full grid would leave the shape a release user actually sees as the
+    // one shape nothing in the tree can render.
     if (const char* v = opt(argc, argv, "--fx-helper")) {
-        state.fxHelper = fx_helper_opened_at(std::atoi(v));
+        const int count = state.caps.midi ? songcore::EFFECT_TYPE_COUNT
+                                          : songcore::EFFECT_TYPE_COUNT_NO_MIDI;
+        state.fxHelper  = fx_helper_opened_at(std::atoi(v), FxGrid::of(count));
     }
     // --selection=r1,c1,r2,c2: paint a selection region, so the row-highlight colours can be eyeballed.
     if (const char* v = opt(argc, argv, "--selection")) {

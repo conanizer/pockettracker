@@ -98,11 +98,11 @@ CursorContext PhraseEditorModule::cursor_context(const PhraseEditorState& s) con
         }
         case 2: return cc::volume(step.volume);
         case 3: return cc::instrument(step.instrument);
-        case 4: return cc::effect_type(step.fx1Type, 1);
+        case 4: return cc::effect_type(step.fx1Type, 1, s.effectTypeCount);
         case 5: return cc::effect_value(step.fx1Value, 1, effect_value_max(step.fx1Type));
-        case 6: return cc::effect_type(step.fx2Type, 2);
+        case 6: return cc::effect_type(step.fx2Type, 2, s.effectTypeCount);
         case 7: return cc::effect_value(step.fx2Value, 2, effect_value_max(step.fx2Type));
-        case 8: return cc::effect_type(step.fx3Type, 3);
+        case 8: return cc::effect_type(step.fx3Type, 3, s.effectTypeCount);
         case 9: return cc::effect_value(step.fx3Value, 3, effect_value_max(step.fx3Type));
         default: return cc::none();
     }

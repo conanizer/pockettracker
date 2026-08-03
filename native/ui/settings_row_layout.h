@@ -229,8 +229,8 @@ inline int settings_content_height(const PlatformCaps& caps, int rowHeight) {
 
 // ─── PROJECT ─────────────────────────────────────────────────────────────────────────────────────
 //
-// Its row map is Kotlin's, unfiltered — every row edits the PROJECT or acts on it, and a project is
-// the same thing on every platform. The shell adds exactly one row on the end.
+// Rows 0–6 edit the project or act on it, and exist everywhere. The last two are conditional — see
+// `project_row_visible` below.
 
 enum class ProjectRow {
     TEMPO     = 0,
@@ -240,24 +240,76 @@ enum class ProjectRow {
     EXPORT    = 4,   // MIX | STEMS
     COMPACT   = 5,   // SEQ | INST
     SYSTEM    = 6,   // SETTINGS >
-    MIDI      = 7,   // MIDI >     (plan §8.1)
-    EXIT      = 8,   // the shell only — Android apps never exit
+    MIDI      = 7,   // MIDI >     — only where the MIDI surfaces are authorable
+    EXIT      = 8,   // QUIT >     — only where the process can be handed back to a launcher
 };
 
-// ⚠️ MIDI IS APPENDED AFTER SYSTEM, NOT INSERTED BEFORE IT, AND THAT IS THE WHOLE REASON `p3-input`
-// SURVIVED. The plan called this the "PROJECT-row landmine": the golden carries 4410 PROJECT cases and
-// renumbering a row it records rewrites all of them. It records rows 0–6 ONLY — EXIT is never in it,
-// because the corpus was recorded from Android and Android has no EXIT row. So SYSTEM keeping the
-// number 6 is what makes this a pure append: every recorded case still names the row it was recorded
-// against, and the only row that renumbers is the one nothing has ever tested.
-//
-// It also happens to be the placement §8.1 asked for ("PROJECT row 7") and the one that reads right:
-// SYSTEM and MIDI are both doors to a sub-screen, so they sit together, above the way out.
-inline int project_row_count(const PlatformCaps& caps) { return caps.appExit ? 9 : 8; }
+// ⚠️ A ROW'S NUMBER IS ITS IDENTITY. `p3-input` records 4410 PROJECT cases by row number, the cursor
+// stores that number, and settings.json persists it — so a row may be APPENDED but never INSERTED,
+// and a hidden row is skipped rather than renumbered. Both conditional rows are at the end, which is
+// also where they read right: SYSTEM and MIDI are doors to a sub-screen and sit together, above the
+// way out.
+inline constexpr int PROJECT_ROW_COUNT = 9;
 
-/** The last PROJECT row on this platform — MIDI, or EXIT where there is one. */
+/**
+ * Does this build have this row at all? Two rows are conditional, for unrelated reasons: EXIT exists
+ * where the process can be given back to a launcher, and MIDI where the MIDI surfaces are authorable
+ * (ui/platform_caps.h). Everything else edits the PROJECT, and a project is the same thing everywhere.
+ *
+ * ⚠️ A ROW'S NUMBER STAYS ITS IDENTITY, as on SETTINGS — hiding MIDI does NOT renumber EXIT to 7.
+ * The cursor, `p3-input`'s recorded PROJECT cases and every `ProjectRow::X` in the tools all speak in
+ * these values, so the walkers below skip a hidden row rather than closing the gap.
+ */
+inline bool project_row_visible(ProjectRow row, const PlatformCaps& caps) {
+    switch (row) {
+        case ProjectRow::MIDI: return caps.midi;
+        case ProjectRow::EXIT: return caps.appExit;
+        default:               return true;
+    }
+}
+
+/** How many PROJECT rows this build draws. */
+inline int project_row_count(const PlatformCaps& caps) {
+    int n = 0;
+    for (int i = 0; i < PROJECT_ROW_COUNT; ++i)
+        if (project_row_visible(static_cast<ProjectRow>(i), caps)) ++n;
+    return n;
+}
+
+/** The last visible PROJECT row's VALUE — EXIT, or MIDI, or SYSTEM, depending on the build. */
 inline ProjectRow project_last_row(const PlatformCaps& caps) {
-    return caps.appExit ? ProjectRow::EXIT : ProjectRow::MIDI;
+    ProjectRow last = ProjectRow::TEMPO;
+    for (int i = 0; i < PROJECT_ROW_COUNT; ++i) {
+        const auto row = static_cast<ProjectRow>(i);
+        if (project_row_visible(row, caps)) last = row;
+    }
+    return last;
+}
+
+/**
+ * The next VISIBLE row's VALUE in direction `delta` (+1 = down, −1 = up), wrapping — the same walk
+ * SETTINGS uses, and for the same reason: with a row hidden mid-map, stepping by ±1 lands the cursor
+ * on a row that is never drawn. Returns `from` unchanged if nothing else is visible.
+ */
+inline int project_next_visible_row(int from, int delta, const PlatformCaps& caps) {
+    int idx = from;
+    for (int guard = 0; guard < PROJECT_ROW_COUNT; ++guard) {
+        idx += delta;
+        if (idx < 0)                   idx = PROJECT_ROW_COUNT - 1;
+        if (idx >= PROJECT_ROW_COUNT)  idx = 0;
+        if (project_row_visible(static_cast<ProjectRow>(idx), caps)) return idx;
+    }
+    return from;
+}
+
+/** `row` if this build draws it, else the first visible row — the landing spot for a stale cursor. */
+inline int project_clamp_row(int row, const PlatformCaps& caps) {
+    if (row >= 0 && row < PROJECT_ROW_COUNT &&
+        project_row_visible(static_cast<ProjectRow>(row), caps))
+        return row;
+    for (int i = 0; i < PROJECT_ROW_COUNT; ++i)
+        if (project_row_visible(static_cast<ProjectRow>(i), caps)) return i;
+    return 0;
 }
 
 /**
@@ -280,11 +332,18 @@ inline bool project_row_gap_after(ProjectRow row) {
     return row == ProjectRow::TRANSPOSE || row == ProjectRow::COMPACT;
 }
 
-/** How far down the panel a PROJECT row is drawn, in pixels from the first row's top. */
-inline int project_row_offset_y(ProjectRow target, int rowHeight) {
+/**
+ * How far down the panel a PROJECT row is drawn, in pixels from the first row's top.
+ *
+ * A hidden row contributes NOTHING — unlike SETTINGS, where a hidden row still pays its group gap.
+ * The difference is not a policy choice: the gaps here fall after TRANSPOSE and COMPACT, and neither
+ * of those is ever hidden, so there is no gap to preserve and closing the space is simply right.
+ */
+inline int project_row_offset_y(ProjectRow target, const PlatformCaps& caps, int rowHeight) {
     int y = 0;
     for (int i = 0; i < static_cast<int>(target); ++i) {
         const ProjectRow row = static_cast<ProjectRow>(i);
+        if (!project_row_visible(row, caps)) continue;
         y += rowHeight * (project_row_gap_after(row) ? 2 : 1);
     }
     return y;

@@ -9,14 +9,15 @@ namespace {
 // The geometry, verbatim from drawFxHelper. Kotlin recomputes these each frame from DESIGN_WIDTH_PX;
 // they are constants here because the canvas IS the design (canvas.h) and cannot be another size.
 constexpr int BOX_W = 580;
-// 8 + 4 description rows + 8 + header + 8 + the grid + 9 of bottom padding.
-// ⚠️ DERIVED from FX_GRID_ROWS, and it was the literal 243 until MIDI phase D needed a sixth row —
-// a hard-coded height with a grid that grows is a picker whose last row is drawn outside its own box.
-// It reproduces the original 243 exactly at five rows, which is how the arithmetic was checked.
-constexpr int BOX_H = 8 + 4 * ROW_HEIGHT + 8 + ROW_HEIGHT + 8 + FX_GRID_ROWS * ROW_HEIGHT + 9;
-constexpr int BOX_X = (DESIGN_W - BOX_W) / 2;   // 30
-constexpr int BOX_Y = (DESIGN_H - BOX_H) / 2;   // 118
-constexpr int INNER_X = BOX_X + 10;             // 40
+// 8 + 4 description rows + 8 + header + 8 + the grid + 9 of bottom padding. ⚠️ DERIVED from the
+// grid's row count, which is a function of how many effects this build shows (fx_helper.h): a
+// hard-coded height under a grid that can be a row shorter or taller is a picker whose last row
+// draws outside its own box, or a box with a band of dead space under it.
+constexpr int box_h(int gridRows) {
+    return 8 + 4 * ROW_HEIGHT + 8 + ROW_HEIGHT + 8 + gridRows * ROW_HEIGHT + 9;
+}
+constexpr int BOX_X   = (DESIGN_W - BOX_W) / 2;   // 30
+constexpr int INNER_X = BOX_X + 10;               // 40
 constexpr int CELL_W  = 80;
 
 // The ONE backdrop constant (canvas.h) — the shell matches it in the letterbox bars / bezel gap (B4),
@@ -40,6 +41,9 @@ void draw_fx_helper(Canvas& c, const FxHelperState& s, const Theme& t) {
     // The overlay is modal: it must not be clipped by whatever editor was drawing when it opened.
     c.reset_clip();
 
+    const int BOX_H = box_h(s.grid.rows);
+    const int BOX_Y = (DESIGN_H - BOX_H) / 2;
+
     c.fill_rect(0, 0, DESIGN_W, DESIGN_H, BACKDROP);
     c.fill_rect(BOX_X, BOX_Y, BOX_W, BOX_H, t.meterBackground);
     c.stroke_rect(BOX_X, BOX_Y, BOX_W, BOX_H, t.textTitle);
@@ -61,12 +65,12 @@ void draw_fx_helper(Canvas& c, const FxHelperState& s, const Theme& t) {
     const int headerX = BOX_X + (BOX_W - run_advance(6)) / 2;
     c.draw_text("EFFECT", headerX, headerY + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
 
-    // ── The grid (6×6 since phase D; the last row centres itself) ────────────────────────────────
+    // ── The grid — six columns, as many rows as this build's effects need ────────────────────────
     const int gridY = headerY + ROW_HEIGHT + 8;
     const int gridX = BOX_X + (BOX_W - FX_GRID_COLS * CELL_W) / 2;
 
-    for (int i = 0; i < songcore::EFFECT_TYPE_COUNT; ++i) {
-        const FxCell cell  = fx_index_to_cell(i);  // the last row centres itself
+    for (int i = 0; i < s.grid.count; ++i) {
+        const FxCell cell  = fx_index_to_cell(i, s.grid);  // the last row centres itself
         const int    cellX = gridX + cell.col * CELL_W;
         const int    cellY = gridY + cell.row * ROW_HEIGHT;
 

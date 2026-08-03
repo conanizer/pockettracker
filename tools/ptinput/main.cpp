@@ -1508,37 +1508,42 @@ static std::string recompute_kbdwin(const std::vector<std::string>& toks, std::s
 //
 // These hold for ANY grid size, which is why they survive the next effect being added:
 //   * every effect has exactly one cell, and every cell round-trips back to its own index;
-//   * the reachable cells number exactly EFFECT_TYPE_COUNT — nothing is stranded (the last row is
+//   * the reachable cells number exactly the grid's COUNT — nothing is stranded (the last row is
 //     centred, so its edge columns are NOT cells) and nothing is double-booked;
-//   * walking right COUNT times from any start returns to the start, having seen every effect once;
+//   * walking right a row's WIDTH times returns to the start, having seen every cell in it once;
 //   * every reachable cell holds a REAL effect code — the failure the centred row can produce is a
 //     cursor on an empty cell that commits some other effect entirely (see fx_helper.h).
-static int check_fx_grid_invariants() {
+//
+// ⚠️ RUN AGAINST BOTH GRIDS. A build with the MIDI surfaces hidden shows a grid one row shorter with
+// a differently-centred last row, and that grid is what a RELEASE user navigates — the shape nobody
+// developing the app ever sees. Passing them the same invariants is what stops the hidden build from
+// being the untested one; the counts printed beside each verdict are what say which grid ran.
+static int check_fx_grid_invariants(const pt::ui::FxGrid& g, const char* label) {
     using namespace pt::ui;
-    const int count = songcore::EFFECT_TYPE_COUNT;
+    const int count = g.count;
     int failures = 0;
     auto fail = [&](const std::string& what, const std::string& got) {
-        std::cerr << "[FAIL] fx-grid invariant: " << what << " — " << got << "\n";
+        std::cerr << "[FAIL] fx-grid invariant [" << label << "]: " << what << " — " << got << "\n";
         ++failures;
     };
 
     // 1. index → cell → index, for every effect.
     for (int i = 0; i < count; ++i) {
-        const FxCell c = fx_index_to_cell(i);
-        FxHelperState s{true, c.row, c.col};
+        const FxCell c = fx_index_to_cell(i, g);
+        FxHelperState s{true, c.row, c.col, g};
         if (s.cursor_index() != i)
             fail("index " + std::to_string(i) + " does not round-trip", std::to_string(s.cursor_index()));
-        if (c.col != fx_clamp_col_for_row(c.row, c.col))
+        if (c.col != fx_clamp_col_for_row(c.row, c.col, g))
             fail("index " + std::to_string(i) + " sits on an unreachable column", std::to_string(c.col));
     }
 
     // 2. the reachable cells ARE the effects, one for one.
     std::vector<int> seen(static_cast<size_t>(count), 0);
     int cells = 0;
-    for (int row = 0; row < FX_GRID_ROWS; ++row) {
+    for (int row = 0; row < g.rows; ++row) {
         for (int col = 0; col < FX_GRID_COLS; ++col) {
-            if (fx_clamp_col_for_row(row, col) != col) continue;   // an empty edge cell of the last row
-            const FxHelperState s{true, row, col};
+            if (fx_clamp_col_for_row(row, col, g) != col) continue;  // an empty edge cell of the last row
+            const FxHelperState s{true, row, col, g};
             const int idx = s.cursor_index();
             ++cells;
             if (idx < 0 || idx >= count) { fail("a reachable cell holds no effect", std::to_string(idx)); continue; }
@@ -1560,11 +1565,11 @@ static int check_fx_grid_invariants() {
     // grid. `fx_move_right` wraps within the row (the comment three lines above it says so), so what
     // COUNT rights prove is nothing at all. Stated properly the check is sharper anyway: each row is a
     // cycle of its own WIDTH, and the last row's width is the centred one. A row whose width is wrong
-    // is exactly what a mis-derived FX_LAST_ROW_COUNT produces.
+    // is exactly what a mis-derived last-row count produces.
     for (int start = 0; start < count; ++start) {
-        const FxCell c0 = fx_index_to_cell(start);
-        const int width = (c0.row == FX_LAST_ROW) ? FX_LAST_ROW_COUNT : FX_GRID_COLS;
-        FxHelperState s = fx_helper_opened_at(start);
+        const FxCell c0 = fx_index_to_cell(start, g);
+        const int width = (c0.row == g.lastRow) ? g.lastRowCount : FX_GRID_COLS;
+        FxHelperState s = fx_helper_opened_at(start, g);
         std::vector<int> visited;
         for (int n = 0; n < width; ++n) {
             visited.push_back(s.cursor_index());
@@ -1587,9 +1592,9 @@ static int check_fx_grid_invariants() {
     // valid, and every lap after that lands in the same place. A navigation that kept sliding sideways
     // would pass "stayed on the grid" and fail this.
     for (int start = 0; start < count; ++start) {
-        FxHelperState s = fx_helper_opened_at(start);
+        FxHelperState s = fx_helper_opened_at(start, g);
         auto lap = [&] {
-            for (int n = 0; n < FX_GRID_ROWS; ++n) {
+            for (int n = 0; n < g.rows; ++n) {
                 fx_move_down(s);
                 const int idx = s.cursor_index();
                 if (idx < 0 || idx >= count)
@@ -1603,9 +1608,29 @@ static int check_fx_grid_invariants() {
                  std::to_string(first) + " then " + std::to_string(s.cursor_index()));
     }
 
-    std::cout << "  fx-grid invariants: " << count << " effects, " << cells << " reachable cells, "
-              << FX_GRID_ROWS << "x" << FX_GRID_COLS << " grid — "
+    std::cout << "  fx-grid invariants [" << label << "]: " << count << " effects, " << cells
+              << " reachable cells, " << g.rows << "x" << FX_GRID_COLS << " grid, last row "
+              << g.lastRowCount << " at cols " << g.firstCol << ".." << g.lastCol << " — "
               << (failures == 0 ? "OK" : std::to_string(failures) + " FAILED") << "\n";
+    return failures;
+}
+
+// Both builds' grids. The MIDI-hidden one is the shape a release user navigates.
+static int check_fx_grid_invariants() {
+    using namespace pt::ui;
+    int failures = check_fx_grid_invariants(FX_GRID_FULL, "midi");
+    failures += check_fx_grid_invariants(FxGrid::of(songcore::EFFECT_TYPE_COUNT_NO_MIDI), "no-midi");
+
+    // ⚠️ The two grids must genuinely DIFFER, or the second call is the first one run twice and the
+    // whole pair certifies nothing. Six effects is the MIDI tail; a row is what it costs.
+    if (FX_GRID_FULL.count - songcore::EFFECT_TYPE_COUNT_NO_MIDI != songcore::MIDI_EFFECT_COUNT ||
+        FX_GRID_FULL.rows <= FxGrid::of(songcore::EFFECT_TYPE_COUNT_NO_MIDI).rows) {
+        std::cerr << "[FAIL] fx-grid: the two grids are not distinct — "
+                  << FX_GRID_FULL.count << "/" << FX_GRID_FULL.rows << " vs "
+                  << songcore::EFFECT_TYPE_COUNT_NO_MIDI << "/"
+                  << FxGrid::of(songcore::EFFECT_TYPE_COUNT_NO_MIDI).rows << "\n";
+        ++failures;
+    }
     return failures;
 }
 

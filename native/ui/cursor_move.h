@@ -278,12 +278,10 @@ inline void move_cursor_up(AppState& s) {
         // PROJECT's rows WRAP, and every row change snaps the column back to 1 — you never arrive on
         // a row holding the column you left the last one on, because the rows have 1, 2, 3 and 20 of
         // them and a carried column would land nowhere.
-        case ScreenType::PROJECT: {
-            const int last = project_row_count(s.caps) - 1;
-            s.projectCursorRow = (s.projectCursorRow > 0) ? s.projectCursorRow - 1 : last;
+        case ScreenType::PROJECT:
+            s.projectCursorRow    = project_next_visible_row(s.projectCursorRow, -1, s.caps);
             s.projectCursorColumn = 1;
             break;
-        }
 
         // SETTINGS wraps too — over the VISIBLE rows (ui/settings_row_layout.h).
         case ScreenType::SETTINGS:
@@ -367,12 +365,10 @@ inline void move_cursor_down(AppState& s) {
             if (s.effectsCursorRow < 7) s.effectsCursorRow++;
             break;
 
-        case ScreenType::PROJECT: {
-            const int last = project_row_count(s.caps) - 1;
-            s.projectCursorRow = (s.projectCursorRow < last) ? s.projectCursorRow + 1 : 0;
+        case ScreenType::PROJECT:
+            s.projectCursorRow    = project_next_visible_row(s.projectCursorRow, +1, s.caps);
             s.projectCursorColumn = 1;
             break;
-        }
 
         case ScreenType::SETTINGS:
             s.settingsCursorRow    = settings_next_visible_row(s.settingsCursorRow, +1, s.caps);

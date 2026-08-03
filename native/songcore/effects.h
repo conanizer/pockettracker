@@ -123,6 +123,25 @@ inline constexpr int EFFECT_TYPES[] = {
 };
 inline constexpr int EFFECT_TYPE_COUNT = static_cast<int>(sizeof(EFFECT_TYPES) / sizeof(int));
 
+// ⚠️ THE SIX MIDI COMMANDS ARE THE LAST SIX ENTRIES, AND A BUILD THAT HIDES THEM RELIES ON IT.
+// A build without the MIDI surfaces (native/ui/platform_caps.h `midi`) shows the first
+// EFFECT_TYPE_COUNT_NO_MIDI entries and nothing else. That is only safe because they are a TAIL: an
+// FX cell stores an INDEX into this array while the .ptp stores the effect CODE, so shortening the
+// list leaves every index 0..EFFECT_TYPE_COUNT_NO_MIDI-1 naming the effect it always named. Move one
+// of them, or append a non-MIDI effect after them, and the two builds disagree about what a saved
+// cell means — hence the assert rather than a comment.
+inline constexpr int MIDI_EFFECT_COUNT         = 6;
+inline constexpr int EFFECT_TYPE_COUNT_NO_MIDI = EFFECT_TYPE_COUNT - MIDI_EFFECT_COUNT;
+
+static_assert(EFFECT_TYPES[EFFECT_TYPE_COUNT_NO_MIDI + 0] == FX_MPG &&
+                  EFFECT_TYPES[EFFECT_TYPE_COUNT_NO_MIDI + 1] == FX_MPB &&
+                  EFFECT_TYPES[EFFECT_TYPE_COUNT_NO_MIDI + 2] == FX_CCA &&
+                  EFFECT_TYPES[EFFECT_TYPE_COUNT_NO_MIDI + 3] == FX_CCB &&
+                  EFFECT_TYPES[EFFECT_TYPE_COUNT_NO_MIDI + 4] == FX_CCC &&
+                  EFFECT_TYPES[EFFECT_TYPE_COUNT_NO_MIDI + 5] == FX_CCD,
+              "the MIDI commands must stay the LAST six entries of EFFECT_TYPES — a build that hides "
+              "them shortens the list, so anything after them would be hidden too");
+
 /** Index of `code` in EFFECT_TYPES, or 0 (FX_NONE) if it is not a known effect — `indexOf(...) ?: 0`. */
 inline int effect_type_index(int code) {
     for (int i = 0; i < EFFECT_TYPE_COUNT; ++i)

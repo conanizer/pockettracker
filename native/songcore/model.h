@@ -62,6 +62,8 @@ enum class ModDest {
 // The instrument's ROUTING DESTINATION — which sound module consumes its event stream (MIDI plan §1),
 // not "what kind of instrument it is". SAMPLER and SOUNDFONT are consumed by EngineConsumer; EXTERNAL
 // leaves the process as MIDI bytes (ExternalConsumer, midi_out.h). Future synth modules append here.
+// ⚠️ EXTERNAL STAYS LAST. A build without the MIDI surfaces (native/ui/platform_caps.h `midi`) walks
+// the TYPE cell over one type fewer, which only hides EXTERNAL while EXTERNAL is the tail.
 enum class InstrumentType { SAMPLER, SOUNDFONT, EXTERNAL };
 
 inline const char* mod_type_name(ModType t) {

@@ -404,8 +404,15 @@ inline CursorContext character(char current) {
  * walks the list, and the module converts back to a code when it writes the step.
  * A+B clears the effect, but only when it is not already NONE (FX_NONE is a valid stop on the cycle,
  * not an "empty" cell).
+ *
+ * `type_count` is how many of the list this build lets you reach — fewer where the MIDI commands at
+ * the end of it are hidden (ui/platform_caps.h `midi`). It bounds the coarse A+LEFT/A+RIGHT step; the
+ * picker that A+UP/A+DOWN opens is bounded by its own grid (ui/fx_helper.h). ⚠️ It clamps the CURSOR,
+ * never the CELL: a step that already holds a hidden effect keeps it and keeps drawing it, because
+ * the value came off disk and this build is not the one that authored it.
  */
-inline CursorContext effect_type(int current_type, int fx_slot) {
+inline CursorContext effect_type(int current_type, int fx_slot,
+                                 int type_count = songcore::EFFECT_TYPE_COUNT) {
     CursorContext c;
     c.valueType                 = CursorValueType::EFFECT_TYPE;
     c.capabilities.canIncrement = true;
@@ -414,7 +421,7 @@ inline CursorContext effect_type(int current_type, int fx_slot) {
     c.capabilities.isEmpty      = false;
     c.currentValue = songcore::effect_type_index(current_type);
     c.minValue     = 0;
-    c.maxValue     = songcore::EFFECT_TYPE_COUNT - 1;
+    c.maxValue     = type_count - 1;
     c.smallStep    = 1;
     c.fxSlot       = fx_slot;
     return c;

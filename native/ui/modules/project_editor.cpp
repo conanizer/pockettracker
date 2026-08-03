@@ -54,11 +54,12 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     // The first row's background sits below the title and its 14px of air.
     const int firstRowY = y + TEXT_PADDING + ROW_HEIGHT + 14;
     const auto rowY = [&](ProjectRow row) {
-        return firstRowY + project_row_offset_y(row, ROW_HEIGHT);
+        return firstRowY + project_row_offset_y(row, s.caps, ROW_HEIGHT);
     };
 
-    const bool hasExit  = s.caps.appExit;
-    const int  lastRow  = static_cast<int>(project_last_row(s.caps));
+    const bool hasExit = s.caps.appExit;
+    const bool hasMidi = s.caps.midi;
+    const int  lastRow = static_cast<int>(project_last_row(s.caps));
 
     // The row highlight spans the whole module, and it lights from the ROW alone — every column of a
     // row shares it. Only the VALUE under the cursor additionally takes textCursor.
@@ -148,10 +149,11 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
 
     param_row(ProjectRow::SYSTEM, "SYSTEM", "SETTINGS >");
 
-    // ── MIDI — the door to the MIDI screen (plan §8.1, B4.3) ─────────────────────────────────────
-    // Every platform, unconditionally: a MIDI port is not a device capability the way a touchscreen is,
-    // and a machine with none simply enumerates none — which the OUTPUT row already has a word for.
-    param_row(ProjectRow::MIDI, "MIDI", "MIDI >");
+    // ── MIDI — the door to the MIDI screen ───────────────────────────────────────────────────────
+    // Not a device capability the way a touchscreen is — a machine with no port simply enumerates
+    // none, which the OUTPUT row has a word for. It is gated on the build instead: this row is the
+    // only way to reach the MIDI screen, so hiding it is what makes the surfaces unauthorable.
+    if (hasMidi) param_row(ProjectRow::MIDI, "MIDI", "MIDI >");
 
     // ── EXIT — the shell only ────────────────────────────────────────────────────────────────────
     // Android apps never exit; a handheld launcher needs the process back (port plan §5). Drawn like
@@ -162,7 +164,7 @@ void ProjectModule::draw(Canvas& c, int x, int y, const ProjectState& s) const {
     // Integer math in tenths of a MB, as Kotlin does it, to dodge the locale decimal separator.
     if (s.caps.debug) {
         const int ramY = firstRowY +
-                         project_row_offset_y(static_cast<ProjectRow>(lastRow), ROW_HEIGHT) +
+                         project_row_offset_y(static_cast<ProjectRow>(lastRow), s.caps, ROW_HEIGHT) +
                          ROW_HEIGHT * 2;
         const int64_t tenths = (s.sampleRamBytes * 10 + 524288) / 1048576;
         c.draw_text("USED RAM", labelX, ramY + TEXT_PADDING, t.textParam, CHAR_SPACING, FONT_SCALE);
@@ -214,8 +216,12 @@ CursorContext ProjectModule::cursor_context(const ProjectState& s) const {
         case ProjectRow::EXPORT:
         case ProjectRow::COMPACT:
         case ProjectRow::SYSTEM:
-        case ProjectRow::MIDI:
             return cc::read_only();
+
+        // The two conditional rows answer `none()` where this build does not draw them — a cursor
+        // that cannot get there still has a context taken of it by anything that asks blind.
+        case ProjectRow::MIDI:
+            return s.caps.midi ? cc::read_only() : cc::none();
 
         case ProjectRow::EXIT:
             return s.caps.appExit ? cc::read_only() : cc::none();
