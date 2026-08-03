@@ -18,14 +18,23 @@ PocketTracker stands on a lot of excellent open-source work. Thank you to everyo
 | [stb_vorbis](https://github.com/nothings/stb) | Public domain (MIT) | Native OGG Vorbis decoding |
 | [libopus / opusfile](https://opus-codec.org/) | BSD-3-Clause | Native Opus decoding |
 | [nlohmann/json](https://github.com/nlohmann/json) | MIT | Parsing `.ptp` / `.pti` project + instrument JSON |
-| [Jetpack Compose](https://developer.android.com/jetpack/compose) | Apache 2.0 | Android UI toolkit |
-| [Kotlinx Serialization](https://github.com/Kotlin/kotlinx.serialization) | Apache 2.0 | JSON project save / load |
+| [SDL2](https://www.libsdl.org/) | zlib | Window, renderer, audio device, controller and keyboard input on every platform |
+| [AndroidX Core-KTX](https://developer.android.com/jetpack/androidx/releases/core) | Apache 2.0 | Window-insets handling in the Android launcher activity |
+| [AndroidX Core-SplashScreen](https://developer.android.com/jetpack/androidx/releases/core) | Apache 2.0 | Android 12+ splash-screen compatibility |
 
 Each library keeps its own license. PocketTracker as a whole is distributed under GPL-3.0-or-later (see [`LICENSE`](LICENSE)).
 
 **Full notices for everything compiled into the audio engine — the code that ships in both the APK
 and the Linux port — are in [`licenses/THIRD-PARTY-NOTICES.md`](licenses/THIRD-PARTY-NOTICES.md),**
 which is the single source of truth and travels inside the release artifact.
+
+**Oboe and the two AndroidX rows are Gradle-resolved rather than compiled from `native/`**, so they
+exist only in the APK. Apache-2.0 §4(a) requires that a copy of the License reach anyone who receives
+the binary, and naming it here does not do that — **the full Apache-2.0 text is in the notices file**,
+which is why the notices cover them too despite not being engine code.
+
+This file ships beside the notices in every artifact rather than only in the repo —
+`assets/licenses/CREDITS.md` in the APK, `licenses/CREDITS.md` in the Linux tarball.
 
 > **Note on DaisySP:** it is not uniformly MIT. Of the eight files PocketTracker compiles, five are
 > MIT (`svf`, `overdrive`, `decimator`, `limiter`, `crossfade`) and **three are LGPL-2.1** —

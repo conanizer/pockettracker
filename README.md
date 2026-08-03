@@ -213,6 +213,9 @@ It is distributed in the hope that it will be useful, but **without any warranty
 Full license text: [`LICENSE`](LICENSE).
 
 PocketTracker statically links several third-party components, each under its own license (BSD-3-Clause,
-MIT, LGPL-2.1, and public-domain dedications). Their copyright notices and license terms are reproduced
-in [`licenses/THIRD-PARTY-NOTICES.md`](licenses/THIRD-PARTY-NOTICES.md), which also ships inside the
-Linux port's release archive.
+MIT, LGPL-2.1, zlib, and public-domain dedications). Their copyright notices and license terms are
+reproduced in [`licenses/THIRD-PARTY-NOTICES.md`](licenses/THIRD-PARTY-NOTICES.md).
+
+That file, the GPL text and [`CREDITS.md`](CREDITS.md) ship **inside every release artifact**, not just
+in this repository — `licenses/` in the Windows zip, the Linux tarball and the PortMaster zip, and
+`assets/licenses/` inside the Android APK. If you received only a binary, the notices came with it.

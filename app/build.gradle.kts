@@ -152,3 +152,63 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)
 }
+
+// ─── The licence payload that ships INSIDE the APK ───────────────────────────────────────────────
+//
+// PocketTracker is GPL-3.0-or-later and statically links a dozen third-party components, so their
+// notices have to travel with the BINARY and not merely with the source tree that built it — GPL-3.0
+// §4 and BSD-3-Clause both word the obligation around what the recipient of the ARTIFACT receives.
+// The Windows zip, the Linux tarball and the PortMaster zip each stage these three files into a
+// `licenses/` folder beside the executable. The APK is the one artifact that has no "beside the
+// executable", and it carried none of them.
+//
+// They are COPIED from the repo root at build time rather than checked in under `src/main/assets/`,
+// so `licenses/THIRD-PARTY-NOTICES.md` stays the single source of truth and no second copy exists to
+// drift from it. Assets — unlike `res/` — are untouched by `isShrinkResources`, so the release APK
+// keeps all three.
+//
+// ⚠️ The wiring is `addGeneratedSourceDirectory`, NOT `sourceSets.assets.srcDir(...)` plus a
+// hand-written `dependsOn`: it makes the asset-merge task consume this task's output directory by
+// construction, so no ordering can put the merge first.
+//
+// ⚠️ Nothing READS these files — they are payload, and their whole job is to exist. So a missing one
+// breaks no build and throws nothing at run time: it would ship silently, and a green build is no
+// evidence at all. The only evidence is the finished APK, which the release build verifies by reading
+// all three back out of it and comparing the bytes (a truncated copy unzips just as cleanly).
+abstract class StageLicenseAssets : DefaultTask() {
+    /** The repo-root files to ship, taken verbatim. */
+    @get:InputFiles abstract val notices: ConfigurableFileCollection
+
+    /** Becomes `assets/` in the APK, so the files land under `assets/licenses/`. */
+    @get:OutputDirectory abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun stage() {
+        val dir = outputDir.get().asFile.resolve("licenses")
+        // Wipe first: an entry dropped from `notices` must leave the APK too, and Gradle's stale-output
+        // cleanup does not reach inside a directory this task wrote by hand.
+        dir.deleteRecursively()
+        dir.mkdirs()
+        notices.forEach { src -> src.copyTo(dir.resolve(src.name), overwrite = true) }
+    }
+}
+
+val stageLicenseAssets = tasks.register<StageLicenseAssets>("stageLicenseAssets") {
+    notices.from(
+        rootProject.file("LICENSE"),                         // GPL-3.0-or-later — PocketTracker's own
+        rootProject.file("licenses/THIRD-PARTY-NOTICES.md"), // every statically linked component
+        rootProject.file("CREDITS.md"),                      // the Gradle-resolved Android dependencies
+        // The notices file cites this one by path for the Linux Biolinum font, so shipping the
+        // citation without the text would leave a dangling pointer for anyone holding only the APK.
+        rootProject.file("licenses/OFL-1.1-LinuxBiolinum.txt"),
+    )
+    outputDir.set(layout.buildDirectory.dir("generated/licenseAssets"))
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(
+            stageLicenseAssets, StageLicenseAssets::outputDir
+        )
+    }
+}
