@@ -95,6 +95,12 @@ class TraceWriter : public IMidiConsumer {
                 s += " param="; s += std::to_string(static_cast<int>(ev.cc.param));
                 s += " value="; s += fbits(ev.cc.valueBits);
                 break;
+            case EV_PROGRAM:
+                s += " program="; s += std::to_string(static_cast<int>(ev.program.program));
+                break;
+            case EV_PITCH_BEND:
+                s += " value="; s += std::to_string(static_cast<int>(ev.pitchBend.value14));
+                break;
             case EV_EXT_PITCH_RATE:
                 s += " rate=";  s += fbits(ev.extPitchRate.rateBits);
                 s += " tempo="; s += std::to_string(static_cast<int>(ev.extPitchRate.tempo));

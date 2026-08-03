@@ -34,6 +34,7 @@
 #include "ui/std_filesystem.h"
 
 #include "app.h"
+#include "midi-in.h"          // picks the platform's IMidiIn  (winmm at E2, ALSA rawmidi at E5)
 #include "midi-out.h"         // picks the platform's IMidiOut; the block below has no #ifdef of its own
 #include "sdl-audio-engine.h"
 
@@ -285,6 +286,47 @@ int main(int argc, char** argv) {
             midiOut.test_note(600);
     }
 #endif
+
+    // ── MIDI IN (MIDI plan phase E2) ─────────────────────────────────────────────────────────────
+    //
+    //   POCKETTRACKER_MIDI_IN=<index | name fragment>   listen on that port
+    //   POCKETTRACKER_MIDI_IN=list                      print the input devices and open nothing
+    //   POCKETTRACKER_MIDI_IN_TRACE=1                   print every message as it is drained (app.cpp)
+    //
+    // ⚠️ **IT RESOLVES; IT DOES NOT OPEN, which is the one place this block differs from the OUT one
+    // above.** An open input port delivers bytes immediately, and the object they have to land in lives
+    // inside the `SongcoreHost` that `ptshell::run` has not built yet. So the spec becomes a device NAME
+    // in the settings, and the dispatcher — the only thing that also knows how to wire the sink — does
+    // the opening. See app.h.
+    //
+    // ⭐ **THE DESK LOOPBACK, and it is why this backend exists before the two that ship:** point
+    // POCKETTRACKER_MIDI_OUT and POCKETTRACKER_MIDI_IN at the same loopMIDI port and PocketTracker's
+    // sequencer drives PocketTracker's MIDI in. The whole of phase E is then watchable with no keyboard,
+    // no cable and no hardware — the same trick that let phase B be debugged against the GS synth.
+#ifdef PT_HAS_PLATFORM_MIDI_IN
+    ptshell::PlatformMidiIn midiIn;
+    {
+        // Attached whether or not anything opens, exactly like the output backend: E3's INPUT row needs
+        // the ENUMERATOR, not a port, and every use of the pointer is guarded.
+        cfg.midiIn = &midiIn;
+
+        if (const char* spec = SDL_getenv("POCKETTRACKER_MIDI_IN"))
+            cfg.midiInDevice = midiIn.resolve_spec(spec);
+    }
+#endif
+
+    // POCKETTRACKER_MIDI_SYNC=0|1 — phase C's clock and transport, forced for a scripted run.
+    //
+    // ⚠️ **DELIBERATELY OUTSIDE THE BACKEND `#ifdef` ABOVE**, and that is the same reasoning that made
+    // B3 measurable: what the clock decides is WHEN a message is released, which is upstream of every
+    // platform port, and the send observer is called whether or not one is open (midi_out.h). So the
+    // phase-C timing measurement needs no cable — and a build with no MIDI backend compiled in must
+    // still be able to run it, or the one instrument in the tree that can see a millisecond would be
+    // unavailable on the platform most likely to need it.
+    if (const char* sy = SDL_getenv("POCKETTRACKER_MIDI_SYNC")) {
+        cfg.midiSyncOut = (sy[0] == '0') ? 0 : 1;
+        std::printf("midi:    SYNC OUT %s (override)\n", cfg.midiSyncOut ? "ON 24 PPQN" : "off");
+    }
 
     // The launcher's kill, as a question the shared loop can ask once a frame. The handler above only
     // ever sets this flag; everything that has to happen because of it happens in the loop.

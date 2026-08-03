@@ -45,6 +45,8 @@
 // Any screen not named below falls through to the shared 16-row default, which is what the Kotlin
 // `else` branch does for anything it has not named.
 
+#include <algorithm>
+
 #include "ui/app_state.h"
 #include "ui/instrument_row_layout.h"
 #include "ui/settings_row_layout.h"
@@ -289,7 +291,10 @@ inline void move_cursor_up(AppState& s) {
             s.settingsCursorColumn = 1;
             break;
 
-        // MIDI wraps over a fixed five — no caps filter, because every row is on every platform.
+        // MIDI wraps over a fixed eight — no caps filter, because every row is on every platform.
+        // ⚠️ The column resets to 1, which matters since E3 gave IN CH eight of them: leaving the
+        // cursor on column 6 while stepping onto a one-column row would put it on a cell that is not
+        // drawn, and `cursor_context` would answer for a track the screen is not showing.
         case ScreenType::MIDI:
             s.midiCursorRow = (s.midiCursorRow > 0) ? s.midiCursorRow - 1 : MIDI_ROW_COUNT - 1;
             s.midiCursorColumn = 1;
@@ -465,12 +470,14 @@ inline void move_cursor_left(AppState& s) {
             s.settingsCursorColumn = 1;
             return;
 
-        // ⚠️ MIDI IS ONE COLUMN WIDE AND SAYS SO OUT LOUD, rather than falling into the `default` and
-        // reaching the same answer by accident. It would: min == max == 0 there. But the accident it
-        // would rely on is EFFECTS' documented bug two comments down — LEFT walking the SHARED
-        // `cursorColumn` on a screen that never reads it — and a screen that is correct only because
-        // another screen's bug is harmless is one row away from not being.
+        // ⚠️ MIDI IS ONE COLUMN WIDE EXCEPT ON IN CH, AND SAYS SO OUT LOUD rather than falling into the
+        // `default` and reaching the same answer by accident. It would, for the one-column rows: min ==
+        // max == 0 there. But the accident it would rely on is EFFECTS' documented bug two comments
+        // down — LEFT walking the SHARED `cursorColumn` on a screen that never reads it — and a screen
+        // that is correct only because another screen's bug is harmless is one row away from not being.
         case ScreenType::MIDI:
+            if (static_cast<MidiRow>(s.midiCursorRow) == MidiRow::IN_MAP && s.midiCursorColumn > 1)
+                s.midiCursorColumn--;
             return;
 
         default:
@@ -548,10 +555,17 @@ inline void move_cursor_right(AppState& s) {
             return;
         }
 
-        // One column — see the matching arm in move_cursor_left for why it is stated rather than left
-        // to the fall-through.
-        case ScreenType::MIDI:
+        // One column, except IN CH's eight — see the matching arm in move_cursor_left for why it is
+        // stated rather than left to the fall-through. ⚠️ The bound is the PROJECT's own vector, not
+        // the constant: a project carrying fewer than eight tracks must not offer a ninth cell that
+        // `handle_input` will then refuse.
+        case ScreenType::MIDI: {
+            if (static_cast<MidiRow>(s.midiCursorRow) != MidiRow::IN_MAP) return;
+            const int tracks = s.project ? static_cast<int>(s.project->midiInputChannels.size()) : 0;
+            const int last   = std::min(MIDI_IN_MAP_COLUMNS, tracks);
+            if (s.midiCursorColumn < last) s.midiCursorColumn++;
             return;
+        }
 
         default:
             break;

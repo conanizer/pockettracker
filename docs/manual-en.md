@@ -1368,6 +1368,44 @@ automate the master EQ across a song (e.g. a filter-sweep build-up).
 
 ---
 
+### MPG `XX` — MIDI Program Change
+
+Sends a MIDI **program change** to `XX` (`00`–`7F`) on the channel of the instrument playing this track.
+Use it to switch patches on external gear mid-song. It applies from this step onward; the instrument's
+own PROG setting is re-sent with its next note, so the change lasts until then.
+
+Put it on an **empty step** to change the patch cleanly between notes — on a step that also has a note,
+that note still sounds with the old patch.
+
+---
+
+### MPB `XX` — MIDI Pitch Bend
+
+Sends an **absolute** MIDI pitch bend: `00` = fully down, `80` = centre, `FF` = fully up. How far that
+actually bends is the receiving instrument's bend-range setting, not ours.
+
+Unlike `PBN` (which is a *rate*, and drives the internal sampler), `MPB` is a position and is sent to
+external gear only. Playback returns the bend to centre when it stops, so a song cannot leave a synth
+detuned.
+
+---
+
+### CCA / CCB / CCC / CCD `XX` — MIDI CC Slots
+
+Sends value `XX` (`00`–`FF`, scaled to MIDI's `0`–`127`) on the controller number configured in the
+instrument's **CC A–D** rows (INSTRUMENT screen, EXTERNAL type). The phrase names the *slot*, the
+instrument names the *controller* — so re-pointing CC A from cutoff to resonance re-points every `CCA`
+in the song with it.
+
+A slot with no controller number set does nothing. Values arrive **after** the instrument's CC defaults
+on a step that has a note, so a `CCA` always wins over the default for that note.
+
+> These four also work on internal instruments where the controller number is one the engine
+> understands (7 volume, 10 pan, 91 reverb send, 93 delay send) — the same command drives a sampler and
+> an external synth. Other controller numbers reach external gear only.
+
+---
+
 ## 22. Modulation Reference
 
 See §14 for how to edit mod slots, and [Appendix E](#appendix-e-parameter-reference--units--ranges)
@@ -1856,6 +1894,12 @@ Open with **A** (or SELECT) on an EQ cell.
 | DEL | Delay Send | `XX` | Per-note delay send level |
 | EQN | EQ (note) | `XX` | Per-note EQ preset slot (00–7F) |
 | EQM | EQ (mixer) | `XX` | Master EQ preset slot; holds till next EQM, resets on stop |
+| MPG | MIDI Program | `XX` | Program change (00–7F) on the instrument's MIDI channel |
+| MPB | MIDI Bend | `XX` | Absolute pitch bend (00=down 80=centre FF=up); external only |
+| CCA | MIDI CC A | `XX` | Value for the controller in the instrument's CC A row |
+| CCB | MIDI CC B | `XX` | Value for the controller in the instrument's CC B row |
+| CCC | MIDI CC C | `XX` | Value for the controller in the instrument's CC C row |
+| CCD | MIDI CC D | `XX` | Value for the controller in the instrument's CC D row |
 
 ---
 

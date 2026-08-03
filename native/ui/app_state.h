@@ -30,6 +30,7 @@
 #include "ui/platform_caps.h"
 #include "ui/selection.h"
 
+#include "songcore/midi_in.h"    // IMidiIn  — the input port (E2); its row is E3's
 #include "songcore/midi_out.h"   // IMidiOut — the port the MIDI screen picks (B4.3)
 
 #include <cstdint>
@@ -291,6 +292,21 @@ struct AppState {
      */
     std::vector<std::string> midiDeviceNames{"OFF"};
     int                      midiDeviceIndex = 0;
+
+    /**
+     * The INPUT port and its own list (phase E2) — the mirror of the two above, and separate from them
+     * because they are separate device lists on every platform: winmm enumerates outputs and inputs
+     * with different calls, and a loopback port appears in BOTH under the same name.
+     *
+     * ⚠️ Null on any build with no input backend — since E5 that is no shipping platform (winmm, ALSA
+     * rawmidi and `MidiManager` are all here), but every use stays guarded: null is also what a build
+     * with a MISSING libasound gets, and that is a state a user can be in. The INPUT row that displays
+     * this list is E3's; the pointer is here because the thing that OPENS the port at boot is the
+     * dispatcher, and it reads this struct.
+     */
+    songcore::IMidiIn*       midiIn = nullptr;
+    std::vector<std::string> midiInDeviceNames{"OFF"};
+    int                      midiInDeviceIndex = 0;
 
     /** The MIDI screen's one-shot readout — "PANIC SENT", "TEST SENT", "NO PORT". */
     std::string midiStatusText;

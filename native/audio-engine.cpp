@@ -989,7 +989,19 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
         // Process all scheduled kill events for this exact frame (BEFORE notes)
         while (killIdx < killBatch.size() && killBatch[killIdx].targetFrame <= currentFrame) {
             ScheduledKill kill = killBatch[killIdx++];
-            if (kill.softKill) {
+            if (kill.mode == KILL_KEY_OFF) {
+                // A live key let go of (MIDI plan §4.1). The three-way rule is inside
+                // SamplerVoice::keyRelease — and the ONLY difference from a KIL is the one-shot arm,
+                // which does nothing at all here and a declicked fade there.
+                triggerKeyRelease(kill.trackId);
+                // SF: unchanged. TSF owns its own release envelope, a SoundFont preset always HAS one,
+                // and "a one-shot with no envelope" is a sampler-only shape — there is nothing for the
+                // §4.1 rule to decide on this side.
+                if (kill.trackId >= 0 && kill.trackId < SF_VOICE_COUNT) {
+                    sfVoices[kill.trackId].noteOff();
+                }
+                LOGT("🎹 Key release: track %d at frame %lld", kill.trackId, (long long)currentFrame);
+            } else if (kill.mode == KILL_SOFT) {
                 triggerNoteOff(kill.trackId);  // Sampler: trigger ADSR release
                 // SF: noteOff (TSF handles its own release envelope internally)
                 if (kill.trackId >= 0 && kill.trackId < SF_VOICE_COUNT) {
@@ -2065,7 +2077,15 @@ void AudioEngine::scheduleNoteOff(int64_t targetFrame, int trackId) {
     ScheduledKill kill{};
     kill.targetFrame = targetFrame;
     kill.trackId     = trackId;
-    kill.softKill    = true;
+    kill.mode        = KILL_SOFT;
+    killQueue.schedule(kill);
+}
+
+void AudioEngine::scheduleKeyRelease(int64_t targetFrame, int trackId) {
+    ScheduledKill kill{};
+    kill.targetFrame = targetFrame;
+    kill.trackId     = trackId;
+    kill.mode        = KILL_KEY_OFF;
     killQueue.schedule(kill);
 }
 
@@ -2488,6 +2508,14 @@ void AudioEngine::triggerNoteOff(int trackId) {
     // The release-vs-fade decision lives in Voice::noteOff — one implementation.
     for (int v = 0; v < MAX_VOICES; v++) {
         if (voices[v].isActive && voices[v].trackId == trackId) voices[v].noteOff();
+    }
+}
+
+void AudioEngine::triggerKeyRelease(int trackId) {
+    // …and the key-release decision lives in Voice::keyRelease, for the same reason: this loop is
+    // allocation, not policy. The two differ in exactly one arm (see sampler-voice.h).
+    for (int v = 0; v < MAX_VOICES; v++) {
+        if (voices[v].isActive && voices[v].trackId == trackId) voices[v].keyRelease();
     }
 }
 

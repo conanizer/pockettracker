@@ -175,6 +175,17 @@ static std::string recompute(const Line& ln, const std::string& testdata, std::s
         s += " bck=" + optI(r.bckValue);
         s += " eqn=" + optI(r.eqnSlot);
         s += " eqm=" + optI(r.eqmSlot);
+        // MIDI phase D. ⚠️ Printed for EVERY line, absent or not — the golden's line shape is fixed
+        // (a field that only appears when set cannot be told from a field that stopped being printed).
+        // No line in the golden can carry one of these: the Kotlin emitter that produced the file
+        // predates the codes, so the suffix below must be IDENTICAL on all 159 rows, and that is the
+        // check on the patch that added it. The codes' own resolution is asserted in ptmidi, which is
+        // hand-written — adding hand-written cases to a recorded golden would quietly cost the file
+        // the provenance that makes it worth having.
+        s += " mpg=" + optI(r.midiProgram);
+        s += " mpb=" + optI(r.midiBend);
+        for (int i = 0; i < songcore::MIDI_CC_SLOTS; ++i)
+            s += std::string(" cc") + static_cast<char>('a' + i) + "=" + optI(r.ccSlotValue[i]);
         return s;
     }
     if (ln.kind == "USEDINST") {

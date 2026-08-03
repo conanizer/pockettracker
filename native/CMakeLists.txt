@@ -473,6 +473,13 @@ if(ANDROID)
             "${PT_SHELL_DIR}/font.cpp"         # the button-label font (convergence D): Helvetica + D-pad triangles
             "${PT_SHELL_DIR}/midi-out-base.cpp"    # the platform-FREE half of a MIDI backend (MIDI plan B2b)
             "${PT_SHELL_DIR}/midi-out-android.cpp" # the ANDROID songcore::IMidiOut: five JNI up-calls (B2b)
+            "${PT_SHELL_DIR}/midi-in-base.cpp"     # the platform-FREE half of a MIDI INPUT backend (E2)
+            "${PT_SHELL_DIR}/midi-in-android.cpp"  # the ANDROID songcore::IMidiIn: five JNI up-calls (E5).
+                                                   # ⚠️ POLLED once a frame, where winmm and ALSA push —
+                                                   # see its header, and MidiInBase::pump
+            "${PT_SHELL_DIR}/midi-sender.cpp"      # the just-in-time MIDI sender thread (MIDI plan B3).
+                                                   # ⚠️ SDL_CreateThread, so SDL attaches it to the JVM —
+                                                   # midi-out-android.cpp makes JNI calls FROM this thread
             "${PT_SHELL_DIR}/sdl-input.cpp"
             "${PT_SHELL_DIR}/sdl-touch.cpp"
             "${PT_SHELL_DIR}/sdl-video.cpp"

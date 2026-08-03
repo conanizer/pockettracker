@@ -1,7 +1,7 @@
 # ─── The by-name JNI callbacks from native into Kotlin (convergence Phase E) ──────────────────
 #
-# The shared C++ shell calls exactly seven Kotlin methods on MainActivity by name, resolving each with
-# GetMethodID (shell/android-main.cpp, shell/midi-out-android.cpp):
+# The shared C++ shell calls exactly twelve Kotlin methods on MainActivity by name, resolving each with
+# GetMethodID (shell/android-main.cpp, shell/midi-out-android.cpp, shell/midi-in-android.cpp):
 #     onButtonFeedback(IZZIZI)V     — routes a virtual-button press to the sound/haptic managers
 #     hasPhysicalGameButtons()Z     — the SOURCE_GAMEPAD check SDL's looser C joystick API cannot make
 #     midiDeviceCount()I            — ┐ the EXTERNAL MIDI out port (MIDI plan B2b). MidiManager is a
@@ -9,7 +9,12 @@
 #     midiOpenDevice(I)Z            — │ Android, so these five are the whole platform seam. See
 #     midiCloseDevice()V            — │ MidiOutManager.kt for why AMidi does not remove the Java half.
 #     midiSend(IIII)Z               — ┘
-# so all seven NAMES are part of the ABI and R8 must not rename or strip them. They carry @Keep as well, but
+#     midiInDeviceCount()I          — ┐ the MIDI INPUT port (MIDI plan E5), the same seam in the other
+#     midiInDeviceName(I)L…/String; — │ direction. ⚠️ Its device list is `outputPortCount > 0`, the
+#     midiInOpenDevice(I)Z          — │ OPPOSITE filter — see MidiInManager.kt. The last one is a READ
+#     midiInCloseDevice()V          — │ because the native side POLLS this port once a frame rather
+#     midiInRead([B)I               — ┘ than being called from the MIDI service's binder thread.
+# so all twelve NAMES are part of the ABI and R8 must not rename or strip them. They carry @Keep as well, but
 # an explicit rule is this project's standing requirement for a native-by-name callback: @Keep alone
 # once let a renamed SAM member (onProgress, the old songcore render-progress hook — since deleted with
 # the JNI facade) kill every render in a release APK. MainActivity now runs R8 in release, having left
@@ -26,6 +31,11 @@
     boolean midiOpenDevice(int);
     void midiCloseDevice();
     boolean midiSend(int, int, int, int);
+    int midiInDeviceCount();
+    java.lang.String midiInDeviceName(int);
+    boolean midiInOpenDevice(int);
+    void midiInCloseDevice();
+    int midiInRead(byte[]);
 }
 
 # ─── SDL2's Java glue (convergence plan C1) ───────────────────────────────────────────────────

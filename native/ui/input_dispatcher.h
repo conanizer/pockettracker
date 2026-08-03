@@ -377,6 +377,22 @@ class InputDispatcher {
      */
     void boot_midi_port();
 
+    /**
+     * The same, for the INPUT port (phase E2) — resolve `settings.midiInDevice` against the live list,
+     * wire the host's queue as the sink, open it.
+     *
+     * ⚠️ **A SEPARATE CALL AND NOT A SECOND HALF OF `boot_midi_port`**, because the two are separately
+     * absent: a build can have an output backend and no input one (Linux between B2b and E5, and any
+     * platform where only one of the two libraries is present), and folding them would make "there is
+     * no MIDI in on this build" print as though the cable had failed.
+     *
+     * ⚠️ **THE SINK IS WIRED HERE, WITH THE OPEN, AND THAT PAIRING IS THE POINT.** An input port that is
+     * open with no sink drops every byte silently, and one whose sink outlives its `set_sink(nullptr)`
+     * is a backend thread writing into a dead object. Both are invisible until they are not, so the two
+     * calls live in the one function that can never do one without the other.
+     */
+    void boot_midi_in_port();
+
   private:
     AppState&               s_;
     songcore::SongcoreHost& host_;
@@ -762,6 +778,35 @@ class InputDispatcher {
      * to — the note-offs we owe delivered to a port that is already closed.
      */
     void apply_midi_device();
+
+    /** `refresh_midi_devices`' twin for the INPUT list (E2). Same rules, a different enumeration. */
+    void refresh_midi_in_devices();
+
+    /**
+     * Make the input port match `settings.midiInDevice` — unwire the sink, close, open the named one,
+     * wire the sink back.
+     *
+     * ⚠️ THE ORDER IS THE WHOLE FUNCTION. `set_sink(nullptr)` before `close()`, so no byte from the old
+     * device can arrive during the swap; `host_.reset_midi_in()` between them, because a cable pulled
+     * mid-message leaves running status in force and the next port's first data byte would otherwise
+     * complete a note nobody played on the previous device's channel; `set_sink` before `open`, because
+     * a port that is open is a port already delivering.
+     */
+    void apply_midi_in_device();
+
+    /**
+     * ⭐ **THE THRU VERDICT (E4): is the port we listen on the same one we send on?**
+     *
+     * MIDI thru — a live key on an EXTERNAL instrument reaching the cable — is the feature. On a
+     * LOOPBACK port it is instead an amplifying feedback loop (key → cable → the same port → key), and
+     * a loopback is not exotic here: it is the only MIDI-in test rig this project has (§0.8).
+     *
+     * ⚠️ **ONE FUNCTION, CALLED FROM BOTH SIDES, BECAUSE THE VERDICT DEPENDS ON BOTH PORTS.** Either
+     * device row can change it, so a rule spelled out at each site is a rule one of them will forget —
+     * the repo has paid for that five times (the modal-guard predicate, `settingsDirty`, …). It is
+     * derived from the two names the SCREEN is showing, which is the same data the user is reading.
+     */
+    void update_midi_thru();
 
     /** NEW, and the engine sync a fresh project needs (SongcoreHost::new_project). */
     void start_new_project();

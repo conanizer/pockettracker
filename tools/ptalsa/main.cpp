@@ -46,7 +46,9 @@ int main() {
 
 #include <type_traits>
 
-#include "../../shell/midi-out-alsa.h"
+// ⚠️ alsa-rawmidi.h since E5, where `AlsaApi` moved when the INPUT backend turned out to need every
+// entry point in it. midi-out-alsa.h is where this list used to live.
+#include "../../shell/alsa-rawmidi.h"
 
 using ptshell::alsa_detail::AlsaApi;
 
@@ -80,6 +82,7 @@ using Real_rawmidi_info_get_name    = const char* (*)(const snd_rawmidi_info_t*)
 using Real_rawmidi_open             = int  (*)(snd_rawmidi_t**, snd_rawmidi_t**, const char*, int);
 using Real_rawmidi_close            = int  (*)(snd_rawmidi_t*);
 using Real_rawmidi_write            = ssize_t (*)(snd_rawmidi_t*, const void*, size_t);
+using Real_rawmidi_read             = ssize_t (*)(snd_rawmidi_t*, void*, size_t);
 using Real_rawmidi_drain            = int  (*)(snd_rawmidi_t*);
 using Real_strerror                 = const char* (*)(int);
 
@@ -100,8 +103,9 @@ using Real_strerror                 = const char* (*)(int);
 [[maybe_unused]] constexpr Real_rawmidi_open            k12 = &snd_rawmidi_open;
 [[maybe_unused]] constexpr Real_rawmidi_close           k13 = &snd_rawmidi_close;
 [[maybe_unused]] constexpr Real_rawmidi_write           k14 = &snd_rawmidi_write;
-[[maybe_unused]] constexpr Real_rawmidi_drain           k15 = &snd_rawmidi_drain;
-[[maybe_unused]] constexpr Real_strerror                k16 = &snd_strerror;
+[[maybe_unused]] constexpr Real_rawmidi_read            k15 = &snd_rawmidi_read;   // E5
+[[maybe_unused]] constexpr Real_rawmidi_drain           k16 = &snd_rawmidi_drain;
+[[maybe_unused]] constexpr Real_strerror                k17 = &snd_strerror;
 
 // ── And now the same signatures as AlsaApi spells them, with the opaque handles substituted. ─────
 //
@@ -144,6 +148,7 @@ static_assert(same<Real_rawmidi_info_get_name,   decltype(AlsaApi::rawmidi_info_
 static_assert(same<Real_rawmidi_open,            decltype(AlsaApi::rawmidi_open)>,            "rawmidi_open");
 static_assert(same<Real_rawmidi_close,           decltype(AlsaApi::rawmidi_close)>,           "rawmidi_close");
 static_assert(same<Real_rawmidi_write,           decltype(AlsaApi::rawmidi_write)>,           "rawmidi_write");
+static_assert(same<Real_rawmidi_read,            decltype(AlsaApi::rawmidi_read)>,            "rawmidi_read");
 static_assert(same<Real_rawmidi_drain,           decltype(AlsaApi::rawmidi_drain)>,           "rawmidi_drain");
 static_assert(same<Real_strerror,                decltype(AlsaApi::strerror_fn)>,             "strerror");
 
@@ -153,20 +158,26 @@ static_assert(same<Real_strerror,                decltype(AlsaApi::strerror_fn)>
 // snd_ctl_rawmidi_info for the OUTPUT stream and treats -ENXIO as "skip"). Wrong, and the row lists
 // the user's MIDI keyboard as a destination while hiding their synth.
 static_assert(ptshell::alsa_detail::STREAM_OUTPUT == SND_RAWMIDI_STREAM_OUTPUT, "STREAM_OUTPUT");
+// ⚠️ Its E5 mirror, and it does the same job in the other direction: it is what keeps output-only
+// ports off the INPUT row. Wrong, and the row offers the user's synth as something to play FROM
+// while hiding their keyboard — which reads as "no MIDI devices", not as a bug.
+static_assert(ptshell::alsa_detail::STREAM_INPUT == SND_RAWMIDI_STREAM_INPUT, "STREAM_INPUT");
 static_assert(ptshell::alsa_detail::NONBLOCK == SND_RAWMIDI_NONBLOCK, "NONBLOCK");
 
 }  // namespace
 
 int main() {
     // Everything above is compile-time; reaching here IS the pass. The report exists so that a green
-    // run prints the number beside the verdict rather than an unqualified "OK" — 16 prototypes and 2
+    // run prints the number beside the verdict rather than an unqualified "OK" — 17 prototypes and 3
     // constants is the count a future reader should compare against AlsaApi's field list, because a
-    // field ADDED to AlsaApi and not added here would otherwise pass in silence.
-    std::printf("ptalsa: 16 prototypes and 2 constants checked against <alsa/asoundlib.h>\n");
-    std::printf("ptalsa: symbols the backend dlsym()s      = 16\n");
+    // field ADDED to AlsaApi and not added here would otherwise pass in silence. (It nearly did: E5
+    // added `rawmidi_read` and `STREAM_INPUT`, and this counter is what refused the build until they
+    // were covered.)
+    std::printf("ptalsa: 17 prototypes and 3 constants checked against <alsa/asoundlib.h>\n");
+    std::printf("ptalsa: symbols the backends dlsym()      = 17\n");
     std::printf("ptalsa: fields in AlsaApi                 = %d\n",
                 static_cast<int>(sizeof(AlsaApi) / sizeof(void (*)())));
-    if (sizeof(AlsaApi) / sizeof(void (*)()) != 16) {
+    if (sizeof(AlsaApi) / sizeof(void (*)()) != 17) {
         std::printf("ptalsa: FAIL - AlsaApi has fields this check does not cover\n");
         return 1;
     }

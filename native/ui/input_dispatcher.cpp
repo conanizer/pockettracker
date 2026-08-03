@@ -345,11 +345,13 @@ CursorContext InputDispatcher::cursor_context() const {
 
         case ScreenType::MIDI: {
             MidiState ms{*s_.project, s_.settings};
-            ms.cursorRow    = s_.midiCursorRow;
-            ms.cursorColumn = s_.midiCursorColumn;
-            ms.deviceNames  = s_.midiDeviceNames;
-            ms.deviceIndex  = s_.midiDeviceIndex;
-            ms.caps         = s_.caps;
+            ms.cursorRow      = s_.midiCursorRow;
+            ms.cursorColumn   = s_.midiCursorColumn;
+            ms.deviceNames    = s_.midiDeviceNames;
+            ms.deviceIndex    = s_.midiDeviceIndex;
+            ms.inDeviceNames  = s_.midiInDeviceNames;
+            ms.inDeviceIndex  = s_.midiInDeviceIndex;
+            ms.caps           = s_.caps;
             return midi_.cursor_context(ms);
         }
 
@@ -466,16 +468,19 @@ bool InputDispatcher::apply_edit(const InputAction& action) {
             return false;
 
         // ⚠️ MIDI IS THE ONE SCREEN THAT EDITS BOTH SUBJECTS, so it is the one arm whose return value
-        // is a QUESTION rather than a constant. PROG CHG is a `Project` field that emits into the .ptp,
-        // so it dirties the song exactly as TEMPO does; OUTPUT and OFFSET are settings.json's and must
-        // not, or picking a cable would put "you have unsaved work" in front of the next NEW.
+        // is a QUESTION rather than a constant. PROG CHG and IN CH are `Project` fields that emit into
+        // the .ptp, so they dirty the song exactly as TEMPO does; OUTPUT, INPUT and OFFSET are
+        // settings.json's and must not, or picking a cable would put "you have unsaved work" in front
+        // of the next NEW.
         case ScreenType::MIDI: {
             const MidiInputResult r =
                 midi_.handle_input(p, s_.settings, s_.midiCursorRow, s_.midiCursorColumn,
-                                   s_.midiDeviceNames, action);
-            // The two side effects the module cannot perform itself — it has no port and no OS.
-            if (r.deviceChanged) apply_midi_device();
-            if (r.offsetChanged) host_.set_midi_offset_ms(s_.settings.midiOffsetMs);
+                                   s_.midiDeviceNames, s_.midiInDeviceNames, action);
+            // The side effects the module cannot perform itself — it has no port and no OS.
+            if (r.deviceChanged)   apply_midi_device();
+            if (r.inDeviceChanged) apply_midi_in_device();
+            if (r.offsetChanged)   host_.set_midi_offset_ms(s_.settings.midiOffsetMs);
+            if (r.syncChanged)     host_.set_midi_sync_out(s_.settings.midiSyncOut);
             return r.projectModified;
         }
 
@@ -2110,7 +2115,11 @@ void InputDispatcher::project_action() {
             //
             // ⚠️ THE ENUMERATION HAPPENS HERE, ON THE WAY IN. See refresh_midi_devices(): a port list is
             // only true at the moment it is read, and this is the moment the user is about to read it.
+            // ⚠️ BOTH lists, since E3 — the INPUT row is as hot-pluggable as the OUTPUT one, and a
+            // screen that refreshed one of them would show a stale answer on the other for as long as
+            // the user stayed on it.
             refresh_midi_devices();
+            refresh_midi_in_devices();
             s_.midiStatusText.clear();   // last visit's "TEST SENT" is not this visit's news
             s_.midiReturnScreen = s_.currentScreen;
             NavResult nav;
@@ -2171,6 +2180,10 @@ void InputDispatcher::boot_midi_port() {
     // applied" bug in its purest form: the value would sit correct in settings.json, be drawn correctly
     // on the screen, and change nothing anybody could hear.
     host_.set_midi_offset_ms(s_.settings.midiOffsetMs);
+    // SYNC (phase C) for exactly the same reason, and it is the more dangerous of the two to forget:
+    // OFFSET being unapplied is a few milliseconds nobody measures, but SYNC being unapplied means a
+    // user who turned it on last session, saw ON when they came back, and got no clock at all.
+    host_.set_midi_sync_out(s_.settings.midiSyncOut);
 
     refresh_midi_devices();
     if (port_open()) return;                       // the env override already opened this same device
@@ -2214,9 +2227,9 @@ void InputDispatcher::apply_midi_device() {
     host_.midi_out().panic();
     s_.midiOut->close();
 
-    if (wanted == 0) { s_.midiStatusText = "OUTPUT OFF"; return; }
-
-    if (s_.midiOut->open(wanted - 1)) {          // −1: index 0 of the list is OFF, not a device
+    if (wanted == 0) {
+        s_.midiStatusText = "OUTPUT OFF";
+    } else if (s_.midiOut->open(wanted - 1)) {   // −1: index 0 of the list is OFF, not a device
         s_.midiStatusText = "PORT OPENED";
     } else {
         // ⚠️ SAID OUT LOUD, and the setting is left alone. A port that refuses to open is usually one
@@ -2225,6 +2238,105 @@ void InputDispatcher::apply_midi_device() {
         // `is_open()` is false, which is the truth.
         s_.midiStatusText = "PORT BUSY";
     }
+
+    // ⭐ ONE call, below every arm, because the loopback verdict depends on which port is OPEN and each
+    // of the three arms above leaves that different — including "OUTPUT OFF", which is the arm that
+    // turns thru back ON. A rule repeated at each site is a rule one site will forget.
+    update_midi_thru();   // the OUT row's half of the ONE verdict (E4) — see apply_midi_in_device
+}
+
+// ─── MIDI IN (phase E2) ──────────────────────────────────────────────────────────────────────────
+
+void InputDispatcher::boot_midi_in_port() {
+    refresh_midi_in_devices();
+    if (s_.midiInDeviceIndex != 0) apply_midi_in_device();
+    // ⚠️ UNCONDITIONALLY, and after the OUT port's own boot (app.cpp calls them in that order): with no
+    // input device the verdict is still a verdict — thru ON, nothing to loop — and a boot that skipped
+    // it would leave the flag at whatever the default happens to be rather than at something decided.
+    update_midi_thru();
+    // ⚠️ …and drop what `apply` just wrote, exactly as `boot_midi_port` does: boot news belongs on the
+    // CONSOLE, and a status line left over from launch would greet the user on the MIDI screen minutes
+    // later as though something had just happened.
+    s_.midiStatusText.clear();
+}
+
+void InputDispatcher::refresh_midi_in_devices() {
+    s_.midiInDeviceNames.assign(1, "OFF");   // index 0, always — "no device" is a choice, not a gap
+
+    if (s_.midiIn) {
+        const int n = s_.midiIn->device_count();
+        for (int i = 0; i < n; ++i) s_.midiInDeviceNames.push_back(s_.midiIn->device_name(i));
+    }
+
+    s_.midiInDeviceIndex = 0;
+    for (size_t i = 1; i < s_.midiInDeviceNames.size(); ++i) {
+        if (s_.midiInDeviceNames[i] == s_.settings.midiInDevice) {
+            s_.midiInDeviceIndex = static_cast<int>(i);
+            break;
+        }
+    }
+}
+
+void InputDispatcher::apply_midi_in_device() {
+    int wanted = 0;
+    for (size_t i = 1; i < s_.midiInDeviceNames.size(); ++i) {
+        if (s_.midiInDeviceNames[i] == s_.settings.midiInDevice) { wanted = static_cast<int>(i); break; }
+    }
+    s_.midiInDeviceIndex = wanted;
+
+    if (!s_.midiIn) { s_.midiStatusText = "NO MIDI BACKEND"; return; }
+
+    // ⚠️ The teardown order, and every step of it answers a way this can go wrong — see the header.
+    s_.midiIn->set_sink(nullptr);
+    s_.midiIn->close();
+    host_.reset_midi_in();
+
+    if (wanted == 0) {
+        s_.midiStatusText = "INPUT OFF";
+    } else {
+        // The sink BEFORE the open: an open port is already delivering, and bytes that arrive between
+        // the two would be dropped by a backend that has nowhere to put them — a silent loss at exactly
+        // the moment a user is watching to see whether their keyboard works.
+        s_.midiIn->set_sink(&host_.midi_in_sink());
+        if (s_.midiIn->open(wanted - 1)) {   // −1: index 0 of the list is OFF, not a device
+            s_.midiStatusText = "INPUT OPENED";
+        } else {
+            // The choice is KEPT, exactly as on the OUTPUT side: a port that refuses is usually one
+            // another app holds, which is a transient the user can fix. The sink is unwired again so a
+            // backend that half-opened cannot deliver into a port the app believes is closed.
+            s_.midiIn->set_sink(nullptr);
+            s_.midiStatusText = "INPUT BUSY";
+        }
+    }
+
+    update_midi_thru();   // …and the IN half of the same one verdict (E4) — see apply_midi_device
+}
+
+void InputDispatcher::update_midi_thru() {
+    // ⚠️ **BOTH PORTS OPEN, OR THERE IS NOTHING TO LOOP.** `is_open()` and not the saved choice: a
+    // device that was picked and then refused to open (PORT BUSY) is a port sending nothing, and
+    // suppressing thru for it would silence a feature over a cable that does not exist.
+    const bool inOpen  = s_.midiIn != nullptr && s_.midiIn->is_open() && s_.midiInDeviceIndex > 0;
+    const bool outOpen = port_open() && s_.midiDeviceIndex > 0;
+
+    // The two names the SCREEN is showing. On every backend this project has met, a loopback's two
+    // directions carry the SAME display name (winmm's "loopMIDI Port" both ways) — a hardware keyboard
+    // and a hardware synth never do, because they are two different devices.
+    // ⚠️ Index 0 is "OFF" on both lists, which is why the `> 0` above is part of the predicate and not
+    // an optimisation: without it, two closed ports would compare equal and turn thru off.
+    const bool loopback =
+        inOpen && outOpen &&
+        static_cast<size_t>(s_.midiInDeviceIndex) < s_.midiInDeviceNames.size() &&
+        static_cast<size_t>(s_.midiDeviceIndex)   < s_.midiDeviceNames.size() &&
+        s_.midiInDeviceNames[static_cast<size_t>(s_.midiInDeviceIndex)] ==
+            s_.midiDeviceNames[static_cast<size_t>(s_.midiDeviceIndex)];
+
+    host_.set_midi_in_thru(!loopback);
+
+    // ⚠️ SAID OUT LOUD, on the screen the user just used to cause it. A suppression nobody is told
+    // about is indistinguishable from an EXTERNAL instrument that does not respond to a keyboard —
+    // and it overwrites "INPUT OPENED" deliberately, because it is the more surprising news of the two.
+    if (loopback) s_.midiStatusText = "THRU OFF: LOOP";
 }
 
 void InputDispatcher::midi_action() {

@@ -1497,6 +1497,118 @@ static std::string recompute_kbdwin(const std::vector<std::string>& toks, std::s
            " cl=" + std::to_string(w.clipLeft ? 1 : 0) + " cr=" + std::to_string(w.clipRight ? 1 : 0);
 }
 
+// ─── The FX grid's INVARIANTS — not a golden, and that is the point ─────────────────────────────
+//
+// ⚠️⚠️ **THE FXH GOLDEN LINES ARE THE ONE PART OF THIS FILE THAT NO LONGER HAS AN INDEPENDENT
+// AUTHOR.** Every other case was recorded from the real Kotlin implementation; the JVM emitter is
+// gone (convergence phase E), so when MIDI phase D added six effects and the grid grew a sixth row,
+// 113 FXH lines were regenerated FROM THE CODE THEY TEST. That is self-certification, and the
+// guardrail against it is a check that re-derives the property from something other than the
+// navigation functions: cells and indices, counted.
+//
+// These hold for ANY grid size, which is why they survive the next effect being added:
+//   * every effect has exactly one cell, and every cell round-trips back to its own index;
+//   * the reachable cells number exactly EFFECT_TYPE_COUNT — nothing is stranded (the last row is
+//     centred, so its edge columns are NOT cells) and nothing is double-booked;
+//   * walking right COUNT times from any start returns to the start, having seen every effect once;
+//   * every reachable cell holds a REAL effect code — the failure the centred row can produce is a
+//     cursor on an empty cell that commits some other effect entirely (see fx_helper.h).
+static int check_fx_grid_invariants() {
+    using namespace pt::ui;
+    const int count = songcore::EFFECT_TYPE_COUNT;
+    int failures = 0;
+    auto fail = [&](const std::string& what, const std::string& got) {
+        std::cerr << "[FAIL] fx-grid invariant: " << what << " — " << got << "\n";
+        ++failures;
+    };
+
+    // 1. index → cell → index, for every effect.
+    for (int i = 0; i < count; ++i) {
+        const FxCell c = fx_index_to_cell(i);
+        FxHelperState s{true, c.row, c.col};
+        if (s.cursor_index() != i)
+            fail("index " + std::to_string(i) + " does not round-trip", std::to_string(s.cursor_index()));
+        if (c.col != fx_clamp_col_for_row(c.row, c.col))
+            fail("index " + std::to_string(i) + " sits on an unreachable column", std::to_string(c.col));
+    }
+
+    // 2. the reachable cells ARE the effects, one for one.
+    std::vector<int> seen(static_cast<size_t>(count), 0);
+    int cells = 0;
+    for (int row = 0; row < FX_GRID_ROWS; ++row) {
+        for (int col = 0; col < FX_GRID_COLS; ++col) {
+            if (fx_clamp_col_for_row(row, col) != col) continue;   // an empty edge cell of the last row
+            const FxHelperState s{true, row, col};
+            const int idx = s.cursor_index();
+            ++cells;
+            if (idx < 0 || idx >= count) { fail("a reachable cell holds no effect", std::to_string(idx)); continue; }
+            ++seen[static_cast<size_t>(idx)];
+            if (songcore::effect_name(s.selected_effect_code()) == "---" && idx != 0)
+                fail("cell " + std::to_string(row) + "," + std::to_string(col) + " commits an unnamed code",
+                     std::to_string(s.selected_effect_code()));
+        }
+    }
+    if (cells != count) fail("reachable cells != effects", std::to_string(cells) + " vs " + std::to_string(count));
+    for (int i = 0; i < count; ++i)
+        if (seen[static_cast<size_t>(i)] != 1)
+            fail("effect " + std::to_string(i) + " is reachable from a wrong number of cells",
+                 std::to_string(seen[static_cast<size_t>(i)]));
+
+    // 3. RIGHT cycles a ROW — its own row, not the grid.
+    //
+    // ⚠️ The first draft of this asserted that COUNT rights come home, and it FAILED — on a correct
+    // grid. `fx_move_right` wraps within the row (the comment three lines above it says so), so what
+    // COUNT rights prove is nothing at all. Stated properly the check is sharper anyway: each row is a
+    // cycle of its own WIDTH, and the last row's width is the centred one. A row whose width is wrong
+    // is exactly what a mis-derived FX_LAST_ROW_COUNT produces.
+    for (int start = 0; start < count; ++start) {
+        const FxCell c0 = fx_index_to_cell(start);
+        const int width = (c0.row == FX_LAST_ROW) ? FX_LAST_ROW_COUNT : FX_GRID_COLS;
+        FxHelperState s = fx_helper_opened_at(start);
+        std::vector<int> visited;
+        for (int n = 0; n < width; ++n) {
+            visited.push_back(s.cursor_index());
+            fx_move_right(s);
+        }
+        if (s.cursor_index() != start)
+            fail("row cycle from " + std::to_string(start) + " does not close",
+                 std::to_string(s.cursor_index()));
+        std::sort(visited.begin(), visited.end());
+        if (std::unique(visited.begin(), visited.end()) != visited.end())
+            fail("a row cycle from " + std::to_string(start) + " repeats a cell", "duplicate");
+    }
+
+    // 4. DOWN never leaves the grid, and settles.
+    //
+    // ⚠️ Also not "returns to where it started", and also learned by the check failing: passing
+    // through the centred last row CLAMPS an edge column inward (col 0 → 1), deliberately — the cell
+    // it would otherwise land on holds no effect. So a walk from an edge column legitimately never
+    // comes home. What must hold is that it STOPS moving: one full lap of ROWS steps lands somewhere
+    // valid, and every lap after that lands in the same place. A navigation that kept sliding sideways
+    // would pass "stayed on the grid" and fail this.
+    for (int start = 0; start < count; ++start) {
+        FxHelperState s = fx_helper_opened_at(start);
+        auto lap = [&] {
+            for (int n = 0; n < FX_GRID_ROWS; ++n) {
+                fx_move_down(s);
+                const int idx = s.cursor_index();
+                if (idx < 0 || idx >= count)
+                    fail("moving down from " + std::to_string(start) + " left the grid", std::to_string(idx));
+            }
+            return s.cursor_index();
+        };
+        const int first = lap();
+        if (lap() != first)
+            fail("down from " + std::to_string(start) + " never settles",
+                 std::to_string(first) + " then " + std::to_string(s.cursor_index()));
+    }
+
+    std::cout << "  fx-grid invariants: " << count << " effects, " << cells << " reachable cells, "
+              << FX_GRID_ROWS << "x" << FX_GRID_COLS << " grid — "
+              << (failures == 0 ? "OK" : std::to_string(failures) + " FAILED") << "\n";
+    return failures;
+}
+
 // ─── main ────────────────────────────────────────────────────────────────────────────────────────
 
 int main(int argc, char** argv) {
@@ -1596,6 +1708,8 @@ int main(int argc, char** argv) {
             }
         }
     }
+
+    failures += check_fx_grid_invariants();
 
     std::cout << "== Phase-3 S3 input-layer parity (C++ vs JVM golden) ==\n";
     for (const auto& kv : perKind) std::cout << "  " << kv.first << ": " << kv.second << " case(s)\n";

@@ -52,6 +52,30 @@ constexpr int FX_BCK      = 0x22;  // BCK  playback direction
 constexpr int FX_EQN      = 0x23;  // EQN  per-note EQ preset slot
 constexpr int FX_EQM      = 0x24;  // EQM  master/mixer EQ preset slot
 
+// ─── MIDI phase D — the commands that speak the CC map (plan §8.3) ────────────────────────────────
+//
+// ⚠️ **THESE ARE ROUTER EVENTS, NOT "EXTERNAL-ONLY EFFECTS".** They resolve to the same three bus
+// records every other consumer already reads (EV_PROGRAM / EV_PITCH_BEND / EV_CC), so `CCA` on a
+// SAMPLER instrument moves the mapped engine param and `CCA` on an EXTERNAL one puts a controller on
+// the wire — one command vocabulary across module types, which is the whole payoff of the seam.
+//
+// ⚠️ A CC slot is named by its LETTER, never by a controller number: the number lives in the
+// instrument (`Instrument::midiCC[slot].cc`), so the same phrase follows an instrument that has been
+// re-patched. The letter→number resolution happens in the CONSUMER (event.h `CC_SLOT_A`), for the
+// reason `TrackInstruments` exists at all — the step's instrument COLUMN is 0x00 on an FX-only step
+// and is not the instrument that is sounding.
+constexpr int FX_MPG      = 0x25;  // MPG  MIDI program change (00-7F)
+constexpr int FX_MPB      = 0x26;  // MPB  MIDI pitch bend, absolute (00-FF, 80 = centre)
+constexpr int FX_CCA      = 0x27;  // CCA  instrument CC slot A
+constexpr int FX_CCB      = 0x28;  // CCB  instrument CC slot B
+constexpr int FX_CCC      = 0x29;  // CCC  instrument CC slot C
+constexpr int FX_CCD      = 0x2A;  // CCD  instrument CC slot D
+
+/** Slot index 0-3 for FX_CCA..FX_CCD, or -1 for any other effect code. */
+inline int fx_cc_slot(int code) {
+    return (code >= FX_CCA && code <= FX_CCD) ? code - FX_CCA : -1;
+}
+
 // Effect code → 3-letter display name, or "---" for NONE/unknown. Mirrors FX_NAMES / effectName().
 // (RPT is the on-screen name for FX_REPEAT; DEL/REV are the DSEND/RSEND labels.)
 inline std::string effect_name(int code) {
@@ -65,15 +89,23 @@ inline std::string effect_name(int code) {
         case FX_PVX: return "PVX"; case FX_PIT: return "PIT"; case FX_SLI: return "SLI";
         case FX_PAN: return "PAN"; case FX_RSEND: return "REV"; case FX_DSEND: return "DEL";
         case FX_BCK: return "BCK"; case FX_EQN: return "EQN"; case FX_EQM: return "EQM";
+        case FX_MPG: return "MPG"; case FX_MPB: return "MPB";
+        case FX_CCA: return "CCA"; case FX_CCB: return "CCB";
+        case FX_CCC: return "CCC"; case FX_CCD: return "CCD";
         default: return "---";
     }
 }
 
 // Max parameter byte for an effect: table/groove/EQ-preset pool refs cap at 0x7F (128 slots), all
 // others use the full 0xFF range. Mirrors effectValueMax().
+//
+// MPG joins the 0x7F group and does not merely follow it: a MIDI program number IS seven bits, so a
+// cell that let you type FF would be a cell whose top half sends something else (`& 0x7F` folds 0x80
+// back onto program 0). MPB stays 0xFF — it is the wide 14-bit value's top byte, not a 7-bit one.
 inline int effect_value_max(int effect_type) {
     return (effect_type == FX_TBL || effect_type == FX_GRV ||
-            effect_type == FX_EQN || effect_type == FX_EQM) ? 127 : 255;
+            effect_type == FX_EQN || effect_type == FX_EQM ||
+            effect_type == FX_MPG) ? 127 : 255;
 }
 
 // The cycle order of the FX-type column, and the reading order of the FX helper grid — mirrors
@@ -85,8 +117,9 @@ inline constexpr int EFFECT_TYPES[] = {
     FX_NONE, FX_ARC, FX_CHA, FX_LAT, FX_GRV, FX_HOP, FX_TIC, FX_ARPEGGIO, FX_KILL, FX_OFFSET,
     FX_RND, FX_RNL, FX_REPEAT, FX_TBL, FX_THO, FX_VOLUME,
     FX_PSL, FX_PBN, FX_PVB, FX_PVX, FX_PIT, FX_SLI,
-    // Last grid row (centred): the four send/EQ FX
     FX_PAN, FX_BCK, FX_RSEND, FX_DSEND, FX_EQN, FX_EQM,
+    // Last grid row (centred): the four CC-slot commands (MIDI phase D)
+    FX_MPG, FX_MPB, FX_CCA, FX_CCB, FX_CCC, FX_CCD,
 };
 inline constexpr int EFFECT_TYPE_COUNT = static_cast<int>(sizeof(EFFECT_TYPES) / sizeof(int));
 
@@ -131,6 +164,11 @@ struct ResolvedStepParams {
     std::optional<int> bckValue;
     std::optional<int> eqnSlot;
     std::optional<int> eqmSlot;
+    // MIDI phase D. `ccSlotValue[i]` is slot A..D's authored 00-FF byte; the controller NUMBER it
+    // moves is the instrument's, resolved consumer-side (see the FX_CCA note above).
+    std::optional<int> midiProgram;                    // MPG
+    std::optional<int> midiBend;                       // MPB (authored byte, not the 14-bit value)
+    std::optional<int> ccSlotValue[MIDI_CC_SLOTS];     // CCA-CCD
 };
 
 // Fold a step's three FX slots into the resolved bundle. `default_volume` seeds `volume` (the
@@ -179,6 +217,11 @@ inline ResolvedStepParams resolve_step_params(const PhraseStep& step,
             case FX_GRV:    p.grooveId = value; break;
             case FX_PIT:    p.pitSemitones = (value < 0x80) ? value : value - 256; break;
             case FX_SLI:    p.sliIndex = value; break;
+            case FX_MPG:    p.midiProgram = value & 0x7F; break;
+            case FX_MPB:    p.midiBend = value; break;
+            case FX_CCA: case FX_CCB: case FX_CCC: case FX_CCD:
+                p.ccSlotValue[fx_cc_slot(type)] = value;
+                break;
             // ARP / CHA / RND / RNL / TIC and any unknown code: no resolved field — no-op.
             default: break;
         }

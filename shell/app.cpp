@@ -24,6 +24,8 @@
 #include "font.h"
 #include "portrait2.h"
 
+#include "midi-in.h"      // the platform's IMidiIn, or nothing (E2: Windows only)
+#include "midi-sender.h"
 #include "sdl-input.h"
 #include "sdl-touch.h"
 #include "sdl-video.h"
@@ -43,6 +45,47 @@ namespace {
 // ⚠️ It lives on `run`'s STACK, so the watcher MUST be removed before `run` returns — see the
 // SDL_DelEventWatch below the loop. A watcher outliving its userdata is a use-after-free that fires
 // during teardown, which is the least debuggable moment available.
+// ─── THE MIDI-IN CONSOLE (phase E2) ──────────────────────────────────────────────────────────────
+//
+// ⭐⭐ **THE INSTRUMENT FOR A COMPONENT WHOSE CORRECT BEHAVIOUR IS SILENCE.** A MIDI input that is
+// working and one that never received a byte look identical from every seat in the app: no sound, no
+// screen, no log. So every stage of the path counts, and the counts are printed beside the verdict at
+// exit — bytes at the PORT (`MidiInBase`), bytes and messages at the QUEUE and PARSER
+// (`SongcoreHost`), records at the ROUTER, and here the split between messages that produced a record
+// and messages that produced none.
+//
+// ⚠️ That last split is the one nothing else can make, and it is the difference between "the cable is
+// dead" and "no track is listening on that channel" — two problems whose fixes have nothing in common.
+//
+// It runs on the FRAME LOOP's thread (`SongcoreHost::poll` drains, this is called from there), so it
+// may print. The backend's own callback may not — see midi-in-base.h.
+struct MidiInConsole : songcore::IMidiInObserver {
+    bool     trace    = false;   // POCKETTRACKER_MIDI_IN_TRACE=1
+    uint64_t messages = 0;
+    uint64_t records  = 0;
+    uint64_t silent   = 0;       // messages that produced no bus record at all
+
+    void on_midi_in(const songcore::MidiInMessage& m, const songcore::Event* ev, int n) override {
+        ++messages;
+        records += static_cast<uint64_t>(n < 0 ? 0 : n);
+        if (n <= 0) ++silent;
+        if (!trace) return;
+
+        // ⚠️ The bytes are RECONSTRUCTED from the message rather than remembered from the wire, so a
+        // trace line that disagrees with the cable is a parser bug this can actually show. A channel
+        // message's status byte is the nibble plus the channel; a system one is the whole byte.
+        const unsigned status = m.is_channel() ? (m.status | m.channel) : m.status;
+        std::printf("midi ->  %02X", status);
+        if (m.len > 1) std::printf(" %02X", m.data1);
+        if (m.len > 2) std::printf(" %02X", m.data2);
+        std::printf("%*s-> %d event(s)", (m.len > 2 ? 3 : (m.len > 1 ? 6 : 9)), "", n);
+        for (int i = 0; i < n; ++i)
+            std::printf("  [track %d inst %d]", ev[i].track, static_cast<int>(ev[i].instrument));
+        std::printf("\n");
+        std::fflush(stdout);
+    }
+};
+
 struct BackgroundContext {
     SongcoreHost*        host       = nullptr;
     ui::InputDispatcher* dispatch   = nullptr;
@@ -191,7 +234,24 @@ int run(const AppConfig& cfg) {
     // mistake this pair can make.
     engineRef.onResumeRequested = [&audio] { audio.resumeStream(); };
 
+    // ⚠️ **DECLARED BEFORE THE HOST, AND THE ORDER IS A LIFETIME FIX, NOT A STYLE CHOICE.** The
+    // ExternalConsumer inside `host` calls this observer, and its DESTRUCTOR panics — which emits
+    // messages. Declared after the host it would be destroyed first, and that final panic would call
+    // into a dead object. It is also what makes the early `return 1` below (a boot project that does not
+    // parse) safe: there is no teardown path on which the observer outlives its caller.
+    // See the sender-thread block after the port is attached for what fills it.
+    MidiJitterRecorder midiJitter;
+
+    // ⚠️ **ALSO BEFORE THE HOST, AND FOR THE SAME KIND OF REASON**: the host calls this observer from
+    // `poll()`, and `~SongcoreHost` runs before any object declared after it. Attached unconditionally
+    // below — the counters are what make a silent input path readable, so they must exist on the runs
+    // where nobody asked for a trace.
+    MidiInConsole midiInConsole;
+
     SongcoreHost host(&engineRef, audio.sampleRate());
+    host.set_midi_in_observer(&midiInConsole);
+    if (const char* t = SDL_getenv("POCKETTRACKER_MIDI_IN_TRACE"); t && t[0] == '1')
+        midiInConsole.trace = true;
 
     // THIS install's app root — where Projects/ Samples/ Soundfonts/… live (also the FileSystem's root).
     // Handed to the host BEFORE the first load: a project opened at boot may have been authored on
@@ -203,6 +263,35 @@ int run(const AppConfig& cfg) {
     // loads, so an EXTERNAL instrument in a boot project is routed from its very first note.
     host.set_midi_out(cfg.midiOut);
     host.set_midi_offset_ms(cfg.midiOffsetMs);
+
+    // ── The MIDI sender thread (phase B3) ────────────────────────────────────────────────────────
+    //
+    // Started on EVERY platform and whether or not a port is open: the queue must be released either
+    // way (a LEN gate and a panic's note-offs are owed after the last note was scheduled), and starting
+    // it only when a cable is attached would mean the timing path a user exercises is not the one that
+    // was measured. `poll()` stops pumping while it runs — see set_midi_pump_external.
+    //
+    // ⚠️ DEV OVERRIDES, both of them, and the first is B3's own negative control:
+    //   POCKETTRACKER_MIDI_SENDER=0   don't start it; the 60 Hz frame loop keeps the job (pre-B3)
+    //   POCKETTRACKER_MIDI_JITTER=1   measure every released message and print the numbers on exit
+    const bool jitterOn = [] {
+        const char* j = SDL_getenv("POCKETTRACKER_MIDI_JITTER");
+        return j && j[0] == '1';
+    }();
+    if (jitterOn) host.midi_out().set_send_observer(&midiJitter);
+
+    // ⚠️ …and the SENDER is declared AFTER the host, for the mirror-image reason: it pumps `host`, so it
+    // must be destroyed (and its thread joined — see the destructor) while the host is still alive. That
+    // is also what makes the early `return 1` safe on this side.
+    MidiSender  midiSender(engineRef, host, audio.sampleRate());
+    const char* senderEnv = SDL_getenv("POCKETTRACKER_MIDI_SENDER");
+    bool        senderOn  = false;
+    if (senderEnv && senderEnv[0] == '0') {
+        std::printf("midi:    sender thread DISABLED (POCKETTRACKER_MIDI_SENDER=0) - the 60 Hz frame "
+                    "loop releases the queue, as it did before phase B3\n");
+    } else {
+        senderOn = midiSender.start();
+    }
 
     // A REQUESTED project is one with a path; its bytes are already in `projectBlob`, read by the
     // platform before any window existed to hide a bad path behind.
@@ -411,8 +500,13 @@ int run(const AppConfig& cfg) {
     // The two env-var overrides land here, over whatever settings.json said, BEFORE anything opens —
     // see app.h for why they become settings rather than a second, invisible source of truth.
     state.midiOut = cfg.midiOut;
+    // The INPUT backend (E2) rides in the same way and on the same terms — the list is the OS's, the
+    // choice is a NAME, and the override becomes a setting rather than a second source of truth.
+    state.midiIn  = cfg.midiIn;
+    if (!cfg.midiInDevice.empty())  state.settings.midiInDevice  = cfg.midiInDevice;
     if (!cfg.midiOutDevice.empty()) state.settings.midiOutDevice = cfg.midiOutDevice;
     if (cfg.midiOffsetMs != 0)      state.settings.midiOffsetMs  = cfg.midiOffsetMs;
+    if (cfg.midiSyncOut >= 0)       state.settings.midiSyncOut   = cfg.midiSyncOut != 0;
 
     ui::Canvas        canvas;
     ui::TrackerLayout layout;
@@ -429,10 +523,45 @@ int run(const AppConfig& cfg) {
     // which device is open. See InputDispatcher::boot_midi_port.
     dispatch.boot_midi_port();
     if (cfg.midiOut) {
-        std::printf("midi:    OUT %s (offset %+d ms)\n",
+        std::printf("midi:    OUT %s (offset %+d ms, sync %s)\n",
                     cfg.midiOut->is_open() ? state.settings.midiOutDevice.c_str() : "OFF",
-                    state.settings.midiOffsetMs);
+                    state.settings.midiOffsetMs,
+                    state.settings.midiSyncOut ? "ON 24 PPQN" : "off");
     }
+
+    // The INPUT port, opened the same way and by the same rule: the dispatcher owns the open BECAUSE it
+    // owns the sink wiring, and the two may never come apart (input_dispatcher.h).
+    //
+    // ⭐ **THE LINE IS UNCONDITIONAL ON A BUILD THAT HAS A BACKEND, and that is the guardrail's own
+    // "give it one 'I woke up' line".** An input path is the purest case of a component whose correct
+    // behaviour is silence: with no line here, "MIDI in is not compiled into this build" and "your
+    // keyboard is not plugged in" and "the port refused to open" are one indistinguishable nothing.
+    dispatch.boot_midi_in_port();
+    // Latched at BOOT, and read by the exit report. Not asked again at teardown for `senderOn`'s reason
+    // (the B3 block above): by then the port has been closed, so the object would answer "no" on every
+    // run and the report would print on none of them.
+    const bool midiInPortWasOpen = cfg.midiIn && cfg.midiIn->is_open();
+    if (cfg.midiIn) {
+        std::printf("midi:    IN  %s (%d port(s) enumerated)\n",
+                    cfg.midiIn->is_open() ? state.settings.midiInDevice.c_str() : "OFF",
+                    static_cast<int>(state.midiInDeviceNames.size()) - 1);
+    } else {
+        // ⚠️ Since E5 every shipping platform HAS a backend (winmm, ALSA rawmidi, `MidiManager`), so
+        // this arm now means "this build is none of the three" and nothing else. A Linux box whose
+        // libasound is missing does NOT come here — it has a backend object that answers 0 devices, and
+        // said why on its own line — and keeping the two states distinguishable is the whole point.
+        std::printf("midi:    IN  no input backend compiled into this build\n");
+    }
+
+    // ⭐ **THE THRU VERDICT (E4), PRINTED WHETHER OR NOT IT IS THE INTERESTING ONE.** A live key on an
+    // EXTERNAL instrument goes out on the cable; on a LOOPBACK port that would be an amplifying feedback
+    // loop, so the dispatcher turns it off when both ports name the same device. Both outcomes print,
+    // because the suppression is invisible from anywhere else — a silent thru and an EXTERNAL instrument
+    // that simply is not responding look exactly alike from the keyboard.
+    bool midiThru = host.midi_in_thru();
+    std::printf("midi:    THRU %s%s\n", midiThru ? "on" : "OFF",
+                midiThru ? " (a live key on an EXTERNAL instrument reaches the cable)"
+                         : " - IN and OUT are the SAME port, and thru on a loopback is a feedback loop");
 
     // ── What a RENDER needs from the shell (S7) ──────────────────────────────────────────────────
     //
@@ -603,6 +732,37 @@ int run(const AppConfig& cfg) {
 
     bool   running    = true;
     Uint64 lastStatus = 0;
+
+    // ── ⚠️ DEV BRING-UP ONLY: the two hooks that make a TIMED run scriptable (phase B3) ───────────
+    //
+    //   POCKETTRACKER_AUTOPLAY_MS=<n>   press START once, n ms after the first frame
+    //   POCKETTRACKER_QUIT_AFTER_MS=<n> push SDL_QUIT n ms after the first frame
+    //
+    // They exist because B3's claim is about MILLISECONDS and a human pressing SPACE cannot be a
+    // control run. Neither invents a path: autoplay pushes a `Button::START` PRESSED event through
+    // `ui::handle_button` — the identical call the SDL input layer makes, so the mapper, the
+    // preview-silencing rule and `on_start` all run exactly as they do for a finger. (What it does NOT
+    // exercise is `sdl-input.cpp` itself, which remains the tree's one untested layer; that is a
+    // different gap and this does not pretend to close it.)
+    //
+    // ⚠️ Not a general scripted-input facility, deliberately. One button, no sequence, no file: the
+    // moment this grows a script format it becomes a second input path to keep in step with the real
+    // one, and the guardrails have a name for a test that drives a path the user cannot.
+    const auto env_ms = [](const char* name) -> Uint64 {
+        const char* v = SDL_getenv(name);
+        if (!v || !v[0]) return 0;
+        const long n = SDL_strtol(v, nullptr, 10);
+        return n > 0 ? static_cast<Uint64>(n) : 0;
+    };
+    const Uint64 autoplayMs  = env_ms("POCKETTRACKER_AUTOPLAY_MS");
+    const Uint64 quitAfterMs = env_ms("POCKETTRACKER_QUIT_AFTER_MS");
+    Uint64       firstFrameMs = 0;   // 0 until the first frame — the clock both hooks count from
+    bool         autoplayFired = false;
+    if (autoplayMs || quitAfterMs) {
+        std::printf("dev:     AUTOPLAY_MS=%llu  QUIT_AFTER_MS=%llu (scripted run)\n",
+                    static_cast<unsigned long long>(autoplayMs),
+                    static_cast<unsigned long long>(quitAfterMs));
+    }
 
     // The last output size the PORTRAIT2 log line reported, so it prints once per rotation/resize rather
     // than every frame — the portrait analogue of sdl-video's describe-on-change (which reports the
@@ -929,8 +1089,55 @@ int run(const AppConfig& cfg) {
             ui::handle_button(be, dispatch, mapper, now);
         }
 
+        // ── The scripted-run hooks (dev only; both are 0 unless an env var set them) ─────────────
+        if ((autoplayMs || quitAfterMs) && firstFrameMs == 0) firstFrameMs = now;
+        if (autoplayMs && !autoplayFired && now - firstFrameMs >= autoplayMs) {
+            autoplayFired = true;
+            // The user's path, not a shortcut around it: this is the same call the input layer makes.
+            ui::handle_button({ui::Button::START, ui::ButtonAction::PRESSED, ui::ButtonMods{}}, dispatch,
+                              mapper, now);
+            std::printf("dev:     AUTOPLAY pressed START at %llu ms\n",
+                        static_cast<unsigned long long>(now - firstFrameMs));
+            std::fflush(stdout);
+        }
+        if (quitAfterMs && now - firstFrameMs >= quitAfterMs) {
+            std::printf("dev:     QUIT_AFTER reached at %llu ms\n",
+                        static_cast<unsigned long long>(now - firstFrameMs));
+            running = false;
+        }
+
+        // Which instrument a live MIDI key plays on a track the sequencer has not touched (E2). Pushed
+        // every frame rather than on change, because the user moves the cursor between frames and there
+        // is no change notification to hook — the same reason SCALING is polled sixty lines below.
+        //
+        // ⚠️ It is the instrument the UI is SHOWING, which is the one the A-button already auditions, and
+        // it exists so a correctly configured keyboard is not silent on a stopped song. `TrackInstruments`
+        // wins the moment the sequencer plays a note on that track (midi_in.h).
+        host.set_midi_in_instrument(state.currentInstrument);
+
+        // ⚠️ The thru verdict can CHANGE mid-session — picking a port on the MIDI screen is exactly how
+        // a user arrives at a loopback — and the boot line above would then be a lie for the rest of the
+        // run. One line per transition, never per frame: the screen says `THRU OFF: LOOP` where the pick
+        // was made, and this is the console's copy of the same news.
+        if (host.midi_in_thru() != midiThru) {
+            midiThru = host.midi_in_thru();
+            std::printf("midi:    THRU %s (device pick)\n", midiThru ? "on" : "OFF - loopback");
+            std::fflush(stdout);
+        }
+
+        // ⚠️ **IMMEDIATELY ABOVE THE DRAIN, and E5's Android backend is why there is a call here at
+        // all.** A POLLED input backend (`MidiManager`, which delivers to Kotlin on a binder thread)
+        // fetches its bytes here; the winmm and ALSA backends push from their own threads and this is a
+        // no-op for them. Move it below `host.poll()` and every Android MIDI byte waits an extra frame —
+        // invisible on the two platforms that ignore the call, which is exactly why the ordering is
+        // written down in midi-in-base.h as well.
+        if (cfg.midiIn) cfg.midiIn->pump();
+
         // The lookahead pump — the same call, on the same 60 Hz cadence, that PixelPerfectRenderer's
-        // loop makes on Android.
+        // loop makes on Android. ⚠️ Since B3 it no longer releases the MIDI queue when the sender
+        // thread is running (host.h's set_midi_pump_external) — the scheduler's lookahead is still all
+        // its own. ⚠️ Since E2 it also DRAINS the MIDI-in queue, which is why a live key's latency is
+        // this loop's period and not something a backend chose.
         host.poll();
 
         const PlaybackPosition pos = host.playheads();
@@ -1053,6 +1260,61 @@ int run(const AppConfig& cfg) {
     // normally — the watcher's job was the Home press that never reaches this line at all.
     SDL_DelEventWatch(on_app_event, &bg);
 
+    // ⚠️ **THE SENDER THREAD GOES BEFORE `host.stop()`, AND THE ORDER IS THE POINT.** Once it has
+    // joined, `poll()` owns the release again and the panic below runs on the only thread left — so the
+    // note-offs a stop owes are sent by definition rather than by winning a race against a thread that
+    // is being torn down. It also must be joined before `host` (its `pump` target) leaves scope, and
+    // before `audio.closeStream()` takes away the frame counter it reads.
+    midiSender.stop();
+
+    // ⚠️⚠️ **THE INPUT PORT IS CLOSED HERE, AND IT IS A LIFETIME FIX RATHER THAN POLITENESS.** The port
+    // object belongs to the platform's `main` and OUTLIVES this function; the queue it delivers into is
+    // inside `host`, which does not. Leave it open and a byte arriving during teardown — a key released
+    // as the user quits, a controller's own all-notes-off — is a backend thread writing into a destroyed
+    // object. Unwire first, then close: `close()` is what waits for a callback already in flight.
+    if (cfg.midiIn) {
+        cfg.midiIn->set_sink(nullptr);
+        cfg.midiIn->close();
+    }
+
+    // The E2 verdict, and it prints on every run that opened a port — the counters ARE the instrument
+    // for a path whose failure is silence. Four stages, so a break can be located rather than guessed:
+    // the port received nothing (no cable, or the device is not sending), the queue dropped (the drain
+    // is not keeping up), the parser saw orphans (the stream was joined mid-message), or the router
+    // routed nothing (nothing is mapped — and its four counters say which of the four reasons).
+    if (cfg.midiIn && (host.midi_in_bytes() > 0 || midiInPortWasOpen)) {
+        MidiInBase* base = cfg.midiIn;
+        const songcore::MidiInputRouter& r = host.midi_in_router();
+        std::printf("midi in: %llu bytes at the port (%llu callbacks, %llu port errors), %llu drained, "
+                    "%llu messages\n"
+                    "         routed %llu, dropped: %llu non-channel, %llu unmapped, %llu no-instrument, "
+                    "%llu unsupported\n"
+                    "         queue overflow %llu bytes, parser orphans %llu, messages with no record %llu\n"
+                    // ⭐ THE E4 LINE, and it is the one that says whether anything was HEARD. `routed`
+                    // above counts records the router made; these count records the ENGINE and the
+                    // CABLE were actually handed — the two differ by exactly the thru suppression, so a
+                    // silent keyboard on an EXTERNAL instrument names itself here instead of looking
+                    // like a dead cable three lines up.
+                    "         injected %llu into the engine; thru %s: %llu to the cable, %llu suppressed\n",
+                    static_cast<unsigned long long>(base->bytes_received()),
+                    static_cast<unsigned long long>(base->callbacks()),
+                    static_cast<unsigned long long>(base->port_errors()),
+                    static_cast<unsigned long long>(host.midi_in_bytes()),
+                    static_cast<unsigned long long>(host.midi_in_messages()),
+                    static_cast<unsigned long long>(r.routed()),
+                    static_cast<unsigned long long>(r.nonChannel()),
+                    static_cast<unsigned long long>(r.unmapped()),
+                    static_cast<unsigned long long>(r.noInstrument()),
+                    static_cast<unsigned long long>(r.unsupported()),
+                    static_cast<unsigned long long>(host.midi_in_sink().dropped()),
+                    static_cast<unsigned long long>(host.midi_in_parser().orphan_bytes()),
+                    static_cast<unsigned long long>(midiInConsole.silent),
+                    static_cast<unsigned long long>(host.midi_in_injected()),
+                    host.midi_in_thru() ? "on" : "OFF (loopback)",
+                    static_cast<unsigned long long>(host.midi_in_thru_sent()),
+                    static_cast<unsigned long long>(host.midi_in_thru_suppressed()));
+    }
+
     //
     // ⚠️ Settings are written HERE, not on every keystroke. Holding A+UP on a hex-byte setting fires
     // an edit every 100 ms (the key-repeat interval), and one file write per repeat is an SD card
@@ -1093,6 +1355,20 @@ int run(const AppConfig& cfg) {
     dispatch.flush_autosave();
 
     host.stop();
+
+    // The B3 verdict, after the last message has left (the panic in `host.stop()` is part of the run).
+    if (jitterOn) {
+        host.midi_out().set_send_observer(nullptr);
+        // ⚠️ `senderOn` is latched at START, not read here: `midiSender.stop()` above has already
+        // cleared `running()`, so asking the object would label every run "60 Hz" — a mislabelled
+        // measurement, which is worse than no measurement.
+        // The TEMPO is phase C's anchor: the clock block derives BPM from a wall clock and from the due
+        // frames, and this is the third number they are both checked against. Read from the live
+        // project, which is the same value the clock's period came from.
+        midiJitter.report(senderOn ? "B3 sender thread" : "60 Hz frame loop (pre-B3)", audio.sampleRate(),
+                          host.project().tempo);
+    }
+
     engineRef.onResumeRequested = nullptr;
     audio.closeStream();
     input.close_controllers();

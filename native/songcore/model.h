@@ -32,6 +32,10 @@
 #include <vector>
 #include <optional>
 
+// The event schema — for the CC-slot ids `resolve_cc_param` below translates. event.h depends on
+// nothing but <cstdint>/<cstring>, so this stays a leaf-ward include and no cycle is possible.
+#include "event.h"
+
 namespace songcore {
 
 // ─── small helpers ────────────────────────────────────────────────────────────────────────────
@@ -198,6 +202,13 @@ inline Note note_from_midi(int midi) {
     return Note{midi % 12, midi / 12 - 1};
 }
 
+// VolumeUtils.hexToFloat — an authored 0x00-0xFF byte as a 0-1 gain. Here for note_to_midi's reason,
+// and it moved for the third time the same argument has been made (note_to_midi, then chain_is_empty in
+// phase C): it is the model's own arithmetic, three files outside the sequencer now need it, and a
+// second copy is two rules that agree until one of them is edited. scheduler.h still sees it — it
+// includes this header — so every existing caller is untouched.
+inline float hex_to_float(int hex) { return (hex & 0xFF) / 255.0f; }
+
 // Note.NOTES — the chromatic names, two chars each so every note renders in a fixed 3-char cell.
 inline const char* const NOTE_NAMES[12] = {"C-", "C#", "D-", "D#", "E-", "F-",
                                            "F#", "G-", "G#", "A-", "A#", "B-"};
@@ -231,6 +242,15 @@ struct Chain {
     Chain() = default;
     explicit Chain(int id_) : id(id_) {}
 };
+
+// A chain row with no phrase in it. `-1` is the pool's "empty value" everywhere (never 0, never 0xFF).
+//
+// ⚠️ Lives HERE, not in scheduler.h where it was written, because two different layers now decide
+// how long a song row is: `updatePlaybackBuffer` (which schedules it) and `nominal_spp_beats`
+// (midi_clock.h, which tells a drum machine where the playhead landed). A second copy of the
+// predicate would be two things that agree until the day they do not — and a Song Position Pointer
+// computed from a different notion of "empty" than the scheduler's is a number that matches nothing.
+inline bool chain_is_empty(const Chain& c, int index) { return c.phraseRefs[index] == -1; }
 
 struct TableRow {
     int transpose = 0x00;
@@ -422,6 +442,29 @@ inline bool instrument_is_free(const Instrument& ins) {
  */
 inline bool instrument_routes_external(const Instrument& ins) {
     return ins.instrumentType == InstrumentType::EXTERNAL;
+}
+
+/**
+ * The controller number a bus CC event names, for THIS instrument (MIDI phase D).
+ *
+ * A literal 0-127 passes through. A symbolic slot id (event.h `CC_SLOT_A`..`CC_SLOT_D`, what a
+ * `CCA`-`CCD` phrase command emits) names a LETTER, and the number that letter stands for is the
+ * instrument's own — `midiCC[slot].cc`. **−1 = nothing to move**: the slot is unassigned, or the id
+ * is one this build does not know.
+ *
+ * ⚠️ It lives HERE, beside `instrument_routes_external`, for the identical reason and it is not
+ * tidiness: BOTH consumers translate these ids (engine_consumer.h resolves them to engine params,
+ * midi_out.h to bytes on a wire), and two private copies of the rule are two things that agree until
+ * the day one of them is edited. Same argument that moved `chain_is_empty` out of the scheduler.
+ *
+ * ⚠️ And −1 must never be "fall back to the raw id": `CC_SLOT_A` is 128, which masks to CC 0 — BANK
+ * SELECT. A `CCA` on an instrument with no slot A would re-bank the device instead of doing nothing.
+ */
+inline int resolve_cc_param(const Instrument& ins, uint8_t param) {
+    const int slot = cc_slot_index(param);
+    if (slot < 0) return param <= 127 ? static_cast<int>(param) : -1;
+    if (static_cast<size_t>(slot) >= ins.midiCC.size()) return -1;
+    return ins.midiCC[static_cast<size_t>(slot)].cc;
 }
 
 struct Project {

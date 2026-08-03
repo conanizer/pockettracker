@@ -82,22 +82,56 @@ class EngineConsumer : public IMidiConsumer {
                 note_on(ev);
                 break;
 
+            // ⚠️ THREE MODES SINCE E4, and the third is not a synonym for the second. NOTE_OFF_KEY is
+            // a live key let go of (MIDI plan §4.1): a one-shot with no release envelope IGNORES it
+            // and plays out, where a KIL fades the same voice. The difference lives in
+            // `SamplerVoice::keyRelease`; what belongs here is only the translation, and an explicit
+            // third arm rather than a widened `else` — a mode this switch does not know must not
+            // silently become a KIL.
             case EV_NOTE_OFF:
-                if (ev.noteOff.mode == NOTE_OFF_CUT) engine_->scheduleKill(ev.frame, ev.track);
-                else                                 engine_->scheduleNoteOff(ev.frame, ev.track);
+                switch (ev.noteOff.mode) {
+                    case NOTE_OFF_CUT: engine_->scheduleKill(ev.frame, ev.track);       break;
+                    case NOTE_OFF_KEY: engine_->scheduleKeyRelease(ev.frame, ev.track); break;
+                    default:           engine_->scheduleNoteOff(ev.frame, ev.track);    break;
+                }
                 break;
 
             case EV_CC: {
                 const float v = f32_from_bits(ev.cc.valueBits);
-                switch (ev.cc.param) {
+                // A symbolic slot id (CCA-CCD) names a controller the INSTRUMENT chose, so it is
+                // resolved here — against the same instrument the routing gate above just used —
+                // and then treated as any other controller number. That is what makes one FX column
+                // drive a sampler and an external synth: `CCA` on an instrument whose slot A is CC 10
+                // pans this engine's voice and pans the gear, from the same phrase (plan §6/§8.3).
+                const int param = resolve_cc(instr, ev.cc.param);
+                switch (param) {
                     case CC_VOLUME:      engine_->scheduleTrackPhraseVol(ev.frame, ev.track, v);  break;
                     case CC_PAN:         engine_->scheduleVoicePan(ev.frame, ev.track, v);        break;
                     case CC_REVERB_SEND: engine_->scheduleVoiceReverbSend(ev.frame, ev.track, v); break;
                     case CC_DELAY_SEND:  engine_->scheduleVoiceDelaySend(ev.frame, ev.track, v);  break;
-                    default: break;   // ids beyond the four wired today arrive in MIDI phase D
+                    // ⚠️ EVERY OTHER §6 ID IS DROPPED HERE, AND THAT IS A GAP, NOT A DECISION. Cutoff
+                    // (74), resonance (71), attack/release (72/73) and the GP drive/crush pair are
+                    // real sampler params — but they are INSTRUMENT-STATIC in this engine
+                    // (setInstrumentParams), and only the four above have an entry in the
+                    // sample-accurate ParamUpdateQueue. Wiring the rest means new queue entries and
+                    // per-voice overrides in the DSP, which is engine work phase D does not do; until
+                    // then a `CCA` pointing at 74 moves external gear and nothing here.
+                    default: break;
                 }
                 break;
             }
+
+            // ⚠️ NO ENGINE PATH EXISTS FOR EITHER, AND SAYING SO IS THE POINT OF THE ARMS.
+            //   • MPG: this engine has no notion of a program. The soundfont module does (a TSF
+            //     preset), but selecting one mid-take needs a per-track preset override that
+            //     scheduleSoundfontNote does not have.
+            //   • MPB: `schedulePitchBend` is PBN — a RATE in semitones per step, applied over time.
+            //     An absolute 14-bit bend is a different quantity and there is no param to hold it.
+            // Both reach external gear correctly (midi_out.h); on a sampler they are silent. An empty
+            // arm that names why beats a `default:` that cannot tell "dropped" from "forgotten".
+            case EV_PROGRAM:
+            case EV_PITCH_BEND:
+                break;
 
             case EV_EXT_PITCH_RATE:
                 engine_->schedulePitchBend(ev.frame, ev.track,
@@ -133,6 +167,24 @@ class EngineConsumer : public IMidiConsumer {
     }
 
   private:
+    /**
+     * The controller number for this event, via the model's shared rule (`resolve_cc_param`) — so a
+     * `CCA` means the same controller here as it does on the wire. −1 (unknown instrument, or an
+     * unassigned slot) matches no case in the switch and is therefore a no-op.
+     */
+    int resolve_cc(int16_t instrument, uint8_t param) const {
+        // ⚠️ A LITERAL id RETURNS BEFORE THE INSTRUMENT IS EVEN LOOKED AT, and that early return is
+        // load-bearing rather than an optimisation. PAN/REV/DEL are track-scoped and older than any of
+        // this: on an FX-only step before the track's first note-on, `TrackInstruments` resolves to
+        // INSTRUMENT_NONE and they are applied ANYWAY — the engine acts on whatever voice the track
+        // has. Requiring an instrument for every CC would silently drop those, in a channel neither
+        // the traces (which stop above this file) nor `live == render` (same code both sides) can see.
+        // Only a SLOT id genuinely needs an instrument, because only a letter needs translating.
+        if (cc_slot_index(param) < 0) return param;
+        if (instrument < 0 || static_cast<size_t>(instrument) >= project_->instruments.size()) return -1;
+        return resolve_cc_param(project_->instruments[static_cast<size_t>(instrument)], param);
+    }
+
     bool is_external(int16_t instrument) const {
         if (instrument < 0 || static_cast<size_t>(instrument) >= project_->instruments.size()) return false;
         return instrument_routes_external(project_->instruments[static_cast<size_t>(instrument)]);

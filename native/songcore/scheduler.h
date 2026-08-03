@@ -52,7 +52,8 @@ namespace songcore {
 // ─── small helpers ───────────────────────────────────────────────────────────────────────────────
 inline int   clampi(int v, int lo, int hi)       { return v < lo ? lo : (v > hi ? hi : v); }
 inline float clampf(float v, float lo, float hi)  { return v < lo ? lo : (v > hi ? hi : v); }
-inline float hex_to_float(int hex)                { return (hex & 0xFF) / 255.0f; }  // VolumeUtils.hexToFloat
+// hex_to_float MOVED to model.h (MIDI phase E) — the MIDI-in router needs it and has no business
+// including the sequencer, exactly as note_to_midi moved for the UI. Callers here are unchanged.
 
 // Indexed FX access on a PhraseStep (model.h keeps the flat fx{1,2,3}{Type,Value}) — mirrors
 // PhraseStep.fx / fxType / setFx / setFxValue.
@@ -73,7 +74,8 @@ inline void step_set_fx_value(PhraseStep& s, int slot, int value) {
     else if (slot == 3) s.fx3Value = value;
 }
 inline bool step_empty(const PhraseStep& s) { return s.note == Note::EMPTY(); }
-inline bool chain_is_empty(const Chain& c, int index) { return c.phraseRefs[index] == -1; }
+// `chain_is_empty` moved to model.h in phase C — the MIDI clock's SPP has to measure a song row with
+// the same ruler this scheduler does. See the note there.
 
 enum class PlaybackMode { STOPPED, PHRASE, CHAIN, SONG };
 
@@ -892,6 +894,38 @@ class Sequencer {
                 // value on stop() (PlaybackController.eqmActive).
                 router_.ext_master_eq(effectiveTargetFrame, *params.eqmSlot);
                 eqmActive_ = true;
+            }
+
+            // ── MIDI phase D: MPG / MPB / CCA-CCD ────────────────────────────────────────────────
+            //
+            // ⚠️ **THEY BELONG AFTER THE STEP'S NOTE-ON, IN BOTH ORDERS — and there are two orders,
+            // which is the trap.** A bus record is CONSUMED the instant it is emitted (arrival order,
+            // set by the code below being where it is), and then QUEUED against its due frame (queue
+            // order, set by `voiceFxFrame`). Each order carries one of the reasons:
+            //
+            //  • ARRIVAL: both consumers answer "which instrument is this for?" from the last note-on
+            //    (TrackInstruments). Emitted above the note block, a command on a step that CHANGES
+            //    instrument would resolve to the previous one — and the first command of a take, with
+            //    no note-on seen yet, to nothing at all.
+            //  • QUEUE: a note-on carries the instrument's own patch bytes with it (bank/program and
+            //    the CC-slot DEFAULTS, midi_out.h). A step command is the specific thing and the
+            //    instrument default the general one, so the command must be released AFTER the default
+            //    it overrides — put it one frame earlier and the note-on's defaults quietly undo every
+            //    CCA in the song, with a byte stream that still looks busy. (Measured: the control
+            //    that emits at `effectiveTargetFrame - 1` flips exactly those two messages.)
+            //  • and `voiceFxFrame` rather than the step frame is the `+1` the PAN/REV/DEL block above
+            //    already uses, for the ENGINE's sake: a param scheduled on the note's own frame
+            //    reaches the OLD voice.
+            //
+            // On a step with no note `voiceFxFrame` is the step frame itself, so a command on an empty
+            // step lands where it was written and acts on the note that is sounding.
+            if (params.midiProgram.has_value())
+                router_.program(voiceFxFrame, trackId, *params.midiProgram);
+            if (params.midiBend.has_value())
+                router_.pitch_bend(voiceFxFrame, trackId, *params.midiBend << 6);
+            for (int slot = 0; slot < MIDI_CC_SLOTS; ++slot) {
+                if (!params.ccSlotValue[slot].has_value()) continue;
+                router_.cc(voiceFxFrame, trackId, CC_SLOT_A + slot, *params.ccSlotValue[slot] / 255.0f);
             }
         }
 

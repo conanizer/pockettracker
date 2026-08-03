@@ -31,13 +31,18 @@
 //      else. libasound is on every CFW because SDL2's audio backend sits on it, so the dlopen
 //      practically always succeeds; it is the *build* that must not require it.
 //
-// The price is that the prototypes in midi-out-alsa.h are hand-copied and nothing checks them. That
-// is what `tools/alsa-abi-check` is for — see the header's comment on `AlsaApi`.
+// The price is that the prototypes are hand-copied and nothing checks them. That is what
+// `tools/ptalsa` is for — see the comment on `AlsaApi`, which since E5 lives in **alsa-rawmidi.h**
+// along with the loader and the device walk, both now shared with the INPUT backend (midi-in-alsa.cpp).
 //
 // ── THREADING AND BLOCKING ───────────────────────────────────────────────────────────────────────
 //
-// `send` is called from whichever thread pumps the queue — today the frame loop, and after phase B3
-// a sender thread. The port is opened in BLOCKING mode (`snd_rawmidi_open` mode 0) rather than
+// `send` is called from whichever thread pumps the queue — **since B3 that is the sender thread**
+// (shell/midi-sender.cpp), plus the frame loop for a panic's immediate note-offs. The two are
+// serialised by `ExternalConsumer`'s mutex, which is what lets this backend keep no lock of its own.
+// ⚠️ That mutex is held across the write below, so a write that BLOCKS stalls the producer — see the
+// blocking argument that follows for why the bound is a few hundred bytes per second and not a stall.
+// The port is opened in BLOCKING mode (`snd_rawmidi_open` mode 0) rather than
 // SND_RAWMIDI_NONBLOCK, and that is deliberate: non-blocking `snd_rawmidi_write` returns -EAGAIN
 // when the driver buffer is full and the bytes are simply **lost**, and the byte most worth losing
 // is never the one you lose — a dropped note-off is a note that sounds until the gear is
@@ -51,90 +56,12 @@
 
 #include <cstdio>
 #include <cstring>
-#include <dlfcn.h>
 
 namespace ptshell {
 
 using alsa_detail::AlsaApi;
 
-namespace {
-
-/**
- * ⚠️ `SND_RAWMIDI_STREAM_OUTPUT` is 0 (alsa/rawmidi.h), and this constant is load-bearing in a way
- * that is easy to miss: `snd_ctl_rawmidi_info` fails with -ENXIO when the device has no stream of
- * the requested direction, so this value is the ONLY thing keeping input-only ports off the list —
- * and, if it were wrong, the thing that would hide every output-only port. tools/alsa-abi-check
- * static_asserts it against the real header.
- */
-constexpr int STREAM_OUTPUT = alsa_detail::STREAM_OUTPUT;
-
-}  // namespace
-
-AlsaMidiOut::AlsaMidiOut() {
-    // ".so.2" and not ".so": the unversioned symlink is in libasound2-dev, which no user has; the
-    // SONAME is what is present at runtime everywhere.
-    lib_ = ::dlopen("libasound.so.2", RTLD_NOW | RTLD_LOCAL);
-    if (!lib_) {
-        // ⚠️ ONE call to dlerror(), into a variable. It CONSUMES the error — a second call returns
-        // null — so the obvious `dlerror() ? dlerror() : "..."` prints "(null)" every single time and
-        // throws away the only sentence that says why. Found by the control that unloads the library
-        // on purpose, which is the only run in which this line is ever reached.
-        const char* why = ::dlerror();
-        std::printf("midi:    libasound.so.2 not available (%s) - MIDI out disabled\n",
-                    why ? why : "no error reported");
-        return;
-    }
-
-    const char* missing = nullptr;
-    auto sym = [&](const char* name) -> void* {
-        void* p = ::dlsym(lib_, name);
-        if (!p && !missing) missing = name;
-        return p;
-    };
-
-    // ⚠️ The casts are the unchecked part. See the header.
-    a_.card_next   = reinterpret_cast<int (*)(int*)>(sym("snd_card_next"));
-    a_.ctl_open    = reinterpret_cast<int (*)(void**, const char*, int)>(sym("snd_ctl_open"));
-    a_.ctl_close   = reinterpret_cast<int (*)(void*)>(sym("snd_ctl_close"));
-    a_.ctl_rawmidi_next_device =
-            reinterpret_cast<int (*)(void*, int*)>(sym("snd_ctl_rawmidi_next_device"));
-    a_.ctl_rawmidi_info = reinterpret_cast<int (*)(void*, void*)>(sym("snd_ctl_rawmidi_info"));
-    a_.rawmidi_info_malloc = reinterpret_cast<int (*)(void**)>(sym("snd_rawmidi_info_malloc"));
-    a_.rawmidi_info_free   = reinterpret_cast<void (*)(void*)>(sym("snd_rawmidi_info_free"));
-    a_.rawmidi_info_set_device =
-            reinterpret_cast<void (*)(void*, unsigned)>(sym("snd_rawmidi_info_set_device"));
-    a_.rawmidi_info_set_subdevice =
-            reinterpret_cast<void (*)(void*, unsigned)>(sym("snd_rawmidi_info_set_subdevice"));
-    a_.rawmidi_info_set_stream =
-            reinterpret_cast<void (*)(void*, int)>(sym("snd_rawmidi_info_set_stream"));
-    a_.rawmidi_info_get_name =
-            reinterpret_cast<const char* (*)(const void*)>(sym("snd_rawmidi_info_get_name"));
-    a_.rawmidi_open =
-            reinterpret_cast<int (*)(void**, void**, const char*, int)>(sym("snd_rawmidi_open"));
-    a_.rawmidi_close = reinterpret_cast<int (*)(void*)>(sym("snd_rawmidi_close"));
-    a_.rawmidi_write =
-            reinterpret_cast<ptrdiff_t (*)(void*, const void*, size_t)>(sym("snd_rawmidi_write"));
-    a_.rawmidi_drain = reinterpret_cast<int (*)(void*)>(sym("snd_rawmidi_drain"));
-    a_.strerror_fn   = reinterpret_cast<const char* (*)(int)>(sym("snd_strerror"));
-
-    if (missing) {
-        // A partial libasound is not a thing that happens, but a TYPO in a symbol name above is, and
-        // it would otherwise show up as a null call through a function pointer at the first note.
-        std::printf("midi:    libasound.so.2 is missing '%s' - MIDI out disabled\n", missing);
-        ::dlclose(lib_);
-        lib_ = nullptr;
-        return;
-    }
-
-    // ⚠️ UNCONDITIONAL, and it is not chattiness. A successful dlopen is SILENT by nature, and the
-    // guardrails have a name for that: a component whose correct behaviour is silence cannot be told
-    // from one that never ran. Without this line, "the ALSA backend loaded and there are no devices"
-    // and "the ALSA backend is not in this binary at all" produce identical console output — and on a
-    // handheld, where "no MIDI devices" is also what a bad cable looks like, that is the whole
-    // afternoon. One line, always, saying which of the two states we are in.
-    std::printf("midi:    ALSA rawmidi backend ready (libasound.so.2, %d entry points)\n",
-                static_cast<int>(sizeof(AlsaApi) / sizeof(void (*)())));
-}
+AlsaMidiOut::AlsaMidiOut() { lib_ = alsa_detail::load_alsa(a_, "OUT"); }
 
 AlsaMidiOut::~AlsaMidiOut() {
     close();
@@ -143,59 +70,14 @@ AlsaMidiOut::~AlsaMidiOut() {
     // teardown-order question with no upside. The process exit does it.
 }
 
-void AlsaMidiOut::scan() {
-    devices_.clear();
-    if (!lib_) return;
-
-    int card = -1;
-    while (a_.card_next(&card) == 0 && card >= 0) {
-        char ctlName[32];
-        std::snprintf(ctlName, sizeof ctlName, "hw:%d", card);
-
-        void* ctl = nullptr;
-        if (a_.ctl_open(&ctl, ctlName, 0) < 0) continue;   // a card we cannot read is not an error
-
-        int device = -1;
-        while (a_.ctl_rawmidi_next_device(ctl, &device) == 0 && device >= 0) {
-            void* info = nullptr;
-            if (a_.rawmidi_info_malloc(&info) < 0) break;
-
-            a_.rawmidi_info_set_device(info, static_cast<unsigned>(device));
-            a_.rawmidi_info_set_subdevice(info, 0);
-            a_.rawmidi_info_set_stream(info, STREAM_OUTPUT);
-
-            // -ENXIO here means "this rawmidi device has no OUTPUT stream" — an input-only port,
-            // correctly skipped. This is the filter; see the note on STREAM_OUTPUT above.
-            if (a_.ctl_rawmidi_info(ctl, info) == 0) {
-                const char* n = a_.rawmidi_info_get_name(info);
-                Device      d;
-                d.name = (n && *n) ? n : ctlName;
-
-                // Two identical USB interfaces produce two identical names, and the settings store a
-                // NAME — so an un-suffixed duplicate would make the second one unselectable forever.
-                // (Which of two identical devices you get after a replug is still undecidable; the
-                // plan calls that acceptable for v1, §11.)
-                int dup = 1;
-                const std::string base = d.name;
-                for (const Device& e : devices_)
-                    if (e.name == d.name) d.name = base + " #" + std::to_string(++dup);
-
-                char hw[40];
-                std::snprintf(hw, sizeof hw, "hw:%d,%d", card, device);
-                d.hw = hw;
-                devices_.push_back(d);
-            }
-            a_.rawmidi_info_free(info);
-        }
-        a_.ctl_close(ctl);
-    }
-}
-
 int AlsaMidiOut::device_count() {
     // Re-enumerates on every call, because MIDI is hot-pluggable and a port list is only true at the
     // moment it is read. InputDispatcher::refresh_midi_devices calls this on every entry to the MIDI
     // screen and then walks device_name(0..n-1), so the cache this fills is always the fresh one.
-    scan();
+    //
+    // ⚠️ `STREAM_OUTPUT` is the filter that keeps a MIDI KEYBOARD off this list — see alsa-rawmidi.h.
+    if (lib_) alsa_detail::scan_rawmidi(a_, alsa_detail::STREAM_OUTPUT, devices_);
+    else      devices_.clear();
     return static_cast<int>(devices_.size());
 }
 

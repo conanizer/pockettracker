@@ -4297,12 +4297,13 @@ int main() {
             if (state.midiCursorRow == 0) break;
             walk += "," + std::to_string(state.midiCursorRow);
         }
-        eqs(walk, "0,1,2,3,4", "MIDI rows: all five are reachable and the fifth wraps to the first");
+        eqs(walk, "0,1,2,3,4,5,6,7",
+            "MIDI rows: all eight are reachable and the eighth wraps to the first");
 
         state.midiCursorRow = static_cast<int>(MidiRow::OUTPUT);
         dispatch.on_dpad_right();
         dispatch.on_dpad_right();
-        eq(state.midiCursorColumn, 1, "MIDI: the screen is ONE column — RIGHT does not move");
+        eq(state.midiCursorColumn, 1, "MIDI: every row but IN CH is ONE column — RIGHT does not move");
         dispatch.on_dpad_left();
         eq(state.midiCursorColumn, 1, "MIDI: …nor LEFT");
 
@@ -4384,6 +4385,28 @@ int main() {
         state.settings.midiOffsetMs = 0;
         ok(!state.project_dirty(), "MIDI OFFSET: still not a change to the SONG");
 
+        // ── (f2) SYNC — phase C, and the check that matters is the one about the HOST ────────────
+        //
+        // ⭐ **"A SETTING THAT ROUND-TRIPS IS NOT A SETTING THAT IS APPLIED — GREP THE CONSUMER, NOT
+        // THE STORE."** `settings.midiSyncOut` going true is worth almost nothing on its own: it would
+        // draw ON, save ON, load ON and send not one clock byte. The consumer here is
+        // `SongcoreHost::midi_sync_out()`, and asserting THAT is what makes the row mean something.
+        state.settings.midiSyncOut = false;
+        host.set_midi_sync_out(false);
+        state.midiCursorRow = static_cast<int>(MidiRow::SYNC);
+        ok(!host.midi_sync_out(), "MIDI SYNC: (setup) the consumer starts off");
+        dispatch.on_a_up();
+        ok(state.settings.midiSyncOut, "MIDI SYNC: A+UP turns it on");
+        ok(host.midi_sync_out(),
+           "⭐ MIDI SYNC: …and the CONSUMER has it — the row reaches the thing that emits clock, not "
+           "just the struct that remembers it");
+        ok(!state.project_dirty(),
+           "MIDI SYNC: not a change to the SONG — whether a drum machine is plugged into THIS desk is "
+           "not something the .ptp can know");
+        dispatch.on_a_down();
+        ok(!state.settings.midiSyncOut, "MIDI SYNC: …and back off");
+        ok(!host.midi_sync_out(), "MIDI SYNC: …the consumer follows both ways");
+
         // ── (g) PROG CHG — the one row here that IS the song's ───────────────────────────────────
         state.projectVersion = state.savedProjectVersion = 7;
         state.midiCursorRow  = static_cast<int>(MidiRow::PROG_CHG);
@@ -4449,6 +4472,7 @@ int main() {
         // can see it: the value is correct in memory, correct on the screen, and gone on the next launch.
         state.settings.midiOutDevice = "Microsoft GS Wavetable Synth";
         state.settings.midiOffsetMs  = -37;
+        state.settings.midiSyncOut   = true;
         ok(save_settings(fs_impl, state.settings, state.theme), "MIDI: settings.json written");
         {
             SettingsValues back{};
@@ -4457,7 +4481,18 @@ int main() {
             eqs(back.midiOutDevice, "Microsoft GS Wavetable Synth",
                 "⭐ MIDI: the device NAME survives a quit and relaunch");
             eq(back.midiOffsetMs, -37, "⭐ MIDI: …and so does the OFFSET, sign and all");
+            ok(back.midiSyncOut, "⭐ MIDI: …and SYNC (phase C)");
+            // ⚠️ The other half, and it is a DIFFERENT fact from the round trip: every settings.json
+            // written before phase C has no `midi_sync_out` key at all. `load_settings` reads every key
+            // as `get_bool(j, key, values.<field>)`, so an absent key yields whatever the struct was
+            // initialised to — which makes the struct's default the operative value for every existing
+            // file, and it must be OFF. (Stated rather than implied: this asserts the default, not the
+            // parse; the parse of a PRESENT key is what the round trip above covers.)
+            SettingsValues fresh{};
+            ok(!fresh.midiSyncOut,
+               "⭐ MIDI SYNC: the default is OFF, so a settings.json from before phase C stays OFF");
         }
+        state.settings.midiSyncOut = false;
 
         // ── (k) boot_midi_port — the shell's one call, and the OFFSET it must not forget ─────────
         {
@@ -4491,6 +4526,476 @@ int main() {
         host.set_midi_offset_ms(0);
         state.settings.midiOutDevice = "OFF";
         state.settings.midiOffsetMs  = 0;
+    }
+
+    // ══ E2 ══ THE MIDI **INPUT** PORT — OPENED AT BOOT, AND WIRED TO THE HOST'S QUEUE ═════════════
+    //
+    // ⚠️ **THE ROW THAT PICKS THIS IS E3's; THE OPEN IS ALREADY REAL, AND THAT IS THE POINT OF TESTING
+    // IT NOW.** `settings.midiInDevice` could have been left round-tripping with no consumer until the
+    // screen existed — which is the trap this repo has fallen into twice (`midiInputChannels` sat unread
+    // from B1 to E1). It is read at boot instead, and these checks ask what the PORT did.
+    //
+    // ⭐⭐ And they ask one thing nothing else in the tree can: **that the SINK was wired.** An input port
+    // that opens without one is a port that receives bytes and drops every single one — the purest form
+    // of "a component whose correct behaviour is silence", indistinguishable from an unplugged cable
+    // from every seat in the app. The fake port below can therefore DELIVER, and the assertion is that
+    // the bytes arrived in the host.
+    {
+        struct FakeMidiIn : songcore::IMidiIn {
+            std::vector<std::string> devices;
+            songcore::IMidiInSink*   sink = nullptr;
+            int  openIndex = -1;
+            int  opens = 0, closes = 0, sinkSets = 0, sinkClears = 0;
+            bool refuse = false;
+
+            int         device_count() override { return static_cast<int>(devices.size()); }
+            std::string device_name(int i) override { return devices[static_cast<size_t>(i)]; }
+            bool        is_open() const override { return openIndex >= 0; }
+            void        close() override { ++closes; openIndex = -1; }
+            bool open(int i) override {
+                ++opens;
+                if (refuse || i < 0 || i >= static_cast<int>(devices.size())) return false;
+                openIndex = i;
+                return true;
+            }
+            void set_sink(songcore::IMidiInSink* s) override {
+                if (s) ++sinkSets; else ++sinkClears;
+                sink = s;
+            }
+            /** What a backend's callback does — the only way to prove the sink is more than a pointer. */
+            void deliver(const uint8_t* d, int n) { if (sink) sink->on_bytes(d, n); }
+        };
+
+        FakeMidiIn in;
+        in.devices = {"loopMIDI Port", "USB MIDI Keyboard"};
+
+        AppState boot;
+        boot.project = &host.edit_project();
+        boot.caps    = PlatformCaps::sdl(true);
+        boot.midiIn  = &in;
+        boot.settings.midiInDevice = "USB MIDI Keyboard";
+
+        InputDispatcher bootDispatch(boot, host, fs_impl);
+        bootDispatch.boot_midi_in_port();
+
+        eq(static_cast<int>(boot.midiInDeviceNames.size()), 3,
+           "MIDI IN: boot ENUMERATES — OFF plus the two input ports (a separate list from OUTPUT's, "
+           "because winmm, ALSA and MidiManager all enumerate the two directions separately)");
+        ok(in.is_open(), "MIDI IN: the port the settings NAME is opened at launch");
+        eq(in.openIndex, 1,
+           "⚠️ MIDI IN: …at device index 1, not 2 — list index 0 is OFF and is not a device");
+        ok(in.sink != nullptr, "⭐⭐ MIDI IN: …and the SINK was wired (a port with none drops every byte)");
+
+        // ⭐ The sink is not merely non-null: it is the HOST's queue. Deliver as a backend's callback
+        // does and the bytes must turn up in the host — the join E3's row will never re-check.
+        const uint64_t before = host.midi_in_bytes();
+        const uint8_t  wire[3] = {0x90, 0x3C, 0x40};
+        in.deliver(wire, 3);
+        host.poll();
+        eq(static_cast<int>(host.midi_in_bytes() - before), 3,
+           "⭐⭐ MIDI IN: bytes delivered on the backend's thread reach the HOST's queue and are drained");
+
+        // A saved device that is GONE reads OFF and opens nothing — the OUTPUT row's rule, and the
+        // reason both settings are NAMES: an index would silently open whatever took the slot.
+        {
+            FakeMidiIn gone;
+            gone.devices = {"Some Other Interface"};
+            AppState b2;
+            b2.project = &host.edit_project();
+            b2.caps    = PlatformCaps::sdl(true);
+            b2.midiIn  = &gone;
+            b2.settings.midiInDevice = "USB MIDI Keyboard";
+            InputDispatcher d2(b2, host, fs_impl);
+            d2.boot_midi_in_port();
+            eq(b2.midiInDeviceIndex, 0, "MIDI IN: an unplugged saved device resolves to OFF");
+            eq(gone.opens, 0, "⭐ MIDI IN: …and nothing is opened at all — not the port that took its place");
+        }
+
+        // A build with NO input backend (Linux and Android until E5) must boot, not crash, and say OFF.
+        {
+            AppState b3;
+            b3.project = &host.edit_project();
+            b3.caps    = PlatformCaps::sdl(true);
+            b3.midiIn  = nullptr;
+            b3.settings.midiInDevice = "USB MIDI Keyboard";
+            InputDispatcher d3(b3, host, fs_impl);
+            d3.boot_midi_in_port();
+            eq(static_cast<int>(b3.midiInDeviceNames.size()), 1,
+               "MIDI IN: with no backend the list is OFF alone");
+            eq(b3.midiInDeviceIndex, 0, "MIDI IN: …and the row reads OFF rather than lying");
+        }
+
+        // The QUIT-AND-RELAUNCH channel, the one neither the screen nor the dispatcher can see.
+        state.settings.midiInDevice = "USB MIDI Keyboard";
+        ok(save_settings(fs_impl, state.settings, state.theme), "MIDI IN: settings.json written");
+        {
+            SettingsValues back{};
+            Theme          backTheme = theme_classic();
+            ok(load_settings(fs_impl, back, backTheme), "MIDI IN: settings.json read back");
+            eqs(back.midiInDevice, "USB MIDI Keyboard",
+                "⭐ MIDI IN: the device NAME survives a quit and relaunch");
+            SettingsValues fresh{};
+            eqs(fresh.midiInDevice, "OFF",
+                "⭐ MIDI IN: and a settings.json from before phase E has no key at all, so it stays OFF "
+                "— an app that opened whatever keyboard it found would hold a port nobody asked it to");
+        }
+
+        // ⚠️ The port must be unwired before the fakes leave scope: the host's queue outlives them here,
+        // and in the app it is the other way round (app.cpp closes the port before `run` returns).
+        in.set_sink(nullptr);
+        in.close();
+        state.settings.midiInDevice = "OFF";
+        host.reset_midi_in();
+    }
+
+    // ══ E3 ══ THE **INPUT ROW** AND THE **PER-TRACK CHANNEL MAP** ═════════════════════════════════
+    //
+    // E2 opened an input port from a settings key nobody could edit and routed on a `.ptp` field nobody
+    // could type. E3 is the two rows that end that — and the checks below are in two halves that ask
+    // very different questions:
+    //
+    //   • INPUT is the OUTPUT row's twin, so its checks are OUTPUT's: the setting is a NAME, the port
+    //     is really opened, the SINK goes with the open (E2's one-operation rule), and picking a cable
+    //     does not dirty the SONG.
+    //   • IN CH is not like any row this screen had. It is eight cells on one row, it edits a PROJECT
+    //     field, and — the point of the whole increment — ⭐⭐ **the number in the cell has to reach the
+    //     ROUTER.** "A setting that round-trips is not a setting that is applied": a map that draws and
+    //     saves correctly while every key still lands on whatever track the old value named would look
+    //     perfect from every seat in this file except the last one.
+    {
+        struct FakeMidiIn : songcore::IMidiIn {
+            std::vector<std::string> devices;
+            songcore::IMidiInSink*   sink = nullptr;
+            int  openIndex = -1;
+            int  opens = 0, closes = 0;
+
+            int         device_count() override { return static_cast<int>(devices.size()); }
+            std::string device_name(int i) override { return devices[static_cast<size_t>(i)]; }
+            bool        is_open() const override { return openIndex >= 0; }
+            void        close() override { ++closes; openIndex = -1; }
+            bool open(int i) override {
+                ++opens;
+                if (i < 0 || i >= static_cast<int>(devices.size())) return false;
+                openIndex = i;
+                return true;
+            }
+            void set_sink(songcore::IMidiInSink* s) override { sink = s; }
+            void deliver(const uint8_t* d, int n) { if (sink) sink->on_bytes(d, n); }
+        };
+
+        songcore::Project& p = host.edit_project();
+
+        FakeMidiIn in;
+        in.devices = {"loopMIDI Port", "USB MIDI Keyboard"};
+        state.midiIn = &in;
+        state.settings.midiInDevice = "OFF";
+        host.reset_midi_in();
+
+        const auto enter_midi = [&] {
+            state.currentScreen       = ScreenType::PROJECT;
+            state.projectCursorRow    = static_cast<int>(ProjectRow::MIDI);
+            state.projectCursorColumn = 1;
+            dispatch.on_button_a();
+        };
+
+        // ── (a) The INPUT row enumerates on the way in, alongside OUTPUT's list ───────────────────
+        //
+        // ⚠️ TWO LISTS, NOT ONE. A machine's inputs and outputs are different sets — this desk had two
+        // outputs and ZERO inputs until loopMIDI was installed — so a screen that refreshed one of them
+        // would show a stale INPUT row for as long as the user stayed on it.
+        enter_midi();
+        eq(static_cast<int>(state.midiInDeviceNames.size()), 3,
+           "⭐ MIDI INPUT: entering the screen enumerates the INPUT ports too — OFF plus the two");
+        eqs(state.midiInDeviceNames[0], "OFF", "MIDI INPUT: index 0 of that list is always OFF");
+        eq(state.midiInDeviceIndex, 0, "MIDI INPUT: nothing picked yet, so the row reads OFF");
+
+        // ── (b) A+UP picks a port — and the port OPENS, with its sink ────────────────────────────
+        state.projectVersion = state.savedProjectVersion = 11;
+        state.midiCursorRow  = static_cast<int>(MidiRow::INPUT);
+        dispatch.on_a_up();
+        eq(state.midiInDeviceIndex, 1, "MIDI INPUT: A+UP steps onto the first input device");
+        eqs(state.settings.midiInDevice, "loopMIDI Port",
+            "⚠️ MIDI INPUT: …and the SETTING stores the device NAME, never the index");
+        ok(in.is_open(), "⭐ MIDI INPUT: …and the PORT was actually OPENED");
+        eq(in.openIndex, 0,
+           "⚠️ MIDI INPUT: …at device index 0, not 1 — list index 1 is the FIRST device");
+        ok(in.sink != nullptr,
+           "⭐⭐ MIDI INPUT: …and the SINK was wired by the same call (E2's rule: a port opened without "
+           "one receives bytes and drops every single one, which looks exactly like an unplugged cable)");
+        ok(!state.project_dirty(),
+           "MIDI INPUT: picking a cable does NOT dirty the SONG — settings.json's, not the .ptp's");
+
+        // ── (c) IN CH: eight cells on one row, and the cursor has to reach all of them ───────────
+        state.midiCursorRow    = static_cast<int>(MidiRow::IN_MAP);
+        state.midiCursorColumn = 1;
+        std::string cols = "1";
+        for (int i = 0; i < 12; ++i) {
+            dispatch.on_dpad_right();
+            cols += "," + std::to_string(state.midiCursorColumn);
+        }
+        eqs(cols, "1,2,3,4,5,6,7,8,8,8,8,8,8",
+            "⭐ MIDI IN CH: RIGHT walks all eight track cells and then CLAMPS — columns clamp where "
+            "rows wrap, which is this app's rule everywhere (cursor_move.h)");
+        for (int i = 0; i < 9; ++i) dispatch.on_dpad_left();
+        eq(state.midiCursorColumn, 1, "MIDI IN CH: …and LEFT walks back and clamps at the first");
+
+        // ⚠️ …and stepping OFF the row must drop the column, or `cursor_context` would answer for a
+        // cell the screen is not drawing.
+        state.midiCursorColumn = 6;
+        dispatch.on_dpad_down();
+        eq(state.midiCursorColumn, 1,
+           "⚠️ MIDI IN CH: leaving the row resets the column — the rows below it have only one");
+        dispatch.on_dpad_up();
+        eq(state.midiCursorRow, static_cast<int>(MidiRow::IN_MAP), "MIDI IN CH: (back on the row)");
+
+        // ── (d) The three states of a cell: off, dialled, and cleared ────────────────────────────
+        state.projectVersion = state.savedProjectVersion = 13;
+        state.midiCursorColumn = 3;                       // track 3 → index 2
+        p.midiInputChannels.assign(8, -1);
+        eq(p.midiInputChannels[2], -1, "MIDI IN CH: (setup) track 3 listens to nothing");
+        dispatch.on_a_up();
+        eq(p.midiInputChannels[2], 0,
+           "⚠️ MIDI IN CH: A+UP on an empty cell lands on channel 0 — STORED 0-15, and the screen is "
+           "the only place the +1 happens (the instrument screen's CHAN row makes the same promise)");
+        ok(state.project_dirty(),
+           "⚠️ MIDI IN CH: …and it DIRTIES THE SONG — `midiInputChannels` is a Project field that emits "
+           "into the .ptp, unlike the cable rows above");
+        for (int i = 0; i < 4; ++i) dispatch.on_a_up();
+        eq(p.midiInputChannels[2], 4, "MIDI IN CH: A+UP walks up the sixteen channels");
+        dispatch.on_a_b();
+        eq(p.midiInputChannels[2], -1,
+           "⭐ MIDI IN CH: A+B clears the cell back to −1 — the project's ONE empty convention, and the "
+           "only way to say 'this track listens to nothing'");
+
+        // ⭐ THE CONTROL-SHAPED ONE, and it is the OFFSET row's lesson in a new cell. Channel 0 is a
+        // REAL channel here (drawn `01`), so the empty value must be −1 and not 0: leave `hex_byte`'s
+        // `empty_value` at its default and A+B on track 1's most likely setting does nothing at all.
+        p.midiInputChannels[2] = 0;
+        dispatch.on_a_b();
+        eq(p.midiInputChannels[2], -1,
+           "⭐ MIDI IN CH: …including from channel 0, which is a value and not an empty cell");
+        dispatch.on_a_down();
+        eq(p.midiInputChannels[2], -1,
+           "⚠️ MIDI IN CH: A+DOWN on an EMPTY cell is inert — an empty cell is entered with A+UP "
+           "(INSERT_DEFAULT) and with nothing else, which is cursor.h's rule for every deletable cell "
+           "in the app, not something this row decides");
+
+        // ── (e) ⭐⭐ THE CLAIM ONLY THIS INCREMENT CAN MAKE: THE CELL REACHES THE ROUTER ───────────
+        //
+        // Everything above is the row remembering a number. This is the row MEANING something: map a
+        // track to a channel WITH THE D-PAD, then push real bytes through the backend the same way a
+        // keyboard would, and ask which track the record came out on.
+        //
+        // ⚠️ It is deliberately driven end to end — `on_a_up` rather than a write to the vector —
+        // because the question is whether the SCREEN's edit is the one the router reads. A test that
+        // sets the field directly would pass with the whole row deleted.
+        p.midiInputChannels.assign(8, -1);
+        struct RouteSpy : songcore::IMidiInObserver {
+            int lastTrack = -99, records = 0;
+            void on_midi_in(const songcore::MidiInMessage&, const songcore::Event* ev, int n) override {
+                records += (n > 0 ? n : 0);
+                if (n > 0) lastTrack = ev[0].track;
+            }
+        } spy;
+        host.set_midi_in_observer(&spy);
+        // ⚠️ THE FALLBACK INSTRUMENT IS THE SHELL'S JOB and it is pushed every frame (app.cpp), so a
+        // headless harness has to do it by hand — without it `input_instrument` answers −1, every record
+        // is dropped as `noInstrument`, and the routing checks below would read as "the map does not
+        // work" when the map is fine. E1's design note: a correctly configured keyboard must not be
+        // silent on a stopped song, and this is the value that makes it so.
+        host.set_midi_in_instrument(0);
+
+        state.midiCursorRow    = static_cast<int>(MidiRow::IN_MAP);
+        state.midiCursorColumn = 5;                       // track 5 → index 4
+        for (int i = 0; i < 4; ++i) dispatch.on_a_up();   // → channel 3, drawn "04"
+        eq(p.midiInputChannels[4], 3, "MIDI IN CH: (setup) track 5 now listens to channel 3");
+
+        const uint8_t keyOn[3] = {0x93, 0x40, 0x64};      // note-on, CHANNEL 3, E-4, mf
+        in.deliver(keyOn, 3);
+        host.poll();
+        eq(spy.records, 1, "⭐⭐ MIDI IN CH: a key on channel 3 produces exactly one bus record");
+        eq(spy.lastTrack, 4,
+           "⭐⭐ MIDI IN CH: …ON TRACK 5 — the number the D-PAD put in the cell is the number the ROUTER "
+           "read. This is the whole increment: without it the row draws, saves and reloads perfectly "
+           "while every key lands wherever the old map said");
+
+        // The other half of the same claim, and it is a different fact: a channel NOBODY maps must
+        // produce nothing. Without it, "routed to track 5" could just as well be "routes everything".
+        spy.records = 0; spy.lastTrack = -99;
+        const uint8_t strayOn[3] = {0x97, 0x40, 0x64};    // channel 7 — mapped by no track
+        in.deliver(strayOn, 3);
+        host.poll();
+        eq(spy.records, 0,
+           "⭐ MIDI IN CH: …and a key on an UNMAPPED channel produces no record at all — the map is a "
+           "filter, not a default");
+        ok(host.midi_in_router().unmapped() > 0,
+           "MIDI IN CH: …counted as `unmapped`, so the console can say WHICH of the four silences it is");
+        host.set_midi_in_observer(nullptr);
+
+        // ── (f) The QUIT-AND-RELAUNCH channel — but for the .ptp, not settings.json ──────────────
+        //
+        // ⚠️ A DIFFERENT FILE FROM EVERY OTHER ROW ON THIS SCREEN. `midiInputChannels` is emitted
+        // default-guarded (project_io.h), which is exactly the shape that stays invisible when it
+        // breaks: the eight goldens keep matching byte for byte because they have no map, and a song
+        // that HAS one silently loses it. So the map has to survive a serialize/parse of its own.
+        p.midiInputChannels.assign(8, -1);
+        p.midiInputChannels[0] = 9;
+        p.midiInputChannels[7] = 0;
+        {
+            const std::string blob = songcore::serialize_project(p);
+            ok(blob.find("midiInputChannels") != std::string::npos,
+               "⭐ MIDI IN CH: a map that is not all-empty is EMITTED into the .ptp");
+            const songcore::Project back = songcore::parse_project(songcore::json::parse(blob));
+            eq(back.midiInputChannels[0], 9, "⭐ MIDI IN CH: …and track 1's channel comes back");
+            eq(back.midiInputChannels[7], 0,
+               "⭐ MIDI IN CH: …including channel 0, which a truthy default-guard would drop");
+            eq(back.midiInputChannels[3], -1, "MIDI IN CH: …and an unmapped track stays unmapped");
+        }
+        {
+            // The guard itself: an all-empty map writes NO key, which is what keeps the eight goldens
+            // byte-identical. (`ptroundtrip` proves they are; this says WHY.)
+            songcore::Project clean;
+            ok(songcore::serialize_project(clean).find("midiInputChannels") == std::string::npos,
+               "⚠️ MIDI IN CH: an all-empty map emits nothing — the default guard the goldens rest on");
+        }
+
+        // Leave the harness as it was found.
+        p.midiInputChannels.assign(8, -1);
+        in.set_sink(nullptr);
+        in.close();
+        state.midiIn = nullptr;
+        state.settings.midiInDevice = "OFF";
+        state.midiCursorColumn = 1;
+        host.reset_midi_in();
+    }
+
+    // ══ E4 ══ THE **THRU VERDICT** — the one decision that reads BOTH device rows ══════════════════
+    //
+    // E4 injects a live key into the engine, and a key on a track whose instrument is EXTERNAL goes out
+    // on the cable (MIDI thru). ⚠️ **On a LOOPBACK port that is an amplifying feedback loop** — key →
+    // cable out → the same port → key — and a loopback is not exotic here: it is the only MIDI-in test
+    // rig this project has. So the dispatcher compares the two OPEN ports and turns thru off when they
+    // are the same device.
+    //
+    // ⭐ **THE CHECKS ARE HALF ABOUT THE ARMS NOBODY WOULD WRITE.** The ON→OFF transition is the easy
+    // one and it is one line; what breaks in six months is the way BACK — changing either row away from
+    // the loopback has to restore thru, from a function each row must remember to call. That is the
+    // "derive it from the data, or write it once below the sites" rule, and these are the assertions
+    // that hold it: ⚠️ the verdict is asserted after a change to the OUT row, the IN row, and both
+    // being OFF, because a predicate that only ever answers "same" is also satisfied by two blanks.
+    {
+        struct FakeMidiOut2 : songcore::IMidiOut {
+            std::vector<std::string> devices;
+            int openIndex = -1;
+            int         device_count() override { return static_cast<int>(devices.size()); }
+            std::string device_name(int i) override { return devices[static_cast<size_t>(i)]; }
+            bool        is_open() const override { return openIndex >= 0; }
+            void        close() override { openIndex = -1; }
+            bool open(int i) override {
+                if (i < 0 || i >= static_cast<int>(devices.size())) return false;
+                openIndex = i;
+                return true;
+            }
+            void send(const uint8_t*, int) override {}
+        };
+        struct FakeMidiIn2 : songcore::IMidiIn {
+            std::vector<std::string> devices;
+            songcore::IMidiInSink*   sink = nullptr;
+            int openIndex = -1;
+            int         device_count() override { return static_cast<int>(devices.size()); }
+            std::string device_name(int i) override { return devices[static_cast<size_t>(i)]; }
+            bool        is_open() const override { return openIndex >= 0; }
+            void        close() override { openIndex = -1; }
+            bool open(int i) override {
+                if (i < 0 || i >= static_cast<int>(devices.size())) return false;
+                openIndex = i;
+                return true;
+            }
+            void set_sink(songcore::IMidiInSink* s) override { sink = s; }
+        };
+
+        // ⚠️ The IN list's FIRST device shares a NAME with the OUT list's first — that is what a
+        // loopback looks like from the app: winmm hands out "loopMIDI Port" in both directions. The
+        // second entries differ, which is what a keyboard-plus-synth rig looks like.
+        FakeMidiOut2 outPort;
+        outPort.devices = {"loopMIDI Port", "Microsoft GS Wavetable Synth"};
+        FakeMidiIn2 inPort;
+        inPort.devices = {"loopMIDI Port", "USB MIDI Keyboard"};
+
+        state.midiOut = &outPort;
+        state.midiIn  = &inPort;
+        state.settings.midiOutDevice = "OFF";
+        state.settings.midiInDevice  = "OFF";
+
+        const auto enter_midi = [&] {
+            state.currentScreen       = ScreenType::PROJECT;
+            state.projectCursorRow    = static_cast<int>(ProjectRow::MIDI);
+            state.projectCursorColumn = 1;
+            dispatch.on_button_a();
+        };
+        enter_midi();
+
+        // ── (a) Two ports OFF is not a loopback ───────────────────────────────────────────────────
+        //
+        // ⚠️ Index 0 of BOTH lists is the string "OFF", so a verdict that compared names without asking
+        // whether a port is OPEN would declare the commonest state in the app a feedback loop and
+        // silently disable thru for every user who has never picked a cable. It costs one clause and
+        // it is the arm most likely to be dropped in a rewrite.
+        ok(host.midi_in_thru(), "⭐ MIDI THRU: two ports OFF is not a loopback — thru stays ON");
+
+        // ── (b) Two DIFFERENT devices: the rig thru exists for ────────────────────────────────────
+        state.midiCursorRow = static_cast<int>(MidiRow::OUTPUT);
+        dispatch.on_a_up();                                   // OUT → loopMIDI Port
+        state.midiCursorRow = static_cast<int>(MidiRow::INPUT);
+        dispatch.on_a_up();
+        dispatch.on_a_up();                                   // IN  → USB MIDI Keyboard
+        eqs(state.settings.midiInDevice, "USB MIDI Keyboard", "MIDI THRU: (setup) a keyboard on IN");
+        eqs(state.settings.midiOutDevice, "loopMIDI Port", "MIDI THRU: (setup) a synth on OUT");
+        ok(host.midi_in_thru(),
+           "⭐ MIDI THRU: a keyboard IN and a different port OUT — thru ON, which is the feature");
+
+        // ── (c) ⭐⭐ THE SAME DEVICE ON BOTH ROWS: the loop, caught at the pick ─────────────────────
+        state.midiCursorRow = static_cast<int>(MidiRow::INPUT);
+        dispatch.on_a_down();                                 // IN → loopMIDI Port, same as OUT
+        eqs(state.settings.midiInDevice, "loopMIDI Port", "MIDI THRU: (setup) IN is now the loopback");
+        ok(!host.midi_in_thru(),
+           "⭐⭐ MIDI THRU: IN and OUT are the SAME port — thru is turned OFF");
+        eqs(state.midiStatusText, "THRU OFF: LOOP",
+            "⭐ MIDI THRU: …and the screen SAYS so, where the pick was made");
+
+        // ── (d) …and the way BACK, from the OTHER row ────────────────────────────────────────────
+        //
+        // ⭐ This is the assertion the design is actually about. The verdict lives in one function
+        // called from both `apply_midi_device` and `apply_midi_in_device`; a version that only called
+        // it from the INPUT row would pass every check above and leave thru dead for the rest of the
+        // session the moment a user changed their OUTPUT port.
+        state.midiCursorRow = static_cast<int>(MidiRow::OUTPUT);
+        dispatch.on_a_up();                                   // OUT → the GS synth
+        eqs(state.settings.midiOutDevice, "Microsoft GS Wavetable Synth",
+            "MIDI THRU: (setup) OUT moved to a different device");
+        ok(host.midi_in_thru(),
+           "⭐⭐ MIDI THRU: changing the OUT row away from the loopback turns thru back ON");
+
+        // ── (e) A closed OUT port cannot loop either ─────────────────────────────────────────────
+        state.midiCursorRow = static_cast<int>(MidiRow::OUTPUT);
+        dispatch.on_a_down();                                 // back to loopMIDI…
+        ok(!host.midi_in_thru(), "MIDI THRU: (setup) back on the loopback, thru OFF again");
+        dispatch.on_a_down();                                 // …and off entirely
+        eqs(state.settings.midiOutDevice, "OFF", "MIDI THRU: (setup) OUT is OFF");
+        ok(host.midi_in_thru(),
+           "⭐ MIDI THRU: with the OUTPUT port closed there is nothing to loop — thru ON");
+
+        // Leave the harness as it was found.
+        inPort.set_sink(nullptr);
+        inPort.close();
+        outPort.close();
+        state.midiIn  = nullptr;
+        state.midiOut = nullptr;
+        state.settings.midiInDevice  = "OFF";
+        state.settings.midiOutDevice = "OFF";
+        state.midiStatusText.clear();
+        host.set_midi_in_thru(true);
+        host.reset_midi_in();
     }
 
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);

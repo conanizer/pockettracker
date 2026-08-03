@@ -82,11 +82,23 @@ struct ScheduledNote {
     }
 };
 
-// Scheduled kill event (for Kill effect K00, and soft note-off for ADSR release)
+// Scheduled kill event (for Kill effect K00, soft note-off for ADSR release, and a live key let go of)
+//
+// ⚠️ **ONE `mode`, NOT A SECOND BOOL BESIDE `softKill`.** Two bools can encode a state that means
+// nothing (hard AND key-release), and the dispatch would have to pick a winner somewhere; an enum
+// cannot be put into that state at all. Same rule the repo applies to every "derive it from the data"
+// case — the numbers below are internal to the engine and unrelated to event.h's NOTE_OFF_* wire
+// values, which is why the consumer translates rather than casts.
+enum KillMode : uint8_t {
+    KILL_HARD    = 0,   // K00 / killTrack — declick fade, whatever the instrument is
+    KILL_SOFT    = 1,   // KIL's soft note-off — ADSR release, else a declick fade
+    KILL_KEY_OFF = 2,   // a KEY released (MIDI in, plan §4.1) — a one-shot IGNORES it and plays out
+};
+
 struct ScheduledKill {
     int64_t targetFrame;     // Exact audio frame to trigger kill
     int trackId;             // Which track to kill (0-7)
-    bool softKill = false;   // false = hard stop, true = soft note-off (triggers ADSR release)
+    KillMode mode = KILL_HARD;
 
     // For priority queue sorting (earliest frame first)
     bool operator>(const ScheduledKill& other) const {

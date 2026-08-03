@@ -47,15 +47,27 @@ struct MidiState {
     const SettingsValues& settings;
 
     int cursorRow    = 0;   // a MidiRow
-    int cursorColumn = 1;   // 1 only; column 0 is the label and is unreachable, as on PROJECT
+    /**
+     * 1 on every row but IN CH, where it is 1..`MIDI_IN_MAP_COLUMNS` — one per track. Column 0 is the
+     * row LABEL on every row and is unreachable, as on PROJECT.
+     */
+    int cursorColumn = 1;
 
     /**
-     * The port list, ALWAYS with "OFF" at index 0 — the dispatcher builds it by asking the platform
+     * The port lists, ALWAYS with "OFF" at index 0 — the dispatcher builds them by asking the platform
      * and prepending that entry, so the module never has to special-case "no device" as a separate
      * state. Empty is impossible; a machine with no ports still gets `{"OFF"}`.
+     *
+     * ⚠️ IN AND OUT ARE TWO SEPARATE LISTS AND MUST NOT BE COLLAPSED INTO ONE. A machine's MIDI inputs
+     * and outputs are different sets, indexed independently, and a port that is both (loopMIDI, a
+     * keyboard with a thru) sits at a different index in each. `midi-out-base` and `midi-in-base` are
+     * separate enumerators for that reason, and this is the same fact reaching the screen.
      */
     std::vector<std::string> deviceNames{"OFF"};
     int                      deviceIndex = 0;
+
+    std::vector<std::string> inDeviceNames{"OFF"};
+    int                      inDeviceIndex = 0;
 
     /** A one-shot readout under the actions — "PANIC SENT", "TEST SENT", "NO PORT". */
     std::string statusText{};
@@ -65,9 +77,11 @@ struct MidiState {
 };
 
 struct MidiInputResult {
-    bool projectModified = false;   // PROG CHG — the only row that dirties the SONG
+    bool projectModified = false;   // PROG CHG and IN CH — the rows that dirty the SONG
     bool deviceChanged   = false;   // OUTPUT — the dispatcher must now (re)open a port
+    bool inDeviceChanged = false;   // INPUT  — likewise, and the sink goes with it (E2's rule)
     bool offsetChanged   = false;   // OFFSET — the dispatcher must push it to the consumer
+    bool syncChanged     = false;   // SYNC   — likewise; and turning it OFF owes the device a Stop
 };
 
 class MidiModule {
@@ -90,6 +104,7 @@ class MidiModule {
     MidiInputResult handle_input(songcore::Project& project, SettingsValues& settings,
                                  int cursor_row, int cursor_column,
                                  const std::vector<std::string>& device_names,
+                                 const std::vector<std::string>& in_device_names,
                                  const InputAction& action) const;
 };
 

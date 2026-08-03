@@ -94,8 +94,8 @@ enum EventType : uint8_t {
     EV_NOTE_OFF       = 0x80,
     EV_NOTE_ON        = 0x90,
     EV_CC             = 0xB0,
-    EV_PROGRAM        = 0xC0,  // MIDI phase D (MPG) — no emitter yet
-    EV_PITCH_BEND     = 0xE0,  // MIDI phase D (MPB, absolute 14-bit) — no emitter yet
+    EV_PROGRAM        = 0xC0,  // MPG            (emitter: scheduler.h, MIDI phase D)
+    EV_PITCH_BEND     = 0xE0,  // MPB, absolute 14-bit (emitter: scheduler.h, MIDI phase D)
 };
 
 // Same-frame drain order (audio-engine.cpp:884/978, pinned as schema law): at equal frame the
@@ -113,6 +113,20 @@ constexpr int sortRank(uint8_t type) {
 // NoteOff modes
 constexpr uint8_t NOTE_OFF_RELEASE = 0;  // scheduleNoteOff — KIL soft kill / ADSR release
 constexpr uint8_t NOTE_OFF_CUT     = 1;  // scheduleKill / killTrack — declick fade
+// ⚠️ **A KEY RELEASE IS NOT A KIL, AND MODE 2 EXISTS BECAUSE THE DIFFERENCE IS AUDIBLE** (MIDI plan
+// §4.1, phase E4). KIL means "end this note now, whatever it is": on a one-shot with no release
+// envelope it is a declick fade, and that is correct — the user typed a kill. Letting go of a KEY on
+// the same instrument must NOT cut it: a drum hit plays out, which is what every sampler with a
+// keyboard on it does. The engine call is `scheduleKeyRelease`, and `SamplerVoice::keyRelease` is the
+// one place the three-way rule lives (ADSR/TRIG → release, looping → soft kill, one-shot → ignore).
+//
+// ⚠️ **NO SCHEMA BUMP, AND THAT IS AN ARGUMENT RATHER THAN AN OVERSIGHT.** This adds a VALUE to an
+// existing byte field, not a tag, a field or an order — the record's layout is unchanged, and the
+// only emitter is `MidiInputRouter` (midi_in.h), which does not ride `MidiRouter` at all. No trace
+// can therefore contain a mode 2, and the 36 goldens are byte-identical across this change. The
+// moment something the SEQUENCER emits uses it, that stops being true and the rule at the top of
+// this file applies in full.
+constexpr uint8_t NOTE_OFF_KEY     = 2;  // scheduleKeyRelease — a live key let go of (MIDI in)
 
 // CC ids carried by EV_CC (MIDI plan §6; more ids flow in phase D)
 constexpr uint8_t CC_VOLUME      = 7;   // scheduleTrackPhraseVol — the value is the float that
@@ -121,6 +135,28 @@ constexpr uint8_t CC_VOLUME      = 7;   // scheduleTrackPhraseVol — the value 
 constexpr uint8_t CC_PAN         = 10;  // scheduleVoicePan   (authored byte /255)
 constexpr uint8_t CC_REVERB_SEND = 91;  // scheduleVoiceReverbSend (authored byte /255)
 constexpr uint8_t CC_DELAY_SEND  = 93;  // scheduleVoiceDelaySend  (authored byte /255)
+
+// ─── SYMBOLIC CC ids — the instrument's four CC slots (MIDI phase D, plan §6/§8.3) ───────────────
+//
+// `param` is a uint8_t and a MIDI controller number is seven bits, so 128-255 is a namespace the wire
+// can never occupy. 128-131 mean "the controller slot A-D of whatever instrument this track's events
+// belong to" — a LETTER, resolved by each consumer against `Instrument::midiCC`, never a number.
+//
+// ⚠️ **THE RESOLUTION IS CONSUMER-SIDE ON PURPOSE AND THE SCHEDULER MUST NOT DO IT.** A `CCA` on an
+// FX-only step has no note beside it, and `PhraseStep::instrument` is 0x00 there whatever is actually
+// sounding — resolving at emit time would read slot A of instrument 00 and, since that slot is
+// normally unassigned, do NOTHING while looking correct. The instrument a track's events belong to is
+// `TrackInstruments` (router.h), the same answer both consumers already use to decide the routing, and
+// the same reason it exists: two consumers that resolve differently play a note twice or not at all.
+//
+// ⚠️ A slot id must never reach a `& 0x7F`: 128 folded that way is CC 0 = BANK SELECT. Every consumer
+// resolves or drops it explicitly (midi_out.h `cc_event`, engine_consumer.h `EV_CC`).
+constexpr uint8_t CC_SLOT_A = 128, CC_SLOT_B = 129, CC_SLOT_C = 130, CC_SLOT_D = 131;
+
+/** Slot index 0-3 for CC_SLOT_A..D, or -1 for a literal controller number. */
+constexpr int cc_slot_index(uint8_t param) {
+    return (param >= CC_SLOT_A && param <= CC_SLOT_D) ? param - CC_SLOT_A : -1;
+}
 
 // The full NoteOn trigger bundle — the seam args of AudioEngine.scheduleNote, verbatim, tapped at
 // entry (after the empty-note guard, before instrument/sample validity checks — invalid-instrument
@@ -164,8 +200,12 @@ struct NoteOnPayload {
 
 struct NoteOffPayload  { uint8_t mode; };                          // mode      NOTE_OFF_*
 struct CcPayload       { uint8_t param; uint32_t valueBits; };     // param value
-struct ProgramPayload  { uint8_t program; };                       // program   (phase D)
-struct PitchBendPayload{ uint16_t value14; };                      // value     center 0x2000 (phase D)
+struct ProgramPayload  { uint8_t program; };                       // program   0-127
+// value14: the authored MPB byte shifted into the top eight bits of the 14-bit range (`b << 6`), so
+// 0x80 lands EXACTLY on centre 0x2000 and 0x00 on 0. The cost is the very top: 0xFF gives 16320 of a
+// possible 16383, 0.4% short of full bend. Centre being exact is worth more than that 0.4% — a bend
+// that does not rest at zero detunes every note that is not bending.
+struct PitchBendPayload{ uint16_t value14; };                      // value     centre 0x2000
 struct ExtPitchRatePayload { uint32_t rateBits; uint16_t tempo; }; // rate tempo (rate: raw byte /16)
 struct ExtVibratoPayload   { uint32_t speedBits, depthBits; };     // speed depth
 struct ExtTableRowPayload  { uint8_t row; };                       // row       0-15

@@ -296,23 +296,43 @@ inline int project_row_offset_y(ProjectRow target, int rowHeight) {
 // every platform — a MIDI cable is not a device capability the way a touchscreen is, and a phone with
 // no port simply enumerates none, which OUTPUT already has a word for.
 //
-// ⚠️ **SYNC OUT IS DELIBERATELY ABSENT, THOUGH `Project::midiSyncOut` EXISTS AND ROUND-TRIPS.**
-// Nothing sends a clock until phase C, and a row that stores a choice nobody reads is the exact trap
-// the guardrails name: a setting that round-trips is not a setting that is applied. It gets its row in
-// the same increment that gets its clock. `INPUT` / `SYNC IN` are phase E and absent for the same
-// reason. §8.1's two-column sketch collapses to one column here because half of it is those rows.
+// ⚠️ **SYNC OUT WAS DELIBERATELY ABSENT UNTIL PHASE C, AND `INPUT` / `IN CH` UNTIL PHASE E3**, though
+// `Project::midiSyncOut` and `Project::midiInputChannels` have round-tripped since B1. A row that
+// stores a choice nobody reads is the exact trap the guardrails name: a setting that round-trips is not
+// a setting that is applied. Each got its row in the increment that got its reader. `SYNC IN` is still
+// absent for that reason (§9 defers it) — the two-column sketch in §8.1 is one column here because the
+// rows its right-hand column held are these, arriving one phase at a time.
 enum class MidiRow {
     OUTPUT   = 0,   // <device name> | OFF   — the cable
-    OFFSET   = 1,   // -99..+99 MS           — the cable
-    PROG_CHG = 2,   // ON | OFF              — the project (Instrument BANK/PROG on note-on)
-    PANIC    = 3,   // A: ALL NOTES OFF
-    TEST     = 4,   // A: C-4 CH 1
+    INPUT    = 1,   // <device name> | OFF   — the cable      (phase E3)
+    OFFSET   = 2,   // -99..+99 MS           — the cable
+    SYNC     = 3,   // ON | OFF              — the cable (phase C: 24 PPQN clock + transport)
+    PROG_CHG = 4,   // ON | OFF              — the project (Instrument BANK/PROG on note-on)
+    IN_MAP   = 5,   // 8 cells, -- | 01..16  — the project (per-track input channel, phase E3)
+    PANIC    = 6,   // A: ALL NOTES OFF
+    TEST     = 7,   // A: C-4 CH 1
 };
 
-constexpr int MIDI_ROW_COUNT = 5;
+// ⚠️ ROWS ARE INSERTED HERE, NOT APPENDED, and unlike B4.3's PROJECT row that is safe: nothing in the
+// tree stores a MIDI row index. `settings.json` and the `.ptp` both key rows by NAME, `ptdispatch`
+// drives them by enumerator, `p3-input.txt` has no MIDI line at all (the screen has no Kotlin twin),
+// and the cursor is clamped to `MIDI_ROW_COUNT` on every move. What decided each position is the
+// grouping: OUTPUT/INPUT/OFFSET/SYNC describe THIS MACHINE'S CABLE and live in settings.json, PROG CHG
+// and IN CH describe THE SONG and travel in the .ptp, and the last two are actions. INPUT sits beside
+// OUTPUT rather than after SYNC because the question a user arrives with is "which cables am I on".
+constexpr int MIDI_ROW_COUNT = 8;
 
-/** Group gap: after PROG CHG — the values end and the two actions begin. */
-inline bool midi_row_gap_after(MidiRow row) { return row == MidiRow::PROG_CHG; }
+/** The IN CH row is eight cells wide — one per track — and they are cursor COLUMNS 1..8. */
+constexpr int MIDI_IN_MAP_COLUMNS = 8;
+
+/**
+ * Group gaps: after PROG CHG (the single-value rows end and the track map begins — the blank row is
+ * also where the map's `1 2 3 4 5 6 7 8` header is drawn) and after IN CH (the values end, the two
+ * actions begin).
+ */
+inline bool midi_row_gap_after(MidiRow row) {
+    return row == MidiRow::PROG_CHG || row == MidiRow::IN_MAP;
+}
 
 /** How far down the panel a MIDI row is drawn, in pixels from the first row's top. */
 inline int midi_row_offset_y(MidiRow target, int rowHeight) {

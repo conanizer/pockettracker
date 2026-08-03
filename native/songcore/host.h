@@ -36,6 +36,7 @@
 #include "../audio-engine.h"
 #include "engine_consumer.h"
 #include "engine_setup.h"
+#include "midi_in.h"
 #include "midi_out.h"
 #include "model.h"
 #include "project_io.h"
@@ -68,6 +69,13 @@ class SongcoreHost {
         // owns which note, what a channel was last told), and a consumer that only starts listening
         // when a device is picked would attach mid-song with no idea what is already sounding.
         router_.add_consumer(&external_);
+
+        // MIDI in (phase E). Wired here and never again: the router reads the live Project (which is
+        // replaced IN PLACE by push_project, so the pointer stays good) and the SAME `TrackInstruments`
+        // the cable's own consumer keeps, so a live key and a sequenced note cannot disagree about
+        // which instrument a track is playing. Nothing here opens or touches a port.
+        midiInRouter_.set_project(&project_);
+        midiInRouter_.set_track_instruments(&external_.track_instruments());
     }
 
     ~SongcoreHost() { set_trace(false, ""); }
@@ -82,6 +90,138 @@ class SongcoreHost {
     ExternalConsumer& midi_out() { return external_; }
     void set_midi_out(IMidiOut* out) { external_.set_out(out); }
     void set_midi_offset_ms(int ms) { external_.set_offset_ms(ms); }
+    /** Phase C: the 24 PPQN clock + transport out. Takes effect at the next transport start. */
+    void set_midi_sync_out(bool on) { external_.set_sync_out(on); }
+    bool midi_sync_out() const { return external_.sync_out(); }
+
+    /**
+     * Hand the queue's release over to somebody else — B3's sender thread (`shell/midi-sender.h`).
+     *
+     * ⚠️ **ONE OWNER OF "WHO RELEASES THE QUEUE", and it is the same rule B4.3 wrote for "who opens
+     * the port".** Leaving `poll()`'s pump in place alongside a sender thread would not misbehave
+     * visibly — `poll` reads the block-quantised counter, which is never AHEAD of the estimator, so it
+     * could only ever release messages the thread was about to release anyway — and that is exactly
+     * what makes it dangerous: the 60 Hz path would still be live, still be the thing timing some
+     * fraction of the messages, and a broken sender thread would look like a working one with worse
+     * jitter. A measurement can only tell the two cadences apart if only one of them is running.
+     *
+     * Nobody calls this in the tools or on the Android JNI path, so `poll()` keeps pumping there.
+     */
+    void set_midi_pump_external(bool external) { midiPumpExternal_ = external; }
+    bool midi_pump_external() const { return midiPumpExternal_; }
+
+    // ── ↕ MIDI in (MIDI plan phase E2) ───────────────────────────────────────────────────────────
+    //
+    // The mirror of the block above, and the same division of labour: the PORT is the platform's
+    // (`IMidiIn`, opened by the shell), and everything from the first byte onwards is here — the queue
+    // that crosses the backend's thread, the parser, the router, and the one place that drains them.
+    //
+    // ⚠️ **THE HOST OWNS THE DRAIN, NOT THE SHELL**, for the reason `poll()` owns the lookahead: three
+    // platforms will each open a port their own way (winmm now, ALSA and `MidiManager` at E5) and the
+    // thing that happens to the bytes afterwards must be the same code on all three. A shell that
+    // drained for itself would be one drain per platform, diverging in one of them.
+
+    /**
+     * Where a backend delivers its bytes — `IMidiIn::set_sink(&host.midi_in_sink())`.
+     *
+     * ⚠️ Called from a thread this class knows nothing about, which is exactly what `MidiInQueue` is
+     * for: the sink is a lock and a memcpy and NOTHING else, and everything with an opinion (parsing,
+     * routing, the observer) runs on the frame loop in `poll()`.
+     */
+    MidiInQueue& midi_in_sink() { return midiInQueue_; }
+
+    /** The routing policy's counters and the channel map's reader. See midi_in.h. */
+    MidiInputRouter& midi_in_router() { return midiInRouter_; }
+    const MidiParser& midi_in_parser() const { return midiInParser_; }
+
+    /**
+     * Told about every message drained, with the records it produced. E2's is the shell's console;
+     * E4's is the injection into the engine. Nullable — with none, the drain still runs and still
+     * counts, because the counters are how "no cable" is told from "no track listening".
+     */
+    void set_midi_in_observer(IMidiInObserver* obs) { midiInObserver_ = obs; }
+
+    /**
+     * The instrument a live key plays on a track the sequencer has not touched yet — the one the UI is
+     * showing (midi_in.h says why this exists at all: without it a correctly configured keyboard is
+     * SILENT on a stopped song, which is the "not configured looks like broken" failure verbatim).
+     * Pushed every frame by the shell, because the user moves the cursor between frames.
+     */
+    void set_midi_in_instrument(int instrumentId) { midiInRouter_.set_fallback_instrument(instrumentId); }
+
+    /**
+     * MIDI THRU — whether a live key on a track whose instrument is EXTERNAL reaches the CABLE (E4).
+     *
+     * ⭐ **ON is the feature; OFF exists for exactly one configuration, and it is not a preference.**
+     * Playing external gear from a keyboard through the tracker is the obvious use of an input port,
+     * and a key on an EXTERNAL track that did nothing at all would be §B2's failure verbatim ("not
+     * configured" indistinguishable from "broken").
+     *
+     * ⚠️ **BUT WHEN THE INPUT PORT AND THE OUTPUT PORT ARE THE SAME DEVICE, THRU IS A FEEDBACK LOOP** —
+     * key → track → cable out → the same port → key again, amplifying, for ever. That is not a corner
+     * case here: a loopback port is the only MIDI-in test rig this project has (§0.8's desk loopback,
+     * now a manual regression test). So the SHELL compares the two open port names and turns thru off
+     * when they match, saying so on the console; this flag is where that verdict lands.
+     *
+     * The default is ON, deliberately: a host nobody told (the tools, the JNI path) behaves like the
+     * feature rather than like the exception, and the suppression has to be an explicit act.
+     */
+    void set_midi_in_thru(bool on) { midiInThru_ = on; }
+    bool midi_in_thru() const { return midiInThru_; }
+
+    /** Bytes that reached the queue, and complete messages the parser made of them. */
+    uint64_t midi_in_bytes() const { return midiInBytes_; }
+    uint64_t midi_in_messages() const { return midiInMessages_; }
+
+    /** Records handed to the ENGINE consumer, to the cable, and withheld from the cable by thru (E4). */
+    uint64_t midi_in_injected() const { return midiInInjected_; }
+    uint64_t midi_in_thru_sent() const { return midiInThruSent_; }
+    uint64_t midi_in_thru_suppressed() const { return midiInThruSuppressed_; }
+
+    /**
+     * Forget everything mid-flight — the queue's parked bytes and the parser's half-assembled message.
+     *
+     * ⚠️ Called when a port CLOSES, and it is not housekeeping: a cable pulled between a status byte
+     * and its data leaves running status in force, so the next port's first data byte would complete a
+     * note nobody played, on the previous device's channel.
+     */
+    void reset_midi_in() {
+        midiInQueue_.clear();
+        midiInParser_.reset();
+    }
+
+    /**
+     * Drain → parse → route → **inject**, at `frame`. Returns the number of bus records produced.
+     *
+     * Called by `poll()` with the transport clock; a test calls it directly with a frame of its own.
+     */
+    int poll_midi_in(int64_t frame) {
+        // The buffer is the ring's whole capacity, so ONE drain always empties it: a second pass could
+        // only pick up bytes that arrived during this one, and those belong to the next frame anyway.
+        uint8_t buf[MidiInQueue::CAPACITY];
+        const int n = midiInQueue_.drain(buf, static_cast<int>(sizeof buf));
+        if (n <= 0) return 0;
+        midiInBytes_ += static_cast<uint64_t>(n);
+
+        int total = 0;
+        Event ev[MidiInputRouter::MAX_EVENTS];
+        for (int i = 0; i < n; ++i) {
+            if (!midiInParser_.feed(buf[i])) continue;
+            ++midiInMessages_;
+            const int k = midiInRouter_.route(midiInParser_.message(), frame, ev,
+                                              MidiInputRouter::MAX_EVENTS);
+            total += k;
+            for (int j = 0; j < k; ++j) inject(ev[j]);
+            // ⚠️ Called even when `k == 0`. A message that routed nowhere still ARRIVED, and an
+            // observer told only about the routed ones cannot tell a dead cable from an unmapped
+            // channel — the same argument as the router's four counters.
+            // ⚠️ **AFTER the injection, not before** — an observer that prints is a debugging aid, and
+            // a debugging aid that runs between the record and the sound it makes would be the one
+            // thing changing the order of the two.
+            if (midiInObserver_) midiInObserver_->on_midi_in(midiInParser_.message(), ev, k);
+        }
+        return total;
+    }
 
     // ── ↓ data ───────────────────────────────────────────────────────────────────────────────────
     // The blob is the .ptp JSON verbatim — the bytes FileController.serializeProject() produces, which
@@ -181,11 +321,17 @@ class SongcoreHost {
     // PlaybackController.updatePlaybackBuffer().
     void poll() {
         sync_clock();
+        // ⚠️ **BEFORE the lookahead pass, and with a LEAD-IN.** A live key has no lookahead at all — the
+        // byte is already late by the time it is drained — so it is stamped `now + 100` frames, which is
+        // `preview_note`'s lead-in and for the identical reason: a frame in the immediate past is a
+        // record the engine has already run past. Draining first also means a key pressed this frame is
+        // routed against the clock this frame read, not the one the pass has moved on to.
+        poll_midi_in(seq_.clock() + MIDI_IN_LEAD_FRAMES);
         seq_.updatePlaybackBuffer();
-        // ⚠️ The MIDI queue is released HERE, from the poll that already read the frame clock — and
-        // it must be released even when nothing is playing, because a LEN gate and a panic's note-offs
-        // are things we OWE after the last note was scheduled. `pump` is idempotent on an empty queue.
-        external_.pump(seq_.clock());
+        // ⚠️ The MIDI queue is released HERE — unless a sender thread has taken the job (B3) — and it
+        // must be released even when nothing is playing, because a LEN gate and a panic's note-offs are
+        // things we OWE after the last note was scheduled. `pump` is idempotent on an empty queue.
+        if (!midiPumpExternal_) external_.pump(seq_.clock());
         flush_trace();
     }
 
@@ -951,6 +1097,77 @@ class SongcoreHost {
     }
 
     /**
+     * ⭐⭐ **PHASE E4 — ONE BUS RECORD FROM A LIVE KEY, HANDED TO THE CONSUMERS THAT OWN IT.**
+     *
+     * ── WHY NOT `router_` ────────────────────────────────────────────────────────────────────────
+     *
+     * The obvious move is `router_.note_on(...)` and let the bus fan out. It is wrong here, for three
+     * reasons, and B5 already answered the same question the same way for the preview:
+     *
+     *   1. ⚠️ **THE BUS'S ORDERING INVARIANT.** `TrackInstruments` (router.h) assumes events arrive per
+     *      track in NON-DECREASING frame order, which the sequencer guarantees because it schedules
+     *      forward. A live key is stamped `clock + 100` while the lookahead has already emitted records
+     *      up to two phrases into the future — so a key pressed mid-song would arrive *behind* records
+     *      already dispatched. The consumers each keep their own map and are handed the record
+     *      directly, which is the only arrangement in which that is harmless.
+     *   2. **THE TRACE.** `writer_` is a bus consumer and the 36 goldens have never contained a live
+     *      event. A key press is not part of the song, exactly as a preview is not.
+     *   3. There is nothing to gain: the two consumers below ARE the bus's audio subscribers.
+     *
+     * ── WHAT EACH CONSUMER IS ASKED ──────────────────────────────────────────────────────────────
+     *
+     * `consume` is the ONE DOOR on both (B5's `preview_note_off` says why): each answers the routing
+     * gate itself, resolves the record's owner through its own `TrackInstruments`, and honours the LEN
+     * gate — so a live key and a sequenced note cannot disagree about who owns a track.
+     *
+     *   • the ENGINE consumer, **unconditionally and whichever way the instrument routes**. Its gate
+     *     drops EXTERNAL records, and its internal→external arm is the one that ends a voice a flip
+     *     would otherwise leave sounding.
+     *   • the CABLE, only when THRU is on — see `set_midi_in_thru`. A suppressed record is COUNTED,
+     *     because "the key is silent" needs to name which of the reasons it was.
+     */
+    void inject(const Event& ev) {
+        ++midiInInjected_;
+
+        // ⚠️ **THE PAUSED-STREAM RESUME IS NOT MISSING HERE — IT IS ONE LAYER DOWN.** With the transport
+        // stopped the audio stream may be paused, and a note scheduled into a paused engine is a note
+        // nobody hears at a frame counter that is not moving. `plan_note_on` calls `requestResume()`
+        // immediately before both of its schedule calls (voice_derive.h), so every path that raises a
+        // voice already resumes; a second call here would be a second, unmeasured copy of that rule.
+        // (`preview_note` above does have its own — it predates the seam and is Kotlin's line for
+        // Kotlin's reason. This one does not need it.)
+
+        // ⚠️ Asked BEFORE either consume, and only to COUNT: `ExternalConsumer::consume` learns from a
+        // note-on, so a verdict taken afterwards would be answering about the state this record just
+        // created rather than the one it arrived into.
+        const bool external = record_is_external(ev);
+
+        consumer_.consume(ev);
+
+        if (midiInThru_) {
+            external_.consume(ev);
+            if (external) ++midiInThruSent_;
+        } else if (external) {
+            ++midiInThruSuppressed_;
+        }
+    }
+
+    /**
+     * Would this record have gone out on the cable? Asked ONLY to count a suppression — the consumers
+     * never ask it, they answer it themselves.
+     *
+     * ⚠️ A note-on carries its instrument; every other record on the bus is track-scoped and rides
+     * `INSTRUMENT_NONE`, so the owner comes from the same `TrackInstruments` the cable's own consumer
+     * keeps. A second opinion about track ownership is the one thing this file must not invent.
+     */
+    bool record_is_external(const Event& ev) const {
+        int16_t instrument = ev.instrument;
+        if (instrument == INSTRUMENT_NONE) instrument = external_.track_instruments().current(ev.track);
+        if (instrument < 0 || static_cast<size_t>(instrument) >= project_.instruments.size()) return false;
+        return instrument_routes_external(project_.instruments[static_cast<size_t>(instrument)]);
+    }
+
+    /**
      * The preview lane's note-off on the CABLE (MIDI plan B5) — the timed audition's end, and what
      * `stop_preview` sends.
      *
@@ -997,6 +1214,19 @@ class SongcoreHost {
     Sequencer        seq_;
     EngineConsumer   consumer_;
     ExternalConsumer external_;
+    bool             midiPumpExternal_ = false;   // B3: a sender thread owns the release, not poll()
+
+    // MIDI in (E2). The queue is the only member here another thread ever touches, and it locks.
+    // Kotlin's `+100` preview lead-in, in frames — see the note in `poll()`.
+    static constexpr int64_t MIDI_IN_LEAD_FRAMES = 100;
+    MidiInQueue       midiInQueue_;
+    MidiParser        midiInParser_;
+    MidiInputRouter   midiInRouter_;
+    IMidiInObserver*  midiInObserver_ = nullptr;
+    uint64_t          midiInBytes_ = 0, midiInMessages_ = 0;
+    // E4: the injection. `midiInThru_` defaults to the FEATURE — see set_midi_in_thru.
+    bool              midiInThru_ = true;
+    uint64_t          midiInInjected_ = 0, midiInThruSent_ = 0, midiInThruSuppressed_ = 0;
 
     TraceWriter   writer_;
     std::string   traceBuf_;

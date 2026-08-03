@@ -175,6 +175,24 @@ struct MidiRouter {
         emit(ev);
     }
 
+    // ── MIDI phase D (MPG / MPB) ──
+    //
+    // Track-scoped like CC, and for the same reason: the instrument they act on is whatever the track
+    // is playing (TrackInstruments), not a routing key of their own.
+
+    void program(int64_t frame, int track, int program) {
+        Event ev = base(frame, track, INSTRUMENT_NONE, EV_PROGRAM);
+        ev.program.program = static_cast<uint8_t>(program & 0x7F);
+        emit(ev);
+    }
+
+    /** `value14` is the full 14-bit value, centre 0x2000 — the caller does the byte→14-bit widening. */
+    void pitch_bend(int64_t frame, int track, int value14) {
+        Event ev = base(frame, track, INSTRUMENT_NONE, EV_PITCH_BEND);
+        ev.pitchBend.value14 = static_cast<uint16_t>(value14 & 0x3FFF);
+        emit(ev);
+    }
+
     void ext_pitch_rate(int64_t frame, int track, float rate, int tempo) {
         Event ev = base(frame, track, INSTRUMENT_NONE, EV_EXT_PITCH_RATE);
         ev.extPitchRate.rateBits = bits(rate);

@@ -317,11 +317,12 @@ struct Voice : public IAudioVoice {
 
     void hardStop() override { stop(); }
 
-    void noteOff() override {
-        // THE release decision for sampler voices — AudioEngine::triggerNoteOff delegates
-        // here (they used to be two drifted copies). Promote live ADSR/TRIG VOL mods
-        // (attack/decay/sustain, with a nonzero release configured) to the release stage;
-        // an already-releasing mod also counts. No release envelope → declicked kill fade.
+    /**
+     * Promote every live ADSR/TRIG VOL mod to its release stage. Returns whether this voice HAS a
+     * release envelope to run — which is the one fact `noteOff` and `keyRelease` both branch on, and
+     * the reason it is written once here rather than twice above.
+     */
+    bool releaseVolMods() {
         bool hasRelease = false;
         for (int m = 0; m < 4; m++) {
             VoiceModSlot& vmod = voiceMods[m];
@@ -335,12 +336,39 @@ struct Voice : public IAudioVoice {
                 }
             }
         }
-        if (hasRelease) {
-            // Looping voice: abandon the loop so playback runs out into the [loopEnd, end] tail.
-            if (loopMode != 0) loopReleasing = true;
-        } else {
-            startFadeOut(KILL_FADE_SAMPLES);  // deliberate note-off, not a steal
-        }
+        // Looping voice: abandon the loop so playback runs out into the [loopEnd, end] tail.
+        if (hasRelease && loopMode != 0) loopReleasing = true;
+        return hasRelease;
+    }
+
+    void noteOff() override {
+        // THE release decision for sampler voices — AudioEngine::triggerNoteOff delegates
+        // here (they used to be two drifted copies). Promote live ADSR/TRIG VOL mods
+        // (attack/decay/sustain, with a nonzero release configured) to the release stage;
+        // an already-releasing mod also counts. No release envelope → declicked kill fade.
+        if (!releaseVolMods()) startFadeOut(KILL_FADE_SAMPLES);  // deliberate note-off, not a steal
+    }
+
+    /**
+     * A live KEY was let go of (MIDI plan §4.1, phase E4) — `AudioEngine::triggerKeyRelease`.
+     *
+     * ⚠️ **IDENTICAL TO `noteOff` EXCEPT IN ONE ARM, AND THAT ARM IS THE WHOLE POINT.** A KIL means
+     * "end this note"; releasing a key does not. So:
+     *
+     *   • ADSR/TRIG with a release configured → the release stage. Same as a KIL, and the common case.
+     *   • a LOOPING voice with no release envelope → the declicked soft kill. It would otherwise loop
+     *     for ever with nothing left to end it, which is the one failure this arm exists to prevent.
+     *   • **a ONE-SHOT with no release envelope → NOTHING AT ALL.** The hit plays out. That is what
+     *     every sampler with a keyboard on it does, and cutting a snare because a finger came off the
+     *     key is the behaviour §4.1 was written to rule out.
+     *
+     * A voice with a release envelope AND a loop takes the same `loopReleasing` path as a KIL — the
+     * loop is abandoned so playback runs out into the tail while the envelope releases.
+     */
+    void keyRelease() {
+        if (releaseVolMods()) return;
+        if (loopMode != 0) startFadeOut(KILL_FADE_SAMPLES);   // nothing else would ever end it
+        // else: a one-shot with no envelope. Deliberately silent — the sample plays to its end.
     }
 
     void setVolume(float v) override { volume = v; params.setBase(PARAM_VOL, v); }

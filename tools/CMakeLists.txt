@@ -22,8 +22,13 @@ project("pockettracker-tools" LANGUAGES C CXX)
 #   ptinput  Phase3 S3 the input layer          21687 cases          (units/p3-input.txt)
 #   ptdispatch Ph3 S5  the input DISPATCHER     686 assertions — NO golden; see below and its header
 #   ptmapper   conv C0 the COMBO MATRIX         assertions     — NO golden; the layer above ptdispatch
-#   ptmidi     MIDI B  the EXTERNAL MIDI BYTES  assertions     — NO golden, and none POSSIBLE: MIDI
-#                      out never existed in Kotlin. The only tool that sees a byte on the wire.
+#   ptmidi     MIDI B  the EXTERNAL MIDI BYTES  86 assertions  — NO golden, and none POSSIBLE: MIDI
+#                      out never existed in Kotlin. The only tool that sees a byte on the wire, and
+#                      (since B3) the only one that runs a second THREAD — see its header for why.
+#   ptmidiin   MIDI E  MIDI IN: parser/queue/router  assertions — NO golden, ptmidi's reason. The only
+#                      tool that READS a raw MIDI byte: running status, real-time bytes arriving
+#                      mid-message, SysEx. A mis-parse makes well-formed events for notes nobody
+#                      played, so every tool downstream of it is blind by construction.
 #   pttouch    conv D1 the TOUCH LAYOUT sizes   675 golden lines     (units/touch-layout.txt)
 #              conv D3 + touch POSITIONS        assertions     — NO golden (--positions); see below
 #   ptdecode   conv D2 the PNG DECODER          decode fixtures — an INDEPENDENT encoder; see below
@@ -225,7 +230,29 @@ target_link_libraries(ptdispatch PRIVATE pt-ui)
 # (gate-to-next, LEN, panic) and the two-sided routing gate are checked. See its header.
 add_executable(ptmidi ptmidi/main.cpp)
 pt_ieee_exact(ptmidi)
-target_link_libraries(ptmidi PRIVATE pockettracker)
+# ⚠️ Threads, and it is the ONE tool here that needs them: B3's block runs `pump` on a real second
+# thread, because that is the one thing about B3 no single-threaded check can see (a missing lock in
+# midi_out.h leaves every other block in this file green). `std::thread` on gcc/libstdc++ needs -pthread
+# at COMPILE time as well as at link, which is what Threads::Threads carries and a bare `-lpthread`
+# does not.
+find_package(Threads REQUIRED)
+target_link_libraries(ptmidi PRIVATE pockettracker Threads::Threads)
+
+# ptmidiin — the MIDI-IN path (MIDI plan phases E1 and E2). Same standing as ptmidi and for the same reason:
+# MIDI in never existed in Kotlin, so there is no golden and none is possible. It is the only thing in
+# the tree that reads a raw MIDI byte, which is where the protocol bugs live — running status, a clock
+# byte arriving mid-message, System Common cancelling running status — all of which produce perfectly
+# well-formed events for notes nobody played, and so are invisible to every tool downstream.
+#
+# ⚠️ Threads for the same reason ptmidi needs them: the byte ring crosses a thread boundary no other
+# object in songcore crosses, and a single-threaded check of it stays green with the mutex deleted.
+#
+# Since E2 it also drives `SongcoreHost` itself (block 9): the drain, the parse and the route moved
+# INTO `poll()`, so a test that calls the three by hand — which is the whole of E1 — no longer says
+# anything about what the app does with a backend's bytes.
+add_executable(ptmidiin ptmidiin/main.cpp)
+pt_ieee_exact(ptmidiin)
+target_link_libraries(ptmidiin PRIVATE pockettracker Threads::Threads)
 
 # ptalsa — does shell/midi-out-alsa.h's hand-copied libasound ABI match the real headers? (B2b)
 #
@@ -254,6 +281,42 @@ elseif(NOT WIN32)
     message(STATUS "ptalsa: not Linux - the libasound ABI check does not apply")
 endif()
 
+# ptalsain — the Linux MIDI backends DRIVEN, against a fake libasound.so.2 (MIDI plan E5)
+#
+# ⚠️ Different from ptalsa in the way that matters: ptalsa needs libasound2-dev and checks SIGNATURES;
+# this needs NOTHING installed and checks BEHAVIOUR. Before it, no line of shell/midi-*-alsa.cpp had
+# ever been executed by anything — the output backend has shipped since B2b having never put a byte
+# anywhere, which is the purest case of the guardrails' "a component whose correct behaviour is
+# silence cannot be told from one that never ran".
+#
+# ⭐⭐ **THE FAKE IS A REAL SHARED LIBRARY WITH THE REAL SONAME, and that is the whole trick.** The
+# backend calls `dlopen("libasound.so.2")` exactly as it does on a handheld; because this executable
+# already links an object whose SONAME is `libasound.so.2`, the loader hands it THAT one. So the
+# production code is unmodified and unaware: the loader runs, all seventeen dlsyms run, the reader
+# thread runs. A mock injected through a seam would have proven none of those.
+if(UNIX AND NOT APPLE AND NOT ANDROID)
+    add_library(fake-asound SHARED ptalsain/fake-asound.cpp)
+    # OUTPUT_NAME + SOVERSION is what produces `libasound.so.2` with `SONAME libasound.so.2`. The name
+    # is load-bearing, not cosmetic — it is the string the backend passes to dlopen.
+    set_target_properties(fake-asound PROPERTIES OUTPUT_NAME asound VERSION 2.0.0 SOVERSION 2)
+
+    add_executable(ptalsain
+            ptalsain/main.cpp
+            ../shell/alsa-rawmidi.cpp     # the loader + the device walk        (E5)
+            ../shell/midi-in-alsa.cpp     # the INPUT backend + its reader thread (E5)
+            ../shell/midi-in-base.cpp     # the shared sink and counters        (E2)
+            ../shell/midi-out-alsa.cpp    # the OUTPUT backend                  (B2b)
+            ../shell/midi-out-base.cpp    # the shared list/TEST/trace/panic    (B2b)
+    )
+    pt_ieee_exact(ptalsain)
+    # `pockettracker` for songcore's include roots (midi_in.h / midi_out.h); Threads because the input
+    # backend owns a std::thread and libstdc++ needs -pthread at COMPILE time as well as at link;
+    # ${CMAKE_DL_LIBS} because the loader really does dlopen.
+    find_package(Threads REQUIRED)
+    target_link_libraries(ptalsain PRIVATE pockettracker Threads::Threads ${CMAKE_DL_LIBS} fake-asound)
+    add_test(NAME e5-alsa-io COMMAND ptalsain)
+endif()
+
 # ptrender writes WAVs, and the fingerprint goldens live beside the projects they describe.
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/render-out")
 
@@ -276,6 +339,8 @@ add_test(NAME p3-dispatch      COMMAND ptdispatch)
 add_test(NAME c0-mapper        COMMAND ptmapper)
 # No golden either, and no Kotlin original to record one from — MIDI out is new. See ptmidi's header.
 add_test(NAME b1-midi-out      COMMAND ptmidi)
+# Nor here, and for the identical reason — see ptmidiin's own header.
+add_test(NAME e1-midi-in       COMMAND ptmidiin)
 # The touch-layout size golden (B2), re-parsed and byte-compared by the C++ port. See pttouch's header.
 add_test(NAME d-touch-layout   COMMAND pttouch     "${PT_TESTDATA}/units/touch-layout.txt")
 # The touch button POSITIONS (D3), by a hand-written oracle — NO golden, because Compose's layout pass

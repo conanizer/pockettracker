@@ -9,7 +9,11 @@ namespace {
 // The geometry, verbatim from drawFxHelper. Kotlin recomputes these each frame from DESIGN_WIDTH_PX;
 // they are constants here because the canvas IS the design (canvas.h) and cannot be another size.
 constexpr int BOX_W = 580;
-constexpr int BOX_H = 243;  // 4 description rows + header + 5 grid rows
+// 8 + 4 description rows + 8 + header + 8 + the grid + 9 of bottom padding.
+// ⚠️ DERIVED from FX_GRID_ROWS, and it was the literal 243 until MIDI phase D needed a sixth row —
+// a hard-coded height with a grid that grows is a picker whose last row is drawn outside its own box.
+// It reproduces the original 243 exactly at five rows, which is how the arithmetic was checked.
+constexpr int BOX_H = 8 + 4 * ROW_HEIGHT + 8 + ROW_HEIGHT + 8 + FX_GRID_ROWS * ROW_HEIGHT + 9;
 constexpr int BOX_X = (DESIGN_W - BOX_W) / 2;   // 30
 constexpr int BOX_Y = (DESIGN_H - BOX_H) / 2;   // 118
 constexpr int INNER_X = BOX_X + 10;             // 40
@@ -57,7 +61,7 @@ void draw_fx_helper(Canvas& c, const FxHelperState& s, const Theme& t) {
     const int headerX = BOX_X + (BOX_W - run_advance(6)) / 2;
     c.draw_text("EFFECT", headerX, headerY + TEXT_PADDING, t.textTitle, CHAR_SPACING, FONT_SCALE);
 
-    // ── The 6×5 grid ─────────────────────────────────────────────────────────────────────────────
+    // ── The grid (6×6 since phase D; the last row centres itself) ────────────────────────────────
     const int gridY = headerY + ROW_HEIGHT + 8;
     const int gridX = BOX_X + (BOX_W - FX_GRID_COLS * CELL_W) / 2;
 

@@ -59,8 +59,11 @@ class MidiOutManager(context: Context) {
 
     /**
      * One reusable buffer, because [send] runs per MIDI message and a 3-byte allocation per note is
-     * pure garbage-collector pressure on the one path that must not stutter. Safe only because every
-     * call arrives on the single thread that pumps the queue — see the class note.
+     * pure garbage-collector pressure on the one path that must not stutter.
+     *
+     * ⚠️ It used to say "safe only because every call arrives on the single thread that pumps the
+     * queue". Since MIDI plan B3 there are TWO threads that can (a sender thread releases the queue,
+     * the frame loop still panics), so [send] is `@Synchronized` — see the note there.
      */
     private val scratch = ByteArray(3)
 
@@ -178,7 +181,21 @@ class MidiOutManager(context: Context) {
         device = null
     }
 
-    /** One MIDI message, 1–3 bytes, already serialized by songcore. False = it did not go out. */
+    /**
+     * One MIDI message, 1–3 bytes, already serialized by songcore. False = it did not go out.
+     *
+     * ⚠️⚠️ **`@Synchronized`, AND MIDI PLAN B3 IS WHY.** `scratch` is one reusable 3-byte buffer, and
+     * its original comment said that was safe "because every call arrives on the one thread that pumps
+     * the queue". That was TRUE WHEN IT WAS WRITTEN and B3 invalidated it: the queue is now released by
+     * a dedicated sender thread while `panic()` still runs on the frame loop, so two threads reach this
+     * method. Two callers filling one buffer would interleave into a message that is neither of theirs.
+     *
+     * `ExternalConsumer`'s own mutex already serialises every `send`, so this lock is redundant TODAY —
+     * and it stays anyway, because the alternative is a Kotlin file whose correctness depends on a
+     * C++ lock two layers away that nothing here can see. (The guardrails' rule: derive safety from the
+     * data, or write it once below the sites — not from a convention every future caller must know.)
+     */
+    @Synchronized
     fun send(b0: Int, b1: Int, b2: Int, len: Int): Boolean {
         val p = port ?: return false
         if (len < 1 || len > 3) return false

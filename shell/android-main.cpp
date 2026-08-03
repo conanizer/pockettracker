@@ -33,6 +33,7 @@
 
 #include "app.h"
 #include "button_feedback.h"
+#include "midi-in-android.h"    // the MIDI INPUT port  (MIDI plan E5);  compiles to nothing elsewhere
 #include "midi-out-android.h"   // the EXTERNAL MIDI port (MIDI plan B2b); compiles to nothing elsewhere
 
 #include <android/log.h>
@@ -370,6 +371,21 @@ int main(int argc, char** argv) {
     // and which is the same path the OUTPUT row uses. One owner of "which port is open".
     ptshell::AndroidMidiOut midiOut;
     cfg.midiOut = &midiOut;
+
+    // ── MIDI IN (MIDI plan phase E5) ─────────────────────────────────────────────────────────────
+    //
+    // The same terms as the output port above, and the same three rules: attached UNCONDITIONALLY (the
+    // MIDI screen's INPUT row needs the enumerator even on a phone with nothing plugged in), constructed
+    // HERE so it outlives `run()` — ⚠️ which is not a style point but the E2 lifetime rule: the queue
+    // this port delivers into lives inside the `SongcoreHost` that `run()` owns, so the port must be the
+    // longer-lived of the two and `run()` closes it before returning — and NO env-var block, because the
+    // device pick comes from settings.json through `InputDispatcher::boot_midi_in_port()`.
+    //
+    // ⚠️ Unlike the other two backends this one is POLLED, once a frame, from inside `run()`. See
+    // midi-in-android.cpp: `MidiManager` delivers on a binder thread to the Kotlin side and the frame
+    // loop fetches, which costs nothing because the drain is on that loop either way.
+    ptshell::AndroidMidiIn midiIn;
+    cfg.midiIn = &midiIn;
 
     const int rc = ptshell::run(cfg);
 

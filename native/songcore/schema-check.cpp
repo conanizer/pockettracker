@@ -16,7 +16,10 @@ static_assert(EV_NOTE_OFF == 0x80 && EV_NOTE_ON == 0x90 && EV_CC == 0xB0 &&
               "MIDI-status tags are frozen");
 
 static_assert(TRACK_PREVIEW == 8 && TRACK_GLOBAL == 0xFF, "track domain is frozen");
-static_assert(NOTE_OFF_RELEASE == 0 && NOTE_OFF_CUT == 1, "note-off modes are frozen");
+// E4 added NOTE_OFF_KEY. The two older values keep their numbers — that is what "frozen" means here,
+// and it is why the goldens did not move; a third value below them would have renumbered a trace.
+static_assert(NOTE_OFF_RELEASE == 0 && NOTE_OFF_CUT == 1 && NOTE_OFF_KEY == 2,
+              "note-off modes are frozen");
 static_assert(CC_VOLUME == 7 && CC_PAN == 10 && CC_REVERB_SEND == 91 && CC_DELAY_SEND == 93,
               "CC ids are frozen");
 

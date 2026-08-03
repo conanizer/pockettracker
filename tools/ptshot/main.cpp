@@ -683,8 +683,15 @@ int main(int argc, char** argv) {
                     // headless renderer CAN answer about this screen: does it draw at all, and does the
                     // OUTPUT row degrade to OFF rather than to an empty cell or a crash. A shot WITH
                     // devices would need a fake enumerator, which is ptdispatch's job (block B4.3).
-                    state.midiCursorRow    = clamp(row, MIDI_ROW_COUNT - 1);
-                    state.midiCursorColumn = 1;   // one column
+                    state.midiCursorRow = clamp(row, MIDI_ROW_COUNT - 1);
+                    // One column everywhere but IN CH, whose eight cells are the one thing on this
+                    // screen a shot can genuinely check the GEOMETRY of (E3): the cells and the track
+                    // numbers above them are drawn by two separate loops, so nothing but pixels can say
+                    // whether they line up.
+                    state.midiCursorColumn =
+                        (static_cast<MidiRow>(state.midiCursorRow) == MidiRow::IN_MAP)
+                            ? (col < 1 ? 1 : clamp(col, MIDI_IN_MAP_COLUMNS))
+                            : 1;
                     break;
 
                 case ScreenType::SETTINGS: {

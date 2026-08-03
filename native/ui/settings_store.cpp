@@ -65,7 +65,14 @@ bool load_settings(FileSystem& fs, SettingsValues& values, Theme& theme) {
     //
     // Absent from an older settings.json → OFF / 0 ms, which is what every existing file has.
     values.midiOutDevice      = get_string(j, "midi_out_device", values.midiOutDevice);
+    // E2 — the INPUT port. Absent from every settings.json written before phase E → "OFF", which is
+    // also the right default: an app that opened whatever keyboard it found would hold a port another
+    // program wanted, and would do it on the say-so of nobody.
+    values.midiInDevice       = get_string(j, "midi_in_device", values.midiInDevice);
     values.midiOffsetMs       = clamp(get_int(j, "midi_offset_ms", values.midiOffsetMs), -99, 99);
+    // Phase C. Absent → false, which is both the default and what every settings.json written before
+    // phase C says: a file from yesterday must not silently start driving a drum machine today.
+    values.midiSyncOut        = get_bool(j, "midi_sync_out", values.midiSyncOut);
 
     // ⚠️ RESUME (S10). New here because the shell only GAINED the row in S10 — and the session that
     // flips the cap on is the session that must add the key, or the setting resets to ASK on every
@@ -172,7 +179,9 @@ std::string serialize_settings(const SettingsValues& values, const Theme& theme)
     // B4.3 — the MIDI screen's two cable settings. `midi_out_device` is a stable NAME string, for the
     // same reason `portrait_skin` and `overlay_name` below are (see load_settings).
     j["midi_out_device"]    = values.midiOutDevice;
+    j["midi_in_device"]     = values.midiInDevice;   // E2 — the INPUT port, a NAME for the same reason
     j["midi_offset_ms"]     = values.midiOffsetMs;
+    j["midi_sync_out"]      = values.midiSyncOut;   // phase C — the clock + transport switch
 
     // The Android device rows — see the matching block in load_settings for why these are written on
     // every platform a full phase before any of them is displayed. On the shell they are simply their

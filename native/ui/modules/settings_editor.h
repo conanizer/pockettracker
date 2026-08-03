@@ -104,9 +104,33 @@ struct SettingsValues {
     // index saved on Tuesday names a different synth on Wednesday. "OFF" is the no-device choice.
     std::string midiOutDevice = "OFF";
 
+    // The INPUT port (phase E2) — same kind, same rule, same "OFF" for no device. ⚠️ It is a NAME here
+    // too, and the input list is the one MORE likely to reorder: a USB keyboard is unplugged between
+    // sessions where a desk synth is not.
+    //
+    // ⚠️ **THE ROW THAT EDITS THIS ARRIVES IN E3, AND THIS IS NOT A SETTING WITHOUT A CONSUMER.** It is
+    // read at boot and it OPENS THE PORT (`InputDispatcher::boot_midi_in_port`), which is what makes the
+    // desk loopback survive a restart; what E3 adds is a way to change it without editing settings.json.
+    // The alternative — the shell opening an input port privately until the row exists — is the "two
+    // owners of which port is open" bug B4.3 already paid for once.
+    std::string midiInDevice = "OFF";
+
     // Signed milliseconds; positive = MIDI leaves LATER than the audio. Our own output has tens of ms
     // of latency that the cable does not, so the user nudges the two into line by ear (plan §4.3).
     int         midiOffsetMs  = 0;
+
+    // SYNC OUT — the 24 PPQN clock, Start/Stop/Continue and the song position (plan phase C).
+    //
+    // ⚠️ SETTINGS AND NOT THE PROJECT, where PROG CHG next to it on the same screen is the project's.
+    // The distinction is "what does the SONG mean" versus "what is plugged into THIS machine": whether
+    // an instrument states its bank and program is a musical decision that travels with the .ptp;
+    // whether there is a drum machine on the other end of the cable waiting to be told the tempo is a
+    // fact about the desk it is sitting on.
+    //
+    // Default OFF, deliberately. Clock is ~51 messages a second on a 31 250 baud wire, and a synth left
+    // switched to external sync sits silent until it gets one — so a user who has not asked for sync
+    // must not be given either surprise.
+    bool        midiSyncOut   = false;
 
     // ⚠️ VISUALIZER is NOT here. It lives on the THEME (`Theme::visualizerType`), which is where
     // Kotlin keeps it too — and not by accident: the oscilloscope reads it off the theme it is already

@@ -58,6 +58,7 @@ namespace songcore { struct IMidiOut; }
 namespace ptshell {
 
 class ButtonFeedback;
+class MidiInBase;
 
 /**
  * Everything the shared shell is GIVEN rather than decides. Every field is filled by the platform's
@@ -177,6 +178,44 @@ struct AppConfig {
     songcore::IMidiOut* midiOut = nullptr;
     int                 midiOffsetMs = 0;
     std::string         midiOutDevice;   // empty = no override; else the resolved device NAME
+
+    /**
+     * The MIDI INPUT port (plan phase E2). Borrowed and nullable on the same terms as `midiOut` above,
+     * and absent for a much simpler reason: only Windows has a backend yet (E5 adds ALSA and Android).
+     *
+     * ⚠️ **NULL IS NOT "MIDI IN OFF" EITHER.** The host owns the queue, the parser and the router
+     * unconditionally, so the whole path above the port is alive and counting whether or not a device
+     * exists — which is what makes "no cable" distinguishable from "no track is listening on that
+     * channel" instead of both being silence.
+     *
+     * ⚠️ **THE SHELL NEVER OPENS THIS ONE ITSELF, not even for the env override.** An open input port
+     * delivers bytes immediately, and the object they must land in is inside a `SongcoreHost` that does
+     * not exist while `main` is reading its environment. So `POCKETTRACKER_MIDI_IN` resolves to a device
+     * NAME here (`MidiInBase::resolve_spec`) and `InputDispatcher::boot_midi_in_port` does the open —
+     * the one place that also wires the sink, which is a pairing nothing may split.
+     *
+     * ⚠️ **`MidiInBase*` WHERE `midiOut` ABOVE IS THE songcore INTERFACE, and the asymmetry is earned.**
+     * An input path's whole failure mode is silence, so the exit report has to be able to ask the PORT
+     * how many bytes it received — a number that exists on this side of the seam only, and the one that
+     * separates "nothing was sent to us" from "we received it and lost it later". Taking the interface
+     * and casting back down would be the same coupling with a way to get it wrong.
+     */
+    MidiInBase* midiIn = nullptr;
+    std::string midiInDevice;    // empty = no override; else the resolved device NAME
+
+    /**
+     * SYNC OUT override (phase C) — `POCKETTRACKER_MIDI_SYNC`. **−1 = no override**, 0/1 = force.
+     *
+     * ⚠️ An `int` and not a `bool`, because a bool has no "the user said nothing" state and the two
+     * settings above both need one. Forcing it to `false` by default would make every launch quietly
+     * overwrite a SYNC the user turned on — the same single-owner rule as `midiOutDevice`, which is why
+     * this one also persists on quit.
+     *
+     * It exists so the phase-C timing measurement is scriptable: the clock is what
+     * `POCKETTRACKER_MIDI_JITTER=1` reports on, and requiring a human to walk to the MIDI screen first
+     * would make the one instrument that can see a millisecond un-automatable.
+     */
+    int                 midiSyncOut = -1;
 
     /**
      * Is a PHYSICAL game controller present right now? NULLABLE and Android-only. The shared layout gate

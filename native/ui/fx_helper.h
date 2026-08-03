@@ -4,11 +4,16 @@
 //
 // A 1:1 port of ui/overlays/FxHelperOverlay.kt — the modal grid-picker that opens when A+UP or
 // A+DOWN is pressed while the cursor sits on an FX *type* column (PHRASE cols 4/6/8, TABLE cols
-// 3/5/7). 28 effects in a 6×5 grid, with the effect's own documentation above it.
+// 3/5/7). 34 effects in a 6×6 grid, with the effect's own documentation above it.
 //
-// It exists because a tracker's FX column is otherwise unusable: A+UP steps blindly through 28
+// It exists because a tracker's FX column is otherwise unusable: A+UP steps blindly through 34
 // three-letter codes with nothing on screen to say what "PVX" or "THO" does. Holding A and reading is
 // how you find an effect; releasing A is how you pick it.
+//
+// ⚠️ It was 6×5 until MIDI phase D added six commands. Everything about the geometry is DERIVED from
+// FX_GRID_ROWS/COLS and EFFECT_TYPE_COUNT — the centred last row, the box height in
+// modules/fx_helper_overlay.cpp — so a row is the only thing that had to change; the static_assert
+// below is what makes the next such addition an error rather than four effects nobody can reach.
 //
 //   A + DPAD    move in the grid
 //   release A   commit the highlighted effect and close  (dispatcher's `on_a_released`)
@@ -30,9 +35,17 @@
 namespace pt::ui {
 
 inline constexpr int FX_GRID_COLS = 6;
-inline constexpr int FX_GRID_ROWS = 5;
+inline constexpr int FX_GRID_ROWS = 6;
 
-/** The first four rows are full: 24 cells. */
+// ⚠️ **THE CLAMP IN `fx_last_row_count` IS A SILENT TRUNCATION, SO THIS TURNS IT INTO A BUILD ERROR.**
+// Overflow the grid and the surplus effects simply have no cell: they stay reachable by A+UP in the FX
+// column and are invisible in the picker, which reads as "the helper is missing an effect" long after
+// the commit that caused it. Phase D added six and needed a sixth row; the assert is what will say so
+// next time.
+static_assert(songcore::EFFECT_TYPE_COUNT <= FX_GRID_ROWS * FX_GRID_COLS,
+              "the FX helper grid is too small for EFFECT_TYPES — add a row");
+
+/** The first five rows are full: 30 cells. */
 inline constexpr int FX_FULL_CELLS = (FX_GRID_ROWS - 1) * FX_GRID_COLS;
 inline constexpr int FX_LAST_ROW   = FX_GRID_ROWS - 1;
 
@@ -172,6 +185,18 @@ inline const std::vector<std::vector<std::string>>& effect_descriptions() {
         /* 25 DEL */ {"DEL: Per-note delay send", "xx=send amount (00-FF)", "this note only"},
         /* 26 EQN */ {"EQN: Per-note EQ slot", "xx=EQ preset slot (00-7F)", "this note only"},
         /* 27 EQM */ {"EQM: Master/mixer EQ slot", "xx=EQ preset slot (00-7F)", "holds till next EQM", "resets to mixer EQ on stop"},
+        /* 28 MPG */ {"MPG: MIDI program change", "xx=program (00-7F)", "external instruments only"},
+        /* 29 MPB */ {"MPB: MIDI pitch bend", "00=down 80=centre FF=up", "absolute - external only"},
+        // ⚠️ **NO APOSTROPHE AND NO SEMICOLON IN A DESCRIPTION** — the font has neither glyph and draws
+        // a BLANK, so "instrument's" renders as "INSTRUMENT S". It is silent: the string is right, the
+        // width is right, only the pixels are wrong, and these lines are the only long prose in the UI.
+        // ⚠️ Pre-existing, not new: BCK's "sampler; toggle live to scratch" has always drawn as
+        // "SAMPLER  TOGGLE…". Caught by ptshot — the one tool here that looks at pixels. Stick to
+        // letters, digits, and `: = - ( ) . /`, all of which are proven by the entries above.
+        /* 30 CCA */ {"CCA: MIDI CC slot A", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC A row"},
+        /* 31 CCB */ {"CCB: MIDI CC slot B", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC B row"},
+        /* 32 CCC */ {"CCC: MIDI CC slot C", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC C row"},
+        /* 33 CCD */ {"CCD: MIDI CC slot D", "xx=value (00-FF)", "moves the CC number set in", "the instrument CC D row"},
     };
     return d;
 }

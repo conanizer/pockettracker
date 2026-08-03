@@ -35,14 +35,29 @@
 // ALSA backend's `SND_RAWMIDI_STREAM_OUTPUT` filter; both are in one place each, and both are
 // commented, because neither can be caught by a test that does not have hardware attached.
 //
-// ── THREADING ────────────────────────────────────────────────────────────────────────────────────
+// ── THREADING ⚠️ CORRECTED BY MIDI PLAN B3 ───────────────────────────────────────────────────────
 //
-// Every method here runs on the SDL thread (the frame loop), NOT the Java UI thread —
-// `SDL_AndroidGetJNIEnv` attaches it to the JVM and hands back its env. `MidiInputPort.send` is safe
-// from any thread. The one method that blocks is `open`: `MidiManager.openDevice` is ASYNCHRONOUS and
-// the Kotlin side waits on a latch for it (bounded, ~3 s), so a port pick can stall the frame loop
-// briefly. That is a deliberate trade — see MidiOutManager.kt, which explains why the alternative
-// (an optimistic `true`) would make the OUTPUT row lie about which cable is live.
+// This note used to read "every method here runs on the SDL thread (the frame loop)". **That was true
+// when it was written and B3 invalidated it** — the guardrails' recurring shape exactly: an assumption
+// true when made, broken by the layer built on top, in a channel nothing was pointed at. Today:
+//
+//   • `send` runs on the MIDI SENDER THREAD for anything the clock releases (shell/midi-sender.cpp),
+//     and on the FRAME LOOP for a panic's immediate note-offs. Two threads, serialised by
+//     `ExternalConsumer`'s mutex — and `MidiOutManager.send` is `@Synchronized` as well, so the Kotlin
+//     side's one reusable byte buffer does not depend on a C++ lock it cannot see.
+//   • `device_count` / `device_name` / `open` / `close` still run on the frame loop only (a port pick,
+//     boot, teardown).
+//
+// ⚠️ **THE SENDER THREAD IS AN `SDL_CreateThread` THREAD FOR THE SAKE OF THIS FILE.** A native thread
+// must be attached to the JVM before any JNI call; SDL's thread entry calls `Android_JNI_SetupThread()`,
+// which attaches it and registers the detach on exit. A raw `std::thread` would work perfectly on
+// Windows and Linux and abort the VM here.
+//
+// `MidiInputPort.send` is safe from any thread. The one method that blocks is `open`:
+// `MidiManager.openDevice` is ASYNCHRONOUS and the Kotlin side waits on a latch for it (bounded, ~3 s),
+// so a port pick can stall the frame loop briefly. That is a deliberate trade — see MidiOutManager.kt,
+// which explains why the alternative (an optimistic `true`) would make the OUTPUT row lie about which
+// cable is live.
 //
 // Every method id is resolved BY NAME, so a missing Kotlin side degrades to "no devices" with one log
 // line rather than a crash — and R8 must not rename them: see app/proguard-rules.pro.
@@ -54,43 +69,13 @@
 #include <SDL.h>
 #include <android/log.h>
 
+#include "android-jni.h"   // `Attached` — shared with the INPUT backend since E5
+
 namespace ptshell {
 
 namespace {
 
 constexpr const char* kLogTag = "PocketTracker";
-
-/**
- * The env + a LOCAL ref to the running activity, released on scope exit.
- *
- * Local refs are not free — the JNI spec only guarantees 16 slots without an explicit frame — and
- * `send` runs per MIDI message, so leaking one per note would eventually abort the VM with a local
- * reference table overflow. RAII rather than five hand-written DeleteLocalRef calls.
- */
-struct Attached {
-    JNIEnv* env      = nullptr;
-    jobject activity = nullptr;
-
-    Attached() {
-        env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
-        if (env) activity = static_cast<jobject>(SDL_AndroidGetActivity());
-    }
-    ~Attached() {
-        if (env && activity) env->DeleteLocalRef(activity);
-    }
-    Attached(const Attached&)            = delete;
-    Attached& operator=(const Attached&) = delete;
-
-    bool ok() const { return env != nullptr && activity != nullptr; }
-
-    /** Clear any pending exception so the NEXT JNI call is not refused. Returns true if there was one. */
-    bool failed() const {
-        if (!env->ExceptionCheck()) return false;
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-        return true;
-    }
-};
 
 }  // namespace
 
@@ -198,7 +183,7 @@ void AndroidMidiOut::send(const uint8_t* data, int len) {
 
     // Three ints rather than a byte[]: it keeps this side allocation-free (no jbyteArray per note, no
     // global ref to manage) and the JNI signature trivial. The Kotlin side owns one reusable 3-byte
-    // buffer, which is safe because every call arrives on the one thread that pumps the queue.
+    // buffer, which is `@Synchronized` since B3 — two threads reach this now, see the header note.
     ++sent_;
     const jboolean ok =
             a.env->CallBooleanMethod(a.activity, h.send, static_cast<jint>(len >= 1 ? data[0] : 0),

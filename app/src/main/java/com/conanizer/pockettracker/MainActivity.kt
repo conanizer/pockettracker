@@ -18,6 +18,7 @@ import androidx.core.view.WindowCompat
 import com.conanizer.pockettracker.input.VirtualButton
 import com.conanizer.pockettracker.platform.android.ButtonHapticManager
 import com.conanizer.pockettracker.platform.android.ButtonSoundManager
+import com.conanizer.pockettracker.platform.android.MidiInManager
 import com.conanizer.pockettracker.platform.android.MidiOutManager
 import org.json.JSONObject
 import org.libsdl.app.SDLActivity
@@ -222,6 +223,9 @@ class MainActivity : SDLActivity() {
         // starts calls `boot_midi_port()` during its boot, which re-opens the saved device. Nothing
         // here touches hardware — it only takes the system service — so it costs the splash nothing.
         midiOut = MidiOutManager(this)
+        // …and the INPUT port beside it (E5), for the identical reason: `boot_midi_in_port()` runs in
+        // the same native boot and re-opens the saved keyboard.
+        midiIn = MidiInManager(this)
 
         super.onCreate(savedInstanceState)
         hideSystemBars()
@@ -237,6 +241,11 @@ class MainActivity : SDLActivity() {
         // the last note on the hardware until the user power-cycles it. `close()` is idempotent.
         midiOut?.close()
         midiOut      = null
+        // ⚠️ The same backstop for the input port (E5), and it matters for a different reason: an open
+        // MidiOutputPort holds the DEVICE, so a port left connected after this activity dies is a
+        // keyboard no other app on the phone can use until PocketTracker's process is killed.
+        midiIn?.close()
+        midiIn       = null
         super.onDestroy()
     }
 
@@ -374,6 +383,51 @@ class MainActivity : SDLActivity() {
     @Keep
     fun midiSend(b0: Int, b1: Int, b2: Int, len: Int): Boolean =
         midiOut?.send(b0, b1, b2, len) ?: false
+
+    // ── MIDI IN (MIDI plan phase E5) ───────────────────────────────────────────────────────────────
+    //
+    // Five more, and the mirror of the block above in every way but two, both of which are written out
+    // in `MidiInManager`: the device list is `outputPortCount > 0` (to RECEIVE you open the device's
+    // OUTPUT port — the exact opposite of the block above), and the last hook is a READ rather than a
+    // send, because the native side POLLS this port once a frame instead of being called from the
+    // binder thread the MIDI service delivers on. `shell/midi-in-android.cpp` says why polling costs
+    // nothing here and buys a single JNI direction for the whole app.
+    //
+    // ⚠️ `@Keep` AND `proguard-rules.pro`, exactly as above. Twelve by-name hooks now, and the count in
+    // that file's comment is part of the check — a hook added without updating it is one nobody knows is
+    // unprotected until a release APK has shipped with MIDI silently dead.
+
+    private var midiIn: MidiInManager? = null
+
+    /** How many devices can send MIDI to this phone right now. Re-enumerates — MIDI is hot-pluggable. */
+    @Keep
+    fun midiInDeviceCount(): Int = midiIn?.deviceCount() ?: 0
+
+    /** Display name of input device [index], from the snapshot [midiInDeviceCount] just took. */
+    @Keep
+    fun midiInDeviceName(index: Int): String = midiIn?.deviceName(index).orEmpty()
+
+    /**
+     * Open input device [index]. ⚠️ BLOCKS the calling (SDL) thread for up to ~3 s, for
+     * [midiOpenDevice]'s reason: the MIDI screen's rows show what is OPEN, not what was wanted.
+     */
+    @Keep
+    fun midiInOpenDevice(index: Int): Boolean = midiIn?.open(index) ?: false
+
+    /** Disconnect the receiver and release the port. Idempotent; the native side re-picks freely. */
+    @Keep
+    fun midiInCloseDevice() {
+        midiIn?.close()
+    }
+
+    /**
+     * Move whatever has arrived since the last frame into [out]; returns how many bytes.
+     *
+     * ⚠️ The array is allocated ONCE on the native side and reused — no allocation per frame on the one
+     * thread that must not stutter. Anything this does not take stays in `MidiInManager`'s ring.
+     */
+    @Keep
+    fun midiInRead(out: ByteArray): Int = midiIn?.read(out) ?: 0
 
     /**
      * **C6 — the one-time SharedPreferences → settings.json migration.**

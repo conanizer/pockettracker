@@ -130,6 +130,11 @@ add_executable(pockettracker-sdl
         midi-out-base.cpp  # the platform-FREE half of a MIDI backend (MIDI plan B2b): list, TEST, trace
         midi-out-winmm.cpp # the WINDOWS songcore::IMidiOut (MIDI plan B2);  empty TU elsewhere
         midi-out-alsa.cpp  # the LINUX   songcore::IMidiOut (MIDI plan B2b); empty TU elsewhere
+        alsa-rawmidi.cpp   # the ONE libasound loader + rawmidi device walk (E5); empty TU elsewhere
+        midi-in-base.cpp   # the platform-FREE half of a MIDI INPUT backend (E2): list, sink, counters
+        midi-in-winmm.cpp  # the WINDOWS songcore::IMidiIn  (MIDI plan E2);  empty TU elsewhere
+        midi-in-alsa.cpp   # the LINUX   songcore::IMidiIn  (MIDI plan E5);  empty TU elsewhere
+        midi-sender.cpp    # the just-in-time MIDI sender thread + its jitter instrument (MIDI plan B3)
         sdl-audio-engine.cpp
         sdl-input.cpp
         sdl-touch.cpp
@@ -168,8 +173,14 @@ endif()
 # that is `${CMAKE_DL_LIBS}` rather than a bare -ldl: dlopen moved into libc proper at glibc 2.34, and
 # this port's floor is 2.31 (ubuntu:20.04, see Dockerfile.portmaster), where it is still a separate
 # library. CMake resolves it to `dl` or to nothing, whichever the toolchain wants.
+#
+# ⚠️ Threads::Threads since E5: the ALSA INPUT backend owns a reader thread (`std::thread`, because
+# ALSA rawmidi has no callback — midi-in-alsa.cpp says why it is not an SDL thread), and on
+# gcc/libstdc++ `std::thread` needs -pthread at COMPILE time as well as at link. A bare -lpthread is
+# not the same flag and leaves a binary that aborts the moment a thread is created.
 if(UNIX AND NOT APPLE AND NOT ANDROID)
-    target_link_libraries(pockettracker-sdl PRIVATE ${CMAKE_DL_LIBS})
+    find_package(Threads REQUIRED)
+    target_link_libraries(pockettracker-sdl PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
 endif()
 
 if(MSVC)

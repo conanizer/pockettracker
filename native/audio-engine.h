@@ -223,6 +223,12 @@ public:
     // Schedule a soft note-off (triggers ADSR release instead of hard stop)
     void scheduleNoteOff(int64_t targetFrame, int trackId);
 
+    // Schedule a KEY release — a live MIDI-in note let go of (MIDI plan §4.1, phase E4).
+    // ⚠️ NOT the same thing as scheduleNoteOff, and the difference is the whole reason it exists: a
+    // one-shot sample with no release envelope IGNORES this and plays out (a drum hit finishes), where
+    // a KIL fades it. ADSR/TRIG release and the looping soft-kill are identical in both.
+    void scheduleKeyRelease(int64_t targetFrame, int trackId);
+
     // Clear all scheduled notes
     void clearScheduledNotes();
 
@@ -381,6 +387,9 @@ public:
 
     // Smart note-off: trigger ADSR/TRIG release if available, otherwise hard-stop.
     void triggerNoteOff(int trackId);
+
+    // The same, for a live KEY that was let go of — a one-shot ignores it (MIDI plan §4.1).
+    void triggerKeyRelease(int trackId);
 
     // Clear all modulation slots for an instrument
     void clearInstrumentModulation(int sampleId);
