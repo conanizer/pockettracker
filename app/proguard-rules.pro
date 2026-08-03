@@ -1,9 +1,14 @@
 # ─── The by-name JNI callbacks from native into Kotlin (convergence Phase E) ──────────────────
 #
-# The shared C++ shell calls exactly twelve Kotlin methods on MainActivity by name, resolving each with
+# The shared C++ shell calls exactly thirteen Kotlin methods on MainActivity by name, resolving each with
 # GetMethodID (shell/android-main.cpp, shell/midi-out-android.cpp, shell/midi-in-android.cpp):
 #     onButtonFeedback(IZZIZI)V     — routes a virtual-button press to the sound/haptic managers
 #     hasPhysicalGameButtons()Z     — the SOURCE_GAMEPAD check SDL's looser C joystick API cannot make
+#     describeInputDevices()L…/String; — the same enumeration as TEXT, printed at boot into the log file
+#                                     a user can send. ⚠️ It is a DIAGNOSTIC, which is exactly why it
+#                                     must be kept: it is only ever read when something has gone wrong
+#                                     on a device nobody here owns, so a release-only rename would be
+#                                     discovered by the report coming back empty.
 #     midiDeviceCount()I            — ┐ the EXTERNAL MIDI out port (MIDI plan B2b). MidiManager is a
 #     midiDeviceName(I)L…/String;   — │ Java-only API and the ONLY route to USB/virtual/BLE MIDI on
 #     midiOpenDevice(I)Z            — │ Android, so these five are the whole platform seam. See
@@ -26,6 +31,7 @@
 -keepclassmembers class com.conanizer.pockettracker.MainActivity {
     void onButtonFeedback(int, boolean, boolean, int, boolean, int);
     boolean hasPhysicalGameButtons();
+    java.lang.String describeInputDevices();
     int midiDeviceCount();
     java.lang.String midiDeviceName(int);
     boolean midiOpenDevice(int);

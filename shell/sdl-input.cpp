@@ -70,7 +70,7 @@ bool pad_to_button(Uint8 b, Button& out) {
     }
 }
 
-/** DPAD buttons are the only repeatable ones — every `startKeyRepeat` call site is a DPAD press. */
+/** The always-repeatable buttons. B joins them only under `set_b_repeatable` — see press(). */
 bool is_dpad(Button b) {
     return b == Button::DPAD_UP || b == Button::DPAD_DOWN || b == Button::DPAD_LEFT ||
            b == Button::DPAD_RIGHT;
@@ -147,7 +147,9 @@ void SdlInput::press(Button b, uint64_t now_ms) {
     // `handleButtonAction` sees, since it updates the modifier state before it resolves the combo.
     queue_.push_back({b, ButtonAction::PRESSED, mods_now()});
 
-    if (is_dpad(b)) {
+    // B joins the D-pad only while `set_b_repeatable` says so — the qwerty overlay, where B is a
+    // backspace. Everywhere else B is COPY / BACK / CANCEL and must fire exactly once per press.
+    if (is_dpad(b) || (b == Button::B && bRepeatable_)) {
         repeatActive_ = true;
         repeatButton_ = b;
         repeatNextMs_ = now_ms + REPEAT_INITIAL_DELAY;

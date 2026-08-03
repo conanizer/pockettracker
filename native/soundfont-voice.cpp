@@ -92,6 +92,10 @@ void SoundfontVoice::setVolume(float v) {
 }
 
 void SoundfontVoice::setPan(float pan) {
+    // The BASE too, exactly as the sampler's setPan does (sampler-voice.h). The per-block PAN
+    // modulation in processAudioBlock recomputes the channel pan as base + mod, so a PAN effect that
+    // moved only TSF's channel would be undone by the next modulated block.
+    params.setBase(PARAM_PAN, pan);
     int slot = sfSlot;
     if (slot >= 0 && slot < MAX_SOUNDFONTS) {
         std::lock_guard<std::mutex> lock(soundfonts[slot].mutex);

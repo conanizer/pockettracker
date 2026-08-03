@@ -1575,6 +1575,13 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                     noteVol = fmaxf(0.0f, noteVol + (mod.envValue - 1.0f) * mod.effectiveAmt);
                 }
             }
+            // PAN modulation. A SoundFont voice has no panLeft/panRight gains in the mix loop — TSF
+            // pans on its own channel — so the modulated value goes back through
+            // tsf_channel_set_pan instead, guarded by the same |mod| > 0.001 test the sampler path
+            // uses so an unmodulated voice keeps whatever pan the note or a PAN effect gave it.
+            const bool panModded = fabsf(sv.params.mod[PARAM_PAN]) > 0.001f;
+            const float modPan = panModded ? fmaxf(0.0f, fminf(1.0f, sv.params.get(PARAM_PAN))) : 0.0f;
+
             // Snapshot sfSlot ONCE into a local: eviction (JNI thread) calls detach() which sets
             // sv.sfSlot = -1 at any moment — re-reading the member after the >= 0 check indexes
             // soundfonts[-1] (out of bounds → garbage tsf* → SIGSEGV in tsf_channel_set_volume).
@@ -1585,7 +1592,10 @@ void AudioEngine::processAudioBlock(float* output, int numFrames, int channelCou
                 // tsf_close + null it concurrently; a stale pointer here is a use-after-free.
                 std::lock_guard<std::mutex> sfLock(soundfonts[volSlot].mutex);
                 tsf* h = soundfonts[volSlot].handle;
-                if (h) tsf_channel_set_volume(h, t, noteVol * trkVol);
+                if (h) {
+                    tsf_channel_set_volume(h, t, noteVol * trkVol);
+                    if (panModded) tsf_channel_set_pan(h, t, modPan);
+                }
             }
 
             // When releasing with ADSR/TRIG VOL mods: stop as soon as all have finished

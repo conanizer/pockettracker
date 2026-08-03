@@ -308,6 +308,48 @@ class MainActivity : SDLActivity() {
      * name over JNI, so `@Keep` plus an explicit `proguard-rules.pro` `-keep` guard it against R8, which
      * now runs on this class in release (`src/main`).
      */
+    /**
+     * Everything `hasPhysicalGameButtons()` looked at, as text, plus the device identity — the payload
+     * of a "it opened without the on-screen buttons" report.
+     *
+     * ⚠️ **UNCONDITIONAL, and that is the point.** `hasPhysicalGameButtons()` logs only when it FINDS a
+     * pad, so a wrong `true` and a device that was never enumerated look identical from outside: the
+     * one state that needs explaining is the one that leaves no record. This lists every device with its
+     * raw `sources` bitmask, so a verdict can be re-derived from the report rather than trusted.
+     *
+     * ⚠️ Returned as a STRING rather than logged here, so native can `printf` it through the stdout
+     * pipe — which is what tees it into `pockettracker-log.txt`, the copy a user can actually send.
+     * A `Log.i` from Kotlin reaches logcat only, and logcat needs a PC. Called by name over JNI, so it
+     * needs its `-keep` in `proguard-rules.pro` like every other hook here.
+     */
+    @Keep
+    fun describeInputDevices(): String {
+        val sb = StringBuilder()
+        sb.append("device:  ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL)
+            .append("  (Android ").append(Build.VERSION.RELEASE)
+            .append(", API ").append(Build.VERSION.SDK_INT).append(")\n")
+
+        val ids = InputDevice.getDeviceIds()
+        sb.append("input:   ").append(ids.size).append(" device(s) enumerated\n")
+        for (deviceId in ids) {
+            val d = InputDevice.getDevice(deviceId)
+            if (d == null) {
+                sb.append("input:     id=").append(deviceId).append("  <null>\n")
+                continue
+            }
+            val s = d.sources
+            sb.append("input:     id=").append(deviceId)
+                .append("  sources=0x").append(Integer.toHexString(s))
+                .append("  gamepad=").append((s and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD)
+                .append(" joystick=").append((s and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK)
+                .append(" keyboard=").append((s and InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD)
+                .append(" virtual=").append(d.isVirtual)
+                .append("  '").append(d.name).append("'\n")
+        }
+        sb.append("input:   hasPhysicalGameButtons() = ").append(hasPhysicalGameButtons())
+        return sb.toString()
+    }
+
     @Keep
     fun hasPhysicalGameButtons(): Boolean {
         for (deviceId in InputDevice.getDeviceIds()) {

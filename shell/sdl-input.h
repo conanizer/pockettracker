@@ -107,6 +107,22 @@ public:
      *  controls) vs a touch layout — the SDL analogue of `DeviceAdapter.hasPhysicalGameButtons()`. */
     size_t controller_count() const { return controllers_.size(); }
 
+    /**
+     * Let a held B repeat, the way a held D-pad does. OFF everywhere except the qwerty overlay, and
+     * that scope is the whole point: outside the keyboard B is COPY, BACK, CANCEL and the modifier of
+     * B+DPAD, and none of those may fire sixty times because a thumb rested on the button. Inside the
+     * keyboard B is a backspace, where holding to erase a word is the expected gesture.
+     *
+     * ⚠️ It also DISARMS a B repeat already in flight, so the overlay closing under a held B (B on the
+     * last character applies nothing, but A does) cannot leave the repeat hammering whatever screen is
+     * revealed. The shell re-states it every frame from the live overlay flag, so there is no
+     * open/close call site that can forget to.
+     */
+    void set_b_repeatable(bool on) {
+        bRepeatable_ = on;
+        if (!on && repeatActive_ && repeatButton_ == Button::B) repeatActive_ = false;
+    }
+
 private:
     void press(Button b, uint64_t now_ms);
     void release(Button b);
@@ -122,8 +138,10 @@ private:
 
     bool held_[static_cast<size_t>(Button::COUNT)] = {false};
 
-    // ONE repeat at a time, and only ever a DPAD button — the same shape as Kotlin, which keeps a
-    // single `repeatRunnable` and cancels it before starting another. The app re-reads the modifiers
+    // ONE repeat at a time — the same shape as Kotlin, which keeps a single `repeatRunnable` and
+    // cancels it before starting another. A DPAD button always, plus B while `bRepeatable_` (the
+    // qwerty overlay's backspace); a D-pad press taken mid-backspace therefore steals the slot, which
+    // is the correct reading of a thumb that has moved on. The app re-reads the modifiers
     // when the repeat fires, so holding A+UP keeps editing and holding UP alone keeps moving, with no
     // need to remember *which* action started the repeat.
     //
@@ -132,6 +150,9 @@ private:
     bool     repeatActive_ = false;
     Button   repeatButton_ = Button::DPAD_UP;
     uint64_t repeatNextMs_ = 0;
+
+    /** Whether B currently counts as repeatable — see set_b_repeatable. */
+    bool bRepeatable_ = false;
 
     bool trace_ = false;
 

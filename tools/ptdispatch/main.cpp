@@ -5163,6 +5163,150 @@ int main() {
         proj.phrases[3].steps[0].fx1Value = 0;
     }
 
+    // ── 44. THE PLAYBACK CURSOR IN PHRASE MODE ──────────────────────────────────────────────────
+    //
+    // ⚠️ THE FIELD THE SHELL READS IS NOT THE FIELD THE MODE FILLED.
+    //
+    // `PlaybackPosition` carries `row` and `phraseStep`, and its own header says `row` "doubles as the
+    // phrase step in every mode". CHAIN and SONG fill BOTH. PHRASE filled only `row` — while the shell
+    // reads `pos.phraseStep` into `state.playbackRow` (app.cpp). So the highlight on the PHRASE screen
+    // sat on step 0 for the whole loop, and only in phrase playback: the same code path drew a moving
+    // cursor under SONG, which is why it read as "it works sometimes".
+    //
+    // This is a SIDE-RECORD (event-schema SC-4): playheads carry no bus event, so all 36 golden traces
+    // are green either way and ptplay is structurally blind to it. Nothing else in the ladder looks at
+    // it at all — hence a check here, at the level the shell reads.
+    {
+        songcore::MidiRouter kr;
+        songcore::Project    kp = songcore::make_default_project();
+        kp.tempo = 120;
+        songcore::Sequencer kseq(kr, kp, 44100);
+        kseq.set_clock(0);
+        kseq.playPhrase(0);
+
+        const int64_t fps = songcore::frames_per_step(120, 44100);
+
+        int distinctStep = 0, distinctRow = 0, lastStep = -1, lastRow = -1, matched = 0;
+        for (int k = 0; k < 16; ++k) {
+            kseq.set_clock(k * fps + fps / 2);          // mid-step: no boundary rounding to argue about
+            const songcore::PlaybackPosition pos = kseq.getPlaybackPosition();
+            if (pos.phraseStep != lastStep) { ++distinctStep; lastStep = pos.phraseStep; }
+            if (pos.row        != lastRow)  { ++distinctRow;  lastRow  = pos.row; }
+            if (pos.phraseStep == k) ++matched;
+        }
+
+        // ⚠️ `row` is the CONTROL, and it is what makes this measure the right thing: it moved before
+        // the fix too, so a check that only asserted "something advances" passed on the broken build.
+        eq(distinctRow, 16, "PHRASE CURSOR: (control) `row` advances one value per step");
+        eq(distinctStep, 16, "⭐ PHRASE CURSOR: `phraseStep` — the field the SHELL reads — advances too");
+        eq(matched, 16, "PHRASE CURSOR: …and it equals the step it is standing on, all 16 of them");
+    }
+
+    // ── 45. A LIVE EDIT IS HEARD ON THE NEXT PHRASE, NOT THREE PHRASES LATER ────────────────────
+    //
+    // ⚠️ §26 SAYS LIVE-EDIT RESCHEDULING HAS NO COVERAGE ON EITHER ENGINE. This is that coverage, and
+    // it asks the question a user asks: **how many phrase repeats until I hear what I just typed?**
+    //
+    // The scheduler runs BUFFER_PHRASES (2) phrases ahead, so an untouched lookahead makes an edit
+    // audible ~3 phrases later. `notify_data_changed()` exists to roll that back to the earliest
+    // UNPLAYED phrase boundary; `mark_modified()` calls it whenever the transport is running. Neither
+    // half was measured: §26 proved a rollback does not EAT A PENDING KIL, which is the opposite
+    // question, and a harness that calls the host verb directly cannot tell "the rollback works" from
+    // "the rollback works and no gesture asks for it".
+    //
+    // So the edit here is the REAL one — A+UP on the VOLUME cell of the PHRASE screen, through the
+    // real dispatcher, over a real engine with the transport actually running — and the metric is the
+    // AUDIO: which repeat first carries sound in the edited step's window.
+    {
+        auto engine = std::make_unique<AudioEngine>();   // ⚠️ HEAP — see §23
+        engine->setDeviceSampleRate(44100);
+
+        songcore::SongcoreHost lhost(engine.get(), 44100);
+        AppState               lstate;
+        lstate.project = &lhost.edit_project();
+        lstate.caps    = PlatformCaps::sdl(true);
+        InputDispatcher ld(lstate, lhost, fs_impl);
+
+        const fs::path ltone = tree.root / "Samples" / "livetone.wav";
+        {
+            std::vector<float> pcm(44100 / 4);
+            for (size_t i = 0; i < pcm.size(); ++i)
+                pcm[i] = static_cast<float>(0.6 * std::sin(2.0 * 3.14159265358979 *
+                                                           440.0 * static_cast<double>(i) / 44100.0));
+            songcore::write_wav_mono(ltone.generic_string(), pcm, 44100);
+        }
+
+        songcore::Project& lp = lhost.edit_project();
+        lp = songcore::make_default_project();
+        lp.tempo = 240;                       // fast, so eight repeats fit in a short run
+        lhost.load_sample(0, ltone.generic_string());
+        lp.instruments[0].volume = 0xFF;
+
+        // Step 0 sounds throughout — the positive control that the transport is running at all, so a
+        // silent step 8 means "the edit was not heard" rather than "nothing was playing".
+        lp.phrases[0].steps[0].note = songcore::Note::C4();
+        lp.phrases[0].steps[0].instrument = 0;
+        lp.phrases[0].steps[0].volume = 0x7F;
+        // Step 8 already HAS a note, at volume 0 — inaudible. The gesture raises it. (An empty cell
+        // would take A, a different handler; VOLUME is the column the report named.)
+        lp.phrases[0].steps[8].note = songcore::Note::C4();
+        lp.phrases[0].steps[8].instrument = 0;
+        lp.phrases[0].steps[8].volume = 0x00;
+        lhost.push_params();
+
+        lhost.play_phrase(0);
+
+        const int64_t fps       = songcore::frames_per_step(240, 44100);
+        const int64_t perPhrase = fps * 16;
+        constexpr int BLK       = 128;
+        constexpr int REPEATS   = 8;
+        const int     editAt    = 2;
+
+        std::vector<float>  buf(BLK * 2);
+        std::vector<double> step8(REPEATS, 0.0), step0(REPEATS, 0.0);
+        bool                edited = false;
+
+        for (int64_t f = 0; f < perPhrase * REPEATS; f += BLK) {
+            lhost.poll();
+            ld.set_now(static_cast<long long>(f * 1000 / 44100));
+
+            if (!edited && f >= editAt * perPhrase + fps * 2) {
+                edited = true;
+                lstate.currentScreen = ScreenType::PHRASE;
+                lstate.cursorRow     = 8;
+                lstate.cursorColumn  = 2;                       // NOTE=0 INST=1 VOL=2
+                for (int n = 0; n < 40; ++n) ld.on_a_up();      // walk the volume up to audible
+            }
+
+            engine->processLiveBlock(buf.data(), BLK, 2, 44100.0f);
+
+            for (int i = 0; i < BLK; ++i) {
+                const int64_t frame = f + i;
+                const int     rep   = static_cast<int>(frame / perPhrase);
+                if (rep < 0 || rep >= REPEATS) continue;
+                const int64_t into = frame % perPhrase;
+                const double  v    = std::fabs(static_cast<double>(buf[i * 2]));
+                // ⚠️ The windows START one step AFTER the trigger, so a peak cannot inherit the
+                // previous step's tail — E4's "discard one window, measure the next".
+                if (into >= fps * 9 && into < fps * 11) step8[rep] = std::max(step8[rep], v);
+                if (into >= fps * 1 && into < fps * 3)  step0[rep] = std::max(step0[rep], v);
+            }
+        }
+
+        int quietRepeats = 0, heard = -1;
+        for (int r = 0; r < REPEATS; ++r) if (step0[r] > 0.02) ++quietRepeats;
+        for (int r = 0; r < REPEATS; ++r) if (step8[r] > 0.02) { heard = r; break; }
+
+        // ⭐ The number beside the verdict, and `heard` is derived from the rendered AUDIO rather than
+        // from what the gesture was supposed to do.
+        std::printf("           live edit: made in repeat %d, first heard in repeat %d\n", editAt, heard);
+        eq(quietRepeats, REPEATS, "LIVE EDIT: (control) step 0 sounded in every repeat — the transport ran");
+        eq(lhost.project().phrases[0].steps[8].volume > 0x00, 1,
+           "LIVE EDIT: (control) A+UP really moved the VOLUME cell it was standing on");
+        eq(heard - editAt, 1,
+           "⭐⭐ LIVE EDIT: the edit is audible on the NEXT phrase, not after the 2-phrase lookahead");
+    }
+
     std::printf("\n%d checks, %d failure(s)\n", checks, failures);
     std::printf("%s\n", failures == 0 ? "ALL GREEN" : "RED");
     return failures == 0 ? 0 : 1;

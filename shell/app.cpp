@@ -769,6 +769,12 @@ int run(const AppConfig& cfg) {
     // centred landscape frame and would misdescribe this mode; see present() in sdl-video.cpp).
     int lastPortraitW = 0, lastPortraitH = 0;
 
+    // The last LAYOUT-GATE verdict reported, on the same print-on-change discipline. `lastUseTouch`
+    // starts at the value `useTouch` can never legitimately hold at boot on a touch device, and the
+    // sizes at -1, so the first frame always prints — the line's whole job is to exist at boot.
+    bool lastUseTouch = false;
+    int  lastGateW = -1, lastGateH = -1;
+
     // The device skin currently decoded into `skin` + adopted by `portrait`. -1 = none loaded yet, so
     // the first touch frame decodes the persisted choice; thereafter it reloads only when the SETTINGS
     // skin column moves `skinIndex`. Decoding ~10 PNGs is a deliberate-action cost, never a per-frame one.
@@ -883,6 +889,25 @@ int run(const AppConfig& cfg) {
             const bool useTouch = cfg.touchCapable && !physicalPad;
             touch.set_enabled(useTouch);
 
+            // ⚠️ **THE DECISION, SAID OUT LOUD — because a phone that lands on FULL and one that has no
+            // touchscreen at all look identical from here.** A user reporting "it opened without the
+            // virtual buttons" leaves nothing behind to tell a wrong `physicalPad` from a wrong aspect
+            // ratio from a `touchCapable` that never got set; the portrait2 line below only prints once
+            // the skin is ALREADY up, so it is silent in exactly the case that needs explaining.
+            // Printed on every CHANGE (and therefore once at boot), not per frame — hot-plugging a pad
+            // is a transition worth a line too.
+            if (cfg.console && (useTouch != lastUseTouch || outW != lastGateW || outH != lastGateH)) {
+                std::printf("layout:  %s  (touchCapable=%d physicalPad=%d output=%dx%d %s)\n",
+                            useTouch ? (outH > outW ? "PORTRAIT2 skin" : "landscape touch panels")
+                                     : "FULL - no on-screen buttons",
+                            cfg.touchCapable ? 1 : 0, physicalPad ? 1 : 0, outW, outH,
+                            outH > outW ? "portrait" : "landscape");
+                std::fflush(stdout);
+                lastUseTouch = useTouch;
+                lastGateW    = outW;
+                lastGateH    = outH;
+            }
+
             // ⚠️ **THE SETTINGS > LAYOUT ROW FOLLOWS THE TOUCH GATE, NOT JUST THE STATIC CAP.**
             // `caps.touchLayouts` is true on every Android build, but on a device WITH physical buttons —
             // a handheld like the AYANEO, which auto-selects FULL — there is no touch layout to configure,
@@ -980,6 +1005,14 @@ int run(const AppConfig& cfg) {
                 lastPortraitH = outH;
             }
         }
+
+        // ⚠️ BEFORE the event loop, or a B pressed THIS frame would arm against last frame's answer.
+        // B repeats only while the qwerty overlay is up, where it is a backspace and holding it to
+        // erase a word is the expected gesture; everywhere else B is COPY / BACK / CANCEL and the
+        // modifier of B+DPAD, none of which may fire on a timer. Restated every frame from the live
+        // flag rather than pushed when the overlay opens and closes — the state cannot come apart from
+        // the overlay if nothing has to remember to say so. (`sdl-input.h::set_b_repeatable`.)
+        input.set_b_repeatable(state.qwerty.isOpen);
 
         SDL_Event e;
         while (SDL_PollEvent(&e)) {

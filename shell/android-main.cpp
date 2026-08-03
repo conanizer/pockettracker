@@ -76,6 +76,31 @@ constexpr const char* kFallbackAppRoot = "/storage/emulated/0/Documents/PocketTr
 //
 // Twenty lines of pipe-and-pump fixes both, and it is platform residue in the strictest sense —
 // nothing above this file knows it happened.
+//
+// ⚠️ **AND THE SAME LINES GO TO A FILE, because logcat is unreachable to the person who has the bug.**
+// Reading logcat needs a PC, developer mode and USB debugging; a user reporting "it opened without the
+// on-screen buttons" has none of those, and that report is about the boot itself — the one moment
+// nobody can be talked through capturing live. So the pump tees into `<appRoot>/pockettracker-log.txt`,
+// which the user reaches with any file manager and attaches to a mail. It is TRUNCATED at start (a
+// session log, not a history) and capped, so it cannot grow into the user's storage.
+FILE*  g_logFile     = nullptr;   // pump thread only, after the pump starts; null = logcat alone
+size_t g_logFileSize = 0;
+constexpr size_t kLogFileCap = 512 * 1024;
+
+void log_line(const char* s) {
+    __android_log_write(ANDROID_LOG_INFO, kLogTag, s);
+    if (!g_logFile || g_logFileSize >= kLogFileCap) return;
+    // ⚠️ Flushed per line, for main.cpp's `setvbuf` reason exactly: a buffer that dies with the
+    // process takes the boot with it, and the boot is what this file exists to record.
+    // ⚠️ `fprintf` returns NEGATIVE on error, and this counter is unsigned — adding it raw would wrap
+    // to a huge value and silently stop the log at the first hiccup (a full disk, a revoked grant).
+    const int written = std::fprintf(g_logFile, "%s\n", s);
+    if (written > 0) g_logFileSize += static_cast<size_t>(written);
+    std::fflush(g_logFile);
+    if (g_logFileSize >= kLogFileCap)
+        std::fprintf(g_logFile, "--- log capped at %zu bytes ---\n", kLogFileCap);
+}
+
 void* log_pump(void* arg) {
     const int   fd = static_cast<int>(reinterpret_cast<intptr_t>(arg));
     std::string line;
@@ -84,7 +109,7 @@ void* log_pump(void* arg) {
     while ((n = read(fd, buf, sizeof(buf))) > 0) {
         for (ssize_t i = 0; i < n; ++i) {
             if (buf[i] == '\n') {
-                __android_log_write(ANDROID_LOG_INFO, kLogTag, line.c_str());
+                log_line(line.c_str());
                 line.clear();
             } else if (buf[i] != '\r') {
                 line.push_back(buf[i]);
@@ -93,7 +118,7 @@ void* log_pump(void* arg) {
         // A status line that never ends in '\n' would otherwise accumulate forever. Flush long
         // fragments rather than growing without bound.
         if (line.size() > 1024) {
-            __android_log_write(ANDROID_LOG_INFO, kLogTag, line.c_str());
+            log_line(line.c_str());
             line.clear();
         }
     }
@@ -189,11 +214,59 @@ bool android_has_physical_gamepad() {
     return result;
 }
 
-void redirect_stdio_to_logcat() {
+// `appRoot` may be empty — then the tee is skipped and logcat is the only sink, which is the
+// pre-existing behaviour rather than a failure.
+// ─── the input-device enumeration, once at boot ──────────────────────────────────────────────────
+//
+// ⚠️ **THE ONE THING A LAYOUT BUG REPORT NEEDS, AND THE ONE THING NOTHING RECORDED.** `useTouch` is
+// `touchCapable && !physicalPad`, and when a phone lands on FULL there is no way to tell which half
+// was wrong — `hasPhysicalGameButtons()` logs only when it FINDS a pad, so the failing case is the
+// silent one. This prints the whole enumeration Java saw, through `printf` so the pipe tees it into
+// `pockettracker-log.txt` (a `Log.i` from Kotlin reaches logcat only, and logcat needs a PC).
+//
+// Once, at boot, on the same by-name/exception-safe pattern as the hook above: a missing method
+// degrades to one line saying so, never a crash.
+void android_log_input_devices() {
+    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+    if (!env) { std::printf("input:   no JNI env - cannot enumerate\n"); return; }
+    jobject activity = static_cast<jobject>(SDL_AndroidGetActivity());
+    if (!activity) { std::printf("input:   no activity - cannot enumerate\n"); return; }
+
+    jclass    cls = env->GetObjectClass(activity);
+    jmethodID mid = env->GetMethodID(cls, "describeInputDevices", "()Ljava/lang/String;");
+    if (env->ExceptionCheck()) { env->ExceptionClear(); mid = nullptr; }
+    if (!mid) {
+        std::printf("input:   describeInputDevices() not found - R8 renamed it, or it is not built\n");
+    } else {
+        jobject s = env->CallObjectMethod(activity, mid);
+        if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); s = nullptr; }
+        if (s) {
+            const char* utf = env->GetStringUTFChars(static_cast<jstring>(s), nullptr);
+            if (utf) {
+                std::printf("%s\n", utf);
+                env->ReleaseStringUTFChars(static_cast<jstring>(s), utf);
+            }
+            env->DeleteLocalRef(s);
+        }
+    }
+    std::fflush(stdout);
+    env->DeleteLocalRef(cls);
+    env->DeleteLocalRef(activity);
+}
+
+void redirect_stdio_to_logcat(const std::string& appRoot) {
     // Unbuffered for the same reason main.cpp is: a buffer that dies with the process takes the only
     // record of the boot with it.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
+
+    // Opened BEFORE the pump starts, so the very first banner line is already teed. A failure here
+    // (no permission yet, no such directory) leaves the pointer null and costs nothing.
+    if (!appRoot.empty()) {
+        const std::string path = appRoot + "/pockettracker-log.txt";
+        g_logFile     = std::fopen(path.c_str(), "w");
+        g_logFileSize = 0;
+    }
 
     int pfd[2];
     if (pipe(pfd) != 0) return;  // No console is a degraded bring-up, not a failure to launch.
@@ -210,8 +283,10 @@ void redirect_stdio_to_logcat() {
 }  // namespace
 
 int main(int argc, char** argv) {
-    redirect_stdio_to_logcat();
-
+    // ⚠️ THE ROOT IS RESOLVED FIRST, and the redirect follows it — not the other way round. The pump
+    // tees the console into `<appRoot>/pockettracker-log.txt`, so it has to know the root before the
+    // first line is written or the banner lands in logcat alone. The two lines below use
+    // `__android_log_print` directly and so do not need the redirect to be up.
     // argv[0] is the application name SDLActivity supplies; the root is the first real argument.
     std::string appRoot = (argc > 1 && argv[1] && argv[1][0]) ? argv[1] : std::string();
     if (appRoot.empty()) {
@@ -221,6 +296,8 @@ int main(int argc, char** argv) {
                             kFallbackAppRoot);
         appRoot = kFallbackAppRoot;
     }
+
+    redirect_stdio_to_logcat(appRoot);
 
     // ⚠️ **THE BACK BUTTON, TRAPPED BEFORE SDL_Init (C4).** Untrapped, Android's back runs
     // `SDLActivity.onBackPressed()` → `finish()`, which closes the activity out from under the frame
@@ -322,6 +399,10 @@ int main(int argc, char** argv) {
     // keyboard from a pad, so the gate asks Java. Desktop/handheld leave this null and fall back to the SDL
     // count, which IS the truth there. See app.h physicalGamepadPresent and android_has_physical_gamepad.
     cfg.physicalGamepadPresent = android_has_physical_gamepad;
+
+    // The evidence behind the line above, written down once. See android_log_input_devices: the
+    // layout gate's inputs are otherwise unrecoverable from a user's report.
+    android_log_input_devices();
 
     // ⚠️ **`cfg.windowed = true` UNLOCKS PORTRAIT, AND THAT IS AN ORIENTATION DECISION, NOT A COSMETIC
     // ONE.** It becomes `SDL_WINDOW_RESIZABLE`, which SDL hands straight to

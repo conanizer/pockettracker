@@ -223,6 +223,13 @@ add_executable(ptdispatch ptdispatch/main.cpp)
 pt_ieee_exact(ptdispatch)
 target_link_libraries(ptdispatch PRIVATE pt-ui)
 
+# ptsfpan — does a MOD reach a SOUNDFONT voice's PAN? A separate tool rather than a ptdispatch section
+# because it needs a real .sf2, and ptdispatch is the one tool with no /testdata argument. The SF and
+# sampler voices are modulated in different places, and only the sampler's had ever been measured.
+add_executable(ptsfpan ptsfpan/main.cpp)
+pt_ieee_exact(ptsfpan)
+target_link_libraries(ptsfpan PRIVATE pockettracker)
+
 # ptmidi — the EXTERNAL MIDI-out byte stream (MIDI plan phase B). Also NOT a conformance tool, and for
 # a stronger reason than ptdispatch's: MIDI out never existed in Kotlin, so there is no golden to be
 # had at all. It is the only thing in the tree that can see a MIDI byte — ptplay stops at the bus
@@ -337,6 +344,9 @@ add_test(NAME p3-input         COMMAND ptinput     "${PT_TESTDATA}/units/p3-inpu
 add_test(NAME p3-dispatch      COMMAND ptdispatch)
 # Likewise no golden: the combo matrix is uncovered on the Kotlin side too. See ptmapper's header.
 add_test(NAME c0-mapper        COMMAND ptmapper)
+# The SOUNDFONT voice's PAN modulation, over the REAL engine and the shipped .sf2. An absolute path, so
+# a deleted fixture is a hard load failure rather than a vacuous pass — the ptdecode/ptfont discipline.
+add_test(NAME sf-pan-mod       COMMAND ptsfpan     "${PT_TESTDATA}/golden/test.sf2")
 # No golden either, and no Kotlin original to record one from — MIDI out is new. See ptmidi's header.
 add_test(NAME b1-midi-out      COMMAND ptmidi)
 # Nor here, and for the identical reason — see ptmidiin's own header.

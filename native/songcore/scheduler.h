@@ -187,7 +187,13 @@ class Sequencer {
 
         switch (playbackMode_) {
             case PlaybackMode::PHRASE: {
-                pos.row = clampi(static_cast<int>((elapsedFrames % framesPerPhrase) / framesPerStep), 0, 15);
+                // ⚠️ BOTH fields, and `phraseStep` is the load-bearing one: the shell reads the phrase
+                // cursor out of `phraseStep`, not `row`. Filling only `row` here (as the Kotlin original
+                // does, where the UI read `row`) leaves `phraseStep` at its zero default, so the PHRASE
+                // screen's playback highlight sits frozen on step 0 for the whole loop while CHAIN and
+                // SONG — which fill both — move normally. Same shape as the two arms below.
+                pos.phraseStep = clampi(static_cast<int>((elapsedFrames % framesPerPhrase) / framesPerStep), 0, 15);
+                pos.row = pos.phraseStep;
                 return pos;
             }
             case PlaybackMode::CHAIN: {
