@@ -123,6 +123,13 @@ cp "$SRC/LICENSE"                                  "$STAGE/licenses/LICENSE"
 cp "$SRC/licenses/THIRD-PARTY-NOTICES.md"          "$STAGE/licenses/THIRD-PARTY-NOTICES.md"
 cp "$SRC/CREDITS.md"                               "$STAGE/licenses/CREDITS.md"
 
+# The OFL text ships even though this package bundles no font. THIRD-PARTY-NOTICES.md, which does
+# ship, cites licenses/OFL-1.1-LinuxBiolinum.txt by path — a notices file pointing at a file that is
+# not in the artifact is the breach it exists to prevent. And if assets/fonts/ ever travels with a
+# desktop build, the OFL's "must accompany the font" clause is already satisfied rather than newly
+# breached.
+cp "$SRC/licenses/OFL-1.1-LinuxBiolinum.txt"        "$STAGE/licenses/OFL-1.1-LinuxBiolinum.txt"
+
 cat > "$STAGE/README.txt" <<EOF
 PocketTracker $VERSION — Linux (x86-64)
 
@@ -163,8 +170,13 @@ tar tzf "$TARBALL"
 # back out of the finished file — sizes included, because a zero-byte member also extracts cleanly.
 echo
 echo "read back out of the tarball:"
-for NEEDED in "PocketTracker" "README.txt" "licenses/LICENSE" "licenses/THIRD-PARTY-NOTICES.md" "licenses/CREDITS.md"; do
-    BYTES=$(tar xzOf "$TARBALL" "PocketTracker-$VERSION/$NEEDED" 2>/dev/null | wc -c)
+for NEEDED in "PocketTracker" "README.txt" "licenses/LICENSE" "licenses/THIRD-PARTY-NOTICES.md" \
+              "licenses/CREDITS.md" "licenses/OFL-1.1-LinuxBiolinum.txt"; do
+    # ⚠️ `|| BYTES=0` is what makes the failure READABLE. A member that is not in the archive makes
+    # tar exit 2, and under `set -euo pipefail` that kills the script mid-loop — before the FAIL
+    # line below, with tar's own reason already swallowed by 2>/dev/null. The operator would get a
+    # bare exit 2 and no name. Absent and empty are the same verdict here, so they take the same path.
+    BYTES=$(tar xzOf "$TARBALL" "PocketTracker-$VERSION/$NEEDED" 2>/dev/null | wc -c) || BYTES=0
     echo "  $NEEDED: $BYTES bytes"
     if [ "$BYTES" -lt 100 ]; then
         echo "FAIL: PocketTracker-$VERSION/$NEEDED is missing or empty inside the tarball."

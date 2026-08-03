@@ -122,6 +122,13 @@ cp "$SRC/licenses/THIRD-PARTY-NOTICES.md"               "$STAGE/pockettracker/li
 cp "$SRC/native/vendor/ogg/COPYING"                     "$STAGE/pockettracker/licenses/libogg-COPYING"
 cp "$SRC/native/vendor/opus/COPYING"                    "$STAGE/pockettracker/licenses/libopus-COPYING"
 cp "$SRC/native/vendor/opus/LICENSE_PLEASE_READ.txt"    "$STAGE/pockettracker/licenses/libopus-LICENSE_PLEASE_READ.txt"
+
+# The OFL text ships even though this package bundles no font. THIRD-PARTY-NOTICES.md, which does
+# ship, cites licenses/OFL-1.1-LinuxBiolinum.txt by path — a notices file pointing at a file that is
+# not in the artifact is the breach it exists to prevent. And if assets/fonts/ ever travels with a
+# handheld build, the OFL's "must accompany the font" clause is already satisfied rather than newly
+# breached.
+cp "$SRC/licenses/OFL-1.1-LinuxBiolinum.txt"            "$STAGE/pockettracker/licenses/OFL-1.1-LinuxBiolinum.txt"
 ls -1 "$STAGE/pockettracker/licenses/"
 
 echo
@@ -226,8 +233,13 @@ unzip -l "$OUT/pockettracker.zip"
 # ships. Same discipline as verifying the launch script's CR bytes out of the archive.
 echo
 echo "licences, read back out of the zip:"
-for L in LICENSE THIRD-PARTY-NOTICES.md libogg-COPYING libopus-COPYING libopus-LICENSE_PLEASE_READ.txt; do
-    BYTES=$(unzip -p "$OUT/pockettracker.zip" "pockettracker/licenses/$L" | wc -c)
+for L in LICENSE THIRD-PARTY-NOTICES.md libogg-COPYING libopus-COPYING libopus-LICENSE_PLEASE_READ.txt \
+         OFL-1.1-LinuxBiolinum.txt; do
+    # ⚠️ `|| BYTES=0` is what makes the failure READABLE. A member that is not in the archive makes
+    # unzip exit 11, and under `set -euo pipefail` that kills the script mid-loop — before the FAIL
+    # line below, so the package is rejected without ever naming the file that is missing. Absent and
+    # empty are the same verdict here, so they take the same path.
+    BYTES=$(unzip -p "$OUT/pockettracker.zip" "pockettracker/licenses/$L" | wc -c) || BYTES=0
     echo "  $BYTES bytes   $L"
     if [ "$BYTES" -lt 100 ]; then
         echo "FAIL: pockettracker/licenses/$L is missing or empty inside the zip."
